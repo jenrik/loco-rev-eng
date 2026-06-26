@@ -1,0 +1,8 @@
+lego-loco.iso
+lego-loco-unpacked/
+wine-prefix/
+DDrawCompat-*.zip
+tools/ghidra-mcp/*.zip
+tools/ghidra-mcp/GhidraMCP-release-*/
+.claude/
+*.pyc
