@@ -1,0 +1,24 @@
+services:
+  # Headless mode — for agent interaction, screenshots, debugging
+  # Usage: docker compose up loco
+  loco:
+    build: .
+    volumes:
+      - ./wine-prefix:/wine-prefix
+    environment:
+      VNC_ENABLED: "0"
+      LOCO_AUTOSTART: "1"
+
+  # Display mode — for user play via VNC (connect on localhost:5900)
+  # Usage: docker compose --profile display up loco-display
+  loco-display:
+    build: .
+    profiles: [display]
+    volumes:
+      - ./wine-prefix:/wine-prefix
+    ports:
+      - "5900:5900"
+    environment:
+      VNC_ENABLED: "1"
+      VNC_PASSWORD: ""
+      LOCO_AUTOSTART: "1"

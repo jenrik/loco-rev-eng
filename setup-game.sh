@@ -25,6 +25,12 @@ mkdir -p "$INSTALL_DIR"
 cp -r "$DISC_DIR/Exe" "$INSTALL_DIR/"
 cp -r "$DISC_DIR/art-res" "$INSTALL_DIR/"
 
+# The intro video lives at the disc root (not under art-res), copy it in.
+if [ -f "$SCRIPT_DIR/lego-loco-unpacked/Video/locoIntr.avi" ]; then
+    cp "$SCRIPT_DIR/lego-loco-unpacked/Video/locoIntr.avi" \
+       "$INSTALL_DIR/art-res/video/"
+fi
+
 # Update LEGO.INI to point to the install location (C:\loco\...)
 cat > "$INSTALL_DIR/Exe/LEGO.INI" <<'EOF'
 //LEGO ini file
@@ -35,7 +41,7 @@ ResFile=c:\loco\art-res\resource.rfh
 exe=loco.exe
 
 [Video]
-Dir=c:\loco\Art-res\Video\locointr.avi
+Dir=c:\loco\art-res\video\locoIntr.avi
 EOF
 
 # Apply binary patches
