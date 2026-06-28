@@ -31,6 +31,9 @@ if [ "${VNC_ENABLED:-0}" = "1" ]; then
     if [ -n "${VNC_PASSWORD:-}" ]; then
         PASSWORD_ARGS=(-passwd "$VNC_PASSWORD")
     fi
+    # Unset Wayland env so x11vnc doesn't refuse to start on the pure-X Xvfb
+    unset WAYLAND_DISPLAY
+    export XDG_SESSION_TYPE=x11
     x11vnc -display "$DISPLAY" -forever -bg -rfbport 5900 \
         "${PASSWORD_ARGS[@]}" -noxdamage -quiet -logfile /tmp/x11vnc.log
     echo "VNC started on port 5900 (connect with any VNC viewer)"
