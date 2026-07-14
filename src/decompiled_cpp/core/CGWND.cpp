@@ -968,31 +968,454 @@ after_registry:
 
 
 /* ================================================================== */
-/* CGWND::InitAllSubsystems — Initialize all game subsystems           */
-/* Address: 0x406F90                                                    */
+/* CGWND::InitAllSubsystems — Master subsystem initialization          */
+/* Address: 0x406F90  (size: 2052 bytes / 0x406F90-0x407794)          */
 /*                                                                     */
-/* Creates and initializes all COM-like subsystems in order:           */
-/*   UI_MainMenu, Town, PostcardSend, Postcard, Cursor, AudioMgr,     */
-/*   AboutDialog, Train, etc.                                          */
-/* See src/decompiled/cgwnd_initallsubsystems.c for full details.      */
+/* Allocates and constructs all 8 major game subsystems in sequence.   */
+/* Each is initialized in two phases:                                  */
+/*   1. operator_new(size) -> Ctor(this, hInstance, resourceId)       */
+/*   2. Create/Init(this, hWndParent)                                 */
+/*                                                                     */
+/* Protected by SEH (scopetable @0x474FD8). On any failure, destroys  */
+/* all previously-created subsystems and returns a negative error code. */
+/*                                                                     */
+/* Subsystem allocations and resource IDs:                             */
+/*   1. UI_MainMenu    (0x224 bytes)  resId=0x1F8 (504)               */
+/*   2. Town           (0x6E0 bytes)  resId=0x1F5 (501)               */
+/*   3. PostcardSend   (0x2C4 bytes)  resId=0x1F7 (503)               */
+/*   4. TrainStation   (0x1D4 bytes)  resId=0x1FC (508)               */
+/*   5. Postcard       (0x254 bytes)  resId=0x1FB (507)               */
+/*   6. Cursor         (0x740 bytes)  resId=0x1FA (506)               */
+/*   7. AudioMgr/Help  (0x3078 bytes) resId=0x1FE (510)               */
+/*   8. AboutDialog    (0x1184 bytes) resId=0x1FD (509)               */
+/*                                                                     */
+/* Calling convention: __fastcall (ECX = CGWND *this)                  */
+/*                                                                     */
+/* Called by: GameLoop_Setup @0x406BA0                                 */
+/*                                                                     */
+/* @return 0 on success, negative error code (-2 to -17) on failure    */
 /* ================================================================== */
-void CGWND::InitAllSubsystems()
+
+/* Helper: destroy a COM-like subsystem by calling vtable[0](self, 1) */
+static void destroy_subsystem(void*& ptr) {
+    if (ptr != nullptr) {
+        void** vt = *(void***)ptr;                       /* +0x00: vtable */
+        void (*dtor)(void*, int) = (void(*)(void*,int))vt[0]; /* vtable[0] = dtor */
+        dtor(ptr, 1);                                    /* arg 1 = delete flag */
+        ptr = nullptr;
+    }
+}
+
+int CGWND::InitAllSubsystems()
 {
-    /* See src/decompiled/cgwnd_initallsubsystems.c (0x406F90) */
+    HWND      hWndParent = this->hWnd;        /* +0x04: parent HWND */
+    HINSTANCE hInst      = this->hInstance;    /* +0x0C: HINSTANCE */
+    void*     mem;
+    BOOL      ok;
+
+    /* ── Subsystem constructor/Create forward declarations ── */
+    extern void* UI_MainMenu_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);           /* @0x4202F0 */
+    extern BOOL  UI_MainMenu_Create(void* self, HWND hWndParent);                        /* @0x4204D0 */
+    extern void* Town_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);                  /* @0x42E900 */
+    extern BOOL  Town_InitSprites(void* self, HWND hWndParent);                          /* @0x42EDB0 */
+    extern void* PostcardPreviewWindow_Ctor(void* mem, HINSTANCE hInst, uint32_t resId); /* @0x430A90 */
+    extern BOOL  LOCOBITMAP_InitWindow(void* self, HWND hWndParent);                     /* @0x402520 */
+    extern void* TrainStationWindow_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);    /* @0x436B20 */
+    extern BOOL  TrainStationWindow_Create(void* self, HWND hWndParent);                 /* @0x436C50 */
+    extern void* LOCOBITMAP_CreateFromResource(void* mem, HINSTANCE hInst, uint32_t id); /* @0x401F50 */
+    extern void* Cursor_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);                /* @0x415980 */
+    extern BOOL  Cursor_Create(void* self, HWND hWndParent);                             /* @0x4169E0 */
+    extern void* AudioMgr_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);              /* @0x44F490 */
+    extern BOOL  HelpWnd_Create(void* self, HWND hWndParent);                            /* @0x450CA0 */
+    extern void* CGWND_AboutDialog_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);     /* @0x40F1C0 */
+    extern BOOL  CGWND_AboutDialog_Create(void* self, HWND hWndParent);                  /* @0x40F510 */
+
+    /* ================================================================
+     * 1. UI_MainMenu (0x224 bytes, resource 0x1F8 = 504)
+     * 0x406FD0-0x40700C
+     * ================================================================ */
+    mem = operator_new(0x224);
+    g_ui_main = (mem != nullptr)
+        ? UI_MainMenu_Ctor(mem, hInst, 0x1F8)
+        : nullptr;
+    if (g_ui_main == nullptr) {
+        return -2;   /* 0xFFFFFFFE */
+    }
+
+    ok = UI_MainMenu_Create(g_ui_main, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_ui_main);
+        return -3;   /* 0xFFFFFFFD */
+    }
+
+    /* ================================================================
+     * 2. Town (0x6E0 bytes, resource 0x1F5 = 501)
+     * 0x407014-0x40705C
+     * ================================================================ */
+    mem = operator_new(0x6E0);
+    g_town = (mem != nullptr)
+        ? Town_Ctor(mem, hInst, 0x1F5)
+        : nullptr;
+    if (g_town == nullptr) {
+        destroy_subsystem(g_ui_main);
+        return -4;   /* 0xFFFFFFFC */
+    }
+
+    ok = Town_InitSprites(g_town, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -5;   /* 0xFFFFFFFB */
+    }
+
+    /* ================================================================
+     * 3. PostcardPreviewWindow (0x2C4 bytes, resource 0x1F7 = 503)
+     * 0x407064-0x4070AC
+     * ================================================================ */
+    mem = operator_new(0x2C4);
+    g_postcard_send = (mem != nullptr)
+        ? PostcardPreviewWindow_Ctor(mem, hInst, 0x1F7)
+        : nullptr;
+    if (g_postcard_send == nullptr) {
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -6;   /* 0xFFFFFFFA */
+    }
+
+    ok = LOCOBITMAP_InitWindow(g_postcard_send, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -7;   /* 0xFFFFFFF9 */
+    }
+
+    /* ================================================================
+     * 4. TrainStationWindow (0x1D4 bytes, resource 0x1FC = 508)
+     * 0x4070B4-0x4070FC
+     * ================================================================ */
+    mem = operator_new(0x1D4);
+    g_trainstation_window = (mem != nullptr)
+        ? TrainStationWindow_Ctor(mem, hInst, 0x1FC)
+        : nullptr;
+    if (g_trainstation_window == nullptr) {
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -8;   /* 0xFFFFFFF8 */
+    }
+
+    ok = TrainStationWindow_Create(g_trainstation_window, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -9;   /* 0xFFFFFFF7 */
+    }
+
+    /* ================================================================
+     * 5. Postcard LOCOBITMAP (0x254 bytes, resource 0x1FB = 507)
+     * 0x407104-0x40714C
+     * ================================================================ */
+    mem = operator_new(0x254);
+    g_postcard = (mem != nullptr)
+        ? LOCOBITMAP_CreateFromResource(mem, hInst, 0x1FB)
+        : nullptr;
+    if (g_postcard == nullptr) {
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -10;  /* 0xFFFFFFF6 */
+    }
+
+    ok = LOCOBITMAP_InitWindow(g_postcard, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -11;  /* 0xFFFFFFF5 */
+    }
+
+    /* ================================================================
+     * 6. Cursor (0x740 bytes, resource 0x1FA = 506)
+     * 0x407154-0x40719C
+     * ================================================================ */
+    mem = operator_new(0x740);
+    g_cursor = (mem != nullptr)
+        ? Cursor_Ctor(mem, hInst, 0x1FA)
+        : nullptr;
+    if (g_cursor == nullptr) {
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -12;  /* 0xFFFFFFF4 */
+    }
+
+    ok = Cursor_Create(g_cursor, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_cursor);
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -13;  /* 0xFFFFFFF3 */
+    }
+
+    /* ================================================================
+     * 7. AudioMgr / HelpWnd (0x3078 bytes, resource 0x1FE = 510)
+     * 0x4071A4-0x4071EC
+     * ================================================================ */
+    mem = operator_new(0x3078);
+    g_audio_mgr = (mem != nullptr)
+        ? AudioMgr_Ctor(mem, hInst, 0x1FE)
+        : nullptr;
+    if (g_audio_mgr == nullptr) {
+        destroy_subsystem(g_cursor);
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -14;  /* 0xFFFFFFF2 */
+    }
+
+    ok = HelpWnd_Create(g_audio_mgr, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_audio_mgr);
+        destroy_subsystem(g_cursor);
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -15;  /* 0xFFFFFFF1 */
+    }
+
+    /* ================================================================
+     * 8. AboutDialog (0x1184 bytes, resource 0x1FD = 509)
+     * 0x4071F4-0x40723C
+     * ================================================================ */
+    mem = operator_new(0x1184);
+    g_about = (mem != nullptr)
+        ? CGWND_AboutDialog_Ctor(mem, hInst, 0x1FD)
+        : nullptr;
+    if (g_about == nullptr) {
+        destroy_subsystem(g_audio_mgr);
+        destroy_subsystem(g_cursor);
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -16;  /* 0xFFFFFFF0 */
+    }
+
+    ok = CGWND_AboutDialog_Create(g_about, hWndParent);
+    if (!ok) {
+        destroy_subsystem(g_about);
+        destroy_subsystem(g_audio_mgr);
+        destroy_subsystem(g_cursor);
+        destroy_subsystem(g_postcard);
+        destroy_subsystem(g_trainstation_window);
+        destroy_subsystem(g_postcard_send);
+        destroy_subsystem(g_town);
+        destroy_subsystem(g_ui_main);
+        return -17;  /* 0xFFFFFFEF */
+    }
+
+    /* All 8 subsystems initialized successfully */
+    return 0;
 }
 
 
 /* ================================================================== */
-/* CGWND::InitMode1 — Initialize game mode 1 subsystems                */
-/* Address: 0x408350                                                    */
+/* CGWND::InitMode1 — Mode 1 initialization (loading screen / game start)
+/* Address: 0x408350  (size: 641 bytes)                                 */
 /*                                                                     */
-/* Sets up the game world for initial entry into gameplay mode.        */
-/* Transitions to mode 3 (TOWN) when complete.                         */
-/* See src/decompiled/cgwnd_initmode1.c for full details.              */
+/* Two execution paths based on this->field_10:                        */
+/*                                                                     */
+/* PATH A (field_10 == 0) — First-time initialization:                 */
+/*   Shows progressive loading screen with per-subsystem init steps,   */
+/*   queues a screensaver idle thread, and returns. Game stays in      */
+/*   mode 1.                                                           */
+/*                                                                     */
+/* PATH B (field_10 != 0) — World-reload (set by CGWND_QuitToMenu):   */
+/*   Loads a world, inits subsystems, transitions to mode 3.           */
+/*   - Demo mode: picks random screensaver world                       */
+/*   - Multiplayer (scenarioId==2): builds "Layouts\XX" from player    */
+/*     count                                                           */
+/*   - Single player: loads "curr" if clean exit flag is set           */
+/*                                                                     */
+/* Called by: CGWND::SetMode(1) @0x40815C                              */
 /* ================================================================== */
 void CGWND::InitMode1()
 {
-    /* See src/decompiled/cgwnd_initmode1.c (0x408350) */
+    char   path_buf_a[0x104];    /* ESP+0x04 — screensaver/single path */
+    char   path_buf_b[0x104];    /* ESP+0x10C — multiplayer layout path */
+    HWND   main_hwnd = this->hWnd;  /* +0x04 */
+    void** vtbl;
+
+    /* Zero both path buffers */
+    /* 0x40836F-0x4083B2 */
+    path_buf_a[0] = '\0';
+    memset(path_buf_a + 1, 0, 0x103);
+    path_buf_b[0] = '\0';
+    memset(path_buf_b + 1, 0, 0x103);
+
+    /* ── Dependencies ── */
+    extern uintptr_t SetTimer(HWND hWnd, uintptr_t idEvent, uint32_t uElapse, void* lpTimerFunc);
+    extern BOOL      EnableWindow(HWND hWnd, BOOL bEnable);
+    extern BOOL      InvalidateRect(HWND hWnd, const RECT* lpRect, BOOL bErase);
+    extern BOOL      UpdateWindow(HWND hWnd);
+    extern BOOL      PlaySoundA(const char* pszSound, HMODULE hmod, DWORD fdwSound);
+    extern int       wsprintfA(char* buf, const char* fmt, ...);
+    extern void      GameAudio_UpdateVolume(void* audio, int level);            /* @0x4135B0 */
+    extern void      Game_SetScreenMode(void* game, int a, int b, int c);       /* @0x411DC0 */
+    extern void      DirectPlay_Init(void);                                     /* @0x45E090 */
+    extern void      CGWND_PumpMessages(int drain_only);                        /* @0x4085E0 */
+    extern void      Town_InitOverlaySprite(void* town);                        /* @0x42FDF0 */
+    extern void      DDRAW_Present(uint32_t flags);                             /* @0x45E1E0 */
+    extern void      Cursor_InitBackground(void* cursor);                       /* @0x416460 */
+    extern void      GFX_InitWindow(void* locobitmap);                          /* @0x404720 */
+    extern void      Town_HandlePostcardCommand(void* wnd);                     /* @0x430C20 */
+    extern uint32_t  WIN32_QueueAsyncTask(void* queue, void* callback, uint32_t d); /* @0x461790 */
+    extern void      RESMGR_SelectScreensaver(char* out);                       /* @0x4481B0 */
+    extern int       INPUT_LoadWorld(void* inputmgr, uint8_t* path);            /* @0x41D320 */
+    extern int       NETMAN_GetPlayerCount(void* netman);                       /* @0x43D210 */
+
+    /* Create a periodic 150ms timer (ID 0x47) for loading screen.
+     * No callback: WM_TIMER handled in the window procedure. */
+    /* 0x4083C0 */
+    g_timer_id = (int)SetTimer(main_hwnd, 0x47, 150, nullptr);
+
+    /* Update audio volume on mode entry */
+    /* 0x4083E2 */
+    if (g_audio != nullptr) {
+        GameAudio_UpdateVolume(g_audio, 1);
+    }
+
+    /* ================================================================
+     * DECISION POINT: this->field_10 == 0 ?
+     * 0x4083F8
+     * ================================================================ */
+    if (this->field_10 == 0) {
+
+        /* ── PATH A: First-time initialization ("fresh start") ── */
+        /* 0x408400-0x4085C5 */
+
+        /* Step the UI (show loading screen / transition frame) */
+        vtbl = *(void***)g_ui_main;
+        ((void(*)())vtbl[1])();                           /* vtable[1] */
+
+        Game_SetScreenMode(&g_game, 0, 1, 0);
+        DirectPlay_Init();
+
+        /* Disable main window during loading to prevent interaction */
+        EnableWindow(main_hwnd, FALSE);
+        CGWND_PumpMessages(1);                            /* drain=1: discard non-critical */
+
+        if (g_demo_mode != 1) {
+            /* Initialize each subsystem one at a time, presenting the
+             * display and draining messages between steps to show
+             * loading progress. */
+
+            Town_InitOverlaySprite(g_town);               /* +0x5FA guard: inits once */
+            DDRAW_Present(0);
+            CGWND_PumpMessages(1);
+
+            Cursor_InitBackground(g_cursor);              /* +0x1E8 guard: inits once */
+            DDRAW_Present(0);
+            CGWND_PumpMessages(1);
+
+            GFX_InitWindow(g_postcard);                   /* +0xFC guard: inits once */
+            DDRAW_Present(0);
+            CGWND_PumpMessages(1);
+
+            /* Multiplayer postcard scenario: init the send dialog */
+            if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) { /* +0x7C4: scenarioId */
+                Town_HandlePostcardCommand(g_postcard_send);
+                DDRAW_Present(0);
+                CGWND_PumpMessages(1);
+            }
+        }
+
+        /* Queue a background thread for screensaver/idle monitoring.
+         * Callback at 0x45DE40 cycles worlds after inactivity. */
+        WIN32_QueueAsyncTask((void*)0x4A9AD0, (void*)0x45DE40, 0);
+
+        /* Force window repaint to show final loading state */
+        InvalidateRect(main_hwnd, nullptr, FALSE);
+        UpdateWindow(main_hwnd);
+        return;
+        /* Game stays in mode 1 (loading/menu). The game loop in WinMain
+         * processes events at this mode level. */
+    }
+
+    /* ================================================================
+     * PATH B: World-reload path
+     * this->field_10 != 0 — set by CGWND_QuitToMenu @0x406E94.
+     * Load the appropriate world before transitioning to gameplay.
+     * 0x4084D0-0x4085D0
+     * ================================================================ */
+
+    if (g_demo_mode == 1) {
+        /* Demo/kiosk: pick random screensaver world */
+        RESMGR_SelectScreensaver(path_buf_a);
+        if (INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)path_buf_a) != 0) {
+            goto common_init;    /* screensaver loaded */
+        }
+        /* Screensaver load failed — try "curr" if clean exit */
+        if (g_clean_exit != 0) {
+            INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)"curr");   /* 0x47E2A0 */
+        }
+        goto common_init;
+    }
+
+    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {  /* scenarioId == 2 */
+        /* Network multiplayer/postcard: build "Layouts\XX" path */
+        int player_count = NETMAN_GetPlayerCount(g_netman);
+        if (player_count == 0) {
+            goto common_init;  /* BUG: no world loaded — town may be empty */
+        }
+        wsprintfA(path_buf_b, "Layouts\\%s", player_count + 0x12); /* fmt @0x47E2A8 */
+        INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)path_buf_b);
+    } else {
+        /* Single player: reload "curr" world if clean exit */
+        if (g_clean_exit != 0) {
+            INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)"curr");   /* 0x47E2A0 */
+        }
+    }
+
+common_init:
+    /* ── Common post-load initialization ── */
+    /* 0x4085A0-0x4085E0 */
+
+    /* Dismiss loading screen / hide menu */
+    vtbl = *(void***)g_ui_main;
+    ((void(*)())vtbl[1])();                               /* vtable[1] */
+
+    Town_InitOverlaySprite(g_town);
+    Cursor_InitBackground(g_cursor);
+    GFX_InitWindow(g_postcard);
+
+    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {  /* scenarioId */
+        Town_HandlePostcardCommand(g_postcard_send);
+    }
+
+    /* Stop all currently playing audio */
+    PlaySoundA(nullptr, nullptr, 0);
+
+    /* Transition to mode 3 (gameplay / town view).
+     * CGWND::SetMode(3) dispatches to CGWND_InitMode4 @0x4086F0
+     * which renders the town scene and starts the game loop. */
+    this->SetMode(3);
 }
 
 
