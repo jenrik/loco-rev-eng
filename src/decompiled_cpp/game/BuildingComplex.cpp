@@ -63,12 +63,35 @@ void* BuildingComplex::scalar_deleting_destructor(byte flags)
 
 
 /* ================================================================== */
-/* BuildingComplex::DispatchTimers — Timer dispatch across tiles       */
-/* Address: 0x438070                                                   */
+/* BuildingComplex::DispatchTimers — Dispatch timer events             */
+/* Address: 0x434690  (size: 143 bytes)                                */
 /*                                                                     */
-/* See src/decompiled/buildingcomplex_dispatchtimers.c for full details */
+/* Iterates timer collections at +0x4C and +0x64, calling vtable[0x40] */
+/* on each item with fields at +0xA8 and +0xAC as arguments.           */
+/* Only runs in game mode 3.                                           */
 /* ================================================================== */
 void BuildingComplex::DispatchTimers()
 {
-    /* See src/decompiled/buildingcomplex_dispatchtimers.c (0x438070) */
+    extern int g_game_mode;
+    if (g_game_mode != 3) return;
+
+    auto dispatchCollection = [](void* timer_coll) {
+        void** vt = *(void***)timer_coll;
+        auto getCount = (int(__thiscall*)())vt[0x2C / 4];
+        auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
+
+        int count = getCount();
+        for (int i = 0; i < count; i++) {
+            void* item = getItem(i);
+            /* vtable[0x40] = Dispatch(arg_a, arg_b) */
+            void** ivt = *(void***)item;
+            ((void(__thiscall*)(int,int))ivt[0x40 / 4])(
+                *(int*)((uint8_t*)item + 0xA8),
+                *(int*)((uint8_t*)item + 0xAC));
+            count = getCount();
+        }
+    };
+
+    dispatchCollection((uint8_t*)this + 0x4C);
+    dispatchCollection((uint8_t*)this + 0x64);
 }

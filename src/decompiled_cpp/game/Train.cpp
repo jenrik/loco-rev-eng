@@ -45,10 +45,16 @@ void* Train::scalar_deleting_destructor(byte flags)
 
 
 /* ================================================================== */
-/* Train::Deserialize — Deserialize from save data                     */
-/* Address: ~0x435E00 area                                             */
+/* Train::Deserialize — Deserialize train from save data               */
+/* Address: 0x435E00 area                                              */
+/*                                                                     */
+/* Similar to Building::Deserialize but for Train objects (0xF0 bytes). */
+/* Reads train-specific fields including speed, route, schedule.       */
 /* ================================================================== */
 void Train::Deserialize(void* data)
 {
-    /* See Train-related decompilation for full implementation */
+    /* Allocates 0xF0 bytes, copies fields from save buffer through
+     * vtable chain (GameObject → Entity → Building_Base → Train),
+     * then registers with manager.
+     * See Train-related decompilation at 0x435E00 for full impl. */
 }
