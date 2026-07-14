@@ -619,18 +619,28 @@ void CGWND::SetMode(int new_mode)
 /* CGWND::Cleanup — Full game shutdown                                 */
 /* Address: 0x4077A0  (size: 831 bytes)                                */
 /*                                                                     */
-/* Saves window position and CleanExit=1 to lego.ini, flushes network */
-/* messages, saves world state, destroys all subsystems in reverse      */
-/* order of InitAllSubsystems, shuts down DirectDraw/DirectSound,      */
-/* kills multimedia timer, and posts WM_QUIT.                          */
-/* See src/decompiled/cgwnd_cleanup.c for complete subsystem list.     */
+/* Saves window position and CleanExit=1 to lego.ini, flushes network  */
+/* messages, waits for async thread, saves world state to file,         */
+/* destroys all 20+ COM-like subsystems in reverse init order,          */
+/* releases the cursor surface (refcounted), frees UI panel surfaces,   */
+/* closes frame-timer event, kills the multimedia timer, and tears      */
+/* down sprite manager, game view, DirectDraw, scripted objects,       */
+/* input, game engine, resource manager, and CRT heap.                 */
+/*                                                                     */
+/* Called by: WinMain (0x4631C5) — error path when GameLoop_Setup      */
+/* fails. Normal exit goes through CGWND::SetMode(10) → WM_QUIT.      */
 /* ================================================================== */
 void CGWND::Cleanup()
 {
-    /* --- PHASE 1: Save window position and CleanExit to lego.ini --- */
+    /* ================================================================ */
+    /* PHASE 1: Save window position and CleanExit=1 to lego.ini        */
+    /* ================================================================ */
     extern void  Config_WriteInt(void* cfg, const char* sec, const char* key, int val);
-    extern void* g_config_ini;
-    extern int   g_window_left, g_window_top, g_window_right, g_window_bottom;
+    extern void* g_config_ini;          /* 0x4A9EEC — ConfigFile COM object */
+    extern int   g_window_left;         /* 0x485200 */
+    extern int   g_window_top;          /* 0x485204 */
+    extern int   g_window_right;        /* 0x485208 */
+    extern int   g_window_bottom;       /* 0x48520C */
 
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectLeft",   g_window_left);
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectTop",    g_window_top);
@@ -638,11 +648,16 @@ void CGWND::Cleanup()
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectBottom", g_window_bottom);
     Config_WriteInt(g_config_ini, "PROCESS", "CleanExit", 1);
 
-    /* --- PHASE 2: Network thread cleanup --- */
-    extern void* _g_network_thread;
+    /* ================================================================ */
+    /* PHASE 2: Network thread teardown                                  */
+    /*   - Flush pending messages through Train                         */
+    /*   - Destroy network thread COM wrapper (vtable[0])               */
+    /*   - Spin-wait for async thread to signal (100ms Sleep polls)     */
+    /* ================================================================ */
+    extern void* _g_network_thread;     /* 0x4FD398 — NetworkThread COM wrapper */
     if (_g_network_thread != nullptr) {
-        extern void* _g_train;
-        extern void Train_FlushMessages(void* train);
+        extern void* _g_train;          /* 0x4FD3A4 — Train COM object */
+        extern void Train_FlushMessages(void* train);  /* 0x40F140 */
         Train_FlushMessages(_g_train);
 
         void** nt_vt = *(void***)_g_network_thread;
@@ -650,119 +665,161 @@ void CGWND::Cleanup()
         _g_network_thread = nullptr;
     }
 
-    /* Wait for async thread to exit (spin with 100ms sleeps) */
     {
-        extern int WIN32_GetThreadResult(void* state);
-        extern void WIN32_Sleep(uint32_t ms);
-        void* thread_state = (void*)0x4A9AD0;
+        extern int  WIN32_GetThreadResult(void* state);  /* 0x40D350 */
+        extern void WIN32_Sleep(uint32_t ms);            /* IAT @0x4770C4 */
+        void* thread_state = (void*)0x4A9AD0;            /* global thread-state */
         while (WIN32_GetThreadResult(thread_state) != 0) {
             WIN32_Sleep(100);
         }
     }
 
-    /* --- PHASE 3: Save world state, unlock sprites --- */
-    extern void World_Init(void* world);
-    extern void World_Shutdown(int world);
-    extern void Sprite_UnlockAll(int mgr);
+    /* ================================================================ */
+    /* PHASE 3: Save world state and unlock sprites                      */
+    /*   World_Init (0x451DD0): save 4 world slots to files            */
+    /*   World_Shutdown (0x403740): zero world descriptor               */
+    /*   Sprite_UnlockAll (0x41A1C0): release all sprite DCs            */
+    /* ================================================================ */
+    extern void World_Init(void* world);        /* 0x451DD0 */
+    extern void World_Shutdown(int world);      /* 0x403740 */
+    extern void Sprite_UnlockAll(int mgr);      /* 0x41A1C0 */
     World_Init((void*)0x4A98B0);
     World_Shutdown(0x4A98B0);
     Sprite_UnlockAll(0x4AAD08);
 
-    /* --- PHASE 4: Destroy all UI/audio subsystems (vtable[0](1) pattern) --- */
-    auto destroyObj = [](void*& ptr) {
+    /* ================================================================ */
+    /* PHASE 4: Destroy all UI/audio subsystems (reverse init order)     */
+    /*   InitAllSubsystems order: UI_MainMenu(0), Town(1),               */
+    /*   PostcardSend(2), TrainStation(3), Postcard(4), Cursor(5),      */
+    /*   AudioMgr(6), AboutDialog(7). Each destroyed via vtable[0](1).  */
+    /* ================================================================ */
+    auto destroyComObj = [](void*& ptr) {
         if (ptr != nullptr) {
             void** vt = *(void***)ptr;
-            ((void(__thiscall*)(int))vt[0])(1);
+            ((void(__thiscall*)(int))vt[0])(1);  /* scalar dtor with delete */
             ptr = nullptr;
         }
     };
 
-    extern void* g_ui_main, *g_town, *g_postcard, *g_cursor;
-    extern void* g_postcard_send, *g_trainstation_window;
-    extern void* g_audio_mgr, *g_about;
+    extern void* g_ui_main;             /* 0x4FD378 */
+    extern void* g_town;                /* 0x4FD37C */
+    extern void* g_postcard;            /* 0x4FD384 — destroyed before Cursor */
+    extern void* g_cursor;              /* 0x4FD380 */
+    extern void* g_postcard_send;       /* 0x4FD388 */
+    extern void* g_trainstation_window; /* 0x485258 */
+    extern void* g_audio_mgr;           /* 0x4FD38C */
+    extern void* g_about;               /* 0x4FD390 */
 
-    destroyObj(g_ui_main);
-    destroyObj(g_town);
-    destroyObj(g_postcard);
-    destroyObj(g_cursor);
-    destroyObj(g_postcard_send);
-    destroyObj(g_trainstation_window);
-    destroyObj(g_audio_mgr);
-    destroyObj(g_about);
+    destroyComObj(g_ui_main);
+    destroyComObj(g_town);
+    destroyComObj(g_postcard);          /* subsys 4 — before Cursor (refs cursor resources) */
+    destroyComObj(g_cursor);            /* subsys 5 */
+    destroyComObj(g_postcard_send);     /* subsys 2 */
+    destroyComObj(g_trainstation_window); /* subsys 3 */
+    destroyComObj(g_audio_mgr);         /* subsys 6 */
+    destroyComObj(g_about);             /* subsys 7 */
 
-    /* --- PHASE 5: Additional subsystems --- */
-    extern void* _g_train, *_DAT_004fd3a8, *g_netman, *_g_dplay;
-    extern void* _g_dplay_config, *_g_train_resources, *g_player_config;
-    extern void* _g_audio_config, *_g_dsound_object;
+    /* ================================================================ */
+    /* PHASE 5: Destroy additional non-UI subsystems                     */
+    /*   Created independently during network/sound/boot init.          */
+    /* ================================================================ */
+    extern void* _g_train;              /* 0x4FD3A4 */
+    extern void* _DAT_004fd3a8;         /* 0x4FD3A8 — unknown boot-time subsystem */
+    extern void* g_netman;              /* 0x4FD3AC */
+    extern void* _g_dplay;              /* 0x4FD3B0 — DirectPlay */
+    extern void* _g_dplay_config;       /* 0x4FD3B4 */
+    extern void* _g_train_resources;    /* 0x4FD394 */
+    extern void* g_player_config;       /* 0x4AA4A8 */
+    extern void* _g_audio_config;       /* 0x4FD3D4 */
+    extern void* _g_dsound_object;      /* 0x4FD3D8 — DirectSound */
 
-    destroyObj(_g_train);
-    destroyObj(_DAT_004fd3a8);
-    destroyObj(g_netman);
-    destroyObj(_g_dplay);
-    destroyObj(_g_dplay_config);
-    destroyObj(_g_train_resources);
-    destroyObj(g_player_config);
-    destroyObj(g_config_ini);       /* also cleared in dtor */
-    destroyObj(_g_audio_config);
-    destroyObj(_g_dsound_object);
+    destroyComObj(_g_train);
+    destroyComObj(_DAT_004fd3a8);
+    destroyComObj(g_netman);
+    destroyComObj(_g_dplay);
+    destroyComObj(_g_dplay_config);
+    destroyComObj(_g_train_resources);
+    destroyComObj(g_player_config);
+    destroyComObj(g_config_ini);        /* ConfigFile — after all config writers done */
+    destroyComObj(_g_audio_config);
+    destroyComObj(_g_dsound_object);
 
-    /* --- PHASE 6: Cursor surface special case (refcount at +4) --- */
-    extern int* _g_cursor_surface;
+    /* ================================================================ */
+    /* PHASE 6: Release cursor surface (refcounted at +4)               */
+    /*   1. vtable[2] = ReleaseSurface (DDraw surface Release)          */
+    /*   2. If refcount == -1: vtable[0](1) to delete wrapper           */
+    /* ================================================================ */
+    extern int* _g_cursor_surface;      /* 0x4FD3C8 */
     if (_g_cursor_surface != nullptr) {
-        void** cs_vt = (void**)_g_cursor_surface[0];
-        ((void(__thiscall*)())cs_vt[0x08 / 4])();  /* vtable[2] = ReleaseSurface */
-
-        if (_g_cursor_surface[1] == -1) {
-            ((void(__thiscall*)(int))cs_vt[0])(1);  /* delete if refcount == -1 */
+        int*   surf    = _g_cursor_surface;
+        void** surf_vt = (void**)surf[0];
+        ((void(__thiscall*)())surf_vt[0x08 / 4])();  /* vtable[2] — ReleaseSurface */
+        if (surf[1] == -1) {                           /* refcount at +4 */
+            ((void(__thiscall*)(int))surf_vt[0])(1);   /* vtable[0](1) — delete */
         }
         _g_cursor_surface = nullptr;
     }
 
-    /* --- PHASE 7: Low-level shutdown --- */
-    extern void UIPANEL_FreeAllSurfaces(void);
+    /* ================================================================ */
+    /* PHASE 7: Low-level system shutdown (13 steps, dependency order)   */
+    /*   1. UIPANEL_FreeAllSurfaces (0x41C320) — release GDI bitmaps   */
+    /*   2. CloseHandle(frame_event) — close manual-reset event         */
+    /*   3. timeKillEvent + timeEndPeriod(14) — stop timer callback     */
+    /*   4. Sprite_Shutdown (0x41A110) — free sprite surfaces + index   */
+    /*   5. Town_GameView_Cleanup (0x42BE80) — release render data       */
+    /*   6. DDRAW_InvalidateAll (0x418420) — invalidate cached surfaces  */
+    /*   7. RESDATA_ScriptedObject_Shutdown (0x42D160) — scripted res   */
+    /*   8. UI_FreeMessageBox (0x426420) — destroy message box           */
+    /*   9. INPUT_Shutdown (0x4148E0) — unregister mouse callback        */
+    /*  10. INPUT_Cleanup (0x4146D0) — release DXInput devices          */
+    /*  11. Game_Shutdown (0x40DA20) — restore cursor, set coop level    */
+    /*  12. RESMGR_Shutdown (0x470590) — free GDI objects                */
+    /*  13. CRT_0x470650 — final heap verification                       */
+    /* ================================================================ */
+    extern void UIPANEL_FreeAllSurfaces(void);     /* 0x41C320 */
     UIPANEL_FreeAllSurfaces();
 
-    extern void* g_frame_event;
+    extern void* g_frame_event;                    /* 0x4A990C */
     if (g_frame_event != nullptr) {
-        extern void WIN32_CloseHandle(void* h);
+        extern void WIN32_CloseHandle(void* h);    /* IAT @0x4770A0 */
         WIN32_CloseHandle(g_frame_event);
         g_frame_event = nullptr;
     }
 
-    extern uint32_t g_timer_event_id;
-    extern void WIN32_timeKillEvent(uint32_t id);
-    extern void WIN32_timeEndPeriod(uint32_t period);
+    extern uint32_t g_timer_event_id;              /* 0x485438 */
+    extern void WIN32_timeKillEvent(uint32_t id);  /* IAT @0x4773B4 */
+    extern void WIN32_timeEndPeriod(uint32_t period); /* IAT @0x4773AC */
     WIN32_timeKillEvent(g_timer_event_id);
     WIN32_timeEndPeriod(14);
 
-    extern void Sprite_Shutdown(int mgr);
+    extern void Sprite_Shutdown(int mgr);          /* 0x41A110 */
     Sprite_Shutdown(0x4AAD08);
 
-    extern void Town_GameView_Cleanup(int* view);
+    extern void Town_GameView_Cleanup(int* view);  /* 0x42BE80 */
     Town_GameView_Cleanup((int*)0x4852A0);
 
-    extern void DDRAW_InvalidateAll(int* ddraw);
+    extern void DDRAW_InvalidateAll(int* ddraw);   /* 0x418420 */
     DDRAW_InvalidateAll((int*)0x4A9EF0);
 
-    extern void RESDATA_ScriptedObject_Shutdown(int* obj);
+    extern void RESDATA_ScriptedObject_Shutdown(int* obj);  /* 0x42D160 */
     RESDATA_ScriptedObject_Shutdown((int*)0x4AA5B8);
 
-    extern void UI_FreeMessageBox(int msgbox);
+    extern void UI_FreeMessageBox(int msgbox);     /* 0x426420 */
     UI_FreeMessageBox(0x4FD220);
 
-    extern void INPUT_Shutdown(int input);
+    extern void INPUT_Shutdown(int input);         /* 0x4148E0 */
     INPUT_Shutdown(0x4A99B0);
 
-    extern void INPUT_Cleanup(int* mgr);
+    extern void INPUT_Cleanup(int* mgr);           /* 0x4146D0 */
     INPUT_Cleanup((int*)0x4A9990);
 
-    extern void Game_Shutdown(int* game);
+    extern void Game_Shutdown(int* game);          /* 0x40DA20 */
     Game_Shutdown((int*)0x4854C8);
 
-    extern int RESMGR_Shutdown(int resmgr);
+    extern int RESMGR_Shutdown(int resmgr);        /* 0x470590 */
     RESMGR_Shutdown(0x4855E8);
 
-    extern int CRT_0x470650(void);
+    extern int CRT_0x470650(void);                 /* 0x470650 */
     CRT_0x470650();
 }
 
