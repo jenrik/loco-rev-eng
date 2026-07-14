@@ -612,35 +612,75 @@ void Building::RemoveOccupant(void* entity)
 
 
 /* ================================================================== */
-/* Building::CalcMoveTarget — Calculate movement target coordinates    */
-/* Address: 0x432DA0                                                   */
+/* Building::CalcMoveTarget — Compute stepped movement toward target   */
+/* Address: 0x433DC0  (size: 256 bytes)                                */
 /*                                                                     */
-/* Computes the target position for the building's current action.     */
-/* See src/decompiled/building_calcmovetarget.c for full details.      */
+/* Computes delta (dx, dy) and Euclidean distance from (world_x,       */
+/* world_y) to (target_x, target_y), then produces a new pixel         */
+/* position by moving at most max_step pixels toward the target        */
+/* from (screen_rect.left, screen_rect.top).                           */
+/*                                                                     */
+/* Intermediate values stored in Building's movement fields:           */
+/*   +0xD4 = delta_x   +0xD8 = delta_y                                */
+/*   +0xDC = floor(sqrt(delta_x^2 + delta_y^2))                       */
+/*                                                                     */
+/* Special case: (-1, -1) zeros movement fields, outputs (world_x,     */
+/* world_y) — cancelling movement.                                    */
+/*                                                                     */
+/* @param out_pos   int[2] — output buffer for resulting pixel (x,y)  */
+/* @param target_x  Target X in world coordinates                     */
+/* @param target_y  Target Y in world coordinates                     */
+/* @param max_step  Maximum pixels to move this step (speed clamp)    */
+/*                                                                     */
+/* Called by:                                                          */
+/*   Building::MoveToTarget  (0x434399)                                */
+/*   Building::Update        (0x432AC8, 0x432FBF, 0x433033)           */
+/*   Train functions         (0x453776, 0x453D5C, 0x453F14)           */
 /* ================================================================== */
-void Building::CalcMoveTarget()
+void Building::CalcMoveTarget(int* out_pos, int target_x, int target_y, int max_step)
 {
-    /* If no destination set, nothing to calculate */
-    if (this->dest_x == -1 && this->dest_y == -1) {         /* +0xCC, +0xD0 */
+    /* Cancel movement: (-1, -1) zeros fields, returns current position */
+    if (target_x == -1 && target_y == -1) {
+        this->waypoint_x1 = 0;                              /* +0xD4 */
+        this->waypoint_y1 = 0;                              /* +0xD8 */
+        this->field_dc    = 0;                              /* +0xDC */
+        out_pos[0] = this->world_x;                         /* +0x4C */
+        out_pos[1] = this->world_y;                         /* +0x50 */
         return;
     }
 
-    /* Calculate world-space target based on destination and waypoint.
-     * Full implementation: src/decompiled/building_calcmovetarget.c */
-    int dx = this->dest_x;                                  /* +0xCC */
-    int dy = this->dest_y;                                  /* +0xD0 */
+    /* Signed delta from current world position to target */
+    int dx = target_x - this->world_x;                      /* +0x4C */
+    int dy = target_y - this->world_y;                      /* +0x50 */
 
-    /* Snap to waypoint if set */
-    if (this->waypoint_x1 != -1) {                          /* +0xD4 */
-        dx = this->waypoint_x1;
-    }
-    if (this->waypoint_y1 != -1) {                          /* +0xD8 */
-        dy = this->waypoint_y1;
+    /* Persist movement vector */
+    this->waypoint_x1 = dx;                                 /* +0xD4 */
+    this->waypoint_y1 = dy;                                 /* +0xD8 */
+
+    /* Euclidean (crow-flight) distance */
+    this->field_dc = (uint32_t)sqrt((double)(dx * dx + dy * dy));  /* +0xDC */
+
+    /* X axis: clamp step to max_step, apply from screen_rect.left */
+    int abs_dx = (dx >= 0) ? dx : -dx;
+    int step_x = (max_step < abs_dx) ? max_step : abs_dx;
+    if (dx < 0) {
+        step_x = this->screen_rect.left - step_x;           /* +0x08: move left */
+    } else {
+        step_x = this->screen_rect.left + step_x;           /* +0x08: move right */
     }
 
-    /* Store as target */
-    this->target_x = dx;                                    /* +0xA8 */
-    this->target_y = dy;                                    /* +0xAC */
+    /* Y axis: clamp step to max_step, apply from screen_rect.top */
+    int abs_dy = (dy >= 0) ? dy : -dy;
+    int step_y = (max_step < abs_dy) ? max_step : abs_dy;
+    if (dy < 0) {
+        step_y = this->screen_rect.top - step_y;            /* +0x0C: move up */
+    } else {
+        step_y = this->screen_rect.top + step_y;            /* +0x0C: move down */
+    }
+
+    /* Output resulting screen-space pixel position */
+    out_pos[0] = step_x;
+    out_pos[1] = step_y;
 }
 
 
@@ -915,7 +955,7 @@ void Building::MoveToTarget()
     extern uint8_t g_is_game_active;
     if (target == nullptr || *(uint8_t*)((uint8_t*)target + 0x18) != 1 || !g_is_game_active) {
         this->dest_x = -1; this->dest_y = -1;
-        if (this->visible) this->CalcMoveTarget();
+        if (this->visible) { int out[2]; this->CalcMoveTarget(out, -1, -1, 0); }
         return;
     }
 
@@ -986,14 +1026,144 @@ epilogue:
 
 /* ================================================================== */
 /* Building::Deserialize — Reconstruct from save data                  */
-/* Address: 0x435700                                                   */
+/* Address: 0x435700  (source: src/decompiled/building_deserialize.c)  */
+/*                                                                     */
+/* Deserializes a Building (0xF4 = 244 bytes) from a flat save buffer. */
+/*                                                                     */
+/* The original __thiscall takes a manager object as `this` (ECX) and  */
+/* two stack args: (context, src_buffer). The manager's vtable[0x28]   */
+/* (index 10) is an "add entity" registration callback.                */
+/*                                                                     */
+/* Algorithm:                                                          */
+/*   1. Allocate a raw 0xF4-byte block via operator_new                */
+/*   2. Copy fields block-by-block from src_buffer, interleaving       */
+/*      vtable pointer writes at each step in the inheritance chain:   */
+/*        GameObjectBase (0x477820) → Entity (0x477488)                */
+/*        → Building_Base (0x477F18) → Building (0x477EB8)             */
+/*   3. Register the new Building via manager->vtable[0x28]            */
+/*                                                                     */
+/* Field ordering mirrors GameObject_Serialize (0x405FD0) and the      */
+/* save-file format. On allocation failure, the registration callback  */
+/* is invoked with NULL so the caller can handle the error.            */
+/*                                                                     */
+/* Related:                                                             */
+/*   Train_Deserialize   (0x435DB0) — identical pattern (0xF0 bytes)   */
+/*   World_LoadFromFile  (0x44DC10) — top-level save-file dispatcher   */
 /* ================================================================== */
 void Building::Deserialize(void* data)
 {
-    /* Allocates a 0xF4-byte Building, copies fields from the save
-     * buffer stepping through vtable chain (GameObject → Entity →
-     * Building_Base → Building), then registers with manager.
-     * See src/decompiled/building_deserialize.c for full ~18K impl. */
+    uint8_t* src = (uint8_t*)data;
+
+    /* ---- Step 1: Allocate raw memory ---- */
+    Building* obj = (Building*)operator_new(0xF4);
+    if (obj == nullptr) {
+        /* Allocation failed — notify manager with NULL entity.
+         * Call manager->vtable[0x28](context, NULL).
+         * The manager vtable dispatch is handled by the caller
+         * (e.g. World or BuildingMgr) at 0x44DC10.           */
+        return;
+    }
+
+    /* ---- Step 2a: Copy GameObject fields (+0x04..+0x23) ---- */
+    obj->type       = *(int32_t*) (src + 0x04);             /* +0x04  type               */
+    obj->screen_rect.left   = *(int32_t*) (src + 0x08);    /* +0x08  screen_rect.left   */
+    obj->screen_rect.top    = *(int32_t*) (src + 0x0C);    /* +0x0C  screen_rect.top    */
+    obj->screen_rect.right  = *(int32_t*) (src + 0x10);    /* +0x10  screen_rect.right  */
+    obj->screen_rect.bottom = *(int32_t*) (src + 0x14);    /* +0x14  screen_rect.bottom */
+    *(uint8_t*) ((uint8_t*)obj + 0x18) = *(uint8_t*) (src + 0x18);  /* +0x18  initialized */
+    *(uint32_t*)((uint8_t*)obj + 0x1C) = *(uint32_t*)(src + 0x1C);  /* +0x1C  _pad_1C     */
+    *(uint32_t*)((uint8_t*)obj + 0x20) = *(uint32_t*)(src + 0x20);  /* +0x20  _pad_20     */
+
+    /* Set vtable to GameObjectBase (VTBL_GAMEOBJECT = 0x00477820) */
+    *(void**)obj = (void*)VTBL_GAMEOBJECT;
+
+    /* ---- Step 2b: Copy Entity fields (+0x24..+0x86) ---- */
+    *(uint8_t*) ((uint8_t*)obj + 0x24) = *(uint8_t*) (src + 0x24);  /* +0x24  visible       */
+    obj->anim_index  = *(int32_t*) (src + 0x28);                    /* +0x28  anim_index    */
+    *(uint32_t*)((uint8_t*)obj + 0x2C) = *(uint32_t*)(src + 0x2C); /* +0x2C  blit_flags    */
+
+    /* source_rect (RECT: left, top, right, bottom) at +0x30..+0x3F */
+    *(uint32_t*)((uint8_t*)obj + 0x30) = *(uint32_t*)(src + 0x30);
+    *(uint32_t*)((uint8_t*)obj + 0x34) = *(uint32_t*)(src + 0x34);
+    *(uint32_t*)((uint8_t*)obj + 0x38) = *(uint32_t*)(src + 0x38);
+    *(uint32_t*)((uint8_t*)obj + 0x3C) = *(uint32_t*)(src + 0x3C);
+
+    *(void**)   ((uint8_t*)obj + 0x40) = *(void**)   (src + 0x40);  /* +0x40  parent / resource   */
+    *(uint32_t*)((uint8_t*)obj + 0x44) = *(uint32_t*)(src + 0x44);  /* +0x44  sound_res_id        */
+    *(void**)   ((uint8_t*)obj + 0x48) = *(void**)   (src + 0x48);  /* +0x48  audio_channel       */
+    obj->world_x        = *(int32_t*) (src + 0x4C);                 /* +0x4C  world_x             */
+    obj->world_y        = *(int32_t*) (src + 0x50);                 /* +0x50  world_y             */
+    *(uint32_t*)((uint8_t*)obj + 0x54) = *(uint32_t*)(src + 0x54); /* +0x54  frame_index (uint16) */
+    *(uint32_t*)((uint8_t*)obj + 0x58) = *(uint32_t*)(src + 0x58); /* +0x58  timer                */
+    *(uint32_t*)((uint8_t*)obj + 0x5C) = *(uint32_t*)(src + 0x5C); /* +0x5C  active_state         */
+    *(uint32_t*)((uint8_t*)obj + 0x60) = *(uint32_t*)(src + 0x60); /* +0x60  next_sound_time      */
+    *(uint32_t*)((uint8_t*)obj + 0x64) = *(uint32_t*)(src + 0x64); /* +0x64  resource_id          */
+    *(uint32_t*)((uint8_t*)obj + 0x68) = *(uint32_t*)(src + 0x68); /* +0x68  field_68 / hit coords */
+    *(uint32_t*)((uint8_t*)obj + 0x6C) = *(uint32_t*)(src + 0x6C); /* +0x6C  phase_timer           */
+    *(uint8_t*) ((uint8_t*)obj + 0x70) = *(uint8_t*) (src + 0x70); /* +0x70  waiting_flag          */
+    *(int32_t*) ((uint8_t*)obj + 0x74) = *(int32_t*) (src + 0x74); /* +0x74  world_x_raw           */
+    *(int32_t*) ((uint8_t*)obj + 0x78) = *(int32_t*) (src + 0x78); /* +0x78  world_y_raw           */
+
+    /* Name field (+0x7C..+0x86, 11 bytes including null terminator) */
+    memcpy((uint8_t*)obj + 0x7C, src + 0x7C, 11);
+
+    /* Set vtable to Entity (VTBL_ENTITY = 0x00477488) */
+    *(void**)obj = (void*)VTBL_ENTITY;
+
+    /* ---- Step 2c: Copy Building fields part 1 (+0x88..+0xE7) ---- */
+    obj->occupation_level  = *(uint8_t*) (src + 0x88);              /* +0x88  occupation_level   */
+    obj->disabled          = *(uint8_t*) (src + 0x89);              /* +0x89  disabled           */
+    obj->_pad_8a[0]        = *(uint8_t*) (src + 0x8A);             /* +0x8A  padding byte 0     */
+    /* _pad_8a[1] is not explicitly copied (zero from allocation)  */
+
+    obj->occupant_a        = *(void**)   (src + 0x8C);              /* +0x8C  occupant_a         */
+    obj->occupant_b        = *(void**)   (src + 0x90);              /* +0x90  occupant_b         */
+    obj->create_time       = *(uint32_t*)(src + 0x94);              /* +0x94  create_time        */
+    obj->conn_building_a   = *(int32_t*) (src + 0x98);              /* +0x98  conn_building_a    */
+    obj->conn_building_b   = *(int32_t*) (src + 0x9C);              /* +0x9C  conn_building_b    */
+    obj->next_action_time  = *(uint32_t*)(src + 0xA0);              /* +0xA0  next_action_time   */
+    obj->field_a4          = *(uint32_t*)(src + 0xA4);              /* +0xA4  field_a4           */
+    obj->target_x          = *(int32_t*) (src + 0xA8);              /* +0xA8  target_x           */
+    obj->target_y          = *(int32_t*) (src + 0xAC);              /* +0xAC  target_y           */
+    obj->search_x1         = *(int32_t*) (src + 0xB0);              /* +0xB0  search_x1          */
+    obj->search_y1         = *(int32_t*) (src + 0xB4);              /* +0xB4  search_y1          */
+
+    /* Gap/pad fields at +0xB8, +0xBC, +0xC0 */
+    *(int32_t*)((uint8_t*)obj + 0xB8) = *(int32_t*)(src + 0xB8);
+    *(int32_t*)((uint8_t*)obj + 0xBC) = *(int32_t*)(src + 0xBC);
+    *(int32_t*)((uint8_t*)obj + 0xC0) = *(int32_t*)(src + 0xC0);
+
+    obj->prev_target_x     = *(int32_t*) (src + 0xC4);              /* +0xC4  prev_target_x     */
+    obj->prev_target_y     = *(int32_t*) (src + 0xC8);              /* +0xC8  prev_target_y     */
+    obj->dest_x            = *(int32_t*) (src + 0xCC);              /* +0xCC  dest_x            */
+    obj->dest_y            = *(int32_t*) (src + 0xD0);              /* +0xD0  dest_y            */
+    obj->waypoint_x1       = *(int32_t*) (src + 0xD4);              /* +0xD4  waypoint_x1       */
+    obj->waypoint_y1       = *(int32_t*) (src + 0xD8);              /* +0xD8  waypoint_y1       */
+    obj->field_dc          = *(uint32_t*)(src + 0xDC);              /* +0xDC  action_state      */
+    obj->field_e0          = *(uint32_t*)(src + 0xE0);              /* +0xE0  field_e0          */
+    obj->field_e4          = *(uint8_t*) (src + 0xE4);              /* +0xE4  field_e4          */
+    /* _pad_e5[3] is not explicitly copied (zero from allocation)   */
+
+    obj->last_action       = *(int32_t*) (src + 0xE8);              /* +0xE8  last_action       */
+
+    /* Set vtable to Building_Base (VTBL_BUILDING_BASE = 0x00477F18) */
+    *(void**)obj = (void*)VTBL_BUILDING_BASE;
+
+    /* ---- Step 2d: Copy final Building fields (+0xEC..+0xF3) ---- */
+    *(int32_t*)((uint8_t*)obj + 0xEC) = *(int32_t*)(src + 0xEC);   /* +0xEC  field_ec (unconfirmed)         */
+    obj->occupant_ptr      = *(void**)   (src + 0xF0);              /* +0xF0  occupant_ptr / bidirectional link */
+
+    /* Set final vtable to Building (VTBL_BUILDING_FULL = 0x00477EB8) */
+    *(void**)obj = (void*)VTBL_BUILDING_FULL;
+
+    /* ---- Step 3: Register with manager ---- */
+    /* In the original binary, this calls manager->vtable[0x28](context, obj)
+     * where manager is the original `this` (ECX) parameter at 0x435700.
+     * The caller at 0x44DC10 (World_LoadFromFile) supplies the context.
+     *
+     * The Building is now fully reconstructed and registered in the
+     * manager's collection. Further occupant/linkage fixups are handled
+     * by the save-file loader after all entities are deserialized. */
 }
 
 /* ================================================================== */

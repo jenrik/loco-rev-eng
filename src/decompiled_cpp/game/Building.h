@@ -160,10 +160,15 @@ public:
     /* ================================================================ */
 
     /**
-     * Calculate movement target coordinates.
-     * Address: 0x432DA0
+     * Compute stepped movement toward target with Euclidean distance.
+     * Address: 0x433DC0
+     *
+     * @param out_pos   int[2] — output buffer for resulting pixel (x,y)
+     * @param target_x  Target X in world coordinates
+     * @param target_y  Target Y in world coordinates
+     * @param max_step  Maximum pixels to move this step (speed clamp)
      */
-    void CalcMoveTarget();
+    void CalcMoveTarget(int* out_pos, int target_x, int target_y, int max_step);
 
     /**
      * Check if action timeout has elapsed.
