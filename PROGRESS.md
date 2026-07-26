@@ -159,6 +159,16 @@ main()
 | `shared/weak_stubs.c` | ✅ Compiles | g_install_path, g_remote_res_path |
 | `docs/ghidra-cleanup-workflow.md` | NEW | 11-tag cleanup program |
 
+### Decompilation workflow scheduler (2026-07-26)
+
+- [x] **Incremental supervisor scheduling** — replaced upfront queue discovery with settled-boundary START/WAIT/COMPLETE decisions
+- [x] **Persistent PRIMARY actors** — PARTIAL now nudges the same actor without an intermediate reviewer run
+- [x] **Strict block gate** — only explicit block-reviewer legitimacy stops a class; review failure returns an error
+- [x] **Settled completion buffering** — stale supervisor launch decisions are discarded when jobs finish during a scheduling turn
+- [x] **Parallel pool consolidation** — removed superseded `tools/decompile-parallel.ts`
+- [x] **Directed discovery** — optional capability objective focuses scheduling on the smallest relevant runtime dependency cone
+- [x] **Workflow regression suite** — covers PARTIAL, rejected/legitimate blocks, review failure, directed discovery, and stale scheduling decisions
+
 ## Remaining work
 
 ### Priority 1: #ifdef pivot — first wave
@@ -279,6 +289,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-26 (workflow-scheduler) | Replaced upfront work queues with incremental supervisor decisions; added persistent PARTIAL-aware primaries, strict block validation, settled completion buffering, directed discovery objectives, and 7 regression tests. |
 | 2026-07-26 (decompile-class) | GameVehicle: 7 function(s) — 3 pass(es), achieved INTEGRATED |
 | 2026-07-26 (workflow) | Refactored `tools/decompile-class.ts` schema retry handling into a shared helper; primary, reviewer, and block-reviewer agents now retry invalid structured output with schema-specific corrective feedback. |
 | 2026-07-26 (decompile-class) | GameVehicle: 7 function(s) — 1 pass(es), achieved VALIDATED |

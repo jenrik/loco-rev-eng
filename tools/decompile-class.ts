@@ -1,25 +1,18 @@
 /**
- * decompile-class.ts — Single-class decompilation with one-shot agents
+ * decompile-class.ts — Single-class decompilation workflow
  *
- * Primary and reviewer are one-shot agents.run() calls with JSON Schema.
- * Every prompt includes full context (taskPrefix) so no persistence is needed.
+ * A persistent PRIMARY actor retains context across work turns. Reviewers remain
+ * schema-backed one-shot agents. PARTIAL responses are nudged directly back to
+ * the same PRIMARY without paying for an intermediate review.
  *
- * Usage (from fabric_exec):
- *   const code = await pi.read('tools/decompile-class.ts');
- *   const wrapped = '(async () => { ' + code + ' })()';
- *   const { decompileClass } = await eval(wrapped);
- *   return await decompileClass({ className: "Foo", ... });
- *
- * Architecture:
- *   while pass < maxIter:
- *     orchestrator runs make check → passes output to reviewer
- *     REVIEWER (schema)      → if INTEGRATED + zero BLOCKERs → return approved
- *     PRIMARY  (schema)      → status: DONE | BLOCKED | PARTIAL
- *       if BLOCKED:
- *         BLOCK REVIEWER     → validates legitimacy
- *           if LEGITIMATE    → route to supervisor, return { status: "blocked" }
- *                              (supervisor may restart the loop)
- *           if NOT           → tell primary to continue
+ * State machine:
+ *   review -> approved: stop
+ *          -> primary
+ *               PARTIAL -> nudge same primary
+ *               DONE    -> review
+ *               BLOCKED -> block reviewer
+ *                            false -> give reason to same primary
+ *                            true  -> stop and report validated block
  */
 
 const PROJECT = "/home/user/projects/v43/jenrik/lego-loco-rev-eng";
@@ -90,7 +83,7 @@ const BLOCK_REVIEW_SCHEMA = {
 };
 
 // ============================================================================
-// Ghidra tools (no lifecycle management — agents don't open/close databases)
+// Agent tools
 // ============================================================================
 
 const GHIDRA_RW = [
@@ -102,250 +95,205 @@ const GHIDRA_RW = [
   "mcp.ghidra.get_database_info", "mcp.ghidra.get_type_info",
   "mcp.ghidra.set_decompiler_comment",
 ];
-
-const GHIDRA_RO = GHIDRA_RW.filter(t => !t.includes('set_decompiler_comment'));
+const GHIDRA_RO = GHIDRA_RW.filter((tool) => !tool.includes("set_decompiler_comment"));
+const MAX_STRUCTURED_OUTPUT_RETRIES = 2;
 
 // ============================================================================
-// Templates
+// Prompt construction
 // ============================================================================
+
+function taskPrefix(params) {
+  return `## Class: ${params.className}` +
+    (params.parentClass ? ` (extends ${params.parentClass})` : "") + "\n" +
+    (params.vtableAddress ? `Vtable: ${params.vtableAddress}\n` : "") +
+    `Ghidra DB: ${params.ghidraDatabase}\n` +
+    `AGENTS.md: ${AGENTS_MD}\n` +
+    `Build: cd ${DECOMPILED} && make check\n\n` +
+    "## Files\n" +
+    `- ${DECOMPILED}/${params.headerPath}\n` +
+    `- ${DECOMPILED}/${params.implPath}\n` +
+    (params.contextFiles || []).map((file) => `- ${DECOMPILED}/${file}\n`).join("") +
+    "\n## Functions\n" +
+    params.functions.map((fn, index) => {
+      let line = `${index + 1}. ${fn.name} @ ${fn.address}`;
+      if (fn.vtableSlot !== undefined) line += ` (vtable[${fn.vtableSlot}])`;
+      if (fn.description) line += ` — ${fn.description}`;
+      return line;
+    }).join("\n") + "\n" +
+    (params.supervisorGuidance
+      ? `\n## Supervisor guidance from a previous scheduling decision\n${params.supervisorGuidance}\n`
+      : "");
+}
+
+function primaryActorInstructions(params) {
+  return `${taskPrefix(params)}
+You are the persistent PRIMARY implementer for this one class. Retain context
+between messages and continue editing the same files until the work is complete.
+
+Read ${AGENTS_MD} completely before editing. The Ghidra database is already open;
+do not open or close it. Verify every target with both decompiler and disassembly.
+Follow the complete correctness, completeness, status-tag, and anti-pattern rules.
+Run \`cd ${DECOMPILED} && make check\` when you believe the class is ready.
+
+Every response must be ONLY one JSON object with this shape:
+{
+  "status": "DONE" | "PARTIAL" | "BLOCKED",
+  "summary": "work performed and what remains",
+  "compilationStatus": "PASS" | "FAIL" | "UNKNOWN",
+  "blocks": [{"what":"...", "why":"...", "suggestion":"...", "address":"..."}]
+}
+
+Status meanings:
+- DONE: you believe the requested target status is ready for independent review.
+- PARTIAL: you know what remains and can continue without outside help.
+- BLOCKED: progress is impossible without an external dependency or cross-class decision.
+  Include at least one precise block. Uncertainty, naming difficulty, or more work is PARTIAL.
+No markdown fences or prose outside the JSON object.`;
+}
 
 function templateReviewFeedback(review) {
   if (!review || review.approved) return "";
   let text = `## Reviewer found ${(review.issues || []).length} issue(s)\n`;
   text += `Current status: ${review.currentStatus || "UNKNOWN"}.\n\n`;
-  const blockers = (review.issues || []).filter(i => i.severity === "BLOCKER");
-  const warnings = (review.issues || []).filter(i => i.severity === "WARNING");
-  if (blockers.length > 0) {
-    text += `### BLOCKERS (${blockers.length}):\n\n`;
-    for (const b of blockers) {
-      text += `- **${b.category}**${b.file ? ` in \`${b.file}\`` : ""}${b.line ? ` line ${b.line}` : ""}\n`;
-      text += `  Problem: ${b.description}\n  Fix: ${b.fix}\n\n`;
+  for (const severity of ["BLOCKER", "WARNING", "INFO"]) {
+    const issues = (review.issues || []).filter((issue) => issue.severity === severity);
+    if (issues.length === 0) continue;
+    text += `### ${severity} (${issues.length})\n`;
+    for (const issue of issues) {
+      text += `- **${issue.category}**${issue.file ? ` in \`${issue.file}\`` : ""}` +
+        `${issue.line ? ` line ${issue.line}` : ""}\n` +
+        `  Problem: ${issue.description}\n  Fix: ${issue.fix}\n`;
     }
+    text += "\n";
   }
-  if (warnings.length > 0) {
-    text += `### WARNINGS (${warnings.length}):\n\n`;
-    for (const w of warnings) text += `- **${w.category}**: ${w.description}\n  Fix: ${w.fix}\n\n`;
-  }
-  text += `### Summary:\n${review.summary || "N/A"}\n`;
+  text += `### Summary\n${review.summary || "N/A"}\n`;
   return text;
 }
 
-// ============================================================================
-// Shared task prefix — every primary prompt gets full context
-// ============================================================================
+function buildPrimaryReviewTask(review) {
+  return `Fix every issue from the independent review below. Continue using Ghidra
+and the project rules. Return DONE only when ready for another independent review;
+return PARTIAL when you can continue yourself.
 
-function taskPrefix(params) {
-  return `## Class: ${params.className}` +
-    (params.parentClass ? ` (extends ${params.parentClass})` : "") + `\n` +
-    (params.vtableAddress ? `Vtable: ${params.vtableAddress}\n` : "") +
-    `Ghidra DB: ${params.ghidraDatabase}\n` +
-    `AGENTS.md: ${AGENTS_MD}\n` +
-    `Build: cd ${DECOMPILED} && make check\n\n` +
-    `## Files\n` +
-    `- ${DECOMPILED}/${params.headerPath}\n` +
-    `- ${DECOMPILED}/${params.implPath}\n` +
-    (params.contextFiles || []).map(f => `- ${DECOMPILED}/${f}\n`).join("") +
-    `\n## Functions\n` +
-    params.functions.map((f, i) => {
-      let s = `${i + 1}. ${f.name} @ ${f.address}`;
-      if (f.vtableSlot !== undefined) s += ` (vtable[${f.vtableSlot}])`;
-      if (f.description) s += ` — ${f.description}`;
-      return s;
-    }).join("\n") + `\n`;
+${templateReviewFeedback(review)}`;
 }
 
-// ============================================================================
-// Task builders
-// ============================================================================
+function buildPartialNudge(primaryOutput) {
+  return `Continue the work. You returned PARTIAL, so no independent review has been
+started. Complete the remaining work you already identified, then return the required
+JSON object again. Do not repeat the previous summary without making progress.
 
-function buildPrimaryTask(params, reviewFeedback, blockOverride) {
-  const prefix = taskPrefix(params);
+Previous summary:
+${primaryOutput.summary}`;
+}
 
-  if (blockOverride) {
-    return `${prefix}
-## Task
-Your previous BLOCKED status was reviewed and determined NOT legitimate.
+function buildEmptyBlockNudge(primaryOutput) {
+  return `Your BLOCKED response contained no concrete block reasons, so it is treated
+as PARTIAL. Continue working and return the required JSON object after making progress.
+Use BLOCKED only with at least one precise, externally dependent reason.
 
-Reviewer: ${blockOverride.reason}
-${blockOverride.suggestion ? `Suggestion: ${blockOverride.suggestion}\n` : ""}
-Continue fixing the issues. Do not declare BLOCKED for this again.
+Previous summary:
+${primaryOutput.summary}`;
+}
 
-${reviewFeedback ? `## Remaining reviewer issues\n${templateReviewFeedback(reviewFeedback)}` : ""}
+function buildRejectedBlockTask(blockReview, primaryOutput) {
+  return `Your BLOCKED claim was independently reviewed and found NOT legitimate.
+Continue working; do not stop for this reason again.
 
-## Instructions
-- Read AGENTS.md at ${AGENTS_MD}
-- Use Ghidra (${params.ghidraDatabase}) to verify against disassembly
-- Remove ALL 12 anti-patterns per AGENTS.md § "Ghidra decompiler anti-patterns":
-  1. No _Ctor/_Dtor free functions → proper constructors/destructors
-  2. No ClassName_MethodName free functions → ClassName::MethodName
-  3. No scalar deleting destructor free_memory flag
-  4. No literal vtable dispatch
-  5. No __thiscall/__fastcall on C++ declarations
-  6. No Ghidra auto-labels (FUN_, DAT_, RESDATA_, GAMESTATE_, LOCOBITMAP_, PTR_LAB_)
-  7. No extern "C" around C++ methods
-  8. No void* fields where type is known
-  9. No param_N parameter names
-  10. No flat struct for types with vtables → use inheritance
-  11. No array fields as separate scalars
-  12. No void* return on constructors
-- Run \`cd ${DECOMPILED} && make check\` after edits
-- Respond DONE when complete`;
-  }
-
-  if (reviewFeedback && !reviewFeedback.approved) {
-    return `${prefix}
-## Task
-Fix ALL issues the reviewer found.
-
-${templateReviewFeedback(reviewFeedback)}
-
-## Instructions
-- Read AGENTS.md at ${AGENTS_MD}
-- Remove ALL 12 anti-patterns
-- Every function: doc comment with /* 0xADDRESS */
-- Every this-relative offset mapped to a named field in a header
-- Virtual method calls — NO literal vtable dispatch: (*(void (**)(...))(*(void**)this + N))(...)
-- Run \`cd ${DECOMPILED} && make check\` after edits
-- Respond DONE when complete, BLOCKED only if genuinely stuck`;
-  }
-
-  return `${prefix}
-## Task — Initial decompilation
-Decompile this class from loco.exe (MSVC 1998 x86) into clean C++.
-
-## Instructions
-1. Read AGENTS.md at ${AGENTS_MD} completely
-2. For each function, use mcp.ghidra.decompile_function AND mcp.ghidra.disassemble_function
-3. Remove ALL 12 anti-patterns (AGENTS.md § "Ghidra decompiler anti-patterns")
-4. Every function: doc comment with /* 0xADDRESS */
-5. Named fields instead of raw offsets where possible
-6. Virtual method calls instead of literal vtable dispatch
-7. Tag with appropriate Status (TRANSCRIBED/VALIDATED/INTEGRATED)
-8. Run \`cd ${DECOMPILED} && make check\` — fix ALL errors
-
-Respond DONE when complete, BLOCKED only if genuinely stuck on external dependency.`;
+Block-reviewer reason: ${blockReview.reason}
+${blockReview.suggestion ? `Suggestion: ${blockReview.suggestion}\n` : ""}
+Your previous summary: ${primaryOutput.summary}`;
 }
 
 function buildReviewerTask(params, buildOutput) {
-  let task = `You are a STRICT code reviewer. Find EVERY defect in \`${params.className}\`.
+  let task = `You are a STRICT independent reviewer. Find every defect in ${params.className}.
 
-## CRITICAL: Read AGENTS.md first — ${AGENTS_MD}
+Read ${AGENTS_MD} completely first. Use read-only Ghidra decompilation and disassembly
+to compare every listed function against the original binary.
 
-## Ghidra access
-You have read-only Ghidra access. Use decompile_function and disassemble_function
-to cross-reference against the original assembly.
+${taskPrefix(params)}
+## Required review
+- Enforce all twelve Ghidra anti-pattern rules as blockers.
+- Verify control flow, data flow, widths, signedness, calls, side effects, offsets,
+  declarations, class hierarchy, address annotations, and status tags.
+- approved may be true only when currentStatus exactly reaches ${params.targetStatus || "INTEGRATED"},
+  compilation passes, and there are zero blockers.
 
-## Files
-- ${DECOMPILED}/${params.headerPath}
-- ${DECOMPILED}/${params.implPath}
-${(params.contextFiles || []).map(f => `- ${DECOMPILED}/${f}`).join("\n")}
-
-## Anti-patterns — BLOCKER if found
-1. _Ctor/_Dtor free functions  2. ClassName_MethodName free functions
-3. Scalar deleting destructor  4. Literal vtable dispatch
-5. __thiscall/__fastcall  6. Ghidra auto-labels (FUN_, DAT_, RESDATA_, etc.)
-7. extern "C" around C++  8. void* where type known
-9. param_N names  10. Flat struct instead of inheritance
-11. Array fields as scalars  12. Constructor void* return
-
-## Correctness + Completeness
-Control flow matches disassembly, data flow preserved, signedness correct,
-all basic blocks present, all offsets named, cross-refs consistent.
-
-## Build verification
+## Orchestrator build output
+\`\`\`
+${buildOutput === undefined ? "Build not available" : buildOutput}
+\`\`\`
 `;
-
-  if (buildOutput !== undefined) {
-    task += `The orchestrator ran \`make check\` for you:\n\`\`\`\n${buildOutput}\n\`\`\`\n`;
-    if (buildOutput.includes('[OK]') && !buildOutput.includes('need work')) {
-      task += `Compilation: PASS\n\n`;
-    } else if (buildOutput.includes('error:') || buildOutput.includes('FAIL')) {
-      task += `Compilation: FAIL\n\n`;
-    }
-  } else {
-    task += `Compilation status was not verified by the orchestrator. Mark as UNKNOWN.\n\n`;
-  }
-
-  task += `## Status assignment
-PRE_TRANSCRIBED → TRANSCRIBED → VALIDATED → INTEGRATED.
-approved: true ONLY at INTEGRATED with zero BLOCKERs and compilation PASS.
-
-Return structured JSON.`;
-
-  return task;
+  if (buildOutput === undefined) task += "Mark compilationStatus UNKNOWN.\n";
+  return task + "Return structured JSON matching the supplied schema.";
 }
 
+function buildBlockReviewerTask(primaryOutput, className) {
+  return `The PRIMARY for ${className} claims it cannot continue. Determine only
+whether the stated reason is a legitimate reason to STOP THIS CLASS LOOP.
+
+Blocks:
+${JSON.stringify(primaryOutput.blocks || [], null, 2)}
+
+Primary summary:
+${primaryOutput.summary}
+
+LEGITIMATE means progress actually depends on unavailable external work, a separate
+class dependency outside this task, or a cross-cutting architectural decision.
+NOT LEGITIMATE means the PRIMARY can use Ghidra, inspect nearby code, choose and
+document a reasonable name, or simply perform more work itself.
+
+Return structured JSON matching the supplied schema.`;
+}
 
 // ============================================================================
-// Structured-agent retry helper
+// Structured output helpers
 // ============================================================================
-
-const MAX_STRUCTURED_OUTPUT_RETRIES = 2;
 
 const SCHEMA_REQUIREMENTS = {
-  PRIMARY_SCHEMA: [
-    "- status: DONE | BLOCKED | PARTIAL",
-    "- summary: string",
-    "- compilationStatus: PASS | FAIL | UNKNOWN",
-    "- blocks: array of {what, why, suggestion?, address?}",
-  ],
   REVIEW_SCHEMA: [
-    "- approved: boolean",
-    "- currentStatus: PRE_TRANSCRIBED | TRANSCRIBED | VALIDATED | INTEGRATED",
-    "- summary: string",
-    "- issues: array of {severity, category, description, fix}",
-    "- compilationStatus: PASS | FAIL | UNKNOWN",
+    "approved: boolean",
+    "currentStatus: PRE_TRANSCRIBED | TRANSCRIBED | VALIDATED | INTEGRATED",
+    "summary: string",
+    "issues: array of {severity, category, description, fix}",
+    "compilationStatus: PASS | FAIL | UNKNOWN",
   ],
   BLOCK_REVIEW_SCHEMA: [
-    "- legitimate: boolean",
-    "- reason: string",
-    "- suggestion?: string",
+    "legitimate: boolean",
+    "reason: string",
+    "suggestion?: string",
   ],
 };
 
 function describeStructuredRunError(runError) {
-  if (runError instanceof Error) return "Error: " + runError.message;
+  if (runError instanceof Error) return `Error: ${runError.message}`;
   if (runError && runError.error) {
-    return "Status: " + (runError.status || "unknown") + "\n" +
-      "Error: " + (typeof runError.error === "string"
-        ? runError.error
-        : JSON.stringify(runError.error));
+    return `Status: ${runError.status || "unknown"}\nError: ` +
+      (typeof runError.error === "string" ? runError.error : JSON.stringify(runError.error));
   }
-  return "Status: " + ((runError && runError.status) || "unknown") + "\n" +
-    "Raw text (first 500 chars): " + String((runError && runError.text) || "").substring(0, 500);
+  return `Status: ${(runError && runError.status) || "unknown"}\n` +
+    `Raw text: ${String((runError && runError.text) || "").substring(0, 500)}`;
 }
 
 function buildRetryFeedback(runError, schemaName) {
-  const requirements = SCHEMA_REQUIREMENTS[schemaName];
-  if (!requirements) throw new Error("Unknown structured-output schema: " + schemaName);
-
-  return "## ⚠️ Your previous response was invalid\n\n" +
-    "The output did not satisfy the required JSON Schema (" + schemaName + ").\n\n" +
-    describeStructuredRunError(runError) + "\n\n" +
-    "## Required schema fields\n" + requirements.join("\n") + "\n\n" +
-    "## Instructions\n" +
-    "Produce ONLY valid JSON that matches the schema. No markdown fences or extra text. " +
-    "Do not omit required fields; use empty arrays where appropriate.";
+  return `Your previous response did not satisfy ${schemaName}.
+${describeStructuredRunError(runError)}
+Required fields:
+- ${SCHEMA_REQUIREMENTS[schemaName].join("\n- ")}
+Return only valid JSON matching the schema, with empty arrays where appropriate.`;
 }
 
-/**
- * Runs a schema-backed one-shot agent and retries only malformed/invalid output.
- * The original task is repeated so each retry has full context; the retry feedback
- * explains the prior failure and restates the exact schema contract.
- */
 async function runStructuredAgentWithRetry(options) {
   const maxRetries = options.maxRetries ?? MAX_STRUCTURED_OUTPUT_RETRIES;
   let lastError = null;
-
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const task = attempt === 0
       ? options.task
-      : options.task + "\n\n" + buildRetryFeedback(lastError, options.schemaName);
+      : `${options.task}\n\n${buildRetryFeedback(lastError, options.schemaName)}`;
     let result;
-
     try {
       result = await agents.run({
-        name: options.name + "-a" + attempt,
+        name: `${options.name}-a${attempt}`,
         task,
         model: options.model,
         runner: "pi",
@@ -355,92 +303,107 @@ async function runStructuredAgentWithRetry(options) {
     } catch (error) {
       lastError = error;
     }
-
     if (result && result.status === "completed" && result.value !== undefined) return result;
-
     lastError = result || lastError;
-    const detail = describeStructuredRunError(lastError).replace(/\n/g, " ");
     if (attempt < maxRetries) {
-      print("│ [" + options.logLabel + "] Attempt " + (attempt + 1) +
-        " invalid: " + detail.substring(0, 180) + ". Retrying...\n");
-      continue;
+      print(`│ [${options.logLabel}] Invalid structured output; retrying (${attempt + 1}/${maxRetries}).\n`);
     }
   }
-
-  throw new Error(options.logLabel + " failed after " + (maxRetries + 1) +
-    " attempts: " + describeStructuredRunError(lastError));
+  throw new Error(`${options.logLabel} failed after ${maxRetries + 1} attempts: ` +
+    describeStructuredRunError(lastError));
 }
 
-async function runReviewerWithRetry(params, buildOutput, pass) {
+function extractJsonObject(text) {
+  if (text && typeof text === "object") return text;
+  const raw = String(text || "").trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  try { return JSON.parse(candidate); } catch (_) {}
+
+  const start = candidate.indexOf("{");
+  if (start < 0) throw new Error("response contains no JSON object");
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = start; i < candidate.length; i++) {
+    const char = candidate[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) return JSON.parse(candidate.slice(start, i + 1));
+  }
+  throw new Error("response contains an unterminated JSON object");
+}
+
+function validatePrimaryOutput(value) {
+  if (!value || typeof value !== "object") return "output is not an object";
+  if (!["DONE", "BLOCKED", "PARTIAL"].includes(value.status)) return "invalid status";
+  if (typeof value.summary !== "string") return "summary must be a string";
+  if (!["PASS", "FAIL", "UNKNOWN"].includes(value.compilationStatus)) return "invalid compilationStatus";
+  if (!Array.isArray(value.blocks)) return "blocks must be an array";
+  for (const block of value.blocks) {
+    if (!block || typeof block.what !== "string" || typeof block.why !== "string") {
+      return "every block requires string fields what and why";
+    }
+  }
+  return null;
+}
+
+async function askPrimaryWithRetry(primaryId, message, logLabel) {
+  let prompt = message;
+  let lastError = null;
+  for (let attempt = 0; attempt <= MAX_STRUCTURED_OUTPUT_RETRIES; attempt++) {
+    let response;
+    try {
+      response = await agents.ask({ id: primaryId, message: prompt });
+      const raw = response.value !== undefined ? response.value : response.text;
+      const parsed = extractJsonObject(raw);
+      const validationError = validatePrimaryOutput(parsed);
+      if (!validationError) return parsed;
+      lastError = new Error(validationError);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < MAX_STRUCTURED_OUTPUT_RETRIES) {
+      print(`│ [${logLabel}] Invalid PRIMARY output; asking same actor to correct it.\n`);
+      prompt = `Your previous response was invalid: ${lastError.message}\n` +
+        "Return ONLY the required JSON object. Do not perform additional implementation work in this correction turn.";
+    }
+  }
+  throw new Error(`PRIMARY failed structured output after ${MAX_STRUCTURED_OUTPUT_RETRIES + 1} attempts: ${lastError.message}`);
+}
+
+async function runReviewer(params, buildOutput, pass) {
   return runStructuredAgentWithRetry({
-    name: "review-" + params.className.toLowerCase() + "-p" + pass,
+    name: `review-${params.className.toLowerCase()}-p${pass}`,
     task: buildReviewerTask(params, buildOutput),
     model: params.reviewerModel || "deepseek/deepseek-v4-pro",
-    tools: ["read", "grep", "find", "ls"].concat(GHIDRA_RO),
+    tools: ["read", "grep", "find", "ls", ...GHIDRA_RO],
     schema: REVIEW_SCHEMA,
     schemaName: "REVIEW_SCHEMA",
     logLabel: "REVIEWER",
   });
 }
 
-async function runPrimaryWithRetry(params, primaryTask, pass, primaryModel) {
+async function runBlockReviewer(primaryOutput, params, primaryTurn) {
   return runStructuredAgentWithRetry({
-    name: "primary-" + params.className.toLowerCase() + "-p" + pass,
-    task: primaryTask,
-    model: primaryModel,
-    tools: ["read", "grep", "find", "ls", "edit", "write", "bash", ...GHIDRA_RW],
-    schema: PRIMARY_SCHEMA,
-    schemaName: "PRIMARY_SCHEMA",
-    logLabel: "PRIMARY",
+    name: `block-review-${params.className.toLowerCase()}-t${primaryTurn}`,
+    task: buildBlockReviewerTask(primaryOutput, params.className),
+    model: params.reviewerModel || "deepseek/deepseek-v4-pro",
+    tools: ["read", "grep", "find", "ls", ...GHIDRA_RO],
+    schema: BLOCK_REVIEW_SCHEMA,
+    schemaName: "BLOCK_REVIEW_SCHEMA",
+    logLabel: "BLOCK-REVIEW",
   });
 }
 
-async function runBlockReviewerWithRetry(primaryOut, className, pass, reviewerModel) {
-  const task = buildBlockReviewerTask(primaryOut, className);
-  if (!task) return null;
-
-  try {
-    return await runStructuredAgentWithRetry({
-      name: "block-review-" + className.toLowerCase() + "-p" + pass,
-      task,
-      model: reviewerModel,
-      tools: ["read", "grep", "find", "ls"].concat(GHIDRA_RO),
-      schema: BLOCK_REVIEW_SCHEMA,
-      schemaName: "BLOCK_REVIEW_SCHEMA",
-      logLabel: "BLOCK-REVIEW",
-    });
-  } catch (error) {
-    print("│ [BLOCK-REVIEW] " + error.message + ". Accepting block.\n");
-    return null;
-  }
-}
-
-function buildBlockReviewerTask(primaryOutput, className) {
-  const blocks = primaryOutput.blocks || [];
-  if (blocks.length === 0) return null;
-  return `The primary agent for ${className} claims to be BLOCKED. Verify if legitimate.
-
-## Primary's blocks:
-${JSON.stringify(blocks, null, 2)}
-
-## Primary's summary:
-${primaryOutput.summary}
-
-## Criteria
-- LEGITIMATE: progress is IMPOSSIBLE because the work depends on something external
-  that does not exist yet. This means:
-  - A function from another class that hasn't been decompiled yet, AND the primary
-    cannot decompile it because it belongs to a different class's scope
-  - A cross-cutting architecture decision (class hierarchy, file split, naming convention)
-    that must be consistent across multiple classes
-  - A type or field whose definition lives in a dependency that isn't decompiled
-- NOT LEGITIMATE (primary can and should handle this itself):
-  - The primary has Ghidra access and can decompile the blocking function itself
-  - The primary can grep the codebase for similar naming patterns and make a choice
-  - The primary can make a reasonable decision and document it with a // NOTE: comment
-  - The primary is unsure about a name — it should pick one and move on
-
-Return structured JSON: { legitimate, reason, suggestion? }`;
+function buildPassed(buildOutput) {
+  return Boolean(buildOutput && buildOutput.includes("[OK]") && !buildOutput.includes("need work"));
 }
 
 // ============================================================================
@@ -448,144 +411,140 @@ Return structured JSON: { legitimate, reason, suggestion? }`;
 // ============================================================================
 
 async function decompileClass(params) {
-  const maxIter = params.maxIterations || 5;
-  const primaryModel = params.primaryModel || "deepseek/deepseek-v4-pro";
-  const reviewerModel = params.reviewerModel || "deepseek/deepseek-v4-pro";
-  const supervisorId = params.supervisorId || null;
+  const maxPrimaryTurns = params.maxIterations || 5;
   const targetStatus = params.targetStatus || "INTEGRATED";
+  const primaryModel = params.primaryModel || "deepseek/deepseek-v4-pro";
 
   print(`\n═══ DECOMPILE: ${params.className} ═══\n`);
-  print(`Functions: ${params.functions.length}  |  Passes: ${maxIter}  |  Target: ${targetStatus}  |  DB: ${params.ghidraDatabase}\n\n`);
+  print(`Functions: ${params.functions.length} | Primary turns: ${maxPrimaryTurns} | Target: ${targetStatus} | DB: ${params.ghidraDatabase}\n\n`);
 
+  let primary = null;
   let review = null;
-  let blockOverride = null;
-  let pass = 0;
+  let reviewPasses = 0;
+  let primaryTurns = 0;
+  let nextPrimaryMessage = null;
+  let needsReview = true;
 
-  while (pass < maxIter) {
-    pass++;
-    print(`┌─ PASS ${pass}/${maxIter} ───────────────────────────────┐\n`);
+  try {
+    while (primaryTurns < maxPrimaryTurns || needsReview) {
+      if (needsReview) {
+        reviewPasses++;
+        print(`┌─ REVIEW ${reviewPasses} ─────────────────────────────────┐\n`);
+        let buildOutput;
+        try {
+          const build = await pi.bash({ command: `cd ${DECOMPILED} && make check 2>&1`, settle: true });
+          buildOutput = build.output || "";
+        } catch (error) {
+          buildOutput = `Build command failed: ${error.message}`;
+        }
 
-    // ── Run make check (orchestrator-owned, not agent-reported) ──
-    let buildOutput = undefined;
-    try {
-      const build = await pi.bash({ command: `cd ${DECOMPILED} && make check 2>&1`, settle: true });
-      buildOutput = build.output || "";
-    } catch (e) {
-      buildOutput = `Build command failed: ${e.message}`;
-    }
+        let reviewResult;
+        try {
+          reviewResult = await runReviewer({ ...params, targetStatus }, buildOutput, reviewPasses);
+        } catch (error) {
+          return { status: "error", className: params.className, reviewPasses, primaryTurns,
+            error: `Reviewer: ${error.message}` };
+        }
 
-    // ── REVIEWER (with retry for schema violations) ──
-    print(`│ [REVIEWER] Checking...\n`);
-    let revResult;
-    try {
-      revResult = await runReviewerWithRetry(params, buildOutput, pass);
-    } catch (e) {
-      return { status: "error", className: params.className, pass, error: `Reviewer: ${e.message}` };
-    }
+        review = reviewResult.value;
+        const blockers = (review.issues || []).filter((issue) => issue.severity === "BLOCKER");
+        const buildOk = buildPassed(buildOutput);
+        const actuallyApproved = review.approved === true &&
+          review.currentStatus === targetStatus &&
+          review.compilationStatus === "PASS" && blockers.length === 0 && buildOk;
 
-    review = revResult.value;
-    const blockers = (review.issues || []).filter(i => i.severity === "BLOCKER");
-    const buildOk = buildOutput && buildOutput.includes('[OK]') && !buildOutput.includes('need work');
+        print(`│ Status: ${review.currentStatus} | Model approved: ${review.approved} | Enforced: ${actuallyApproved} | ${blockers.length}B | Build: ${buildOk ? "PASS" : "FAIL"}\n`);
+        print("└────────────────────────────────────────────────┘\n");
 
-    // ── Enforce approval invariants in TypeScript ──
-    const actuallyApproved =
-      review.approved === true &&
-      review.currentStatus === targetStatus &&
-      review.compilationStatus === "PASS" &&
-      blockers.length === 0 &&
-      buildOk;
+        if (actuallyApproved) {
+          return { status: "approved", className: params.className,
+            reviewPasses, primaryTurns, finalReview: review };
+        }
+        if (primaryTurns >= maxPrimaryTurns) break;
 
-    print(`│ Status: ${review.currentStatus}  |  Approved: ${review.approved}  |  Enforced: ${actuallyApproved}  |  ${blockers.length}B  |  Build: ${buildOk ? "PASS" : "FAIL"}\n`);
-    for (const b of blockers.slice(0, 3)) print(`│   BLOCKER: ${b.category} — ${b.description.substring(0, 70)}\n`);
-    print(`└──────────────────────────────────────────────┘\n`);
+        if (!primary) {
+          primary = await agents.create({
+            name: `primary-${params.className.toLowerCase()}`,
+            instructions: primaryActorInstructions({ ...params, targetStatus }),
+            model: primaryModel,
+            runner: "pi",
+            tools: ["read", "grep", "find", "ls", "edit", "write", "bash", ...GHIDRA_RW],
+            delivery: "mailbox",
+            responseMode: "text",
+          });
+          print(`│ [PRIMARY] Persistent actor: ${primary.id}\n`);
+        }
 
-    if (actuallyApproved) {
-      print(`\n✅ APPROVED at ${review.currentStatus} after ${pass} pass(es)!\n`);
-      return { status: "approved", className: params.className, iterations: pass, finalReview: review };
-    }
+        nextPrimaryMessage = buildPrimaryReviewTask(review);
+        needsReview = false;
+      }
 
-    // ── PRIMARY ──
-    const primaryTask = buildPrimaryTask(params, review, blockOverride);
-    blockOverride = null;
+      if (primaryTurns >= maxPrimaryTurns) break;
+      primaryTurns++;
+      print(`│ [PRIMARY] Turn ${primaryTurns}/${maxPrimaryTurns}\n`);
 
-    print(`│ [PRIMARY] Working...\n`);
-    let primaryResult;
-    try {
-      primaryResult = await runPrimaryWithRetry(params, primaryTask, pass, primaryModel);
-    } catch (e) {
-      return { status: "error", className: params.className, pass, error: `Primary: ${e.message}` };
-    }
+      let primaryOutput;
+      try {
+        primaryOutput = await askPrimaryWithRetry(primary.id, nextPrimaryMessage, "PRIMARY");
+      } catch (error) {
+        return { status: "error", className: params.className, reviewPasses, primaryTurns,
+          finalReview: review, error: error.message };
+      }
+      print(`│ [PRIMARY] ${primaryOutput.status} | Compiles: ${primaryOutput.compilationStatus}\n`);
 
-    const primaryOut = primaryResult.value;
-    print(`│ [PRIMARY] Status: ${primaryOut.status}  |  Compiles: ${primaryOut.compilationStatus}\n`);
-
-    // ── Handle BLOCKED ──
-    if (primaryOut.status === "BLOCKED") {
-      const blocks = primaryOut.blocks || [];
-
-      if (blocks.length === 0) {
-        print(`│ [BLOCKED] Empty blocks array — treating as PARTIAL, continuing.\n`);
-        print(`\n`);
+      if (primaryOutput.status === "DONE") {
+        needsReview = true;
         continue;
       }
 
-      print(`│ [BLOCKED] Primary claims stuck. Running block reviewer...\n`);
+      if (primaryOutput.status === "PARTIAL") {
+        nextPrimaryMessage = buildPartialNudge(primaryOutput);
+        continue;
+      }
 
-      let blockReview;
+      const blocks = primaryOutput.blocks || [];
+      if (blocks.length === 0) {
+        print("│ [BLOCKED] Empty block list; treating as PARTIAL.\n");
+        nextPrimaryMessage = buildEmptyBlockNudge(primaryOutput);
+        continue;
+      }
+
+      print("│ [BLOCKED] Validating stop reason...\n");
+      let blockReviewResult;
       try {
-        blockReview = await runBlockReviewerWithRetry(primaryOut, params.className, pass, reviewerModel);
-      } catch (e) {
-        print(`│ [BLOCK-REVIEW] Unexpected throw: ${e.message}. Accepting block.\n`);
-        return { status: "blocked", className: params.className, iterations: pass, finalReview: review, blocks };
+        blockReviewResult = await runBlockReviewer(primaryOutput, params, primaryTurns);
+      } catch (error) {
+        // Failure to review is neither legitimate nor illegitimate. Fail closed:
+        // never inform the supervisor that an unvalidated block is legitimate.
+        return { status: "error", className: params.className, reviewPasses, primaryTurns,
+          finalReview: review, error: `Block reviewer: ${error.message}` };
       }
-      if (blockReview && blockReview.status === "completed" && blockReview.value) {
-        const br = blockReview.value;
-        print(`│ [BLOCK-REVIEW] Legitimate: ${br.legitimate}  |  ${br.reason?.substring(0, 80)}\n`);
 
-        if (br.legitimate) {
-          // Route to supervisor for resolution, then end loop.
-          // Supervisor may restart with a fresh decompileClass() call.
-          let supervisorDecisions = null;
-          if (supervisorId) {
-            try {
-              const query = `Primary for ${params.className} is blocked:\n\n` +
-                blocks.map(b => `**What:** ${b.what}\n**Why:** ${b.why}\n` +
-                  (b.suggestion ? `**Suggestion:** ${b.suggestion}\n` : "") +
-                  (b.address ? `**Address:** ${b.address}\n` : "")).join("\n");
-              print(`│ [SUPERVISOR] Routing ${blocks.length} decision(s)...\n`);
-              const supResponse = await agents.ask({ id: supervisorId, message: query });
-              supervisorDecisions = supResponse.value || supResponse.text;
-              print(`│ [SUPERVISOR] Responded — ${String(supervisorDecisions).length} chars\n`);
-            } catch (e) {
-              print(`│ [SUPERVISOR] Unavailable: ${e.message}\n`);
-            }
-          }
-
-          print(`│ ⏸️  BLOCKED — loop ended. Supervisor may restart.\n`);
-          return {
-            status: "blocked",
-            className: params.className,
-            iterations: pass,
-            finalReview: review,
-            blocks,
-            supervisorDecisions,
-            blockReview: br,
-          };
-        } else {
-          print(`│ [BLOCK-REVIEW] Block rejected. Primary must continue.\n`);
-          blockOverride = br;
-        }
-      } else {
-        print(`│ [BLOCK-REVIEW] Failed. Accepting block.\n`);
-        return { status: "blocked", className: params.className, iterations: pass, finalReview: review, blocks };
+      const blockReview = blockReviewResult.value;
+      print(`│ [BLOCK-REVIEW] Legitimate: ${blockReview.legitimate} | ${blockReview.reason.substring(0, 100)}\n`);
+      if (blockReview.legitimate) {
+        return {
+          status: "blocked",
+          className: params.className,
+          reviewPasses,
+          primaryTurns,
+          finalReview: review,
+          blocks,
+          blockReview,
+        };
       }
+
+      nextPrimaryMessage = buildRejectedBlockTask(blockReview, primaryOutput);
     }
 
-    print(`\n`);
+    return { status: "max_iterations_reached", className: params.className,
+      reviewPasses, primaryTurns, finalReview: review };
+  } finally {
+    if (primary) {
+      await agents.remove({ id: primary.id }).catch(() => {});
+      print(`Primary actor for ${params.className} cleaned up.\n`);
+    }
   }
-
-  print(`\n❌ MAX ITERATIONS (${maxIter}) reached at ${review?.currentStatus || "?"}.\n`);
-  return { status: "max_iterations_reached", className: params.className, iterations: maxIter, finalReview: review };
 }
 
-return { decompileClass };
+return { decompileClass, extractJsonObject, validatePrimaryOutput };

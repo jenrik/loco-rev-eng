@@ -1,469 +1,518 @@
 /**
- * supervisor.ts — Top-level orchestrator for multi-class decompilation
+ * supervisor.ts — Incremental, dependency-aware decompilation scheduler
  *
- * Usage (from fabric_exec):
- *   const code = await pi.read('tools/supervisor.ts');
- *   const wrapped = '(async () => { ' + code + ' })()';
- *   const { run } = await eval(wrapped);
- *   return await run({ classes: [...], ghidraDatabase: "loco12", maxParallel: 3 });
- *
- * Architecture:
- *   SUPERVISOR ACTOR (persistent) — answers blocked primaries
- *   ├─ Initial deep review — assesses all files + dependencies
- *   └─ Dispatches → decompileClass() × N via concurrency pool
- *        └─ primary↔reviewer loop with BLOCKED → supervisor routing
+ * The persistent supervisor never emits a complete work queue. At each settled
+ * scheduling boundary it receives the current running set, newly completed work,
+ * validated legitimate blocks, and free capacity. It then authorizes only the
+ * work that is safe to start now. TypeScript executes those launch directives.
  */
 
 const PROJECT = "/home/user/projects/v43/jenrik/lego-loco-rev-eng";
 const DECOMPILED = `${PROJECT}/src/decompiled_cpp`;
 const AGENTS_MD = `${PROJECT}/AGENTS.md`;
 const PROGRESS_MD = `${PROJECT}/PROGRESS.md`;
+const MAX_SUPERVISOR_OUTPUT_RETRIES = 2;
 
-function buildSupervisorInstructions(classes, ghidraDatabase, isDiscovery) {
-  let instructions = `You are the SUPERVISOR for a multi-class decompilation session.
+const SUPERVISOR_TOOLS = [
+  "read", "grep", "find", "ls", "bash",
+  "mcp.ghidra.decompile_function", "mcp.ghidra.disassemble_function",
+  "mcp.ghidra.get_xrefs_to", "mcp.ghidra.get_xrefs_from",
+  "mcp.ghidra.list_functions", "mcp.ghidra.get_strings",
+  "mcp.ghidra.find_code_by_string", "mcp.ghidra.get_structure",
+  "mcp.ghidra.list_structures", "mcp.ghidra.list_names",
+  "mcp.ghidra.get_database_info", "mcp.ghidra.get_type_info",
+];
 
-## Your role
-You are an ORCHESTRATOR, not a worker. Your job is to:
-- Analyze the codebase to discover what needs decompilation work
-- Track which classes are running, blocked, or complete
-- Answer architectural questions from blocked primary agents
-- Resolve naming conflicts and cross-cutting decisions
-- Decide what can be dispatched and in what order
+function buildSupervisorInstructions(params, isDiscovery) {
+  const explicitTargets = isDiscovery ? "" : `
+## Allowed explicit targets
+${JSON.stringify(params.classes || [], null, 2)}
+Only schedule classes from this list. A START entry may contain only className,
+retry, and guidance; the host will merge the canonical configuration.`;
 
-You do NOT decompile functions or edit code. You analyze, decide, and direct.
+  const directionInstructions = isDiscovery && params.direction ? `
 
-## Your authority
-- Rename Ghidra auto-labels (RESDATA_*, FUN_*, DAT_*) when you determine the correct name
-- Decide on architectural questions: class hierarchy, file splits, naming conventions
-- Resolve naming conflicts across classes
-- Determine dispatch order based on dependencies
-- Discover classes that need decompilation work
+## Discovery direction — primary session objective
+${params.direction}
 
-## Tools
-- Ghidra (database ${ghidraDatabase}): decompile, disassemble, xrefs — read access
-  Use these to UNDERSTAND functions before naming them. Do not modify Ghidra.
-- File tools: read, grep, find, ls — to inspect code and inform decisions
-- Build: cd ${DECOMPILED} && make check
+Treat this direction as the optimization target for discovery and scheduling:
+1. Translate it into concrete, observable success criteria.
+2. Trace backward from that capability through callers, constructors, globals,
+   runtime paths, and class dependencies.
+3. Prioritize the smallest dependency cone that advances those criteria.
+4. Defer unrelated below-status cleanup, even if it would otherwise be a quick win.
+5. Re-evaluate the dependency cone after every completion or legitimate block.
+Do not claim COMPLETE until the directed capability is working or no further work
+can be identified; explain which condition applies in the COMPLETE reason.` : "";
 
-## How you work
-`;
+  const discoveryInstructions = isDiscovery ? `
+## Discovery mode
+Discover work incrementally within scope "${params.scope}". Scope semantics:
+- below-integrated: TRANSCRIBED, VALIDATED, or missing status
+- transcribed: only TRANSCRIBED work needing validation
+- validated: only VALIDATED work needing integration
+- all: include INTEGRATED work when the direction requires re-validation
 
-  if (isDiscovery) {
-    instructions += `### Discovery mode
-You will first analyze the entire codebase to find classes that need work.
-Read PROGRESS.md at ${PROGRESS_MD}, check status tags, run make check,
-and use Ghidra to identify functions that still need decompilation.
+Read ${PROGRESS_MD} completely, inspect status tags and untagged files, run
+\`cd ${DECOMPILED} && make check\`, and use Ghidra to verify every function address.
+Do not build a complete queue. At each turn identify only enough safe work to use
+the currently available capacity. Never guess an address.${directionInstructions}` : "";
 
-### After discovery
-When a primary agent is BLOCKED, you receive a query describing what they need:
-1. Use Ghidra and file tools to understand the situation
-2. Make a clear decision: provide a name, resolve an architecture question, or
-   confirm that the dependency needs to be dispatched as a separate task
-3. Respond clearly — your answer will be relayed back when the class is restarted
-`;
-  } else {
-    instructions += `## Target classes
-${classes.map(c => `- ${c.className} (${c.headerPath}, ${c.implPath})`).join("\n")}
+  return `You are the persistent SUPERVISOR and scheduling authority for a multi-class
+Lego Loco decompilation session. Read ${AGENTS_MD} completely.
 
-1. When a primary agent is BLOCKED, you receive a query describing what they need
-2. Use Ghidra and file tools to understand the situation
-3. Make a clear decision: provide a name, resolve an architecture question, or
-   confirm that the dependency needs to be dispatched as a separate task
-4. Respond clearly — your answer will be relayed back when the class is restarted
-`;
-  }
+You are an orchestrator, not an implementer. Do not edit code and do not decompile
+whole functions as implementation work. Inspect files and Ghidra only to understand
+dependencies, validate names and addresses, and decide what can safely run together.
 
-  instructions += `
-## Decision guidelines
-- Ghidra labels: decompile the function, understand its purpose, name it accordingly
-- When in doubt, decompile from Ghidra and describe what it does before naming it
-- Prefer descriptive names. If a function checks tile types, name it IsRoadTile or similar.
-- If a dependency needs its own decompilation pass, say so — the orchestrator will
-  dispatch it as a separate task before restarting the blocked class.
+Ghidra database: ${params.ghidraDatabase}
+Maximum concurrency: ${params.maxParallel}
+${discoveryInstructions}${explicitTargets}
 
-Always read ${AGENTS_MD} before making decisions that affect code standards.`;
+## Scheduling protocol
+Every message contains:
+- running: class attempts still in flight
+- justCompleted: completions not shown in an earlier scheduling turn
+- knownOutcomes: latest outcome for every attempted class
+- availableSlots: hard launch limit for this turn
+- notice: rejected or stale prior decisions, when applicable
 
-  return instructions;
-}
+A blocked completion appears only after a block reviewer explicitly determined that
+the class had a legitimate reason to stop. Use that dependency information for
+future scheduling. Do not send advice back into the stopped class loop. You may:
+- schedule the missing dependency;
+- avoid other work with the same dependency;
+- later schedule a fresh retry with retry:true and concrete guidance after the
+  prerequisite has completed.
 
-// ============================================================================
-// Discovery — supervisor finds classes needing work
-// ============================================================================
-
-function buildDiscoveryTask(scope) {
-  let scopeDesc = "";
-  switch (scope) {
-    case "below-integrated":
-      scopeDesc = "files that are below INTEGRATED status (TRANSCRIBED, VALIDATED, or missing status tag)";
-      break;
-    case "transcribed":
-      scopeDesc = "files at TRANSCRIBED status that need validation";
-      break;
-    case "validated":
-      scopeDesc = "files at VALIDATED status that need integration";
-      break;
-    case "all":
-      scopeDesc = "ALL files including those already INTEGRATED (for re-validation)";
-      break;
-    default:
-      scopeDesc = "files that are below INTEGRATED status (TRANSCRIBED, VALIDATED, or missing status tag)";
-  }
-
-  return `## Discovery Task — Find classes that need decompilation work
-
-Analyze the codebase and return a prioritized list of classes that need work.
-Focus on: ${scopeDesc}
-
-### Step 1: Read project status
-Read ${PROGRESS_MD} completely. Note:
-- "Remaining work" section — what's pending
-- "Architecture notes" — class hierarchy and key addresses
-- "Session log" — recent accomplishments
-
-### Step 2: Find status tags
-Run: grep -rn "Status:" ${DECOMPILED} --include="*.cpp" --include="*.h"
-This shows which files have explicit status tags (TRANSCRIBED/VALIDATED/INTEGRATED).
-
-Files WITHOUT a status tag predate the tagging system — they need assessment.
-
-### Step 3: Check compilation
-Run: cd ${DECOMPILED} && make check
-Note which files appear in "KNOWN GOOD" vs "NEEDS WORK".
-
-### Step 4: Read PROGRESS.md priorities
-Cross-reference PROGRESS.md "Remaining work" items with files on disk:
-- "Implement real subsystem constructors" → which .cpp files have stub constructors?
-- "Unbreak remaining C++ files" → which files fail make check?
-- "Port remaining native .c files to C++" → which .c files in native/ still need porting?
-
-### Step 5: For each file needing work, determine functions
-For files that already have .cpp implementations (needing validation or integration):
-- Read the header to find declared methods
-- Read the .cpp to find implemented functions and their address annotations
-- List ALL functions that need validation/integration
-
-For files that need NEW decompilation (no .cpp or only stubs):
-- Use Ghidra to find the class vtable
-- Use xrefs to find constructor/destructor and all virtual method implementations
-- List functions with their addresses
-
-### Step 6: Prioritize
-Order by:
-1. Dependencies first (if class A depends on class B being INTEGRATED, do B first)
-2. PROGRESS.md priority order (Priority 1 > Priority 2 > ...)
-3. Within same priority: TRANSCRIBED → VALIDATED (quick win) before new decompilation
-
-### Step 7: Output structured JSON
-Return a JSON object:
-
-\`\`\`json
+Return ONLY one JSON object:
 {
-  "summary": "Overall assessment of codebase state",
-  "totalFiles": 72,
-  "filesNeedingWork": 5,
-  "classes": [
+  "action": "START" | "WAIT" | "COMPLETE",
+  "summary": "current scheduling assessment",
+  "reason": "why this action is safe",
+  "starts": [
     {
-      "className": "EditorState",
-      "headerPath": "world/EditorState.h",
-      "implPath": "world/EditorState.cpp",
-      "functions": [
-        { "name": "EditorState::EditorState", "address": "0x4XXXXX" },
-        { "name": "EditorState::Update", "address": "0x4XXXXX", "vtableSlot": 1 }
-      ],
-      "parentClass": null,
-      "vtableAddress": "0x4XXXXX",
-      "contextFiles": ["shared/types.h", "core/Entity.h"],
-      "targetStatus": "VALIDATED",
-      "priority": 1,
-      "reason": "Currently TRANSCRIBED — needs validation",
-      "currentStatus": "TRANSCRIBED"
+      "className": "ClassName",
+      "headerPath": "game/ClassName.h",
+      "implPath": "game/ClassName.cpp",
+      "functions": [{"name":"ClassName::Method", "address":"0x...", "vtableSlot":0}],
+      "parentClass": "OptionalBase",
+      "vtableAddress": "0x...",
+      "contextFiles": [],
+      "targetStatus": "INTEGRATED",
+      "retry": false,
+      "guidance": "optional scheduling or dependency guidance"
     }
   ]
 }
-\`\`\`
 
-### Important rules
-- Be thorough — check every .cpp and .h file under ${DECOMPILED}
-- Only include classes that GENUINELY need work (not already INTEGRATED)
-- For class names, use the C++ class name (not the filename)
-- For addresses, verify against Ghidra — never guess
-- For functions, include the address annotation from the .cpp file's doc comment
-- If a file has no address annotations, use Ghidra to find the function address
-- Limit to at most 15 classes (focus on highest priority)
-- If you cannot determine functions for a class, mark it with an empty functions array and explain why in the reason`;
+Rules:
+- START requires one or more starts and may not exceed availableSlots.
+- WAIT means starts must be empty and is valid only while work is running or a
+  concrete prerequisite is expected.
+- COMPLETE means starts must be empty and no further work in scope remains.
+- Never schedule two attempts of the same class concurrently.
+- New discovery targets require headerPath, implPath, and verified functions.
+- Respect dependency order and avoid concurrent edits to shared files.
+- Do not use markdown fences or text outside the JSON object.`;
 }
 
-function parseDiscoveryOutput(text) {
-  // Try to extract JSON from the response
-  let jsonStr = text;
+function extractJsonObject(text) {
+  if (text && typeof text === "object") return text;
+  const raw = String(text || "").trim();
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : raw;
+  try { return JSON.parse(candidate); } catch (_) {}
 
-  // Try markdown code block first
-  const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlock) {
-    jsonStr = codeBlock[1].trim();
-  } else {
-    // Look for { "summary" or { "classes"
-    const jsonMatch = text.match(/\{\s*"(?:summary|classes|totalFiles)"/);
-    if (jsonMatch) {
-      jsonStr = text.substring(jsonMatch.index);
-      // Find matching closing brace
-      let depth = 0;
-      let end = jsonMatch.index;
-      for (let i = jsonMatch.index; i < text.length; i++) {
-        if (text[i] === '{') depth++;
-        if (text[i] === '}') {
-          depth--;
-          if (depth === 0) { end = i + 1; break; }
-        }
-      }
-      jsonStr = text.substring(jsonMatch.index, end);
+  const start = candidate.indexOf("{");
+  if (start < 0) throw new Error("response contains no JSON object");
+  let depth = 0;
+  let quoted = false;
+  let escaped = false;
+  for (let i = start; i < candidate.length; i++) {
+    const char = candidate[i];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') quoted = true;
+    else if (char === "{") depth++;
+    else if (char === "}" && --depth === 0) return JSON.parse(candidate.slice(start, i + 1));
+  }
+  throw new Error("response contains an unterminated JSON object");
+}
+
+function validateDirective(value) {
+  if (!value || typeof value !== "object") return "directive is not an object";
+  if (!["START", "WAIT", "COMPLETE"].includes(value.action)) return "invalid action";
+  if (typeof value.summary !== "string") return "summary must be a string";
+  if (typeof value.reason !== "string") return "reason must be a string";
+  if (!Array.isArray(value.starts)) return "starts must be an array";
+  if (value.action === "START" && value.starts.length === 0) return "START requires at least one start";
+  if (value.action !== "START" && value.starts.length !== 0) return `${value.action} requires an empty starts array`;
+  for (const start of value.starts) {
+    if (!start || typeof start.className !== "string" || start.className.length === 0) {
+      return "every start requires className";
+    }
+    if (start.functions !== undefined && !Array.isArray(start.functions)) return "functions must be an array";
+    if (start.contextFiles !== undefined && !Array.isArray(start.contextFiles)) return "contextFiles must be an array";
+  }
+  return null;
+}
+
+async function askSupervisorWithRetry(supervisorId, message) {
+  let prompt = message;
+  let lastError = null;
+  for (let attempt = 0; attempt <= MAX_SUPERVISOR_OUTPUT_RETRIES; attempt++) {
+    let response;
+    try {
+      response = await agents.ask({ id: supervisorId, message: prompt });
+      const raw = response.value !== undefined ? response.value : response.text;
+      const directive = extractJsonObject(raw);
+      const validationError = validateDirective(directive);
+      if (!validationError) return directive;
+      lastError = new Error(validationError);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < MAX_SUPERVISOR_OUTPUT_RETRIES) {
+      print(`│ [SUPERVISOR] Invalid directive; asking same settled actor to correct it.\n`);
+      prompt = `Your previous scheduling response was invalid: ${lastError.message}\n` +
+        "Return only a corrected scheduling JSON object. Do not perform additional discovery in this correction turn.";
+    }
+  }
+  throw new Error(`Supervisor failed structured output after ${MAX_SUPERVISOR_OUTPUT_RETRIES + 1} attempts: ${lastError.message}`);
+}
+
+function compactResult(result) {
+  return {
+    className: result.className,
+    status: result.status,
+    currentStatus: result.finalReview && result.finalReview.currentStatus,
+    primaryTurns: result.primaryTurns,
+    reviewPasses: result.reviewPasses,
+    blocks: result.blocks || [],
+    blockReviewReason: result.blockReview && result.blockReview.reason,
+    error: result.error,
+  };
+}
+
+function buildSchedulingMessage(state) {
+  return `## Scheduling boundary ${state.turn}
+
+The previous supervisor activation has settled. This is a fresh, coalesced state
+snapshot; no message was steered into an ongoing activation.
+
+${JSON.stringify({
+    direction: state.direction || null,
+    running: state.running,
+    justCompleted: state.justCompleted,
+    knownOutcomes: state.knownOutcomes,
+    availableSlots: state.availableSlots,
+    notice: state.notice || null,
+  }, null, 2)}
+
+Choose what is safe to start now. Return only the scheduling JSON object.`;
+}
+
+async function loadDecompileClass() {
+  const code = await pi.read("tools/decompile-class.ts");
+  const wrapped = "(async () => { " + code + " })()";
+  const module = await eval(wrapped);
+  return module.decompileClass;
+}
+
+function normalizeConfig(start, params, isDiscovery) {
+  let config = start;
+  if (!isDiscovery) {
+    const canonical = (params.classes || []).find((candidate) => candidate.className === start.className);
+    if (!canonical) return { error: `unknown explicit class ${start.className}` };
+    config = { ...canonical, ...start, functions: canonical.functions };
+  }
+
+  if (!config.headerPath || !config.implPath) {
+    return { error: `${config.className} is missing headerPath or implPath` };
+  }
+  if (!Array.isArray(config.functions) || config.functions.length === 0) {
+    return { error: `${config.className} has no verified function targets` };
+  }
+  for (const fn of config.functions) {
+    if (!fn || typeof fn.name !== "string" || typeof fn.address !== "string") {
+      return { error: `${config.className} has an invalid function target` };
     }
   }
 
-  try {
-    return JSON.parse(jsonStr);
-  } catch (e) {
-    print(`Discovery parse warning: ${e.message}\n`);
-    print(`Raw (first 500): ${jsonStr.substring(0, 500)}\n`);
-    return null;
-  }
+  return {
+    config: {
+      className: config.className,
+      headerPath: config.headerPath,
+      implPath: config.implPath,
+      functions: config.functions,
+      ghidraDatabase: config.ghidraDatabase || params.ghidraDatabase,
+      parentClass: config.parentClass,
+      vtableAddress: config.vtableAddress,
+      contextFiles: config.contextFiles || [],
+      primaryModel: config.primaryModel || params.primaryModel,
+      reviewerModel: config.reviewerModel || params.reviewerModel,
+      maxIterations: config.maxIterations || params.maxIterations,
+      targetStatus: config.targetStatus || "INTEGRATED",
+      supervisorGuidance: config.guidance || start.guidance,
+    },
+  };
 }
 
-async function loadModule(filePath) {
-  const code = await pi.read(filePath);
-  const wrapped = '(async () => { ' + code + ' })()';
-  return eval(wrapped);
+function summarizeFinalResults(attemptResults) {
+  const latest = new Map();
+  for (const result of attemptResults) latest.set(result.className, result);
+  const results = Array.from(latest.values());
+  return {
+    total: results.length,
+    approved: results.filter((result) => result.status === "approved").length,
+    blocked: results.filter((result) => result.status === "blocked").length,
+    maxIterationsReached: results.filter((result) => result.status === "max_iterations_reached").length,
+    errors: results.filter((result) => result.status === "error").length,
+    results,
+    attempts: attemptResults,
+  };
 }
 
-async function run(params) {
-  const {
-    classes: inputClasses,
-    discover = false,
-    scope = "below-integrated",
-    ghidraDatabase = "loco12",
-    maxParallel = 3,
-    maxIterations = 5,
-    primaryModel = "deepseek/deepseek-v4-pro",
-    reviewerModel = "deepseek/deepseek-v4-pro",
-    supervisorModel = "deepseek/deepseek-v4-pro",
-  } = params;
+async function run(inputParams) {
+  const params = {
+    classes: inputParams.classes,
+    discover: inputParams.discover || false,
+    scope: inputParams.scope || "below-integrated",
+    direction: typeof inputParams.direction === "string" && inputParams.direction.trim()
+      ? inputParams.direction.trim()
+      : null,
+    ghidraDatabase: inputParams.ghidraDatabase || "loco",
+    maxParallel: inputParams.maxParallel || 3,
+    maxIterations: inputParams.maxIterations || 5,
+    maxSupervisorTurns: inputParams.maxSupervisorTurns || 100,
+    maxAttemptsPerClass: inputParams.maxAttemptsPerClass || 3,
+    primaryModel: inputParams.primaryModel || "deepseek/deepseek-v4-pro",
+    reviewerModel: inputParams.reviewerModel || "deepseek/deepseek-v4-pro",
+    supervisorModel: inputParams.supervisorModel || "deepseek/deepseek-v4-pro",
+  };
 
-  // ── Determine mode ──
-  const isDiscovery = discover && (!inputClasses || inputClasses.length === 0);
-
-  if (!isDiscovery && (!Array.isArray(inputClasses) || inputClasses.length === 0)) {
-    print("supervisor: no classes provided and discover not enabled.\n");
-    print("Use { discover: true } for auto-discovery or { classes: [...] } for explicit list.\n");
-    return { total: 0, approved: 0, blocked: 0, maxIterationsReached: 0, errors: 0, results: [] };
+  const isDiscovery = params.discover && (!params.classes || params.classes.length === 0);
+  if (!isDiscovery && (!Array.isArray(params.classes) || params.classes.length === 0)) {
+    return { total: 0, approved: 0, blocked: 0, maxIterationsReached: 0, errors: 0,
+      results: [], attempts: [] };
   }
 
-  const classCount = isDiscovery ? 15 : inputClasses.length;
-  const concurrency = Math.max(1, Math.min(maxParallel, classCount));
+  const concurrency = Math.max(1, params.maxParallel);
+  params.maxParallel = concurrency;
+  const decompileClass = await loadDecompileClass();
 
   print(`\n╔══════════════════════════════════════════════╗\n`);
-  if (isDiscovery) {
-    print(`║   SUPERVISOR — Auto-discovery mode           ║\n`);
-    print(`║   Scope: ${scope.padEnd(33)} ║\n`);
-  } else {
-    print(`║   SUPERVISOR — ${inputClasses.length} class(es), concurrency ${concurrency}     ║\n`);
-  }
-  print(`║   DB: ${ghidraDatabase}  |  Max passes: ${maxIterations}                ║\n`);
-  print(`╚══════════════════════════════════════════════╝\n\n`);
+  print(`║ SUPERVISOR — incremental scheduler           ║\n`);
+  print(`║ Mode: ${(isDiscovery ? "discover" : "explicit").padEnd(12)} | Concurrency: ${String(concurrency).padEnd(3)}      ║\n`);
+  print(`╚══════════════════════════════════════════════╝\n`);
+  if (params.direction) print(`Direction: ${params.direction}\n`);
+  print("\n");
 
-  // ── Load decompile-class ──
-  const { decompileClass } = await loadModule('tools/decompile-class.ts');
-
-  // ── Create supervisor actor ──
-  print("Creating supervisor actor...\n");
   const supervisor = await agents.create({
-    name: "supervisor",
-    instructions: buildSupervisorInstructions(inputClasses || [], ghidraDatabase, isDiscovery),
-    model: supervisorModel,
+    name: "decompilation-supervisor",
+    instructions: buildSupervisorInstructions(params, isDiscovery),
+    model: params.supervisorModel,
     runner: "pi",
-    tools: ["read", "grep", "find", "ls",
-            "mcp.ghidra.decompile_function", "mcp.ghidra.disassemble_function",
-            "mcp.ghidra.get_xrefs_to", "mcp.ghidra.get_xrefs_from",
-            "mcp.ghidra.list_functions", "mcp.ghidra.get_strings",
-            "mcp.ghidra.find_code_by_string", "mcp.ghidra.get_structure",
-            "mcp.ghidra.list_structures", "mcp.ghidra.list_names",
-            "mcp.ghidra.get_database_info", "mcp.ghidra.get_type_info"],
+    tools: SUPERVISOR_TOOLS,
     delivery: "mailbox",
     responseMode: "text",
   });
   print(`Supervisor actor: ${supervisor.id}\n`);
 
-  let orderedClasses = inputClasses || [];
+  const active = new Map();
+  const attemptResults = [];
+  const latestOutcome = new Map();
+  const attemptsByClass = new Map();
+  let pendingCompletions = [];
+  let stateRevision = 0;
+  let schedulingTurn = 0;
+  let notice = null;
+  let idleDecisions = 0;
+  let nextJobId = 1;
+
+  function drainSettled() {
+    for (const [jobId, record] of Array.from(active.entries())) {
+      if (!record.settled) continue;
+      active.delete(jobId);
+      attemptResults.push(record.result);
+      latestOutcome.set(record.className, record.result);
+      pendingCompletions.push(compactResult(record.result));
+      const icon = record.result.status === "approved" ? "✅" :
+        record.result.status === "blocked" ? "⏸️" : "⚠️";
+      print(`${icon} ${record.className} attempt ${record.attempt}: ${record.result.status}\n`);
+    }
+  }
+
+  function launch(config) {
+    const className = config.className;
+    const attempt = (attemptsByClass.get(className) || 0) + 1;
+    attemptsByClass.set(className, attempt);
+    const jobId = nextJobId++;
+    const record = { jobId, className, attempt, config, settled: false, result: null, promise: null };
+    record.promise = decompileClass(config).then(
+      (value) => {
+        record.result = { className, attempt, ...value };
+        record.settled = true;
+        stateRevision++;
+        return record.result;
+      },
+      (reason) => {
+        record.result = { className, attempt, status: "error", error: reason && reason.message || String(reason) };
+        record.settled = true;
+        stateRevision++;
+        return record.result;
+      },
+    );
+    active.set(jobId, record);
+    print(`▶ ${className} attempt ${attempt} (${config.functions.length} functions)\n`);
+  }
+
+  function runningSnapshot() {
+    return Array.from(active.values()).filter((record) => !record.settled).map((record) => ({
+      className: record.className,
+      attempt: record.attempt,
+      targetStatus: record.config.targetStatus,
+    }));
+  }
+
+  function hasActiveClass(className) {
+    return Array.from(active.values()).some((record) => !record.settled && record.className === className);
+  }
 
   try {
-    if (isDiscovery) {
-      // ═══════════════════════════════════════════════
-      // DISCOVERY PHASE — supervisor finds classes needing work
-      // ═══════════════════════════════════════════════
-      print("┌─ DISCOVERY PHASE ────────────────────────────┐\n");
-      print("│ Supervisor analyzing codebase...\n");
+    while (schedulingTurn < params.maxSupervisorTurns) {
+      drainSettled();
 
-      const discoveryTask = buildDiscoveryTask(scope);
-      const discoveryResponse = await agents.ask({ id: supervisor.id, message: discoveryTask });
-      const discoveryText = discoveryResponse.text || discoveryResponse.value || "";
+      if (runningSnapshot().length >= concurrency) {
+        const promises = Array.from(active.values()).filter((record) => !record.settled).map((record) => record.promise);
+        if (promises.length > 0) await Promise.race(promises);
+        continue;
+      }
 
-      print(`│ Response: ${discoveryText.length} chars\n`);
+      schedulingTurn++;
+      const deliveredCompletions = pendingCompletions;
+      pendingCompletions = [];
+      const revisionAtStart = stateRevision;
+      const running = runningSnapshot();
+      const schedulingMessage = buildSchedulingMessage({
+        turn: schedulingTurn,
+        direction: params.direction,
+        running,
+        justCompleted: deliveredCompletions,
+        knownOutcomes: Array.from(latestOutcome.values()).map(compactResult),
+        availableSlots: concurrency - running.length,
+        notice,
+      });
+      notice = null;
 
-      const discovery = parseDiscoveryOutput(discoveryText);
+      print(`│ [SUPERVISOR] Turn ${schedulingTurn}: ${running.length} running, ${deliveredCompletions.length} completed, ${concurrency - running.length} slots\n`);
+      const directive = await askSupervisorWithRetry(supervisor.id, schedulingMessage);
 
-      if (discovery && Array.isArray(discovery.classes) && discovery.classes.length > 0) {
-        print(`│ Summary: ${discovery.summary || "N/A"}\n`);
-        print(`│ Found ${discovery.classes.length} class(es) needing work\n`);
-        print(`│ Total files: ${discovery.totalFiles || "?"}  |  Needing work: ${discovery.filesNeedingWork || "?"}\n`);
+      // Completions may have arrived while the supervisor was working. The actor is
+      // now settled, so buffer them and send a fresh snapshot before launching from
+      // a stale capacity/dependency decision.
+      drainSettled();
+      if (stateRevision !== revisionAtStart) {
+        notice = `The previous ${directive.action} decision was discarded because running work completed during that supervisor turn. Re-evaluate against this fresh state.`;
+        print("│ [SUPERVISOR] State changed during turn; decision deferred until fresh snapshot.\n");
+        continue;
+      }
 
-        // Sort by priority
-        discovery.classes.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+      print(`│ [SUPERVISOR] ${directive.action}: ${directive.reason}\n`);
 
-        print("│ Priority order:\n");
-        for (const c of discovery.classes) {
-          print(`│   ${c.priority}. ${c.className} (${c.currentStatus || "no tag"} → ${c.targetStatus || "INTEGRATED"}) — ${c.reason}\n`);
+      if (directive.action === "COMPLETE") {
+        if (runningSnapshot().length === 0) {
+          print("│ [SUPERVISOR] Session declared complete.\n");
+          break;
         }
+        notice = "COMPLETE was ignored because work is still running.";
+        continue;
+      }
 
-        orderedClasses = discovery.classes;
+      if (directive.action === "WAIT") {
+        const promises = Array.from(active.values()).filter((record) => !record.settled).map((record) => record.promise);
+        if (promises.length > 0) {
+          idleDecisions = 0;
+          await Promise.race(promises);
+          continue;
+        }
+        idleDecisions++;
+        notice = "WAIT is not actionable because no class is running. Return START or COMPLETE.";
+        if (idleDecisions >= 3) throw new Error("Supervisor repeatedly returned WAIT with no running work");
+        continue;
+      }
+
+      const availableSlots = concurrency - runningSnapshot().length;
+      let launched = 0;
+      const rejected = [];
+      for (const start of directive.starts.slice(0, availableSlots)) {
+        if (hasActiveClass(start.className)) {
+          rejected.push(`${start.className}: already running`);
+          continue;
+        }
+        const prior = latestOutcome.get(start.className);
+        if (prior && !start.retry) {
+          rejected.push(`${start.className}: already completed; retry:true is required`);
+          continue;
+        }
+        const attemptCount = attemptsByClass.get(start.className) || 0;
+        if (attemptCount >= params.maxAttemptsPerClass) {
+          rejected.push(`${start.className}: maximum ${params.maxAttemptsPerClass} attempts reached`);
+          continue;
+        }
+        const normalized = normalizeConfig(start, params, isDiscovery);
+        if (normalized.error) {
+          rejected.push(normalized.error);
+          continue;
+        }
+        launch(normalized.config);
+        launched++;
+      }
+
+      if (directive.starts.length > availableSlots) {
+        rejected.push(`${directive.starts.length - availableSlots} start(s) exceeded available capacity`);
+      }
+      notice = rejected.length > 0 ? `Rejected launch directives: ${rejected.join("; ")}` : null;
+
+      if (launched === 0 && runningSnapshot().length === 0) {
+        idleDecisions++;
+        if (idleDecisions >= 3) throw new Error("Supervisor produced no actionable work for three settled turns");
       } else {
-        print("│ WARNING: Could not parse discovery output.\n");
-        print("└──────────────────────────────────────────────┘\n\n");
-        print("Discovery failed. Returning empty result.\n");
-        return { total: 0, approved: 0, blocked: 0, maxIterationsReached: 0, errors: 0,
-                 results: [], discoveryRaw: discoveryText.substring(0, 1000) };
+        idleDecisions = 0;
       }
-      print("└──────────────────────────────────────────────┘\n\n");
-    } else {
-      // ═══════════════════════════════════════════════
-      // REVIEW PHASE — supervisor reviews provided classes
-      // ═══════════════════════════════════════════════
-      print("┌─ INITIAL REVIEW ─────────────────────────────┐\n");
-      const reviewTask = `Review these ${inputClasses.length} classes for cross-cutting concerns:\n\n` +
-        inputClasses.map(c => `- ${c.className}: ${c.headerPath}, ${c.implPath} (${c.functions.length} functions)`).join("\n") +
-        `\n\nFor each class, read the .h and .cpp. Then identify:\n` +
-        `1. Common dependencies: functions/symbols referenced by multiple classes that aren't decompiled yet\n` +
-        `2. Naming conflicts: Ghidra auto-labels (RESDATA_*, FUN_*) that appear across classes\n` +
-        `3. Priority: which classes should be decompiled first (dependencies first)\n` +
-        `Return your analysis as a prioritized work order.`;
-
-      const initialReview = await agents.ask({ id: supervisor.id, message: reviewTask });
-      const reviewText = initialReview.text || initialReview.value || "";
-      print(`│ Supervisor analyzed ${inputClasses.length} classes`);
-      if (reviewText) print(` — ${reviewText.length} chars`);
-      print(`\n`);
-
-      // Parse priority from review (best-effort: look for class names in order)
-      const priorityOrder = [];
-      for (const cls of inputClasses) {
-        if (reviewText.includes(cls.className) && !priorityOrder.includes(cls.className)) {
-          priorityOrder.push(cls.className);
-        }
-      }
-      for (const cls of inputClasses) {
-        if (!priorityOrder.includes(cls.className)) priorityOrder.push(cls.className);
-      }
-
-      orderedClasses = priorityOrder.map(name => inputClasses.find(c => c.className === name)).filter(Boolean);
-
-      if (orderedClasses.length > 1 && orderedClasses[0].className !== inputClasses[0].className) {
-        print(`│ Priority order: ${orderedClasses.map(c => c.className).join(" → ")}\n`);
-      }
-      print("└──────────────────────────────────────────────┘\n\n");
     }
 
-    // ── Dispatch concurrency pool ──
-    // #32: Supervisor does NOT control whether a loop stops.
-    // The block reviewer (in decompileClass) makes that decision.
-    // Supervisor only answers questions when asked.
-    print(`Dispatching ${orderedClasses.length} class(es) with concurrency ${concurrency}...\n\n`);
-
-    const classConfigs = orderedClasses.map((cls, i) => ({
-      className: cls.className,
-      headerPath: cls.headerPath,
-      implPath: cls.implPath,
-      functions: cls.functions,
-      ghidraDatabase: cls.ghidraDatabase || `${ghidraDatabase}`,
-      parentClass: cls.parentClass,
-      vtableAddress: cls.vtableAddress,
-      contextFiles: cls.contextFiles || [],
-      primaryModel: cls.primaryModel || primaryModel,
-      reviewerModel: cls.reviewerModel || reviewerModel,
-      maxIterations: cls.maxIterations || maxIterations,
-      supervisorId: supervisor.id,
-      targetStatus: cls.targetStatus || "INTEGRATED",
-    }));
-
-    const total = classConfigs.length;
-    const results = new Array(total);
-    let nextIndex = 0;
-    let activeCount = 0;
-
-    await new Promise((resolve) => {
-      function startNext() {
-        while (activeCount < concurrency && nextIndex < total) {
-          const idx = nextIndex++;
-          const cfg = classConfigs[idx];
-          activeCount++;
-
-          print(`  ▶ ${cfg.className} (DB: ${cfg.ghidraDatabase}, ${cfg.functions.length} fn(s))\n`);
-
-          decompileClass(cfg).then(
-            (value) => {
-              const icon = value.status === "approved" ? "✅" : value.status === "blocked" ? "⏸️" : "⚠️";
-              print(`${icon} ${cfg.className}: ${value.status}` +
-                (value.iterations !== undefined ? ` — ${value.iterations} pass(es)` : "") +
-                (value.finalReview ? ` — ${value.finalReview.currentStatus}` : "") + `\n`);
-              results[idx] = { className: cfg.className, ...value };
-            },
-            (reason) => {
-              print(`❌ ${cfg.className}: ${reason?.message || reason}\n`);
-              results[idx] = { className: cfg.className, status: "error", error: reason?.message || String(reason) };
-            }
-          ).finally(() => {
-            activeCount--;
-            if (nextIndex < total) startNext();
-            else if (activeCount === 0) resolve();
-          });
-        }
-      }
-      startNext();
-    });
-
-    // ── Summary ──
-    const finished = results.filter(r => r);
-    const approved = finished.filter(r => r.status === "approved");
-    const blocked = finished.filter(r => r.status === "blocked");
-    const maxed = finished.filter(r => r.status === "max_iterations_reached");
-    const errors = finished.filter(r => r.status === "error");
-
-    print(`\n╔══════════════════════════════════════════════╗\n`);
-    print(`║   SUPERVISOR — Complete                      ║\n`);
-    print(`╠══════════════════════════════════════════════╣\n`);
-    print(`║ ✅ ${String(approved.length).padStart(2)}  |  ⏸️  ${String(blocked.length).padStart(2)}  |  ⚠️  ${String(maxed.length).padStart(2)}  |  ❌ ${String(errors.length).padStart(2)}  ║\n`);
-    print(`╚══════════════════════════════════════════════╝\n`);
-
-    for (const r of approved) print(`  ✅ ${r.className}: ${r.finalReview?.currentStatus || "APPROVED"} (${r.iterations} passes)\n`);
-    for (const r of blocked) print(`  ⏸️  ${r.className}: BLOCKED — ${(r.blocks||[]).map(b=>b.what).join("; ")}\n`);
-    for (const r of maxed) print(`  ⚠️  ${r.className}: ${r.finalReview?.currentStatus || "?"} — max iterations\n`);
-    for (const r of errors) print(`  ❌ ${r.className}: ${r.error}\n`);
-
-    if (isDiscovery && orderedClasses.length === 0) {
-      print("  ℹ️  No classes found needing work — codebase may already be fully INTEGRATED.\n");
+    if (schedulingTurn >= params.maxSupervisorTurns) {
+      throw new Error(`Supervisor exceeded ${params.maxSupervisorTurns} scheduling turns`);
     }
 
-    return {
-      total,
-      approved: approved.length,
-      blocked: blocked.length,
-      maxIterationsReached: maxed.length,
-      errors: errors.length,
-      results: finished,
-    };
-
+    drainSettled();
+    const summary = summarizeFinalResults(attemptResults);
+    summary.direction = params.direction;
+    print(`\nSupervisor complete: ${summary.approved} approved, ${summary.blocked} blocked, ` +
+      `${summary.maxIterationsReached} maxed, ${summary.errors} errors.\n`);
+    return summary;
   } finally {
-    // ── Always clean up the supervisor actor ──
+    // Direct decompileClass calls cannot be abandoned safely because each owns a
+    // persistent PRIMARY actor. Let any in-flight calls finish before actor cleanup.
+    const outstanding = Array.from(active.values()).map((record) => record.promise);
+    if (outstanding.length > 0) await Promise.all(outstanding).catch(() => {});
     await agents.remove({ id: supervisor.id }).catch(() => {});
-    print("\nSupervisor actor cleaned up.\n");
+    print("Supervisor actor cleaned up.\n");
   }
 }
 
-return { run };
+return {
+  run,
+  extractJsonObject,
+  validateDirective,
+  normalizeConfig,
+  compactResult,
+  buildSupervisorInstructions,
+  buildSchedulingMessage,
+};

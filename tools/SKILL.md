@@ -2,57 +2,165 @@
 name: decompile-class
 description: >-
   Reusable Fabric programs for automated reverse-engineering decompilation.
-  Orchestrates reviewer→primary→block-reviewer loops for single classes,
-  concurrency pools for parallel multi-class runs, and a supervisor for
-  cross-cutting architectural decisions.
+  Runs persistent-primary class workflows under an incremental, dependency-aware
+  supervisor scheduler.
 ---
 
 # Decompilation Tools
 
-Three Fabric programs for automated decompilation of loco.exe classes.
+Fabric programs for automated decompilation of `loco.exe` classes.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `tools/decompile-class.ts` | Single-class decompilation loop |
-| `tools/decompile-parallel.ts` | Concurrency pool for multiple classes |
-| `tools/supervisor.ts` | Top-level orchestrator with persistent supervisor actor |
+| `tools/run-session.ts` | Session entry point; opens a fresh Ghidra database and starts the supervisor |
+| `tools/supervisor.ts` | Persistent incremental scheduler for multi-class runs |
+| `tools/decompile-class.ts` | One class: persistent PRIMARY plus one-shot reviewer gates |
+
+`tools/decompile-parallel.ts` was removed. Its fixed concurrency pool was
+superseded by the dependency-aware scheduler in `supervisor.ts`.
 
 ## Architecture
 
-```
-supervisor.ts
-  ├─ Creates SUPERVISOR ACTOR (persistent — discovers work + answers blocked primaries)
-  ├─ [discover mode] Discovery phase — supervisor analyzes codebase, builds work queue
-  │     • Reads PROGRESS.md for remaining work context
-  │     • Greps for Status: tags (TRANSCRIBED/VALIDATED/INTEGRATED)
-  │     • Runs make check for compilation status
-  │     • Uses Ghidra to identify functions needing decompilation
-  │     • Returns prioritized JSON work queue
-  ├─ [explicit mode] Initial deep review — assesses dependencies, sets priority order
-  └─ Dispatches → decompileClass() × N via concurrency pool
+```text
+run-session.ts
+  ├─ opens raw loco.exe with a fresh Ghidra database ID
+  └─ supervisor.run()
+       ├─ creates persistent SUPERVISOR actor
+       ├─ sends settled state snapshot
+       │    • currently running attempts
+       │    • completions since the previous scheduling turn
+       │    • validated legitimate blocks
+       │    • latest outcomes
+       │    • available capacity
+       ├─ supervisor returns START | WAIT | COMPLETE
+       ├─ TypeScript launches only supervisor-authorized classes
+       └─ repeats after completions until COMPLETE
 
-       decompileClass()  (one instance per class)
-         while pass < maxIter:
-           orchestrator runs make check → passes output to reviewer
-           REVIEWER (one-shot, JSON Schema)
-             → if INTEGRATED + zero BLOCKERs → return approved
-           PRIMARY (one-shot, JSON Schema)
-             → status: DONE | BLOCKED | PARTIAL
-             if BLOCKED:
-               BLOCK REVIEWER (one-shot, JSON Schema)
-                 → validates legitimacy
-                 if LEGITIMATE → route to supervisor, return blocked
-                 if NOT → tell primary to continue
-
-       decompile-parallel.ts
-         Concurrency pool — maxParallel in-flight, not batched.
-         When one finishes, the next starts immediately.
-         Failures captured per job.
+supervisor-authorized class attempt
+  └─ decompileClass()
+       ├─ orchestrator runs make check
+       ├─ one-shot REVIEWER validates source against Ghidra
+       ├─ if not approved, create/reuse persistent PRIMARY actor
+       ├─ PRIMARY returns:
+       │    • PARTIAL → nudge same actor; no reviewer call
+       │    • DONE → run build and reviewer
+       │    • BLOCKED → run one-shot block reviewer
+       ├─ block reviewer returns:
+       │    • legitimate=false → reason goes to same PRIMARY
+       │    • legitimate=true → stop class and report blocked
+       │    • failed review → class returns error, never blocked
+       └─ always removes persistent PRIMARY actor
 ```
+
+## Scheduling guarantees
+
+- The supervisor does not fill a complete queue upfront.
+- Exactly one supervisor activation is in flight.
+- Class completions that occur during a supervisor turn are buffered.
+- After the supervisor settles, a stale launch decision is discarded and a fresh,
+  coalesced state snapshot is sent before any new class starts.
+- `maxParallel` is a hard capacity limit, not a target. The supervisor decides how
+  much of that capacity is dependency-safe to use.
+- TypeScript executes launch directives; the model does not own process lifecycle.
+- A class may be retried only with `retry: true`, and attempts are bounded by
+  `maxAttemptsPerClass`.
+
+## Directed discovery
+
+Discovery accepts an optional free-form `direction`. When present, the supervisor:
+
+- translates the objective into observable success criteria;
+- traces the runtime dependency cone backward from that capability;
+- prioritizes only work that advances the objective;
+- defers unrelated status cleanup;
+- re-evaluates the dependency cone after every completion or legitimate block;
+- includes the direction in every settled scheduling snapshot.
+
+Example:
+
+```typescript
+return await run({
+  discover: true,
+  scope: "all", // permit re-validation of dependencies already tagged INTEGRATED
+  direction: "Get the main menu and all of its runtime dependencies working",
+  ghidraDatabase: "locoUniqueSessionId",
+  maxParallel: 3,
+});
+```
+
+Use `scope: "all"` for runtime-capability objectives that may require revisiting
+files already tagged INTEGRATED. The direction still prevents unrelated re-validation.
+Omit `direction`, pass `null`, or use an empty string for broad status-based discovery.
+
+## Block semantics
+
+The block reviewer is only a stop gate:
+
+1. PRIMARY returns `BLOCKED` with one or more precise reasons.
+2. The one-shot block reviewer determines whether stopping is legitimate.
+3. If false, its reason and suggestion are sent to the same persistent PRIMARY,
+   which performs another turn.
+4. If true, the class loop stops and returns `status: "blocked"`.
+5. The supervisor learns about that validated block at the next settled scheduling
+   boundary and may schedule dependencies or a later fresh attempt.
+6. If block review cannot produce valid structured output after retries, the class
+   returns `status: "error"`; an unvalidated block is never reported as legitimate.
+
+The supervisor does not answer the blocked PRIMARY and does not resume the stopped
+class loop. Any retry is a fresh `decompileClass()` attempt with optional supervisor
+guidance.
 
 ## Usage
+
+### Full session
+
+```typescript
+const code = await pi.read('tools/run-session.ts');
+const wrapped = '(async () => { ' + code + ' })()';
+return await eval(wrapped);
+```
+
+### Supervisor discovery mode
+
+The caller must open the raw binary and wait for analysis first.
+
+```typescript
+const code = await pi.read('tools/supervisor.ts');
+const wrapped = '(async () => { ' + code + ' })()';
+const { run } = await eval(wrapped);
+
+return await run({
+  discover: true,
+  scope: "all", // permit re-validation of dependencies already tagged INTEGRATED
+  direction: "Get the main menu and all of its runtime dependencies working",
+  ghidraDatabase: "locoUniqueSessionId",
+  maxParallel: 3,
+  maxIterations: 5,
+  maxAttemptsPerClass: 3,
+});
+```
+
+### Supervisor explicit mode
+
+```typescript
+return await run({
+  classes: [
+    {
+      className: "GameVehicle",
+      headerPath: "game/GameVehicle.h",
+      implPath: "game/GameVehicle.cpp",
+      functions: [
+        { name: "GameVehicle::StartMoving", address: "0x4129C0", vtableSlot: 1 },
+      ],
+      targetStatus: "INTEGRATED",
+    },
+  ],
+  ghidraDatabase: "locoUniqueSessionId",
+  maxParallel: 3,
+});
+```
 
 ### Single class
 
@@ -68,187 +176,124 @@ return await decompileClass({
   functions: [
     { name: "GameVehicle::StartMoving", address: "0x4129C0", vtableSlot: 1 },
   ],
-  ghidraDatabase: "loco12",
-  vtableAddress: "0x477848",
-  parentClass: "RESDATA_GameVehicle",
-  contextFiles: ["shared/types.h", "core/Entity.h"],
+  ghidraDatabase: "locoUniqueSessionId",
   targetStatus: "INTEGRATED",
   maxIterations: 5,
 });
 ```
 
-### Parallel (standalone)
+## Parameters — `decompileClass`
 
-```typescript
-const code = await pi.read('tools/decompile-parallel.ts');
-const wrapped = '(async () => { ' + code + ' })()';
-const { decompileParallel } = await eval(wrapped);
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `className` | required | C++ class name |
+| `headerPath` | required | Header relative to `src/decompiled_cpp` |
+| `implPath` | required | Implementation relative to `src/decompiled_cpp` |
+| `functions` | required | Verified names and binary addresses |
+| `ghidraDatabase` | required | Already-open Ghidra database |
+| `parentClass` | — | Inheritance context |
+| `vtableAddress` | — | Original vtable address |
+| `contextFiles` | `[]` | Additional files for agents |
+| `targetStatus` | `INTEGRATED` | Exact status required for approval |
+| `maxIterations` | `5` | Maximum PRIMARY work turns, including PARTIAL nudges |
+| `supervisorGuidance` | — | Guidance supplied to a fresh scheduler retry |
+| `primaryModel` | `deepseek/deepseek-v4-pro` | Persistent PRIMARY model |
+| `reviewerModel` | `deepseek/deepseek-v4-pro` | Reviewer and block-reviewer model |
 
-return await decompileParallel([
-  { className: "Building", headerPath: "game/Building.h", implPath: "game/Building.cpp",
-    functions: [{ name: "Building::Foo", address: "0x412345" }] },
-  { className: "Train", headerPath: "game/Train.h", implPath: "game/Train.cpp",
-    functions: [{ name: "Train::Bar", address: "0x423456" }] },
-], { maxParallel: 3 });
+## Parameters — `supervisor.run`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `discover` | `false` | Incrementally discover work |
+| `scope` | `below-integrated` | Discovery status scope |
+| `direction` | — | Optional capability objective used to focus dependency discovery and scheduling |
+| `classes` | — | Explicit allowed target list |
+| `ghidraDatabase` | required in practice | Already-open Ghidra database |
+| `maxParallel` | `3` | Hard concurrent-attempt limit |
+| `maxIterations` | `5` | PRIMARY turns per class attempt |
+| `maxAttemptsPerClass` | `3` | Fresh-attempt limit per class |
+| `maxSupervisorTurns` | `100` | Scheduling-turn safety limit |
+| `primaryModel` | `deepseek/deepseek-v4-pro` | Default PRIMARY model |
+| `reviewerModel` | `deepseek/deepseek-v4-pro` | Default reviewer model |
+| `supervisorModel` | `deepseek/deepseek-v4-pro` | Persistent supervisor model |
+
+## Structured outputs
+
+### PRIMARY
+
+```json
+{
+  "status": "DONE | PARTIAL | BLOCKED",
+  "summary": "...",
+  "compilationStatus": "PASS | FAIL | UNKNOWN",
+  "blocks": [{ "what": "...", "why": "...", "suggestion": "...", "address": "..." }]
+}
 ```
 
-### Supervisor (multi-class with dependency management)
+### Reviewer
 
-**Auto-discovery mode** (recommended — supervisor finds classes needing work):
-
-```typescript
-const code = await pi.read('tools/supervisor.ts');
-const wrapped = '(async () => { ' + code + ' })()';
-const { run } = await eval(wrapped);
-
-return await run({
-  discover: true,
-  scope: "below-integrated",  // "below-integrated" | "transcribed" | "validated" | "all"
-  ghidraDatabase: "loco12",
-  maxParallel: 3,
-  maxIterations: 5,
-});
-```
-
-**Explicit mode** (backward compatible — you specify the class list):
-
-```typescript
-const code = await pi.read('tools/supervisor.ts');
-const wrapped = '(async () => { ' + code + ' })()';
-const { run } = await eval(wrapped);
-
-return await run({
-  classes: [
-    { className: "Building", headerPath: "game/Building.h", implPath: "game/Building.cpp",
-      functions: [{ name: "Building::Foo", address: "0x412345" }] },
-    { className: "Train", headerPath: "game/Train.h", implPath: "game/Train.cpp",
-      functions: [{ name: "Train::Bar", address: "0x423456" }] },
+```json
+{
+  "approved": false,
+  "currentStatus": "PRE_TRANSCRIBED | TRANSCRIBED | VALIDATED | INTEGRATED",
+  "summary": "...",
+  "issues": [
+    { "severity": "BLOCKER | WARNING | INFO", "category": "...", "description": "...", "fix": "..." }
   ],
-  ghidraDatabase: "loco12",
-  maxParallel: 3,
-  maxIterations: 5,
-});
+  "compilationStatus": "PASS | FAIL | UNKNOWN"
+}
 ```
 
-## Parameters — decompileClass
+### Block reviewer
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| className | string | required | C++ class name |
-| headerPath | string | required | Path to .h relative to src/decompiled_cpp |
-| implPath | string | required | Path to .cpp relative to src/decompiled_cpp |
-| functions | FunctionTarget[] | required | Functions with name, address, vtableSlot?, description? |
-| ghidraDatabase | string | required | Ghidra DB ID (must be open already) |
-| parentClass | string | — | Parent class for inheritance context |
-| vtableAddress | string | — | Vtable address for documentation |
-| contextFiles | string[] | [] | Extra files agents should read |
-| targetStatus | string | "INTEGRATED" | Required status for approval |
-| maxIterations | number | 5 | Max review-primary passes |
-| primaryModel | string | deepseek/deepseek-v4-pro | Model for primary agent |
-| reviewerModel | string | deepseek/deepseek-v4-pro | Model for reviewer + block reviewer |
-| supervisorId | string | — | Supervisor actor ID for routing blocked decisions |
+```json
+{
+  "legitimate": true,
+  "reason": "...",
+  "suggestion": "..."
+}
+```
 
-## Parameters — decompileParallel
+### Supervisor directive
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| classes | ClassConfig[] | required | Array of decompileClass params |
-| maxParallel | number | 4 | Max concurrent decompileClass calls |
-| maxIterations | number | 5 | Passed to each decompileClass |
-| supervisorId | string | — | Passed to each decompileClass |
-
-## Parameters — supervisor.run
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| discover | boolean | false | Auto-discovery: supervisor finds classes needing work |
-| scope | string | "below-integrated" | Discovery scope: "below-integrated", "transcribed", "validated", "all" |
-| classes | ClassConfig[] | — | Explicit class list (ignored when discover: true) |
-| ghidraDatabase | string | "loco12" | Ghidra DB ID |
-| maxParallel | number | 3 | Max concurrent decompileClass calls |
-| maxIterations | number | 5 | Max review-primary passes per class |
-| primaryModel | string | deepseek/deepseek-v4-pro | Model for primary agents |
-| reviewerModel | string | deepseek/deepseek-v4-pro | Model for reviewer agents |
-| supervisorModel | string | deepseek/deepseek-v4-pro | Model for supervisor actor |
-
-### Discovery scopes
-
-| Scope | Description |
-|-------|-------------|
-| `"below-integrated"` | Files at TRANSCRIBED, VALIDATED, or missing status tag |
-| `"transcribed"` | Only files at TRANSCRIBED status (need validation) |
-| `"validated"` | Only files at VALIDATED status (need integration) |
-| `"all"` | All files including INTEGRATED (for re-validation) |
-
-### Discovery process
-
-When `discover: true`, the supervisor actor:
-1. Reads PROGRESS.md for remaining work context and priorities
-2. Greps for `Status:` tags in all .cpp/.h files
-3. Runs `make check` to verify compilation state
-4. Reads files to extract function lists and address annotations
-5. Uses Ghidra for new decompilation targets (no existing .cpp)
-6. Returns a prioritized JSON work queue
-
-The TypeScript orchestrator parses the JSON and dispatches classes through
-the concurrency pool, just as with explicit mode.
+```json
+{
+  "action": "START | WAIT | COMPLETE",
+  "summary": "...",
+  "reason": "...",
+  "starts": [
+    {
+      "className": "DependencyClass",
+      "headerPath": "game/DependencyClass.h",
+      "implPath": "game/DependencyClass.cpp",
+      "functions": [{ "name": "DependencyClass::Method", "address": "0x..." }],
+      "retry": false,
+      "guidance": "..."
+    }
+  ]
+}
+```
 
 ## Return values
 
-### decompileClass
+### `decompileClass`
 
-```typescript
-{ status: "approved", className, iterations, finalReview }
-{ status: "blocked", className, iterations, finalReview, blocks, supervisorDecisions?, blockReview }
-{ status: "max_iterations_reached", className, iterations, finalReview }
-{ status: "error", className, pass, error }
+```text
+{ status: "approved", className, primaryTurns, reviewPasses, finalReview }
+{ status: "blocked", className, blocks, blockReview, primaryTurns, reviewPasses, finalReview }
+{ status: "max_iterations_reached", className, primaryTurns, reviewPasses, finalReview }
+{ status: "error", className, error, primaryTurns, reviewPasses, finalReview? }
 ```
 
-### decompileParallel / supervisor.run
+`blocked` always means the block reviewer explicitly returned `legitimate: true`.
 
-```typescript
-{ total, approved, blocked, maxIterationsReached, errors, results }
-```
+### `supervisor.run`
 
-## Schemas
-
-### PRIMARY_SCHEMA
-
-```json
+```text
 {
-  "status": "DONE" | "BLOCKED" | "PARTIAL",
-  "summary": "...",
-  "compilationStatus": "PASS" | "FAIL" | "UNKNOWN",
-  "blocks": [{ "what": "...", "why": "...", "suggestion?": "...", "address?": "..." }]
+  total, approved, blocked, maxIterationsReached, errors,
+  results,   // latest result for each class
+  attempts,  // every attempt, including superseded blocked attempts
+  direction  // normalized discovery objective, or null
 }
 ```
-
-### REVIEW_SCHEMA
-
-```json
-{
-  "approved": true | false,
-  "currentStatus": "PRE_TRANSCRIBED" | "TRANSCRIBED" | "VALIDATED" | "INTEGRATED",
-  "summary": "...",
-  "issues": [{ "severity": "BLOCKER"|"WARNING"|"INFO", "category": "...", "description": "...", "fix": "..." }],
-  "compilationStatus": "PASS" | "FAIL" | "UNKNOWN"
-}
-```
-
-### BLOCK_REVIEW_SCHEMA
-
-```json
-{
-  "legitimate": true | false,
-  "reason": "...",
-  "suggestion?": "..."
-}
-```
-
-## Design decisions
-
-- **One-shot agents with full context**: Primary and reviewer use `agents.run()` with JSON Schema for structured output. Every prompt includes full context (class, files, functions, Ghidra DB, AGENTS.md path) via `taskPrefix()`. No persistent state needed.
-- **Orchestrator-owned build**: `make check` is run by the TypeScript orchestrator, not the agents. Output is passed to the reviewer.
-- **Block reviewer gate**: Primary cannot unilaterally stop the loop. A separate block reviewer validates that the block is legitimate before the loop ends.
-- **Approval enforced in TypeScript**: The orchestrator checks `approved`, `currentStatus`, `compilationStatus`, blocker count, and build output — not just trusting the model's `approved` field.
-- **Ghidra lifecycle external**: Agents don't open/close databases. The caller ensures the database is open before dispatching.
