@@ -12,6 +12,7 @@
  * Naming: VTBL_<ClassName>[_<variant>]
  *   _BASE  = intermediate vtable set by base constructor
  *   _FULL  = final vtable set by most-derived constructor
+ *   _ALT   = alternative entry (same table, different view)
  */
 
 #pragma once
@@ -19,36 +20,590 @@
 /* ================================================================== */
 /* GameObject hierarchy                                                */
 /* ================================================================== */
-#define VTBL_GAMEOBJECT                0x00477820  /* GameObject root vtable      */
-#define VTBL_GAMEOBJECT_SCALAR_DTOR    0x00477820  /* vtable[0] — scalar dtor     */
+#define VTBL_GAMEOBJECT                0x00477820  /* GameObject root vtable
+    Base vtable: 4 slots only:
+    [0] +0x00: BaseScalarDtor (0x412600)
+    [1] +0x04: InvalidateRect (0x436AB0)
+    [2] +0x08: PtInRect (0x436A10)
+    [3] +0x0C: MoveTo (0x436A60)
+    Full 15-slot layout in VTBL_ENTITY below.                             */
+#define VTBL_GAMEOBJECT_SCALAR_DTOR    0x00477820  /* vtable[0] — scalar dtor, 0x412600 */
 
-#define VTBL_ENTITY                    0x00477488  /* Entity vtable               */
-#define VTBL_ENTITY_SCALAR_DTOR        0x00477488  /* vtable[0] — scalar dtor     */
+#define VTBL_ENTITY                    0x00477488  /* Entity vtable (15 slots)
+    [0]  +0x00: scalar deleting destructor  (Entity_ScrDtor, 0x405850)
+    [1]  +0x04: InvalidateRect              (0x436AB0)
+    [2]  +0x08: PtInRect                    (0x436A10)
+    [3]  +0x0C: HitTest dispatch            (0x405680, overrides MoveTo)
+    [4]  +0x10: (unknown)
+    [5]  +0x14: (unknown)
+    [6]  +0x18: InitBase                    (0x405900)
+    [7]  +0x1C: StopSound                   (0x405A20)
+    [8]  +0x20: SetFrame                    (0x405DE0)
+    [9]  +0x24: (unknown)
+    [10] +0x28: (unknown)
+    [11] +0x2C: Draw                        (0x405E60)
+    [12] +0x30: DrawConnected               (0x405FD0)
+    [13] +0x34: SetName                     (0x405E20)
+    [14] +0x38: SetAnimState                (0x405A50)                     */
+
+#define VTBL_GAME                      0x00477718  /* Game vtable
+    [0]  +0x00: scalar deleting destructor (Game_Dtor, 0x410660)
+                    -> calls ~Game() base destructor (Game_BaseDtor, 0x410680)
+    [1]  +0x04: StopSound                    (Game_StopSound, 0x410CF0)
+    [2]  +0x08: release resource             (Game_ReleaseResource, 0x410D60)
+    [3]  +0x0C: HitTest dispatch             (Game_HitTest, 0x40F160)
+    [4]  +0x10: (unknown)                    (Game_method4, 0x410DC0)
+    [5]  +0x14: (unknown)                    (Game_method5, 0x410DF0)
+    [6]  +0x18: InitBase                     (Game_InitBase, 0x40E1A0)
+    [7]  +0x1C: SetAnimState                 (Game_ScreenModeSet, 0x40EA10)
+    [8]  +0x20: SetFrame                     (Game_SetFrame, 0x40E9E0)
+    [9]  +0x24: SetName                      (Game_SetName, 0x410E20)
+    [10] +0x28: Draw                         (Game_Draw, 0x40F170)
+    [11] +0x2C: DrawConnected                (Game_DrawConnected, 0x4108B0)
+    [12] +0x30: OnTimerTick                  (Game_OnTimerTick, 0x410A50)
+    [13] +0x34: (unknown)                    (Game_method13, 0x40FFE0)
+    [14] +0x38: AnimStateSelect              (Game_AnimStateSelect, 0x40EA30) */
 
 /* ================================================================== */
-/* CGWND — main game window                                            */
+/* CGWND — Main game window / application                              */
 /* ================================================================== */
 #define VTBL_CGWND                     0x004774C4  /* CGWND vtable                */
 
 /* ================================================================== */
-/* Building hierarchy                                                  */
+/* Building — In-game building/vehicle entity                           */
 /* ================================================================== */
 #define VTBL_BUILDING_FULL             0x00477EB8  /* Building complete vtable    */
 #define VTBL_BUILDING_BASE             0x00477F18  /* Building_BaseCtor vtable    */
 
-/* ================================================================== */
-/* BuildingComplex                                                     */
-/* ================================================================== */
-#define VTBL_BUILDING_COMPLEX          0x00478008  /* BuildingComplex vtable      */
+#define VTBL_BUILDING_CARRIAGE         0x00477EF8  /* Carriage/vehicle part vtable */
+
+/* 0x478008 was formerly labeled VTBL_BUILDING_COMPLEX. loco_v8 shows
+ * collection methods there (0x436040, 0x424010, 0x424760), and no code
+ * installs or references 0x478008 as a Building-derived vtable. */
+#define VTBL_COLLECTION_TAIL_478008    0x00478008  /* legacy analysis marker */
 
 /* ================================================================== */
-/* Graphics — LOCOBITMAP variants                                      */
+/* TrackPos — Grid-cell track position struct (20 bytes, vtable at 0x477840) */
 /* ================================================================== */
-#define VTBL_LOCOBITMAP                0x004773E8  /* LOCOBITMAP vtable A         */
-#define VTBL_LOCOBITMAP_ALT            0x004773F0  /* LOCOBITMAP vtable B         */
+#define VTBL_TRACKPOS                  0x00477840  /* TrackPos vtable
+    Struct size: 0x14 (20 bytes): vtable + 4 int32_t fields.
+    Functions:
+      TrackPos_Init       (0x412620)  — full init: vtable + all 4 fields to -1
+      TrackPos_BaseInit   (0x412660)  — lightweight: vtable only
+      TrackPos_IsObjectBetween (0x412670) — 1D circular track overlap check     */
 
 /* ================================================================== */
-/* Additional vtables (addresses documented, class names TBD)          */
+/* Train / Subsystem — Locomotive train and rail subsystem              */
+/* ================================================================== */
+#define VTBL_TRAIN_ENTITY              0x004780B8  /* TrainEntity (Building-derived) vtable */
+#define VTBL_TRAIN_SUBSYSTEM           0x004781C4  /* TrainSubsystem (network manager) vtable */
+#define VTBL_TRAIN_STATION_WINDOW      0x00478130  /* TrainStationWindow (GameWindow-derived) vtable */
+
+/* ================================================================== */
+/* Netman — Multiplayer networking manager                              */
+/* ================================================================== */
+#define VTBL_NETMAN                    0x004781C8  /* Netman vtable
+    [0]  +0x00: scalar deleting destructor (NET_Dtor_ScalarDeleting, 0x453C10) */
+
+/* ================================================================== */
+/* DPlayConfig (GameConfig) — Network session configuration manager     */
+/* ================================================================== */
+#define VTBL_DPLAY_CONFIG              0x004781CC  /* DPlayConfig vtable
+    [0]  +0x00: scalar deleting destructor (NETMAN_FreeProviderList, 0x440CC0)
+    Size: 0xB0 bytes.
+    Manages: session name, player counts, provider list, timeout.
+    Persisted to NetSettings.dat via LoadSettings/SaveSettings.        */
+
+/* ================================================================== */
+/* NetworkPlayerList — DPLAY-level player list / surface cache          */
+/* ================================================================== */
+#define VTBL_NETWORK_PLAYER_LIST       0x00478268  /* NetworkPlayerList vtable
+    [1]  +0x04: (unknown)
+    Full struct derives from a base with surface cache arrays.          */
+
+/* ================================================================== */
+/* DPLAY_PlayerSlot — Per-player slot with track entries                */
+/* ================================================================== */
+#define VTBL_DPLAY_PLAYER_SLOT         0x00478264  /* DPLAY_PlayerSlot vtable
+    [0]  +0x00: scalar deleting destructor (DPLAY_CleanupPlayer, 0x442A00) */
+
+/* ================================================================== */
+/* DPLAY_SessionData — Serialized player snapshot for network use       */
+/* ================================================================== */
+#define VTBL_DPLAY_SESSION_DATA        0x00478268  /* Alias: same as VTBL_NETWORK_PLAYER_LIST */
+
+/* ================================================================== */
+/* NameEntryPanel — Multiplayer name-entry and lobby panel              */
+/* Derived from UI_WindowBase (vtable 0x477C30). Size: ~0x178 bytes.    */
+/* ================================================================== */
+#define VTBL_NAMEENTRYPANEL            0x004781D0  /* NameEntryPanel vtable
+    [0]  +0x00: scalar deleting destructor (0x440F80)
+    [1]  +0x04: Hide                        (inherited: UI_WindowBase_Hide, 0x425990)
+    [2]  +0x08: Show                        (inherited: UI_WindowBase_Show, 0x4259C0)
+    [3]  +0x0C: virtual (default stub)      (inherited: 0x425FD0)
+    [4]  +0x10: virtual (default stub)      (inherited: 0x426020)
+    [5]  +0x14: virtual (default stub)      (inherited: 0x426130)
+    [6]  +0x18: CreateFullWindow            (inherited: UI_CreateFullWindow, 0x425B70)
+    [7]  +0x1C: OnCreate                    (inherited: UI_WindowBase_OnCreate, 0x425D30)
+    [8]  +0x20: Render / draw               (NameEntryPanel_Draw, 0x441190)
+    [9]  +0x24: virtual (default no-op)     (inherited: 0x4661A0)
+    [10] +0x28: virtual (default stub)      (inherited: 0x426140)
+    [11] +0x2C: WindowProc                  (inherited: UI_DefWndProc, 0x422EA0) */
+
+/* ================================================================== */
+/* GameSetupPanel — City/scenario selection lobby panel                 */
+/* Derived from UI_WindowBase (vtable 0x477C30). Size: 0x260 bytes.    */
+/* ================================================================== */
+#define VTBL_GAMESETUPPANEL            0x004774D0  /* GameSetupPanel vtable
+    [0]  +0x00: scalar deleting destructor (0x408B00)
+    [1]  +0x04: Hide                        (inherited: UI_WindowBase_Hide, 0x425990)
+    [2]  +0x08: Show                        (inherited: UI_WindowBase_Show, 0x4259C0)
+    [3]  +0x0C: virtual (default stub)      (inherited: 0x425FD0)
+    [4]  +0x10: virtual (default stub)      (inherited: 0x426020)
+    [5]  +0x14: virtual (default stub)      (inherited: 0x426130)
+    [6]  +0x18: CreateFullWindow            (inherited: UI_CreateFullWindow, 0x425B70)
+    [7]  +0x1C: OnCreate                    (inherited: UI_WindowBase_OnCreate, 0x425D30)
+    [8]  +0x20: Render/Update               (GameSetupPanel_Render, 0x409280)
+    [9]  +0x24: virtual (default no-op)     (inherited: 0x4661A0)
+    [10] +0x28: virtual (default stub)      (inherited: 0x426140)
+    [11] +0x2C: WindowProc                  (inherited: UI_DefWndProc, 0x422EA0)
+    [12] +0x30: HandleMapClick              (0x40ABA0)
+    [13] +0x34: SelectLayoutEntry           (0x40AAF0)
+    [14] +0x38: SendScenarioSelect          (0x40AC50)
+    [15] +0x3C: ConnectToNetworkGame        (0x40AA20) */
+
+/* ================================================================== */
+/* PostcardAlbum — Postcard collection album window                     */
+/* Derived from UI_WindowBase (vtable 0x477C30).                       */
+/* ================================================================== */
+#define VTBL_POSTCARD_ALBUM            0x004773F0  /* PostcardAlbum window vtable */
+#define VTBL_LOCOBITMAP_ALT            0x004773F0  /* Alias: same table, used in FreeAllSprites */
+
+/* ================================================================== */
+/* PostcardPreviewWindow — Postcard send/preview dialog                 */
+/* Derived from UI_WindowBase (vtable 0x477C30).                       */
+/* ================================================================== */
+#define VTBL_POSTCARD_PREVIEW          0x004778F8  /* PostcardPreviewWindow vtable (TBD) */
+
+/* ================================================================== */
+/* PixelDataCache — Resource frame data cache object                   */
+/* ================================================================== */
+#define VTBL_PIXELDATA_CACHE           0x004773E8  /* PixelDataCache vtable        */
+
+/* ================================================================== */
+/* UIPANEL_Surface — Embedded offscreen DDraw surface wrapper           */
+/* ================================================================== */
+#define VTBL_UIPANEL_Surface           0x00477D28  /* UIPANEL_Surface vtable      */
+
+/* ================================================================== */
+/* Timer classes                                                        */
+/* ================================================================== */
+#define VTBL_TIMER2_BASE              0x00477FE0  /* Timer2 base vtable
+    Parallel variant of Timer with separate vtable.                       */
+#define VTBL_TIMER_BASE                0x00478070  /* Timer base vtable
+    The Timer class inherits from SortedCollection, which inherits from
+    Collection. Its vtable embeds the Collection virtual methods at
+    known offsets:
+      [0]  +0x00: Timer_Resize          (0x435D10)
+      [3]  +0x0C: Collection_RemoveAt   (0x4356B0)
+      [12] +0x30: SortedCollection_SetAt (0x435A10)
+      [15] +0x3C: SortedCollection_QuickSortRange (0x435AA0)
+      [18] +0x48: Compare (or Timer_IsSorted dispatch)
+    This vtable is the "Timer as Collection" view set during destruction.
+    The full vtable for the most-derived Timer class is larger and
+    contains additional TimerList-specific methods.                     */
+
+/* ================================================================== */
+/* Collection / SortedCollection — Generic dynamic array containers     */
+/*                                                                       */
+/* These are NOT standalone classes with their own vtables — instead,   */
+/* the vtable entries for Collection/SortedCollection operations are     */
+/* embedded in the vtables of derived classes (Timer, TimerList, etc.).  */
+/*                                                                       */
+/* Virtual method offsets (shared across all Collection derivatives):   */
+/*   [0]  +0x00: Resize           (e.g. Timer_Resize @ 0x435D10)        */
+/*   [3]  +0x0C: RemoveAt         (Collection_RemoveAt @ 0x4356B0)      */
+/*   [7]  +0x1C: GetAt            (varies by class)                     */
+/*   [12] +0x30: SetAt            (SortedCollection_SetAt @ 0x435A10)   */
+/*   [15] +0x3C: SortRange        (SortedCollection_QuickSortRange @ 0x435AA0) */
+/*   [18] +0x48: Compare          (varies by element type)              */
+/*                                                                       */
+/* Data references to Collection_RemoveAt (0x4356B0) appear at vtable   */
+/* offset +0x0C (slot 3) across: 0x4777A4, 0x477BDC, 0x477B4C,         */
+/* 0x47807C, 0x477FEC.                                                  */
+/*                                                                       */
+/* SortedCollection2 (templated variant, byte-identical to              */
+/* SortedCollection) has its SetAt at 0x4360B0, referenced from         */
+/* vtable slot at 0x477FB0.                                             */
+/* ================================================================== */
+#define VTBL_SORTED_COLLECTION2         0x00477FB0  /* SortedCollection2 vtable
+    Byte-identical twin of SortedCollection (different template instantiation).
+    SortedCollection2_SetAt @ 0x4360B0 at vtable offset +0x30 from 0x477FB0.  */
+
+/* ================================================================== */
+/* PlayerConfig / PlayerRecord                                          */
+/* ================================================================== */
+#define VTBL_PLAYERCONFIG              0x004784BC  /* PlayerConfig descriptor     */
+#define VTBL_PLAYERRECORD              0x004784C0  /* PlayerRecord descriptor     */
+
+/* ================================================================== */
+/* Panel — UI widget panel (GameObject subclass)                        */
+/* ================================================================== */
+#define VTBL_PANEL                     0x004784C8  /* Panel vtable                */
+
+/* ================================================================== */
+/* UIPANEL — Scrollable building picker panel (Panel subclass)          */
+/* ================================================================== */
+#define VTBL_UIPANEL                   0x00477CC8  /* UIPANEL vtable              */
+
+/* ================================================================== */
+/* GameWindow — Base for DDraw-backed overlay windows                   */
+/* ================================================================== */
+#define VTBL_GAMEWINDOW                0x00477898  /* GameWindow vtable
+    [0]  +0x00: scalar deleting destructor (0x413B50)
+    [1]  +0x04: Hide                   (0x413C10)
+    [2]  +0x08: Show                   (0x413D10)
+    [3]  +0x0C: set_mode               (0x414340)
+    [4]  +0x10: method_4               (0x426130)
+    [5]  +0x14: Create                 (0x413DE0)
+    [6]  +0x18: update_client_rect     (0x4140A0)
+    [7]  +0x1C: on_show                (0x426130)              */
+
+/* ================================================================== */
+/* AboutDialog — About/Credits dialog and idle screensaver             */
+/* Derived from GameWindow (vtable 0x477898). Size: 0x1184 bytes.      */
+/* ================================================================== */
+#define VTBL_ABOUTDIALOG              0x00477680  /* AboutDialog vtable
+    [0]  +0x00: scalar deleting destructor (CGWND_AboutDialog_Dtor,    0x40F270)
+    [1]  +0x04: Hide / screensaver_hide     (CGWND_Screensaver_Hide,   0x40F480)
+    [2]  +0x08: Show / screensaver_show     (CGWND_AboutDialog_Show,   0x40F2A0)
+    [3]  +0x0C: set_mode                    (inherited: GameWindow_SetMode,   0x414340)
+    [4]  +0x10: method_4                    (inherited: stub,                 0x426130)
+    [5]  +0x14: Create                      (inherited: GameWindow_Create,    0x413DE0)
+    [6]  +0x18: Init / load_credits         (CGWND_AboutDialog_Init,          0x40F5C0)
+    [7]  +0x1C: Update screensaver/tick     (CGWND_AboutDialog_UpdateScrn,    0x40F890)  */
+
+/* ================================================================== */
+/* HelpWnd (AudioMgr) — Tutorial/help window subsystem                  */
+/* Derived from GameWindow (vtable 0x477898). Size: ~0x3190 bytes.     */
+/* ================================================================== */
+#define VTBL_HELPWND                  0x00478428  /* HelpWnd vtable
+    [0]  +0x00: scalar deleting destructor
+    [1]  +0x04: Hide                        (HelpWnd_Hide,      0x450AE0)
+    [2]  +0x08: Show                        (HelpWnd_Show,      0x450240)
+    [3]  +0x0C: set_mode / Cursor dispatch  (inherited)
+    [4]  +0x10: method_4 / cleanup_sprites  (HelpWnd_CleanupSprites, 0x451440)
+    [5]  +0x14: Create                      (HelpWnd_Create,    0x450CA0)
+    [6]  +0x18: Init callback               (HelpWnd_Init,      0x451180)
+    [7]  +0x1C: on_show callback            (HelpWnd_UpdateAnim, 0x450450)
+    Slots beyond [7] are HelpWnd-specific (WndProc handler, etc.)    */
+
+/* ================================================================== */
+/* HelpPageNode — Linked list node for help page data                   */
+/* Sub-object used by HelpWnd's page system. Standalone class            */
+/* (not a window, not a GameObject).                                    */
+/* ================================================================== */
+#define VTBL_HELPPAGE_NODE            0x004783D8  /* HelpPageNode vtable
+    [0]  +0x00: scalar deleting destructor (HelpWnd_GetPageCount 0x44F2A0)
+    [1]  +0x04: base destructor             (HelpWnd_GetPageTitle 0x44F2C0)  */
+
+/* ================================================================== */
+/* UI_WindowBase — base class for all game UI windows                   */
+/* ================================================================== */
+#define VTBL_UI_WINDOWBASE             0x00477C30  /* UI_WindowBase vtable        */
+
+/* Global state shared by all UI_WindowBase instances */
+#define ADDR_g_cursor_back             0x004FD3CC  /* shared cursor backbuffer      */
+#define ADDR_g_cursor_refcount         0x004FD3D0  /* refcount for cursor backbuf   */
+
+/* ================================================================== */
+/* EditWindow (UI_MainMenu) — full-screen main menu dialog              */
+/* Derived from UI_WindowBase (vtable 0x477C30).                        */
+/* ================================================================== */
+#define VTBL_EDITWINDOW                0x004779F8  /* EditWindow vtable
+    [0]  +0x00: scalar deleting destructor (0x4203A0)
+    [1]  +0x04: Hide (0x420860)
+    [2]  +0x08: Show (0x4206B0)
+    [3]  +0x0C: virtual method (default stub, 0x425FD0)
+    [4]  +0x10: virtual method (default stub, 0x426020)
+    [5]  +0x14: virtual method (default stub, 0x426130)
+    [6]  +0x18: CreateFullWindow (inherited: UI_CreateFullWindow, 0x425B70)
+    [7]  +0x1C: OnCreate (overridden: EditWindow_OnCreate, 0x422930)
+    [8]  +0x20: Render/Update (EditWindow_Render, 0x422AA0)
+    [9]  +0x24: MouseWheel (overridden: EditWindow_MouseWheel, 0x422950)
+    [10] +0x28: virtual method (default stub, 0x426140)
+    [11] +0x2C: WindowProc (overridden: EditWindow_WndProc, 0x422600) */
+
+/* ================================================================== */
+/* Town — In-game town/city game view window                            */
+/* Derived from UI_WindowBase (vtable 0x477C30).                        */
+/* ================================================================== */
+#define VTBL_TOWN                     0x00477D88  /* Town vtable
+    [0]  +0x00: scalar deleting destructor (UI_DtorWrapper, 0x4234E0)
+    ... standard UI_WindowBase vtable layout ...
+    [8]  +0x20: Render/Update (Town_DrawDispatch, 0x42EDF0)
+    ... + more Town-specific virtual slots ...                          */
+
+/* ================================================================== */
+/* TownGameView — Town scroll view / game view widget                    */
+/* Not a window — derived from GameObject (vtable 0x477820)             */
+/* ================================================================== */
+#define VTBL_TOWN_GAMEVIEW             0x00477D30  /* TownGameView / ScrollView vtable
+    [0]  +0x00: scalar deleting destructor (0x42D810)
+    [1]  +0x04: (inherited from GameObject: StopSound)
+    [2]  +0x08: (inherited)
+    [3]  +0x0C: HitTest dispatch
+    [4]  +0x10: (inherited)
+    [5]  +0x14: (inherited)
+    [6]  +0x18: Init (GameObject::InitBase)
+    [7]  +0x1C: SetAnimState (overridden)
+    [8]  +0x20: SetFrame (inherited from GameObject)
+    [9]  +0x24: SetName (inherited)
+    [10] +0x28: Draw (TownGameView_Draw, 0x42F900)
+    [11] +0x2C: DrawConnected
+    [12] +0x30: OnTimerTick
+    [13] +0x34: (overridden)
+    [14] +0x38: AnimStateSelect (inherited)                             */
+
+/* ================================================================== */
+/* PostcardPreviewWindow — Postcard preview/send dialog                 */
+/* Derived from UI_WindowBase (vtable 0x477C30). Size: 0x150+ bytes.   */
+/* ================================================================== */
+#define VTBL_POSTCARD_PREVIEW_WINDOW   0x00477E20  /* PostcardPreviewWindow vtable
+    [0]  +0x00: scalar deleting destructor
+    [1]  +0x04: Hide (overridden: PostcardPreviewWindow_Hide, 0x430B40)
+    [2]  +0x08: Show (overridden: PostcardPreviewWindow_Show, 0x430C40)
+    [2]..[11]: inherited from UI_WindowBase (see VTBL_UI_WINDOWBASE)   */
+
+/* ================================================================== */
+/* GameVehicle — Vehicle destination management (extends RESDATA_GameObject) */
+/* ================================================================== */
+#define VTBL_RESDATA_GAMEVEHICLE        0x00478308  /* RESDATA_GameVehicle vtable
+    Base class (type=4, 0x11C bytes, extends RESDATA_GameObject).
+    [0]  +0x00: scalar deleting destructor (RESDATA_GameVehicle_Dtor, 0x44B030)
+    Constructor: RESDATA_GameVehicle_Ctor (0x44AE80)
+    Sets vehicle_kind at +0x10C based on tile type byte at RESDATA+0x63a.         */
+
+#define VTBL_GAMEVEHICLE                0x00477848  /* GameVehicle vtable
+    Derived from RESDATA_GameVehicle (vtable 0x478308) -> Entity -> GameObject.
+    Adds destination queue management (linked list at +0x124). Size: ~0x12C bytes.
+    15-slot layout matches Entity; overrides at [0], [7], [10].
+    [0]  +0x00: scalar deleting destructor (0x4128B0)           — OVERRIDDEN
+    [1]  +0x04: InvalidateRect (0x436AB0)                       — Entity
+    [2]  +0x08: PtInRect (0x436A10)                             — Entity
+    [3]  +0x0C: MoveTo (0x405C00)                               — Entity
+    [4]  +0x10: InvokeCallback1 (0x436AE0)                      — Entity
+    [5]  +0x14: InvokeCallback2 (0x436B00)                      — Entity
+    [6]  +0x18: InitBase (0x405900)                             — Entity
+    [7]  +0x1C: SetOccupantState (0x44B130)                     — RESDATA_GameVehicle
+    [8]  +0x20: SetFrame (0x405DE0)                             — Entity
+    [9]  +0x24: SetVisible (0x4061B0)                           — Entity
+    [10] +0x28: Update (0x412A80)                               — OVERRIDDEN
+    [11] +0x2C: Draw (0x4343B0)                                 — RESDATA_GameVehicle
+    [12] +0x30: DrawConnected (0x405FD0)                        — Entity
+    [13] +0x34: SetName (0x405E20)                              — Entity
+    [14] +0x38: SetAnimState (0x405A50)                         — Entity
+    Constructor: GameVehicle_Ctor (0x412870), chains to Entity(), then calls
+    RESDATA_GameVehicle_Ctor (0x44AE80) for base init, zeros extended fields,
+    sets vehicle_kind (+0x10C) to 4.
+    StartMoving (0x4129C0) is NON-VIRTUAL — not in vtable.               */
+
+/* ================================================================== */
+/* SoundObject — TrackPiece subclass with text label (vtable at 0x478280) */
+/* Used for sound-editor/resource-editor UI elements with text labels.  */
+/* ================================================================== */
+#define VTBL_SOUND_OBJECT              0x00478280  /* SoundObject vtable
+    [0]  +0x00: scalar deleting destructor (RESMGR_SoundObject_Dtor, 0x448FE0) */
+
+/* ================================================================== */
+/* ScriptEngine / ScriptedObject vtables                                 */
+/* ================================================================== */
+#define VTBL_SCRIPTENGINE_BASE          0x004782A4  /* ScriptEngine base (RESDATA) vtable
+    [0]  +0x00: Cleanup / scalar-deleting dtor (RESDATA_ScriptEngine_Cleanup, 0x4493C0)
+    [1]  +0x04: Lock (RESDATA_Lock, 0x449410)
+    [2]  +0x08: Unlock (RESDATA_Unlock, 0x449420)                      */
+#define VTBL_SCRIPTENGINE_FULL          0x00478378  /* ScriptEngine full vtable
+    [0]  +0x00: (scalar deleting destructor)
+    [1]  +0x04: Lock
+    [2]  +0x08: Unlock
+    [3]  +0x0C: Call/OnInitFromStream body destructor (ScriptEngine_Call, 0x44E930) */
+
+/* ScriptedObject vtable at 0x4782A8 (22+ slots).
+   Extends Panel -> GameObject. Has at least 23 vtable slots (indices 0-22).
+   Slots 0-14 match GameObject base; slots 15-22 are ScriptedObject-specific. */
+#define VTBL_SCRIPTED_OBJECT            0x004782A8  /* ScriptedObject vtable
+    [0]  +0x00: scalar deleting destructor (RESDATA_ScriptedObject_Dtor,       0x4494C0)
+    [1]  +0x04: UpdateChild/InvalidateRect  (RESDATA_UpdateChild,             0x454890)
+    [2]  +0x08: IsDragging / PtInRect       (RESDATA_ScriptedObject_IsDragging,0x449CE0)
+    [3]  +0x0C: MoveTo                       (RESDATA_ScriptedObject_MoveTo,   0x449DC0)
+    [4]  +0x10: HitTest                      (RESDATA_ScriptedObject_HitTest,  0x44A0C0)
+    [5]  +0x14: (unknown)                    (0x454A60)
+    [6]  +0x18: Init/InitBase                (Panel_Init,                      0x454680)
+    [7]  +0x1C: StopSound                    (GameObject_StopSound,            0x405A20)
+    [8]  +0x20: SetPause/callback            (CGWND_SetPause,                  0x4061B0)
+    [9]  +0x24: Update callback              (RESDATA_ScriptedObject_Update,   0x4497A0)
+    [10] +0x28: Dispatch/Draw                (RESDATA_DispatchEvent,           0x454900)
+    [11] +0x2C: DrawConnected                (GameObject_DrawConnected,        0x405FD0)
+    [12] +0x30: SetName                      (GameObject_SetName,              0x405E20)
+    [13] +0x34: SetAnimState                 (GameObject_SetAnimState,         0x405A50)
+    [14] +0x38: Shutdown/cleanup             (RESDATA_ScriptedObject_Shutdown, 0x4495B0)
+    [15] +0x3C: InitState                    (RESDATA_GameVehicle_InitState,   0x44ADF0)
+    [16] +0x40: HandleToolClick              (RESDATA_ScriptedObject_HandleToolClick, 0x44A250)
+    [17] +0x44: (unknown, shared by [18])    (0x44EF00)
+    [18] +0x48: (unknown, shared by [17])    (0x44EF00)
+    [19] +0x4C: UpdateToolState              (RESDATA_ScriptedObject_UpdateToolState, 0x44AC20)
+    [20] +0x50: GetDragOffset                (RESDATA_ScriptedObject_GetDragOffset,   0x449D80)
+    [21] +0x54: CheckClick                   (RESDATA_ScriptedObject_CheckClick,      0x449D00)
+    [22] +0x58: (unknown)                                                                   */
+
+#define VTBL_SCRIPTED_OBJECT_CHILD      0x00478358  /* Child ScriptedObject vtable
+    [0]  +0x00: scalar deleting destructor (RESDATA_ScriptedObject_DtorChain, 0x44B200) */
+
+/* ================================================================== */
+/* Vehicle — Road vehicle class (0x94-byte standalone, ScriptedObject-like) */
+/* ================================================================== */
+#define VTBL_VEHICLE                    0x0047836C  /* Vehicle vtable
+    Road vehicle class (cars, trucks, buses). Standalone 0x94-byte object
+    with its own struct layout (NOT derived from GameObject/Entity).
+    Vtable layout is identical to VTBL_SCRIPTED_OBJECT but with different
+    concrete function pointers:
+    [0]  +0x00: scalar deleting destructor (RESDATA_ScriptedObject_DtorList, 0x44C0B0)
+    [1]  +0x04: cleanup (inherited layout)
+    [2]  +0x08: PtInRect / CheckClick
+    [3]  +0x0C: MoveTo / HitTest dispatch
+    [4]  +0x10: method_4
+    [5]  +0x14: method_5
+    [6]  +0x18: InitBase
+    [7]  +0x1C: SetAnimState (editor vtable dispatch: 0=forward, 1=reverse)
+    [8]  +0x20: SetFrame (editor vtable dispatch: (anim_data, frame))
+    [9]  +0x24: SetName
+    [10] +0x28: Draw / Update
+    [11] +0x2C: DrawConnected / Dispatch
+    [12] +0x30: OnTimerTick
+    [13] +0x34: method_13
+    [14] +0x38: AnimStateSelect
+    Constructor: Vehicle_Ctor (0x44BE50)
+    Creates EditorState (0x20) and VehicleEditor (0x450) sub-objects.
+    Sub-objects: up to 4 VehicleEditor at +0x10, EditorState at +0x20.   */
+
+/* ================================================================== */
+/* Resource manager / data structures                                   */
+/* ================================================================== */
+#define VTBL_RESDATA                   0x00478274  /* RESDATA vtable              */
+#define VTBL_RESOURCE_ENTRY             0x00478278  /* ResourceEntry vtable        */
+
+/* ================================================================== */
+/* UI sprite / widget classes                                           */
+/* ================================================================== */
+#define VTBL_BUTTONSPRITE              0x0047851C  /* ButtonSprite vtable         */
+
+/* ================================================================== */
+/* TileMap Manager — TileMap wrapper/manager class                      */
+/* Set by Sprite_Create (0x454CF0). Operates on TileMap struct data.    */
+/* Despite "Sprite_" names, these are TileMap management functions.     */
+/* ================================================================== */
+#define VTBL_TILEMAP_MANAGER           0x00478520  /* TileMap manager vtable
+    [0]  +0x00: (scalar deleting destructor)
+    Used by Sprite_Create/Shutdown/LockAll/UnlockAll functions which
+    operate on the TileMap global struct despite "Sprite" naming.       */
+
+/* ================================================================== */
+/* ChildWindow — Generic child window widget                            */
+/* ================================================================== */
+#define VTBL_CHILD_WINDOW              0x00477C18  /* ChildWindow vtable          */
+
+/* ================================================================== */
+/* CursorEditWindow — In-game cursor-connected edit window              */
+/* ================================================================== */
+#define VTBL_CURSOREDITWINDOW          0x00477610  /* CursorEditWindow vtable     */
+
+/* ================================================================== */
+/* UI Manager — UI component manager singleton                           */
+/* ================================================================== */
+#define VTBL_UI_MANAGER                 0x00477AD0  /* UI Manager vtable           */
+
+/* ================================================================== */
+/* Timer list variants — used for timed events and callbacks            */
+/* ================================================================== */
+#define VTBL_TIMERLIST_A                0x00477BD0  /* TimerList variant A        */
+#define VTBL_TIMERLIST_B                0x00477B78  /* TimerList variant B        */
+#define VTBL_TIMERLIST_C                0x00477B40  /* TimerList variant C        */
+#define VTBL_TIMERLIST_WRAPPER          0x00477AE8  /* TimerList wrapper          */
+#define VTBL_TIMERLIST_WRAPPER2         0x00477AEC  /* TimerList wrapper 2        */
+
+/* ================================================================== */
+/* TimerSlotList — Timer slot list (Collection layout, 16 bytes)       */
+/* Dead marker vtable used during destruction:                          */
+/*   [0] +0x00: Timer_Resize (minimal resize-only slot)                */
+/*   [1] +0x04: TimerSlotList_ScalarDeletingDtor_Dead (0x412580)      */
+/* ================================================================== */
+#define VTBL_TIMERSLOT_DEAD_MARKER      0x00477798  /* TimerSlotList dead marker vtable
+    [0] +0x00: Timer_Resize
+    [1] +0x04: TimerSlotList_ScalarDeletingDtor_Dead (0x412580)         */
+
+/* VTBL at 0x477790 — vtable[14] (FindIndex) slice used by Timer slots */
+/* Entry: Game_CheckIdleTimeout (0x412540) — linear search in items array */
+
+/* ================================================================== */
+/* Vehicle Editor — Track/vehicle editing UI                            */
+/* ================================================================== */
+#define VTBL_UIENTITY                  0x00477A90  /* UIEntity vtable */
+
+#define VTBL_VEHICLE_EDITOR             0x00477590  /* VehicleEditor vtable
+    [0]  +0x00: scalar deleting destructor (VehicleEditor_Dtor, 0x43C9C0)
+    [1]  +0x04: (inherited from GameObject)
+    [2]  +0x08: (inherited)
+    [3]  +0x0C: HitTest dispatch (overridden: VehicleEditor_HitTest)
+    [4]  +0x10: (overridden)
+    [5]  +0x14: (inherited)
+    [6]  +0x18: Init (overridden: VehicleEditor_Init)
+    [7]  +0x1C: SetAnimState
+    [8]  +0x20: SetFrame (overridden)
+    [9]  +0x24: SetName
+    [10] +0x28: Draw (VehicleEditor_Draw, 0x43CFB0)
+    [11] +0x2C: DrawConnected
+    [12] +0x30: OnTimerTick
+    [13] +0x34: (overridden)
+    [14] +0x38: AnimStateSelect/VehicleCtor (VehicleEditor_VehicleCtor, 0x43CAB0) */
+
+/* ================================================================== */
+/* EditorState — Per-endpoint track editor state machine               */
+/* Size: 0x20 bytes. Vtable: 0x477564                                  */
+/* ================================================================== */
+#define VTBL_EDITORSTATE               0x00477564  /* EditorState vtable
+    [0] +0x00: scalar deleting destructor (EditorState::~EditorState, 0x40B550)  */
+
+/* ================================================================== */
+/* TrackPiece — Individual rail track piece (derives from GameObject)   */
+/* ================================================================== */
+#define VTBL_TRACK_PIECE                0x00477568  /* TrackPiece vtable
+    Derives directly from GameObject (NOT from Entity — type=7).
+    GameObject base vtable at 0x477820 has 4 slots (0-3).
+    TrackPiece adds slots 4-8.
+    [0]  +0x00: scalar deleting destructor        (TrackPiece_ScrDtor, 0x40D020)
+    [1]  +0x04: InvalidateRect                    (inherited: 0x436AB0)
+    [2]  +0x08: PtInRect                          (inherited: 0x436A10)
+    [3]  +0x0C: HitTest dispatch                  (TrackPiece_HitTest, 0x43E9A0)
+    [4]  +0x10: (unknown — TrackPiece-specific)
+    [5]  +0x14: (unknown — TrackPiece-specific)
+    [6]  +0x18: SetFrame                          (TrackPiece_SetFrame, 0x40D2A0)
+    [7]  +0x1C: UpdateAnim                        (TrackPiece_UpdateAnim, 0x40D2F0)
+    [8]  +0x20: Render                            (TrackPiece_Render, 0x40D340)
+    Note: Init() at 0x40D0B0 is NOT a virtual method — it's called
+    directly from the constructor only.                                 */
+
+/* ================================================================== */
+/* DDraw building sprite resource                                       */
+/* ================================================================== */
+#define VTBL_DDRAW_BUILDING_SPRITE      0x00478548
+
+/* ================================================================== */
+/* Win32 Thread wrapper                                                 */
+/* ================================================================== */
+#define VTBL_WIN32_THREAD               0x00479168
+
+/* ================================================================== */
+/* Unidentified vtables — addresses only, class TBD                     */
 /* ================================================================== */
 #define VTBL_0047703C                  0x0047703C
 #define VTBL_00477044                  0x00477044
@@ -61,33 +616,3 @@
 #define VTBL_004770A0                  0x004770A0
 #define VTBL_004770C4                  0x004770C4
 #define VTBL_0047726C                  0x0047726C
-#define VTBL_00477290                  0x00477290
-#define VTBL_004772A4                  0x004772A4
-#define VTBL_004772A8                  0x004772A8
-#define VTBL_004772AC                  0x004772AC
-#define VTBL_004772D4                  0x004772D4
-#define VTBL_004772F4                  0x004772F4
-#define VTBL_004772F8                  0x004772F8
-#define VTBL_004772FC                  0x004772FC
-#define VTBL_00477300                  0x00477300
-#define VTBL_00477340                  0x00477340
-#define VTBL_00477348                  0x00477348
-#define VTBL_0047734C                  0x0047734C
-#define VTBL_00477354                  0x00477354
-#define VTBL_00477358                  0x00477358
-#define VTBL_00477364                  0x00477364
-#define VTBL_00477368                  0x00477368
-#define VTBL_0047736C                  0x0047736C
-#define VTBL_00477374                  0x00477374
-#define VTBL_00477394                  0x00477394
-#define VTBL_004773AC                  0x004773AC
-#define VTBL_004773B4                  0x004773B4
-#define VTBL_00477564                  0x00477564
-#define VTBL_00477894                  0x00477894
-#define VTBL_00477A90                  0x00477A90
-#define VTBL_00477B40                  0x00477B40
-#define VTBL_00477BD0                  0x00477BD0
-#define VTBL_00477D28                  0x00477D28
-#define VTBL_00477F70                  0x00477F70
-#define VTBL_00477F88                  0x00477F88
-#define VTBL_00477FE0                  0x00477FE0

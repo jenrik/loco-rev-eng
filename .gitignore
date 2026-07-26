@@ -6,3 +6,15 @@ tools/ghidra-mcp/*.zip
 tools/ghidra-mcp/GhidraMCP-release-*/
 .claude/
 *.pyc
+.direnv/
+.pi/
+
+# Generated build outputs
+build/
+src/decompiled_cpp/build/
+src/sdl3_shims/build/
+*.o
+
+# Locally extracted game assets and runtime captures
+unpacked/
+screenshot-from-virtual-machine/

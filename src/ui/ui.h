@@ -1155,19 +1155,30 @@ typedef struct PanelB {
  *   +0x0f0  uint8_t  flag0
  *   +0x0f4  uint8_t  flag1           cleared on destroy
  *   +0x0f8  HICON    hAppIcon        resource 0x65
- *   +0x13c..+0x17c  8 RECT hit-rects for buttons (set by MainMenu_recalcLayout)
- *   +0x16c  int32_t  centerOffsetX   (surface_w - screen_w) / 2
+ *   +0x0fc  RECT     rcBtn407        hit-rect, sprite id 0x407  (design (0x212,0x1ea))
+ *   +0x10c  RECT     rcBtn409        hit-rect, sprite id 0x409  (design (0x2c9,0x1ea))
+ *   +0x11c  RECT     rcBtn40b        hit-rect, sprite id 0x40b  (design (0x387,0x1bd))
+ *   +0x12c  RECT     rcBtn40e        hit-rect, sprite id 0x40e  (design (0x387,0x231))
+ *   +0x13c  RECT     rcBtnGo         hit-rect, sprite 0x403/0x404 (design (0x387,0x2a5))
+ *   +0x14c  RECT     rcBtnBack       hit-rect, sprite 0x405/0x406 (design (0x18b,0x2a5))
+ *   +0x15c  RECT     rcFixedB        fixed region (0x232,0x2cc)-(0x34d,0x2ed)
+ *   +0x16c  int32_t  centerOffsetX   (surface_w - screen_w) / 2  [centering delta]
  *   +0x170  int32_t  centerOffsetY   (surface_h - screen_h) / 2
+ *   +0x174  int32_t  originX         g_screenWidth  + centerOffsetX
+ *   +0x178  int32_t  originY         g_screenHeight + centerOffsetY
+ *   +0x17c  RECT     rcFixedA        fixed region (300,0xac)-(0x3d4,0x354)
  *   +0x18c  BOOL     spritesInitialized
- *   +0x1b0..+0x1e7  SpriteSlot[12]  main-menu button sprite pairs
- *   +0x1f0  void*    pMainSurface    1280x1024 DirectDraw / SDL_Texture*
+ *   +0x190..+0x1ef  SpriteSlot[12]  main-menu button sprite pairs (NOT +0x1b0!)
+ *           order: 0x407,0x408,0x409,0x40a,0x403,0x404,0x405,0x406,0x40b,0x40c,0x40e,0x40f
+ *   +0x1f0  void*    pMainSurface    1280x1024 DirectDraw / SDL_Texture* (composite)
  *   +0x204  HBRUSH   hbrSolid        CreateSolidBrush(0x5252e7) blue-purple
  *   +0x208  HBRUSH   hbrHatch        CreateHatchBrush(0x000a5c0a) dark olive
  *   +0x20c  HWND     hwndEdit        child edit control (ID 0x411, max 11 ch)
- *   +0x210  void*    pChildDialog    active child dialog or NULL
- *   +0x214  WNDPROC  savedWndProc    original wndproc before subclassing
- *   +0x21c  PanelA*  pPanelA         name-entry panel
- *   +0x220  PanelB*  pPanelB         city/multiplayer panel
+ *   +0x210  void*    pChildDialog    active child dialog (intro AVI) or NULL
+ *   +0x214  WNDPROC  savedEditWndProc  original EDIT wndproc before subclassing
+ *   +0x218  WNDPROC  savedChildWndProc original child-dialog wndproc
+ *   +0x21c  PanelA*  pPanelA         action-strip panel  (dlg template 0x1f6)
+ *   +0x220  PanelB*  pPanelB         city/multiplayer panel (dlg template 0x1f9)
  *
  * WIN32: Edit control subclassed to wndproc at 0x420b20.
  *        Cursor hidden via while(ShowCursor(FALSE)>=0){} loop.
@@ -1184,22 +1195,35 @@ typedef struct EditWindow {
     uint8_t     flag1;              /* +0x0f4 */
     uint8_t     _pad1[3];
     void       *hAppIcon;           /* +0x0f8  HICON, resource 0x65 */
-    uint8_t     _pad2[0x8f];        /* +0x0fc..+0x18b hit-rects + offsets */
+    /* 7 button/region hit-rects (filled by MainMenu_recalcLayout, 0x421200) */
+    LOCO_RECT   rcBtn407;           /* +0x0fc */
+    LOCO_RECT   rcBtn409;           /* +0x10c */
+    LOCO_RECT   rcBtn40b;           /* +0x11c */
+    LOCO_RECT   rcBtn40e;           /* +0x12c */
+    LOCO_RECT   rcBtnGo;            /* +0x13c  sprite pair 0x403/0x404 */
+    LOCO_RECT   rcBtnBack;          /* +0x14c  sprite pair 0x405/0x406 */
+    LOCO_RECT   rcFixedB;           /* +0x15c */
+    int32_t     centerOffsetX;      /* +0x16c  (surface_w - g_screenWidth)/2  */
+    int32_t     centerOffsetY;      /* +0x170  (surface_h - g_screenHeight)/2 */
+    int32_t     originX;            /* +0x174 */
+    int32_t     originY;            /* +0x178 */
+    LOCO_RECT   rcFixedA;           /* +0x17c */
     int32_t     spritesInitialized; /* +0x18c */
-    uint8_t     _pad3[0x23];        /* +0x190..+0x1b2 */
-    SpriteSlot  menuSprite[12];     /* +0x1b0..+0x1e7 */
-    void       *pMainSurface;       /* +0x1f0  1280x1024 DDraw / SDL_Texture */
+    /* 12 sprite slots (6 buttons x 2 states) START at +0x190, not +0x1b0.
+     * Index order matches resource ids 0x407,0x408,0x409,0x40a,0x403,0x404,
+     * 0x405,0x406,0x40b,0x40c,0x40e,0x40f.  rcBtnGo uses [4]/[5], etc. */
+    SpriteSlot  menuSprite[12];     /* +0x190..+0x1ef */
+    void       *pMainSurface;       /* +0x1f0  1280x1024 DDraw / SDL_Texture (composite) */
     uint8_t     _pad4[0x10];        /* +0x1f4..+0x203 */
     void       *hbrSolid;           /* +0x204  0x5252e7 blue-purple */
     void       *hbrHatch;           /* +0x208  0x000a5c0a dark olive */
     void       *hwndEdit;           /* +0x20c  HWND child edit control */
-    void       *pChildDialog;       /* +0x210 */
-    void       *savedWndProc;       /* +0x214  WNDPROC before subclass */
-    uint8_t     _pad5[4];           /* +0x218..+0x21b */
-    PanelA     *pPanelA;            /* +0x21c */
-    PanelB     *pPanelB;            /* +0x220 */
-    uint8_t     _pad6[0x0f];        /* +0x224..+0x22f */
-} EditWindow;                       /* total: ~0x230 bytes */
+    void       *pChildDialog;       /* +0x210  intro-AVI child dialog */
+    void       *savedEditWndProc;   /* +0x214  EDIT wndproc before subclass */
+    void       *savedChildWndProc;  /* +0x218  child-dialog wndproc */
+    PanelA     *pPanelA;            /* +0x21c  dlg template 0x1f6 */
+    PanelB     *pPanelB;            /* +0x220  dlg template 0x1f9 */
+} EditWindow;                       /* total: 0x224 bytes (matches Ghidra EditWnd) */
 
 /*---------------------------------------------------------------------------
  * ScreenSaverCtx  --  Screensaver dialog state block (~0x78 bytes)

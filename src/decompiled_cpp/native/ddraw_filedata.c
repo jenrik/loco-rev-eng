@@ -1,0 +1,293 @@
+/**
+ * ddraw_filedata.c — File resource data loading and cleanup
+ *
+ * Lego Loco (loco.exe, 1998, MSVC x86)
+ * Reverse engineered via Ghidra decompilation.
+ *
+ * These functions manage a FileData struct (16 bytes) used by the
+ * ResourceManager to load chunked resource files (.RES/.PKG):
+ *
+ * struct FileData {
+ *     int       file_handle;    // +0x00  CRT file handle
+ *     ChunkNode* chunk_list;    // +0x04  linked list of parsed chunks
+ *     int       field_08;       // +0x08  flags/state, zeroed on close
+ *     char*     filename;       // +0x0C  malloc'd filename string
+ * };
+ *
+ * Each ChunkNode (16 bytes) in the linked list:
+ * struct ChunkNode {
+ *     char*     data;           // +0x00  malloc'd chunk data blob
+ *     int       chunk_id;       // +0x04  chunk identifier
+ *     int       data_size;      // +0x08  chunk data byte count
+ *     ChunkNode* next;          // +0x0C  next node in singly-linked list
+ * };
+ *
+ * The file format is: [chunk_name:4B][data_size:4B][chunk_id:4B][data:...]
+ * repeated until end-of-file.
+ *
+ * DDRAW_LoadFile is __thiscall — it's a C++ method on a FileData struct.
+ * DDRAW_FileData_Dtor is __fastcall — the destructor/cleanup for the same.
+ * DDRAW_FreeClipper (in ddraw_clippers.c) zeros a different struct.
+ */
+
+#include <stdint.h>
+
+/* ================================================================== */
+/* External functions                                                  */
+/* ================================================================== */
+
+extern void*  operator_new(uint32_t size);              /* 0x465CE0 */
+extern void   __cdecl GLOBAL_free(void* ptr);           /* 0x465CD0 */
+extern void   __cdecl CRT_free(void* ptr);              /* 0x466C70 */
+extern void*  __cdecl CRT_malloc_zero(uint32_t size);   /* 0x4673C0 */
+
+/* CRT file read helpers */
+extern int32_t __cdecl CRT_0x468480(char* filename, void* mode);  /* fopen-like open */
+extern void   __cdecl CRT_0x4681D0(int32_t handle);               /* fclose-like close */
+extern int32_t __cdecl CRT_0x468610(void* buf, uint32_t size,      /* fread-like read */
+                                      uint32_t count, int32_t handle);
+extern void   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...);  /* 0x466D60 */
+extern void   __cdecl CRT_wcsstr(uint8_t* str, uint8_t* substr);  /* 0x471480 */
+
+/* ================================================================== */
+/* ChunkNode struct (16 bytes)                                         */
+/* ================================================================== */
+typedef struct ChunkNode {
+    char*           data;       /* +0x00  malloc'd chunk data */
+    int32_t         chunk_id;   /* +0x04  chunk type identifier */
+    int32_t         data_size;  /* +0x08  chunk data byte count */
+    struct ChunkNode* next;     /* +0x0C  next in singly-linked list */
+} ChunkNode;
+
+/* ================================================================== */
+/* FileData struct (16 bytes)                                          */
+/* ================================================================== */
+typedef struct {
+    int32_t     file_handle;    /* +0x00  CRT file handle */
+    ChunkNode*  chunk_list;     /* +0x04  head of chunk linked list */
+    int32_t     field_08;       /* +0x08  state/flags */
+    char*       filename;       /* +0x0C  malloc'd filename copy */
+} FileData;
+
+/* ================================================================== */
+/* External constants                                                  */
+/* ================================================================== */
+
+extern const char DAT_00481190[4];     /* fopen mode "rb" */
+extern const char DAT_0048118c[4];     /* ".RES" extension */
+extern const char DAT_00481194[4];     /* ".PKG" extension */
+
+/* ================================================================== */
+/* DDRAW_FileData_Dtor — Destructor for FileData struct               */
+/* Address: 0x45CA20                                                   */
+/* Size: 123 bytes (43 insn)                                           */
+/* Calling convention: __fastcall (param_1 in ECX = FileData*)         */
+/*                                                                     */
+/* Frees the file handle, walks the chunk linked list freeing each     */
+/* node's data blob and the node itself, then frees the filename.      */
+/*                                                                     */
+/* Does NOT free the FileData struct itself — caller owns memory.      */
+/*                                                                     */
+/* Called by: NET_Shutdown (?), direct call sites                      */
+/*                                                                     */
+/* @param fd  FileData* to clean up                                    */
+/* ================================================================== */
+void __fastcall DDRAW_FileData_Dtor(FileData* fd)
+{
+    /* Close file handle if open */
+    if (fd->file_handle != 0) {
+        CRT_0x4681D0(fd->file_handle);
+        fd->file_handle = 0;
+    }
+
+    /* Walk and free the chunk linked list */
+    ChunkNode* node = fd->chunk_list;
+    fd->field_08 = 0;
+
+    while (node != NULL) {
+        ChunkNode* next = node->next;
+
+        /* Free chunk data blob if present */
+        if (node->data != NULL) {
+            CRT_free(node->data);
+            node->data = NULL;
+        }
+
+        /* Free the chunk node itself */
+        GLOBAL_free(node);
+        node = next;
+    }
+
+    fd->chunk_list = NULL;
+
+    /* Free filename string if present */
+    if (fd->filename != NULL) {
+        CRT_free(fd->filename);
+        fd->filename = NULL;
+    }
+}
+
+/* ================================================================== */
+/* DDRAW_LoadFile — Load and parse a chunked resource file            */
+/* Address: 0x45CAA0                                                   */
+/* Size: 603 bytes (219 insn)                                          */
+/* Calling convention: __thiscall (ECX = FileData*, 1 stack param)    */
+/*                                                                     */
+/* Opens a resource file (.PKG or .RES), reads the extension to        */
+/* determine file type, then reads chunks in a loop:                   */
+/*   [chunk_name:4B][data_size:4B][chunk_id:4B][data:data_size]       */
+/* Each chunk is stored as a ChunkNode appended to a singly-linked     */
+/* list at fd->chunk_list (+0x04).                                     */
+/*                                                                     */
+/* After reading all chunks, closes the first file handle and opens    */
+/* the .RES counterpart (if original was .PKG) or vice versa.          */
+/* The filename used is stored at fd->filename (+0x0C).                */
+/*                                                                     */
+/* Called by: ResourceManager_Init (0x4460A4) — with ECX=param_1+0x18 */
+/*                                                                     */
+/* @param filename  Path to the resource file to load                  */
+/* @return          TRUE (1) on success, FALSE (0) on failure           */
+/* ================================================================== */
+uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
+{
+    char local_name[400];   /* stack buffer for filename manipulation */
+    char chunk_name[400];   /* stack buffer for chunk names */
+    char ext_buffer[4];     /* extension string */
+
+    /* Close any existing file handle + reset */
+    if (fd->file_handle != 0) {
+        CRT_0x4681D0(fd->file_handle);
+        fd->file_handle = 0;
+        fd->field_08 = 0;
+    }
+
+    /* Copy filename to local buffer */
+    {
+        const char* src = filename;
+        char* dst = local_name;
+        while (*src != '\0') {
+            *dst++ = *src++;
+        }
+        *dst = '\0';
+    }
+
+    /* Find extension (last '.') */
+    {
+        char* ext_ptr = NULL;
+        char* p = local_name;
+        while (*p != '\0') {
+            if (*p == '.') {
+                ext_ptr = p;
+            }
+            p++;
+        }
+
+        if (ext_ptr == NULL) {
+            return 0;  /* no extension found */
+        }
+
+        ext_ptr++;  /* skip the '.' */
+
+        /* Build extension name (starting from ext_ptr) */
+        CRT_sprintf_buf(ext_ptr, (char*)&DAT_00481194);  /* ".PKG" */
+
+        /* Open file for reading */
+        fd->file_handle = CRT_0x468480(local_name, (void*)&DAT_00481190);  /* "rb" */
+
+        if (fd->file_handle == 0) {
+            return 0;
+        }
+    }
+
+    /* Read chunk data loop */
+    {
+        uint32_t chunk_size;
+        uint32_t chunk_id;
+
+        while ((*(uint8_t*)(fd->file_handle + 0xC) & 0x10) == 0) {
+            /* Read chunk name (4 bytes) */
+            uint32_t bytes_read = CRT_0x468610((char*)&chunk_size, 1, 4, fd->file_handle);
+            if (bytes_read == 0) break;
+
+            /* Read data size (4 bytes) */
+            CRT_0x468610(chunk_name, 1, chunk_size, fd->file_handle);
+
+            /* Read chunk ID (4 bytes) */
+            CRT_0x468610((char*)&chunk_id, 1, 4, fd->file_handle);
+
+            /* Read total data (4 bytes for original size + data) */
+            CRT_0x468610((char*)&chunk_size, 1, 4, fd->file_handle);
+
+            /* Allocate and populate chunk node */
+            ChunkNode* node = (ChunkNode*)operator_new(0x10);
+            char* node_data = (char*)CRT_malloc_zero(chunk_size);
+
+            node->data = node_data;
+            node->data_size = chunk_size;
+
+            /* Copy chunk name */
+            {
+                const char* src2 = chunk_name;
+                char* dst2 = node_data;
+                while (*src2 != '\0') {
+                    *dst2++ = *src2++;
+                }
+                *dst2 = '\0';
+            }
+
+            node->chunk_id = chunk_id;
+            node->next = NULL;
+
+            /* Append to linked list (tail insert) */
+            if (fd->chunk_list == NULL) {
+                fd->chunk_list = node;
+            } else {
+                ChunkNode* tail = fd->chunk_list;
+                while (tail->next != NULL) {
+                    tail = tail->next;
+                }
+                tail->next = node;
+            }
+        }
+    }
+
+    /* Close first file handle */
+    CRT_0x4681D0(fd->file_handle);
+
+    /* Build alternate filename (.RES extension) */
+    /* ext_ptr is still valid from above */
+    {
+        char* p2 = local_name;
+        while (*p2 != '\0') p2++;
+        /* Back up to extension */
+        while (p2 > local_name && *p2 != '.') p2--;
+        if (*p2 == '.') p2++;
+        CRT_sprintf_buf(p2, (char*)&DAT_0048118c);  /* ".RES" */
+
+        /* Open second file */
+        fd->file_handle = CRT_0x468480(local_name, (void*)&DAT_00481190);
+    }
+
+    /* Store filename */
+    {
+        const char* src3 = local_name;
+        uint32_t len = 0;
+        while (src3[len] != '\0') len++;
+        char* name_copy = (char*)CRT_malloc_zero(len + 1);
+        fd->filename = name_copy;
+
+        src3 = local_name;
+        while (*src3 != '\0') {
+            *name_copy++ = *src3++;
+        }
+        *name_copy = '\0';
+    }
+
+    fd->field_08 = 0;
+
+    if (fd->file_handle == 0) {
+        return 0;
+    }
+
+    return 1;
+}

@@ -1417,6 +1417,37 @@ int         g_screensaverMode    = 0;      /* DAT_004a9918 */
 int         g_seasonOverride     = 0;      /* DAT_00485230 */
 int32_t     g_locobitmapRefCount = 0;      /* DAT_00485254 */
 
+/* Actual screen dimensions, set once when the display mode is selected.
+ * The main menu is authored in MAINMENU_SURFACE_WIDTH x MAINMENU_SURFACE_HEIGHT
+ * (1280x1024) "design space" and centered onto these. */
+int         g_screenWidth        = 640;    /* DAT_004851d8 */
+int         g_screenHeight       = 480;    /* DAT_00485214 */
+
+/* -------------------------------------------------------------------------
+ * Small rect helpers — direct ports of the GDI32 SetRect / OffsetRect calls
+ * the original code uses all over the menu layout/hit-test paths.
+ * ---------------------------------------------------------------------- */
+static void LOCO_RECT_set(LOCO_RECT *r, int l, int t, int rt, int b)
+{
+    r->left = l; r->top = t; r->right = rt; r->bottom = b;   /* WIN32: SetRect */
+}
+static void LOCO_RECT_offset(LOCO_RECT *r, int dx, int dy)
+{
+    r->left += dx; r->right += dx; r->top += dy; r->bottom += dy; /* WIN32: OffsetRect */
+}
+static int LOCO_RECT_contains(const LOCO_RECT *r, int x, int y)
+{
+    /* WIN32: PtInRect — note right/bottom are exclusive */
+    return x >= r->left && x < r->right && y >= r->top && y < r->bottom;
+}
+
+/* WIN32: FUN_00425d30 — WindowBase (CGWnd) base layout recompute */
+extern void WindowBase_recalc(EditWindow *self);
+
+/* Forward decl: helper extracted from MainMenu_recalcLayout (defined below). */
+static void MenuButton_placeRect(EditWindow *self, LOCO_RECT *rc,
+                                 int x, int y, int spriteIdx);
+
 /* =========================================================================
  * ButtonSprite_ctor  (0x00454b50)
  *
@@ -1782,7 +1813,7 @@ EditWindow *EditWindow_ctor(EditWindow *self)
     self->pPanelA           = NULL;
     self->pPanelB           = NULL;
     self->hwndEdit          = NULL;
-    self->savedWndProc      = NULL;
+    self->savedEditWndProc      = NULL;
     self->pMainSurface      = NULL;
     self->hbrSolid          = NULL;  /* WIN32: CreateSolidBrush(0x5252e7)    */
     self->hbrHatch          = NULL;  /* WIN32: CreateHatchBrush(5, 0xa5c0a)  */
@@ -1903,7 +1934,7 @@ int EditWindow_WM_INITDIALOG(EditWindow *self)
      * LINUX: SDL_StartTextInput(); SDL_SetTextInputRect(&textRect)
      */
     self->hwndEdit     = NULL;
-    self->savedWndProc = NULL;
+    self->savedEditWndProc = NULL;
 
     return 1;
 }
@@ -2034,7 +2065,7 @@ void EditWindow_setState(EditWindow *self, int newState)
 
     case UI_STATE_CLOSE_CHILD:  /* 7 */
         /* restore subclassed wndproc */
-        if (self->hwndEdit && self->savedWndProc) {
+        if (self->hwndEdit && self->savedEditWndProc) {
             /* WIN32: SetWindowLongA(hwndEdit, GWL_WNDPROC, (LONG)savedWndProc)
              * LINUX: no-op */
         }
@@ -2079,7 +2110,7 @@ void EditWindow_destroy(EditWindow *self)
     self->flag1 = 0;
 
     if (self->pChildDialog) {
-        if (self->hwndEdit && self->savedWndProc) {
+        if (self->hwndEdit && self->savedEditWndProc) {
             /* WIN32: SetWindowLongA(hwndEdit, GWL_WNDPROC, ...) */
         }
         /* WIN32: DestroyWindow or FUN_004544a0 */
@@ -2205,21 +2236,79 @@ void MainMenu_layoutSprites(EditWindow *self)
  * ======================================================================= */
 void MainMenu_recalcLayout(EditWindow *self)
 {
-    int cx, cy;
+    /*
+     * Recovered verbatim from FUN_00421200.  The menu is authored in a fixed
+     * 1280x1024 "design space" (MAINMENU_SURFACE_*).  Each button is placed at
+     * its design coordinate, sized from its OWN sprite's pixel dimensions
+     * (sprite header: width at +0x14, height at +0x16), then the whole layout
+     * is shifted by (-centerOffsetX, -centerOffsetY) so the design canvas is
+     * centered on the player's actual screen (g_screenWidth/g_screenHeight,
+     * 0x4851d8 / 0x485214).  Because every rect uses the SAME offset, the menu
+     * moves as a rigid body across resolutions.
+     *
+     * Helper that mirrors the WIN32 SetRect+(read sprite size)+OffsetRect idiom:
+     *   left/top  = design coordinate
+     *   right     = left + sprite.width
+     *   bottom    = top  + sprite.height
+     *   then OffsetRect(-dx, -dy)
+     */
+    WindowBase_recalc(self);                       /* WIN32: FUN_00425d30(self) */
 
     if (!self->spritesInitialized) {
         return;
     }
 
-    /* centering delta: (surface_w - screen_w)/2 */
-    cx = (MAINMENU_SURFACE_WIDTH  - 640) / 2;  /* placeholder screen width  */
-    cy = (MAINMENU_SURFACE_HEIGHT - 480) / 2;  /* placeholder screen height */
-    (void)cx; (void)cy;
+    /* Centering deltas — half the difference between the composite surface size
+     * and the real screen size.  Surface w/h are LOCOBITMAP fields at +8/+0xc. */
+    self->centerOffsetX =
+        ((int)((LOCOBITMAP *)self->pMainSurface)->width  - g_screenWidth ) >> 1;  /* +0x16c */
+    self->centerOffsetY =
+        ((int)((LOCOBITMAP *)self->pMainSurface)->height - g_screenHeight) >> 1;  /* +0x170 */
+    self->originX = g_screenWidth  + self->centerOffsetX;                         /* +0x174 */
+    self->originY = g_screenHeight + self->centerOffsetY;                         /* +0x178 */
 
-    /* WIN32 pattern per slot:
-     *   SetRect(&rectArray[n], x, y, x+w, y+h);
-     *   OffsetRect(&rectArray[n], cx, cy);
-     * LINUX: manual LOCO_RECT assignment and cx/cy addition */
+    /* menuSprite[] index map: [0]=0x407 [1]=0x408 [2]=0x409 [3]=0x40a
+     *                         [4]=0x403(Go) [5]=0x404 [6]=0x405(Back) [7]=0x406
+     *                         [8]=0x40b [9]=0x40c [10]=0x40e [11]=0x40f          */
+    MenuButton_placeRect(self, &self->rcBtnGo,   0x387, 0x2a5, 4);  /* sprite 0x403 */
+    MenuButton_placeRect(self, &self->rcBtnBack, 0x18b, 0x2a5, 6);  /* sprite 0x405 */
+    MenuButton_placeRect(self, &self->rcBtn407,  0x212, 0x1ea, 0);  /* sprite 0x407 */
+    MenuButton_placeRect(self, &self->rcBtn409,  0x2c9, 0x1ea, 2);  /* sprite 0x409 */
+    MenuButton_placeRect(self, &self->rcBtn40b,  0x387, 0x1bd, 8);  /* sprite 0x40b */
+    MenuButton_placeRect(self, &self->rcBtn40e,  0x387, 0x231, 10); /* sprite 0x40e */
+
+    /* Two fixed (non-sprite-sized) regions, then centered the same way. */
+    LOCO_RECT_set(&self->rcFixedA, 300,   0xac,  0x3d4, 0x354);
+    LOCO_RECT_offset(&self->rcFixedA, -self->centerOffsetX, -self->centerOffsetY);
+    LOCO_RECT_set(&self->rcFixedB, 0x232, 0x2cc, 0x34d, 0x2ed);
+    LOCO_RECT_offset(&self->rcFixedB, -self->centerOffsetX, -self->centerOffsetY);
+}
+
+/* =========================================================================
+ * MenuButton_placeRect  (helper extracted from FUN_00421200)
+ *
+ * Places one button hit-rect: top-left at the design coordinate (x,y),
+ * sizes it from menuSprite[spriteIdx]'s pixel dimensions, then offsets it by
+ * the centering delta so it maps into screen space.
+ *
+ * WIN32 original (per button):
+ *   SetRect(rc, x, y, 0, 0);
+ *   rc->right  = rc->left + *(uint16_t*)(sprite->pResource + 0x14);
+ *   rc->bottom = rc->top  + *(uint16_t*)(sprite->pResource + 0x16);
+ *   OffsetRect(rc, -centerOffsetX, -centerOffsetY);
+ * ======================================================================= */
+static void MenuButton_placeRect(EditWindow *self, LOCO_RECT *rc,
+                                 int x, int y, int spriteIdx)
+{
+    const uint8_t *spr = (const uint8_t *)self->menuSprite[spriteIdx].pResource;
+    uint16_t w = spr ? *(const uint16_t *)(spr + 0x14) : 0;  /* sprite header width  */
+    uint16_t h = spr ? *(const uint16_t *)(spr + 0x16) : 0;  /* sprite header height */
+
+    rc->left   = x;
+    rc->top    = y;
+    rc->right  = x + w;
+    rc->bottom = y + h;
+    LOCO_RECT_offset(rc, -self->centerOffsetX, -self->centerOffsetY);
 }
 
 /* =========================================================================
@@ -2587,4 +2676,303 @@ int Audio_init(void)
     /* WIN32: FUN_00413630(pAudio, volLow, volMed, volHigh, volHigh)  */
     /* LINUX: Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048)        */
     return 1;
+}
+
+/*===========================================================================
+ * SECTION 3:  INPUT DISPATCH, BUTTON HIT-TESTING & RENDERING  (recovered)
+ *
+ * These functions answer "how do the menu buttons work".  They were missing
+ * from the earlier decompilation pass; recovered here from the binary and
+ * mirrored into the Ghidra project (loco.exe.rep).
+ *
+ * Message flow:
+ *   Win32 msg --> CGWnd_StaticWndProc (0x4272f0) recovers 'this' from the HWND
+ *             --> this->vtable[10] CGWnd_dispatchMessage (0x426140)
+ *             --> specific virtual: OnLButtonDown / OnKeyDown / OnMouseMove ...
+ *
+ * A "button" is the triple (normal sprite, pressed sprite, hit-rect).  There is
+ * no button object: the controller owns flat sprite[] and rect fields and drives
+ * them directly.  Pressed sprite id = normal id + 1 (e.g. Go 0x403 / 0x404).
+ *=========================================================================*/
+
+/* Win32 message ids used below (avoid pulling in <windows.h> for the port). */
+#define LOCO_WM_KEYDOWN      0x0100
+#define LOCO_WM_LBUTTONDOWN  0x0201
+#define LOCO_WM_MOUSEMOVE    0x0200
+#define LOCO_VK_RETURN       0x0d
+#define LOCO_VK_ESCAPE       0x1b
+#define MAINMENU_PRESS_MS    0x96    /* Sleep(150) so a press is visible */
+
+/* menuSprite[] index constants (see MainMenu_recalcLayout map). */
+enum {
+    SPR_407 = 0, SPR_408, SPR_409, SPR_40A,
+    SPR_GO,  SPR_GO_PRESSED,            /* 0x403 / 0x404 */
+    SPR_BACK, SPR_BACK_PRESSED,         /* 0x405 / 0x406 */
+    SPR_40B, SPR_40C, SPR_40E, SPR_40F
+};
+
+/* Forward declarations for this section (definitions follow). */
+intptr_t CGWnd_dispatchMessage(EditWindow *self, void *hwnd, unsigned int msg,
+                               uintptr_t wParam, intptr_t lParam);
+intptr_t EditWnd_onLButtonDown(EditWindow *self, void *hwnd, unsigned int msg,
+                               uintptr_t wParam, intptr_t lParam);
+intptr_t EditWnd_onMouseMove_hitTest(EditWindow *self, void *hwnd, unsigned int msg,
+                                     uintptr_t wParam, intptr_t lParam);
+intptr_t EditWnd_onKeyDown(EditWindow *self, void *hwnd, unsigned int msg,
+                           uintptr_t wParam, intptr_t lParam);
+void     EditWnd_submitPlayerName(EditWindow *self);
+static void MenuButton_drawPressed(EditWindow *self, const LOCO_RECT *rc, int spriteIdx);
+
+/* =========================================================================
+ * CGWnd_StaticWndProc  (0x004272f0)
+ *
+ * The single WNDPROC registered for EVERY CGWnd window class
+ * (RegisterClassA in CGWnd_createWindow / WindowBase_create, 0x425b70).
+ * It recovers the C++ object stored in GWL_USERDATA and forwards to the
+ * object's virtual message dispatcher (vtable[10]).  On the first message it
+ * instead latches 'this' from the CREATESTRUCT (classic MFC-style thunk).
+ *
+ * WIN32: GetWindowLongA(hwnd, GWL_USERDATA=-21); SetWindowLongA(...); GetParent;
+ *        DefWindowProcA
+ * LINUX: SDL has no per-window WNDPROC; route SDL_Event to the matching
+ *        CGWnd* and call its dispatch() directly.
+ * ======================================================================= */
+intptr_t CGWnd_StaticWndProc(void *hwnd, unsigned int msg,
+                             uintptr_t wParam, intptr_t lParam)
+{
+    EditWindow *self = /* WIN32: GetWindowLongA(hwnd, GWL_USERDATA) */ g_pEditWindow;
+
+    if (self != NULL) {
+        /* vtable[10] == CGWnd_dispatchMessage (0x426140) */
+        return CGWnd_dispatchMessage(self, hwnd, msg, wParam, lParam);
+    }
+    /* First message: WIN32 stores lpCreateParams into GWL_USERDATA here. */
+    /* WIN32: hParent = GetParent(hwnd); ... DefWindowProcA(hwnd,msg,wParam,lParam) */
+    return 0;
+}
+
+/* =========================================================================
+ * CGWnd_dispatchMessage  (0x00426140, vtable index 10)
+ *
+ * Translates each Win32 message into a call to a specific virtual slot, and
+ * manages mouse capture + cursor visibility for the borderless fullscreen
+ * window.  Only the slots the main menu actually overrides are shown; the
+ * full table is documented in docs/MAIN_MENU_ARCHITECTURE.md §2.3.
+ *
+ *   WM_LBUTTONDOWN 0x201 -> vtable+0x38 (idx14) EditWnd_onLButtonDown
+ *   WM_MOUSEMOVE   0x200 -> vtable+0x50 (idx20) EditWnd_onMouseMove_hitTest
+ *   WM_KEYDOWN     0x100 -> vtable+0x54 (idx21) EditWnd_onKeyDown
+ *
+ * WIN32: SetCapture/ReleaseCapture/ShowCursor/WindowFromPoint
+ * ======================================================================= */
+intptr_t CGWnd_dispatchMessage(EditWindow *self, void *hwnd, unsigned int msg,
+                               uintptr_t wParam, intptr_t lParam)
+{
+    switch (msg) {
+    case LOCO_WM_LBUTTONDOWN:
+        /* WIN32: SetForegroundWindow(self->hwnd) then vtable+0x38 */
+        return EditWnd_onLButtonDown(self, hwnd, msg, wParam, lParam);
+    case LOCO_WM_MOUSEMOVE:
+        return EditWnd_onMouseMove_hitTest(self, hwnd, msg, wParam, lParam);
+    case LOCO_WM_KEYDOWN:
+        return EditWnd_onKeyDown(self, hwnd, msg, wParam, lParam);
+    default:
+        /* WIN32: many more slots; otherwise DefWindowProcA */
+        return 0;
+    }
+}
+
+/* =========================================================================
+ * EditWnd_onLButtonDown  (0x00422930, vtable index 14)
+ *
+ * Mouse-press handler.  If the screen is idle (state 0) a click anywhere
+ * dismisses any child screen (setState 7).  Otherwise the click point is
+ * unpacked from lParam and tested against the visible button rects; on a hit
+ * the PRESSED sprite is blitted as feedback, the screen is redrawn, we sleep
+ * briefly so the depression is visible, then the button's action runs.
+ *
+ *   x = lParam & 0xffff ;  y = lParam >> 16          (GET_X/Y_LPARAM)
+ *   PtInRect(rcBtnGo)   -> press sprGoPressed   -> EditWnd_submitPlayerName
+ *   PtInRect(rcBtnBack) -> press sprBackPressed -> back/cancel action
+ *
+ * WIN32: PtInRect, Sleep, vtable[3] redraw, FUN_0042b050 sprite blit
+ * LINUX: SDL_Point + SDL_PointInRect; SDL_Delay; re-render
+ * ======================================================================= */
+intptr_t EditWnd_onLButtonDown(EditWindow *self, void *hwnd, unsigned int msg,
+                               uintptr_t wParam, intptr_t lParam)
+{
+    int x, y;
+    (void)hwnd; (void)msg; (void)wParam;
+
+    if (self->dialogState == UI_STATE_INITIAL) {     /* +0xe8 == 0 */
+        EditWindow_setState(self, UI_STATE_CLOSE_CHILD);
+        return 0;
+    }
+    if (!self->flag1 /* +0xf4 buttonsVisible */) {
+        return 0;
+    }
+
+    x = (int)(lParam & 0xffff);
+    y = (int)((lParam >> 16) & 0xffff);
+
+    /*
+     * Six buttons are hit-tested in the original (0x422930); actions verbatim:
+     *   rcBtnGo  (+0x13c, 0x403/0x404): submit name -> proceed
+     *   rcBtnBack(+0x14c, 0x405/0x406): play sound, screensaver-pw probe, FUN_00408130(0xa)
+     *   rcBtn407 (+0xfc):  enable multiplayer  g_pConfigMgr[7]=1, FUN_0043d2b0(npc,3)
+     *   rcBtn409 (+0x10c): disable multiplayer g_pConfigMgr[7]=0, FUN_0043d2b0(npc,0)
+     *   rcBtn40b (+0x11c): set   sub-option g_pConfigMgr[8]=1
+     *   rcBtn40e (+0x12c): clear sub-option g_pConfigMgr[8]=0
+     * Each blits its PRESSED sprite for feedback and repaints (FUN_00422010 + vtable[3]).
+     */
+    if (LOCO_RECT_contains(&self->rcBtnGo, x, y)) {
+        /* visual feedback: blit pressed "Go" sprite (id 0x404) to the screen */
+        MenuButton_drawPressed(self, &self->rcBtnGo, SPR_GO_PRESSED);
+        /* WIN32: screensaver-pw check (0x5015); vtable[3] redraw; Sleep(0x96) */
+        EditWnd_submitPlayerName(self);              /* 0x422660 — the Go action */
+        return 0;
+    }
+    if (LOCO_RECT_contains(&self->rcBtnBack, x, y)) {
+        MenuButton_drawPressed(self, &self->rcBtnBack, SPR_BACK_PRESSED);
+        /* WIN32: PlaySoundA; screensaver-pw probe (res 0x5015); vtable[0x10];
+         *        FUN_00408130(0xa)  — leave the screen via the secondary path */
+        /* GameState_machine(0xa);  // FUN_00408130(0xa) */
+        return 0;
+    }
+    /* rcBtn407/409/40b/40e: mode-select toggles — flip g_pConfigMgr flags and repaint.
+     * (Omitted here; see the action map above and EditWnd_onLButtonDown's Ghidra comment.) */
+    return 0;
+}
+
+/* =========================================================================
+ * EditWnd_onMouseMove_hitTest  (0x00422d80, vtable index 20)
+ *
+ * Hover handler.  While the pointer is active (+0x14) it tests all eight
+ * button/region rects in order and, on the first that contains the cursor,
+ * triggers a redraw (the common tail at 0x422e78 -> vtable[3]).  This is the
+ * engine's hover/refresh feedback path.
+ * ======================================================================= */
+intptr_t EditWnd_onMouseMove_hitTest(EditWindow *self, void *hwnd, unsigned int msg,
+                                     uintptr_t wParam, intptr_t lParam)
+{
+    int x = (int)(lParam & 0xffff);
+    int y = (int)((lParam >> 16) & 0xffff);
+    const LOCO_RECT *order[8] = {
+        &self->rcBtnGo, &self->rcBtnBack, &self->rcBtn407, &self->rcBtn409,
+        &self->rcBtn40b, &self->rcBtn40e, &self->rcFixedA, &self->rcFixedB
+    };
+    int i;
+    (void)hwnd; (void)msg; (void)wParam;
+
+    for (i = 0; i < 8; i++) {
+        if (LOCO_RECT_contains(order[i], x, y)) {
+            /* WIN32: redraw via vtable[3] (CGWnd_onDraw, 0x425fd0) */
+            return 0;
+        }
+    }
+    return 0;
+}
+
+/* =========================================================================
+ * EditWnd_onKeyDown  (0x00420bb0, vtable index 21 AND the EDIT subclass body)
+ *
+ * The child EDIT control is subclassed (init: SetWindowLongA GWL_WNDPROC ->
+ * 0x420b20).  That thunk maps Enter/Esc/Tab to app messages and passes all
+ * other keys to the original EDIT proc (so normal typing still works).  This
+ * body activates the default/cancel button exactly like a mouse press:
+ * Enter == clicking Go, Escape == clicking Back.
+ *
+ * WIN32: CallWindowProcA(savedEditWndProc, ...) for normal keys
+ * LINUX: SDL_TEXTINPUT for typing; SDLK_RETURN/SDLK_ESCAPE for accelerators
+ * ======================================================================= */
+intptr_t EditWnd_onKeyDown(EditWindow *self, void *hwnd, unsigned int msg,
+                           uintptr_t wParam, intptr_t lParam)
+{
+    (void)hwnd; (void)msg; (void)lParam;
+
+    if (self->dialogState == UI_STATE_INITIAL) {
+        /* WIN32: PostMessageA(self->hwnd, 0x40a, 0, 0) */
+        return 0;
+    }
+    if (wParam == LOCO_VK_RETURN && self->flag1 /* buttonsVisible */) {
+        MenuButton_drawPressed(self, &self->rcBtnGo, SPR_GO_PRESSED);
+        /* WIN32: Sleep(0x96); redraw normal; */
+        EditWnd_submitPlayerName(self);              /* same action as Go click */
+        return 0;
+    }
+    if (wParam == LOCO_VK_ESCAPE && self->flag1) {
+        /* Escape == clicking the +0x14c button (rcBtnBack): leaves via FUN_00408130(0xa) */
+        MenuButton_drawPressed(self, &self->rcBtnBack, SPR_BACK_PRESSED);
+        /* GameState_machine(0xa);  // FUN_00408130(0xa) */
+        return 0;
+    }
+    /* Normal keystroke: WIN32 CallWindowProcA(self->savedEditWndProc, ...) */
+    return 0;
+}
+
+/* =========================================================================
+ * MenuButton_drawPressed  (helper for the press-feedback blit)
+ *
+ * Blits a button's PRESSED sprite into its rect on the primary DirectDraw
+ * surface, then (in the original) sleeps MAINMENU_PRESS_MS and redraws the
+ * normal sprite.  Mirrors the inline blit sequences in 0x422930 / 0x420bb0.
+ * ======================================================================= */
+static void MenuButton_drawPressed(EditWindow *self, const LOCO_RECT *rc, int spriteIdx)
+{
+    void *pressedSurface = self->menuSprite[spriteIdx].pSurface;
+    (void)pressedSurface; (void)rc;
+    /* WIN32: blit pressedSurface to g_pPrimarySurface (DAT_004fd3c4) at rc,
+     *        then vtable[3] redraw, Sleep(MAINMENU_PRESS_MS).
+     * LINUX: SDL_RenderCopy(renderer, pressedTexture, NULL, &sdlRect);
+     *        SDL_RenderPresent(renderer); SDL_Delay(MAINMENU_PRESS_MS). */
+}
+
+/* =========================================================================
+ * EditWnd_submitPlayerName  (0x00422660)  -- the "Go" / Enter action
+ *
+ * Reads the EDIT control text (<=11 chars), validates it (must NOT contain any
+ * char from a reject set at 0x47e77c, and MUST contain at least one [A-Za-z]
+ * from 0x47e744), stores it into the player record (g_pUserProfile+6) and
+ * persists it to ee.ini [USER] Name=, then advances the screen's state machine
+ * (single player) or kicks off the multiplayer game.  Transitions are recovered
+ * verbatim from FUN_00422660.
+ *
+ * WIN32: GetWindowTextA, WritePrivateProfileStringA, SetWindowTextA
+ * LINUX: read SDL text buffer; INI_SetString(g_pIniFile,"USER","Name",buf)
+ * ======================================================================= */
+void EditWnd_submitPlayerName(EditWindow *self)
+{
+    char buf[13];
+    (void)buf;
+
+    /* WIN32: vtable[4](self) refresh; GetWindowTextA(self->hwndEdit, buf, 13) */
+    /* if (!strpbrk(buf, rejectSet) && strpbrk(buf, "A-Za-z")) {  // FUN_004676d0 */
+    /*     PlayerRecord_setName(g_pUserProfile, buf);                            */
+    /*     WritePrivateProfileStringA("USER","Name",buf,"ee.ini");              */
+    /* }                                                                         */
+    /* WIN32: SetWindowTextA(self->hwndEdit, g_pUserProfile + 6);               */
+
+    {
+        /* g_pConfigMgr (DAT_004fd3a8) flags drive the transition. */
+        uint8_t mpActive = g_pConfigMgr ? *((uint8_t *)g_pConfigMgr + 7)    : 0;
+        uint8_t subOpt   = g_pConfigMgr ? *((uint8_t *)g_pConfigMgr + 8)    : 0;
+
+        if (!mpActive) {
+            /* Single-player.  Pick a panel state from sub-option flags + which
+             * PanelA item is enabled (panelA+0x1e0 / +0x1e1); fall back to 2. */
+            if (!subOpt /* && config+0x24 set && (config+0x28==4 && panelA[0x1e0]) ||
+                                                  (config+0x28==2 && panelA[0x1e1]) */) {
+                EditWindow_setState(self, UI_STATE_PANEL_B_SINGLE);   /* 4 */
+            } else if (subOpt /* && config+0x18 set && similar PanelA check */) {
+                EditWindow_setState(self, UI_STATE_PANEL_B_MULTI);    /* 5 */
+            } else {
+                EditWindow_setState(self, UI_STATE_DEACTIVATED);      /* 2 */
+            }
+        } else {
+            /* Multiplayer: start lobby + game world directly. */
+            /* WIN32: FUN_0043d2b0(g_pNpcMgr,1); FUN_004616c0(g_pNet,1);
+             *        EditWnd_startGameWorld(self); FUN_00408130(1) */
+            EditWindow_setState(self, UI_STATE_SHUTDOWN);             /* 6 -> game start path */
+        }
+    }
 }

@@ -12,6 +12,9 @@
 
 #include <stdint.h>
 
+/* Prevent stubs/windows.h from redefining types already declared here */
+#define LOCO_TYPES_DEFINED
+
 /* ================================================================== */
 /* Windows type shims — match original MSVC 32-bit sizes               */
 /* ================================================================== */
@@ -21,10 +24,31 @@ typedef uint16_t  WORD;
 typedef uint32_t  DWORD;
 typedef uint32_t  UINT;
 typedef int32_t   BOOL;
-typedef void*     HWND;
-typedef void*     HINSTANCE;
-typedef const char* LPCSTR;
-typedef const wchar_t* LPCWSTR;
+typedef int32_t   LONG;
+typedef int32_t   LRESULT;
+typedef uint32_t  WPARAM;
+typedef int32_t   LPARAM;
+typedef uint16_t  ATOM;
+
+/* Handle types — void* on 32-bit; compatible with stubs/windows.h */
+typedef void*     HANDLE;
+typedef HANDLE    HWND;
+typedef HANDLE    HINSTANCE;
+typedef HANDLE    HMODULE;
+typedef HANDLE    HMENU;
+typedef HANDLE    HDC;
+typedef HANDLE    HICON;
+typedef HANDLE    HBRUSH;
+typedef HANDLE    HCURSOR;
+typedef HANDLE    HFONT;
+typedef HANDLE    HPALETTE;
+typedef HANDLE    HBITMAP;
+typedef HANDLE    HRGN;
+typedef HANDLE    HGDIOBJ;
+typedef HANDLE    HPEN;
+
+typedef const char*     LPCSTR;
+typedef const wchar_t*  LPCWSTR;
 
 /* ================================================================== */
 /* RECT — matches Windows RECT (4 x int32_t = 16 bytes)                */
@@ -37,6 +61,96 @@ struct RECT {
 };
 
 /* ================================================================== */
+/* POINT — matches Windows POINT (2 x int32_t = 8 bytes)               */
+/* ================================================================== */
+struct POINT {
+    int32_t x;
+    int32_t y;
+};
+
+/* ================================================================== */
+/* SIZE — matches Windows SIZE (2 x int32_t = 8 bytes)                 */
+/* ================================================================== */
+struct SIZE {
+    int32_t cx;
+    int32_t cy;
+};
+
+#ifndef _TAGMSG_DEFINED
+#define _TAGMSG_DEFINED
+/* ================================================================== */
+/* tagMSG — Windows message structure (28 bytes)                       */
+/* ================================================================== */
+struct tagMSG {
+    HWND     hwnd;
+    UINT     message;
+    WPARAM   wParam;
+    LPARAM   lParam;
+    DWORD    time;
+    POINT    pt;
+};
+#endif /* _TAGMSG_DEFINED */
+
+/* ================================================================== */
+#ifndef _WNDCLASSA_DEFINED
+#define _WNDCLASSA_DEFINED
+/* WNDCLASSA — Window class structure (40 bytes)                       */
+/* ================================================================== */
+struct WNDCLASSA {
+    UINT      style;
+    LRESULT (*lpfnWndProc)(HWND, UINT, WPARAM, LPARAM);
+    int       cbClsExtra;
+    int       cbWndExtra;
+    HINSTANCE hInstance;
+    HICON     hIcon;
+    HCURSOR   hCursor;
+    HBRUSH    hbrBackground;
+    LPCSTR    lpszMenuName;
+    LPCSTR    lpszClassName;
+};
+#endif /* _WNDCLASSA_DEFINED */
+
+/* ================================================================== */
+#ifndef _WNDCLASSEXA_DEFINED
+#define _WNDCLASSEXA_DEFINED
+/* WNDCLASSEXA — Extended window class structure (48 bytes)            */
+/* ================================================================== */
+struct WNDCLASSEXA {
+    UINT      cbSize;
+    UINT      style;
+    LRESULT (*lpfnWndProc)(HWND, UINT, WPARAM, LPARAM);
+    int       cbClsExtra;
+    int       cbWndExtra;
+    HINSTANCE hInstance;
+    HICON     hIcon;
+    HCURSOR   hCursor;
+    HBRUSH    hbrBackground;
+    LPCSTR    lpszMenuName;
+    LPCSTR    lpszClassName;
+    HICON     hIconSm;
+};
+#endif /* _WNDCLASSEXA_DEFINED */
+
+/* ================================================================== */
+/* COLORREF — GDI color value (uint32_t)                                */
+/* ================================================================== */
+typedef uint32_t COLORREF;
+
+typedef int32_t  HRESULT;
+
+/* ================================================================== */
+/* Additional Win32 types not in compat.h                               */
+/* ================================================================== */
+typedef LRESULT (*WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+
+#ifndef FALSE
+#define FALSE 0
+#endif
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+/* ================================================================== */
 /* Forward declarations for cross-referenced types                     */
 /* ================================================================== */
 struct GameObject;
@@ -46,6 +160,7 @@ struct UIPANEL;
 struct SURFACE;
 struct FrameData;
 struct UISprite;
+struct AboutDialog;    /* About/Credits dialog and screensaver class */
 
 /* ================================================================== */
 /* FrameData — per-frame animation metadata                            */
@@ -70,27 +185,60 @@ struct FrameData {
 };
 
 /* ================================================================== */
+#ifndef RESDATA_DEFINED
+#define RESDATA_DEFINED
 /* RESDATA — resource definition loaded from ResourceManager            */
+/* Size: 0x1D8 bytes (from Ghidra: base size documented in RM.h)       */
+/*                                                                     */
+/* WARNING: This struct serves dual purposes:                           */
+/*  - Sprite metadata mode (+0x04..+0x34): frame/animation fields      */
+/*  - Save/load buffer mode (+0x04..+0xAF): entity+vehicle buffers     */
+/*    (accessed via ResourceManager.cpp which #undefs RESDATA_DEFINED  */
+/*     and provides its own layout with entity_buffer, vehicle_buffer,  */
+/*     pixels, primary_stream, etc. at documented offsets.)            */
 /* ================================================================== */
 struct RESDATA {
     void     *vtable;           /* +0x00  vtable[1]=Lock/GetSurface         */
     int32_t   resource_id;      /* +0x04  numeric resource ID               */
-    /* gap +0x08..+0x0F */
+    /* gap +0x08..+0x0F — padding / unknown */
+    uint8_t   _pad_08[8];       /* +0x08  padding                           */
     uint32_t  flags;            /* +0x10  0 = no surface data               */
-    UIPANEL  *ui_panel;         /* +0x10  (overlaps: sprite-sheet panel ptr)*/
+    /* Note: +0x10 also aliased as ui_panel (UIPANEL*) in some contexts    */
     uint16_t  frame_width;      /* +0x14  sprite frame width in pixels      */
     uint16_t  frame_height;     /* +0x16  sprite frame height in pixels     */
-    /* +0x18 */
+    uint8_t   _pad_18[2];       /* +0x18  padding                           */
     uint16_t  anim_count;       /* +0x1A  total animation entry count       */
-    /* +0x1C */
+    uint8_t   _pad_1C[2];       /* +0x1C  padding                           */
     int16_t   default_anim;     /* +0x1E  default animation index (signed)  */
     FrameData *anim_table;      /* +0x20  array of FrameData entries        */
-    /* +0x24..+0x31 */
+    uint8_t   _pad_24[14];      /* +0x24..+0x31  padding                    */
     int16_t   offset_x;         /* +0x32  world X offset (added in SetPos)  */
     int16_t   offset_y;         /* +0x34  world Y offset                    */
-    /* ... variable-sized fields follow ... */
+    /* +0x36..+0x163: unknown fields — padding to reach default_delay     */
+    /* Fields below carved out of this padding range; exact offsets TBD,  */
+    /* consumers reference them by name only (see TrackPiece.cpp).        */
+    uint16_t  frame_count;       /* +0x?? total frame count (entity_buffer +0x28) */
+    uint16_t  frame_w;           /* +0x?? frame width (entity_buffer +0x24) */
+    uint16_t  frame_h;           /* +0x?? frame height (entity_buffer +0x26) */
+    int16_t   world_x;           /* +0x?? world X (entity_buffer +0x2a)     */
+    int16_t   world_y;           /* +0x?? world Y (entity_buffer +0x2c)     */
+    uint8_t   entity_buffer[0x24]; /* +0x?? raw entity save/load buffer     */
+    uint8_t   _pad_36[0x100];   /* +0x36..+0x163 (reduced by fields above)  */
     uint32_t  default_delay;    /* +0x164 timing/delay copied to GameObject */
+    /* +0x168..+0x1C3: padding — resource manager save/load fields        */
+    uint8_t   _pad_168[0x5C];   /* +0x168..+0x1C3                           */
+    /* The following fields are documented for ResourceManager save/load
+     * operations. They live at +0x1C4..+0x1D7 in the full 0x1D8-byte
+     * layout. ResourceManager.cpp #undefs RESDATA_DEFINED and provides
+     * its own definition with these fields at the correct offsets.       */
+    /* +0x1C4: pixels (void*)                                              */
+    /* +0x1C8: primary_stream (void*)                                      */
+    /* +0x1CC: secondary_stream (void*)                                    */
+    /* +0x1D0: asset_data (void*)                                          */
+    /* +0x1D4: asset_size (int32_t)                                        */
+    uint8_t   _pad_1C4[0x14];   /* +0x1C4..+0x1D7                           */
 };
+#endif /* RESDATA_DEFINED */
 
 /* ================================================================== */
 /* UISprite — UI hit-test / render sprite descriptor                   */
@@ -111,3 +259,4 @@ extern HWND      g_main_window;         /* 0x4AA4A0 — main window handle      
 extern uint8_t   g_is_party_mode;       /* 0x48548C — 1 = party mode active    */
 extern uint32_t  g_party_start_time;    /* 0x485490 — tick when party started  */
 extern void     *g_config_ini;          /* 0x485484 — config/INI object handle  */
+extern int32_t    g_demo_mode;           /* 0x4A9918 — 1 = demo mode active      */

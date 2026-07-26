@@ -1,96 +1,88 @@
 /**
- * BuildingMgr.h — Building Manager singleton
+ * BuildingMgr.h — Building manager singleton at 0x485448.
  *
- * Lego Loco (loco.exe, 1998, MSVC x86)
- * Reverse engineered via Ghidra decompilation.
- *
- * BuildingMgr manages all Building objects in the game world:
- * creation from resources, per-frame dispatch, rendering overlays,
- * click handling, and collection maintenance.
- *
- * Singleton at g_building_mgr (0x485448).
+ * Validated against Ghidra database loco_v8.  The function at 0x434500 and
+ * vtable 0x477f70 belong to this class; "BuildingComplex" was a legacy
+ * decompiler name, not a base or derived class.
  */
-
 #pragma once
 
 #include "../shared/types.h"
 
 class Building;
 
+class BuildingCollectionLock {
+public:
+    uint8_t critical_section[0x18];
+    virtual ~BuildingCollectionLock() {}
+};
+
+class BuildingCollection {
+public:
+    void** items;            // +0x04
+    uint32_t capacity;       // +0x08
+    uint32_t count;          // +0x0c
+    int32_t key_offset;      // +0x10
+    int32_t key_size;        // +0x14
+
+    virtual ~BuildingCollection() {}
+    void Resize(uint32_t new_capacity);                 // 0x435d10
+    void ConfigureKey(int32_t offset, int32_t size);    // 0x424490
+    Building* GetItem(uint32_t index) const;            // vtable [8]
+    uint32_t GetCount() const;                          // vtable [11]
+    void Sort();                                        // vtable [20]
+};
+
 class BuildingMgr {
 public:
-    /* Collection fields */
-    void*  building_list;       /* dynamic array/list of Building* */
-    int    building_count;
-    int    building_capacity;
-    /* Additional collection management fields */
+    BuildingCollectionLock building_lock;       // +0x04
+    BuildingCollectionLock secondary_lock;      // +0x20
+    int32_t building_count;                     // +0x3c
+    int32_t secondary_count;                    // +0x40
+    uint8_t delayed_update;                     // +0x44
+    uint8_t _pad_45[3];                         // +0x45
+    uint32_t delayed_update_start;              // +0x48
+    BuildingCollection buildings;               // +0x4c
+    BuildingCollection secondary_buildings;     // +0x64
 
-    /**
-     * Blit overlap indicators for selected buildings.
-     * Address: 0x434AB0
-     */
-    void BlitOverlaps();
+    /** Address: 0x434500. */
+    BuildingMgr();
+    /** Scalar wrapper 0x4345d0; body 0x4345f0. */
+    virtual ~BuildingMgr();
+    void BaseDtor();
 
-    /**
-     * Compact building collections (remove gaps from removals).
-     * Address: 0x434870
-     */
+    /** Vtable [1], address 0x434690. */
+    virtual void UpdateStoredTargets();
+    /** Vtable [2], start 0x434720 (0x434777 is an internal call). */
+    virtual void UpdateAll();
+    /** Vtable [3], address 0x434800. */
+    virtual void InvalidateAll(int unused);
+    /** Vtable [4], address 0x4348a0. */
+    virtual void DispatchAll(int dispatch_flags, int left, int top,
+                             int right, int bottom);
+
+    /** Address: 0x434870. */
     void CompactCollections();
-
-    /**
-     * Create a Building from a resource definition.
-     * Address: 0x4348F0
-     *
-     * Allocates Building object (operator_new(0xF4)), calls
-     * Building::Building() constructor with the given resource ID.
-     */
-    Building* CreateFromResource(int resource_id);
-
-    /**
-     * Destroy all buildings and free memory.
-     * Address: 0x434E50
-     */
-    void DestroyAll();
-
-    /**
-     * Dispatch per-frame update to all buildings.
-     * Address: 0x434DC0
-     */
-    void DispatchAll();
-
-    /**
-     * Find a building at position and notify it of click.
-     * Address: (in buildingmgr_findandnotify.c)
-     */
-    void FindAndNotify(int x, int y);
-
-    /**
-     * Handle a mouse click at the given position.
-     * Address: (in buildingmgr_handleclick.c)
-     */
-    void HandleClick(int x, int y);
-
-    /**
-     * Invalidate rectangles for all visible buildings.
-     * Address: (in buildingmgr_invalidaterects.c)
-     */
-    void InvalidateRects();
-
-    /**
-     * Remove buildings with no occupants.
-     * Address: (in buildingmgr_removeempty.c)
-     */
+    /** Start 0x4349d0; 0x434af7 is an internal constructor call site. */
+    Building* CreateFromResource(int resource_id, int owner_slot,
+                                 int world_x, int world_y);
+    /** Address: 0x434970. */
     void RemoveEmpty();
-
-    /**
-     * Remove a specific building object.
-     * Address: (in buildingmgr_removeobject.c)
-     */
-    void RemoveObject(void* building);
-
-    /**
-     * Update all buildings (comprehensive update cycle).
-     * Address: (in buildingmgr_updateall.c)
-     */
-    void UpdateAll();
+    /** Address: 0x434b60. */
+    void RemoveObject(Building* object, bool show_message);
+    /** Address: 0x434c50. */
+    bool FindAndNotify(int world_x, int world_y);
+    /** Address: 0x435020. */
+    int InvalidateRects(RECT rect);
+    /** Address: 0x435200. */
+    int BlitOverlaps(int left, int top, int right, int bottom,
+                     Building* target);
+    /** Address: 0x435580. */
+    void HandleClick(void* command, int left, int top, int right, int bottom);
 };
+
+#if UINTPTR_MAX == 0xffffffffu
+static_assert(sizeof(BuildingCollectionLock) == 0x1c, "lock layout mismatch");
+static_assert(sizeof(BuildingCollection) == 0x18, "collection layout mismatch");
+static_assert(sizeof(BuildingMgr) == 0x7c, "BuildingMgr layout mismatch");
+#endif

@@ -1,90 +1,102 @@
 /**
- * Entity.h — Mid-level base class for all interactive game objects
+ * Entity.h — Resource-backed interactive object base.
  *
- * Lego Loco (loco.exe, 1998, MSVC x86)
- * Reverse engineered via Ghidra decompilation.
- *
- * Extends GameObject with:
- *   - Parent/child scene graph pointer (+0x40)
- *   - Audio resource and channel handles (+0x44, +0x48)
- *   - World position with resource offset (+0x4C, +0x50)
- *   - Frame tracking and timer state (+0x54..+0x70)
- *   - Hit-test coordinate storage (+0x60..+0x6C)
- *   - Object name buffer[11] (+0x7C)
- *
- * Vtable: 0x477488
- *   Inherits most virtual methods from GameObject.
- *   Overrides constructor/destructor for Entity field initialization.
- *
- * Class hierarchy:
- *   GameObject (root, type=1, vtable 0x477820)
- *     └─ Entity (type=2, vtable 0x477488)  ← this class
- *          ├─ Building (vtable 0x477EB8)
- *          ├─ LOCOBITMAP (vtables 0x4773E8/0x4773F0, extends to ~0x1F4+)
- *          ├─ Game (vtable 0x477718)
- *          └─ Train (shares Building base ctor)
+ * Binary vtable: 0x477488 (15 slots)
+ *   [0]  0x405850 scalar deleting destructor
+ *   [1]  0x436AB0 GameObject::InvalidateRect
+ *   [2]  0x436A10 GameObject::PtInRect
+ *   [3]  0x405C00 SetWorldPos (overrides GameObject::MoveTo)
+ *   [4]  0x436AE0 GameObject::InvokeCallback1
+ *   [5]  0x436B00 GameObject::InvokeCallback2
+ *   [6]  0x405900 InitBase
+ *   [7]  0x405A20 StopSound
+ *   [8]  0x405DE0 SetFrame
+ *   [9]  0x4061B0 SetVisible
+ *   [10] 0x405C40 Update
+ *   [11] 0x405E60 Draw
+ *   [12] 0x405FD0 DrawConnected
+ *   [13] 0x405E20 SetName
+ *   [14] 0x405A50 SetAnimState
  */
-
 #pragma once
 
 #include "GameObject.h"
 
 class Entity : public GameObject {
 public:
-    /* ================================================================ */
-    /* Entity-specific fields (start at +0x40, after GameObject fields)  */
-    /* ================================================================ */
+    uint8_t visible;                    // +0x24
+    uint8_t _pad_25[3];                 // +0x25
+    int32_t anim_index;                 // +0x28
+    uint32_t blit_flags;                // +0x2C
+    RECT source_rect;                   // +0x30
+    union {
+        void* resource;                 // +0x40, resource-backed entities
+        Entity* parent;                 // +0x40, alias used by some derived layouts
+    };
+    uint32_t sound_res_id;              // +0x44
+    void* audio_channel;                // +0x48
+    /* world_x / world_y (binary +0x4C/+0x50) now declared on GameObject
+       so plain GameObject* handles can reach them without a downcast. */
+    int32_t frame_index;                // +0x54 (all binary accesses are dword)
+    uint32_t timer;                     // +0x58
+    uint32_t active_state;              // +0x5C
+    uint32_t next_sound_time;           // +0x60
+    union {
+        uint32_t field_64;              // +0x64
+        uint32_t hit_miss_x;            // historical derived-class alias
+    };
+    union {
+        uint32_t field_68;              // +0x68
+        uint32_t hit_hit_x;             // historical derived-class alias
+    };
+    uint32_t phase_timer;               // +0x6C
+    uint8_t waiting_flag;               // +0x70
+    uint8_t _pad_71[3];                 // +0x71
+    int32_t world_x_raw;                // +0x74
+    int32_t world_y_raw;                // +0x78
+    char name[11];                      // +0x7C..+0x86
+    uint8_t _pad_87;                    // +0x87
 
-    Entity*  parent;            // +0x40  parent in scene graph, or NULL
-    uint32_t sound_res_id;      // +0x44  sound resource ID (RESMGR)
-    void*    audio_channel;     // +0x48  audio channel handle (CGWND)
-    int32_t  world_x;           // +0x4C  world X (resource offset applied)
-    int32_t  world_y;           // +0x50  world Y (resource offset applied)
-    uint16_t frame_index;       // +0x54  current sprite frame number
-    uint8_t  _pad_56[2];        // +0x56
-    uint32_t timer;             // +0x58  general-purpose timer/counter
-    uint32_t active_state;      // +0x5C  audio state flag
-    uint32_t next_sound_time;   // +0x60  absolute game tick for next sound
-    uint32_t hit_miss_x;        // +0x64  miss-case X for HitTest dispatch
-    uint32_t hit_miss_y;        // +0x68  miss-case Y for HitTest dispatch
-    uint32_t hit_hit_x;         // +0x68  hit-case X for HitTest dispatch (overlaps)
-    uint32_t hit_hit_y;         // +0x6C  hit-case Y for HitTest dispatch
-    uint32_t phase_timer;       // +0x6C  animation phase step counter (overlaps)
-    uint8_t  waiting_flag;      // +0x70  1 = waiting at animation boundary
-    uint8_t  _pad_71[3];        // +0x71
-    int32_t  world_x_raw;       // +0x74  raw X (before resource offset)
-    int32_t  world_y_raw;       // +0x78  raw Y (before resource offset)
-    char     name[11];          // +0x7C  null-terminated, max 10 chars
+    Entity();
 
-    /* ================================================================ */
-    /* Constructor                                                       */
-    /* ================================================================ */
-
-    /**
-     * Entity base constructor.
-     * Address: 0x405790
-     *
-     * Calls GameObject() (0x4369D0) to initialize base fields, then:
-     *   - Sets vtable to 0x477488 (Entity vtable)
-     *   - Sets type = 2
-     *   - Zeroes parent, audio/sound handles, timers
-     *   - Copies empty string to name field
-     *   - If resource_id > 0, calls InitBase() to load the resource
-     *
-     * Called by all derived class constructors (Building, Train, Game,
-     * LOCOBITMAP, UIPANEL, ScriptedObject, etc.).
-     *
-     * @param resource_id  numeric resource ID (> 0 to load)
-     * @param anim_idx     initial animation index (-1 = use resource default)
-     * @param world_x      initial world X position
-     * @param world_y      initial world Y position
-     */
+    /** Address: 0x405790. */
     Entity(int resource_id, int16_t anim_idx, int world_x, int world_y);
 
-    /**
-     * Destructor — inherited from GameObject.
-     * Entity does NOT override the destructor body; it inherits
-     * GameObject::~GameObject() which resets vtable to 0x477488,
-     * releases resources, and marks dead.
-     */
+    /** Body 0x405870; scalar deleting wrapper 0x405850. */
+    ~Entity() override;
+
+    /** Address: 0x405C00, vtable [3]. */
+    void MoveTo(int x, int y) override;
+
+    /** Descriptive non-virtual alias used by reconstructed callers. */
+    void SetWorldPos(int x, int y) { MoveTo(x, y); }
+
+    /** Address: 0x405900, vtable [6]. */
+    virtual int InitBase(int resource_id, int anim_index, bool force_reload);
+    /** Address: 0x405A20, vtable [7]. */
+    virtual void StopSound(int param);
+    /** Address: 0x405DE0, vtable [8]. */
+    virtual void SetFrame(int frame_id, bool trigger_invalidate);
+    /** Address: 0x4061B0, vtable [9]. */
+    virtual void SetVisible(bool visible);
+    /** Address: 0x405C40, vtable [10]. */
+    virtual void Update();
+    /** Address: 0x405E60, vtable [11]. */
+    virtual void Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags);
+    /** Address: 0x405FD0, vtable [12]. */
+    virtual void DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_flags);
+    /** Address: 0x405E20, vtable [13]. */
+    virtual void SetName(const char* name);
+    /** Address: 0x405A50, vtable [14]. */
+    virtual int SetAnimState(int anim_index);
+
+    /** Address: 0x405AB0. */
+    void PlayAnimation(int sound_id);
+    /** Address: 0x405E20 (same implementation as SetName). */
+    void CopyName(const char* name);
+
+    /** Address: 0x458350. */
+    void GetSubObjectPosition(int* out_xy, int sub_index);
+    /** Address: 0x4583C0. */
+    BOOL GetBoundingRect(RECT* out_rect);
 };

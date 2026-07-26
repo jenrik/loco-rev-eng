@@ -1,14 +1,19 @@
 /**
- * GameObject.cpp — Implementation of the root GameObject base class
+ * GameObject.cpp — GameObject primitives and Entity resource methods
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
  * All method body addresses reference the original loco.exe binary.
+ *
+ * NOTE on scalar deleting destructors:
+ *   GameObject's wrapper at 0x412600 calls MarkDead (0x436A00).
+ *   Entity's wrapper at 0x405850 calls the resource-releasing destructor
+ *   body at 0x405870. They are distinct class-level destructors.
  */
 
 #include "GameObject.h"
-#include "../shared/vtable_addrs.h"
+#include "Entity.h"
 
 /* ================================================================== */
 /* External function declarations (addresses from Ghidra)              */
@@ -23,20 +28,30 @@ extern "C" {
 
 /* Windows API */
 extern "C" {
-    BOOL IntersectRect(RECT* out, const RECT* a, const RECT* b);         /* USER32 */
-    BOOL PtInRect(const RECT* r, uint32_t packedXY);                      /* USER32 */
-    void SetRect(RECT* r, int left, int top, int right, int bottom);     /* USER32 */
+    BOOL  IntersectRect(RECT* out, const RECT* a, const RECT* b);   /* USER32 */
+    BOOL  PtInRect(const RECT* r, uint32_t packedXY);                /* USER32 */
+    void  SetRect(RECT* r, int left, int top, int right, int bottom);/* USER32 */
+    void  SetRectEmpty(RECT* r);                                     /* USER32 */
+    BOOL  IsRectEmpty(const RECT* r);                                /* USER32 */
+    BOOL  OffsetRect(RECT* r, int dx, int dy);                       /* USER32 */
+}
+
+/* Tilemap */
+extern "C" {
+    void TileMap_InvalidateRect(void* tilemap, int left, int top,
+                                int right, int bottom);            /* 0x455840 */
 }
 
 /* Resource Manager */
-extern void* ResourceManager_GetById(void* resmgr, int id);             /* 0x446xxx */
-extern void  RESMGR_ReleaseSoundResource(void* resource);                /* 0x447xxx */
+extern void* ResourceManager_GetById(void* resmgr, int id);      /* 0x446xxx */
+extern void  RESMGR_ReleaseSoundResource(void* resource);         /* 0x447xxx */
 
 /* Audio */
 extern void GameAudio_AllocChannel(void* audio, int res_id, void** out_ch,
                                    int x, int y, int volume, int immediate);  /* 0x450xxx */
 extern void CGWND_AudioChannel_Release(void* channel);                  /* 0x406xxx */
 extern void CGWND_AudioChannel_Play(void* channel);                     /* 0x406xxx */
+extern void CGWND_AudioChannel_Stop(void* channel);                     /* 0x40EE00 */
 extern void CGWND_AudioChannel_UpdatePosition(void* channel, int x, int y); /* 0x406xxx */
 
 /* Surface blitting */
@@ -45,40 +60,31 @@ extern void UIPANEL_Blit(void* panel, int dst_left, int dst_top,
                           void* surface, int src_left, int src_top,
                           int src_right, int src_bottom, uint32_t flags);
 
-/* Object lifecycle helpers */
-extern void GameObject_InvalidateRect(int* obj);                         /* 0x405xxxx */
-extern void GameObject_MarkDead(void** obj);                             /* 0x405xxxx */
-extern void GameObject_MoveTo_raw(void* obj, int x, int y);             /* 0x405Bxx */
+/* Memory */
+extern void GLOBAL_free(void* p);                                 /* 0x465CD0 */
 
 /* Global variables */
-extern void* g_primary_surface;     /* primary DirectDraw surface */
-extern void* g_resmgr;              /* global resource manager singleton */
-extern void* g_audio;               /* global GameAudio singleton */
-extern uint32_t g_game_time;        /* 0x4A99B4 — game tick counter */
-extern HWND   g_main_window;        /* 0x4AA4A0 */
-extern double  _DAT_00481170;       /* FPS limit threshold */
-extern char   g_empty_string;       /* empty string constant */
+extern void*  g_primary_surface;     /* primary DirectDraw surface */
+extern void*  g_resmgr;              /* global resource manager singleton */
+extern void*  g_audio;               /* global GameAudio singleton */
+extern uint32_t g_game_time;         /* 0x4A99B4 — game tick counter */
+extern HWND    g_main_window;        /* 0x4AA4A0 */
+extern double  _DAT_00481170;        /* FPS limit threshold */
+extern char    g_empty_string;       /* empty string constant */
+extern void*   g_tilemap;            /* 0x4AAD08 — tilemap singleton */
 
 
 /* ================================================================== */
 /* GameObject::GameObject() — Base constructor                         */
 /* Address: 0x4369D0                                                  */
-/*                                                                     */
-/* Called by:                                                          */
-/*   GameObject_BaseCtor (0x4057B0) — Entity-level base constructor   */
-/*   CGWND_TrackPiece_Ctor (0x40CFBD) — track piece constructor       */
-/*                                                                     */
-/* Zeroes +0x1C/+0x20, sets vtable=0x477820, type=1, clears screen    */
-/* rect, marks initialized.                                            */
 /* ================================================================== */
 GameObject::GameObject()
 {
-    /* Zero out two padding fields */
-    this->_pad_1C = 0;
-    this->_pad_20 = 0;
+    /* Clear the two callback slots at +0x1C and +0x20. */
+    this->callback_1 = nullptr;
+    this->callback_2 = nullptr;
 
-    /* Set root vtable (0x477820) — will be overridden by derived classes */
-    this->vtable = (void**)VTBL_GAMEOBJECT;
+    /* In the binary: sets vtable = 0x477820 (managed by compiler here). */
 
     /* Type 1 = GameObject */
     this->type = 1;
@@ -92,100 +98,248 @@ GameObject::GameObject()
 
 
 /* ================================================================== */
-/* GameObject::~GameObject() — Destructor body                         */
-/* Address: 0x405870                                                   */
+/* GameObject::Update / RegisterEntity / InitBase — base no-op hooks   */
 /*                                                                     */
-/* Called by:                                                          */
-/*   GameObject::scalar_deleting_destructor (0x405850) — vtable[0]    */
-/*   Derived class dtors (Building_Dtor, etc.)                          */
-/*                                                                     */
-/* Releases audio channel (+0x48), resource reference (+0x40), sound   */
-/* resource (+0x44), then marks object dead in manager. Uses SEH       */
-/* (__try/__except) to guard cleanup.                                  */
+/* GameObject itself has no per-frame animation or resource state;    */
+/* Entity overrides these with the real implementations below. They   */
+/* exist on GameObject so generic dispatch code holding a GameObject* */
+/* (e.g. TrainEntity_DeserializeFactory) can call them without a       */
+/* downcast.                                                            */
 /* ================================================================== */
-GameObject::~GameObject()
+void GameObject::Update()
 {
-    /* Reset vtable to Entity vtable — preserved during destruction
-     * so that if a derived dtor already changed it, we still have
-     * valid virtual dispatch for cleanup.                                */
-    this->vtable = (void**)VTBL_ENTITY;
+}
 
-    /* Release audio channel if active (+0x48).
-     * Note: offset +0x48 / sizeof(void*) = 0x12 * 4 = 0x48.
-     * The Ghidra decomp uses param_1[0x12] for this.                    */
-    void* audio_ch = *(void**)((uint8_t*)this + 0x48);
+void GameObject::RegisterEntity(void* context, void* entity)
+{
+    (void)context;
+    (void)entity;
+}
+
+int GameObject::InitBase(int resource_id, int anim_index, bool force_reload)
+{
+    (void)resource_id;
+    (void)anim_index;
+    (void)force_reload;
+    return 0;
+}
+
+
+/* ================================================================== */
+/* Entity::~Entity() — Resource-releasing destructor body              */
+/* Address: 0x405870                                                   */
+/* ================================================================== */
+Entity::~Entity()
+{
+    /* In the binary: resets vtable to Entity vtable (0x477488) so virtual
+     * dispatch remains valid during derived-class teardown. In natural C++
+     * the compiler handles vtable adjustments during destruction. */
+
+    /* Release audio channel if active (+0x48). */
+    void* audio_ch = this->audio_channel;
     if (audio_ch != nullptr) {
         CGWND_AudioChannel_Release(audio_ch);
-        *(uint32_t*)((uint8_t*)this + 0x5C) = 0;  /* clear active state */
+        this->active_state = 0;  /* clear active state */
     }
 
     /* Release resource reference (+0x40) */
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    void* resource = this->resource;
     if (resource != nullptr) {
         /* If resource has a locked flag at +0x162, invalidate rect
-         * and release via vtable[2] (resource's Release method) */
+         * and release via resource->vtable[2] */
         if (*(uint8_t*)((uint8_t*)resource + 0x162) == 1) {
-            GameObject_InvalidateRect((int*)this);
-            /* Call resource's Release() — vtable[2] at resource+0x00 */
+            this->InvalidateRect();
+            /* Call resource's Release() — vtable[2] */
             void** res_vtbl = *(void***)resource;
             ((void(*)())res_vtbl[2])();
         }
-        *(void**)((uint8_t*)this + 0x40) = nullptr;
+        this->resource = nullptr;
     }
 
     /* Release sound resource (+0x44) */
-    void* snd_res = *(void**)((uint8_t*)this + 0x44);
+    void* snd_res = (void*)this->sound_res_id;
     if (snd_res != nullptr) {
-        *(uint32_t*)((uint8_t*)this + 0x5C) = 0;
+        this->active_state = 0;
         RESMGR_ReleaseSoundResource(snd_res);
-        *(void**)((uint8_t*)this + 0x44) = nullptr;
+        this->sound_res_id = 0;
     }
 
     /* Mark dead in object manager */
-    GameObject_MarkDead((void**)this);
+    this->MarkDead();
 }
 
 
 /* ================================================================== */
-/* GameObject::scalar_deleting_destructor — Vtable slot [0]            */
-/* Address: 0x405850                                                   */
+/* GameObject::MarkDead — Non-virtual helper                           */
+/* Address: 0x436A00                                                   */
 /*                                                                     */
-/* Standard MSVC scalar-deleting destructor pattern:                   */
-/*   1. Call destructor body (~GameObject)                             */
-/*   2. If flags & 1, free heap memory                                 */
+/* Marks this GameObject as dead by resetting its vtable to the base   */
+/* GameObject vtable and clearing the initialized flag. This prevents  */
+/* any further virtual dispatch or operations on the object after      */
+/* destruction begins.                                                  */
+/*                                                                     */
+/* Also used by the base vtable[0] scalar dtor (0x412600) and unwind   */
+/* handlers as a lightweight cleanup.                                   */
 /* ================================================================== */
-void* GameObject::scalar_deleting_destructor(byte flags)
+GameObject::~GameObject()
 {
-    this->~GameObject();
-    if (flags & 1) {
-        /* GLOBAL_free at 0x465CD0 */
-        extern void GLOBAL_free(void*);
-        GLOBAL_free(this);
+    MarkDead();
+}
+
+void GameObject::MarkDead()
+{
+    /* In the binary: also resets vtable to 0x477820 (base GameObject).
+     * In natural C++ the compiler manages vtable during destruction. */
+    this->initialized = 0;
+}
+
+
+/* ================================================================== */
+/* GameObject::InvalidateRect — Vtable slot [1]                        */
+/* Address: 0x436AB0                                                   */
+/*                                                                     */
+/* Copies screen_rect (+0x08) to a local variable and calls            */
+/* TileMap_InvalidateRect on the global tilemap. This triggers a       */
+/* redraw of the tile region, clearing any previously drawn sprite     */
+/* at this position.                                                    */
+/*                                                                     */
+/* NOTE: Called with ECX=this and NO stack arguments. The old code's   */
+/* vtable[1] call pattern `(this, 0)` was incorrect — this function   */
+/* does not consume any stack parameters (plain RET, not RET N).       */
+/* ================================================================== */
+void GameObject::InvalidateRect()
+{
+    /* Copy screen_rect to stack (4 x int32_t = 16 bytes) */
+    RECT r;
+    r.left   = this->screen_rect.left;
+    r.top    = this->screen_rect.top;
+    r.right  = this->screen_rect.right;
+    r.bottom = this->screen_rect.bottom;
+
+    /* Flag tile region for redraw via tilemap */
+    TileMap_InvalidateRect(&g_tilemap, r.left, r.top, r.right, r.bottom);
+}
+
+
+/* ================================================================== */
+/* GameObject::PtInRect — Vtable slot [2]                              */
+/* Address: 0x436A10                                                   */
+/*                                                                     */
+/* Returns TRUE if point (x, y) falls within this GameObject's         */
+/* screen_rect (+0x08..+0x17). Uses half-open interval convention:     */
+/*   left <= x < right  AND  top <= y < bottom                         */
+/* ================================================================== */
+BOOL GameObject::PtInRect(int x, int y)
+{
+    if (x >= this->screen_rect.left   &&
+        x <  this->screen_rect.right  &&
+        y >= this->screen_rect.top    &&
+        y <  this->screen_rect.bottom)
+    {
+        return TRUE;
     }
-    return this;
+    return FALSE;
 }
 
 
 /* ================================================================== */
-/* GameObject::InitBase — Vtable slot [6]                              */
-/* Address: 0x405900                                                   */
+/* GameObject::GetRelPos — Non-virtual helper                          */
+/* Address: 0x436A40                                                   */
 /*                                                                     */
-/* Called by:                                                          */
-/*   GameObject_BaseCtor (0x40582D)                                    */
-/*   Panel_Init (0x454696)                                             */
-/*   RESDATA_SetPosition (0x454830)                                    */
-/*   10+ vtable entries reference this as InitBase                      */
-/*                                                                     */
-/* Loads a resource by ID, sets up bounding rects from frame dims,     */
-/* initializes animation state via SetAnimState (vtable[7]).           */
-/* Returns 1 on success, 0 on failure.                                 */
+/* Computes the relative position of (x, y) within this GameObject's   */
+/* screen_rect. Used for hit-test offset calculations and drag         */
+/* positioning.                                                         */
+/*   out[0] = x - screen_rect.left                                     */
+/*   out[1] = y - screen_rect.top                                      */
 /* ================================================================== */
-int GameObject::InitBase(int resource_id, int anim_index, bool force_reload)
+void GameObject::GetRelPos(int* out, int x, int y)
 {
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    out[0] = x - this->screen_rect.left;
+    out[1] = y - this->screen_rect.top;
+}
+
+
+/* ================================================================== */
+/* GameObject::MoveTo — Vtable slot [3] (base vtable only)             */
+/* Address: 0x436A60                                                   */
+/*                                                                     */
+/* Teleports the GameObject to new absolute screen coordinates (x, y)  */
+/* while preserving its current width and height.                      */
+/*                                                                     */
+/* 1. Calls InvalidateRect (vtable[1]) to invalidate the old position  */
+/* 2. Updates screen_rect to {x, y, x+width, y+height} via SetRect    */
+/* 3. Calls InvalidateRect again to invalidate the new position        */
+/*                                                                     */
+/* NOTE: This is vtable[3] only in the base GameObject vtable.         */
+/* In Entity-derived classes, vtable[3] is overridden by HitTest,      */
+/* so callers that need the real MoveTo behavior must use direct       */
+/* scope: GameObject::MoveTo(x, y).                                    */
+/* ================================================================== */
+void GameObject::MoveTo(int x, int y)
+{
+    /* Invalidate old position */
+    this->InvalidateRect();
+
+    /* Compute new rect preserving width and height */
+    int width  = this->screen_rect.right  - this->screen_rect.left;
+    int height = this->screen_rect.bottom - this->screen_rect.top;
+
+    SetRect(&this->screen_rect,
+            x,
+            y,
+            x + width,
+            y + height);
+
+    /* Invalidate new position */
+    this->InvalidateRect();
+}
+
+/* ================================================================== */
+/* GameObject callback dispatchers — Vtable slots [4] and [5]          */
+/* Addresses: 0x436AE0, 0x436B00                                      */
+/* ================================================================== */
+BOOL GameObject::InvokeCallback1(int x, int y)
+{
+    return callback_1 != nullptr ? callback_1(x, y) : FALSE;
+}
+
+BOOL GameObject::InvokeCallback2(int x, int y)
+{
+    return callback_2 != nullptr ? callback_2(x, y) : FALSE;
+}
+
+
+/* ================================================================== */
+/* Scalar deleting destructor — vtable slot [0]                         */
+/*                                                                     */
+/* In the binary, MSVC generates compiler-synthesized scalar deleting   */
+/* destructor wrappers for each vtable:                                 */
+/*                                                                     */
+/*   Base GameObject vtable (0x477820) entry at 0x412600:              */
+/*     Calls MarkDead(). If flags & 1, calls GLOBAL_free().             */
+/*     Used for objects destroyed while vtable is still the base class. */
+/*                                                                     */
+/*   Entity vtable (0x477488) entry at 0x405850:                       */
+/*     Calls ~GameObject() body. If flags & 1, calls GLOBAL_free().    */
+/*     Used for all Entity-derived objects.                             */
+/*                                                                     */
+/* In natural C++, the compiler generates equivalent wrappers           */
+/* automatically from `virtual ~GameObject()`. The `flags & 1` check    */
+/* corresponds to `delete obj` (free) vs explicit `obj->~GameObject()`  */
+/* (no free). GLOBAL_free is the original binary's operator delete.     */
+/* ================================================================== */
+
+
+/* ================================================================== */
+/* Entity::InitBase — Vtable slot [6]                              */
+/* Address: 0x405900                                                   */
+/* ================================================================== */
+int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
+{
+    void* resource = this->resource;
 
     /* Reset timer */
-    *(uint32_t*)((uint8_t*)this + 0x58) = 0;
+    this->timer = 0;
 
     /* Check if we already have the right resource loaded */
     if (resource == nullptr || force_reload ||
@@ -194,39 +348,39 @@ int GameObject::InitBase(int resource_id, int anim_index, bool force_reload)
         /* Mark not initialized until resource loads */
         this->initialized = 1;  /* still 1 during load attempt */
 
-        /* Release old resource if any — vtable[1] = StopSound, then vtable[2] = Release */
+        /* Release old resource if any */
         if (resource != nullptr) {
-            /* vtable[1] — invalidate/stop */
-            ((void(*)(void*,int))this->vtable[1])(this, 0);
+            /* vtable[1] — invalidate */
+            this->InvalidateRect();
 
             /* resource->vtable[2] — Release() */
-            void** res_vtbl = *(void***)((uint8_t*)this + 0x40);
+            void** res_vtbl = *(void***)&this->resource;
             ((void(*)())res_vtbl[2])();
 
-            *(void**)((uint8_t*)this + 0x40) = nullptr;
+            this->resource = nullptr;
         }
 
         /* Load new resource if valid ID */
         if (resource_id > 0) {
             resource = ResourceManager_GetById(&g_resmgr, resource_id);
-            *(void**)((uint8_t*)this + 0x40) = resource;
+            this->resource = resource;
         }
 
         /* If no resource loaded, play "no resource" animation and bail */
-        if (*(void**)((uint8_t*)this + 0x40) == nullptr) {
+        if (this->resource == nullptr) {
             this->PlayAnimation(-1);
             this->initialized = 0;
             return 0;
         }
 
         /* Lock/get surface via resource vtable[1] */
-        void** res_vtbl = *(void***)((uint8_t*)this + 0x40);
-        int raw_x = *(int32_t*)((uint8_t*)this + 0x74);
-        int raw_y = *(int32_t*)((uint8_t*)this + 0x78);
+        void** res_vtbl = *(void***)&this->resource;
+        int raw_x = this->world_x_raw;
+        int raw_y = this->world_y_raw;
         ((void(*)(int,int))res_vtbl[1])(raw_x, raw_y);
 
         /* If no surface data (flags at +0x10 == 0), bail */
-        resource = *(void**)((uint8_t*)this + 0x40);
+        resource = this->resource;
         if (*(uint32_t*)((uint8_t*)resource + 0x10) == 0) {
             this->initialized = 0;
             return 0;
@@ -249,16 +403,16 @@ int GameObject::InitBase(int resource_id, int anim_index, bool force_reload)
     }
 
     /* Copy default blit flags from resource (+0x164) */
-    resource = *(void**)((uint8_t*)this + 0x40);
+    resource = this->resource;
     this->blit_flags = *(uint32_t*)((uint8_t*)resource + 0x164);
 
     /* If no anim_index specified, use resource's default */
     if (anim_index < 0) {
-        resource = *(void**)((uint8_t*)this + 0x40);
+        resource = this->resource;
         anim_index = *(int16_t*)((uint8_t*)resource + 0x1E);
     }
 
-    /* Select animation via vtable[7] = SetAnimState */
+    /* Select animation via vtable[14] = SetAnimState */
     int result = this->SetAnimState(anim_index);
 
     /* Check if animation was set successfully */
@@ -272,121 +426,96 @@ int GameObject::InitBase(int resource_id, int anim_index, bool force_reload)
 
 
 /* ================================================================== */
-/* GameObject::StopSound — Vtable slot [1]                             */
+/* Entity::StopSound — Vtable slot [7]                             */
 /* Address: 0x405A20                                                   */
-/*                                                                     */
-/* Called by: vtable dispatch                                          */
-/*                                                                     */
-/* Stops current audio playback. Releases the audio channel at +0x48   */
-/* if active, then calls vtable[14] (AnimStateSelect) for the given    */
-/* sound parameter.                                                     */
 /* ================================================================== */
-void GameObject::StopSound(int param)
+void Entity::StopSound(int param)
 {
-    void* audio_ch = *(void**)((uint8_t*)this + 0x48);
+    void* audio_ch = this->audio_channel;
     if (audio_ch != nullptr) {
         CGWND_AudioChannel_Release(audio_ch);
-        *(uint32_t*)((uint8_t*)this + 0x5C) = 0;  /* clear active state */
+        this->active_state = 0;  /* clear active state */
     }
-    /* vtable[14] — AnimStateSelect */
-    this->AnimStateSelect(param);
+    /* Re-trigger animation state selection (vtable[14] = SetAnimState).
+     * In the binary: calls vtable[14] via dispatch; in natural C++ this
+     * is a virtual call that derived classes may override. */
+    this->SetAnimState(param);
 }
 
 
 /* ================================================================== */
-/* GameObject::SetAnimState — Vtable slot [7]                          */
+/* Entity::SetAnimState — Vtable slot [14]                         */
 /* Address: 0x405A50                                                   */
-/*                                                                     */
-/* Called by:                                                          */
-/*   GameObject::InitBase (0x405900) — initial animation setup        */
-/*   GameObject::Update (0x405C40) — boundary animation switch        */
-/*   Building_UpdateAnimBy... — occupancy/dimension-based anim change  */
-/*                                                                     */
-/* Sets the active animation to the given index in the resource's      */
-/* FrameData table. Validates range, stores frame ID, computes byte    */
-/* offsets, triggers redraw via SetFrame (vtable[8]), and plays the    */
-/* associated sound. Returns the new frame index.                      */
 /* ================================================================== */
-int GameObject::SetAnimState(int anim_index)
+int Entity::SetAnimState(int anim_index)
 {
     if (this->initialized != 1) {
         return 0;
     }
 
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    void* resource = this->resource;
     uint16_t anim_count = *(uint16_t*)((uint8_t*)resource + 0x1A);
 
     if (anim_index >= 0 && anim_index < anim_count) {
         this->anim_index = anim_index;
 
-        /* Get FrameData pointer: resource->anim_table[anim_index]
-         * FrameData is at resource+0x20, each entry is 0x18 bytes */
+        /* Get FrameData pointer: resource->anim_table[anim_index] */
         FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
                                      + anim_index * sizeof(FrameData));
 
         /* Reset phase tracking */
-        *(uint32_t*)((uint8_t*)this + 0x6C) = 0;  /* phase_timer */
-        *(uint32_t*)((uint8_t*)this + 0x58) = 0;  /* timer */
+        this->phase_timer = 0;  /* phase_timer */
+        this->timer = 0;  /* timer */
 
         /* Set starting frame from FrameData.start_frame */
         uint16_t start_frame = fd->start_frame;
-        *(uint16_t*)((uint8_t*)this + 0x54) = start_frame;
+        this->frame_index = start_frame;
 
         /* Update source rect via vtable[8] = SetFrame */
         this->SetFrame(start_frame, true);
 
-        /* Play sound from FrameData.audio_res_id (offset 0x0E, field index 7) */
+        /* Play sound from FrameData.audio_res_id */
         this->PlayAnimation(fd->audio_res_id);
     }
 
-    return *(uint16_t*)((uint8_t*)this + 0x54);
+    return this->frame_index;
 }
 
 
 /* ================================================================== */
-/* GameObject::PlayAnimation — Play sound for a resource ID            */
+/* Entity::PlayAnimation — Play sound for a resource ID            */
 /* Address: 0x405AB0                                                   */
-/*                                                                     */
-/* Called by:                                                          */
-/*   GameObject::SetAnimState (0x405A50)                               */
-/*   GameObject::InitBase (0x405900) — failure case                   */
-/*   External callers via vtable[14] = AnimStateSelect                 */
-/*                                                                     */
-/* Looks up the sound resource by ID, releases old audio channel if    */
-/* needed, allocates a new channel from GameAudio, and schedules       */
-/* playback. Supports immediate playback or random-delayed playback    */
-/* based on FrameData::audio_delay field.                              */
 /* ================================================================== */
-void GameObject::PlayAnimation(int sound_id)
+void Entity::PlayAnimation(int sound_id)
 {
     /* Bail if no audio system or null sound */
     if (g_audio == nullptr || sound_id == 0) {
         return;
     }
 
-    void* resource = *(void**)((uint8_t*)this + 0x40);
-    uint32_t* active_state = (uint32_t*)((uint8_t*)this + 0x5C);
+    void* resource = this->resource;
+    uint32_t* active_state = &this->active_state;
 
     /* If different sound than current, release old */
-    if (sound_id != *(uint32_t*)((uint8_t*)this + 0x5C)) {
-        void* audio_ch = *(void**)((uint8_t*)this + 0x48);
+    if (sound_id != this->active_state) {
+        void* audio_ch = this->audio_channel;
         if (audio_ch != nullptr) {
             CGWND_AudioChannel_Release(audio_ch);
             *active_state = 0;
         }
-        *(uint32_t*)((uint8_t*)this + 0x60) = 0;  /* next_sound_time = 0 */
+        this->next_sound_time = 0;  /* next_sound_time = 0 */
 
         /* Load sound resource via ResourceManager */
-        int snd_res = (int)RESMGR_GetById(&g_resmgr, sound_id);
-        *(int*)((uint8_t*)this + 0x44) = snd_res;
+        int snd_res = (int)ResourceManager_GetById(&g_resmgr, sound_id);
+        this->sound_res_id = snd_res;
 
         /* Validate sound resource: if byte +0x09 != 1, not a valid sound */
         if (snd_res != 0 && *(uint8_t*)(snd_res + 9) != 1) {
-            *(int*)((uint8_t*)this + 0x44) = 0;
+            this->sound_res_id = 0;
         }
     }
 
-    int snd_res = *(int*)((uint8_t*)this + 0x44);
+    int snd_res = (int)this->sound_res_id;
 
     /* Accept sound_id == -1 as "no sound" marker */
     if (snd_res != 0 || sound_id == -1) {
@@ -402,7 +531,7 @@ void GameObject::PlayAnimation(int sound_id)
     FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
                                  + this->anim_index * sizeof(FrameData));
 
-    void** audio_ch_ptr = (void**)((uint8_t*)this + 0x48);
+    void** audio_ch_ptr = &this->audio_channel;
 
     if (*audio_ch_ptr == nullptr) {
         /* Allocate new audio channel from GameAudio */
@@ -426,7 +555,7 @@ void GameObject::PlayAnimation(int sound_id)
         if (delay > 0) {
             if (delay > 0) {
                 uint32_t r = CRT_rand();
-                *(uint32_t*)((uint8_t*)this + 0x60) =
+                this->next_sound_time =
                     g_game_time + (r % delay) + 1;
                 return;
             }
@@ -434,45 +563,41 @@ void GameObject::PlayAnimation(int sound_id)
                 uint32_t r = CRT_rand();
                 delay = (r % (2 - delay)) + delay;
             }
-            *(uint32_t*)((uint8_t*)this + 0x60) = g_game_time + delay;
+            this->next_sound_time = g_game_time + delay;
         }
     } else {
         /* Channel already allocated — check if it's time to play */
         if (fd->audio_delay > 0 &&
-            *(uint32_t*)((uint8_t*)this + 0x60) < g_game_time)
+            this->next_sound_time < g_game_time)
         {
-            CGWND_AudioChannel_Play((uint32_t)*audio_ch_ptr);
+            CGWND_AudioChannel_Play(*audio_ch_ptr);
         }
     }
 }
 
 
 /* ================================================================== */
-/* GameObject::SetWorldPos — Set world position                        */
+/* Entity::MoveTo — Set world position                        */
 /* Address: 0x405C00                                                   */
 /*                                                                     */
-/* Called by:                                                          */
-/*   Game_PlaySound (0x412019, 0x41204F)                               */
-/*   UI_Construct (0x423415, 0x423252)                                 */
-/*   RESDATA_SetPosition (0x454830)                                    */
-/*   Various entity placement code                                     */
-/*                                                                     */
-/* Updates the object's world position. Stores raw coords, applies     */
-/* resource offset for final screen position, and repositions the      */
-/* audio channel.                                                      */
+/* The binary calls GameObject_MoveTo (0x436A60) directly, not through */
+/* vtable dispatch. In Entity-derived classes, vtable[3] is overridden */
+/* by HitTest (0x405680), so a virtual call to MoveTo() would dispatch */
+/* to the wrong function. Use explicit scope: GameObject::MoveTo().   */
 /* ================================================================== */
-void GameObject::SetWorldPos(int x, int y)
+void Entity::MoveTo(int x, int y)
 {
-    /* Store raw position */
-    GameObject_MoveTo_raw(this, x, y);
+    /* Update screen_rect position preserving size, invalidate old/new.
+     * Direct call to GameObject::MoveTo bypasses vtable dispatch.       */
+    GameObject::MoveTo(x, y);
 
     /* Apply resource offset to get final world position */
-    void* resource = *(void**)((uint8_t*)this + 0x40);
-    *(int32_t*)((uint8_t*)this + 0x4C) = *(int16_t*)((uint8_t*)resource + 0x32) + x;
-    *(int32_t*)((uint8_t*)this + 0x50) = *(int16_t*)((uint8_t*)resource + 0x34) + y;
+    void* resource = this->resource;
+    this->world_x = *(int16_t*)((uint8_t*)resource + 0x32) + x;
+    this->world_y = *(int16_t*)((uint8_t*)resource + 0x34) + y;
 
     /* Update audio channel position if active */
-    void* audio_ch = *(void**)((uint8_t*)this + 0x48);
+    void* audio_ch = this->audio_channel;
     if (audio_ch != nullptr) {
         CGWND_AudioChannel_UpdatePosition(audio_ch, x, y);
     }
@@ -480,31 +605,24 @@ void GameObject::SetWorldPos(int x, int y)
 
 
 /* ================================================================== */
-/* GameObject::Update — Animation state machine                        */
+/* Entity::Update — Animation state machine                        */
 /* Address: 0x405C40                                                   */
-/*                                                                     */
-/* Called by: per-frame game loop dispatch                             */
-/*                                                                     */
-/* Advances the sprite frame index based on FrameData timing.          */
-/* Handles forward/reverse animation, ping-pong (loop at boundary),    */
-/* pause-at-boundary (wait_time > 0), and step_mode (+2 per tick).     */
-/* Dispatches SetFrame (vtable[8]) when frame changes.                 */
 /* ================================================================== */
-void GameObject::Update()
+void Entity::Update()
 {
     if (this->initialized != 1) {
         return;
     }
 
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    void* resource = this->resource;
     FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
                                  + this->anim_index * sizeof(FrameData));
 
     uint16_t start_frame = fd->start_frame;
     uint16_t end_frame   = fd->end_frame;
-    uint16_t cur_frame   = *(uint16_t*)((uint8_t*)this + 0x54);
-    uint8_t  waiting     = *(uint8_t*)((uint8_t*)this + 0x70);
-    uint32_t phase_timer = *(uint32_t*)((uint8_t*)this + 0x6C);
+    int32_t cur_frame    = this->frame_index;
+    uint8_t  waiting     = this->waiting_flag;
+    uint32_t phase_timer = this->phase_timer;
 
     /* Single-frame animation with no-loop flag — never updates */
     if (start_frame == end_frame && fd->sound_fx_index < 0) {
@@ -519,42 +637,40 @@ void GameObject::Update()
     /* Check if waiting at animation boundary */
     if (waiting == 1) {
         /* fps_limit check: DAT_00481170 vs g_main_window+0x11 */
-        if (_DAT_00481170 < *(double*)((uint8_t*)g_main_window + 0x11) &&
+        if (_DAT_00481170 < (double)*(uint8_t*)((uint8_t*)g_main_window + 0x11) &&
             fd->wait_time > 0)
         {
             return;
         }
         /* Still within wait period */
-        if (g_game_time < *(uint32_t*)((uint8_t*)this + 0x58)) {
+        if (g_game_time < this->timer) {
             return;
         }
     }
 
-    uint16_t new_frame;
+    int32_t new_frame;
     uint8_t step_mode = *(uint8_t*)((uint8_t*)fd + 0x17);
 
     if (step_mode == 0) {
         /* Normal step mode: advance by 1 per step_delay ticks */
         phase_timer = phase_timer + 1;
-        *(uint32_t*)((uint8_t*)this + 0x6C) = phase_timer;
+        this->phase_timer = phase_timer;
 
         if (start_frame < end_frame) {
             /* Forward animation */
             int step = (int16_t)(phase_timer / fd->step_delay);
-            new_frame = (uint16_t)(step + start_frame);
+            new_frame = step + start_frame;
 
             if (new_frame > end_frame) {
-                /* Hit boundary */
                 waiting = 1;
                 new_frame = end_frame;
             }
         } else {
             /* Reverse animation */
             int step = (int16_t)(phase_timer / fd->step_delay);
-            new_frame = (uint16_t)(start_frame - step);
+            new_frame = (int32_t)start_frame - step;
 
             if (new_frame < end_frame) {
-                /* Hit boundary */
                 waiting = 1;
                 new_frame = end_frame;
             }
@@ -562,11 +678,11 @@ void GameObject::Update()
     } else {
         /* Step mode 1: advance by 2 per tick (skip odd frames) */
         phase_timer = phase_timer + 2;
-        *(uint32_t*)((uint8_t*)this + 0x6C) = phase_timer;
+        this->phase_timer = phase_timer;
 
         if (start_frame < end_frame) {
             int16_t step = (int16_t)(phase_timer / fd->step_delay) + start_frame;
-            new_frame = (uint16_t)(step & 0xFFFE);  /* force even */
+            new_frame = (int32_t)step & ~1;  /* sign-extend, then force even */
 
             if (new_frame > end_frame) {
                 waiting = 1;
@@ -574,7 +690,7 @@ void GameObject::Update()
             }
         } else {
             int16_t step = (start_frame - (int16_t)(phase_timer / fd->step_delay)) + 1;
-            new_frame = (uint16_t)(step & 0xFFFE);  /* force even */
+            new_frame = (int32_t)step & ~1;  /* sign-extend, then force even */
 
             if (new_frame < end_frame) {
                 waiting = 1;
@@ -583,46 +699,42 @@ void GameObject::Update()
         }
     }
 
-    /* Handle boundary */
-    if (waiting == 0 && new_frame != cur_frame) {
-        /* Normal case: frame changed within range */
-        // frame will be updated below
-    } else if (waiting == 1 || (waiting == 0 && new_frame == cur_frame)) {
-        /* At boundary */
-        if (this->initialized == 0) {
-            /* First time hitting boundary — set wait timer */
-            *(uint8_t*)((uint8_t*)this + 0x70) = 1;
-            *(uint32_t*)((uint8_t*)this + 0x58) = fd->wait_time + g_game_time;
+    /* The byte at +0x70 is both the current waiting state and the
+     * first-boundary latch. There is no separate byte at +0x71. */
+    if (waiting == 1 || new_frame == cur_frame) {
+        if (this->waiting_flag == 0) {
+            this->waiting_flag = 1;
+            this->timer = fd->wait_time + g_game_time;
         } else {
-            /* Already waited — call vtable[14] to select next animation */
-            new_frame = this->AnimStateSelect(fd->sound_fx_index);
-            *(uint8_t*)((uint8_t*)this + 0x70) = 0;
+            this->PlayAnimation(fd->sound_fx_index);
+            this->waiting_flag = 0;
         }
     }
 
     /* Update frame if changed */
-    if (*(uint16_t*)((uint8_t*)this + 0x54) != new_frame) {
+    if (this->frame_index != new_frame) {
         this->SetFrame(new_frame, true);
     }
 }
 
 
 /* ================================================================== */
-/* GameObject::SetFrame — Vtable slot [8]                              */
+/* Entity::SetFrame — Vtable slot [8]                              */
 /* Address: 0x405DE0                                                   */
 /*                                                                     */
-/* Stores the frame number at +0x54, computes source rect byte offsets */
-/* from frame width, and optionally triggers invalidation.             */
+/* NOTE: vtable[1] (InvalidateRect) is called with NO stack args.      */
+/* The binary does NOT push 0 before the call; the old code's           */
+/* `(this, 0)` pattern was incorrect.                                   */
 /* ================================================================== */
-void GameObject::SetFrame(int frame_id, bool trigger_invalidate)
+void Entity::SetFrame(int frame_id, bool trigger_invalidate)
 {
     if (this->initialized != 1) {
         return;
     }
 
-    *(int32_t*)((uint8_t*)this + 0x54) = frame_id;
+    this->frame_index = frame_id;
 
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    void* resource = this->resource;
     uint16_t frame_w = *(uint16_t*)((uint8_t*)resource + 0x14);
 
     /* Compute source rect X offsets from frame index and width */
@@ -630,53 +742,61 @@ void GameObject::SetFrame(int frame_id, bool trigger_invalidate)
     this->source_rect.right = (frame_id + 1) * frame_w;
 
     if (trigger_invalidate) {
-        /* vtable[1] — invalidate rect */
-        ((void(*)(void*,int))this->vtable[1])(this, 0);
+        this->InvalidateRect();
     }
 }
 
 
 /* ================================================================== */
-/* GameObject::SetName — Vtable slot [9]                               */
+/* Entity::SetName — Vtable slot [13]                              */
 /* Address: 0x405E20                                                   */
-/*                                                                     */
-/* Validates the first character (alpha-numeric or null allowed),      */
-/* copies up to 10 characters to +0x7C, null-terminates at +0x86.      */
 /* ================================================================== */
-void GameObject::SetName(const char* name)
+/* ================================================================== */
+/* Entity::SetVisible — Vtable slot [9]                                */
+/* Address: 0x4061B0                                                   */
+/* ================================================================== */
+void Entity::SetVisible(bool is_visible)
+{
+    this->visible = is_visible;
+    this->InvalidateRect();
+
+    if (this->audio_channel != nullptr) {
+        if (is_visible) {
+            CGWND_AudioChannel_Play(this->audio_channel);
+        } else {
+            CGWND_AudioChannel_Stop(this->audio_channel);
+        }
+    }
+}
+
+
+void Entity::SetName(const char* name)
 {
     this->CopyName(name);
 }
 
 
 /* ================================================================== */
-/* GameObject::CopyName — Name copy helper (non-virtual)               */
+/* Entity::CopyName — Name copy helper (non-virtual)               */
 /* Address: 0x405E20 (same body as SetName)                            */
-/*                                                                     */
-/* Called by Building_BaseCtor and other constructors that need        */
-/* direct name access without virtual dispatch overhead.               */
 /* ================================================================== */
-void GameObject::CopyName(const char* name)
+void Entity::CopyName(const char* name)
 {
     /* Validate: first char must be alphanumeric or null */
     if (IsCharAlphaNumericA(*name) || *name == '\0') {
         _strncpy((char*)this + 0x7C, name, 10);
     }
-    *(uint8_t*)((uint8_t*)this + 0x86) = 0;  /* null terminate */
+    this->name[10] = 0;  /* null terminate */
 }
 
 
 /* ================================================================== */
-/* GameObject::Draw — Vtable slot [10]                                 */
+/* Entity::Draw — Vtable slot [11]                                 */
 /* Address: 0x405E60                                                   */
-/*                                                                     */
-/* Renders the current sprite frame to the primary surface. Computes   */
-/* source/dest rectangles, handles horizontal flip, clips to visible   */
-/* area via IntersectRect, and blits via UIPANEL_Blit.                 */
 /* ================================================================== */
-void GameObject::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
+void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 {
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    void* resource = this->resource;
 
     /* Bail if no surface or not visible */
     if (*(int*)((uint8_t*)resource + 0x10) == 0 || this->visible != 1) {
@@ -721,9 +841,6 @@ void GameObject::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
         src_left   = (this->source_rect.left + clipped.left) - this->screen_rect.left;
     }
 
-    RECT src_rect;
-    SetRect(&src_rect, src_left, src_top, src_right, src_bottom);
-
     if (enable_scroll == 1) {
         flags |= 0x40;
     }
@@ -732,31 +849,27 @@ void GameObject::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
     UIPANEL_Blit(*(void**)((uint8_t*)resource + 0x10),
                  clipped.left, clipped.top, clipped.right, clipped.bottom,
                  g_primary_surface,
-                 src_rect.left, src_rect.top, src_rect.right, src_rect.bottom,
+                 src_left, src_top, src_right, src_bottom,
                  flags);
 }
 
 
 /* ================================================================== */
-/* GameObject::DrawConnected — Vtable slot [11]                        */
+/* Entity::DrawConnected — Vtable slot [12]                        */
 /* Address: 0x405FD0                                                   */
-/*                                                                     */
-/* Renders a connected/multi-tile sprite. Temporarily increments       */
-/* the frame index, blits, then restores the frame. Used for sprite    */
-/* overlays and connected tile rendering.                              */
 /* ================================================================== */
-void GameObject::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
+void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 {
     /* Bail if not visible or not a connected sprite */
     if (this->visible != 1) {
         return;
     }
 
-    void* resource = *(void**)((uint8_t*)this + 0x40);
+    void* resource = this->resource;
     FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
                                  + this->anim_index * sizeof(FrameData));
 
-    if (fd->is_connected == 0) {
+    if (*(uint8_t*)((uint8_t*)fd + 0x17) == 0) {
         return;
     }
 
@@ -799,10 +912,11 @@ void GameObject::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t ext
     }
 
     /* Increment frame temporarily for connected tile */
-    uint16_t cur_frame = *(uint16_t*)((uint8_t*)this + 0x54);
+    int32_t cur_frame = this->frame_index;
     this->SetFrame(cur_frame + 1, false);
 
     /* Second source rect for the connected tile */
+    RECT src_rect;
     int src2_left  = (clipped.right - this->screen_rect.left) + this->source_rect.left;
     int src2_top   = clipped.bottom - this->screen_rect.top;
     int src2_right = (clipped.left - this->screen_rect.right) + this->source_rect.right;
@@ -818,107 +932,39 @@ void GameObject::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t ext
                  src2_right, src2_bottom, src_rect.left, src_rect.top,
                  flags);
 
-    /* Restore original frame */
-    this->SetFrame(cur_frame - 1, false);
+    /* Restore the frame that preceded the temporary increment. */
+    this->SetFrame(this->frame_index - 1, false);
 }
 
 
 /* ================================================================== */
-/* GameObject::HitTest — Vtable slot [3]                               */
-/* Address: 0x405680                                                   */
+/* Entity::GetBoundingRect — Get bounding rect from resource       */
+/* Address: 0x4583C0                                                   */
 /*                                                                     */
-/* Hit-tests a packed (X|Y) point against 8 UISprite sub-rectangle     */
-/* pointers at +0x148..+0x164. Dispatches vtable[3] with animation     */
-/* data from +0x68/+0x6C (hit case) or +0x60/+0x64 (miss case).       */
-/* Used by LOCOBITMAP for click-region dispatch.                       */
+/* Retrieves the bounding rectangle from the resource at +0x61C,       */
+/* then offsets it by the object's screen_rect position. Returns       */
+/* TRUE (1) on success, FALSE (0) if out_rect is NULL, resource is     */
+/* missing, or the bounding rect is empty.                              */
 /* ================================================================== */
-int GameObject::HitTest(uint32_t packedXY)
+BOOL Entity::GetBoundingRect(RECT* out_rect)
 {
-    /* Check "destroyed" flag at +0x110 (LOCOBITMAP-specific, but checked here) */
-    if (*(uint8_t*)((uint8_t*)this + 0x110) != 0) {
-        return 0;
+    void* resource = this->resource;  /* +0x40 */
+    if (out_rect == nullptr || resource == nullptr) {
+        return FALSE;
     }
 
-    /* If no held child object at +0x130, test the 8 sub-rectangles */
-    if (*(void**)((uint8_t*)this + 0x130) == nullptr) {
-        /* Array of 8 UISprite pointers at +0x148 through +0x164 */
-        for (int i = 0; i < 8; i++) {
-            UISprite** sprite_ptr = (UISprite**)((uint8_t*)this + 0x148 + i * 4);
-            if (*sprite_ptr == nullptr) continue;
+    SetRectEmpty(out_rect);
 
-            /* PtInRect on sprite's RECT (at sprite+4) */
-            RECT* spr_rect = (RECT*)((uint8_t*)(*sprite_ptr) + 4);
-            if (PtInRect(spr_rect, packedXY)) {
-                /* Hit: dispatch vtable[3] with hit coords */
-                int hit_x = *(int*)((uint8_t*)this + 0x68);
-                int hit_y = *(int*)((uint8_t*)this + 0x6C);
-                ((void(*)(void*,int,int,int,int))this->vtable[3])(this, hit_x, hit_y, 0, 1);
-                return 0;
-            }
-        }
+    RECT* res_rect = (RECT*)((uint8_t*)resource + 0x61C);
+    if (IsRectEmpty(res_rect)) {
+        return FALSE;
     }
 
-    /* Miss: dispatch vtable[3] with miss coords */
-    int miss_x = *(int*)((uint8_t*)this + 0x60);
-    int miss_y = *(int*)((uint8_t*)this + 0x64);
-    ((void(*)(void*,int,int,int,int))this->vtable[3])(this, miss_x, miss_y, 0, 1);
-    return 0;
-}
+    out_rect->left   = res_rect->left;
+    out_rect->top    = res_rect->top;
+    out_rect->right  = res_rect->right;
+    out_rect->bottom = res_rect->bottom;
 
-
-/* ================================================================== */
-/* GameObject::OnTimerTick — Vtable slot [12]                          */
-/* Address: 0x4055E0                                                   */
-/*                                                                     */
-/* Timer/event completion handler. Destroys the child callback object  */
-/* at +0x130 via its scalar dtor (vtable[0]), then calls vtable[3]    */
-/* to update the display state.                                        */
-/* ================================================================== */
-int GameObject::OnTimerTick()
-{
-    void* child = *(void**)((uint8_t*)this + 0x130);
-    if (child != nullptr) {
-        /* Call child's scalar deleting destructor with flags=1 (free) */
-        void** child_vtbl = *(void***)child;
-        ((void(*)(void*,byte))child_vtbl[0])(child, 1);
-
-        *(void**)((uint8_t*)this + 0x130) = nullptr;
-
-        /* Dispatch vtable[3] to update display */
-        int disp_x = *(int*)((uint8_t*)this + 0x60);
-        int disp_y = *(int*)((uint8_t*)this + 0x64);
-        ((void(*)(void*,int,int,int,int))this->vtable[3])(this, disp_x, disp_y, 0, 1);
-    }
-    return 0;
-}
-
-
-/* ================================================================== */
-/* GameObject::AnimStateSelect — Vtable slot [14]                      */
-/* Address: 0x405AB0 (default impl = PlayAnimation)                    */
-/*                                                                     */
-/* Called by:                                                          */
-/*   GameObject::Update — when animation hits boundary                */
-/*                                                                     */
-/* Default implementation plays the sound associated with the given    */
-/* index. Derived classes (Building, etc.) override this to implement  */
-/* animation state transitions based on game logic.                    */
-/* ================================================================== */
-void GameObject::AnimStateSelect(int sound_id)
-{
-    /* Default: just play the sound */
-    this->PlayAnimation(sound_id);
-}
-
-
-/* ================================================================== */
-/* GameObject::MoveTo — Internal position helper                       */
-/*                                                                     */
-/* Sets the raw world position fields (+0x74, +0x78) before resource   */
-/* offset is applied by SetWorldPos.                                   */
-/* ================================================================== */
-void GameObject::MoveTo(int x, int y)
-{
-    *(int32_t*)((uint8_t*)this + 0x74) = x;
-    *(int32_t*)((uint8_t*)this + 0x78) = y;
+    OffsetRect(out_rect, this->screen_rect.left, this->screen_rect.top);
+    return TRUE;
 }

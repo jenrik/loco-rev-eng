@@ -6,15 +6,41 @@
  */
 
 #include "CGWND.h"
-#include "../shared/vtable_addrs.h"
+#include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
+
+/* Subsystem class headers — for InitAllSubsystems */
+#include "../ui/EditWindow.h"
+#include "../town/Town.h"
+#include "../ui/PostcardPreviewWindow.h"
+#include "../ui/TrainStationWindow.h"
+#include "../graphics/LOCOBITMAP.h"
+#include "../input/Cursor.h"
+#include "../ui/HelpWnd.h"
+#include "../ui/AboutDialog.h"
+
+#ifndef _WIN32
+#include <SDL3/SDL.h>
+#include "sdl3_window.h"
+extern "C" { SDL_Window* SDL3_GetWindow(void); }
+#endif
 
 /* ================================================================== */
-/* External references                                                 */
+/* Win32 API declarations (Windows only)                               */
 /* ================================================================== */
 
+#ifdef _WIN32
 extern "C" {
     /* Windows API */
     HWND  GetDesktopWindow(void);
+    HWND  CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName,
+                          DWORD dwStyle, int X, int Y, int nWidth, int nHeight,
+                          HWND hWndParent, HMENU hMenu, HINSTANCE hInstance,
+                          void* lpParam);
+    ATOM  RegisterClassA(const WNDCLASSA* lpWndClass);
+    ATOM  RegisterClassExA(const WNDCLASSEXA* lpWndClassEx);
+    BOOL  GetClientRect(HWND hWnd, struct RECT* lpRect);
+    HICON LoadIconA(HINSTANCE hInstance, LPCSTR lpIconName);
+    BOOL  ShowWindow(HWND hWnd, int nCmdShow);
     int   GetSystemMetrics(int nIndex);
     HDC   GetDC(HWND hWnd);
     int   GetDeviceCaps(HDC hdc, int index);
@@ -25,27 +51,85 @@ extern "C" {
     DWORD  GetFileVersionInfoSizeA(const char* file, DWORD* handle);
     BOOL   GetFileVersionInfoA(const char* file, DWORD handle, DWORD len, void* data);
     BOOL   VerQueryValueA(void* block, const char* subBlock, void** buffer, uint32_t* len);
-    void*  operator_new(size_t size);
+    BOOL   PeekMessageA(struct tagMSG* lpMsg, HWND hWnd, uint32_t wMsgFilterMin,
+                        uint32_t wMsgFilterMax, uint32_t wRemoveMsg);
+    BOOL   TranslateMessage(const struct tagMSG* lpMsg);
+    LONG   DispatchMessageA(const struct tagMSG* lpMsg);
+    void   SetCursor(void* hCursor);
+    int    KillTimer(HWND hWnd, uintptr_t uIDEvent);
+    uintptr_t SetTimer(HWND hWnd, uintptr_t nIDEvent, uint32_t uElapse,
+                       void (*lpTimerFunc)(HWND,uint32_t,uintptr_t,DWORD));
+    BOOL   PostMessageA(HWND hWnd, uint32_t Msg, uint32_t wParam, uint32_t lParam);
+    LONG   SetWindowLongA(HWND hWnd, int nIndex, LONG dwNewLong);
+    LONG   GetWindowLongA(HWND hWnd, int nIndex);
+    BOOL   SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y,
+                        int cx, int cy, uint32_t uFlags);
+    BOOL   ShowScrollBar(HWND hWnd, int wBar, BOOL bShow);
+    int    SetScrollRange(HWND hWnd, int nBar, int nMinPos, int nMaxPos, BOOL bRedraw);
+    int    SetScrollPos(HWND hWnd, int nBar, int nPos, BOOL bRedraw);
+    BOOL   AdjustWindowRect(struct RECT* lpRect, DWORD dwStyle, BOOL bMenu);
+    BOOL   EnableWindow(HWND hWnd, BOOL bEnable);
+    BOOL   InvalidateRect(HWND hWnd, const struct RECT* lpRect, BOOL bErase);
+    BOOL   UpdateWindow(HWND hWnd);
+    void   SetRect(struct RECT* lpRect, int left, int top, int right, int bottom);
+    void   SetRectEmpty(struct RECT* lpRect);
+    BOOL   PlaySoundA(const char* pszSound, HMODULE hmod, DWORD fdwSound);
+    BOOL   DrawTextA(HDC hdc, const char* lpchText, int cchText,
+                      struct RECT* lprc, UINT format);
+    BOOL   GetOpenFileNameA(void* lpofn);
 
-    /* CRT */
-    uint32_t CRT_time(void);
-    int      CRT_atoi(const char* str);
-    char*    CRT_strtok(char* str, const char* delim);
+    /* CRT helpers */
+    unsigned int CRT_time(unsigned int* t);
+    int     CRT_toupper(int c);
+    int     CRT_atoi(const char* s);
+    char*   CRT_strtok(char* str, const char* delim);
+    void*   CRT_localtime(unsigned int* timer);
+    void    CRT_mkdir(const char* path);
+    char*   CRT_itoa(int value, char* str, int radix);
+    void    CRT_memset_pattern(void* dst, int val, int count, void* pattern);
+    int     CRT_exit(const char** a, const char** b);
+    void    CRT_free_pattern(void* ptr, int val, int count, void* pattern);
 
-    /* Resource Manager */
-    void FormatResourceString(void* resmgr, int id, char* out, int maxLen);
-
-    /* Config/INI */
-    int  Config_GetIniInt(void* config, const char* section, const char* key, int defaultVal);
-    void Config_WriteInt(void* config, const char* section, const char* key, uint32_t value);
-
-    /* Memory management */
-    void GLOBAL_free(void* ptr);
-    void* operator_new(size_t size);
+    /* INI helpers */
+    int   Config_GetIniInt(void* config, const char* section, const char* key, int defaultVal);
+    void  Config_WriteInt(void* config, const char* section, const char* key, uint32_t value);
+    void  Config_GetIniString(void* config, const char* section, const char* key,
+                              const char* def, char* out, uint32_t maxLen);
+    int    wsprintfA(char* buf, const char* fmt, ...);
 }
+#endif /* _WIN32 */
+
+#ifndef _WIN32
+/* Non-Windows stubs for helpers NOT covered by sdl3_window.h */
+static inline int Config_GetIniInt(void*, const char*, const char*, int d) { return d; }
+static inline void Config_WriteInt(void*, const char*, const char*, unsigned int) {}
+static inline void Config_GetIniString(void*, const char*, const char*, const char*, char* out, unsigned int) { if(out) out[0]=0; }
+static inline void FormatResourceString(void*, unsigned int, char* buf, int sz) { if(buf&&sz>0) buf[0]=0; }
+static inline unsigned int CRT_time() { return 0; }
+static inline int CRT_toupper(int c) { return (c>='a'&&c<='z')?c-32:c; }
+static inline int CRT_atoi(const char* s) { return s?atoi(s):0; }
+static char _strtok_empty_cgwnd[1] = {0}; static inline char* CRT_strtok(char*, const char*) { return _strtok_empty_cgwnd; }
+static inline void* CRT_localtime(unsigned int*) { static int t=0; return &t; }
+static inline int CRT_mkdir(const char*) { return 0; }
+static inline char* CRT_itoa(int v, char* buf, int) { if(buf)snprintf(buf,32,"%d",v); return buf; }
+static inline void CRT_memset_pattern(void*, int, int, void*) {}
+static inline int CRT_exit(const char**, const char**) { exit(0); return 0; }
+static inline void CRT_free_pattern(void*, int, int, void*) {}
+static inline void* GetModuleHandleA(const char*) { return NULL; }
+static inline unsigned int GetModuleFileNameA(void*, char*, unsigned int) { return 0; }
+static inline unsigned int GetFileVersionInfoSizeA(const char*, unsigned int*) { return 0; }
+static inline int GetFileVersionInfoA(const char*, unsigned int, unsigned int, void*) { return 0; }
+static inline int VerQueryValueA(void*, const char*, void**, unsigned int*) { return 0; }
+static inline char* lstrcpyA(char* d, const char* s) { return d?s?strcpy(d,s):d:d; }
+static inline char* lstrcatA(char* d, const char* s) { return d?s?strcat(d,s):d:d; }
+static inline int lstrlenA(const char* s) { return s?strlen(s):0; }
+/* operator_new / GLOBAL_free are defined in link_stubs / stubs_impl */
+extern void* operator_new(size_t);
+extern void  GLOBAL_free(void*);
+#endif
 
 /* ================================================================== */
-/* Global variables                                                    */
+/* Game global variables (all platforms)                               */
 /* ================================================================== */
 extern void*    g_config_ini;           /* INI config object at 0x4A9EEC */
 extern int      g_screen_width;         /* 0x4851D8 */
@@ -57,57 +141,51 @@ extern int      g_window_left;          /* 0x485200 */
 extern int      g_window_top;           /* 0x485204 */
 extern int      g_window_right;         /* 0x485208 */
 extern int      g_window_bottom;        /* 0x48520C */
-extern int      g_client_width;         /* 0x485210 area */
+extern RECT     g_client_rect;          /* 0x485220 */
 extern uint8_t  g_is_fullscreen;        /* 0x485210 */
 extern uint8_t  g_show_scrollbars;      /* 0x485238 */
 extern uint8_t  g_clean_exit;           /* 0x485218 */
 extern uint8_t  g_window_mode;          /* 0x4851F0 */
-extern uint8_t  g_build_mode;           /* build/placement mode flag */
-extern uint8_t  g_road_build_mode;      /* road building mode */
-extern int      g_placement_resource_id;/* resource ID being placed */
-extern int      g_game_mode;            /* 1 = main menu, 2 = in-game */
-extern int      g_timer_id;             /* Windows timer ID */
-extern void*    g_resmgr;               /* global resource manager */
-extern int      g_demo_mode;            /* 0x4A9918 — demo mode flag */
-extern int      g_easter_egg;           /* 0x485230 — easter egg theme */
-extern uint32_t g_screen_bpp;           /* 0x48521C — screen color depth */
+extern uint8_t  g_build_mode;
+extern uint8_t  g_road_build_mode;
+extern int      g_placement_resource_id;
+extern int      g_game_mode;            /* 0x4851F4 — 1=main menu, 2=in-game */
+extern int      g_timer_id;
+extern void*    g_resmgr;
+extern int      g_demo_mode;            /* 0x4A9918 */
+extern int      g_easter_egg;
+extern uint32_t g_screen_bpp;           /* 0x48521C */
+extern int      g_world_width;          /* 0x4AAD0C */
+extern int      g_world_height;         /* 0x4AAD10 */
+extern int      g_client_offset_x;      /* 0x485228 */
+extern int      g_client_offset_y;      /* 0x48522C */
+extern int      g_viewport_x;           /* 0x4AAD24 */
+extern int      g_viewport_y;           /* 0x4AAD28 */
+extern int      g_viewport_rect_left;   /* 0x4AAD14 */
+extern int      g_viewport_rect_top;    /* 0x4AAD18 */
+extern int      g_viewport_rect_right;  /* 0x4AAD1C */
+extern int      g_viewport_rect_bottom; /* 0x4AAD20 */
+extern void*    g_font_small;
 
-/* Subsystem globals (referenced by multiple CGWND methods) */
-extern void*    g_ui_main;              /* 0x4FD378 — UI_MainMenu instance */
-extern void*    g_town;                 /* 0x4FD37C — Town instance */
-extern void*    g_postcard;             /* 0x4FD384 — Postcard LOCOBITMAP */
-extern void*    g_cursor;               /* 0x4FD380 — Cursor instance */
-extern void*    g_postcard_send;        /* 0x4FD388 — PostcardPreviewWindow */
-extern void*    g_trainstation_window;  /* 0x485258 — TrainStationWindow */
-extern void*    g_audio_mgr;            /* 0x4FD38C — AudioMgr/HelpWnd */
-extern void*    g_about;                /* 0x4FD390 — AboutDialog */
-extern void*    g_audio;                /* 0x4FD3BC — GameAudio instance */
-extern void*    g_netman;               /* 0x4FD3AC — NetMan instance */
-extern void*    _g_network_thread;      /* 0x4FD398 — NetworkThread */
-extern void*    _g_train;               /* 0x4FD3A4 — Train object */
-extern void*    _DAT_004fd3a8;          /* 0x4FD3A8 — unknown subsystem */
-extern void*    _g_dplay;               /* 0x4FD3B0 — DirectPlay */
-extern void*    _g_dplay_config;        /* 0x4FD3B4 — DirectPlayConfig */
-extern void*    _g_train_resources;     /* 0x4FD394 — TrainResources */
-extern void*    g_player_config;        /* 0x4AA4A8 — PlayerConfig */
-extern void*    _g_audio_config;        /* 0x4FD3D4 — AudioConfig */
-extern void*    _g_dsound_object;       /* 0x4FD3D8 — DirectSound object */
-extern int*     _g_cursor_surface;      /* 0x4FD3C8 — Cursor surface */
-extern void*    g_frame_event;          /* 0x4A990C — Frame-timer event */
-extern uint32_t g_timer_event_id;       /* 0x485438 — Multimedia timer ID */
-extern void*    g_ddraw;                /* 0x485440 — DirectDraw object */
-extern void*    g_main_window;          /* 0x4AA4A0 — CGWND singleton ptr */
-extern uint8_t  g_in_build_mode;        /* 0x4FD199 — in-build-mode flag */
-extern void*    g_game;                 /* 0x4854C8 — Game object */
-extern void*    g_async_task_queue;     /* 0x4A9AD0 — async task queue */
-
-/* InstallPathInit globals */
-extern char     g_install_path[256];    /* 0x4A99C8 — install path buffer */
-extern char     g_remote_res_path[256]; /* 0x4A97A8 — remote resource path */
-extern const char g_empty_string;       /* 0x4851D0 — empty string (0x00) */
-extern const char DAT_0047e220[];       /* INI key name for install path */
-extern const char DAT_0047e224[];       /* default value for install key */
-extern const char DAT_0047e234;         /* single '\' char as string */
+/* Subsystem globals */
+extern void*    g_ui_main;              /* 0x4FD378 */
+extern void*    g_town;                 /* 0x4FD37C */
+extern void*    g_postcard;             /* 0x4FD384 */
+extern void*    g_cursor;               /* 0x4FD380 */
+extern void*    g_postcard_send;        /* 0x4FD388 */
+extern void*    g_trainstation_window;  /* 0x485258 */
+extern void*    g_audio_mgr;            /* 0x4FD38C */
+extern void*    g_about;                /* 0x4FD390 */
+extern void*    g_ddraw;
+extern void*    g_audio;                /* 0x4FD3BC */
+extern void*    g_netman;               /* 0x4FD3AC */
+extern void*    g_game;                 /* 0x4854C8 */
+extern void*    g_main_window;          /* 0x4AA4A0 */
+extern void*    g_async_task_queue;     /* 0x4A9AD0 */
+extern void*    g_tooltip_mgr;          /* 0x4FD220 */
+extern void*    g_tilemap;              /* 0x4AAD08 */
+extern uint8_t  g_in_build_mode;
+extern uint8_t  g_asset_mgr;
 
 /* ROM strings */
 extern const char s_WINDOW_ATTRIBUTES_0047e1a0[];
@@ -124,7 +202,44 @@ extern const char s_PROCESS_0047e120[];
 extern const char s_CleanExit_0047e128[];
 extern const char s_LEGO_LOCO_0047e1c0[];
 extern const char s_StringFileInfo_080904B0_FileVer_0047e0f8[];
-extern const char DAT_0047e0f4[];  /* "." delimiter for strtok */
+extern const char DAT_0047e0f4[];
+extern const char s_LEGO_LOCO_CLASS[];
+extern const char s_ScreenSaver_0047e2b4[];
+extern const char s_Sound_0047e2c0[];
+extern const char s__s_s_s_0047e3d0[];
+extern const char DAT_0047e3cc[];
+extern const char DAT_0047e3c8[];
+extern const char DAT_00479190[];
+extern const char g_empty_string;
+extern char g_install_path[256];
+extern char g_remote_res_path[256];
+
+static void destroy_subsystem(void* ptr) {
+    if (ptr != nullptr) {
+        void** vt = *(void***)ptr;
+        void (*dtor)(void*, int) = (void(*)(void*,int))vt[0];
+        dtor(ptr, 1);
+        ptr = nullptr;
+    }
+}
+
+/* ================================================================== */
+/* Helper: Play a sound resource by ID without blocking                 */
+/* ================================================================== */
+#ifdef _WIN32
+static void PlaySound(uint32_t resId) {
+    /* Calls PlaySoundA with SND_ASYNC | SND_NOWAIT | SND_RESOURCE */
+    extern BOOL PlaySoundA(const char* pszSound, HMODULE hmod, DWORD fdwSound);
+    extern HMODULE GetModuleHandleA(const char* name);
+    HMODULE hMod = GetModuleHandleA(nullptr);
+    PlaySoundA((const char*)resId, hMod, 0x20001);  /* SND_RESOURCE | SND_ASYNC | SND_NOWAIT */
+}
+#else
+static void PlaySound(uint32_t resId) {
+    /* No sound on non-Windows for now */
+    (void)resId;
+}
+#endif
 
 
 /* ================================================================== */
@@ -134,16 +249,22 @@ extern const char DAT_0047e0f4[];  /* "." delimiter for strtok */
 CGWND::CGWND(HINSTANCE hInstance)
 {
     /* Set vtable to 0x4774C4 */
-    this->vtable = (void*)VTBL_CGWND;
+/* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Init flags */
     this->field_10 = 0;
     g_timer_id = 0;
 
     /* Store fields */
-    this->field_08  = 0;
-    this->hInstance = hInstance;
-    this->hWnd      = GetDesktopWindow();
+    this->hWnd           = nullptr;     /* +0x08: main game window — set later by RegisterWindowClass */
+    this->hWndDesktop    = nullptr;     /* +0x04: will be set below to GetDesktopWindow() */
+    this->hInstance      = hInstance;   /* +0x0C */
+#ifdef _WIN32
+    this->hWndDesktop    = GetDesktopWindow();  /* +0x04 */
+#else
+    this->hWndDesktop    = nullptr;             /* +0x04: no desktop concept in SDL3 */
+#endif
+    this->hWnd           = 0;           /* +0x08: reset */
 
     /* Reset build/placement mode globals */
     if (g_build_mode != 0) {
@@ -165,7 +286,7 @@ CGWND::CGWND(HINSTANCE hInstance)
     g_screen_center_x = 0;
     g_screen_center_y = 0;
     SetRect((RECT*)&g_window_left,  0, 0, 0, 0);
-    SetRect((RECT*)&g_client_width, 0, 0, 0, 0);
+    SetRect(&g_client_rect, 0, 0, 0, 0);
 
     /* Zero version fields */
     this->versionMajor    = 0;
@@ -179,28 +300,29 @@ CGWND::CGWND(HINSTANCE hInstance)
 
 
 /* ================================================================== */
-/* CGWND::scalar_deleting_destructor — Vtable slot [0]                 */
+/* CGWND::scalar deleting destructor — Vtable slot [0]                 */
 /* Address: 0x4062A0                                                   */
 /* ================================================================== */
-void* CGWND::scalar_deleting_destructor(byte flags)
+CGWND::~CGWND()
 {
     /* Restore vtable to CGWND vtable */
-    this->vtable = (void*)VTBL_CGWND;
+/* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
-    /* Release g_config_ini if it exists */
+    /* Release g_config_ini if it exists.
+     * Original uses vtable[0] scalar-deleting-dtor, but g_config_ini
+     * is a PlayerConfig with a descriptor (0x4784BC) at offset 0,
+     * not a real vtable. Under SDL3 we use GLOBAL_free directly. */
     if (g_config_ini != nullptr) {
-        /* Call its scalar deleting destructor with flags=1 */
+#ifdef _WIN32
         void** ini_vtbl = *(void***)g_config_ini;
         ((void(*)(void*,byte))ini_vtbl[0])(g_config_ini, 1);
+#else
+        GLOBAL_free(g_config_ini);
+#endif
         g_config_ini = nullptr;
     }
 
     /* MSVC scalar-delete: if flags & 1, free memory */
-    if (flags & 1) {
-        GLOBAL_free(this);
-    }
-
-    return this;
 }
 
 
@@ -210,12 +332,22 @@ void* CGWND::scalar_deleting_destructor(byte flags)
 /* ================================================================== */
 void CGWND::ShowMainMenu()
 {
+#ifdef _WIN32
     /* Store desktop window handle */
-    this->hWnd = GetDesktopWindow();
+    this->hWndDesktop = GetDesktopWindow();
 
     /* Query screen dimensions */
     g_screen_width  = GetSystemMetrics(0);  /* SM_CXSCREEN */
     g_screen_height = GetSystemMetrics(1);  /* SM_CYSCREEN */
+#else
+    /* SDL3: use the window created by SDL3_WindowInit */
+    this->hWndDesktop = nullptr;
+    {
+        const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
+        g_screen_width  = dm ? dm->w : 800;
+        g_screen_height = dm ? dm->h : 600;
+    }
+#endif
 
     /* Calculate center */
     g_screen_center_x = g_screen_width / 2;
@@ -290,29 +422,30 @@ int CGWND::InitGame()
 {
     char msg[256];
 
-    HDC hdc = GetDC(this->hWnd);
+#ifdef _WIN32
+    HDC hdc = GetDC(this->hWndDesktop);
     uint32_t colorDepth = GetDeviceCaps(hdc, 0x18);  /* BITSPIXEL */
-    g_screen_bpp = GetDeviceCaps(hdc, 0x0C);          /* PLANES -> stored */
+    g_screen_bpp = GetDeviceCaps(hdc, 0x0C);          /* PLANES */
 
-    ReleaseDC(this->hWnd, hdc);
-
+    ReleaseDC(this->hWndDesktop, hdc);
+#else
+    /* SDL3: default to 32 bpp; color depth check passes */
+    uint32_t colorDepth = 32;
+    g_screen_bpp = 32;
+#endif
     /* Gate 1: Color depth check (8-bit paletted = 8 bpp) */
     if (colorDepth < 0x80000000 || g_screen_bpp > 0x10) {
-        /* Color depth failure — show message resource 0x7A */
         FormatResourceString(&g_resmgr, 0x7A, msg, sizeof(msg));
     } else {
         /* Gate 2: Mouse check */
         int mousePresent = GetSystemMetrics(0x13);  /* SM_MOUSEPRESENT */
         if (mousePresent == 0) {
-            /* No mouse — show message resource 0x7B */
             FormatResourceString(&g_resmgr, 0x7B, msg, sizeof(msg));
         } else {
             /* Gate 3: Screen width in range 800-1280 */
             if (g_screen_width < 0x501) {
-                /* Too narrow */
                 FormatResourceString(&g_resmgr, 0x7A, msg, sizeof(msg));
             } else if (g_screen_width > 799) {
-                /* All checks passed! */
                 return 1;
             } else {
                 FormatResourceString(&g_resmgr, 0x7A, msg, sizeof(msg));
@@ -320,7 +453,6 @@ int CGWND::InitGame()
         }
     }
 
-    /* Show error message */
     MessageBoxA(nullptr, msg, s_LEGO_LOCO_0047e1c0, 0);
     return 0;
 }
@@ -333,51 +465,44 @@ int CGWND::InitGame()
 void CGWND::ResetState()
 {
     char     filePath[0x504];
-    char     versionStr[0x400];
+    char     versionStr[0x1000];
     uint32_t dummy;
     void*    verData   = nullptr;
     DWORD    verSize;
 
-    /* Timestamp (unused result) */
     CRT_time();
 
     /* Zero the version string buffer */
     for (int i = 0; i < 0x3FF; i++) {
         ((uint32_t*)versionStr)[i] = 0;
     }
-    *(uint16_t*)(versionStr + 0x3FC) = 0;
-    versionStr[0x3FE] = 0;
+    *(uint16_t*)(versionStr + 0xFFC) = 0;
+    versionStr[0xFFE] = 0;
 
-    /* Get path to loco.exe */
     HMODULE hMod = GetModuleHandleA(nullptr);
     GetModuleFileNameA(hMod, filePath, 0x504);
 
-    /* Get version info block size */
     verSize = GetFileVersionInfoSizeA(filePath, &dummy);
     if (verSize != 0) {
         verData = operator_new(verSize);
     }
 
     if (verData != nullptr) {
-        /* Read version info from file */
         if (GetFileVersionInfoA(filePath, 0, verSize, verData)) {
             char*   verStrPtr = nullptr;
             uint32_t verStrLen = 0;
 
-            /* Query the FileVersion string from StringFileInfo block */
             if (VerQueryValueA(verData,
                     s_StringFileInfo_080904B0_FileVer_0047e0f8,
                     (void**)&verStrPtr, &verStrLen) && verStrLen != 0)
             {
-                /* Copy version string to local buffer */
                 const char* src = verStrPtr;
                 char* dst = versionStr;
                 size_t len = 0;
                 while (*src) { src++; len++; }
-                len++;  /* include null */
+                len++;
                 src = verStrPtr;
 
-                /* 4-byte aligned copy */
                 size_t words = len >> 2;
                 for (size_t i = 0; i < words; i++) {
                     *(uint32_t*)dst = *(const uint32_t*)src;
@@ -392,18 +517,14 @@ void CGWND::ResetState()
         GLOBAL_free(verData);
     }
 
-    /* Check if version string is empty */
     const char* p = versionStr;
     int len = -1;
     while (*p) { len--; p++; }
-    /* If the string is non-empty (len != -2 means not just null terminator) */
 
     if (len != -2) {
-        /* Parse "major.minor.patch.build" via strtok(".") */
         char* token = CRT_strtok(versionStr, DAT_0047e0f4);
         this->versionMajor = CRT_atoi(token);
 
-        /* Advance past token */
         size_t tlen = 0;
         while (*token) { token++; tlen++; }
         token = CRT_strtok(token + tlen + 1, DAT_0047e0f4);
@@ -423,35 +544,23 @@ void CGWND::ResetState()
 
 
 /* ================================================================== */
-/* CGWND::SetPause — Toggle active/paused state                        */
-/* Address: 0x4061B0  (size: 48 bytes)                                 */
-/*                                                                     */
-/* Sets the active/visible flag at +0x24 (Entity.visible), calls       */
-/* vtable[1] (StopSound) to release current audio, then plays or       */
-/* pauses the audio channel at +0x48 depending on new state.           */
-/*                                                                     */
-/* Called by:                                                          */
-/*   UI_EnableWindow (0x4238AB)                                        */
-/*   RESDATA_ScriptedObject_Start (0x4496F2) — demo mode pause        */
+/* Entity::SetPause — Toggle active/paused state (MIS-LABELED as CGWND) */
+/* Address: 0x4061B0 — accesses Entity +0x24 (visible) and +0x48 (audio_channel) */
+/* CGWND is only 0x28 bytes; this is actually an Entity/GameObject method.  */
 /* ================================================================== */
-void CGWND::SetPause(bool paused)
+void __thiscall CGWND_SetPause(void* self, uint8_t paused)
 {
-    /* Set the active/visible flag at +0x24 */
-    this->field_10 = paused ? 1 : 0;                       /* +0x10 (visible for this context) */
+    *(uint8_t*)((uint8_t*)self + 0x24) = paused ? 1 : 0;
 
-    /* Call vtable[1] — StopSound / release current audio */
-    void** vt = (void**)this->vtable;
+    void** vt = *(void***)self;
     ((void(__thiscall*)())vt[0x04 / 4])();
 
-    /* Manage audio channel at +0x48 */
-    void* audio_ch = *(void**)((uint8_t*)this + 0x48);     /* audio channel */
+    void* audio_ch = *(void**)((uint8_t*)self + 0x48);
     if (audio_ch != nullptr) {
         if (paused) {
-            /* Activating — play audio */
             extern void CGWND_AudioChannel_Play(uint32_t ch);
             CGWND_AudioChannel_Play((uint32_t)audio_ch);
         } else {
-            /* Pausing — silence audio */
             extern void CGWND_AudioChannel_Pause(int ch);
             CGWND_AudioChannel_Pause((int)audio_ch);
         }
@@ -460,131 +569,110 @@ void CGWND::SetPause(bool paused)
 
 
 /* ================================================================== */
-/* CGWND::SetMode — Core game mode state machine (modes 0-10)          */
-/* Address: 0x408130  (size: 494 bytes)                                */
-/*                                                                     */
-/* Central mode dispatcher. Guards against redundant transitions       */
-/* (no-op if new == old), then jumps through a 10-entry dispatch       */
-/* table indexed by (mode - 1).                                        */
-/*                                                                     */
-/* Game modes:                                                         */
-/*   0  INIT         1  INIT_GAME    2  MAIN_MENU   3  TOWN           */
-/*   4  EXIT_BUILD   5  TOWN_SCREEN  6  POSTCARD    7  CURSOR         */
-/*   8  SAVE_STATE   9  POSTCARD_SEND  10 QUIT                         */
+/* CGWND_SetMode — Core game mode state machine (modes 0-10)           */
+/* Address: 0x408130 — free function; no this pointer                  */
 /* ================================================================== */
-void CGWND::SetMode(int new_mode)
+void CGWND_SetMode(int new_mode)
 {
-    extern int g_game_mode;                                 /* 0x4851F4 */
+    extern int g_game_mode;
     int old_mode = g_game_mode;
 
-    if (g_game_mode == new_mode) return;  /* already in this mode */
+    if (g_game_mode == new_mode) return;
 
     g_game_mode = new_mode;
 
     switch (new_mode) {
-    case 1:  /* GAME_MODE_INIT_GAME — full init, transitions to mode 3 */
-        this->InitMode1();                                  /* 0x408350 */
+    case 1:
+        ((CGWND*)g_main_window)->initMode1();
         return;
 
-    case 2:  /* GAME_MODE_MAIN_MENU */
+    case 2:
         {
             extern void Game_SetScreenMode(void* game, int a, int b, int c);
-            extern void* g_game;                            /* 0x4854C8 */
             Game_SetScreenMode(g_game, 0, 1, 0);
 
-            extern void* g_ui_main;                         /* 0x4FD378 */
             void** ui_vt = *(void***)g_ui_main;
-            ((void(__thiscall*)())ui_vt[0x08 / 4])();      /* vtable[2] */
+            ((void(__thiscall*)())ui_vt[0x08 / 4])();
         }
+
+
         return;
 
-    case 3:  /* GAME_MODE_TOWN */
-        extern void CGWND_InitMode4(int old);
-        CGWND_InitMode4(old_mode);                          /* 0x4086F0 */
+    case 3:
+        CGWND_EnterMode3(old_mode);
         return;
 
-    case 4:  /* GAME_MODE_EXIT_BUILD */
+    case 4:
         {
             extern void Game_SelectGameObject(void* game, void* obj);
-            extern void* g_game;
-            Game_SelectGameObject(g_game, nullptr);         /* deselect */
+            Game_SelectGameObject(g_game, nullptr);
 
             extern void BuildingMgr_DestroyAll(void* mgr, int flags);
-            extern void* g_building_mgr;                    /* 0x485448 */
+            extern void* g_building_mgr;
             BuildingMgr_DestroyAll(g_building_mgr, 0);
 
             extern void UI_ResetTooltips(void* mgr, int reset_type);
-            extern void* g_tooltip_mgr;
             UI_ResetTooltips(g_tooltip_mgr, 0);
 
             extern void World_Reset(void* world, int flags);
             World_Reset((void*)0x4A98B0, 0);
 
-            extern uint8_t g_in_build_mode;
             g_in_build_mode = 0;
         }
         return;
 
-    case 5:  /* GAME_MODE_TOWN_SCREEN */
-    case 6:  /* GAME_MODE_POSTCARD */
-    case 7:  /* GAME_MODE_CURSOR */
-    case 9:  /* GAME_MODE_POSTCARD_SEND */
+    case 5:
+    case 6:
+    case 7:
+    case 9:
         {
-            extern void* g_audio;
             if (g_audio != nullptr) {
                 extern void GameAudio_UpdateVolume(void* a, int v);
                 GameAudio_UpdateVolume(g_audio, 1);
             }
             extern void Game_SetScreenMode(void* game, int a, int b, int c);
-            extern void* g_game;
             Game_SetScreenMode(g_game, 0, 0, 0);
 
             void* screen_obj = nullptr;
             if (new_mode == 5) {
-                extern void* g_town;
-                screen_obj = g_town;                        /* 0x4FD37C */
+                screen_obj = g_town;
             } else if (new_mode == 6) {
-                extern void* g_postcard;
-                screen_obj = g_postcard;                    /* 0x4FD384 */
+                screen_obj = g_postcard;
             } else if (new_mode == 7) {
-                extern void* g_cursor;
                 extern void Cursor_Show(void* c);
-                Cursor_Show(g_cursor);                      /* 0x416B80 */
+                Cursor_Show(g_cursor);
             } else if (new_mode == 9) {
                 if (old_mode == 4) {
                     extern void NETMAN_SendMapData(void* net, int flags);
-                    extern void* g_netman;
                     NETMAN_SendMapData(g_netman, 0);
                 }
-                extern void* g_postcard_send;
-                screen_obj = g_postcard_send;               /* 0x4FD388 */
+                screen_obj = g_postcard_send;
             }
             if (screen_obj != nullptr) {
                 void** svt = *(void***)screen_obj;
-                ((void(__thiscall*)())svt[0x08 / 4])();    /* vtable[2] */
+                ((void(__thiscall*)())svt[0x08 / 4])();
             }
         }
         return;
 
-    case 8:  /* GAME_MODE_SAVE_STATE — store old mode in audio mgr */
+    case 8:
         {
-            extern void* g_audio_mgr;
+            void* g_audio_mgr = *(void**)0x4FD38C;  /* avoid circular extern */
             *(int*)((uint8_t*)g_audio_mgr + 0x3074) = old_mode;
         }
         return;
 
-    case 10: /* GAME_MODE_QUIT */
+    case 10:
         {
-            extern void* g_audio;
             if (g_audio != nullptr) {
                 extern int GameAudio_PlayResourceEx(void* a, int id, uint32_t* out);
                 uint32_t ch = 0;
                 GameAudio_PlayResourceEx(g_audio, 0x5026, &ch);
 
-                /* Spin-wait for quit sound to finish */
                 if (ch != 0) {
                     extern int CGWND_AudioChannel_IsActive(uint32_t ch);
-                    while (CGWND_AudioChannel_IsActive(ch) && ch != 0) {
+                    /* 0x408276: wait until the channel enters an active state. */
+                    while (!CGWND_AudioChannel_IsActive(ch)) {
                         /* busy-wait */
                     }
                     extern void CGWND_AudioChannel_Release(void* ch);
@@ -592,56 +680,33 @@ void CGWND::SetMode(int new_mode)
                 }
             }
 
-            /* Shutdown DirectDraw */
-            extern void* g_ddraw;
             if (g_ddraw != nullptr) {
                 void** dd_vt = *(void***)g_ddraw;
-                extern void* g_main_window;
                 ((void(__thiscall*)(HWND,int))dd_vt[0x50 / 4])(
-                    *(HWND*)((uint8_t*)g_main_window + 8), 8);
+                    *(HWND*)((uint8_t*)g_main_window + 0x08), 8);
             }
 
-            /* Post WM_QUIT */
-            extern int PostMessageA(HWND hWnd, uint32_t msg, uint32_t wParam, uint32_t lParam);
-            extern void* g_main_window;
-            PostMessageA(*(HWND*)((uint8_t*)g_main_window + 8), 0x10, 0, 0);
+            PostMessageA(*(HWND*)((uint8_t*)g_main_window + 0x08), 0x10, 0, 0);  /* WM_QUIT */
         }
         return;
 
     default:
-        /* Mode 0 or >10: silent no-op (used for reset during startup) */
         break;
     }
 }
 
 
 /* ================================================================== */
-/* CGWND::Cleanup — Full game shutdown                                 */
-/* Address: 0x4077A0  (size: 831 bytes)                                */
-/*                                                                     */
-/* Saves window position and CleanExit=1 to lego.ini, flushes network  */
-/* messages, waits for async thread, saves world state to file,         */
-/* destroys all 20+ COM-like subsystems in reverse init order,          */
-/* releases the cursor surface (refcounted), frees UI panel surfaces,   */
-/* closes frame-timer event, kills the multimedia timer, and tears      */
-/* down sprite manager, game view, DirectDraw, scripted objects,       */
-/* input, game engine, resource manager, and CRT heap.                 */
-/*                                                                     */
-/* Called by: WinMain (0x4631C5) — error path when GameLoop_Setup      */
-/* fails. Normal exit goes through CGWND::SetMode(10) → WM_QUIT.      */
+/* CGWND_Cleanup — Full game shutdown                                  */
+/* Address: 0x4077A0 — free function; no this pointer                  */
 /* ================================================================== */
-void CGWND::Cleanup()
+void CGWND_Cleanup()
 {
+    extern void* g_building_mgr;        /* 0x485448 */
+
     /* ================================================================ */
     /* PHASE 1: Save window position and CleanExit=1 to lego.ini        */
     /* ================================================================ */
-    extern void  Config_WriteInt(void* cfg, const char* sec, const char* key, int val);
-    extern void* g_config_ini;          /* 0x4A9EEC — ConfigFile COM object */
-    extern int   g_window_left;         /* 0x485200 */
-    extern int   g_window_top;          /* 0x485204 */
-    extern int   g_window_right;        /* 0x485208 */
-    extern int   g_window_bottom;       /* 0x48520C */
-
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectLeft",   g_window_left);
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectTop",    g_window_top);
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectRight",  g_window_right);
@@ -650,25 +715,22 @@ void CGWND::Cleanup()
 
     /* ================================================================ */
     /* PHASE 2: Network thread teardown                                  */
-    /*   - Flush pending messages through Train                         */
-    /*   - Destroy network thread COM wrapper (vtable[0])               */
-    /*   - Spin-wait for async thread to signal (100ms Sleep polls)     */
     /* ================================================================ */
-    extern void* _g_network_thread;     /* 0x4FD398 — NetworkThread COM wrapper */
+    extern void* _g_network_thread;
     if (_g_network_thread != nullptr) {
-        extern void* _g_train;          /* 0x4FD3A4 — Train COM object */
-        extern void Train_FlushMessages(void* train);  /* 0x40F140 */
+        extern void* _g_train;
+        extern void Train_FlushMessages(void* train);
         Train_FlushMessages(_g_train);
 
         void** nt_vt = *(void***)_g_network_thread;
-        ((void(__thiscall*)(int))nt_vt[0])(1);  /* scalar dtor with free */
+        ((void(__thiscall*)(int))nt_vt[0])(1);
         _g_network_thread = nullptr;
     }
 
     {
-        extern int  WIN32_GetThreadResult(void* state);  /* 0x40D350 */
-        extern void WIN32_Sleep(uint32_t ms);            /* IAT @0x4770C4 */
-        void* thread_state = (void*)0x4A9AD0;            /* global thread-state */
+        extern int  WIN32_GetThreadResult(void* state);
+        extern void WIN32_Sleep(uint32_t ms);
+        void* thread_state = (void*)0x4A9AD0;
         while (WIN32_GetThreadResult(thread_state) != 0) {
             WIN32_Sleep(100);
         }
@@ -676,882 +738,361 @@ void CGWND::Cleanup()
 
     /* ================================================================ */
     /* PHASE 3: Save world state and unlock sprites                      */
-    /*   World_Init (0x451DD0): save 4 world slots to files            */
-    /*   World_Shutdown (0x403740): zero world descriptor               */
-    /*   Sprite_UnlockAll (0x41A1C0): release all sprite DCs            */
     /* ================================================================ */
-    extern void World_Init(void* world);        /* 0x451DD0 */
-    extern void World_Shutdown(int world);      /* 0x403740 */
-    extern void Sprite_UnlockAll(int mgr);      /* 0x41A1C0 */
+    extern void World_Init(void* world);
+    extern void World_Shutdown(int world);
+    extern void Sprite_UnlockAll(int mgr);
     World_Init((void*)0x4A98B0);
     World_Shutdown(0x4A98B0);
     Sprite_UnlockAll(0x4AAD08);
 
     /* ================================================================ */
     /* PHASE 4: Destroy all UI/audio subsystems (reverse init order)     */
-    /*   InitAllSubsystems order: UI_MainMenu(0), Town(1),               */
-    /*   PostcardSend(2), TrainStation(3), Postcard(4), Cursor(5),      */
-    /*   AudioMgr(6), AboutDialog(7). Each destroyed via vtable[0](1).  */
     /* ================================================================ */
-    auto destroyComObj = [](void*& ptr) {
-        if (ptr != nullptr) {
-            void** vt = *(void***)ptr;
-            ((void(__thiscall*)(int))vt[0])(1);  /* scalar dtor with delete */
-            ptr = nullptr;
-        }
-    };
-
-    extern void* g_ui_main;             /* 0x4FD378 */
-    extern void* g_town;                /* 0x4FD37C */
-    extern void* g_postcard;            /* 0x4FD384 — destroyed before Cursor */
-    extern void* g_cursor;              /* 0x4FD380 */
-    extern void* g_postcard_send;       /* 0x4FD388 */
-    extern void* g_trainstation_window; /* 0x485258 */
-    extern void* g_audio_mgr;           /* 0x4FD38C */
-    extern void* g_about;               /* 0x4FD390 */
-
-    destroyComObj(g_ui_main);
-    destroyComObj(g_town);
-    destroyComObj(g_postcard);          /* subsys 4 — before Cursor (refs cursor resources) */
-    destroyComObj(g_cursor);            /* subsys 5 */
-    destroyComObj(g_postcard_send);     /* subsys 2 */
-    destroyComObj(g_trainstation_window); /* subsys 3 */
-    destroyComObj(g_audio_mgr);         /* subsys 6 */
-    destroyComObj(g_about);             /* subsys 7 */
+    destroy_subsystem(g_ui_main);
+    destroy_subsystem(g_town);
+    destroy_subsystem(g_postcard);
+    destroy_subsystem(g_cursor);
+    destroy_subsystem(g_postcard_send);
+    destroy_subsystem(g_trainstation_window);
+    destroy_subsystem(g_audio_mgr);
+    destroy_subsystem(g_about);
 
     /* ================================================================ */
     /* PHASE 5: Destroy additional non-UI subsystems                     */
-    /*   Created independently during network/sound/boot init.          */
     /* ================================================================ */
-    extern void* _g_train;              /* 0x4FD3A4 */
-    extern void* _DAT_004fd3a8;         /* 0x4FD3A8 — unknown boot-time subsystem */
-    extern void* g_netman;              /* 0x4FD3AC */
-    extern void* _g_dplay;              /* 0x4FD3B0 — DirectPlay */
-    extern void* _g_dplay_config;       /* 0x4FD3B4 */
-    extern void* _g_train_resources;    /* 0x4FD394 */
-    extern void* g_player_config;       /* 0x4AA4A8 */
-    extern void* _g_audio_config;       /* 0x4FD3D4 */
-    extern void* _g_dsound_object;      /* 0x4FD3D8 — DirectSound */
+    extern void* _g_train;
+    extern void* _DAT_004fd3a8;
+    extern void* _g_dplay;
+    extern void* _g_dplay_config;
+    extern void* _g_train_resources;
+    /* g_player_config: declared as PlayerConfig* in PlayerConfig.h */
+    extern void* _g_audio_config;
+    extern void* _g_dsound_object;
 
-    destroyComObj(_g_train);
-    destroyComObj(_DAT_004fd3a8);
-    destroyComObj(g_netman);
-    destroyComObj(_g_dplay);
-    destroyComObj(_g_dplay_config);
-    destroyComObj(_g_train_resources);
-    destroyComObj(g_player_config);
-    destroyComObj(g_config_ini);        /* ConfigFile — after all config writers done */
-    destroyComObj(_g_audio_config);
-    destroyComObj(_g_dsound_object);
+    destroy_subsystem(_g_train);
+    destroy_subsystem(_DAT_004fd3a8);
+    destroy_subsystem(g_netman);
+    destroy_subsystem(_g_dplay);
+    destroy_subsystem(_g_dplay_config);
+    destroy_subsystem(_g_train_resources);
+    destroy_subsystem(g_player_config);
+    destroy_subsystem(g_config_ini);
+    destroy_subsystem(_g_audio_config);
+    destroy_subsystem(_g_dsound_object);
 
     /* ================================================================ */
     /* PHASE 6: Release cursor surface (refcounted at +4)               */
-    /*   1. vtable[2] = ReleaseSurface (DDraw surface Release)          */
-    /*   2. If refcount == -1: vtable[0](1) to delete wrapper           */
     /* ================================================================ */
-    extern int* _g_cursor_surface;      /* 0x4FD3C8 */
+    extern int* _g_cursor_surface;
     if (_g_cursor_surface != nullptr) {
         int*   surf    = _g_cursor_surface;
         void** surf_vt = (void**)surf[0];
-        ((void(__thiscall*)())surf_vt[0x08 / 4])();  /* vtable[2] — ReleaseSurface */
-        if (surf[1] == -1) {                           /* refcount at +4 */
-            ((void(__thiscall*)(int))surf_vt[0])(1);   /* vtable[0](1) — delete */
+        ((void(__thiscall*)())surf_vt[0x08 / 4])();
+        if (surf[1] == -1) {
+            ((void(__thiscall*)(int))surf_vt[0])(1);
         }
         _g_cursor_surface = nullptr;
     }
 
     /* ================================================================ */
-    /* PHASE 7: Low-level system shutdown (13 steps, dependency order)   */
-    /*   1. UIPANEL_FreeAllSurfaces (0x41C320) — release GDI bitmaps   */
-    /*   2. CloseHandle(frame_event) — close manual-reset event         */
-    /*   3. timeKillEvent + timeEndPeriod(14) — stop timer callback     */
-    /*   4. Sprite_Shutdown (0x41A110) — free sprite surfaces + index   */
-    /*   5. Town_GameView_Cleanup (0x42BE80) — release render data       */
-    /*   6. DDRAW_InvalidateAll (0x418420) — invalidate cached surfaces  */
-    /*   7. RESDATA_ScriptedObject_Shutdown (0x42D160) — scripted res   */
-    /*   8. UI_FreeMessageBox (0x426420) — destroy message box           */
-    /*   9. INPUT_Shutdown (0x4148E0) — unregister mouse callback        */
-    /*  10. INPUT_Cleanup (0x4146D0) — release DXInput devices          */
-    /*  11. Game_Shutdown (0x40DA20) — restore cursor, set coop level    */
-    /*  12. RESMGR_Shutdown (0x470590) — free GDI objects                */
-    /*  13. CRT_0x470650 — final heap verification                       */
+    /* PHASE 7: Low-level system shutdown                               */
     /* ================================================================ */
-    extern void UIPANEL_FreeAllSurfaces(void);     /* 0x41C320 */
+    extern void UIPANEL_FreeAllSurfaces(void);
     UIPANEL_FreeAllSurfaces();
 
-    extern void* g_frame_event;                    /* 0x4A990C */
+    extern void* g_frame_event;
     if (g_frame_event != nullptr) {
-        extern void WIN32_CloseHandle(void* h);    /* IAT @0x4770A0 */
+        extern void WIN32_CloseHandle(void* h);
         WIN32_CloseHandle(g_frame_event);
         g_frame_event = nullptr;
     }
 
-    extern uint32_t g_timer_event_id;              /* 0x485438 */
-    extern void WIN32_timeKillEvent(uint32_t id);  /* IAT @0x4773B4 */
-    extern void WIN32_timeEndPeriod(uint32_t period); /* IAT @0x4773AC */
+    extern uint32_t g_timer_event_id;
+    extern void WIN32_timeKillEvent(uint32_t id);
+    extern void WIN32_timeEndPeriod(uint32_t period);
     WIN32_timeKillEvent(g_timer_event_id);
     WIN32_timeEndPeriod(14);
 
-    extern void Sprite_Shutdown(int mgr);          /* 0x41A110 */
+    extern void Sprite_Shutdown(int mgr);
     Sprite_Shutdown(0x4AAD08);
 
-    extern void Town_GameView_Cleanup(int* view);  /* 0x42BE80 */
+    extern void Town_GameView_Cleanup(int* view);
     Town_GameView_Cleanup((int*)0x4852A0);
 
-    extern void DDRAW_InvalidateAll(int* ddraw);   /* 0x418420 */
+    extern void DDRAW_InvalidateAll(int* ddraw);
     DDRAW_InvalidateAll((int*)0x4A9EF0);
 
-    extern void RESDATA_ScriptedObject_Shutdown(int* obj);  /* 0x42D160 */
+    extern void RESDATA_ScriptedObject_Shutdown(int* obj);
     RESDATA_ScriptedObject_Shutdown((int*)0x4AA5B8);
 
-    extern void UI_FreeMessageBox(int msgbox);     /* 0x426420 */
+    extern void UI_FreeMessageBox(int msgbox);
     UI_FreeMessageBox(0x4FD220);
 
-    extern void INPUT_Shutdown(int input);         /* 0x4148E0 */
+    extern void INPUT_Shutdown(int input);
     INPUT_Shutdown(0x4A99B0);
 
-    extern void INPUT_Cleanup(int* mgr);           /* 0x4146D0 */
+    extern void INPUT_Cleanup(int* mgr);
     INPUT_Cleanup((int*)0x4A9990);
 
-    extern void Game_Shutdown(int* game);          /* 0x40DA20 */
+    extern void Game_Shutdown(int* game);
     Game_Shutdown((int*)0x4854C8);
 
-    extern int RESMGR_Shutdown(int resmgr);        /* 0x470590 */
+    extern int RESMGR_Shutdown(int resmgr);
     RESMGR_Shutdown(0x4855E8);
 
-    extern int CRT_0x470650(void);                 /* 0x470650 */
+    extern int CRT_0x470650(void);
     CRT_0x470650();
 }
 
 
 /* ================================================================== */
-/* CGWND::InstallPathInit — Read install path from registry, load INI  */
-/* Address: 0x4068D0  (size: 712 bytes / 0x2C8)                         */
-/*                                                                     */
-/* Flow:                                                               */
-/*   1. Read install path from HKLM\SOFTWARE\Intelligent Games\LEGO    */
-/*      Loco default value. Create key with empty value if missing.    */
-/*   2. Append "\lego.ini" to form config file path.                   */
-/*   3. Create PlayerConfig object wrapping this path.                 */
-/*   4. Read [DIRECTORIES] from lego.ini into g_install_path and       */
-/*      g_remote_res_path.                                             */
-/*   5. If demo mode, clear g_remote_res_path.                        */
-/*   6. Ensure g_remote_res_path ends with '\'.                        */
-/*   7. Strip trailing '\' from g_install_path.                        */
-/*   8. mkdir(g_install_path).                                         */
-/*   9. Re-append '\' to g_install_path.                               */
-/*                                                                     */
-/* Uses SEH (handler @0x474F1E) for registry/heap protection.          */
-/*                                                                     */
-/* Called by: WinMain @0x462FF1                                        */
+/* CGWND::RegisterWindowClass — Register window class and create main   */
+/*                                window                                */
+/* Address: 0x406ED0                                                    */
+/*                                                                      */
+/* Called by: GameLoop_Setup (0x406D80)                                 */
+/*                                                                      */
+/* Registers the "LEGO_LOCO" WNDCLASS (style 0xB, WndProc @ 0x4618C0,   */
+/* icon resource 101), then creates a top-level popup window sized to   */
+/* the full screen dimensions (g_screen_width x g_screen_height).       */
+/*                                                                      */
+/* In demo mode, uses WS_EX_TOPMOST (0x8); retail uses exStyle 0.       */
+/* Window style = WS_POPUP | WS_VISIBLE (0x82000000).                    */
+/*                                                                      */
+/* Stores the new HWND in this->hWnd (+0x08) and queries client rect   */
+/* into the client RECT at 0x485220.                                   */
+/*                                                                      */
+/* @return TRUE on success, FALSE if CreateWindowEx failed.             */
 /* ================================================================== */
-void CGWND::InstallPathInit()
+BOOL CGWND::RegisterWindowClass()
 {
-    HKEY   hkey;
-    LONG   reg_result;
-    DWORD  reg_value_type;
-    DWORD  reg_value_size;
-    char   install_base_buf[1280];    /* stack working path buffer (+ESP+0x40) */
-    char   reg_buf[1284];             /* registry value output (+ESP+0x540) */
+#ifdef _WIN32
+    WNDCLASSA wc;
+
+    /* Zero-initialize the WNDCLASSA structure */
+    wc.style         = 0;
+    wc.lpfnWndProc   = nullptr;
+    wc.cbClsExtra    = 0;
+    wc.cbWndExtra    = 0;
+    wc.hInstance     = nullptr;
+    wc.hIcon         = nullptr;
+    wc.hCursor       = nullptr;
+    wc.hbrBackground = nullptr;
+    wc.lpszMenuName  = nullptr;
+    wc.lpszClassName = nullptr;
+
+    wc.hInstance     = this->hInstance;              /* +0x0C */
+    wc.style         = 0xB;                          /* CS_BYTEALIGNCLIENT | CS_HREDRAW | CS_VREDRAW */
+    wc.lpfnWndProc   = (WNDPROC)0x4618C0;            /* MainWndProc */
+    wc.cbClsExtra    = 0;
+    wc.cbWndExtra    = 0;
+    wc.hIcon         = LoadIconA(this->hInstance, (LPCSTR)0x65);  /* IDI_APPLICATION = 101 */
+    wc.hCursor       = nullptr;                      /* no cursor — handled by game */
+    wc.hbrBackground = nullptr;                      /* no background brush */
+    wc.lpszMenuName  = nullptr;                      /* no menu */
+    wc.lpszClassName = s_LEGO_LOCO_0047e1c0;         /* "LEGO_LOCO" */
+
+    RegisterClassA(&wc);
+
+    /* Assembly: (-(g_demo_mode != 1) & 0xfffffff8) + 8.
+     * The 32-bit addition wraps to 0 for retail and yields
+     * WS_EX_TOPMOST (0x8) for demo mode.
+     */
+    uint32_t exStyle = (g_demo_mode != 1) ? 0 : 0x8;
+
+    this->hWnd = CreateWindowExA(
+        exStyle,
+        s_LEGO_LOCO_0047e1c0,          /* class name */
+        s_LEGO_LOCO_0047e1c0,          /* window title */
+        0x82000000,                     /* WS_POPUP | WS_VISIBLE */
+        0, 0,                           /* position */
+        g_screen_width,                 /* width */
+        g_screen_height,                /* height */
+        nullptr,                        /* no parent */
+        nullptr,                        /* no menu */
+        this->hInstance,                /* hInstance */
+        nullptr);                       /* lpParam */
+
+    if (this->hWnd == nullptr) {
+        return FALSE;
+    }
+
+    /* Query client rect at 0x485220. */
+    GetClientRect(this->hWnd, &g_client_rect);
+    return TRUE;
+
+#else /* !_WIN32 — SDL3 window */
+
+    /* SDL3: The window was already created by SDL3_WindowInit in main.cpp.
+     * Retrieve it via SDL3_GetWindow() and make it visible. */
+    SDL_Window* win = SDL3_GetWindow();
+    if (win == nullptr) {
+        return FALSE;
+    }
+    this->hWnd = (HWND)win;
+
+    SDL_ShowWindow(win);
+
+    /* Query client area size */
+    int w, h;
+    SDL_GetWindowSize(win, &w, &h);
+    g_client_rect.left   = 0;
+    g_client_rect.top    = 0;
+    g_client_rect.right  = w;
+    g_client_rect.bottom = h;
+
+    return TRUE;
+
+#endif /* _WIN32 */
+}
+
+
+/* ================================================================== */
+int CGWND_InstallPathInit()
+{
+#ifdef _WIN32
+/* CGWND_InstallPathInit — Read install path from registry, load INI   */
+/* Address: 0x4068D0 — free function; no this pointer                  */
+/* ================================================================== */
+int CGWND_InstallPathInit()
+{
+
+
+    return (mkdir_result == 0 && path_len > 2) ? 1 : 0;
+
+#else /* !_WIN32 — POSIX with environment variable */
+
+    char   install_base_buf[1280];
     int    path_len;
     int    mkdir_result;
 
-    extern LONG  RegOpenKeyExA(HKEY hKey, const char* subKey, DWORD opts,
-                               REGSAM samDesired, HKEY* out);
-    extern LONG  RegQueryValueExA(HKEY hKey, const char* valueName, DWORD* reserved,
-                                  DWORD* type, uint8_t* data, DWORD* size);
-    extern LONG  RegCloseKey(HKEY hKey);
-    extern LONG  RegCreateKeyExA(HKEY hKey, const char* subKey, DWORD reserved,
-                                 char* lpClass, DWORD options, REGSAM samDesired,
-                                 void* secAttr, HKEY* result, DWORD* disposition);
-    extern LONG  RegSetValueExA(HKEY hKey, const char* valueName, DWORD reserved,
-                                DWORD type, const uint8_t* data, DWORD size);
-
-    /* ── Step 1: Read install path from registry ── */
-    /* 0x4068FB-0x406966 */
-    reg_value_size = 0x504;
-    reg_result = RegOpenKeyExA(
-        HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Intelligent Games\\LEGO Loco", /* 0x47E238 */
-        0,
-        KEY_QUERY_VALUE | KEY_SET_VALUE | KEY_CREATE_SUB_KEY, /* 0x20019 */
-        &hkey);
-
-    if (reg_result == ERROR_SUCCESS) {
-        reg_value_type = 0;
-        reg_result = RegQueryValueExA(
-            hkey,
-            nullptr,                    /* default (nameless) value */
-            nullptr,
-            &reg_value_type,
-            (uint8_t*)reg_buf,
-            &reg_value_size);
-
-        RegCloseKey(hkey);
-
-        if (reg_result == ERROR_SUCCESS) {
-            /* 0x406940: Copy registry value into working buffer */
-            lstrcpyA(install_base_buf, reg_buf);
-            goto after_registry;
-        }
+    /* Step 1: Read install path from environment or use default */
+    const char* env_path = getenv("LEGO_LOCO_PATH");
+    if (env_path != nullptr) {
+        lstrcpyA(install_base_buf, env_path);
+    } else {
+        lstrcpyA(install_base_buf, ".");
     }
 
-    /* Key missing or read failed — create it with empty default value */
-    /* 0x406942-0x406966 */
-    install_base_buf[0] = '\0';
-    extern void CRT_ZeroBuffer(char* buf, size_t len);
-    CRT_ZeroBuffer(install_base_buf, 0x100);           /* @0x466950 */
+    /* Step 2: Build "<install_base>/lego.ini" */
+    lstrcatA(install_base_buf, "/");
+    lstrcatA(install_base_buf, "lego.ini");
 
-    reg_result = RegCreateKeyExA(
-        HKEY_LOCAL_MACHINE,
-        "SOFTWARE\\Intelligent Games\\LEGO Loco",     /* 0x47E238 */
-        0,
-        nullptr,            /* lpClass */
-        0,                  /* dwOptions */
-        KEY_ALL_ACCESS,     /* 0xF003F */
-        nullptr,            /* lpSecurityAttributes */
-        &hkey,
-        nullptr);           /* lpdwDisposition */
-
-    if (reg_result == ERROR_SUCCESS) {
-        RegSetValueExA(
-            hkey,
-            nullptr,                            /* default value */
-            0,                                  /* Reserved */
-            REG_SZ,                             /* type = string */
-            (const uint8_t*)install_base_buf,
-            1);                                 /* length = 1 (just null) */
-        RegCloseKey(hkey);
-    }
-
-after_registry:
-    /* ── Step 2: Build "<install_base>\lego.ini" ── */
-    /* 0x40696B-0x406984 */
-    /* Inlined strcat: append "\" then "lego.ini" */
-    {
-        extern const char DAT_0047e234;  /* "\" as null-terminated string */
-        lstrcatA(install_base_buf, &DAT_0047e234);
-    }
-    lstrcatA(install_base_buf, "lego.ini");            /* 0x47E228 */
-
-    /* ── Step 3: Create PlayerConfig object for INI path ── */
-    /* 0x40698B-0x4069B0 */
-    void* player_config_raw = operator_new(0x10C);
+    /* Step 3: Create config object */
+    void* player_config_raw = operator_new(sizeof(PlayerConfig))  /* was 0x10C (32-bit) */;
     if (player_config_raw != nullptr) {
-        extern void* PlayerConfig_Ctor(void* mem, const char* path); /* @0x452CE0 */
+        extern void* PlayerConfig_Ctor(void* mem, const char* path);
         g_config_ini = PlayerConfig_Ctor(player_config_raw, install_base_buf);
     } else {
         g_config_ini = nullptr;
     }
 
-    /* ── Step 4: Read [DIRECTORIES] section from lego.ini ── */
-    /* 0x4069B4-0x406A2B */
+    /* Step 4: Read [DIRECTORIES] section */
+    extern const char DAT_0047e220[];
+    extern const char DAT_0047e224[];
+    Config_GetIniString(g_config_ini, "DIRECTORIES", DAT_0047e220, DAT_0047e224,
+                        (char*)g_install_path, 0x100);
+    Config_GetIniString(g_config_ini, "DIRECTORIES", "RemoteRes", &g_empty_string,
+                        (char*)g_remote_res_path, 0x100);
+
+    /* Step 5: Demo mode */
+    if (g_demo_mode == 1) *(char*)g_remote_res_path = '\0';
+
+    /* Step 6-7: Path cleanup with forward slashes */
     {
-        extern void Config_GetIniString(void* config, const char* section,
-                                        const char* key, const char* defaultVal,
-                                        char* out, uint32_t size); /* @0x452D80 */
-        extern const char DAT_0047e220[];   /* INI key name for install path */
-        extern const char DAT_0047e224[];   /* default value for that key */
-
-        /* 4a: Install path */
-        Config_GetIniString(g_config_ini,
-            "DIRECTORIES",                         /* 0x47E214 */
-            DAT_0047e220,                          /* key (e.g. "ResFile") */
-            DAT_0047e224,                          /* default */
-            g_install_path,                        /* 0x4A99C8 — output */
-            0x100);
-
-        /* 4b: Remote resource path */
-        Config_GetIniString(g_config_ini,
-            "DIRECTORIES",                         /* 0x47E214 */
-            "RemoteRes",                           /* 0x47E208 */
-            &g_empty_string,                       /* default = "" */
-            g_remote_res_path,                     /* 0x4A97A8 — output */
-            0x100);
+        int rlen = lstrlenA((const char*)g_remote_res_path);
+        if (rlen == 0 || *(char*)(g_remote_res_path + rlen - 1) != '/')
+            lstrcatA((char*)g_remote_res_path, "/");
     }
-
-    /* ── Step 5: Demo mode clears remote resource path ── */
-    /* 0x406A2D-0x406A3E */
-    if (g_demo_mode == 1) {
-        g_remote_res_path[0] = '\0';
-    }
-
-    /* ── Step 6: Ensure g_remote_res_path ends with '\' ── */
-    /* 0x406A40-0x406A6A */
     {
-        int rlen = lstrlenA(g_remote_res_path);
-        extern const char DAT_0047e234;  /* "\" */
-        if (rlen > 0 && g_remote_res_path[rlen - 1] != '\\') {
-            lstrcatA(g_remote_res_path, &DAT_0047e234);
-        }
-    }
-
-    /* ── Step 7: Strip trailing '\' from g_install_path ── */
-    /* 0x406A6F-0x406A99 */
-    {
-        int ilen = lstrlenA(g_install_path);
-        if (ilen > 0 && g_install_path[ilen - 1] == '\\') {
-            g_install_path[ilen - 1] = '\0';
-            path_len = ilen - 1;    /* ESI = len after backslash stripped */
+        int ilen = lstrlenA((const char*)g_install_path);
+        if (ilen > 0 && *(char*)(g_install_path + ilen - 1) == '/') {
+            *(char*)(g_install_path + ilen - 1) = '\0';
+            path_len = ilen - 1;
         } else {
-            path_len = ilen;        /* ESI = original len */
+            path_len = ilen;
         }
     }
 
-    /* ── Step 8: mkdir(g_install_path) ── */
-    /* 0x406A9F-0x406AA6 */
-    extern int CRT_mkdir(const char* path);  /* @0x466590 */
-    mkdir_result = CRT_mkdir(g_install_path);
+    mkdir_result = CRT_mkdir((const char*)g_install_path);
+    lstrcatA((char*)g_install_path, "/");
 
-    /* ── Step 9: Re-append '\' to g_install_path ── */
-    /* 0x406AAC-0x406ABF */
-    {
-        extern const char DAT_0047e234;  /* "\" */
-        lstrcatA(g_install_path, &DAT_0047e234);
-    }
+    return (mkdir_result == 0 && path_len > 2) ? 1 : 0;
 
-    /* ── Step 10: Return success indicator ── */
-    /* 0x406AC4-0x406AD3 */
-    /* Return TRUE only if mkdir succeeded (returned 0) AND path after
-     * backslash-strip has length > 2. This rejects degenerate paths
-     * like "", "C", or "C:". */
-    if (mkdir_result == 0 && path_len > 2) {
-        /* success — data dir exists or was created */
-    }
-    /* Function returns with EAX already set from the comparison chain.
-     * The original uses SETE/SETNZ to produce a BOOL return. For clarity,
-     * we return a bool. */
+#endif /* _WIN32 */
 }
 
 
 /* ================================================================== */
-/* CGWND::InitAllSubsystems — Master subsystem initialization          */
-/* Address: 0x406F90  (size: 2052 bytes / 0x406F90-0x407794)          */
-/*                                                                     */
-/* Allocates and constructs all 8 major game subsystems in sequence.   */
-/* Each is initialized in two phases:                                  */
-/*   1. operator_new(size) -> Ctor(this, hInstance, resourceId)       */
-/*   2. Create/Init(this, hWndParent)                                 */
-/*                                                                     */
-/* Protected by SEH (scopetable @0x474FD8). On any failure, destroys  */
-/* all previously-created subsystems and returns a negative error code. */
-/*                                                                     */
-/* Subsystem allocations and resource IDs:                             */
-/*   1. UI_MainMenu    (0x224 bytes)  resId=0x1F8 (504)               */
-/*   2. Town           (0x6E0 bytes)  resId=0x1F5 (501)               */
-/*   3. PostcardSend   (0x2C4 bytes)  resId=0x1F7 (503)               */
-/*   4. TrainStation   (0x1D4 bytes)  resId=0x1FC (508)               */
-/*   5. Postcard       (0x254 bytes)  resId=0x1FB (507)               */
-/*   6. Cursor         (0x740 bytes)  resId=0x1FA (506)               */
-/*   7. AudioMgr/Help  (0x3078 bytes) resId=0x1FE (510)               */
-/*   8. AboutDialog    (0x1184 bytes) resId=0x1FD (509)               */
-/*                                                                     */
-/* Calling convention: __fastcall (ECX = CGWND *this)                  */
-/*                                                                     */
-/* Called by: GameLoop_Setup @0x406BA0                                 */
-/*                                                                     */
-/* @return 0 on success, negative error code (-2 to -17) on failure    */
+/* InitAllSubsystems — Master subsystem initialization                  */
+/* Address: 0x406F90                                                    */
 /* ================================================================== */
-
-/* Helper: destroy a COM-like subsystem by calling vtable[0](self, 1) */
-static void destroy_subsystem(void*& ptr) {
-    if (ptr != nullptr) {
-        void** vt = *(void***)ptr;                       /* +0x00: vtable */
-        void (*dtor)(void*, int) = (void(*)(void*,int))vt[0]; /* vtable[0] = dtor */
-        dtor(ptr, 1);                                    /* arg 1 = delete flag */
-        ptr = nullptr;
-    }
-}
-
 int CGWND::InitAllSubsystems()
 {
-    HWND      hWndParent = this->hWnd;        /* +0x04: parent HWND */
-    HINSTANCE hInst      = this->hInstance;    /* +0x0C: HINSTANCE */
-    void*     mem;
-    BOOL      ok;
+    HWND      hWndParent = this->hWnd;         /* +0x08: main game HWND */
+    HINSTANCE hInst      = this->hInstance;     /* +0x0C */
 
-    /* ── Subsystem constructor/Create forward declarations ── */
-    extern void* UI_MainMenu_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);           /* @0x4202F0 */
-    extern BOOL  UI_MainMenu_Create(void* self, HWND hWndParent);                        /* @0x4204D0 */
-    extern void* Town_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);                  /* @0x42E900 */
-    extern BOOL  Town_InitSprites(void* self, HWND hWndParent);                          /* @0x42EDB0 */
-    extern void* PostcardPreviewWindow_Ctor(void* mem, HINSTANCE hInst, uint32_t resId); /* @0x430A90 */
-    extern BOOL  LOCOBITMAP_InitWindow(void* self, HWND hWndParent);                     /* @0x402520 */
-    extern void* TrainStationWindow_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);    /* @0x436B20 */
-    extern BOOL  TrainStationWindow_Create(void* self, HWND hWndParent);                 /* @0x436C50 */
-    extern void* LOCOBITMAP_CreateFromResource(void* mem, HINSTANCE hInst, uint32_t id); /* @0x401F50 */
-    extern void* Cursor_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);                /* @0x415980 */
-    extern BOOL  Cursor_Create(void* self, HWND hWndParent);                             /* @0x4169E0 */
-    extern void* AudioMgr_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);              /* @0x44F490 */
-    extern BOOL  HelpWnd_Create(void* self, HWND hWndParent);                            /* @0x450CA0 */
-    extern void* CGWND_AboutDialog_Ctor(void* mem, HINSTANCE hInst, uint32_t resId);     /* @0x40F1C0 */
-    extern BOOL  CGWND_AboutDialog_Create(void* self, HWND hWndParent);                  /* @0x40F510 */
+    /* 1. UI_MainMenu — EditWindow, 0x224 bytes, res 0x1F8. Ctor: 0x420310 */
+    g_ui_main = new EditWindow(hInst, 0x1F8);
+    if (g_ui_main == nullptr) return -2;
+    if (!((EditWindow*)g_ui_main)->create(hWndParent))   /* 0x4204D0 */
+        { destroy_subsystem(g_ui_main); return -3; }
 
-    /* ================================================================
-     * 1. UI_MainMenu (0x224 bytes, resource 0x1F8 = 504)
-     * 0x406FD0-0x40700C
-     * ================================================================ */
-    mem = operator_new(0x224);
-    g_ui_main = (mem != nullptr)
-        ? UI_MainMenu_Ctor(mem, hInst, 0x1F8)
-        : nullptr;
-    if (g_ui_main == nullptr) {
-        return -2;   /* 0xFFFFFFFE */
+    /* 2. Town — 0x6E0 bytes, res 0x1F5. Ctor: 0x42E900 */
+    g_town = new Town(hInst, 0x1F5);
+    if (g_town == nullptr) { destroy_subsystem(g_ui_main); return -4; }
+    if (!((Town*)g_town)->init_sprites(hWndParent))       /* 0x42EDB0 */
+        { destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -5; }
+
+    /* 3. PostcardPreviewWindow — 0x2C4 bytes, res 0x1F7. Ctor: 0x430A90 */
+    g_postcard_send = new PostcardPreviewWindow(hInst, 0x1F7);
+    if (g_postcard_send == nullptr)
+        { destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -6; }
+    if (!((PostcardAlbum*)g_postcard_send)->InitWindow(hWndParent))  /* 0x402520 — shared UI_WindowBase path */
+        { destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -7; }
+
+    /* 4. TrainStationWindow — 0x1D4 bytes, res 0x1FC. Ctor: 0x436B20 */
+    g_trainstation_window = new TrainStationWindow(hInst, 0x1FC);
+    if (g_trainstation_window == nullptr)
+        { destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -8; }
+    if (!((TrainStationWindow*)g_trainstation_window)->Create(hWndParent))  /* 0x436D00 */
+        { destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -9; }
+
+    /* 5. PostcardAlbum — 0x254 bytes, res 0x1FB */
+    g_postcard = PostcardAlbum::CreateFromResource(
+        operator_new(0x254), hInst, 0x1FB);                  /* 0x401F50 */
+    if (g_postcard == nullptr)
+        { destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -10; }
+    if (!((PostcardAlbum*)g_postcard)->InitWindow(hWndParent))  /* 0x402520 */
+        { destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -11; }
+
+    /* 6. Cursor — 0x740 bytes, res 0x1FA. Ctor: 0x415980 */
+    g_cursor = new Cursor(hInst, 0x1FA);
+    if (g_cursor == nullptr)
+        { destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -12; }
+    /* Cursor has no direct create(HWND); uses UI_WindowBase::OnCreate via vtable[6] */
+    {
+        void** vt = *(void***)g_cursor;
+        BOOL (__thiscall *onCreate)(void*, HWND) = (BOOL(__thiscall*)(void*, HWND))vt[6];
+        if (!onCreate(g_cursor, hWndParent))
+            { destroy_subsystem(g_cursor); destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -13; }
     }
 
-    ok = UI_MainMenu_Create(g_ui_main, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_ui_main);
-        return -3;   /* 0xFFFFFFFD */
-    }
+    /* 7. AudioMgr (IS HelpWnd) — 0x3078 bytes, res 0x1FE. Ctor: 0x44F490 */
+    g_audio_mgr = new HelpWnd(hInst, 0x1FE);
+    if (g_audio_mgr == nullptr)
+        { destroy_subsystem(g_cursor); destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -14; }
+    if (!((HelpWnd*)g_audio_mgr)->create(hWndParent))        /* 0x450CA0 */
+        { destroy_subsystem(g_audio_mgr); destroy_subsystem(g_cursor); destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -15; }
 
-    /* ================================================================
-     * 2. Town (0x6E0 bytes, resource 0x1F5 = 501)
-     * 0x407014-0x40705C
-     * ================================================================ */
-    mem = operator_new(0x6E0);
-    g_town = (mem != nullptr)
-        ? Town_Ctor(mem, hInst, 0x1F5)
-        : nullptr;
-    if (g_town == nullptr) {
-        destroy_subsystem(g_ui_main);
-        return -4;   /* 0xFFFFFFFC */
-    }
+    /* 8. AboutDialog — 0x1184 bytes, res 0x1FD. Ctor: 0x40F1C0 */
+    g_about = new AboutDialog(hInst, 0x1FD);
+    if (g_about == nullptr)
+        { destroy_subsystem(g_audio_mgr); destroy_subsystem(g_cursor); destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -16; }
+    if (!((AboutDialog*)g_about)->Create(hWndParent))         /* 0x40F5A0 */
+        { destroy_subsystem(g_about); destroy_subsystem(g_audio_mgr); destroy_subsystem(g_cursor); destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -17; }
 
-    ok = Town_InitSprites(g_town, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -5;   /* 0xFFFFFFFB */
-    }
-
-    /* ================================================================
-     * 3. PostcardPreviewWindow (0x2C4 bytes, resource 0x1F7 = 503)
-     * 0x407064-0x4070AC
-     * ================================================================ */
-    mem = operator_new(0x2C4);
-    g_postcard_send = (mem != nullptr)
-        ? PostcardPreviewWindow_Ctor(mem, hInst, 0x1F7)
-        : nullptr;
-    if (g_postcard_send == nullptr) {
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -6;   /* 0xFFFFFFFA */
-    }
-
-    ok = LOCOBITMAP_InitWindow(g_postcard_send, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -7;   /* 0xFFFFFFF9 */
-    }
-
-    /* ================================================================
-     * 4. TrainStationWindow (0x1D4 bytes, resource 0x1FC = 508)
-     * 0x4070B4-0x4070FC
-     * ================================================================ */
-    mem = operator_new(0x1D4);
-    g_trainstation_window = (mem != nullptr)
-        ? TrainStationWindow_Ctor(mem, hInst, 0x1FC)
-        : nullptr;
-    if (g_trainstation_window == nullptr) {
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -8;   /* 0xFFFFFFF8 */
-    }
-
-    ok = TrainStationWindow_Create(g_trainstation_window, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -9;   /* 0xFFFFFFF7 */
-    }
-
-    /* ================================================================
-     * 5. Postcard LOCOBITMAP (0x254 bytes, resource 0x1FB = 507)
-     * 0x407104-0x40714C
-     * ================================================================ */
-    mem = operator_new(0x254);
-    g_postcard = (mem != nullptr)
-        ? LOCOBITMAP_CreateFromResource(mem, hInst, 0x1FB)
-        : nullptr;
-    if (g_postcard == nullptr) {
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -10;  /* 0xFFFFFFF6 */
-    }
-
-    ok = LOCOBITMAP_InitWindow(g_postcard, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -11;  /* 0xFFFFFFF5 */
-    }
-
-    /* ================================================================
-     * 6. Cursor (0x740 bytes, resource 0x1FA = 506)
-     * 0x407154-0x40719C
-     * ================================================================ */
-    mem = operator_new(0x740);
-    g_cursor = (mem != nullptr)
-        ? Cursor_Ctor(mem, hInst, 0x1FA)
-        : nullptr;
-    if (g_cursor == nullptr) {
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -12;  /* 0xFFFFFFF4 */
-    }
-
-    ok = Cursor_Create(g_cursor, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_cursor);
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -13;  /* 0xFFFFFFF3 */
-    }
-
-    /* ================================================================
-     * 7. AudioMgr / HelpWnd (0x3078 bytes, resource 0x1FE = 510)
-     * 0x4071A4-0x4071EC
-     * ================================================================ */
-    mem = operator_new(0x3078);
-    g_audio_mgr = (mem != nullptr)
-        ? AudioMgr_Ctor(mem, hInst, 0x1FE)
-        : nullptr;
-    if (g_audio_mgr == nullptr) {
-        destroy_subsystem(g_cursor);
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -14;  /* 0xFFFFFFF2 */
-    }
-
-    ok = HelpWnd_Create(g_audio_mgr, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_audio_mgr);
-        destroy_subsystem(g_cursor);
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -15;  /* 0xFFFFFFF1 */
-    }
-
-    /* ================================================================
-     * 8. AboutDialog (0x1184 bytes, resource 0x1FD = 509)
-     * 0x4071F4-0x40723C
-     * ================================================================ */
-    mem = operator_new(0x1184);
-    g_about = (mem != nullptr)
-        ? CGWND_AboutDialog_Ctor(mem, hInst, 0x1FD)
-        : nullptr;
-    if (g_about == nullptr) {
-        destroy_subsystem(g_audio_mgr);
-        destroy_subsystem(g_cursor);
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -16;  /* 0xFFFFFFF0 */
-    }
-
-    ok = CGWND_AboutDialog_Create(g_about, hWndParent);
-    if (!ok) {
-        destroy_subsystem(g_about);
-        destroy_subsystem(g_audio_mgr);
-        destroy_subsystem(g_cursor);
-        destroy_subsystem(g_postcard);
-        destroy_subsystem(g_trainstation_window);
-        destroy_subsystem(g_postcard_send);
-        destroy_subsystem(g_town);
-        destroy_subsystem(g_ui_main);
-        return -17;  /* 0xFFFFFFEF */
-    }
-
-    /* All 8 subsystems initialized successfully */
     return 0;
 }
 
-
-/* ================================================================== */
-/* CGWND::InitMode1 — Mode 1 initialization (loading screen / game start)
-/* Address: 0x408350  (size: 641 bytes)                                 */
-/*                                                                     */
-/* Two execution paths based on this->field_10:                        */
-/*                                                                     */
-/* PATH A (field_10 == 0) — First-time initialization:                 */
-/*   Shows progressive loading screen with per-subsystem init steps,   */
-/*   queues a screensaver idle thread, and returns. Game stays in      */
-/*   mode 1.                                                           */
-/*                                                                     */
-/* PATH B (field_10 != 0) — World-reload (set by CGWND_QuitToMenu):   */
-/*   Loads a world, inits subsystems, transitions to mode 3.           */
-/*   - Demo mode: picks random screensaver world                       */
-/*   - Multiplayer (scenarioId==2): builds "Layouts\XX" from player    */
-/*     count                                                           */
-/*   - Single player: loads "curr" if clean exit flag is set           */
-/*                                                                     */
-/* Called by: CGWND::SetMode(1) @0x40815C                              */
-/* ================================================================== */
-void CGWND::InitMode1()
-{
-    char   path_buf_a[0x104];    /* ESP+0x04 — screensaver/single path */
-    char   path_buf_b[0x104];    /* ESP+0x10C — multiplayer layout path */
-    HWND   main_hwnd = this->hWnd;  /* +0x04 */
-    void** vtbl;
-
-    /* Zero both path buffers */
-    /* 0x40836F-0x4083B2 */
-    path_buf_a[0] = '\0';
-    memset(path_buf_a + 1, 0, 0x103);
-    path_buf_b[0] = '\0';
-    memset(path_buf_b + 1, 0, 0x103);
-
-    /* ── Dependencies ── */
-    extern uintptr_t SetTimer(HWND hWnd, uintptr_t idEvent, uint32_t uElapse, void* lpTimerFunc);
-    extern BOOL      EnableWindow(HWND hWnd, BOOL bEnable);
-    extern BOOL      InvalidateRect(HWND hWnd, const RECT* lpRect, BOOL bErase);
-    extern BOOL      UpdateWindow(HWND hWnd);
-    extern BOOL      PlaySoundA(const char* pszSound, HMODULE hmod, DWORD fdwSound);
-    extern int       wsprintfA(char* buf, const char* fmt, ...);
-    extern void      GameAudio_UpdateVolume(void* audio, int level);            /* @0x4135B0 */
-    extern void      Game_SetScreenMode(void* game, int a, int b, int c);       /* @0x411DC0 */
-    extern void      DirectPlay_Init(void);                                     /* @0x45E090 */
-    extern void      CGWND_PumpMessages(int drain_only);                        /* @0x4085E0 */
-    extern void      Town_InitOverlaySprite(void* town);                        /* @0x42FDF0 */
-    extern void      DDRAW_Present(uint32_t flags);                             /* @0x45E1E0 */
-    extern void      Cursor_InitBackground(void* cursor);                       /* @0x416460 */
-    extern void      GFX_InitWindow(void* locobitmap);                          /* @0x404720 */
-    extern void      Town_HandlePostcardCommand(void* wnd);                     /* @0x430C20 */
-    extern uint32_t  WIN32_QueueAsyncTask(void* queue, void* callback, uint32_t d); /* @0x461790 */
-    extern void      RESMGR_SelectScreensaver(char* out);                       /* @0x4481B0 */
-    extern int       INPUT_LoadWorld(void* inputmgr, uint8_t* path);            /* @0x41D320 */
-    extern int       NETMAN_GetPlayerCount(void* netman);                       /* @0x43D210 */
-
-    /* Create a periodic 150ms timer (ID 0x47) for loading screen.
-     * No callback: WM_TIMER handled in the window procedure. */
-    /* 0x4083C0 */
-    g_timer_id = (int)SetTimer(main_hwnd, 0x47, 150, nullptr);
-
-    /* Update audio volume on mode entry */
-    /* 0x4083E2 */
-    if (g_audio != nullptr) {
-        GameAudio_UpdateVolume(g_audio, 1);
-    }
-
-    /* ================================================================
-     * DECISION POINT: this->field_10 == 0 ?
-     * 0x4083F8
-     * ================================================================ */
-    if (this->field_10 == 0) {
-
-        /* ── PATH A: First-time initialization ("fresh start") ── */
-        /* 0x408400-0x4085C5 */
-
-        /* Step the UI (show loading screen / transition frame) */
-        vtbl = *(void***)g_ui_main;
-        ((void(*)())vtbl[1])();                           /* vtable[1] */
-
-        Game_SetScreenMode(&g_game, 0, 1, 0);
-        DirectPlay_Init();
-
-        /* Disable main window during loading to prevent interaction */
-        EnableWindow(main_hwnd, FALSE);
-        CGWND_PumpMessages(1);                            /* drain=1: discard non-critical */
-
-        if (g_demo_mode != 1) {
-            /* Initialize each subsystem one at a time, presenting the
-             * display and draining messages between steps to show
-             * loading progress. */
-
-            Town_InitOverlaySprite(g_town);               /* +0x5FA guard: inits once */
-            DDRAW_Present(0);
-            CGWND_PumpMessages(1);
-
-            Cursor_InitBackground(g_cursor);              /* +0x1E8 guard: inits once */
-            DDRAW_Present(0);
-            CGWND_PumpMessages(1);
-
-            GFX_InitWindow(g_postcard);                   /* +0xFC guard: inits once */
-            DDRAW_Present(0);
-            CGWND_PumpMessages(1);
-
-            /* Multiplayer postcard scenario: init the send dialog */
-            if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) { /* +0x7C4: scenarioId */
-                Town_HandlePostcardCommand(g_postcard_send);
-                DDRAW_Present(0);
-                CGWND_PumpMessages(1);
-            }
-        }
-
-        /* Queue a background thread for screensaver/idle monitoring.
-         * Callback at 0x45DE40 cycles worlds after inactivity. */
-        WIN32_QueueAsyncTask((void*)0x4A9AD0, (void*)0x45DE40, 0);
-
-        /* Force window repaint to show final loading state */
-        InvalidateRect(main_hwnd, nullptr, FALSE);
-        UpdateWindow(main_hwnd);
-        return;
-        /* Game stays in mode 1 (loading/menu). The game loop in WinMain
-         * processes events at this mode level. */
-    }
-
-    /* ================================================================
-     * PATH B: World-reload path
-     * this->field_10 != 0 — set by CGWND_QuitToMenu @0x406E94.
-     * Load the appropriate world before transitioning to gameplay.
-     * 0x4084D0-0x4085D0
-     * ================================================================ */
-
-    if (g_demo_mode == 1) {
-        /* Demo/kiosk: pick random screensaver world */
-        RESMGR_SelectScreensaver(path_buf_a);
-        if (INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)path_buf_a) != 0) {
-            goto common_init;    /* screensaver loaded */
-        }
-        /* Screensaver load failed — try "curr" if clean exit */
-        if (g_clean_exit != 0) {
-            INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)"curr");   /* 0x47E2A0 */
-        }
-        goto common_init;
-    }
-
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {  /* scenarioId == 2 */
-        /* Network multiplayer/postcard: build "Layouts\XX" path */
-        int player_count = NETMAN_GetPlayerCount(g_netman);
-        if (player_count == 0) {
-            goto common_init;  /* BUG: no world loaded — town may be empty */
-        }
-        wsprintfA(path_buf_b, "Layouts\\%s", player_count + 0x12); /* fmt @0x47E2A8 */
-        INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)path_buf_b);
-    } else {
-        /* Single player: reload "curr" world if clean exit */
-        if (g_clean_exit != 0) {
-            INPUT_LoadWorld((void*)0x4A9990, (uint8_t*)"curr");   /* 0x47E2A0 */
-        }
-    }
-
-common_init:
-    /* ── Common post-load initialization ── */
-    /* 0x4085A0-0x4085E0 */
-
-    /* Dismiss loading screen / hide menu */
-    vtbl = *(void***)g_ui_main;
-    ((void(*)())vtbl[1])();                               /* vtable[1] */
-
-    Town_InitOverlaySprite(g_town);
-    Cursor_InitBackground(g_cursor);
-    GFX_InitWindow(g_postcard);
-
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {  /* scenarioId */
-        Town_HandlePostcardCommand(g_postcard_send);
-    }
-
-    /* Stop all currently playing audio */
-    PlaySoundA(nullptr, nullptr, 0);
-
-    /* Transition to mode 3 (gameplay / town view).
-     * CGWND::SetMode(3) dispatches to CGWND_InitMode4 @0x4086F0
-     * which renders the town scene and starts the game loop. */
-    this->SetMode(3);
-}
-
-
-/* ================================================================ */
-/* Free functions in core range                                      */
-/* ================================================================ */
-
-/* ================================================================== */
-/* CGWND_ParseCmdLine — Parse command line for demo/easter eggs        */
-/* Address: 0x406790                                                   */
-/*                                                                     */
-/* Called by: WinMain @ 0x46308C                                       */
-/* ================================================================== */
-void CGWND_ParseCmdLine(char* lpCmdLine)
-{
-    int   demoTokenSeen = 0;
-    g_easter_egg = 0;
-
-    /* Tokenize by space — custom CRT_strtok at 0x4663A0 */
-    char* token = CRT_strtok(lpCmdLine, (char*)&" ");
-
-    while (token != nullptr) {
-        /*
-         * Demo-mode blacklist gate. CRT_wcsstr returns 0 for exact match.
-         * If token EXACTLY EQUALS any of the three blacklist strings,
-         * flag demo mode.
-         */
-        /* Check: token == "/s"? */
-        if (CRT_wcsstr(token, "/s") == 0) {
-            demoTokenSeen = 1;
-        }
-        /* Check: token == "-s"? */
-        else if (CRT_wcsstr(token, "-s") == 0) {
-            demoTokenSeen = 1;
-        }
-        /* Check: token == "s"? */
-        else if (CRT_wcsstr(token, "s") == 0) {
-            demoTokenSeen = 1;
-        }
-        else {
-            /* Token passed the blacklist gate. Check for easter egg themes. */
-            if (CRT_wcsstr(token, "Easter") == 0) {
-                g_easter_egg = 1;    /* April Fools / Easter */
-            }
-            else if (CRT_wcsstr(token, "Desert") == 0) {
-                g_easter_egg = 2;    /* Desert / Summer */
-            }
-            else if (CRT_wcsstr(token, "Halloween") == 0) {
-                g_easter_egg = 3;    /* Halloween */
-            }
-            else if (CRT_wcsstr(token, "Winter") == 0) {
-                g_easter_egg = 4;    /* Winter */
-            }
-            else if (CRT_wcsstr(token, "/XMas") == 0) {
-                g_easter_egg = 5;    /* Christmas */
-            }
-            /* Unrecognized tokens are silently ignored */
-        }
-
-        /* Next token */
-        token = CRT_strtok(nullptr, (char*)&" ");
-    }
-
-    /* If any token matched a blacklist sentinel, set demo mode */
-    if (demoTokenSeen) {
-        g_demo_mode = 1;
-    }
-}
-
-
-/**
- * CRT_wcsstr — case-insensitive string comparison
- * Address: 0x471480
- *
- * Despite the name, this is NOT a substring search. It returns 0 when
- * the two strings are equal (case-insensitively), and non-zero otherwise.
- * Used throughout the codebase for equality checks.
- */
-extern "C" int CRT_wcsstr(const char* a, const char* b) {
-    /* External — defined in CRT thunk region */
-    return 0;
-}

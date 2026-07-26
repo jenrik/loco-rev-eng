@@ -1,497 +1,293 @@
-/**
- * BuildingMgr.cpp — Building Manager implementation
- *
- * Lego Loco (loco.exe, 1998, MSVC x86)
- * Reverse engineered via Ghidra decompilation.
- *
- * See src/decompiled/buildingmgr_*.c for full C decompilations of each method.
- */
-
+/** BuildingMgr non-vtable operations, validated against loco_v8. */
 #include "BuildingMgr.h"
 #include "Building.h"
+#include "Train.h"
+#include <new>
 
-extern void GLOBAL_free(void* ptr);
-extern void* operator_new(size_t size);
-extern void Building_RemoveFromParent(void* building);     /* BaseCleanup helper */
+extern void* operator_new(size_t);                              // 0x465ce0
+extern void* ResourceManager_GetById(void*, int);               // 0x446ea0
+extern uint8_t GetResourceType(int);                            // 0x446030
+extern void RESDATA_Lock(void*);                                // 0x449410
+extern void RESDATA_Unlock(void*);                              // 0x449420
+extern void UI_CreateMessageBox(void*, int, int, char, int, int, int); // 0x423ab0
+extern int Town_CheckOccupied(void*, int, int, int, int);       // 0x42c950
+extern int UIPANEL_BlitSurface(void*, int, int, void*, int, int); // 0x42a540
+extern void Game_SelectGameObject(void*, void*);                // 0x4113a0
+extern void Town_SelectBuilding(void*, void*);                  // 0x42d040
+extern void PlaySound(int);                                     // 0x447930
+extern void DDRAW_SelectBuilding(void*, void*);                  // 0x459180
+extern BOOL (__stdcall* g_IntersectRect)(RECT*, const RECT*, const RECT*);
+extern BOOL (__stdcall* g_OffsetRect)(RECT*, int, int);
+extern BOOL (__stdcall* g_PtInRect)(const RECT*, int, int);
 
+extern void* g_resmgr;          // 0x4855e8
+extern int g_game_mode;         // 0x4851f4
+extern void* g_tooltip_mgr;     // 0x4fd220
+extern void* g_game;            // 0x4854c8
+extern void* g_town_view;       // 0x4852a0
+extern uint8_t g_click_on_building; // 0x48556c
+extern uint8_t g_click_on_town;     // 0x48557c
+extern uint8_t g_disable_input;     // 0x4855ac
+extern uint32_t g_game_time;        // 0x4a99b4
+extern uint8_t g_is_town_mode;      // 0x485328
+extern uint8_t g_ddraw_active;      // 0x4a9f78
+extern uint16_t g_game_difficulty;  // 0x4aa288
+extern void* g_ddraw_building;      // 0x4a9ef0
 
-/* ================================================================== */
-/* BuildingMgr::CreateFromResource — Factory method                    */
-/* Address: 0x4348F0                                                   */
-/*                                                                     */
-/* Allocates a 0xF4-byte Building object, calls the constructor with   */
-/* the given resource_id, adds it to the building list.                */
-/* See src/decompiled/buildingmgr_createfromresource.c for full details*/
-/* ================================================================== */
-Building* BuildingMgr::CreateFromResource(int resource_id)
+namespace {
+void add_to_collection(BuildingCollection& collection, Building* object)
 {
-    /* Allocate 0xF4 (244) bytes for a new Building */
-    Building* bldg = (Building*)operator_new(0xF4);
-
-    if (bldg != nullptr) {
-        /* Call full constructor */
-        bldg->Building::Building(resource_id);
+    if (collection.count == collection.capacity) {
+        collection.Resize(collection.capacity == 0 ? 100 : collection.capacity * 2);
     }
-
-    /* Add to managed collection (list append) */
-    /* ... collection management ... */
-
-    return bldg;
+    collection.items[collection.count++] = object;
+    collection.Sort();
 }
 
+int find_in_collection(const BuildingCollection& collection, const Building* object)
+{
+    for (uint32_t i = 0; i < collection.count; ++i) {
+        if (collection.items[i] == object) return static_cast<int>(i);
+    }
+    return -1;
+}
 
-/* ================================================================== */
-/* BuildingMgr::CompactCollections — Compact after removals            */
-/* Address: 0x434870                                                   */
-/*                                                                     */
-/* Locks the compact-resource guard at +0x04, calls Compact() on       */
-/* the building collection at +0x4C (vtable[0x50]), then unlocks.      */
-/* Only runs when the threshold count (+0x3C) exceeds 1.               */
-/* ================================================================== */
+void* entity_surface(const Building* object)
+{
+    return object->parent == nullptr
+        ? nullptr : *(void**)((uint8_t*)object->parent + 0x10);
+}
+
+int collection_occupancy(BuildingCollection& collection, const RECT& clip,
+                         int result_code)
+{
+    for (uint32_t i = 0; i < collection.GetCount(); ++i) {
+        Building* object = collection.GetItem(i);
+        if (object == nullptr || object->visible == 0) continue;
+        RECT intersection;
+        if (!g_IntersectRect(&intersection, &clip, &object->screen_rect)) continue;
+        g_OffsetRect(&intersection, -object->screen_rect.left,
+                     -object->screen_rect.top);
+        g_OffsetRect(&intersection, object->source_rect.left, 0);
+        if (Town_CheckOccupied(entity_surface(object), intersection.left,
+                               intersection.top, intersection.right,
+                               intersection.bottom)) return result_code;
+    }
+    return 0;
+}
+}
+
+/** Compact the primary keyed collection. Address: 0x434870. */
 void BuildingMgr::CompactCollections()
 {
-    int* threshold = (int*)((uint8_t*)this + 0x3C);
-    if (*threshold <= 1) return;
-
-    /* Lock collection guard at +0x04 */
-    extern void RESDATA_Lock(void*);
-    RESDATA_Lock((uint8_t*)this + 0x04);
-
-    /* Collection at +0x4C: call Compact() at vtable[0x50] */
-    void* coll = *(void**)((uint8_t*)this + 0x4C);
-    void** vt = *(void***)coll;
-    ((void(__thiscall*)())vt[0x50 / 4])();
-
-    /* Unlock */
-    extern void RESDATA_Unlock(void*);
-    RESDATA_Unlock((uint8_t*)this + 0x04);
+    if (building_count <= 1) return;
+    RESDATA_Lock(&building_lock);
+    buildings.Sort();
+    RESDATA_Unlock(&building_lock);
 }
 
-
-/* ================================================================== */
-/* BuildingMgr::DestroyAll — Destroy all buildings                     */
-/* Address: 0x434800 (called as 0x434E50 wrapper)                      */
-/*                                                                     */
-/* Destroys every building/train in both collections by calling        */
-/* each object's destructor (vtable[1] = cleanup without free).        */
-/* The _unused parameter is accepted but ignored.                      */
-/* ================================================================== */
-void BuildingMgr::DestroyAll()
+/**
+ * Factory body. Address: 0x4349d0.
+ * 0x434af7 is the call to Building::Building, not the function entry.
+ */
+Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
+                                          int world_x, int world_y)
 {
-    auto destroyCollection = [](void* coll) {
-        void** vt = *(void***)coll;
-        auto getCount = (int(__thiscall*)())vt[0x2C / 4];
-        auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
+    void* resource = ResourceManager_GetById(g_resmgr, resource_id);
+    /* The binary assumes this primary lookup succeeds. */
+    if (resource == nullptr) return nullptr;
 
-        int count = getCount();
-        for (int i = 0; i < count; i++) {
-            void* entity = getItem(i);
-            /* vtable[1] = cleanup destructor (no free) */
-            void** evt = *(void***)entity;
-            ((void(__thiscall*)())evt[0x04 / 4])();
-            count = getCount();  /* re-query — destruction may modify collection */
-        }
-    };
+    int dependency_id = *(int*)((uint8_t*)resource + 0x40);
+    void* dependency = ResourceManager_GetById(g_resmgr, dependency_id);
+    if (dependency_id != -1 &&
+        (dependency == nullptr || *(uint16_t*)((uint8_t*)dependency + 0x158) == 0))
+        return nullptr;
 
-    /* Active buildings at +0x4C */
-    destroyCollection(*(void**)((uint8_t*)this + 0x4C));
+    int exclusion_id = *(int*)((uint8_t*)resource + 0x44);
+    void* exclusion = ResourceManager_GetById(g_resmgr, exclusion_id);
+    if (exclusion != nullptr &&
+        *(uint16_t*)((uint8_t*)exclusion + 0x158) != 0) return nullptr;
 
-    /* Special/train collection at +0x64 */
-    destroyCollection(*(void**)((uint8_t*)this + 0x64));
+    Building* object = nullptr;
+    uint8_t type = GetResourceType(resource_id);
+    if (type == 7) {
+        void* memory = operator_new(0xf4);
+        if (memory != nullptr) object = ::new (memory) Building(resource_id);
+    } else if (type == 8) {
+        void* memory = operator_new(0xf0);
+        if (memory != nullptr)
+            object = static_cast<Building*>(::new (memory) TrainEntity(resource_id));
+    }
+    if (object == nullptr) return nullptr;
+    if (object->initialized != 1) {
+        delete object;
+        return nullptr;
+    }
+
+    object->occupant_a = (void*)(intptr_t)owner_slot;               // +0x8c
+    object->MoveTo(world_x, world_y);                               // vtable [3]
+    if (type == 7) {
+        add_to_collection(buildings, object);                       // +0x4c
+        ++building_count;
+    } else {
+        add_to_collection(secondary_buildings, object);             // +0x64
+        ++secondary_count;
+    }
+    return object;
 }
 
-
-/* ================================================================== */
-/* BuildingMgr::DispatchAll — Dispatch event to all entities           */
-/* Address: 0x4348A0                                                   */
-/*                                                                     */
-/* Calls vtable[0x2C] on each building and train. Gated by phase:      */
-/* only dispatches when the low word of flags is 0. Buildings are      */
-/* z-sorted — iteration stops early when screen_rect.top > bottom.     */
-/* ================================================================== */
-void BuildingMgr::DispatchAll()
+/** Remove unused removable buildings. Address: 0x434970. */
+void BuildingMgr::RemoveEmpty()
 {
-    /* Gate: only dispatch during phase 0 */
-    /* (simplified — see src/decompiled/buildingmgr_dispatchall.c for
-     *  full flag-based gating and the per-entity dispatch with
-     *  left/top/right/bottom rect parameters) */
-}
-
-
-/* ================================================================== */
-/* BuildingMgr::BlitOverlaps — Render overlap indicators               */
-/* Address: 0x435200 (via wrapper at 0x434AB0)                         */
-/*                                                                     */
-/* Tests whether a target entity's sprite overlaps any other entity.   */
-/* Tier 1 (buildings): tile occupancy check → result 7.               */
-/* Tier 2 (trains): pixel-level sprite AND test → result 8.           */
-/* Returns 0 if no overlap.                                            */
-/* See src/decompiled/buildingmgr_blitoverlaps.c for full details.     */
-/* ================================================================== */
-void BuildingMgr::BlitOverlaps()
-{
-    /* See src/decompiled/buildingmgr_blitoverlaps.c (0x435200) */
-}
-
-
-/* ================================================================== */
-/* BuildingMgr::HandleClick — Handle mouse click on building           */
-/* Address: 0x435580  (size: 299 bytes)                                */
-/*                                                                     */
-/* Iterates the building collection, testing each building against     */
-/* a click rectangle and type filter. On match, dispatches the click   */
-/* command (animation change or action dispatch). Plays click sound    */
-/* and highlights the building when not in town mode.                  */
-/* ================================================================== */
-void BuildingMgr::HandleClick(int rect_left, int rect_top,
-                               int rect_right, int rect_bottom,
-                               void* cmd_ptr)
-{
-    /* Build click RECT */
-    RECT click_rect;
-    click_rect.left   = rect_left;
-    click_rect.top    = rect_top;
-    click_rect.right  = rect_right;
-    click_rect.bottom = rect_bottom;
-
-    /* Pre-load type filter from click command (+0x08) */
-    struct ClickCmd {
-        int field_00, field_04;
-        int* sprite_type_ptr;   /* +0x08 */
-        int field_0C, field_10;
-        int command;            /* +0x14: 0=anim, non-zero=action */
-        int16_t anim_index;     /* +0x18 */
-        int delay;              /* +0x1C: cooldown ticks */
-    };
-    ClickCmd* cmd = (ClickCmd*)cmd_ptr;
-    int filter_type = *cmd->sprite_type_ptr;  /* BUG: no NULL guard */
-
-    /* Collection at +0x4C */
-    void* coll = *(void**)((uint8_t*)this + 0x4C);
-    void** vt = *(void***)coll;
-    auto getCount = (int(__thiscall*)())vt[0x2C / 4];
-    auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
-
-    int count = getCount();
-    for (int i = 0; i < count; i++) {
-        void* building = getItem(i);
-
-        /* Check 1: Type filter */
-        void* sprite_info = *(void**)((uint8_t*)building + 0x40);
-        int bldg_type = *(int*)((uint8_t*)sprite_info + 4);
-        if (bldg_type != filter_type && filter_type != -1) continue;
-
-        /* Check 2: Point-in-rect */
-        POINT pt;
-        pt.x = *(int*)((uint8_t*)building + 0x08);
-        pt.y = *(int*)((uint8_t*)building + 0x0C);
-        extern BOOL PtInRect(const RECT*, POINT);
-        if (!PtInRect(&click_rect, pt)) continue;
-
-        /* Check 3: Cooldown timer at +0x68 must be 0 */
-        if (*(int*)((uint8_t*)building + 0x68) != 0) continue;
-
-        /* Check 4: Valid command */
-        if (cmd->command == -1) continue;
-
-        /* Execute command */
-        void** bvt = *(void***)building;
-        if (cmd->command == 0) {
-            /* Mode 0: Animation change via vtable[0x1C] */
-            ((void(__thiscall*)(int16_t))bvt[0x1C / 4])(cmd->anim_index);
-            *(int*)((uint8_t*)building + 0x68) = cmd->delay + g_game_time;
-        } else {
-            /* Mode non-zero: Action dispatch via vtable[0x18] */
-            ((void(__thiscall*)(int,int,int))bvt[0x18 / 4])(
-                cmd->command, (int)cmd->anim_index, 0);
-
-            /* Set cooldown or cancel previous action based on type */
-            if (*(uint8_t*)((uint8_t*)building + 0x18) == 1) {
-                *(int*)((uint8_t*)building + 0x68) = cmd->delay + g_game_time;
-            } else {
-                /* Vehicle: cancel previous action */
-                int prev = *(int*)((uint8_t*)building + 0x64);
-                ((void(__thiscall*)(int,int,int))bvt[0x18 / 4])(prev, -1, 0);
-            }
-        }
-
-        /* Post-dispatch sound + visual feedback */
-        extern uint8_t g_is_town_mode;
-        extern uint8_t g_ddraw_active;
-        extern uint16_t g_game_difficulty;
-        if (!g_is_town_mode && (g_ddraw_active != 1 || g_game_difficulty != 3)) {
-            extern void RESMGR_PlaySound(int id);
-            RESMGR_PlaySound(0x571E);
-
-            extern void DDRAW_SelectBuilding(void* ddraw, int building);
-            extern void* g_ddraw_building;
-            DDRAW_SelectBuilding(g_ddraw_building, (int)building);
+    if (g_game_mode != 3) return;
+    for (uint32_t i = 0; i < buildings.GetCount(); ++i) {
+        Building* object = buildings.GetItem(i);
+        if (object != nullptr && object->occupant_b == nullptr &&
+            *(uint8_t*)((uint8_t*)object->parent + 0x16c) != 0) {
+            RemoveObject(object, false);
         }
     }
 }
 
+/** Remove one managed Building/Train. Address: 0x434b60. */
+void BuildingMgr::RemoveObject(Building* object, bool show_message)
+{
+    if (object == nullptr || object->parent == nullptr) return;
+    uint8_t type = *(uint8_t*)((uint8_t*)object->parent + 8);
+    BuildingCollection* collection;
+    BuildingCollectionLock* lock;
+    int32_t* managed_count;
+    if (type == 7) {
+        collection = &buildings; lock = &building_lock; managed_count = &building_count;
+    } else if (type == 8) {
+        collection = &secondary_buildings; lock = &secondary_lock; managed_count = &secondary_count;
+    } else return;
 
-/* ================================================================== */
-/* BuildingMgr::FindAndNotify — Find building at world position        */
-/* Address: 0x434C50  (size: 278 bytes)                                */
-/*                                                                     */
-/* Iterates both collections, calling vtable[0x08] (match-at-position) */
-/* on each object. On first match, optionally selects in game UI and   */
-/* town view. Only runs in game mode 3. Returns TRUE if found.         */
-/* ================================================================== */
+    RESDATA_Lock(lock);
+    int index = find_in_collection(*collection, object);
+    if (index >= 0) {
+        collection->items[index] = nullptr;
+        --*managed_count;
+        if (g_game_mode == 3 && show_message)
+            UI_CreateMessageBox(&g_tooltip_mgr, 0x3860, 0, 'W',
+                                object->world_x, object->world_y, 1);
+        delete object;
+    }
+    RESDATA_Unlock(lock);
+}
+
+/** Select the first object hit at a world position. Address: 0x434c50. */
 bool BuildingMgr::FindAndNotify(int world_x, int world_y)
 {
-    extern int g_game_mode;
     if (g_game_mode != 3) return false;
-
-    auto searchCollection = [&](void* coll) -> bool {
-        void** vt = *(void***)coll;
-        auto getCount = (int(__thiscall*)())vt[0x2C / 4];
-        auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
-
-        int count = getCount();
-        for (int i = 0; i < count; i++) {
-            void* obj = getItem(i);
-            if (obj == nullptr) continue;
-
-            /* Only consider fully initialized objects (visible == 1) */
-            if (*(uint8_t*)((uint8_t*)obj + 0x24) != 1) continue;
-
-            /* vtable[0x08]: match-at-position check */
-            void** ovt = *(void***)obj;
-            if (((bool(__thiscall*)(int,int))ovt[0x08 / 4])(world_x, world_y)) {
-                extern uint8_t g_click_on_building;
-                extern uint8_t g_click_on_town;
-                extern uint8_t g_disable_input;
-
-                if (g_click_on_building) {
-                    extern void Game_SelectGameObject(void* game, void* obj);
-                    extern void* g_game;
-                    Game_SelectGameObject(g_game, obj);
-                }
-                if (g_click_on_town) {
-                    extern void Town_SelectBuilding(void* town, int building);
-                    extern void* g_town_view;
-                    Town_SelectBuilding(g_town_view, (int)obj);
-                }
-                return true;
-            }
+    auto find = [&](BuildingCollection& collection, bool require_visible,
+                    bool respect_disable) {
+        for (uint32_t i = 0; i < collection.GetCount(); ++i) {
+            Building* object = collection.GetItem(i);
+            if (object == nullptr || (require_visible && object->visible != 1)) continue;
+            if (!object->PtInRect(world_x, world_y)) continue;
+            if (g_click_on_building && (!respect_disable || !g_disable_input))
+                Game_SelectGameObject(g_game, object);
+            if (g_click_on_town) Town_SelectBuilding(g_town_view, object);
+            return true;
         }
         return false;
     };
-
-    /* Search buildings at +0x4C */
-    if (searchCollection(*(void**)((uint8_t*)this + 0x4C))) return true;
-
-    /* Search trains at +0x64 */
-    return searchCollection(*(void**)((uint8_t*)this + 0x64));
+    return find(buildings, true, false) ||
+           find(secondary_buildings, false, true);
 }
 
-
-/* ================================================================== */
-/* BuildingMgr::InvalidateRects — Check tile occupancy in clip rect    */
-/* Address: 0x435020  (size: 469 bytes)                                */
-/*                                                                     */
-/* Iterates both collections. For each visible entity whose bounding   */
-/* box intersects the clip rect, checks tile occupancy. Returns:       */
-/*   7 = building occupies tiles, 8 = train occupies tiles, 0 = none.  */
-/* Building check has priority — if it returns 7, trains are skipped.  */
-/* ================================================================== */
-int BuildingMgr::InvalidateRects(RECT clipRect)
+/** Tile occupancy query. Address: 0x435020. */
+int BuildingMgr::InvalidateRects(RECT rect)
 {
-    extern BOOL IntersectRect(RECT* out, const RECT* a, const RECT* b);
-    extern BOOL OffsetRect(RECT* r, int dx, int dy);
-    extern int Town_CheckOccupied(void* surface, int x1, int y1, int x2, int y2);
+    int result = collection_occupancy(buildings, rect, 7);
+    return result != 0 ? result : collection_occupancy(secondary_buildings, rect, 8);
+}
 
-    auto checkCollection = [&](void** coll_base, int result_value) -> int {
-        void* coll = *coll_base;
-        void** vt = *(void***)coll;
-        auto getCount = (int(__thiscall*)())vt[0x2C / 4];
-        auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
+/** Overlap query. Address: 0x435200. */
+int BuildingMgr::BlitOverlaps(int left, int top, int right, int bottom,
+                              Building* target)
+{
+    RECT clip = {left, top, right, bottom};
+    if (target == nullptr) return InvalidateRects(clip);
 
-        int count = getCount();
-        for (int i = 0; i < count && *coll_base != nullptr; i++) {
-            void* entity = getItem(i);
-
-            if (*(uint8_t*)((uint8_t*)entity + 0x24) == 0) continue;  /* not visible */
-
-            RECT* entityRect = (RECT*)((uint8_t*)entity + 0x08);
-            RECT intersect;
-            if (!IntersectRect(&intersect, &clipRect, entityRect)) continue;
-
-            RECT localRect = intersect;
-            OffsetRect(&localRect, -entityRect->left, -entityRect->top);
-            OffsetRect(&localRect, *(int*)((uint8_t*)entity + 0x30), 0);
-
-            void* objRef = *(void**)((uint8_t*)entity + 0x40);
-            void* surface = *(void**)((uint8_t*)objRef + 0x10);
-
-            if (Town_CheckOccupied(surface, localRect.left, localRect.top,
-                                   localRect.right, localRect.bottom)) {
-                return result_value;
-            }
-        }
-        return 0;
+    uint8_t z_limit = *(uint8_t*)((uint8_t*)target->parent + 0x16a);
+    auto local_intersection = [&](Building* object, RECT& object_local,
+                                  RECT& target_local) {
+        if (object == nullptr || object == target || object->visible == 0) return false;
+        int dz = object->world_y - target->world_y;
+        if (dz < 0) dz = -dz;
+        if (dz >= z_limit) return false;
+        RECT intersection;
+        if (!g_IntersectRect(&intersection, &clip, &object->screen_rect)) return false;
+        object_local = intersection;
+        g_OffsetRect(&object_local, -object->screen_rect.left,
+                     -object->screen_rect.top);
+        g_OffsetRect(&object_local, object->source_rect.left, 0);
+        target_local = intersection;
+        g_OffsetRect(&target_local, -target->screen_rect.left,
+                     -target->screen_rect.top);
+        g_OffsetRect(&target_local, target->source_rect.left, 0);
+        return true;
     };
 
-    /* Buildings at +0x4C — returns 7 if occupied */
-    int result = checkCollection((void**)((uint8_t*)this + 0x4C), 7);
-    if (result != 0) return result;
-
-    /* Trains at +0x64 — returns 8 if occupied */
-    return checkCollection((void**)((uint8_t*)this + 0x64), 8);
+    for (uint32_t i = 0; i < buildings.GetCount(); ++i) {
+        Building* object = buildings.GetItem(i);
+        RECT object_local, target_local;
+        if (!local_intersection(object, object_local, target_local)) continue;
+        if (Town_CheckOccupied(entity_surface(object), object_local.left,
+                               object_local.top, object_local.right,
+                               object_local.bottom) &&
+            Town_CheckOccupied(entity_surface(target), target_local.left,
+                               target_local.top, target_local.right,
+                               target_local.bottom)) return 7;
+    }
+    for (uint32_t i = 0; i < secondary_buildings.GetCount(); ++i) {
+        Building* object = secondary_buildings.GetItem(i);
+        RECT object_local, target_local;
+        if (!local_intersection(object, object_local, target_local)) continue;
+        if (UIPANEL_BlitSurface(entity_surface(target), target_local.left,
+                                target_local.top, entity_surface(object),
+                                object_local.left, object_local.top)) return 8;
+    }
+    return 0;
 }
 
-
-/* ================================================================== */
-/* BuildingMgr::RemoveEmpty — Remove buildings with zero occupants     */
-/* Address: 0x434970  (size: 90 bytes)                                 */
-/*                                                                     */
-/* Only runs in game mode 3. Iterates building collection, destroying  */
-/* buildings whose occupant count (+0x90) is 0 and whose resource      */
-/* data (+0x40->+0x16C) allows removal.                                */
-/* ================================================================== */
-void BuildingMgr::RemoveEmpty()
+/** Command hit-test loop. Address: 0x435580. */
+void BuildingMgr::HandleClick(void* command, int left, int top,
+                              int right, int bottom)
 {
-    extern int g_game_mode;
-    if (g_game_mode != 3) return;
+    if (command == nullptr) return;
+    RECT hit = {left, top, right, bottom};
+    int filter = **(int**)((uint8_t*)command + 8);
+    int action = *(int*)((uint8_t*)command + 0x14);
+    int16_t argument = *(int16_t*)((uint8_t*)command + 0x18);
+    uint32_t delay = *(uint32_t*)((uint8_t*)command + 0x1c);
+    for (uint32_t i = 0; i < buildings.GetCount(); ++i) {
+        Building* object = buildings.GetItem(i);
+        if (object == nullptr) continue;
+        int resource_id = *(int*)((uint8_t*)object->parent + 4);
+        if ((filter != -1 && filter != resource_id) ||
+            !g_PtInRect(&hit, object->screen_rect.left,
+                        object->screen_rect.top) ||
+            object->field_68 != 0 || action == -1) continue;
 
-    void* coll = *(void**)((uint8_t*)this + 0x4C);
-    void** vt = *(void***)coll;
-    auto getCount = (int(__thiscall*)())vt[0x2C / 4];
-    auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
-
-    int count = getCount();
-    for (int i = 0; i < count; i++) {
-        void* building = getItem(i);
-
-        /* Check occupant count at +0x90 */
-        if (*(int*)((uint8_t*)building + 0x90) == 0) {
-            /* Check resource-removable flag at resource+0x16C */
-            void* resource = *(void**)((uint8_t*)building + 0x40);
-            if (*(uint8_t*)((uint8_t*)resource + 0x16C) != 0) {
-                /* Destroy via vtable[0x50] = Release */
-                void** bvt = *(void***)building;
-                ((void(__thiscall*)())bvt[0x50 / 4])();
-            }
+        if (action == 0) {
+            object->StopSound(argument);                 // binary vtable +0x1c
+            object->field_68 = delay + g_game_time;
+        } else {
+            object->InitBase(action, argument, false);   // binary vtable +0x18
+            if (object->initialized == 1)
+                object->field_68 = delay + g_game_time;
+            else
+                object->InitBase((int)object->field_64, -1, false);
+        }
+        if (!g_is_town_mode &&
+            !(g_ddraw_active == 1 && g_game_difficulty == 3)) {
+            PlaySound(0x571e);
+            DDRAW_SelectBuilding(g_ddraw_building, object);
         }
     }
 }
 
 
-/* ================================================================== */
-/* BuildingMgr::RemoveObject — Remove a specific building/train        */
-/* Address: 0x434B60  (size: 229 bytes)                                */
-/*                                                                     */
-/* Removes a single building (type 7) or train (type 8) from the       */
-/* manager. Locks the appropriate collection's critical section,       */
-/* removes the object, optionally shows a UI message.                  */
-/* ================================================================== */
-void BuildingMgr::RemoveObject(void* obj, bool show_message)
-{
-    if (obj == nullptr) return;
-
-    /* Determine type from resource byte at +0x08 */
-    void* parent = *(void**)((uint8_t*)obj + 0x40);
-    int type_code = (parent != nullptr) ? *(uint8_t*)((uint8_t*)parent + 8) : 0;
-
-    void* coll;
-    int* count_ptr;
-    int lock_offset;
-
-    if (type_code == 7) {
-        coll       = *(void**)((uint8_t*)this + 0x4C);
-        count_ptr  = (int*)((uint8_t*)this + 0x3C);
-        lock_offset = 0x04;
-    } else if (type_code == 8) {
-        coll       = *(void**)((uint8_t*)this + 0x64);
-        count_ptr  = (int*)((uint8_t*)this + 0x40);
-        lock_offset = 0x20;
-    } else {
-        return;  /* unknown type */
-    }
-
-    /* Lock critical section */
-    extern void RESDATA_Lock(void*);
-    RESDATA_Lock((uint8_t*)this + lock_offset);
-
-    /* Find index and verify */
-    void** cvt = *(void***)coll;
-    int idx = ((int(__thiscall*)(void*))cvt[0x38 / 4])(obj);
-    void* verify = ((void*(__thiscall*)(int))cvt[0x0C / 4])(idx);
-
-    if (verify == obj) {
-        (*count_ptr)--;
-
-        /* Optionally show removal message in game mode */
-        if (g_game_mode == 3 && show_message) {
-            int wx = *(int*)((uint8_t*)obj + 0x4C);
-            int wy = *(int*)((uint8_t*)obj + 0x50);
-            extern void UI_CreateMessageBox(void* mgr, int strId, int param,
-                                             char icon, int x, int y, int show);
-            extern void* g_tooltip_mgr;
-            UI_CreateMessageBox(g_tooltip_mgr, 0x3860, 0, 'W', wx, wy, 1);
-        }
-
-        /* Call scalar deleting destructor (vtable[0]) with flags=1 */
-        void** ovt = *(void***)obj;
-        ((void(__thiscall*)(int))ovt[0])(1);
-    }
-
-    /* Unlock critical section */
-    extern void RESDATA_Unlock(void*);
-    RESDATA_Unlock((uint8_t*)this + lock_offset);
-}
-
-
-/* ================================================================== */
-/* BuildingMgr::UpdateAll — Chain-update all buildings                 */
-/* Address: 0x434720  (size: 212 bytes)                                */
-/*                                                                     */
-/* Chain-updates both collections: building[i-1]->Update(building[i])  */
-/* for i = 1..N-1. The last building in each collection is never used  */
-/* as the "this" of an Update call — a known bug in normal gameplay.   */
-/* After updates, compacts special collection if threshold > 1.        */
-/* ================================================================== */
-void BuildingMgr::UpdateAll()
-{
-    /* Helper: chain-update a collection */
-    auto chainUpdate = [](void* coll_base) {
-        void* coll = *(void**)coll_base;
-        void** vt = *(void***)coll;
-        auto getItem  = (void*(__thiscall*)(int))vt[0x20 / 4];
-        auto getCount = (int(__thiscall*)())vt[0x2C / 4];
-
-        int count = getCount();
-        if (count <= 0) return;
-
-        void* prev = getItem(0);
-        for (int i = 1; i < count; i++) {
-            void* curr = getItem(i);
-            /* vtable[0x3C] = Update(entity* next) */
-            void** pvt = *(void***)prev;
-            ((void(__thiscall*)(void*))pvt[0x3C / 4])(curr);
-            prev = curr;
-            count = getCount();  /* re-read — may have changed */
-        }
-    };
-
-    /* Active buildings at +0x4C */
-    chainUpdate((uint8_t*)this + 0x4C);
-
-    /* Special buildings at +0x64 */
-    chainUpdate((uint8_t*)this + 0x64);
-
-    /* Compact special collection if threshold exceeded */
-    if (*(int*)((uint8_t*)this + 0x40) > 1) {
-        extern void RESDATA_Lock(void*);
-        extern void RESDATA_Unlock(void*);
-        RESDATA_Lock((uint8_t*)this + 0x20);
-
-        void* coll = *(void**)((uint8_t*)this + 0x64);
-        void** cvt = *(void***)coll;
-        ((void(__thiscall*)())cvt[0x50 / 4])();  /* Compact() */
-
-        RESDATA_Unlock((uint8_t*)this + 0x20);
-    }
-}
