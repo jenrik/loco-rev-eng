@@ -25,19 +25,19 @@
 void Cursor::set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw)
 {
     /* If already-hidden (state 0) and requesting state 0, skip */
-    if (this->cursor_state == 0 && stateId == 0)
+    if (this->cursor_state() == 0 && stateId == 0)
         return;
 
     /* If same non-zero state, skip state change but process flags */
-    if (stateId != 0 && this->cursor_state == stateId) {
+    if (stateId != 0 && this->cursor_state() == stateId) {
         /* Still process resetPos and forceRedraw */
         if (resetPos != 0) {
-            SetRect(&this->cursor_rect, 0, 0, 0, 0);
-            SetRect(&this->prev_cursor_rect, 0, 0, 0, 0);
+            SetRect(&this->cursor_rect(), 0, 0, 0, 0);
+            SetRect(&this->prev_cursor_rect(), 0, 0, 0, 0);
         }
         if (forceRedraw != 0) {
             this->update_dirty_rect(1);
-            if (this->viewport_render_enabled != 0) {
+            if (this->viewport_render_enabled() != 0) {
                 this->render_with_viewport(1);
             }
         }
@@ -45,28 +45,28 @@ void Cursor::set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t 
     }
 
     /* Apply new state */
-    this->cursor_state = stateId;
+    this->cursor_state() = stateId;
 
     if (stateId == 0) {
         /* Hiding cursor: invalidate cursor rects */
-        SetRect(&this->cursor_rect, 0, 0, 0, 0);
-        SetRect(&this->prev_cursor_rect, 0, 0, 0, 0);
+        SetRect(&this->cursor_rect(), 0, 0, 0, 0);
+        SetRect(&this->prev_cursor_rect(), 0, 0, 0, 0);
         return;
     }
 
     /* Update animation data and reset rect cache */
     if (resdata != nullptr) {
-        this->anim_resdata = resdata;          /* +0x44 */
+        this->anim_resdata() = resdata;          /* +0x44 */
     }
 
     if (resetPos != 0) {
-        SetRect(&this->cursor_rect, 0, 0, 0, 0);
-        SetRect(&this->prev_cursor_rect, 0, 0, 0, 0);
+        SetRect(&this->cursor_rect(), 0, 0, 0, 0);
+        SetRect(&this->prev_cursor_rect(), 0, 0, 0, 0);
     }
 
     if (forceRedraw != 0) {
         this->update_dirty_rect(1);
-        if (this->viewport_render_enabled != 0) {
+        if (this->viewport_render_enabled() != 0) {
             this->render_with_viewport(1);
         }
     }
@@ -104,7 +104,7 @@ int32_t Cursor::handle_window_paint(HWND hWnd)
 
     Cursor_UnlockAllSurfaces();
 
-    if (this->viewport_render_enabled != 0) {         /* +0x88 */
+    if (this->viewport_render_enabled() != 0) {         /* +0x88 */
         this->render_with_viewport(1);
     }
 
@@ -125,8 +125,8 @@ void Cursor::set_capture(uint8_t releaseFlag)
 {
     if (releaseFlag != 0) {
         /* ACQUIRE game cursor */
-        if (this->capture_flag == 0) {                /* +0x58 */
-            this->capture_flag = 1;
+        if (this->capture_flag() == 0) {                /* +0x58 */
+            this->capture_flag() = 1;
 
             /* Release Windows mouse capture if our window owns it */
             HWND capturedWnd = GetCapture();
@@ -141,14 +141,14 @@ void Cursor::set_capture(uint8_t releaseFlag)
             /* Dispatch screen mode change notification */
             Game_SetScreenMode(g_game, 0, 0, 0);
 
-            if (this->viewport_render_enabled != 0) { /* +0x88 */
+            if (this->viewport_render_enabled() != 0) { /* +0x88 */
                 this->render_with_viewport(1);
             }
         }
     } else {
         /* RELEASE game cursor */
-        if (this->capture_flag != 0 || GetCapture() != this->hWnd) {
-            this->capture_flag = 0;                   /* +0x58 */
+        if (this->capture_flag() != 0 || GetCapture() != this->hWnd) {
+            this->capture_flag() = 0;                   /* +0x58 */
 
             /* Re-acquire Windows mouse capture */
             SetCapture(this->hWnd);
@@ -181,7 +181,7 @@ void Cursor::update_dirty_rect(uint8_t param)
     GetCursorPos(&cursorPos);
 
     /* Get animation data */
-    void* animData = this->anim_resdata;             /* +0x44 */
+    void* animData = this->anim_resdata();             /* +0x44 */
     if (animData == nullptr) {
         Cursor_UnlockAllSurfaces();
         return;
@@ -203,14 +203,14 @@ void Cursor::update_dirty_rect(uint8_t param)
     newRect.bottom = cursorPos.y + (int)spriteH;
 
     /* Clip to viewport */
-    if (newRect.right > this->clip_rect_right)         /* +0x20 */
-        newRect.right = this->clip_rect_right;
-    if (newRect.bottom > this->clip_rect_bottom)       /* +0x24 */
-        newRect.bottom = this->clip_rect_bottom;
+    if (newRect.right > this->clip_rect_right())         /* +0x20 */
+        newRect.right = this->clip_rect_right();
+    if (newRect.bottom > this->clip_rect_bottom())       /* +0x24 */
+        newRect.bottom = this->clip_rect_bottom();
 
     /* Union with stored cursor rect */
     RECT unionRect;
-    UnionRect(&unionRect, &newRect, &this->cursor_rect);  /* +0x68 */
+    UnionRect(&unionRect, &newRect, &this->cursor_rect());  /* +0x68 */
 
     /* Expand by 4px (anti-alias bleed) */
     unionRect.left   -= 4;
@@ -219,33 +219,33 @@ void Cursor::update_dirty_rect(uint8_t param)
     unionRect.bottom += 4;
 
     /* Re-clip to viewport */
-    if (unionRect.left < this->clip_rect_left)          /* +0x18 */
-        unionRect.left = this->clip_rect_left;
-    if (unionRect.top < this->clip_rect_top)            /* +0x1C */
-        unionRect.top = this->clip_rect_top;
-    if (unionRect.right > this->clip_rect_right)
-        unionRect.right = this->clip_rect_right;
-    if (unionRect.bottom > this->clip_rect_bottom)
-        unionRect.bottom = this->clip_rect_bottom;
+    if (unionRect.left < this->clip_rect_left())          /* +0x18 */
+        unionRect.left = this->clip_rect_left();
+    if (unionRect.top < this->clip_rect_top())            /* +0x1C */
+        unionRect.top = this->clip_rect_top();
+    if (unionRect.right > this->clip_rect_right())
+        unionRect.right = this->clip_rect_right();
+    if (unionRect.bottom > this->clip_rect_bottom())
+        unionRect.bottom = this->clip_rect_bottom();
 
     /* Compute dirty dimensions */
     int dirtyW = unionRect.right - unionRect.left;
     int dirtyH = unionRect.bottom - unionRect.top;
 
     /* Store cursor rect for next frame */
-    CopyRect(&this->cursor_rect, &newRect);             /* +0x68 */
+    CopyRect(&this->cursor_rect(), &newRect);             /* +0x68 */
 
     /* Check if cursor is active and not captured */
-    if (this->cursor_state != 0 && this->capture_flag == 0) {  /* +0x14, +0x58 */
+    if (this->cursor_state() != 0 && this->capture_flag() == 0) {  /* +0x14, +0x58 */
         if (param != 0 && dirtyW < 256 && dirtyH < 256) {
             /* ACCELERATED PATH: single composite over union rect */
             /* Capture background */
             {
-                void** vtbl = *(void***)this->backbuffer;      /* +0x5C */
+                void** vtbl = *(void***)this->backbuffer();      /* +0x5C */
                 ((SurfaceBlt_t)vtbl[0x14 / 4])(
-                    this->backbuffer,
+                    this->backbuffer(),
                     &unionRect,
-                    this->primary_surface,                     /* +0x38 */
+                    this->primary_surface(),                     /* +0x38 */
                     &unionRect,
                     BLIT_WAIT,
                     nullptr);
@@ -253,11 +253,11 @@ void Cursor::update_dirty_rect(uint8_t param)
 
             /* Overlay cursor sprite (color-keyed) */
             {
-                void** vtbl = *(void***)this->primary_surface;
+                void** vtbl = *(void***)this->primary_surface();
                 ((SurfaceBlt_t)vtbl[0x14 / 4])(
-                    this->primary_surface,
+                    this->primary_surface(),
                     &unionRect,
-                    this->cursor_sprite_surface,               /* +0x14 */
+                    this->cursor_sprite_surface(),               /* +0x14 */
                     &unionRect,
                     BLIT_KEYSRC_WAIT,
                     nullptr);
@@ -269,7 +269,7 @@ void Cursor::update_dirty_rect(uint8_t param)
                 ((SurfaceBlt_t)vtbl[0x14 / 4])(
                     _g_backbuffer,
                     &unionRect,
-                    this->primary_surface,
+                    this->primary_surface(),
                     &unionRect,
                     BLIT_WAIT,
                     nullptr);
@@ -278,11 +278,11 @@ void Cursor::update_dirty_rect(uint8_t param)
             /* NORMAL PATH: separate restore + render */
             /* Restore background from primary surface */
             {
-                void** vtbl = *(void***)this->backbuffer;
+                void** vtbl = *(void***)this->backbuffer();
                 ((SurfaceBlt_t)vtbl[0x14 / 4])(
-                    this->backbuffer,
+                    this->backbuffer(),
                     &newRect,
-                    this->primary_surface,
+                    this->primary_surface(),
                     &newRect,
                     BLIT_WAIT,
                     nullptr);
@@ -290,11 +290,16 @@ void Cursor::update_dirty_rect(uint8_t param)
 
             /* Composite cursor sprite */
             {
-                void** vtbl = *(void***)this->primary_surface;
+                void** vtbl = *(void***)this->primary_surface();
+                /* NOTE: srcRect is nullptr for NORMAL PATH blits.
+                 *       Per the binary at 0x414FB0, this passes NULL as the
+                 *       source rect, which tells DirectDraw to use the entire
+                 *       source surface. This is correct for the normal path
+                 *       which composites the full cursor sprite. */
                 ((SurfaceBlt_t)vtbl[0x14 / 4])(
-                    this->primary_surface,
+                    this->primary_surface(),
                     &newRect,
-                    this->cursor_sprite_surface,
+                    this->cursor_sprite_surface(),
                     nullptr,
                     BLIT_KEYSRC_WAIT,
                     nullptr);
@@ -306,7 +311,7 @@ void Cursor::update_dirty_rect(uint8_t param)
                 ((SurfaceBlt_t)vtbl[0x14 / 4])(
                     _g_backbuffer,
                     &newRect,
-                    this->primary_surface,
+                    this->primary_surface(),
                     &newRect,
                     BLIT_WAIT,
                     nullptr);
@@ -344,25 +349,25 @@ void Cursor::render_with_viewport(uint8_t param)
     }
 
     /* Use viewport as clip rect temporarily */
-    int32_t savedLeft   = this->clip_rect_left;        /* +0x18 */
-    int32_t savedTop    = this->clip_rect_top;         /* +0x1C */
-    int32_t savedRight  = this->clip_rect_right;       /* +0x20 */
-    int32_t savedBottom = this->clip_rect_bottom;      /* +0x24 */
+    int32_t savedLeft   = this->clip_rect_left();        /* +0x18 */
+    int32_t savedTop    = this->clip_rect_top();         /* +0x1C */
+    int32_t savedRight  = this->clip_rect_right();       /* +0x20 */
+    int32_t savedBottom = this->clip_rect_bottom();      /* +0x24 */
 
-    this->clip_rect_left   = vpRect.left;
-    this->clip_rect_top    = vpRect.top;
-    this->clip_rect_right  = vpRect.right;
-    this->clip_rect_bottom = vpRect.bottom;
+    this->clip_rect_left()   = vpRect.left;
+    this->clip_rect_top()    = vpRect.top;
+    this->clip_rect_right()  = vpRect.right;
+    this->clip_rect_bottom() = vpRect.bottom;
 
-    this->viewport_render_enabled = 1;                 /* +0x88 */
+    this->viewport_render_enabled() = 1;                 /* +0x88 */
     this->update_dirty_rect(param);
-    this->viewport_render_enabled = 0;
+    this->viewport_render_enabled() = 0;
 
     /* Restore original clip rect */
-    this->clip_rect_left   = savedLeft;
-    this->clip_rect_top    = savedTop;
-    this->clip_rect_right  = savedRight;
-    this->clip_rect_bottom = savedBottom;
+    this->clip_rect_left()   = savedLeft;
+    this->clip_rect_top()    = savedTop;
+    this->clip_rect_right()  = savedRight;
+    this->clip_rect_bottom() = savedBottom;
 }
 
 

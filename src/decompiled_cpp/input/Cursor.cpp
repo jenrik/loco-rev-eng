@@ -95,12 +95,9 @@ void Cursor::base_destructor()
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Release obj_184 (player record).
-     * NOTE: CursorEditorRecord is typed as a POD struct but the binary
-     * uses a vtable (vtable[0] = scalar deleting destructor). Once the
-     * record type is refined to a proper class with virtual dtor, use delete. */
+     * Uses scalar deleting destructor (vtable[0]) in the binary. */
     if (this->obj_184 != nullptr) {                             /* +0x184 */
-        void** vtbl = *(void***)this->obj_184;
-        ((void (*)(void*, uint8_t))vtbl[0])(this->obj_184, 1);
+        delete this->obj_184;
         this->obj_184 = nullptr;
     }
 
@@ -110,13 +107,10 @@ void Cursor::base_destructor()
         this->hBrush = nullptr;
     }
 
-    /* Release background surface.
-     * NOTE: background_surface is typed void* but is a UIPANEL object
-     * with a vtable (vtable[0] = scalar deleting dtor). Once typed as
-     * UIPANEL*, use delete. */
+    /* Release background surface (UIPANEL object).
+     * Uses scalar deleting destructor (vtable[0]) in the binary. */
     if (this->background_surface != nullptr) {                  /* +0x1E8 */
-        void** vtbl = *(void***)this->background_surface;
-        ((void (*)(void*, uint8_t))vtbl[0])(this->background_surface, 1);
+        delete (UIPANEL*)this->background_surface;
         this->background_surface = nullptr;
     }
 
@@ -318,7 +312,7 @@ void Cursor::init()
     /* ---- PHASE 3: Load Edit_colour.dat palette ---- */
 
     char filePath[0x504] = { 0 };
-    wsprintfA(filePath, "spost/Edit_colour.dat", &g_install_path);
+    wsprintfA(filePath, "%s/spost/Edit_colour.dat", &g_install_path);
 
     void* readBuffer = operator_new(0x2000);
     int* streamObj = nullptr;
@@ -447,14 +441,14 @@ void Cursor::init_sprites()
 
     if (resdata != nullptr) {
         /* Get surface via RESDATA vtable[1] */
-        void* surface = ((void* (*)(void*))((int**)resdata)[1])(resdata);
+        void* surface = RESDATA_GetSurface(resdata, 0, 0);
         this->primary_surface_obj = surface;                     /* +0x94 */
         UIPANEL_UnlockSurface(surface);
 
         /* Read pixel format from surface (+0x1C), dimensions from RESDATA (+0x14/+0x16) */
         this->primary_surface_fmt = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x90 */
-        this->sprite_width = *(uint16_t*)((intptr_t)resdata + 0x14);        /* +0x3C */
-        this->sprite_height = *(uint16_t*)((intptr_t)resdata + 0x16);       /* +0x40 */
+        this->sprite_width() = *(uint16_t*)((intptr_t)resdata + 0x14);        /* +0x3C */
+        this->sprite_height() = *(uint16_t*)((intptr_t)resdata + 0x16);       /* +0x40 */
     }
 
     /* Resource 0x1403 — cursor overlay sprite */
@@ -462,7 +456,7 @@ void Cursor::init_sprites()
     this->overlay_resdata = resdata;                             /* +0xA4 */
 
     if (resdata != nullptr) {
-        void* surface = ((void* (*)(void*))((int**)resdata)[1])(resdata);
+        void* surface = RESDATA_GetSurface(resdata, 0, 0);
         this->overlay_surface_obj = surface;                     /* +0xA0 */
         UIPANEL_UnlockSurface(surface);
         this->overlay_surface_fmt = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x9C */
@@ -485,7 +479,7 @@ void Cursor::init_sprites()
         DDRAW_RestoreSurfaces(_g_cursor_back, &desc[0xFFFFFF74]);
     }
 
-    this->backbuffer = (void*)(intptr_t)_g_cursor_back;         /* +0x5C */
+    this->backbuffer() = (void*)(intptr_t)_g_cursor_back;         /* +0x5C */
     _g_cursor_refcount++;                                        /* global counter */
 }
 
@@ -523,39 +517,39 @@ void Cursor::init_background()
 
     /* Composite resource 0x3CAA — main panel background */
     {
-        int* resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x3CAA);
-        void* srcSurf = ((void* (*)(void*))((int**)resdata)[1])(resdata);
+        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CAA);
+        void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         /* Blit at full surface rect */
         UIPANEL_Blit(srcSurf, 0, 0, 0x500, 0x400,
                      (int)(intptr_t)this->background_surface, 0, 0, 0x500, 0x400, 0);
-        ((void (*)(void*))((int**)resdata)[2])(resdata);  /* ReleaseSurface */
+        RESDATA_ReleaseSurface(resdata);
     }
 
     /* Composite resource 0x3CC4 */
     {
-        int* resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x3CC4);
-        void* srcSurf = ((void* (*)(void*, void*))((int**)resdata)[1])(resdata, 0);
+        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CC4);
+        void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         UIPANEL_Blit(srcSurf, 0, 0, 0, 0,
                      (int)(intptr_t)this->background_surface, 0, 0, 0, 0, 0);
-        ((void (*)(void*))((int**)resdata)[2])(resdata);  /* ReleaseSurface */
+        RESDATA_ReleaseSurface(resdata);
     }
 
     /* Composite resource 0x3CC5 */
     {
-        int* resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x3CC5);
-        void* srcSurf = ((void* (*)(void*, void*, void*))((int**)resdata)[1])(resdata, 0, 0);
+        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CC5);
+        void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         UIPANEL_Blit(srcSurf, 0, 0, 0, 0,
                      (int)(intptr_t)this->background_surface, 0, 0, 0, 0, 0);
-        ((void (*)(void*))((int**)resdata)[2])(resdata);  /* ReleaseSurface */
+        RESDATA_ReleaseSurface(resdata);
     }
 
     /* Composite resource 0x3CC6 */
     {
-        int* resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x3CC6);
-        void* srcSurf = ((void* (*)(void*, void*, void*))((int**)resdata)[1])(resdata, 0, 0);
+        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CC6);
+        void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         UIPANEL_Blit(srcSurf, 0, 0, 0, 0,
                      (int)(intptr_t)this->background_surface, 0, 0, 0, 0, 0);
-        ((void (*)(void*))((int**)resdata)[2])(resdata);  /* ReleaseSurface */
+        RESDATA_ReleaseSurface(resdata);
     }
 }
 
@@ -569,25 +563,25 @@ void Cursor::init_background()
 /* ================================================================== */
 void Cursor::update_client_rect()
 {
-    if (this->wndproc_flag == 0)                                   /* +0xDB */
+    if (this->wndproc_flag() == 0)                                   /* +0xDB */
         return;
 
     RECT* tmpRect = &this->window_rect;               /* overlaps hEditWnd! */
     GetClientRect(this->hWnd, tmpRect);                            /* +0x08 */
 
     /* Cache widths */
-    this->cached_width = this->window_rect.right - tmpRect->left;    /* +0xE4 */
+    this->cached_width() = this->window_rect.right - tmpRect->left;    /* +0xE4 */
     this->cached_height = this->window_rect.bottom - this->window_rect.top;  /* +0xE8 */
 
     /* Store client rect copy at +0x104 */
-    this->client_rect.left   = tmpRect->left;                     /* +0x104 */
-    this->client_rect.top    = tmpRect->top;                      /* +0x108 */
-    this->client_rect.right  = tmpRect->right;                    /* +0x10C */
-    this->client_rect.bottom = tmpRect->bottom;                   /* +0x110 */
+    this->cursor_client_rect.left   = tmpRect->left;                     /* +0x104 */
+    this->cursor_client_rect.top    = tmpRect->top;                      /* +0x108 */
+    this->cursor_client_rect.right  = tmpRect->right;                    /* +0x10C */
+    this->cursor_client_rect.bottom = tmpRect->bottom;                   /* +0x110 */
 
     /* Derive client width/height caches */
-    this->cached_client_width = this->client_rect.right - this->client_rect.left;  /* +0xEC */
-    this->cached_client_height = this->client_rect.bottom - this->client_rect.top;  /* +0xF0 */
+    this->cached_client_width = this->cursor_client_rect.right - this->cursor_client_rect.left;  /* +0xEC */
+    this->cached_client_height = this->cursor_client_rect.bottom - this->cursor_client_rect.top;  /* +0xF0 */
 }
 
 /* ================================================================== */

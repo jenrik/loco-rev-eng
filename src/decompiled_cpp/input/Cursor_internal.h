@@ -135,16 +135,34 @@ void UI_WindowBase_BaseDtor(void*);
 void UI_WindowBase_Hide(void*);
 void UI_WindowBase_Show(void*);
 
-/* Globals */
-extern Cursor* g_cursor; extern void* g_resmgr; extern void* g_asset_mgr;
-extern char g_install_path[]; extern void* g_ddraw; extern void* _g_backbuffer;
-extern void* _g_primary_surface; extern void* _g_dplay; extern int _g_cursor_refcount;
-extern void* _g_cursor_back; extern void* g_netman; extern char g_empty_string[];
-extern void* g_game; extern void* g_player_config; extern uint8_t g_is_fullscreen;
-extern int32_t g_client_width; extern int32_t g_client_height; extern int32_t g_viewport_x;
-extern int32_t g_viewport_y; extern void* g_town; extern void* g_postcard;
-extern void* g_postcard_send; extern void* g_ui_main; extern void* g_main_window;
-extern void* g_font_small; extern int g_surface_bpp; extern void* g_audio_mgr;
+/* Globals — typed where types are known */
+extern Cursor* g_cursor;
+extern void*   g_resmgr;        /* ResourceManager* */
+extern void*   g_asset_mgr;     /* AssetMgr* */
+extern char    g_install_path[];
+extern void*   g_ddraw;         /* IDirectDraw4* — COM platform object */
+extern void*   _g_backbuffer;   /* IDirectDrawSurface4* — COM platform object */
+extern void*   _g_primary_surface; /* IDirectDrawSurface4* — COM platform object */
+extern void*   _g_dplay;        /* IDirectPlay4* — COM platform object */
+extern int     _g_cursor_refcount;
+extern void*   _g_cursor_back;  /* IDirectDrawSurface4* — COM platform object */
+extern void*   g_netman;        /* NetMan* */
+extern char    g_empty_string[];
+extern void*   g_game;          /* Game* */
+extern void*   g_player_config; /* PlayerConfig* */
+extern uint8_t g_is_fullscreen;
+extern int32_t g_client_width;
+extern int32_t g_client_height;
+extern int32_t g_viewport_x;
+extern int32_t g_viewport_y;
+extern void*   g_town;          /* Town* */
+extern void*   g_postcard;      /* PostcardAlbum* */
+extern void*   g_postcard_send; /* PostcardPreviewWindow* */
+extern void*   g_ui_main;       /* EditWindow* */
+extern void*   g_main_window;   /* UI_WindowBase* */
+extern void*   g_font_small;    /* HFONT — GDI object */
+extern int     g_surface_bpp;
+extern void*   g_audio_mgr;     /* AudioMgr* */
 
 /* Shared internal functions */
 void Cursor_UnlockAllSurfaces(void);
@@ -152,10 +170,29 @@ void Cursor_UnlockAllSurfaces(void);
 /* Surface vtable function pointer types (DirectDraw ABI — __stdcall convention) */
 typedef int (__stdcall *SurfaceBlt_t)(void*, RECT*, void*, RECT*, uint32_t, void*);
 typedef int (__stdcall *SurfacePollBlit_t)(void*, void*);
-typedef void* (__stdcall *ResdataGetSurface_t)(void*, int, int);
-typedef void (__stdcall *ResdataReleaseSurface_t)(void*);
-typedef int (__stdcall *DDrawCreateSurface_t)(void*, int*, void**, int);
 #define BLIT_WAIT 0x1000000
 #define BLIT_KEYSRC 0x8000
 #define BLIT_KEYSRC_WAIT (BLIT_KEYSRC | BLIT_WAIT)
+
+/* ================================================================== */
+/* RESDATA vtable helpers                                              */
+/*                                                                     */
+/* RESDATA is defined in shared/types.h as a POD struct with a vtable  */
+/* pointer at +0x00. These helpers provide typed access to RESDATA's   */
+/* vtable slots used by Cursor (other consumers may use different      */
+/* signatures for the same slots depending on the RESDATA subclass).   */
+/*                                                                     */
+/* RESDATA vtable layout (Cursor-specific subset):                     */
+/*   [0]  scalar deleting destructor                                  */
+/*   [1]  GetSurface(resdata, flags, mode) → surface ptr              */
+/*   [2]  ReleaseSurface(resdata)                                     */
+/* ================================================================== */
+static inline void* RESDATA_GetSurface(void* resdata, int flags, int mode) {
+    void** vtbl = *(void***)resdata;
+    return ((void* (*)(void*, int, int))vtbl[1])(resdata, flags, mode);
+}
+static inline void RESDATA_ReleaseSurface(void* resdata) {
+    void** vtbl = *(void***)resdata;
+    ((void (*)(void*))vtbl[2])(resdata);
+}
 

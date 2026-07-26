@@ -19,6 +19,12 @@
  * Allocated via: operator_new(0x740)
  * Vtable: 0x477930 (set during Cursor_Ctor)
  *
+ * NOTE: Cursor overlays UI_WindowBase fields in +0x00..+0xE7 with
+ * Cursor-specific reinterpretations. Field access uses inline accessor
+ * methods that return references to the base class storage cast to
+ * the Cursor-specific type. For example, cursor_state() overlays
+ * field_14, primary_surface() overlays field_38, etc.
+ *
  * Vtable layout:
  *   [0] +0x00: scalar deleting destructor (0x4159E0)
  *   [1] +0x04: Hide (UI_WindowBase_Hide, 0x425990)
@@ -38,6 +44,7 @@
 #pragma once
 
 #include "../shared/types.h"
+#include "../ui/UI_WindowBase.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* Forward declarations                                                */
@@ -54,142 +61,119 @@ struct CursorEditorRecord {
 };
 
 /* ================================================================== */
-/* Cursor class                                                         */
+/* Cursor class                                                        */
 /* ================================================================== */
 
-class Cursor {
+class Cursor : public UI_WindowBase {
 public:
     /* ================================================================ */
-    /* Fields (offsets from this)                                        */
+    /* Base class field accessors                                        */
+    /*                                                                   */
+    /* Cursor overlays many UI_WindowBase fields with Cursor-specific    */
+    /* interpretations. These inline accessors provide typed references  */
+    /* to the base class storage, preserving the binary-matching layout.  */
     /* ================================================================ */
 
-    /* --- Base: UI_WindowBase fields (+0x00..+0xE4) --- */
-/* vtable at +0x00 is compiler-managed */
-    HINSTANCE  hInstance;              // +0x04  application instance handle
-    HWND       hWnd;                   // +0x08  parent window handle
-    int32_t    field_0C;               // +0x0C  (unknown dword)
-    uint32_t   resource_id;            // +0x10  window resource ID (0x1FA for Cursor)
+    /* +0x0C: field_0C aliases hWndParent */
+    HWND&       field_0C()       { return this->hWndParent; }
 
+    /* +0x10: resource_id aliases resourceId */
+    UINT&       resource_id()    { return this->resourceId; }
+
+    /* +0x14: cursor_state / cursor_sprite_surface aliases field_14 */
+    int32_t&    cursor_state()   { return this->field_14; }
+    void*&      cursor_sprite_surface() { return *(void**)&this->field_14; }
+
+    /* +0x18..+0x24: clip_rect_* aliases field_18..field_24 */
+    int32_t&    clip_rect_left()   { return this->field_18; }
+    int32_t&    clip_rect_top()    { return this->field_1C; }
+    int32_t&    clip_rect_right()  { return this->field_20; }
+    int32_t&    clip_rect_bottom() { return this->field_24; }
+
+    /* +0x28: timer_id aliases timerId */
+    UINT_PTR&   timer_id()       { return this->timerId; }
+
+    /* +0x38: primary_surface aliases field_38 */
+    void*&      primary_surface() { return *(void**)&this->field_38; }
+
+    /* +0x3C: sprite_width (uint32_t) overlays captureFlag + _pad_3E */
+    uint32_t&   sprite_width()   { return *(uint32_t*)&this->captureFlag; }
+
+    /* +0x3D: field_3D in Cursor = field_3D in base (same name, same type) */
+
+    /* +0x40: sprite_height aliases field_40 */
+    int32_t&    sprite_height()  { return this->field_40; }
+
+    /* +0x44: anim_resdata (void*) overlays activeFlag + _pad_45 (4 bytes) */
+    void*&      anim_resdata()   { return *(void**)&this->activeFlag; }
+
+    /* +0x48: anim_frame aliases cursorRefCount */
+    int32_t&    anim_frame()     { return this->cursorRefCount; }
+
+    /* +0x50: dirty_rect_left aliases field_50 */
+    int32_t&    dirty_rect_left()  { return this->field_50; }
+
+    /* +0x54: dirty_rect_top aliases field_54 */
+    int32_t&    dirty_rect_top()   { return this->field_54; }
+
+    /* +0x58: capture_flag (uint8_t) overlays field_58 */
+    uint8_t&    capture_flag()   { return *(uint8_t*)&this->field_58; }
+
+    /* +0x5C: backbuffer aliases field_5C */
+    void*&      backbuffer()     { return *(void**)&this->field_5C; }
+
+    /* +0x60: child_obj_60 aliases childCount0 */
+    void*&      child_obj_60()   { return *(void**)&this->childCount0; }
+
+    /* +0x64: curs_pos_x aliases childObj0 */
+    int32_t&    curs_pos_x()     { return *(int32_t*)&this->childObj0; }
+
+    /* +0x68: cursor_rect (RECT) overlays childCount1..childObj2 */
+    RECT&       cursor_rect()    { return *(RECT*)&this->childCount1; }
+
+    /* +0x78: prev_cursor_rect (RECT) overlays title[50] */
+    RECT&       prev_cursor_rect() { return *(RECT*)this->title; }
+
+    /* +0x88: viewport_render_enabled (inside title buffer at +0x10) */
+    uint8_t&    viewport_render_enabled() { return *(uint8_t*)(this->title + 0x10); }
+
+    /* +0xDB: wndproc_flag (inside workRect at +0x7) */
+    uint8_t&    wndproc_flag()   { return *((uint8_t*)&this->workRect + 7); }
+
+    /* +0xE4: cached_width (int32_t) overlays visible (uint8_t) + _pad_E5 */
+    int32_t&    cached_width()   { return *(int32_t*)&this->visible; }
+
+    /* +0xE8: cached_height — first field beyond base class (0xE8 bytes) */
+    int32_t     cached_height;          // +0xE8  client height cache
+    /* +0xEC: cached_client_width / editor_state */
     union {
-        int32_t cursor_state;        // +0x14  current cursor animation mode (0 = hidden)
-        void*   cursor_sprite_surface; // +0x14  (aliased: cursor sprite surface in render path)
-    };
-    int32_t    clip_rect_left;         // +0x18  viewport clip rectangle left
-    int32_t    clip_rect_top;          // +0x1C  viewport clip rectangle top
-    int32_t    clip_rect_right;        // +0x20  viewport clip rectangle right
-    int32_t    clip_rect_bottom;       // +0x24  viewport clip rectangle bottom
-
-    uint32_t   timer_id;               // +0x28  window timer ID (120ms for show)
-    int32_t    field_2C;               // +0x2C  (unknown dword)
-    int32_t    field_30;               // +0x30  (unknown dword)
-    int32_t    field_34;               // +0x34  (unknown dword)
-    void*      primary_surface;        // +0x38  primary surface / sprite source reference
-    union {
-        uint32_t sprite_width;         // +0x3C  cursor sprite frame width (pixels)
-        struct {
-            uint8_t _sprite_width_lo;  // +0x3C
-            uint8_t field_3D;          // +0x3D  editor highlight state alias
-            uint8_t _pad_3E_alias[2];  // +0x3E
-        };
-    };
-    uint32_t   sprite_height;           // +0x40  cursor sprite frame height (pixels)
-
-    void*      anim_resdata;           // +0x44  current cursor animation RESDATA pointer
-    int32_t    anim_frame;             // +0x48  current animation frame index (wraps at frame_count)
-
-    int32_t    field_4C;               // +0x4C  (unknown dword)
-    int32_t    dirty_rect_left;        // +0x50  last dirty-rect left (-1 = invalid)
-    int32_t    dirty_rect_top;         // +0x54  last dirty-rect top (-1 = invalid)
-
-    uint8_t    capture_flag;           // +0x58  mouse capture flag (byte)
-    uint8_t    _pad_59[3];             // +0x59  padding
-    void*      backbuffer;             // +0x5C  shared cursor backbuffer surface (cursor_surface)
-
-    void*      child_obj_60;           // +0x60  child object (released in base dtor)
-
-    /* --- Cursor position / rect fields (+0x64..+0x84) --- */
-    int32_t    curs_pos_x;             // +0x64  cursor screen x position (also used as HDC
-                                       //         storage by WaitForBlit)
-    RECT       cursor_rect;            // +0x68  current cursor screen rect {left=pos_x, top=pos_y,
-                                       //         right=curs_right, bottom=curs_bottom}
-                                       //  NOTE: overlaps old child_obj_68, curs_pos_y,
-                                       //        curs_right, curs_bottom
-    /* For backward compatibility with existing code: */
-    #define cursor_rect_left   cursor_rect.left     /* +0x68 (was child_obj_68) */
-    #define cursor_rect_top    cursor_rect.top       /* +0x6C (was curs_pos_y) */
-    #define cursor_rect_right  cursor_rect.right     /* +0x70 (was curs_right) */
-    #define cursor_rect_bottom cursor_rect.bottom    /* +0x74 (was curs_bottom) */
-
-    RECT       prev_cursor_rect;       // +0x78  previous frame's cursor rect (dirty tracking)
-                                       //  NOTE: overlaps first 16 bytes of UI_WindowBase::title[50]
-                                       //  (base class at +0x78). The binary reuses the title
-                                       //  buffer for cursor dirty-rect tracking when the window
-                                       //  is in cursor mode.
-
-    uint8_t    viewport_render_enabled; // +0x88  flag: non-zero = RenderWithViewport active
-    uint8_t    _pad_89[0x07];          // +0x89..+0x8F  padding
-
-    /* Cursor sprite surface fields (loaded by init_sprites) */
-    int32_t    primary_surface_fmt;    // +0x90  pixel format of primary cursor surface (res 0x1400)
-    void*      primary_surface_obj;    // +0x94  cursor primary sprite surface object
-    void*      primary_resdata;        // +0x98  RESDATA* for primary cursor (res 0x1400)
-    int32_t    overlay_surface_fmt;    // +0x9C  pixel format of overlay cursor surface (res 0x1403)
-    void*      overlay_surface_obj;    // +0xA0  cursor overlay sprite surface object
-    void*      overlay_resdata;        // +0xA4  RESDATA* for overlay cursor (res 0x1403)
-
-    uint8_t    _pad_A8[0x03];          // +0xA8..+0xAA  padding
-    uint8_t    field_AB;               // +0xAB  (unknown byte)
-    uint8_t    _pad_AC[0x2F];          // +0xAC  padding / unknown
-
-    /* +0xD4..+0xE3: Overlapping UI_WindowBase tail region.
-     * The binary reuses this 16-byte block for both the workRect and
-     * the wndproc_flag/pad fields. */
-    union {
-        RECT       workRect;            // +0xD4  work rectangle (16 bytes)
-        struct {
-            int32_t  _work_rect_left;   // +0xD4
-            int32_t  _work_rect_top;    // +0xD8
-            uint8_t  wndproc_flag;      // +0xDB  WindowProc active flag (byte)
-            uint8_t  _pad_DC[8];        // +0xDC  padding / unknown
-        };
+        int32_t cached_client_width;   // +0xEC  client area width cache
+        int32_t editor_state;          // +0xEC  (aliased: editor mode state)
     };
 
-    /* +0xE4..+0xE7: visible flag shares dword with width cache.
-     * update_client_rect() writes cached_width here; show/hide read visible. */
+    /* +0xF0: cached_client_height / delayed_focus_flag */
     union {
-        uint8_t   visible;              // +0xE4  visible flag (byte)
-        int32_t   cached_width;         // +0xE4  client width cache
+        int32_t cached_client_height;  // +0xF0  client area height cache
+        int32_t delayed_focus_flag;    // +0xF0  (aliased: delayed focus flag)
     };
 
-    int32_t    cached_height;          // +0xE8  client height cache
-    int32_t    cached_client_width;    // +0xEC  client area width cache / editor state
-    int32_t    cached_client_height;   // +0xF0  client area height cache / delayed-focus flag
-    /* The binary reuses these dwords for multiple purposes at different times.
-     * cached_client_width is repurposed as editor_state during editor mode;
-     * cached_client_height is repurposed as delayed_focus_flag. */
-    #define editor_state       cached_client_width
-    #define delayed_focus_flag cached_client_height
+    /* +0xF4: window_rect overlaps hEditWnd */
+    union {
+        RECT   window_rect;            // +0xF4  window client rectangle
+        HWND   hEditWnd;               // +0xF4  edit control HWND (overlaps window_rect.left)
+    };
 
-    /* --- UI_WindowBase window/client rect fields (+0xF4..+0x114) --- */
-
-    RECT       window_rect;            // +0xF4  window client rectangle {left, top, right, bottom}
-                                       //  NOTE: overlaps hEditWnd in Cursor usage — Cursor stores
-                                       //        the edit control HWND at +0xF4 after the window is
-                                       //        created, overwriting window_rect.left
-    HWND       hEditWnd;               // +0xF4  edit control HWND (for toolbar text input)
-                                       //  ALIAS: overlaps window_rect.left — stored AFTER
-                                       //  UI_CreateFullWindow sets up the window rect
-
-    RECT       client_rect;            // +0x104 client area rect copy {left, top, right, bottom}
-                                       //  NOTE: field_108, field_10C, field_110 are top/right/bottom
+    /* +0x104: client_rect overlaps base clientRect fields.
+     * The binary stores a second copy of the client rect at +0x104.
+     * This is separate from base::clientRect at +0xC4. */
+    RECT       cursor_client_rect;     // +0x104 client area rect copy
 
     int32_t    field_114;              // +0x114  (unknown)
     int32_t    field_118;              // +0x118  (unknown)
 
     /* --- Editor scroll/list fields (+0x120..+0x180) --- */
-    /* Old sprite slots used by _new_impls.cpp */
-    ButtonSprite*  sprite_148;             // +0x148 (compat)
-    ButtonSprite*  sprite_14C;             // +0x14C (compat)
+    ButtonSprite*  sprite_148;         // +0x148 (compat)
+    ButtonSprite*  sprite_14C;         // +0x14C (compat)
     RECT       scroll_bg_rect;         // +0x128  scrollable list background rect
     RECT       scroll_border_rect;     // +0x150  scrollable list border rect
     RECT       scroll_header_rect;     // +0x160  scrollable list header text rect
@@ -200,7 +184,7 @@ public:
     int32_t    scroll_end_flag;        // +0x180  byte: 1 = end-of-list reached
     int32_t    field_184;              // +0x184  object ptr (aliased as obj_184 below)
 
-    CursorEditorRecord* obj_184;       // +0x184  editor/player record (released via vtable[0](1))
+    CursorEditorRecord* obj_184;       // +0x184  editor/player record
     uint8_t    field_188;              // +0x188  byte flag (init to 1)
     uint8_t    _pad_189[3];            // +0x189  padding
     uint32_t   timer_id_18C;           // +0x18C  timer ID for periodic update
@@ -234,8 +218,8 @@ public:
     int32_t    editor_blit_h;          // +0x1E4  source height for editor background blit
 
     void*      background_surface;     // +0x1E8  UIPANEL* background surface (or stream ptr)
-    void*      editor_surface;         // +0x1EC  locked editor sprite-sheet surface
-    void*      editor_resdata;         // +0x1F0  RESDATA* for editor sprite-sheet (resource 0x3CB9)
+    void*      editor_surface;         // +0x1EC  locked editor sprite-sheet surface (IDirectDrawSurface*)
+    RESDATA*   editor_resdata;         // +0x1F0  RESDATA* for editor sprite-sheet (resource 0x3CB9)
 
     ButtonSprite*  editor_sprites[10];     // +0x1F4  editor palette sprite array (10 entries)
 
@@ -347,6 +331,16 @@ public:
                                        //         init to 0; populated by create() @ 0x4169E0.
 
     /* Total size: 0x740 bytes */
+
+    /* ================================================================ */
+    /* Iterator macros for cursor_rect / prev_cursor_rect               */
+    /* ================================================================ */
+    /* These provide backward compatibility for code using the old
+     * cursor_rect_left, cursor_rect_top, etc. defines. */
+    #define cursor_rect_left   cursor_rect().left
+    #define cursor_rect_top    cursor_rect().top
+    #define cursor_rect_right  cursor_rect().right
+    #define cursor_rect_bottom cursor_rect().bottom
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */
@@ -462,7 +456,7 @@ public:
      *
      * Synchronizes the cached client rect at +0x104 with the current
      * window client area via GetClientRect. Populates width/height caches
-     * at +0xE4..+0xF0. Only executes when wndproc_flag (+0xDB) is non-zero.
+     * at +0xE4..+0xF0. Only executes when wndproc_flag at +0xDB is non-zero.
      * This is a UI_WindowBase virtual method inherited by Cursor.
      *
      * NOTE: GetClientRect stores the result at +0xF4, which overlaps with
@@ -1008,11 +1002,4 @@ public:
      * @return      0 (handled)
      */
     int32_t handle_window_paint(HWND hWnd);
-
-    /* Additional methods from Cursor.cpp */
-    // NOTE: show_file_dialog, switch_to_locomotive_tab, handle_locomotive_select,
-    // handle_toolbar_hover, handle_locomotive_list_click are declared in the binary
-    // but not yet decompiled. TODO: decompile when callers are identified.
 };
-
-/* static_assert relaxed — compat fields added for _new_impls.cpp */

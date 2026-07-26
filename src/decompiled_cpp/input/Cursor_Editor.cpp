@@ -51,8 +51,8 @@ int32_t Cursor::create(HWND hParent)
         0x40001004,                                /* dwStyle: WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL */
         this->window_rect.top,            /* x */
         this->window_rect.right,            /* y */
-        this->client_rect.left - this->window_rect.top,  /* width */
-        this->client_rect.top - this->window_rect.right,  /* height */
+        this->cursor_client_rect.left - this->window_rect.top,  /* width */
+        this->cursor_client_rect.top - this->window_rect.right,  /* height */
         this->hWnd,                                 /* parent */
         (HMENU)0x411,                               /* control ID */
         this->hInstance,
@@ -81,10 +81,10 @@ int32_t Cursor::create(HWND hParent)
 /* ================================================================== */
 int32_t Cursor::destroy_window()
 {
-    this->wndproc_flag = 0;                                         /* +0xDB */
+    this->wndproc_flag() = 0;                                         /* +0xDB */
     DestroyWindow(this->hWnd);                                      /* +0x08 */
 
-    if (this->field_0C == 0) {                                      /* +0x0C */
+    if (this->field_0C() == 0) {                                      /* +0x0C */
         PostQuitMessage(0);
     }
 
@@ -96,7 +96,7 @@ int32_t Cursor::destroy_window()
 /* Address: 0x414BB0                                                    */
 /*                                                                     */
 /* Unlocks primary surface, then polls surface->vtable[0x44] with     */
-/* &this->curs_pos_x (+0x64) as output. Sleeps 10ms between polls,    */
+/* &this->curs_pos_x() (+0x64) as output. Sleeps 10ms between polls,    */
 /* times out after ~10s (1000 iterations) with FatalError+ExitProcess.*/
 /* Returns the HDC value written to curs_pos_x.                        */
 /* Called by: HelpWnd_*, Train_DrawTextOverlay                          */
@@ -107,17 +107,17 @@ void* Cursor::wait_for_blit(HWND hWnd)
     DDRAW_UnlockPrimary(hWnd);
 
     /* Poll surface vtable[0x44] (slot 17 = poll blit) */
-    void** vtbl = *(void***)this->primary_surface;                  /* +0x38 */
+    void** vtbl = *(void***)this->primary_surface();                  /* +0x38 */
     int result = ((int (*)(void*, void*))vtbl[0x44 / 4])(
-        this->primary_surface, &this->curs_pos_x);                  /* +0x64 */
+        this->primary_surface(), &this->curs_pos_x());                  /* +0x64 */
 
     for (int i = 0; i < 1000; i++) {
         if (result == 0) {
-            return (void*)(intptr_t)this->curs_pos_x;               /* +0x64 */
+            return (void*)(intptr_t)this->curs_pos_x();               /* +0x64 */
         }
         Sleep(10);
         result = ((int (*)(void*, void*))vtbl[0x44 / 4])(
-            this->primary_surface, &this->curs_pos_x);
+            this->primary_surface(), &this->curs_pos_x());
     }
 
     WIN32_FatalError();
@@ -225,10 +225,7 @@ void Cursor::show(void* playerData)
     } else {
         /* Network mode: store player data */
         if (this->obj_184 != nullptr) {
-            /* NOTE: CursorEditorRecord uses vtable[0] scalar deleting dtor.
-             * Use delete once refined to a proper class with virtual dtor. */
-            void** pVtbl = *(void***)this->obj_184;
-            ((void (*)(void*, uint8_t))pVtbl[0])(this->obj_184, 1);
+            delete this->obj_184;
             this->obj_184 = nullptr;
         }
 

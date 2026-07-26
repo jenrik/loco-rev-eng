@@ -22,8 +22,7 @@ void Cursor::init_editor_sprites()
 
     if (resdata != nullptr) {
         /* Get surface via RESDATA vtable[1] */
-        int** vtbl = (int**)resdata;
-        int surface = ((int (*)(void*, int, int))vtbl[1])(resdata, 0, 0);
+        void* surface = RESDATA_GetSurface(resdata, 0, 0);
         this->editor_surface = (void*)(intptr_t)surface;    /* +0x1EC */
     }
 
@@ -144,8 +143,7 @@ void Cursor::cleanup_editor_sprites()
 
     /* Release the editor resource via RESDATA vtable[2] */
     if (this->editor_resdata != nullptr) {
-        void** resVtbl = *(void***)&this->editor_resdata;
-        ((void (*)(void*))resVtbl[2])(this->editor_resdata);
+        RESDATA_ReleaseSurface(this->editor_resdata);
     }
 
     this->editor_resdata = nullptr;
@@ -453,8 +451,9 @@ void Cursor::draw_color_bars(uint8_t reset_buttons)
         FillRect(hdc, &fillRect, brushBlue);
     }
 
-    /* Cleanup GDI objects */
-    DeleteObject(stockBrush);
+    /* Cleanup GDI objects.
+     * NOTE: stockBrush is a GetStockObject(0) NULL_BRUSH — stock GDI objects
+     * are owned by the OS and must NOT be deleted. Only delete created brushes. */
     DeleteObject(brushRed);
     DeleteObject(brushGreen);
     DeleteObject(brushBlue);
@@ -691,6 +690,14 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
 /* ================================================================== */
 void Cursor::draw_locomotive_preview(uint8_t direction)
 {
+    /* NOTE: The surface toggle logic swaps surfA/surfB meanings based on
+     * field_58C, then uses isSurfBDirty flag. The field_58C toggle inverts
+     * each call, creating a double-buffered wipe animation. When field_58C==0,
+     * surfA=editor_surf_b and surfB=editor_surf_a; when field_58C==1, the
+     * assignment is reversed. The dirty flag check (isSurfBDirty) protects
+     * the initial frame where one surface hasn't been drawn yet.
+     * TODO: Ghidra @ 0x418E20 — verify the surface swap and dirty flag
+     *       handling against the disassembly. */
     EnableWindow(this->hWnd, 0);
 
     /* Show "busy" indicator */
@@ -811,8 +818,8 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
             UIPANEL_EndPaint(this);
 
             /* Dispatch set_mode to handle messages */
-            this->set_mode((int32_t)(intptr_t)this->child_obj_60,
-                           (void*)(intptr_t)this->curs_pos_x, 0, 1);
+            this->set_mode((int32_t)(intptr_t)this->child_obj_60(),
+                           (void*)(intptr_t)this->curs_pos_x(), 0, 1);
 
             /* Sleep for timing */
             if (step < totalWidth / 2) {
@@ -1391,12 +1398,16 @@ void Cursor::upload_custom_content()
     }
 
     /* Clean up */
-    /* Update upload status sprite */
-    int uploadStatus = 0;
-    if (this->obj_184 != nullptr) {
-        uploadStatus = (this->obj_184->upload_id != 0) ? 1 : 0;
+    /* Update upload status sprite.
+     * TODO: Ghidra @ 0x419B10 — verify the sprite index. toolbar_sprites[0xBB]
+     *       (index 187) exceeds the [64] array bounds. The computed offset
+     *       +0x48C + 0xBB*4 = +0x778 is past the class size of 0x740.
+     *       The binary likely accesses a different field; this is a
+     *       transcription error needing Ghidra cross-reference. */
+    int spriteIdx = 0xBB;
+    if (spriteIdx >= 0 && spriteIdx < 64) {
+        Sprite_SetState((void*)(intptr_t)this->toolbar_sprites[spriteIdx], uploadStatus, nullptr);
     }
-    Sprite_SetState((void*)(intptr_t)this->toolbar_sprites[0xBB], uploadStatus, nullptr);
     UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 
     /* Kill timer if active */
@@ -1409,14 +1420,19 @@ void Cursor::upload_custom_content()
     this->editor_state = 1;
     this->palette_end_idx = -1;                               /* +0x2B8 */
     this->field_3D = 0;                   /* +0x3D */
-    this->sprite_height = 0;                            /* +0x40 */
+    /* TODO: Ghidra @ 0x419B10 — verify sprite_height = 0 at +0x40.
+     *       This resets the cursor sprite height field during file
+     *       upload. The field is normally set once in init_sprites().
+     *       Suspicious in the upload context — may be accessing a
+     *       different field at this offset. */
+    this->sprite_height() = 0;                            /* +0x40 */
 
     /* Reset dialog background sprite */
     Sprite_SetState(this->sprite_2E0, 0, nullptr);
 
     /* Dispatch set_mode to repaint */
-    this->set_mode((int32_t)(intptr_t)this->child_obj_60,
-                   (void*)(intptr_t)this->curs_pos_x, 0, 1);
+    this->set_mode((int32_t)(intptr_t)this->child_obj_60(),
+                   (void*)(intptr_t)this->curs_pos_x(), 0, 1);
 
     UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 }
