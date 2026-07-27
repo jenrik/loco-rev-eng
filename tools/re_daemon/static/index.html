@@ -27,12 +27,15 @@
   <div class="grid"><section><h2>Write-scope requests</h2><div id="scope-requests" class="list"></div></section><section><h2>Hypotheses</h2><div id="hypotheses" class="list"></div></section><section><h2>Agents</h2><div id="agents" class="list"></div></section></div>
   <section><h2>Live event tail</h2><pre id="tail"></pre></section>
   <script>
-    const $ = selector => document.querySelector(selector); const tail = $('#tail'); let sequence = 0;
+    const $ = selector => document.querySelector(selector); const tail = $('#tail'); let sequence = 0; const tailLines = []; let refreshTimer = null;
     const notice = (message, bad=false) => { const node=$('#notice'); node.textContent=message; node.className=bad?'error':'ok'; setTimeout(()=>node.textContent='', 5000); };
     async function api(path, options={}) { const response = await fetch(path, {headers:{'content-type':'application/json'}, ...options}); if (!response.ok) throw new Error((await response.text()) || response.statusText); return response.json(); }
     const element = (tag, text='', className='') => { const node=document.createElement(tag); node.textContent=text; node.className=className; return node; };
     function action(label, handler, className='') { const button=element('button',label,className); button.type='button'; button.onclick=handler; return button; }
     function renderItems(selector, records, render) { const root=$(selector); root.replaceChildren(...records.map(render)); }
+    function eventText(event) { const payload=event.payload||{}; if(event.kind==='assistant_delta') return `${event.sequence} ${event.agent_id||'daemon'} assistant: ${payload.delta||''}`; const text=JSON.stringify(event); return text.length>2000?`${text.slice(0,2000)}…`:text; }
+    function appendEvent(event) { if(event.sequence<=sequence) return; sequence=event.sequence; tailLines.push(eventText(event)); if(tailLines.length>200) tailLines.splice(0,tailLines.length-200); tail.textContent=tailLines.join('\n'); tail.scrollTop=tail.scrollHeight; }
+    async function backfillEvents(state) { const after=Math.max(0,state.lastSequence-200); const histories=await Promise.all(state.agents.map(agent=>api(`/api/agents/${agent.id}/events?after=${after}&limit=200`).catch(()=>({events:[]})))); const events=histories.flatMap(history=>history.events).sort((left,right)=>left.sequence-right.sequence).slice(-200); events.forEach(appendEvent); }
     function render(state) {
       renderItems('#jobs', state.jobs, job => { const node=element('div','', 'item'); node.append(element('strong',`${job.title} (${job.status})`), element('div',job.id,'muted'), element('div',job.goal)); return node; });
       renderItems('#tasks', state.tasks, task => { const node=element('div','', 'item'); node.append(element('strong',`${task.title} — ${task.status}`),element('div',task.id,'muted'),element('div',task.instructions)); if(['blocked','deferred','failed'].includes(task.status)) node.append(action('Requeue',async()=>{const reason=prompt('Reason for retry/requeue:');if(reason){await api(`/api/tasks/${task.id}/retry`,{method:'POST',body:JSON.stringify({reason})}); await refresh();}})); return node; });
@@ -40,17 +43,17 @@
       renderItems('#hypotheses', state.hypotheses, hypothesis => { const node=element('div','', 'item'); node.append(element('strong',`${hypothesis.subject} r${hypothesis.revision} (${hypothesis.status})`),element('div',hypothesis.statement),element('div',`Evidence: ${hypothesis.evidence_ids.join(', ') || 'none'}`,'muted')); return node; });
       renderItems('#scope-requests', state.writeScopeRequests, request => { const node=element('div','', 'item'); node.append(element('strong',`${request.path} — ${request.status}`),element('div',request.reason),element('div',request.agent_id,'muted')); if(request.status==='pending'){node.append(action('Approve',()=>resolveScope(request.id,'approved')),action('Reject',()=>resolveScope(request.id,'rejected'),'danger'));} if(request.resolution_reason) node.append(element('div',request.resolution_reason,'muted')); return node; });
       const g=state.ghidra, configured=g.configured?'configured':'not configured'; $('#ghidra').textContent=`Ghidra: ${configured}; database=${g.databaseId||'—'}; opened=${g.opened}; restarts=${g.restartCount}`;
-      sequence=Math.max(sequence,state.lastSequence);
     }
     async function resolveScope(id, decision) { const reason=prompt(decision==='rejected'?'Rejection reason (required):':'Approval note (optional):'); if(decision==='rejected'&&!reason)return; try{await api(`/api/write-scope-requests/${id}/resolve`,{method:'POST',body:JSON.stringify({decision,reason})});notice(`Scope ${decision}.`);await refresh();}catch(error){notice(error.message,true);} }
-    async function refresh() { try { render(await api('/api/status')); } catch(error) { notice(error.message,true); } }
+    async function refresh() { try { const state=await api('/api/status'); await backfillEvents(state); render(state); } catch(error) { notice(error.message,true); } }
+    function scheduleRefresh() { if(refreshTimer!==null) return; refreshTimer=setTimeout(()=>{refreshTimer=null;refresh();},250); }
     function form(id, handler) { $(id).addEventListener('submit', async event => { event.preventDefault(); try { await handler(new FormData(event.currentTarget)); event.currentTarget.reset(); await refresh(); } catch(error) { notice(error.message,true); } }); }
     form('#job-form', data => api('/api/jobs',{method:'POST',body:JSON.stringify({title:data.get('title'),goal:data.get('goal')})}));
     form('#task-form', data => api(`/api/jobs/${data.get('jobId')}/tasks`,{method:'POST',body:JSON.stringify({title:data.get('title'),instructions:data.get('instructions'),role:data.get('role'),write_scope:String(data.get('writeScope')).split(',').map(x=>x.trim()).filter(Boolean)})}));
     form('#dependency-form', data => api(`/api/tasks/${data.get('taskId')}/dependencies`,{method:'POST',body:JSON.stringify({dependency_task_id:data.get('dependencyId'),relation:data.get('relation')})}));
     form('#schedule-form', data => api(`/api/jobs/${data.get('jobId')}/schedule?limit=${data.get('limit')}`,{method:'POST'}));
     form('#agent-form', data => api(`/api/agents/${data.get('agentId')}/control`,{method:'POST',body:JSON.stringify({action:data.get('action'),message:data.get('message')||null})}));
-    const socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`); socket.onopen=()=>$('#connection').textContent='Live WebSocket connected'; socket.onmessage=event=>{const item=JSON.parse(event.data);if(item.sequence<=sequence)return;sequence=item.sequence;tail.textContent+=JSON.stringify(item)+'\n';tail.scrollTop=tail.scrollHeight;refresh();}; socket.onclose=()=>$('#connection').textContent='Disconnected; refresh to reconnect'; refresh();
+    const socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`); socket.onopen=()=>$('#connection').textContent='Live WebSocket connected'; socket.onmessage=event=>{appendEvent(JSON.parse(event.data));scheduleRefresh();}; socket.onclose=()=>$('#connection').textContent='Disconnected; refresh to reconnect'; refresh();
   </script>
 </body>
 </html>

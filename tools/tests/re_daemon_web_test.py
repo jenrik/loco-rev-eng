@@ -15,7 +15,10 @@ class DaemonWebTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             app = create_app(f"{temporary}/state.sqlite3", daemon_token="test-capability")
             with TestClient(app) as client:
-                self.assertEqual(client.get("/").status_code, 200)
+                dashboard = client.get("/")
+                self.assertEqual(dashboard.status_code, 200)
+                self.assertIn("backfillEvents", dashboard.text)
+                self.assertIn("state.lastSequence-200", dashboard.text)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",

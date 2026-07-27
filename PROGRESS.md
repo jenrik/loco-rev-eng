@@ -177,7 +177,7 @@ main()
 - [x] **Evidence-led task scheduler** — SQLite tasks/requirement edges/write-scope requests, dependency-gated launch of role agents, and durable agent task transitions
 - [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
-- [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, and write-scope decisions
+- [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, and bounded replay of persisted recent agent events after page load/reconnect
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
 
 ## Remaining work
