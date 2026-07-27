@@ -28,6 +28,8 @@ class DaemonWebTests(unittest.TestCase):
                 self.assertIn("timelineEntries.push(entry)", dashboard.text)
                 self.assertIn("/recover", dashboard.text)
                 self.assertIn("Schedule ready task", dashboard.text)
+                self.assertIn("const submittedForm=event.currentTarget", dashboard.text)
+                self.assertIn("submittedForm.reset()", dashboard.text)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",
