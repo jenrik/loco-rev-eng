@@ -15,6 +15,7 @@ PROJECT_ROOT := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 BUILD_DIR    := $(PROJECT_ROOT)build
 DCP_DIR      := $(PROJECT_ROOT)src/decompiled_cpp
 SHIMS_DIR    := $(PROJECT_ROOT)src/sdl3_shims
+DASHBOARD_DIR := $(PROJECT_ROOT)tools/re_daemon/frontend
 
 # Compiler
 CXX        := g++
@@ -65,7 +66,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all run clean distclean check help dirs
+.PHONY: all run clean distclean check help dirs dashboard dashboard-test
 
 all: dirs $(BINARY)
 	@echo ""
@@ -139,6 +140,14 @@ check:
 	@echo ""
 	@built=$$(find $(BUILD_DIR) -name '*.o' 2>/dev/null | wc -l); echo "  Objects built: $$built / $(words $(ALL_OBJS))"; if [ -f $(BINARY) ]; then echo "  Binary: $(BINARY) ($$(ls -lh $(BINARY) | awk '{print $$5}'))"; else echo "  Binary: not built"; fi
 
+# Autonomous RE dashboard
+dashboard:
+	@cd $(DASHBOARD_DIR) && npm ci --ignore-scripts && npm run build
+
+# Dashboard unit tests
+dashboard-test:
+	@cd $(DASHBOARD_DIR) && npm ci --ignore-scripts && npm test
+
 # Help
 help:
 	@echo "Lego Loco SDL3 -- Unified Build"
@@ -147,7 +156,9 @@ help:
 	@echo "  make run      Build and run"
 	@echo "  make clean    Remove generated build outputs"
 	@echo "  make distclean Reset everything"
-	@echo "  make check    Show status"
+	@echo "  make check          Show status"
+	@echo "  make dashboard      Build the React operator dashboard"
+	@echo "  make dashboard-test Test the React operator dashboard"
 
 
 _test:

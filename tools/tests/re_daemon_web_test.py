@@ -1,3 +1,4 @@
+import re
 import sys
 import tempfile
 import time
@@ -17,26 +18,14 @@ class DaemonWebTests(unittest.TestCase):
             with TestClient(app) as client:
                 dashboard = client.get("/")
                 self.assertEqual(dashboard.status_code, 200)
-                self.assertIn("backfillEvents", dashboard.text)
-                self.assertIn("(state.lastSequence||0)-250", dashboard.text)
-                self.assertIn("font-style:italic", dashboard.text)
-                self.assertIn("'empty','empty'", dashboard.text)
-                self.assertIn("event-agent", dashboard.text)
-                self.assertIn("partial streamed messages are consolidated", dashboard.text)
-                self.assertIn("last_activity_sequence", dashboard.text)
-                self.assertIn("allAgents.value=''", dashboard.text)
-                self.assertIn("timelineEntries.push(entry)", dashboard.text)
-                self.assertIn("/recover", dashboard.text)
-                self.assertIn("Schedule ready task", dashboard.text)
-                self.assertIn("const submittedForm=event.currentTarget", dashboard.text)
-                self.assertIn("submittedForm.reset()", dashboard.text)
-                self.assertIn("select name=\"jobId\"", dashboard.text)
-                self.assertIn("select name=\"taskId\"", dashboard.text)
-                self.assertIn("select name=\"dependencyId\"", dashboard.text)
-                self.assertIn("select name=\"agentId\"", dashboard.text)
-                self.assertIn("function renderIdSelectors", dashboard.text)
-                self.assertIn("Start evidence triage", dashboard.text)
-                self.assertIn("/bootstrap", dashboard.text)
+                self.assertIn('<div id="root"></div>', dashboard.text)
+                self.assertNotIn("cytoscape", dashboard.text.lower())
+                script_path = re.search(r'<script[^>]+src="([^"]+)"', dashboard.text)
+                style_path = re.search(r'<link[^>]+href="([^"]+)"', dashboard.text)
+                self.assertIsNotNone(script_path)
+                self.assertIsNotNone(style_path)
+                self.assertEqual(client.get(script_path.group(1)).status_code, 200)
+                self.assertEqual(client.get(style_path.group(1)).status_code, 200)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",

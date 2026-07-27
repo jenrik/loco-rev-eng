@@ -178,6 +178,7 @@ main()
 - [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
 - [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, formatted/coalesced streamed-message timeline, and declared Uvicorn WebSocket runtime
+- [x] **React graph dashboard** — replaced monolithic Cytoscape HTML with React 19/TypeScript, React Flow custom nodes/edges, lazy ELK layered layout, renderer-neutral graph contracts/registry, reproducible Vite/Nix builds, and frontend/backend regression tests
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
 - [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, startup recovers in-progress tasks whose assigned PID is gone, and the RPC reader accepts escaped multi-KiB tool events
 - [x] **Autonomous task-graph driving** — evidence agents atomically persist bounded acyclic follow-on DAGs, initial triage cannot complete with only a prose plan, ready-task claims are race-safe, terminal transitions dispatch the next serial successor, queued graphs resume on startup, and dashboard snapshots render durable edges
@@ -311,6 +312,8 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 | `src/sdl3_shims/sdl3_ddraw.cpp` | IDirectDraw4 → SDL3 Renderer (keep) |
 | `src/sdl3_shims/sdl3_dsound.cpp` | IDirectSound → SDL3 Audio (keep) |
 | `src/sdl3_shims/sdl3_dplay.h` | DirectPlay stub (keep) |
+| `tools/re_daemon/frontend/src/graph/contracts.ts` | Renderer-neutral dashboard graph and layout contracts |
+| `tools/re_daemon/frontend/src/graph/GraphCanvas.tsx` | Swappable graph-renderer registry (React Flow initially) |
 
 ---
 
@@ -327,6 +330,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (react-flow-dashboard) | Migrated the autonomous RE dashboard from monolithic Cytoscape HTML to React Flow + lazy ELK behind renderer/layout interfaces; added custom graph elements, operator UI parity, Vite/Nix builds, static assets, and regression coverage. |
 | 2026-07-27 (autonomous-task-graph) | Added agent-driven bounded DAG expansion with idempotency/cycle checks/source gating, atomic scheduler claims, automatic terminal/startup advancement, graph rendering, and end-to-end regression coverage. |
 | 2026-07-27 (automatic-job-kickoff) | Job submission now creates and dispatches a read-only initial evidence triage task; added one-click bootstrap for existing empty drafts. |
 | 2026-07-27 (job-status-singleton) | Reconciled dashboard job state from runnable/in-progress/terminal tasks and added an exclusive state-file lock after stale queued/running jobs and three competing daemon processes were observed. |

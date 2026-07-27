@@ -1,0 +1,228 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from './api/client';
+import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
+import { Inspector, type InspectorActions } from './components/Inspector';
+import { GraphCanvas } from './graph/GraphCanvas';
+import { buildGraph } from './graph/buildGraph';
+import type { GraphContextTarget } from './graph/contracts';
+import { useDaemonDashboard } from './hooks/useDaemonDashboard';
+
+export default function App() {
+  const { snapshot, events, connection, error, refresh, backfillAgentEvents } = useDaemonDashboard();
+  const graph = useMemo(() => buildGraph(snapshot), [snapshot]);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [jobFilter, setJobFilter] = useState('');
+  const [fitRevision, setFitRevision] = useState(0);
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const [panelCollapsed, setPanelCollapsed] = useState(true);
+  const [scopePanelOpen, setScopePanelOpen] = useState(false);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
+
+  const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const pendingScopes = snapshot.writeScopeRequests.filter((request) => request.status === 'pending');
+
+  const notify = useCallback((message: string, isError = false) => {
+    setToast({ message, error: isError });
+    window.setTimeout(() => setToast(null), 3200);
+  }, []);
+
+  const perform = useCallback(async (work: () => Promise<unknown>, success: string) => {
+    try {
+      await work();
+      notify(success);
+      await refresh();
+    } catch (reason) {
+      notify(reason instanceof Error ? reason.message : String(reason), true);
+    }
+  }, [notify, refresh]);
+
+  const newJob = useCallback(() => {
+    const title = window.prompt('Job title:');
+    if (!title) return;
+    const goal = window.prompt('Job goal:');
+    if (!goal) return;
+    void perform(() => api('/api/jobs', { method: 'POST', body: JSON.stringify({ title, goal }) }), 'Job created and triage started');
+  }, [perform]);
+
+  const addTask = useCallback((jobId: string) => {
+    const title = window.prompt('Task title:');
+    if (!title) return;
+    const instructions = window.prompt('Instructions:');
+    if (!instructions) return;
+    const role = window.prompt('Role (investigator/transcriber/validator/integrator/reviewer):', 'investigator');
+    if (!role) return;
+    void perform(
+      () => api(`/api/jobs/${jobId}/tasks`, {
+        method: 'POST', body: JSON.stringify({ title, instructions, role, write_scope: [] }),
+      }),
+      'Task created',
+    );
+  }, [perform]);
+
+  const addDependency = useCallback((taskId: string) => {
+    const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
+    const candidates = snapshot.tasks.filter((candidate) => candidate.id !== taskId && candidate.job_id === task?.job_id);
+    if (!candidates.length) return notify('No task in this job can be used as a prerequisite', true);
+    const choice = window.prompt(
+      `Choose prerequisite index:
+${candidates.map((candidate, index) => `[${index}] ${candidate.title}`).join('\n')}`,
+    );
+    if (choice === null) return;
+    const dependency = candidates[Number.parseInt(choice, 10)];
+    if (!dependency) return notify('Invalid prerequisite index', true);
+    const relation = window.prompt('Relation (requires/evidence/invalidates):', 'requires');
+    if (!relation) return;
+    void perform(
+      () => api(`/api/tasks/${taskId}/dependencies`, {
+        method: 'POST', body: JSON.stringify({ dependency_task_id: dependency.id, relation }),
+      }),
+      'Dependency created',
+    );
+  }, [notify, perform, snapshot.tasks]);
+
+  const actions: InspectorActions = useMemo(() => ({
+    schedule: (jobId) => void perform(() => api(`/api/jobs/${jobId}/schedule?limit=1`, { method: 'POST' }), 'Scheduling evaluated'),
+    bootstrap: (jobId) => void perform(() => api(`/api/jobs/${jobId}/bootstrap`, { method: 'POST' }), 'Evidence triage started'),
+    addTask,
+    addDependency,
+    retry: (taskId) => {
+      const reason = window.prompt('Retry reason:');
+      if (reason) void perform(() => api(`/api/tasks/${taskId}/retry`, { method: 'POST', body: JSON.stringify({ reason }) }), 'Task requeued');
+    },
+    recover: (taskId) => {
+      const reason = window.prompt('Recovery reason:');
+      if (reason) void perform(() => api(`/api/tasks/${taskId}/recover`, { method: 'POST', body: JSON.stringify({ reason }) }), 'Recovery requested');
+    },
+    controlAgent: (agentId, action) => {
+      const message = action === 'abort' ? null : window.prompt(`${action} message:`);
+      if (action !== 'abort' && message === null) return;
+      void perform(() => api(`/api/agents/${agentId}/control`, {
+        method: 'POST', body: JSON.stringify({ action, message }),
+      }), `Agent ${action.replace('_', ' ')} requested`);
+    },
+  }), [addDependency, addTask, perform]);
+
+  const handleContextMenu = useCallback((target: GraphContextTarget) => {
+    const node = target.nodeId ? graph.nodes.find((candidate) => candidate.id === target.nodeId) : null;
+    const items = !node ? [{ label: '＋ New job', action: newJob }] : node.kind === 'job' ? [
+      { label: '＋ Add task', action: () => addTask(node.id) },
+      { label: '▶ Schedule', action: () => actions.schedule(node.id) },
+      { label: '◆ Start evidence triage', action: () => actions.bootstrap(node.id) },
+    ] : node.kind === 'task' ? [
+      { label: '＋ Add dependency', action: () => addDependency(node.id) },
+      ...(node.status === 'in_progress' ? [{ label: 'Recover attempt', action: () => actions.recover(node.id), danger: true }] : []),
+      ...(['blocked', 'deferred', 'failed'].includes(node.status) ? [{ label: 'Requeue', action: () => actions.retry(node.id) }] : []),
+    ] : node.kind === 'agent' ? [
+      { label: 'Steer', action: () => actions.controlAgent(node.id, 'steer') },
+      { label: 'Follow up', action: () => actions.controlAgent(node.id, 'follow_up') },
+      { label: 'Abort', action: () => actions.controlAgent(node.id, 'abort'), danger: true },
+    ] : [{ label: 'No actions' }];
+    setMenu({
+      x: Math.min(target.clientX, window.innerWidth - 220),
+      y: Math.min(target.clientY, window.innerHeight - items.length * 38 - 20),
+      items,
+    });
+  }, [actions, addDependency, addTask, graph.nodes, newJob]);
+
+  useEffect(() => {
+    if (!selectedNode || selectedNode.kind !== 'agent') return;
+    const agent = snapshot.agents.find((candidate) => candidate.id === selectedNode.id);
+    void backfillAgentEvents(selectedNode.id, agent?.last_activity_sequence ?? snapshot.lastSequence);
+  }, [backfillAgentEvents, selectedNode, snapshot.agents, snapshot.lastSequence]);
+
+  useEffect(() => {
+    if (selectedNodeId && !graph.nodes.some((node) => node.id === selectedNodeId)) setSelectedNodeId(null);
+  }, [graph.nodes, selectedNodeId]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMenu(null); setSelectedNodeId(null); setPanelCollapsed(true); }
+      if (event.key === 'f' && event.ctrlKey) {
+        event.preventDefault();
+        document.querySelector<HTMLInputElement>('#graph-search')?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const selectNode = (nodeId: string | null) => {
+    setSelectedNodeId(nodeId);
+    if (nodeId) setPanelCollapsed(false);
+  };
+
+  const resolveScope = (requestId: string, decision: 'approved' | 'rejected') => {
+    const reason = window.prompt(`Reason for ${decision}:`) ?? undefined;
+    void perform(
+      () => api(`/api/write-scope-requests/${requestId}/resolve`, {
+        method: 'POST', body: JSON.stringify({ decision, reason }),
+      }),
+      `Write scope ${decision}`,
+    );
+  };
+
+  return (
+    <main className="app-shell">
+      <header className="topbar">
+        <span className={`connection connection--${connection}`}><i />{connection}</span>
+        <span className="separator" />
+        <input id="graph-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search nodes…" />
+        <label>Job</label>
+        <select value={jobFilter} onChange={(event) => setJobFilter(event.target.value)}>
+          <option value="">All jobs</option>
+          {snapshot.jobs.map((job) => <option value={job.id} key={job.id}>{job.title}</option>)}
+        </select>
+        <span className="separator" />
+        <button onClick={() => setFitRevision((value) => value + 1)}>Fit</button>
+        <button onClick={() => setLayoutRevision((value) => value + 1)}>Reset layout</button>
+        <button onClick={newJob}>New job</button>
+        <span className="counts">{graph.nodes.length} nodes · {graph.edges.length} edges</span>
+        <span className="spacer" />
+        <button className={pendingScopes.length ? 'warning' : ''} onClick={() => setScopePanelOpen((open) => !open)}>
+          Scopes {pendingScopes.length ? `(${pendingScopes.length})` : ''}
+        </button>
+        <span className="ghidra">Ghidra: {snapshot.ghidra.configured ? 'ready' : 'off'} · DB: {snapshot.ghidra.databaseId ?? '—'}</span>
+      </header>
+
+      <div className="graph-viewport">
+        <GraphCanvas
+          graph={graph}
+          selectedNodeId={selectedNodeId}
+          filter={{ query: search, jobId: jobFilter }}
+          commands={{ fitRevision, layoutRevision }}
+          onNodeSelect={selectNode}
+          onContextMenu={handleContextMenu}
+        />
+      </div>
+
+      {scopePanelOpen && (
+        <aside className="scope-panel">
+          <header><strong>Write-scope requests</strong><button onClick={() => setScopePanelOpen(false)}>×</button></header>
+          {!pendingScopes.length && <p className="empty">No pending requests.</p>}
+          {pendingScopes.map((request) => (
+            <article key={request.id}>
+              <code>{request.path}</code>
+              <p>{request.reason}</p>
+              <button className="primary" onClick={() => resolveScope(request.id, 'approved')}>Approve</button>
+              <button className="danger" onClick={() => resolveScope(request.id, 'rejected')}>Reject</button>
+            </article>
+          ))}
+        </aside>
+      )}
+
+      <Inspector
+        node={selectedNode}
+        graph={graph}
+        snapshot={snapshot}
+        events={events}
+        collapsed={panelCollapsed}
+        onToggle={() => setPanelCollapsed((collapsed) => !collapsed)}
+        actions={actions}
+      />
+      <ContextMenu menu={menu} onClose={() => setMenu(null)} />
+      {(toast || error) && <div className={`toast ${toast?.error || error ? 'toast--error' : ''}`}>{toast?.message ?? error}</div>}
+    </main>
+  );
+}

@@ -60,6 +60,7 @@
               python3Packages.uvicorn # ASGI server for the dashboard daemon
               python3Packages.websockets # Uvicorn WebSocket implementation for live dashboard events
               python3Packages.httpx   # FastAPI dashboard integration tests
+              nodejs_22                # React/Vite autonomous RE dashboard
 
               # ---- Wine (for running the original Windows binary) ----
               wine                   # Windows compatibility layer
