@@ -111,9 +111,11 @@ The graph is partial and evidence-led, not a mandatory upfront plan.
 - `deferred` means the next investigation is named but the prerequisite is not
   yet known.
 
-The scheduler starts only ready, in-scope work. It may create an investigation
-node when new uncertainty is encountered. It never treats a missing edge as
-proof of independence.
+The scheduler starts only ready, in-scope work. Submitting a job automatically
+creates and dispatches one read-only `Initial evidence triage` investigator task;
+existing empty drafts can be bootstrapped once from the operator UI. It may create
+an investigation node when new uncertainty is encountered. It never treats a
+missing edge as proof of independence.
 
 ## Dashboard and operator controls
 

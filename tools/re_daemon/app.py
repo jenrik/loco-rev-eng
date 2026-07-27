@@ -142,11 +142,43 @@ def create_app(
     def ghidra_status() -> dict[str, Any]:
         return ghidra.status()
 
+    async def bootstrap_job(job: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Create and dispatch the one read-only evidence task for a new objective."""
+        initial_task = store.create_task(
+            job["id"],
+            "Initial evidence triage",
+            (
+                f"Establish an evidence-led starting point for this job objective:\n{job['goal']}\n\n"
+                "Use re_get_task first. Work read-only and issue one tool call at a time. "
+                "Inspect the most relevant existing source and project records, then make up to six targeted "
+                "re_ghidra_query calls against the highest-risk claims. Record direct binary facts with "
+                "re_record_observation and nontrivial interpretations with re_record_hypothesis citing evidence IDs. "
+                "Do not edit files. Finish with re_transition_task: mark completed only after recording sufficient "
+                "evidence and include a prioritized follow-on task plan with addresses, pass, prerequisites, and "
+                "safe write scope. If Ghidra or required evidence is unavailable, mark blocked with the concrete cause."
+            ),
+            "investigator",
+        )
+        await broker.publish(None, "task_created", {"task": initial_task, "automatic": True})
+        return initial_task, await scheduler.schedule(job["id"], limit=1)
+
     @app.post("/api/jobs")
     async def create_job(request: CreateJob) -> dict[str, Any]:
         job = store.create_job(request.title, request.goal)
         await broker.publish(None, "job_created", {"job": job})
-        return job
+        initial_task, launched = await bootstrap_job(job)
+        return {**job, "initialTask": initial_task, "launched": launched}
+
+    @app.post("/api/jobs/{job_id}/bootstrap")
+    async def bootstrap_draft_job(job_id: str) -> dict[str, Any]:
+        try:
+            job = store.get_job(job_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown job") from None
+        if store.list_tasks(job_id):
+            raise HTTPException(status_code=409, detail="job already has tasks; schedule or manage those tasks directly")
+        initial_task, launched = await bootstrap_job(job)
+        return {"job": store.get_job(job_id), "initialTask": initial_task, "launched": launched}
 
     @app.post("/api/jobs/{job_id}/tasks")
     async def create_task(job_id: str, request: CreateTask) -> dict[str, Any]:

@@ -13,7 +13,7 @@ from tools.re_daemon.mcp import GhidraConfig
 class DaemonWebTests(unittest.TestCase):
     def test_dashboard_api_and_live_websocket_event(self):
         with tempfile.TemporaryDirectory() as temporary:
-            app = create_app(f"{temporary}/state.sqlite3", daemon_token="test-capability")
+            app = create_app(f"{temporary}/state.sqlite3", daemon_token="test-capability", pi_binary="/bin/true")
             with TestClient(app) as client:
                 dashboard = client.get("/")
                 self.assertEqual(dashboard.status_code, 200)
@@ -35,6 +35,8 @@ class DaemonWebTests(unittest.TestCase):
                 self.assertIn("select name=\"dependencyId\"", dashboard.text)
                 self.assertIn("select name=\"agentId\"", dashboard.text)
                 self.assertIn("function renderIdSelectors", dashboard.text)
+                self.assertIn("Start evidence triage", dashboard.text)
+                self.assertIn("/bootstrap", dashboard.text)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",
@@ -63,9 +65,43 @@ class DaemonWebTests(unittest.TestCase):
                 denied = client.get(f"/internal/agents/{agent['id']}/context")
                 self.assertEqual(denied.status_code, 403)
 
+    def test_job_submission_creates_and_schedules_initial_triage(self):
+        fake_pi = """#!__PYTHON__
+import json
+import sys
+for line in sys.stdin:
+    command = json.loads(line)
+    if command.get('type') == 'prompt':
+        print(json.dumps({'type': 'agent_start'}), flush=True)
+    elif command.get('type') == 'abort':
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
+        break
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / 'fake-pi'
+            executable.write_text(fake_pi.replace('__PYTHON__', sys.executable), encoding='utf-8')
+            executable.chmod(0o755)
+            app = create_app(root / 'state.sqlite3', daemon_token='test-capability', pi_binary=str(executable))
+            with TestClient(app) as client:
+                created = client.post('/api/jobs', json={'title': 'Fresh objective', 'goal': 'Collect binary evidence'}).json()
+                self.assertEqual(created['initialTask']['title'], 'Initial evidence triage')
+                self.assertEqual(created['initialTask']['role'], 'investigator')
+                self.assertEqual(len(created['launched']), 1)
+                status = client.get('/api/status').json()
+                initial = next(task for task in status['tasks'] if task['id'] == created['initialTask']['id'])
+                self.assertEqual(initial['status'], 'in_progress')
+                self.assertEqual(initial['assigned_agent_id'], created['launched'][0]['agent']['id'])
+                draft = app.state.store.create_job('Existing draft', 'Start it now')
+                started = client.post(f"/api/jobs/{draft['id']}/bootstrap")
+                self.assertEqual(started.status_code, 200)
+                self.assertEqual(started.json()['initialTask']['title'], 'Initial evidence triage')
+                self.assertEqual(len(started.json()['launched']), 1)
+                self.assertEqual(client.post(f"/api/jobs/{draft['id']}/bootstrap").status_code, 409)
+
     def test_operator_recovery_fails_stuck_in_progress_task(self):
         with tempfile.TemporaryDirectory() as temporary:
-            app = create_app(f"{temporary}/state.sqlite3", daemon_token="test-capability")
+            app = create_app(f"{temporary}/state.sqlite3", daemon_token="test-capability", pi_binary="/bin/true")
             with TestClient(app) as client:
                 store = app.state.store
                 job = store.create_job("recover", "stuck task")
@@ -102,7 +138,7 @@ for line in sys.stdin:
             server = root / 'fake-mcp'
             server.write_text(fake_mcp.replace('__PYTHON__', sys.executable), encoding='utf-8')
             server.chmod(0o755)
-            app = create_app(root / 'state.sqlite3', daemon_token='test-capability', ghidra_config=GhidraConfig((str(server),), binary, 'test-db'))
+            app = create_app(root / 'state.sqlite3', daemon_token='test-capability', pi_binary='/bin/true', ghidra_config=GhidraConfig((str(server),), binary, 'test-db'))
             with TestClient(app) as client:
                 job = client.post('/api/jobs', json={'title': 'Ghidra', 'goal': 'decompile'}).json()
                 agent = client.post(f"/api/jobs/{job['id']}/agents", json={'role': 'investigator', 'task': 'query'}).json()
