@@ -25,6 +25,7 @@ class DaemonWebTests(unittest.TestCase):
                 self.assertIn("partial streamed messages are consolidated", dashboard.text)
                 self.assertIn("last_activity_sequence", dashboard.text)
                 self.assertIn("/recover", dashboard.text)
+                self.assertIn("Schedule ready task", dashboard.text)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",
