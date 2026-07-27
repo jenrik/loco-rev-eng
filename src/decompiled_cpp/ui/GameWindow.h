@@ -344,4 +344,8 @@ public:
                UINT classStyle, int unused1, int unused2, uint8_t showCursor);
 };
 
+// The documented 0x118 layout is for the original 32-bit MSVC ABI. Host
+// pointers are 64-bit, so asserting its native sizeof here is invalid.
+#if INTPTR_MAX == INT32_MAX
 static_assert(sizeof(GameWindow) == 0x118, "GameWindow size must be 0x118 bytes");
+#endif

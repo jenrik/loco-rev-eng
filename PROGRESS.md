@@ -88,6 +88,11 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **RFD/RFH archive reader + startup renderer** — `sdl3_shims/resource_archive.{h,cpp}` parses all 2,522 shipped archive entries and decodes real Huffman-compressed BMPs exactly as `Huf_Decode` (0x45C830); `pe_string_table.{h,cpp}` resolves original `LoadStringA` resource IDs; `make test-menu-sprite-viewer` renders a real startup-menu frame through SDL textures.
 - [x] **ResourceManager SDL3 asset bridge** — Replaced null `ResourceManager_Init`/`ResourceManager_GetById` stubs with `resource_manager_sdl3.cpp`: actual PE-ID → RFH/RFD asset lookup, decoded SDL BMP surface cache, paired DAT animation metadata, DirectDraw-compatible magenta color key, and verified 0x421500/0x4216F0 object ABI. Typed archive loading covers WAV, BUT, ANI, LAY, SAV, and INI blobs; `make test-resource-manager-sdl3` validates BMP/DAT/WAV/BUT/ANI assets.
 - [x] **Menu sprite typed cleanup** — `EditWindow` and `menu_sprite_viewer` now use typed `SpriteResource`/`SpriteBitmap` accessors: no raw sprite offsets or direct resource-vtable calls remain in those paths. The only remaining resource vtable table is a documented bridge for untranslated callers.
+- [x] **SDL primary-surface presentation** — `CGWND_sdl3` now presents the SDL DirectDraw primary render target instead of clearing an unrelated blue frame. `sdl3_ddraw` owns lazily-created primary/backbuffer targets and `make test-sdl3-primary-present` verifies their pixels reach the SDL window.
+- [x] **Mode-2 EditWindow bootstrap** — Host `CGWND::InitAllSubsystems` constructs the real first binary subsystem (`EditWindow`, resource 0x1F8) and mode 2 calls its typed `show()` method. The unsupported Town/Cursor/etc. chain remains Windows-only rather than fabricating raw objects.
+- [x] **Enabled-source build restored** — Fixed stale class labels, host-only x86 layout assertion, DirectDraw stub linkage/signature corruption, and remaining declaration mismatches. Root `make` now compiles and links every enabled source into `build/lego_loco`.
+- [x] **DPlayConfig initialization** — Reconstructed `GameConfig_constructor` (0x440C60) from Ghidra as the 0xB0-byte DPlayConfig defaults at DAT_004FD3A8. The legacy menu alias now points at initialized storage; `make test-dplay-config` verifies all recovered defaults.
+- [x] **Typed TrainSubsystem bootstrap** — Replaced EditWindow’s null `TrainSubsystem_Ctor` pointer call with the existing typed `TrainSubsystem` constructor (0x438BC0). SDL’s DirectPlay boundary now reports an empty provider list, preserving the original constructor flow without a Win32 DirectPlay runtime.
 
 ### Phase 6: Native C compilation (2026-07-24)
 
@@ -313,6 +318,11 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (train-subsystem-bootstrap) | Decompiled TrainSubsystem_Ctor (0x438BC0) and worker setup, replaced the null ctor pointer with typed construction, and added an empty-provider SDL DirectPlay boundary. |
+| 2026-07-27 (dplay-config) | Decompiled GameConfig_constructor (0x440C60) and replaced its null host stub with the DPlayConfig defaults; mode-2 startup now advances to the unimplemented TrainSubsystem function pointer. |
+| 2026-07-27 (enabled-build-restored) | Repaired the remaining enabled-source compilation failures; root make now links the 3.6M host binary. |
+| 2026-07-27 (mode2-menu-bootstrap) | Host startup now constructs the real EditWindow-only subsystem cone and enters mode 2 through typed show dispatch; unavailable world subsystems are explicitly gated rather than stub-allocated. |
+| 2026-07-27 (primary-surface-present) | Added SDL primary/backbuffer target ownership and made CGWND present the primary texture; dummy-driver regression verifies pixel-accurate primary-to-window composition. |
 | 2026-07-27 (editwindow-typed-panels) | Replaced EditWindow child-panel construction/destruction and state dispatch with NameEntryPanel/GameSetupPanel C++ methods; modeled the popup lifetime as a virtual C++ object. |
 | 2026-07-26 (resmgr-typed-cleanup) | Replaced raw menu sprite offsets and resource vtable calls in EditWindow/viewer with typed SpriteResource/SpriteBitmap accessors; legacy ABI table is confined and documented in the bridge. |
 | 2026-07-26 (resmgr-dat-nonbmp) | Added paired DAT button/animation parsing, RGB magenta source color-key handling, and typed RFH/RFD asset blobs; regression validates startup metadata plus WAV, compressed BUT, and ANI resources. |

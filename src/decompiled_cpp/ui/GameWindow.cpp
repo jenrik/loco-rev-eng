@@ -56,11 +56,14 @@ extern "C" {
 #endif /* _WIN32 */
 
 #ifndef _WIN32
-/* Non-Windows stubs: include SDL3 window shim for full implementations,
- * plus inline stubs for functions not yet covered by sdl3_window.h */
-#include <SDL3/SDL.h>
-#include "sdl3_window.h"
-
+/* Non-Windows declarations supplied by sdl3_window.cpp. The SDL window
+ * header is intentionally not included because its Win32 aliases conflict
+ * with the translated compatibility headers. */
+extern BOOL CopyRect(RECT* dst, const RECT* src);
+extern DWORD GetLastError();
+extern DWORD FormatMessageA(DWORD flags, const void* source, DWORD message,
+                            DWORD language, char* buffer, DWORD size, void* arguments);
+extern void* LocalFree(void* memory);
 /* Inline stubs for functions not yet covered by sdl3_window.h */
 static inline HWND GetCapture(void) { return NULL; }
 static inline BOOL ReleaseCapture(void) { return TRUE; }

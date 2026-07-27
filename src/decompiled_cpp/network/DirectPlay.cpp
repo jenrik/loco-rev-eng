@@ -246,7 +246,8 @@ static inline int32_t dpaddr2_EnumPlayers(void* iface, void* callback,
 extern void* _g_primary_surface;   /* 0x4FD3C4 — primary DirectDraw surface */
 extern void* _g_dsound_object;     /* 0x4FD398 — shadow GameObject */
 extern void* g_main_window;          /* 0x4AA4A0 */
-extern int32_t g_client_width;      /* primary surface width */
+extern int32_t g_client_width;
+extern int32_t g_client_height;      /* primary surface width */
 extern char g_empty_string;         /* 0x4851D0 */
 extern char g_install_path[];       /* 0x4A99C8 */
 

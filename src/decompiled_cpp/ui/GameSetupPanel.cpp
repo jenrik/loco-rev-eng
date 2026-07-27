@@ -379,7 +379,7 @@ void GameSetupPanel::render(int unused)
     this->renderFlag = 1;                 /* +0x1B8 */
 
     /* Step 8: End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, NULL, 0, NULL);
+    UIPANEL_EndPaintEx(this, this->hWnd, static_cast<int>(0), 0, nullptr);
 }
 
 /* ================================================================== */

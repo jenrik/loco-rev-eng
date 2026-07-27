@@ -57,6 +57,7 @@
 
 #include "../game/Panel.h"
 
+class TrackPiece;
 class ScriptedObject : public Panel {
 public:
     /* ================================================================ */
@@ -125,7 +126,8 @@ public:
     void*    child_script_ptr;              // +0x630  child ScriptedObject pointer
     uint8_t  _pad_634[6];                   // +0x634..+0x639
     uint8_t  unk_flag;                      // +0x63A
-    uint8_t  _pad_63B[0x105];               // +0x63B..+0x73F
+    char     script_bitmap_path[0x104];     // +0x63B  generated scene-relative BMP path
+    uint8_t  _pad_73F;                       // +0x73F
 
     /* ================================================================ */
     /* Mode / trailing fields (+0x740..+0x74B)                           */

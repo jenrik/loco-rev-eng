@@ -4,6 +4,7 @@
 #ifndef _WIN32
 
 #include "CGWND.h"
+#include "../../sdl3_shims/sdl3_ddraw.h"
 #include <SDL3/SDL.h>
 #include <cstdio>
 
@@ -56,8 +57,9 @@ static void PumpMessages_SDL3(uint8_t filter)
         /* Game logic tick */
         GameLoop_FrameUpdate();
 
-        /* Render a frame */
-        if (g_renderer) {
+        // The primary DirectDraw target is now the sole frame source. The
+        // fallback preserves the launch screen until any target exists.
+        if (!SDL3_PresentPrimarySurface() && g_renderer) {
             SDL_SetRenderDrawColor(g_renderer, 0, 40, 80, 255);
             SDL_RenderClear(g_renderer);
             SDL_RenderPresent(g_renderer);

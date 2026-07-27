@@ -329,7 +329,6 @@ void HelpWnd_Create(void*, void*) {}
 void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int) { return mem; }
 void CGWND_AboutDialog_Create(void*, void*) {}
 void CGWND_RegisterWindowClass(void*) {}
-void GameConfig_constructor(void*) {}
 void NETMAN_constructor(void*) {}
 void DirectPlay_constructor(void*) {}
 void PlayerRecord_constructor(void*) {}

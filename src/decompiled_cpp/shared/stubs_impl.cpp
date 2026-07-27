@@ -8,6 +8,8 @@
  */
 
 #include "types.h"
+#include "../network/DPlayConfig.h"
+#include <new>
 #include <cstdlib>
 
 /* Forward-declare Entity for typed pointer globals */
@@ -314,7 +316,20 @@ void SortedCollection_SortRange(int, int) {}
 /* ================================================================== */
 
 /* Subsystem constructors */
-void* GameConfig_constructor(void*) { return nullptr; }
+void* GameConfig_constructor(void* memory)
+{
+    // GameConfig_constructor @ 0x440C60 initializes the 0xB0-byte DPlayConfig
+    // at DAT_004FD3A8. Keep that binary-facing object available to the menu.
+    if (!memory) return nullptr;
+    auto* config = new (memory) DPlayConfig();
+    extern void* _g_netman_state;
+    extern void* g_netSettings;
+    _g_netman_state = config->binary_data();
+    // g_netSettings is the same binary DAT_004FD3A8 object under a stale
+    // translation-unit name used by TrainSubsystem.
+    g_netSettings = config->binary_data();
+    return config;
+}
 void* NETMAN_constructor(void*) { return nullptr; }
 void* NetworkPlayerList_ctor(void*) { return nullptr; }
 void* PlayerRecord_constructor(void*) { return nullptr; }

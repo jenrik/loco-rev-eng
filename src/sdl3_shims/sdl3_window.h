@@ -84,8 +84,12 @@ typedef void* HLOCAL;
 #define MB_OK                0x00000000
 
 /* Registry */
+#ifndef HKEY_LOCAL_MACHINE
 #define HKEY_LOCAL_MACHINE   0x80000002
+#endif
+#ifndef HKEY_CURRENT_USER
 #define HKEY_CURRENT_USER    0x80000001
+#endif
 #define KEY_READ             0x20019
 #define KEY_WRITE            0x20006
 #define REG_SZ               1

@@ -11,10 +11,6 @@
 
 #include "windows.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /* ================================================================== */
 /* IDirectDraw4 / IDirectDrawSurface4 — versioned COM stubs           */
 /* (outside extern "C" because they have C++ member functions)        */
@@ -35,7 +31,7 @@ extern "C" {
   typedef struct IDirectDraw4 {
       void* vtable;
       int Release() { return 0; }
-      int CreateSurface(void* a, void* b, void** c, void* d) { return 0; }
+      int CreateSurface(void* desc, void** out, void* unused) { return 0; }
       int SetCooperativeLevel(void* a, int b) { return 0; }
       int SetDisplayMode(int a, int b, int c, int d, int e) { return 0; }
       int GetDeviceIdentifier(void* a, int b) { return 0; }
@@ -66,4 +62,4 @@ extern "C" {
 
 #endif /* LOCO_SDL3 */
 
-#endif /* STUBS_DDRAW_H */#endif /* STUBS_DDRAW_H */
+#endif /* STUBS_DDRAW_H */

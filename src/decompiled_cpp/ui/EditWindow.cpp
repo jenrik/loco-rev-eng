@@ -10,6 +10,7 @@
 #include "UI_Utils.h"
 #include "NameEntryPanel.h"
 #include "GameSetupPanel.h"
+#include "../game/Train.h"
 #include "resource_manager_sdl3.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
@@ -90,7 +91,9 @@ BOOL  __stdcall PlaySoundA(const char* pszSound, void* hmod, DWORD fdwSound);
 /* Inline stubs for functions not yet covered by sdl3_window.h */
 static inline void* CreateHatchBrush(int, uint32_t) { return NULL; }
 static inline void  ReleaseCapture(void) {}
-static inline int   ShowCursor(BOOL) { return 0; }
+// Win32 decrements a visibility counter on FALSE. Returning -1 after a hide
+// preserves the caller's loop termination on the SDL host.
+static inline int   ShowCursor(BOOL show) { return show ? 0 : -1; }
 static inline void* SetCapture(void*) { return NULL; }
 static inline void* SetFocus(void*) { return NULL; }
 static inline int   GetWindowTextA(void*, char* buf, int max) {
@@ -263,6 +266,7 @@ void EditWindow::base_destructor()
 /* ================================================================== */
 int EditWindow::create(HWND hWndParent)
 {
+    std::fprintf(stderr, "[TRACE] EditWindow::create: begin\n");
     this->hWnd = NULL;
 
     /* Get desktop window dimensions for full-screen */
@@ -274,9 +278,12 @@ int EditWindow::create(HWND hWndParent)
     this->icon = LoadIconA(this->hInstance, (const char*)0x65);  /* +0xF8 */
 
     /* Load sprites */
+    std::fprintf(stderr, "[TRACE] EditWindow::create: load sprites\n");
     this->initSprites();
+    std::fprintf(stderr, "[TRACE] EditWindow::create: sprites loaded\n");
 
     /* Create full-screen window */
+    std::fprintf(stderr, "[TRACE] EditWindow::create: create window\n");
     int result = UI_WindowBase::create_full_window(
         this, 0, hWndParent,
         desktopRect.left, desktopRect.top,
@@ -291,8 +298,10 @@ int EditWindow::create(HWND hWndParent)
     }
 
     /* Construct the reconstructed child panels directly. */
+    std::fprintf(stderr, "[TRACE] EditWindow::create: create NameEntryPanel\n");
     this->pPanelA = new NameEntryPanel(this->hInstance, 0x1F6);
     if (this->pPanelA) this->pPanelA->create_window(this->hWnd);
+    std::fprintf(stderr, "[TRACE] EditWindow::create: create GameSetupPanel\n");
     this->pPanelB = new GameSetupPanel(this->hInstance, 0x1F9);
     if (this->pPanelB) this->pPanelB->create_window(this->hWnd);
 
@@ -330,24 +339,29 @@ int EditWindow::create(HWND hWndParent)
 /* ================================================================== */
 void EditWindow::show()
 {
+    std::fprintf(stderr, "[TRACE] EditWindow::show: begin\n");
     /* Reset state */
     this->previousState = 0;        /* +0xEC */
     this->hasPopup = 0;             /* +0xF4 */
 
     /* Reload sprites */
+    std::fprintf(stderr, "[TRACE] EditWindow::show: reload sprites\n");
     this->initSprites();
 
     /* Set window visible */
     UI_SetWindowVisible(this, 1);
 
     /* Initialize network panel */
+    std::fprintf(stderr, "[TRACE] EditWindow::show: initialize network panel\n");
     this->netPanelInit();
 
     /* Create network session on PanelA */
+    std::fprintf(stderr, "[TRACE] EditWindow::show: create session\n");
     NETMAN_CreateSession(this->pPanelA);
 
     /* Call base class Show (creates timer, captures mouse) */
-    UI_WindowBase_Show(this);
+    std::fprintf(stderr, "[TRACE] EditWindow::show: base show\n");
+    this->UI_WindowBase::show();
 
     /* Bring window to top */
     BringWindowToTop(this->hWnd);
@@ -753,6 +767,7 @@ void EditWindow::onPlayerNameChanged()
 /* ================================================================== */
 void EditWindow::netPanelInit()
 {
+    std::fprintf(stderr, "[TRACE] EditWindow::netPanelInit: config=%p train=%p\n", static_cast<void*>(_g_netman_state), _g_train);
     /* Set polling interval based on game mode */
     if (*(char*)(_g_netman_state + 7) == 0) {
         *(int*)(_g_netman_state + 0x0C) = 0x1E;    /* 30ms for single-player */
@@ -768,19 +783,21 @@ void EditWindow::netPanelInit()
     /* Zero the network queue flag */
     _g_network_queue = 0;
 
-    /* Create TrainSubsystem (0x38 bytes) */
-    typedef void* (__thiscall* TrainSubsystemCtor)(void*, int, int, int);
-    extern TrainSubsystemCtor TrainSubsystem_Ctor;  /* 0x438E50 */
-
-    void* trainBuf = operator_new(0x38);
-    if (trainBuf != NULL) {
-        _g_train = TrainSubsystem_Ctor(trainBuf,
-                                       this->resourceId,
-                                       (int)this->hWndParent,
-                                       0);
-    } else {
-        _g_train = NULL;
-    }
+    /* Create TrainSubsystem (0x38 bytes in the original x86 object). */
+#ifdef _WIN32
+    // TODO: transcribe the original thread-creation path below after the
+    // DirectPlay platform layer is available on this target.
+#else
+    // TrainSubsystem_Ctor @ 0x438BC0 receives the two panel context values.
+    // C++ new performs the allocation + constructor sequence without a raw
+    // function-pointer call; DirectPlay enumeration is isolated in its host
+    // platform branch in Train_network.cpp.
+    _g_train = new TrainSubsystem(
+        static_cast<int>(this->resourceId),
+        static_cast<int>(reinterpret_cast<intptr_t>(this->hWndParent)));
+    _g_network_thread = NULL;
+    return;
+#endif
 
     /* Create network thread (0x41C bytes) */
     typedef void* (__thiscall* WIN32CreateThread)(void* buf);
