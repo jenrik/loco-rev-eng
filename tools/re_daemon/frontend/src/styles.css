@@ -149,8 +149,22 @@ button.warning { border-color: #d29922; color: #e3b341; }
 .inspector__timeline { max-height: 45vh; overflow: auto; }
 .timeline__event { padding: 6px 0; border-bottom: 1px solid #21262d; font-size: 9px; }
 .timeline__meta { display: flex; justify-content: space-between; color: #8b949e; font-size: 8px; text-transform: uppercase; }
+.timeline__summary { font-size: 9px; }
+.timeline__summary--error { color: #ffa198; }
+.timeline__summary--muted { color: #8b949e; }
+.timeline__stderr { color: #ffa198; margin: 0; }
 .timeline__event--tool_started .timeline__meta, .timeline__event--tool_finished .timeline__meta { color: #7ee787; }
 .timeline details summary { color: #58a6ff; cursor: pointer; }
+.timeline__badge { display: inline-block; padding: 0 3px; border-radius: 3px; font-size: 7px; font-weight: 600; text-transform: uppercase; vertical-align: middle; }
+.timeline__badge--green { color: #7ee787; background: #1a3329; }
+.timeline__badge--amber { color: #d3a85a; background: #2d2416; }
+.timeline__badge--red { color: #ffa198; background: #3b1c1c; }
+.timeline__badge--muted { color: #8b949e; background: #1c2128; }
+.timeline__re-event { line-height: 1.6; }
+.timeline__re-event code { color: #7ee787; }
+.timeline__task-list { margin: 3px 0 0 12px; padding: 0; list-style: none; }
+.timeline__task-list li { margin: 1px 0; }
+.timeline__reason { color: #8b949e; }
 
 .scope-panel {
   position: fixed;

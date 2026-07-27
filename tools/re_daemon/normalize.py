@@ -31,7 +31,7 @@ def normalize_pi_event(event: dict[str, Any]) -> tuple[str, dict[str, Any]] | No
     if event_type == "message_update":
         delta = event.get("assistantMessageEvent") or {}
         delta_type = delta.get("type")
-        if delta_type in {"text_delta", "thinking_delta"}:
+        if delta_type in {"text_delta", "thinking_delta", "toolcall_delta"}:
             return "assistant_delta", {
                 "deltaType": delta_type,
                 "contentIndex": delta.get("contentIndex"),
@@ -60,6 +60,18 @@ def normalize_pi_event(event: dict[str, Any]) -> tuple[str, dict[str, Any]] | No
     if event_type == "message_end":
         message = event.get("message", {})
         return "message_finished", _clip({"role": message.get("role"), "content": message.get("content"), "stopReason": message.get("stopReason")})
-    if event_type in {"agent_start", "agent_end", "agent_settled", "turn_start", "turn_end", "auto_retry_start", "auto_retry_end", "compaction_start", "compaction_end", "extension_error"}:
+    if event_type == "agent_start":
+        return event_type, {}
+    if event_type == "agent_end":
+        messages = event.get("messages", [])
+        return event_type, _clip({
+            "willRetry": bool(event.get("willRetry")),
+            "messageCount": len(messages) if isinstance(messages, list) else 0,
+        })
+    if event_type == "agent_settled":
+        return event_type, {}
+    if event_type in {"turn_start", "turn_end"}:
+        return event_type, {}
+    if event_type in {"auto_retry_start", "auto_retry_end", "compaction_start", "compaction_end", "extension_error"}:
         return event_type, _clip({key: value for key, value in event.items() if key != "message"})
     return None
