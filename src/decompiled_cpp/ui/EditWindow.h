@@ -1,3 +1,4 @@
+// Status: TRANSCRIBED
 /**
  * EditWindow.h — Full-screen main menu dialog controller (UI_MainMenu)
  *
@@ -55,13 +56,17 @@
 /* ================================================================== */
 
 struct UIPANEL_Surface;
+namespace loco::assets {
+class SpriteResource;
+class SpriteBitmap;
+}
 
 /* ================================================================== */
-/* MenuSpriteSlot -- 8-byte pair storing one menu button sprite        */
+/* MenuSpriteSlot -- host-side typed sprite pair                       */
 /* ================================================================== */
 struct MenuSpriteSlot {
-    void*    pResource;         /* +0x00  RESDATA pointer for this sprite   */
-    int32_t  hBitmap;           /* +0x04  bitmap handle / surface pointer   */
+    loco::assets::SpriteResource* resource;
+    loco::assets::SpriteBitmap*   bitmap;
 };
 
 /* ================================================================== */

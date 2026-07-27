@@ -85,6 +85,9 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **README.md** — purpose, architecture, palette strategy, limitations
 - [x] All 3 shims compile clean against SDL3 3.4.10
 - [x] **CRT/helper link stubs** — host allocation/PRNG wrappers, no-op subsystem helpers, and weak executable globals in `shared/crt_stubs.cpp`
+- [x] **RFD/RFH archive reader + startup renderer** — `sdl3_shims/resource_archive.{h,cpp}` parses all 2,522 shipped archive entries and decodes real Huffman-compressed BMPs exactly as `Huf_Decode` (0x45C830); `pe_string_table.{h,cpp}` resolves original `LoadStringA` resource IDs; `make test-menu-sprite-viewer` renders a real startup-menu frame through SDL textures.
+- [x] **ResourceManager SDL3 asset bridge** — Replaced null `ResourceManager_Init`/`ResourceManager_GetById` stubs with `resource_manager_sdl3.cpp`: actual PE-ID → RFH/RFD asset lookup, decoded SDL BMP surface cache, paired DAT animation metadata, DirectDraw-compatible magenta color key, and verified 0x421500/0x4216F0 object ABI. Typed archive loading covers WAV, BUT, ANI, LAY, SAV, and INI blobs; `make test-resource-manager-sdl3` validates BMP/DAT/WAV/BUT/ANI assets.
+- [x] **Menu sprite typed cleanup** — `EditWindow` and `menu_sprite_viewer` now use typed `SpriteResource`/`SpriteBitmap` accessors: no raw sprite offsets or direct resource-vtable calls remain in those paths. The only remaining resource vtable table is a documented bridge for untranslated callers.
 
 ### Phase 6: Native C compilation (2026-07-24)
 
@@ -210,6 +213,7 @@ main()
 
 - [ ] **Palette cycling support** — Currently palettes are baked at load time; palette animations (water, sky) need runtime palette swaps
 - [ ] **GDI DC shim** — `GetDC`/`ReleaseDC` currently stubbed; needed for some UI rendering paths
+- [ ] **Complete ResourceManager consumers** — connect cached WAV data to `GameAudio`, parse BUT descriptors and ANI frames for their actual UI/cursor call sites, and map tile DAT semantics into the decompiled world objects; lookup, DAT animation metadata, color keys, and generic archive blobs are now live.
 - [ ] **DDRAW sprite data** — `DDRAW_SpriteData` loading/management (native .c files)
 
 ### Priority 4: Audio completeness
@@ -308,6 +312,11 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-26 (resmgr-typed-cleanup) | Replaced raw menu sprite offsets and resource vtable calls in EditWindow/viewer with typed SpriteResource/SpriteBitmap accessors; legacy ABI table is confined and documented in the bridge. |
+| 2026-07-26 (resmgr-dat-nonbmp) | Added paired DAT button/animation parsing, RGB magenta source color-key handling, and typed RFH/RFD asset blobs; regression validates startup metadata plus WAV, compressed BUT, and ANI resources. |
+| 2026-07-26 (resmgr-sprite-bridge) | Replaced ResourceManager_Init/GetById null stubs with validated PE RT_STRING → RFH/RFD BMP SDL-surface caching; test verifies 0x407 dimensions and vtable[4]/[8] ABI. |
+| 2026-07-26 (sprite-renderer) | Added PE RT_STRING resolver (validates 0x407 → startup\\singleup) and SDL startup-menu viewer composed at the original 0x4216F0/0x422010 coordinates; dummy-driver test renders a real frame. |
+| 2026-07-26 (sprite-archive) | Removed the uncommitted fake sprite/subsystem layer. Added a validated RFD/RFH archive reader from the actual asset format and Huf_Decode (0x45C830); regression test decodes real startup BMP pixels. |
 | 2026-07-26 (gamesetuppanel-review2) | **GameSetupPanel review fixes (6 issues)**: (BLOCKER 1) Removed duplicate class definition from vtable_stubs.cpp (ODR violation). (BLOCKER 2) Created stubs/gamesetuppanel_network_stubs.cpp with 4 extended vtable method stubs (HandleMapClick 0x40ABA0, SelectLayoutEntry 0x40AAF0, SendScenarioSelect 0x40AC50, ConnectToNetworkGame 0x40AA20) using assert(!"stub") + TODO annotations, tracked in PROGRESS.md. (BLOCKER 3) void* currentList → LayoutListNode* currentList; drawLayoutList(void*) → drawLayoutList(LayoutListNode*). (BLOCKER 4) Renamed RESMGR_ReleaseSoundResource → ReleaseSoundResource (Ghidra prefix removal) in ResourceManager.h and call site. (BLOCKER 5) Added NOTE comment for int32_t-to-ResourceEntry* cast. (WARNING) ResourceManager.h GetById return type documented. Compilation: PASS. |
 | 2026-07-26 (workflow-scheduler) | Replaced upfront work queues with incremental supervisor decisions; added persistent PARTIAL-aware primaries, strict block validation, settled completion buffering, directed discovery objectives, and 7 regression tests. |
 | 2026-07-26 (decompile-class) | GameVehicle: 7 function(s) — 3 pass(es), achieved INTEGRATED |

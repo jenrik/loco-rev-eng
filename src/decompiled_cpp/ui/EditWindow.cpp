@@ -1,3 +1,4 @@
+// Status: TRANSCRIBED
 /**
  * EditWindow.cpp -- EditWindow (UI_MainMenu) implementation
  *
@@ -7,6 +8,7 @@
 
 #include "EditWindow.h"
 #include "UI_Utils.h"
+#include "resource_manager_sdl3.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
 #include <cstring>
@@ -115,7 +117,6 @@ int   __thiscall Config_ReadInt(void* ini, const char* section,
 void  __thiscall PlayerConfig_SetName(void* cfg, const char* name); /* 0x44E340 */
 void  __thiscall PlayerConfig_Save(void* cfg);                      /* 0x44E4A0 */
 void  __thiscall TileMap_Init(void** tilemap, byte flag);           /* 0x458380 */
-int   __thiscall ResourceManager_GetById(void** mgr, int id);       /* 0x460A30 */
 int   __thiscall ResourceManager_GetStringById(void** mgr, int id); /* 0x460AA0 */
 void  __thiscall RESMGR_ReleaseSoundResource(int res);              /* 0x44BB90 */
 void  __thiscall RESMGR_LoadSoundResource(int res);                 /* 0x44B8E0 */
@@ -147,6 +148,7 @@ void    __fastcall Town_BlitElement(void* src, int sx, int sy,
 void    __thiscall UIPANEL_InitSurface(void* surf, int w, int h,
                                        int a, int b, int c);    /* 0x426E40 */
 void*   __thiscall UIPANEL_CreateSurface(void* buf);             /* 0x426E10 */
+void*   UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* 0x42A140 */
 
 /* ================================================================== */
 /* External game function references                                    */
@@ -645,9 +647,9 @@ void EditWindow::HandleClick()
     {
         SetRect(&this->btnOption1Rect, 0x387, 0x2A5, 0, 0);
         this->btnOption1Rect.right  = this->btnOption1Rect.left +
-            (uint32_t)*(uint16_t*)((int)this->sprite_405.pResource + 0x14);
+            loco::assets::sprite_width(this->sprite_405.resource);
         this->btnOption1Rect.bottom = this->btnOption1Rect.top +
-            (uint32_t)*(uint16_t*)((int)this->sprite_405.pResource + 0x16);
+            loco::assets::sprite_height(this->sprite_405.resource);
         OffsetRect(&this->btnOption1Rect,
                    -this->centerOffsetX, -this->centerOffsetY);
     }
@@ -656,9 +658,9 @@ void EditWindow::HandleClick()
     {
         SetRect(&this->btnOption2Rect, 0x18B, 0x2A5, 0, 0);
         this->btnOption2Rect.right = this->btnOption2Rect.left +
-            (uint32_t)*(uint16_t*)((int)this->sprite_403.pResource + 0x14);
+            loco::assets::sprite_width(this->sprite_403.resource);
         this->btnOption2Rect.bottom = this->btnOption2Rect.top +
-            (uint32_t)*(uint16_t*)((int)this->sprite_403.pResource + 0x16);
+            loco::assets::sprite_height(this->sprite_403.resource);
         OffsetRect(&this->btnOption2Rect,
                    -this->centerOffsetX, -this->centerOffsetY);
     }
@@ -667,9 +669,9 @@ void EditWindow::HandleClick()
     {
         SetRect(&this->btnPlayRect, 0x212, 0x1EA, 0, 0);
         this->btnPlayRect.right = this->btnPlayRect.left +
-            (uint32_t)*(uint16_t*)((int)this->sprite_407.pResource + 0x14);
+            loco::assets::sprite_width(this->sprite_407.resource);
         this->btnPlayRect.bottom = this->btnPlayRect.top +
-            (uint32_t)*(uint16_t*)((int)this->sprite_407.pResource + 0x16);
+            loco::assets::sprite_height(this->sprite_407.resource);
         OffsetRect(&this->btnPlayRect,
                    -this->centerOffsetX, -this->centerOffsetY);
     }
@@ -678,9 +680,9 @@ void EditWindow::HandleClick()
     {
         SetRect(&this->btnScenarioRect, 0x2C9, 0x1EA, 0, 0);
         this->btnScenarioRect.right = this->btnScenarioRect.left +
-            (uint32_t)*(uint16_t*)((int)this->sprite_409.pResource + 0x14);
+            loco::assets::sprite_width(this->sprite_409.resource);
         this->btnScenarioRect.bottom = this->btnScenarioRect.top +
-            (uint32_t)*(uint16_t*)((int)this->sprite_409.pResource + 0x16);
+            loco::assets::sprite_height(this->sprite_409.resource);
         OffsetRect(&this->btnScenarioRect,
                    -this->centerOffsetX, -this->centerOffsetY);
     }
@@ -689,9 +691,9 @@ void EditWindow::HandleClick()
     {
         SetRect(&this->btnExitRect, 0x387, 0x1BD, 0, 0);
         this->btnExitRect.right = this->btnExitRect.left +
-            (uint32_t)*(uint16_t*)((int)this->sprite_40B.pResource + 0x14);
+            loco::assets::sprite_width(this->sprite_40B.resource);
         this->btnExitRect.bottom = this->btnExitRect.top +
-            (uint32_t)*(uint16_t*)((int)this->sprite_40B.pResource + 0x16);
+            loco::assets::sprite_height(this->sprite_40B.resource);
         OffsetRect(&this->btnExitRect,
                    -this->centerOffsetX, -this->centerOffsetY);
     }
@@ -700,9 +702,9 @@ void EditWindow::HandleClick()
     {
         SetRect(&this->btnTextRect, 0x387, 0x231, 0, 0);
         this->btnTextRect.right = this->btnTextRect.left +
-            (uint32_t)*(uint16_t*)((int)this->sprite_40E.pResource + 0x14);
+            loco::assets::sprite_width(this->sprite_40E.resource);
         this->btnTextRect.bottom = this->btnTextRect.top +
-            (uint32_t)*(uint16_t*)((int)this->sprite_40E.pResource + 0x16);
+            loco::assets::sprite_height(this->sprite_40E.resource);
         OffsetRect(&this->btnTextRect,
                    -this->centerOffsetX, -this->centerOffsetY);
     }
@@ -957,101 +959,26 @@ void EditWindow::netPanelInit()
 /* ================================================================== */
 void EditWindow::initSprites()
 {
-    if (this->spritesLoaded) {
-        return;
-    }
+    if (this->spritesLoaded) return;
 
-    /* --- Group at +0x1B0: resources 0x403-0x406 --- */
-    this->sprite_403.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x403);
-    if (this->sprite_403.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_403.pResource)[4];
-        this->sprite_403.hBitmap = getBmp(this->sprite_403.pResource, 0, 0);
-    }
+    const auto load_sprite = [](MenuSpriteSlot& slot, uint32_t resource_id) {
+        slot.resource = loco::assets::host_resource_manager().get_sprite_by_id(resource_id);
+        slot.bitmap = loco::assets::sprite_bitmap(slot.resource);
+    };
+    load_sprite(this->sprite_403, 0x403);
+    load_sprite(this->sprite_404, 0x404);
+    load_sprite(this->sprite_405, 0x405);
+    load_sprite(this->sprite_406, 0x406);
+    load_sprite(this->sprite_407, 0x407);
+    load_sprite(this->sprite_408, 0x408);
+    load_sprite(this->sprite_409, 0x409);
+    load_sprite(this->sprite_40A, 0x40A);
+    load_sprite(this->sprite_40B, 0x40B);
+    load_sprite(this->sprite_40C, 0x40C);
+    load_sprite(this->sprite_40E, 0x40E);
+    load_sprite(this->sprite_40F, 0x40F);
 
-    this->sprite_404.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x404);
-    if (this->sprite_404.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_404.pResource)[4];
-        this->sprite_404.hBitmap = getBmp(this->sprite_404.pResource, 0, 0);
-    }
-
-    this->sprite_405.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x405);
-    if (this->sprite_405.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_405.pResource)[4];
-        this->sprite_405.hBitmap = getBmp(this->sprite_405.pResource, 0, 0);
-    }
-
-    this->sprite_406.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x406);
-    if (this->sprite_406.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_406.pResource)[4];
-        this->sprite_406.hBitmap = getBmp(this->sprite_406.pResource, 0, 0);
-    }
-
-    /* --- Group at +0x190: resources 0x407-0x409 --- */
-    this->sprite_407.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x407);
-    if (this->sprite_407.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_407.pResource)[4];
-        this->sprite_407.hBitmap = getBmp(this->sprite_407.pResource, 0, 0);
-    }
-
-    this->sprite_408.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x408);
-    if (this->sprite_408.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_408.pResource)[4];
-        this->sprite_408.hBitmap = getBmp(this->sprite_408.pResource, 0, 0);
-    }
-
-    this->sprite_409.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x409);
-    if (this->sprite_409.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_409.pResource)[4];
-        this->sprite_409.hBitmap = getBmp(this->sprite_409.pResource, 0, 0);
-    }
-
-    /* --- Standalone: resource 0x40A at +0x1A8 --- */
-    this->sprite_40A.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x40A);
-    if (this->sprite_40A.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_40A.pResource)[4];
-        this->sprite_40A.hBitmap = getBmp(this->sprite_40A.pResource, 0, 0);
-    }
-
-    /* --- Group at +0x1D0: resources 0x40B, 0x40C, 0x40E, 0x40F --- */
-    this->sprite_40B.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x40B);
-    if (this->sprite_40B.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_40B.pResource)[4];
-        this->sprite_40B.hBitmap = getBmp(this->sprite_40B.pResource, 0, 0);
-    }
-
-    this->sprite_40C.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x40C);
-    if (this->sprite_40C.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_40C.pResource)[4];
-        this->sprite_40C.hBitmap = getBmp(this->sprite_40C.pResource, 0, 0);
-    }
-
-    this->sprite_40E.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x40E);
-    if (this->sprite_40E.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_40E.pResource)[4];
-        this->sprite_40E.hBitmap = getBmp(this->sprite_40E.pResource, 0, 0);
-    }
-
-    this->sprite_40F.pResource = (void*)ResourceManager_GetById((void**)&g_resmgr, 0x40F);
-    if (this->sprite_40F.pResource != NULL) {
-        typedef int (__thiscall* GetBmpFn)(void*, int, int);
-        GetBmpFn getBmp = (GetBmpFn)(*(void***)this->sprite_40F.pResource)[4];
-        this->sprite_40F.hBitmap = getBmp(this->sprite_40F.pResource, 0, 0);
-    }
-
-    /* Composite the backdrop */
-    EditWindow_render(this);
-
+    this->render();
     this->spritesLoaded = 1;
 }
 
@@ -1061,53 +988,28 @@ void EditWindow::initSprites()
 /* ================================================================== */
 void EditWindow::cleanupSprites()
 {
-    if (!this->spritesLoaded) {
-        return;
-    }
+    if (!this->spritesLoaded) return;
 
-    /* Release each sprite resource via vtable[8] */
-    typedef void (__thiscall* ReleaseFn)(void*);
+    const auto release_sprite = [](MenuSpriteSlot& slot) {
+        loco::assets::release_sprite(slot.resource);
+        slot.resource = nullptr;
+        slot.bitmap = nullptr;
+    };
+    release_sprite(this->sprite_403);
+    release_sprite(this->sprite_404);
+    release_sprite(this->sprite_405);
+    release_sprite(this->sprite_406);
+    release_sprite(this->sprite_407);
+    release_sprite(this->sprite_408);
+    release_sprite(this->sprite_409);
+    release_sprite(this->sprite_40A);
+    release_sprite(this->sprite_40B);
+    release_sprite(this->sprite_40C);
+    release_sprite(this->sprite_40E);
+    release_sprite(this->sprite_40F);
 
-    /* Group at +0x1B0 (0x403-0x406) */
-    #define RELEASE_SPRITE(slot) \
-        do { \
-            if (slot.pResource != NULL) { \
-                ReleaseFn rel = (ReleaseFn)(*(void***)slot.pResource)[8]; \
-                rel(slot.pResource); \
-            } \
-            slot.pResource = NULL; \
-        } while(0)
-
-    RELEASE_SPRITE(this->sprite_403);
-    RELEASE_SPRITE(this->sprite_404);
-    RELEASE_SPRITE(this->sprite_405);
-    RELEASE_SPRITE(this->sprite_406);
-
-    /* Group at +0x190 (0x407-0x409) */
-    RELEASE_SPRITE(this->sprite_407);
-    RELEASE_SPRITE(this->sprite_408);
-    RELEASE_SPRITE(this->sprite_409);
-
-    /* Standalone at +0x1A8 (0x40A) */
-    RELEASE_SPRITE(this->sprite_40A);
-
-    /* Group at +0x1D0 (0x40B, 0x40C, 0x40E, 0x40F) */
-    RELEASE_SPRITE(this->sprite_40B);
-    RELEASE_SPRITE(this->sprite_40C);
-    RELEASE_SPRITE(this->sprite_40E);
-    RELEASE_SPRITE(this->sprite_40F);
-
-    #undef RELEASE_SPRITE
-
-    /* Destroy offscreen surface */
-    if (this->pMainSurface != NULL) {
-        void** vtbl = *(void***)this->pMainSurface;
-        typedef void* (__thiscall* DtorFn)(void*, byte);
-        DtorFn dtor = (DtorFn)vtbl[0];
-        dtor(this->pMainSurface, 1);
-    }
-    this->pMainSurface = NULL;
-
+    if (this->pMainSurface) UIPANEL_DestroySurface(this->pMainSurface, 1);
+    this->pMainSurface = nullptr;
     this->spritesLoaded = 0;
 }
 
@@ -1117,53 +1019,26 @@ void EditWindow::cleanupSprites()
 /* ================================================================== */
 void EditWindow::render()
 {
-    /* Create the offscreen surface (1280x1024) */
-    void* surfBuf = operator_new(0x20);
-    if (surfBuf != NULL) {
-        this->pMainSurface = UIPANEL_CreateSurface(surfBuf);
-    } else {
-        this->pMainSurface = NULL;
-    }
+    void* surface_memory = operator_new(0x20);
+    this->pMainSurface = surface_memory
+        ? static_cast<UIPANEL_Surface*>(UIPANEL_CreateSurface(surface_memory)) : nullptr;
+    if (this->pMainSurface) UIPANEL_InitSurface(this->pMainSurface, 0x500, 0x400, 1, 0, 0);
 
-    if (this->pMainSurface != NULL) {
-        UIPANEL_InitSurface(this->pMainSurface, 0x500, 0x400, 1, 0, 0);
-    }
-
-    /* Helper to load, blit, and release a backdrop element */
-    #define BLIT_BACKDROP_ELEMENT(resId, dstOffX, dstOffY) \
-        do { \
-            void* res = (void*)ResourceManager_GetById((void**)&g_resmgr, (resId)); \
-            if (res != NULL) { \
-                typedef void* (__thiscall* GetBmpFn)(void*); \
-                GetBmpFn getBmp = (GetBmpFn)(*(void***)res)[4]; \
-                void* bmp = getBmp(res); \
-                if (bmp != NULL) { \
-                    RECT srcR; \
-                    SetRect(&srcR, 0, 0, \
-                            *(int*)((int)bmp + 8), \
-                            *(int*)((int)bmp + 0x0C)); \
-                    RECT dstR; \
-                    CopyRect(&dstR, &srcR); \
-                    OffsetRect(&dstR, (dstOffX), (dstOffY)); \
-                    Town_BlitElement(bmp, \
-                        srcR.left, srcR.top, srcR.right, srcR.bottom, \
-                        this->pMainSurface, \
-                        dstR.left, dstR.top, dstR.right, dstR.bottom, 0); \
-                } \
-                typedef void (__thiscall* RelFn)(void*); \
-                RelFn rel = (RelFn)(*(void***)res)[8]; \
-                rel(res); \
-            } \
-        } while(0)
-
-    /* Blit 5 backdrop elements */
-    BLIT_BACKDROP_ELEMENT(0x413, 0, 0);
-    BLIT_BACKDROP_ELEMENT(0x444, 0xF4, 0x1D6);
-    BLIT_BACKDROP_ELEMENT(0x445, 0x204, 0xF9);
-    BLIT_BACKDROP_ELEMENT(0x446, 0x11A, 0xF0);
-    BLIT_BACKDROP_ELEMENT(0x443, 0x20B, 0x2A8);
-
-    #undef BLIT_BACKDROP_ELEMENT
+    const auto blit_backdrop = [this](uint32_t resource_id, int x, int y) {
+        auto* resource = loco::assets::host_resource_manager().get_sprite_by_id(resource_id);
+        auto* bitmap = loco::assets::sprite_bitmap(resource);
+        if (bitmap) {
+            const int width = static_cast<int>(loco::assets::bitmap_width(bitmap));
+            const int height = static_cast<int>(loco::assets::bitmap_height(bitmap));
+            Town_BlitElement(bitmap, 0, 0, width, height, this->pMainSurface, x, y, width, height, 0);
+        }
+        loco::assets::release_sprite(resource);
+    };
+    blit_backdrop(0x413, 0, 0);
+    blit_backdrop(0x444, 0xF4, 0x1D6);
+    blit_backdrop(0x445, 0x204, 0xF9);
+    blit_backdrop(0x446, 0x11A, 0xF0);
+    blit_backdrop(0x443, 0x20B, 0x2A8);
 }
 
 /* ================================================================== */
@@ -1181,11 +1056,11 @@ void EditWindow::drawButtons()
 
             RECT srcR;
             srcR.left = 0; srcR.top = 0;
-            srcR.right  = *(uint16_t*)((int)this->sprite_407.pResource + 0x14);
-            srcR.bottom = *(uint16_t*)((int)this->sprite_407.pResource + 0x16);
+            srcR.right  = loco::assets::sprite_width(this->sprite_407.resource);
+            srcR.bottom = loco::assets::sprite_height(this->sprite_407.resource);
 
-            if (this->sprite_407.hBitmap != 0) {
-                Town_BlitElement((void*)this->sprite_407.hBitmap,
+            if (this->sprite_407.bitmap != 0) {
+                Town_BlitElement(this->sprite_407.bitmap,
                     this->btnPlayRect.left, this->btnPlayRect.top,
                     this->btnPlayRect.right, this->btnPlayRect.bottom,
                     g_primary_surface,
@@ -1199,11 +1074,11 @@ void EditWindow::drawButtons()
 
             RECT srcR;
             srcR.left = 0; srcR.top = 0;
-            srcR.right  = *(uint16_t*)((int)this->sprite_40A.pResource + 0x14);
-            srcR.bottom = *(uint16_t*)((int)this->sprite_40A.pResource + 0x16);
+            srcR.right  = loco::assets::sprite_width(this->sprite_40A.resource);
+            srcR.bottom = loco::assets::sprite_height(this->sprite_40A.resource);
 
-            if (this->sprite_40A.hBitmap != 0) {
-                Town_BlitElement((void*)this->sprite_40A.hBitmap,
+            if (this->sprite_40A.bitmap != 0) {
+                Town_BlitElement(this->sprite_40A.bitmap,
                     this->btnScenarioRect.left, this->btnScenarioRect.top,
                     this->btnScenarioRect.right, this->btnScenarioRect.bottom,
                     g_primary_surface,
@@ -1219,11 +1094,11 @@ void EditWindow::drawButtons()
 
                 RECT srcR;
                 srcR.left = 0; srcR.top = 0;
-                srcR.right  = *(uint16_t*)((int)this->sprite_40C.pResource + 0x14);
-                srcR.bottom = *(uint16_t*)((int)this->sprite_40C.pResource + 0x16);
+                srcR.right  = loco::assets::sprite_width(this->sprite_40C.resource);
+                srcR.bottom = loco::assets::sprite_height(this->sprite_40C.resource);
 
-                if (this->sprite_40C.hBitmap != 0) {
-                    Town_BlitElement((void*)this->sprite_40C.hBitmap,
+                if (this->sprite_40C.bitmap != 0) {
+                    Town_BlitElement(this->sprite_40C.bitmap,
                         this->btnExitRect.left, this->btnExitRect.top,
                         this->btnExitRect.right, this->btnExitRect.bottom,
                         g_primary_surface,
@@ -1240,11 +1115,11 @@ void EditWindow::drawButtons()
 
             RECT srcR;
             srcR.left = 0; srcR.top = 0;
-            srcR.right  = *(uint16_t*)((int)this->sprite_408.pResource + 0x14);
-            srcR.bottom = *(uint16_t*)((int)this->sprite_408.pResource + 0x16);
+            srcR.right  = loco::assets::sprite_width(this->sprite_408.resource);
+            srcR.bottom = loco::assets::sprite_height(this->sprite_408.resource);
 
-            if (this->sprite_408.hBitmap != 0) {
-                Town_BlitElement((void*)this->sprite_408.hBitmap,
+            if (this->sprite_408.bitmap != 0) {
+                Town_BlitElement(this->sprite_408.bitmap,
                     this->btnPlayRect.left, this->btnPlayRect.top,
                     this->btnPlayRect.right, this->btnPlayRect.bottom,
                     g_primary_surface,
@@ -1258,11 +1133,11 @@ void EditWindow::drawButtons()
 
             RECT srcR;
             srcR.left = 0; srcR.top = 0;
-            srcR.right  = *(uint16_t*)((int)this->sprite_409.pResource + 0x14);
-            srcR.bottom = *(uint16_t*)((int)this->sprite_409.pResource + 0x16);
+            srcR.right  = loco::assets::sprite_width(this->sprite_409.resource);
+            srcR.bottom = loco::assets::sprite_height(this->sprite_409.resource);
 
-            if (this->sprite_409.hBitmap != 0) {
-                Town_BlitElement((void*)this->sprite_409.hBitmap,
+            if (this->sprite_409.bitmap != 0) {
+                Town_BlitElement(this->sprite_409.bitmap,
                     this->btnScenarioRect.left, this->btnScenarioRect.top,
                     this->btnScenarioRect.right, this->btnScenarioRect.bottom,
                     g_primary_surface,

@@ -26,7 +26,6 @@ void RESDATA_IsBuildingTile() {}
 void RESDATA_IsRoadTile() {}
 void RESMGR_LoadSoundResource() {}
 void RESMGR_ReleaseSoundResource() {}
-void ResourceManager_GetById() {}
 void Sprite_Init() {}
 void Sprite_SetState() {}
 void TileMap_InvalidateRect() {}
@@ -335,7 +334,6 @@ void NETMAN_constructor(void*) {}
 void DirectPlay_constructor(void*) {}
 void PlayerRecord_constructor(void*) {}
 void PixelDataCache_Ctor(void*) {}
-int ResourceManager_Init(void*) { return 1; }  /* return success */
 void TileMap_Init(void*, unsigned char) {}
 void GameAudio_StopFinished(void*) {}
 void DDRAW_GetDsoundErrorString(int) {}

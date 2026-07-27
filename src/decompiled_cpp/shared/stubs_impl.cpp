@@ -75,7 +75,6 @@ void Timer_Resize(void*, int) {}
 void Collection_Sort(void*) {}
 void RESDATA_Lock(void*) {}
 void RESDATA_Unlock(void*) {}
-void* ResourceManager_GetById(void*, int) { return nullptr; }
 void RESMGR_PlaySound(int) {}
 void ScriptEngine_constructor(void*) {}
 void RESDATA_ScriptEngine_Dtor(void*) {}
@@ -325,7 +324,6 @@ void* PixelDataCache_Ctor(void*) { return nullptr; }
 int   DDRAW_Init(void) { return 1; }
 void  TileMap_Init(void*, char) {}
 void  UIPANEL_Hide(void*, void*) {}
-int   ResourceManager_Init(void*) { return 1; }
 void  INPUT_LoadConfig(void*) {}
 
 /* Per-frame updates */
