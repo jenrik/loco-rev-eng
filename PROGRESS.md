@@ -173,7 +173,7 @@ main()
 ### Autonomous reverse-engineering daemon pivot (2026-07-27)
 
 - [x] **Daemon vertical slice** — active design, SQLite WAL event/task store, normalized Pi RPC event recorder, local FastAPI/WebSocket dashboard, capability-protected internal API, Pi RPC lifecycle manager, and custom Pi task/write-scope extension
-- [x] **Read-only Ghidra adapter** — daemon-owned MCP stdio client opens raw `loco.exe`, waits for analysis, serializes an allowlisted query set, and stores content-addressed evidence revisions
+- [x] **Read-only Ghidra adapter** — daemon-owned MCP stdio client opens raw `loco.exe`, waits for analysis, serializes an allowlisted query set with verified direct proxy names, and stores content-addressed evidence revisions
 - [x] **Evidence-led task scheduler** — SQLite tasks/requirement edges/write-scope requests, dependency-gated launch of role agents, and durable agent task transitions
 - [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
@@ -326,6 +326,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (ghidra-proxy-names) | Found the adapter sent Pi-decorated `ghidra_*` names to the direct re-mcp-ghidra proxy, which exposes unprefixed names; corrected open/wait/close/query mappings and verified a live decompile. |
 | 2026-07-27 (rpc-framing) | Found large escaped `read` result JSONL records exceeded asyncio’s 64KiB reader limit, silently halting stdout consumption and stalling sibling parallel reads; raised the bounded limit to 2MiB with regression coverage. |
 | 2026-07-27 (websocket-runtime) | Fixed live dashboard upgrades by declaring Uvicorn’s WebSocket runtime in Nix and enforcing it at startup; verified HTTP 101 handshake. |
 | 2026-07-27 (stalled-attempt-recovery) | Found a live agent stalled after 3 of 4 parallel reads never completed; added tool-inactivity/dead-PID watchdog, safe operator recovery, and startup stale-task recovery. |

@@ -35,8 +35,11 @@ requests abort, then reaps the idle RPC child after a brief response-flush grace
 period. A watchdog fails an attempt after bounded tool inactivity or a definitely
 dead child PID; startup performs the same dead-PID recovery for stale tasks.
 Its subprocess JSONL reader accepts 2MiB records because Pi read results can
-exceed asyncio's 64KiB default after JSON escaping. It is the only writer to
-the database, avoiding races between agents.
+exceed asyncio's 64KiB default after JSON escaping. Its direct
+`re-mcp-ghidra proxy` client uses the proxy's unprefixed operation names
+(`open_database`, `decompile_function`, etc.), rather than Pi's decorated
+`mcp.ghidra.*` names. It is the only writer to the database, avoiding races
+between agents.
 
 A local SQLite database in WAL mode is appropriate for this single-host,
 read-heavy dashboard. WAL permits concurrent readers with one writer but does

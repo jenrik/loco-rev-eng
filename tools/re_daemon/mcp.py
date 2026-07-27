@@ -146,16 +146,18 @@ class GhidraAdapter:
     """Allowlisted, read-only Ghidra operations for one raw binary database."""
 
     OPERATIONS = {
-        "decompile_function": "ghidra_decompile_function",
-        "disassemble_function": "ghidra_disassemble_function",
-        "list_functions": "ghidra_list_functions",
-        "get_xrefs_to": "ghidra_get_xrefs_to",
-        "get_xrefs_from": "ghidra_get_xrefs_from",
-        "list_structures": "ghidra_list_structures",
-        "get_structure": "ghidra_get_structure",
-        "list_names": "ghidra_list_names",
-        "get_strings": "ghidra_get_strings",
-        "find_code_by_string": "ghidra_find_code_by_string",
+        # re-mcp-ghidra proxy exposes backend operations directly. The
+        # mcp.ghidra.* namespace is Pi-side decoration, not an MCP tool name.
+        "decompile_function": "decompile_function",
+        "disassemble_function": "disassemble_function",
+        "list_functions": "list_functions",
+        "get_xrefs_to": "get_xrefs_to",
+        "get_xrefs_from": "get_xrefs_from",
+        "list_structures": "list_structures",
+        "get_structure": "get_structure",
+        "list_names": "list_names",
+        "get_strings": "get_strings",
+        "find_code_by_string": "find_code_by_string",
     }
 
     def __init__(self, config: GhidraConfig | None):
@@ -182,7 +184,7 @@ class GhidraAdapter:
         if self._client is not None:
             if self._opened and self.config is not None:
                 try:
-                    await self._client.call_tool("ghidra_close_database", {"database": self.config.database_id})
+                    await self._client.call_tool("close_database", {"database": self.config.database_id})
                 except McpError:
                     # Shutdown must release the process even if the worker already died.
                     pass
@@ -239,9 +241,9 @@ class GhidraAdapter:
             return
         if not self.config.binary_path.is_file():
             raise McpError(f"Ghidra binary does not exist: {self.config.binary_path}")
-        await self._client.call_tool("ghidra_open_database", {
+        await self._client.call_tool("open_database", {
             "file_path": str(self.config.binary_path),
             "database_id": self.config.database_id,
         })
-        await self._client.call_tool("ghidra_wait_for_analysis", {"database": self.config.database_id})
+        await self._client.call_tool("wait_for_analysis", {"database": self.config.database_id})
         self._opened = True

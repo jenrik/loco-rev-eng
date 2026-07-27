@@ -19,7 +19,10 @@ for line in sys.stdin:
         result = {'protocolVersion': '2024-11-05', 'capabilities': {}, 'serverInfo': {'name': 'fake-ghidra', 'version': '1'}}
     elif request['method'] == 'tools/call':
         call = request['params']
-        if call['name'] == 'ghidra_decompile_function':
+        if call['name'] not in {'open_database', 'wait_for_analysis', 'close_database', 'decompile_function'}:
+            print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'error': {'code': -32601, 'message': f"Unknown tool: {call['name']}"}}), flush=True)
+            continue
+        if call['name'] == 'decompile_function':
             result = {'content': [{'type': 'text', 'text': 'int FUN_00401000(void) { return 7; }'}], 'arguments': call['arguments']}
         else:
             result = {'content': [], 'arguments': call['arguments']}
@@ -66,8 +69,8 @@ class GhidraAdapterTests(unittest.TestCase):
                 marker = root / 'first-call'
                 server = root / 'recovering-mcp'
                 script = FAKE_MCP.replace('__PYTHON__', sys.executable).replace(
-                    "if call['name'] == 'ghidra_decompile_function':",
-                    f"if call['name'] == 'ghidra_decompile_function' and not __import__('pathlib').Path({str(marker)!r}).exists():\n            __import__('pathlib').Path({str(marker)!r}).touch()\n            sys.exit(0)\n        if call['name'] == 'ghidra_decompile_function':",
+                    "if call['name'] == 'decompile_function':",
+                    f"if call['name'] == 'decompile_function' and not __import__('pathlib').Path({str(marker)!r}).exists():\n            __import__('pathlib').Path({str(marker)!r}).touch()\n            sys.exit(0)\n        if call['name'] == 'decompile_function':",
                 )
                 server.write_text(script, encoding='utf-8')
                 server.chmod(0o755)
