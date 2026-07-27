@@ -176,7 +176,7 @@ and `agents.run()` to spawn persistent actors and one-shot reviewers.
 in a file without inlining its contents, use the async-IIFE + eval pattern:
 
 ```typescript
-const code = await pi.read('tools/decompile-class.ts');
+const code = await pi.read('tools/deprecated/decompile-class.ts');
 const wrapped = '(async () => { ' + code + ' })()';
 const result = await eval(wrapped);
 // result contains { decompileClass, transcribeFunction, ... }
