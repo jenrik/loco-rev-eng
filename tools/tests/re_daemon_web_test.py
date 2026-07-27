@@ -1,5 +1,6 @@
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -103,6 +104,54 @@ for line in sys.stdin:
                 self.assertEqual(approved.status_code, 200)
                 context = client.get(f"/internal/agents/{agent['id']}/context", headers={'x-re-daemon-token': 'test-capability'}).json()
                 self.assertIn('game/Building.h', context['agent']['write_scope'])
+
+    def test_terminal_task_transition_aborts_live_pi_attempt(self):
+        fake_pi = """#!__PYTHON__
+import json
+import sys
+for line in sys.stdin:
+    command = json.loads(line)
+    if command.get('type') == 'prompt':
+        print(json.dumps({'type': 'agent_start'}), flush=True)
+    elif command.get('type') == 'abort':
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
+        break
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / 'fake-pi'
+            executable.write_text(fake_pi.replace('__PYTHON__', sys.executable), encoding='utf-8')
+            executable.chmod(0o755)
+            app = create_app(root / 'state.sqlite3', project_root=Path.cwd(), daemon_token='test-capability', pi_binary=str(executable))
+            with TestClient(app) as client:
+                job = client.post('/api/jobs', json={'title': 'terminal', 'goal': 'stop after completion'}).json()
+                task = client.post(
+                    f"/api/jobs/{job['id']}/tasks",
+                    json={'title': 'one attempt', 'instructions': 'wait for terminal transition', 'role': 'investigator'},
+                ).json()
+                launched = client.post(f"/api/jobs/{job['id']}/schedule?limit=1").json()['launched'][0]
+                agent_id = launched['agent']['id']
+                completed = client.post(
+                    f"/internal/agents/{agent_id}/task/transition",
+                    headers={'x-re-daemon-token': 'test-capability'},
+                    json={'status': 'completed', 'reason': 'trial finished'},
+                )
+                self.assertEqual(completed.status_code, 200)
+                for _ in range(100):
+                    status = client.get('/api/status').json()
+                    agent = next(item for item in status['agents'] if item['id'] == agent_id)
+                    if agent['status'] == 'settled':
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(agent['status'], 'settled')
+                for _ in range(100):
+                    if agent_id not in app.state.agent_manager._agents:
+                        break
+                    time.sleep(0.02)
+                self.assertNotIn(agent_id, app.state.agent_manager._agents)
+                self.assertEqual(next(item for item in status['tasks'] if item['id'] == task['id'])['status'], 'completed')
+                kinds = [event['kind'] for event in client.get(f"/api/agents/{agent_id}/events?limit=100").json()['events']]
+                self.assertIn('terminal_abort_requested', kinds)
 
 
 if __name__ == "__main__":

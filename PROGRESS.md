@@ -178,12 +178,13 @@ main()
 - [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
 - [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, and write-scope decisions
+- [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
 
 ## Remaining work
 
 ### Autonomous reverse-engineering daemon
 
-- [ ] **Scheduler recovery policy** — retry/timeout/cancellation semantics and automatic re-queueing of interrupted task attempts
+- [ ] **Scheduler recovery policy** — timeout/retry semantics and automatic re-queueing of interrupted task attempts
 - [ ] **Transcript history** — expose bounded historical Pi-session transcript links without serving secret-bearing files
 - [ ] **Evidence lifecycle** — retention/eviction policy for content-addressed artifacts and explicit cache refresh controls in the dashboard
 
@@ -324,6 +325,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (daemon-reaper-trial) | Re-ran a real no-write Pi→daemon→Ghidra task after the terminal lifecycle fix: task completed, evidence persisted, and the Pi child was reaped; 224K temporary state removed. |
 | 2026-07-27 (daemon-trial) | Ran one live no-write Pi→daemon→Ghidra trial: evidence and a hypothesis persisted, task completed, abort control worked, and 340K temporary state was removed. |
 | 2026-07-27 (autonomous-re-daemon) | Added Ghidra worker recovery, project-local non-secret config, job-scoped evidence caching, revisioned hypotheses, operator scope approvals with dynamic enforcement, and browser scheduling/agent controls. |
 | 2026-07-27 (autonomous-re-daemon) | Added daemon-owned read-only Ghidra MCP adapter, content-addressed evidence revisions, dependency-gated task scheduler, durable task outcomes/scope requests, and real loco.exe MCP integration probe. |

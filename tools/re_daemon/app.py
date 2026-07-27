@@ -321,6 +321,15 @@ def create_app(
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         await broker.publish(agent_id, "task_transitioned", {"task": transitioned})
+        # A terminal task outcome ends the agent attempt. Without this explicit
+        # lifecycle signal Pi may continue autonomous turns after it has already
+        # reported success, growing the transcript and consuming model budget.
+        try:
+            await manager.control(agent_id, "abort")
+        except (KeyError, RuntimeError) as error:
+            await broker.publish(agent_id, "terminal_abort_unavailable", {"taskId": task["id"], "error": str(error)})
+        else:
+            await broker.publish(agent_id, "terminal_abort_requested", {"taskId": task["id"], "status": request.status})
         return transitioned
 
     @app.post("/internal/agents/{agent_id}/write-scope-requests")

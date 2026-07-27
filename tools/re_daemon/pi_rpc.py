@@ -158,6 +158,7 @@ class AgentManager:
         self.daemon_token = daemon_token
         self.pi_binary = pi_binary
         self._agents: dict[str, PiRpcAgent] = {}
+        self._reapers: dict[str, asyncio.Task[None]] = {}
 
     async def launch(self, agent_id: str) -> dict[str, Any]:
         if agent_id in self._agents:
@@ -179,6 +180,7 @@ class AgentManager:
             raise KeyError(agent_id)
         if action == "abort":
             await process.abort()
+            self._schedule_reap(agent_id, process)
         elif action == "steer" and message:
             await process.steer(message)
         elif action == "follow_up" and message:
@@ -186,6 +188,27 @@ class AgentManager:
         else:
             raise ValueError("invalid control action or missing message")
 
+    def _schedule_reap(self, agent_id: str, process: PiRpcAgent) -> None:
+        if agent_id not in self._reapers:
+            self._reapers[agent_id] = asyncio.create_task(self._reap_after_abort(agent_id, process))
+
+    async def _reap_after_abort(self, agent_id: str, process: PiRpcAgent) -> None:
+        """Release an idle RPC process after abort has let its tool response flush."""
+        try:
+            await asyncio.sleep(1)
+            if process.process is not None and process.process.returncode is None:
+                process.process.terminate()
+            if process._wait_task is not None:
+                try:
+                    await asyncio.wait_for(asyncio.shield(process._wait_task), timeout=5)
+                except TimeoutError:
+                    if process.process is not None and process.process.returncode is None:
+                        process.process.kill()
+                    await asyncio.shield(process._wait_task)
+        finally:
+            if self._agents.get(agent_id) is process:
+                self._agents.pop(agent_id, None)
+            self._reapers.pop(agent_id, None)
     async def close(self) -> None:
         """Abort daemon-owned Pi children during application shutdown."""
         processes = list(self._agents.values())
@@ -198,4 +221,6 @@ class AgentManager:
                 if process.process is not None and process.process.returncode is None:
                     process.process.kill()
             await asyncio.gather(*waiters, return_exceptions=True)
+        await asyncio.gather(*self._reapers.values(), return_exceptions=True)
+        self._reapers.clear()
         self._agents.clear()

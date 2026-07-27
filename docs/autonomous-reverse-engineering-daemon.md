@@ -30,8 +30,9 @@ Browser dashboard
 
 The daemon owns all durable state and all process control. It starts and stops Pi
 processes, sends RPC `prompt`, `steer`, `follow_up`, and `abort` commands, and
-normalizes the JSONL event stream from each process. It is the only writer to
-the database, avoiding races between agents.
+normalizes the JSONL event stream from each process. A terminal task transition
+requests abort, then reaps the idle RPC child after a brief response-flush grace
+period. It is the only writer to the database, avoiding races between agents.
 
 A local SQLite database in WAL mode is appropriate for this single-host,
 read-heavy dashboard. WAL permits concurrent readers with one writer but does
