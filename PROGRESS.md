@@ -178,8 +178,27 @@ main()
 - [x] **Parallel pool consolidation** — removed superseded `tools/decompile-parallel.ts`
 - [x] **Directed discovery** — optional capability objective focuses scheduling on the smallest relevant runtime dependency cone
 - [x] **Workflow regression suite** — covers PARTIAL, rejected/legitimate blocks, review failure, directed discovery, and stale scheduling decisions
+- [x] **Evidence-guided workflow foundation** — documented design intent; added lock-protected Python JSON core, Pi TypeScript bridge, durable attempt outcome ledger, source write-set audit, and CLI/integration regression tests
+
+### Autonomous reverse-engineering daemon pivot (2026-07-27)
+
+- [x] **Daemon vertical slice** — active design, SQLite WAL event/task store, normalized Pi RPC event recorder, local FastAPI/WebSocket dashboard, capability-protected internal API, Pi RPC lifecycle manager, and custom Pi task/write-scope extension
+- [x] **Read-only Ghidra adapter** — daemon-owned MCP stdio client opens raw `loco.exe`, waits for analysis, serializes an allowlisted query set with verified direct proxy names, and stores content-addressed evidence revisions
+- [x] **Evidence-led task scheduler** — SQLite tasks/requirement edges/write-scope requests, automatic initial evidence triage on job submission, dependency-gated launch of role agents, durable agent task transitions, and task-derived job states (`draft`/`queued`/`running`/terminal)
+- [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
+- [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
+- [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, formatted/coalesced streamed-message timeline, and declared Uvicorn WebSocket runtime
+- [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
+- [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, startup recovers in-progress tasks whose assigned PID is gone, and the RPC reader accepts escaped multi-KiB tool events
+- [x] **Autonomous task-graph driving** — evidence agents atomically persist bounded acyclic follow-on DAGs, initial triage cannot complete with only a prose plan, ready-task claims are race-safe, terminal transitions dispatch the next serial successor, queued graphs resume on startup, and dashboard snapshots render durable edges
 
 ## Remaining work
+
+### Autonomous reverse-engineering daemon
+
+- [ ] **Scheduler retry policy** — bounded automatic re-queueing/backoff for failed attempts (the watchdog currently fails safely for explicit operator requeue)
+- [ ] **Transcript history** — expose bounded historical Pi-session transcript links without serving secret-bearing files
+- [ ] **Evidence lifecycle** — retention/eviction policy for content-addressed artifacts and explicit cache refresh controls in the dashboard
 
 ### Priority 1: #ifdef pivot — first wave
 
@@ -320,6 +339,20 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (autonomous-task-graph) | Added agent-driven bounded DAG expansion with idempotency/cycle checks/source gating, atomic scheduler claims, automatic terminal/startup advancement, graph rendering, and end-to-end regression coverage. |
+| 2026-07-27 (automatic-job-kickoff) | Job submission now creates and dispatches a read-only initial evidence triage task; added one-click bootstrap for existing empty drafts. |
+| 2026-07-27 (job-status-singleton) | Reconciled dashboard job state from runnable/in-progress/terminal tasks and added an exclusive state-file lock after stale queued/running jobs and three competing daemon processes were observed. |
+| 2026-07-27 (ghidra-proxy-names) | Found the adapter sent Pi-decorated `ghidra_*` names to the direct re-mcp-ghidra proxy, which exposes unprefixed names; corrected open/wait/close/query mappings and verified a live decompile. |
+| 2026-07-27 (rpc-framing) | Found large escaped `read` result JSONL records exceeded asyncio’s 64KiB reader limit, silently halting stdout consumption and stalling sibling parallel reads; raised the bounded limit to 2MiB with regression coverage. |
+| 2026-07-27 (websocket-runtime) | Fixed live dashboard upgrades by declaring Uvicorn’s WebSocket runtime in Nix and enforcing it at startup; verified HTTP 101 handshake. |
+| 2026-07-27 (stalled-attempt-recovery) | Found a live agent stalled after 3 of 4 parallel reads never completed; added tool-inactivity/dead-PID watchdog, safe operator recovery, and startup stale-task recovery. |
+| 2026-07-27 (dashboard-timeline) | Reworked the live event tail into an activity-sorted agent-filterable timeline with formatted event cards and consolidated streaming deltas. |
+| 2026-07-27 (daemon-reaper-trial) | Re-ran a real no-write Pi→daemon→Ghidra task after the terminal lifecycle fix: task completed, evidence persisted, and the Pi child was reaped; 224K temporary state removed. |
+| 2026-07-27 (daemon-trial) | Ran one live no-write Pi→daemon→Ghidra trial: evidence and a hypothesis persisted, task completed, abort control worked, and 340K temporary state was removed. |
+| 2026-07-27 (autonomous-re-daemon) | Added Ghidra worker recovery, project-local non-secret config, job-scoped evidence caching, revisioned hypotheses, operator scope approvals with dynamic enforcement, and browser scheduling/agent controls. |
+| 2026-07-27 (autonomous-re-daemon) | Added daemon-owned read-only Ghidra MCP adapter, content-addressed evidence revisions, dependency-gated task scheduler, durable task outcomes/scope requests, and real loco.exe MCP integration probe. |
+| 2026-07-27 (autonomous-re-daemon) | Pivoted to active daemon design; implemented SQLite event store, Pi RPC manager, custom Pi extension, local FastAPI/WebSocket dashboard, and 6 daemon tests. |
+| 2026-07-27 (evidence-workflow-core) | Added the evidence-guided workflow design, atomic Python ledger/cache CLI, Pi bridge, supervisor attempt persistence and write-audit integration, plus 13 workflow/core tests. |
 | 2026-07-27 (mode2-main-loop) | Replaced EditWindow’s raw slot-4 dispatch with its assembly-proven null-target no-op; SDL mode 2 reaches the message pump without crashing. |
 | 2026-07-27 (uipanel-sdl-composition) | Recovered UIPANEL_Render (0x426EB0), added typed SDL primary surface clear/blit operations, and rendered decoded menu sprites without raw x86 vtable access. |
 | 2026-07-27 (train-subsystem-bootstrap) | Decompiled TrainSubsystem_Ctor (0x438BC0) and worker setup, replaced the null ctor pointer with typed construction, and added an empty-provider SDL DirectPlay boundary. |
