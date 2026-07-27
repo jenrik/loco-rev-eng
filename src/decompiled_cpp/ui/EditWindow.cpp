@@ -395,12 +395,14 @@ void EditWindow::show()
 
     /* Transition based on previousState */
     if (this->previousState == 0) {
-        /* First show: call vtable[4] then hide edit control */
-        void** vtbl = (void**)*(void***)this  /* [VTBL] manual vtable access */;
-        typedef void (__thiscall* Virtual4Fn)(void*, int, int, int, int, int);
-        Virtual4Fn v4 = (Virtual4Fn)vtbl[4];
-        v4(this, 0, 0, 0, 0, 1);
-
+        /*
+         * UI_WindowBase vtable[4], 0x426020, is invoked here with
+         * (tile_map=nullptr, divisor=0, origin=nullptr, clear=false,
+         * redraw=true). Its first branch compares tile_map with +0x14;
+         * both are null after UI_WindowBase_Ctor (0x425870), so it returns
+         * immediately at 0x42611D. Preserve that proven no-op directly
+         * instead of manually indexing a compiler-owned vtable.
+         */
         ShowWindow(this->hwndEdit, SW_HIDE);
     } else {
         /* Return from game: go to state 7 */
