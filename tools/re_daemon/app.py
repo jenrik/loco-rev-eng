@@ -76,6 +76,10 @@ class RequeueTask(BaseModel):
     reason: str = Field(min_length=1, max_length=16000)
 
 
+class RecoverTask(BaseModel):
+    reason: str = Field(min_length=1, max_length=16000)
+
+
 class TaskTransition(BaseModel):
     status: str = Field(pattern="^(completed|blocked|deferred|failed)$")
     reason: str | None = Field(default=None, max_length=16000)
@@ -106,6 +110,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        await manager.recover_orphaned_tasks()
         try:
             yield
         finally:
@@ -193,6 +198,15 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
         await broker.publish(scope_request["agent_id"], "write_scope_resolved", {"request": scope_request})
         return scope_request
+
+    @app.post("/api/tasks/{task_id}/recover")
+    async def recover_task(task_id: str, request: RecoverTask) -> dict[str, Any]:
+        try:
+            return await manager.recover_task(task_id, request.reason)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown task") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @app.post("/api/tasks/{task_id}/retry")
     async def retry_task(task_id: str, request: RequeueTask) -> dict[str, Any]:

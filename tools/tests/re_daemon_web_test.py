@@ -24,6 +24,7 @@ class DaemonWebTests(unittest.TestCase):
                 self.assertIn("event-agent", dashboard.text)
                 self.assertIn("partial streamed messages are consolidated", dashboard.text)
                 self.assertIn("last_activity_sequence", dashboard.text)
+                self.assertIn("/recover", dashboard.text)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",
@@ -51,6 +52,22 @@ class DaemonWebTests(unittest.TestCase):
 
                 denied = client.get(f"/internal/agents/{agent['id']}/context")
                 self.assertEqual(denied.status_code, 403)
+
+    def test_operator_recovery_fails_stuck_in_progress_task(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = create_app(f"{temporary}/state.sqlite3", daemon_token="test-capability")
+            with TestClient(app) as client:
+                store = app.state.store
+                job = store.create_job("recover", "stuck task")
+                task = store.create_task(job["id"], "stuck", "recover it", "investigator")
+                agent = store.create_agent(job["id"], "investigator", "stuck", f"{temporary}/session")
+                store.transition_task(task["id"], "in_progress", "launched", agent["id"])
+                response = client.post(f"/api/tasks/{task['id']}/recover", json={"reason": "no tool completion"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["status"], "failed")
+                self.assertIn("operator recovery", response.json()["transition_reason"])
+                self.assertEqual(store.get_agent(agent["id"])["status"], "failed")
+
 
     def test_internal_ghidra_query_records_evidence(self):
         fake_mcp = """#!__PYTHON__

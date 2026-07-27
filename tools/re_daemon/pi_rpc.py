@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import time
 from typing import Any
 
 from .broker import EventBroker
@@ -55,6 +56,8 @@ class PiRpcAgent:
         self._wait_task: asyncio.Task[None] | None = None
         self._aborted = False
         self._write_lock = asyncio.Lock()
+        self._active_tools: dict[str, float] = {}
+        self._last_activity_at = time.monotonic()
 
     async def start(self) -> None:
         session_dir = Path(self.agent["session_dir"])
@@ -122,12 +125,25 @@ class PiRpcAgent:
             except json.JSONDecodeError:
                 await self.broker.publish(self.agent["id"], "rpc_protocol_error", {"line": line[:4096].decode("utf-8", errors="replace")})
                 continue
+            self._last_activity_at = time.monotonic()
+            event_type = event.get("type")
+            tool_call_id = event.get("toolCallId")
+            if event_type == "tool_execution_start" and isinstance(tool_call_id, str):
+                self._active_tools[tool_call_id] = self._last_activity_at
+            elif event_type == "tool_execution_update" and isinstance(tool_call_id, str) and tool_call_id in self._active_tools:
+                self._active_tools[tool_call_id] = self._last_activity_at
+            elif event_type == "tool_execution_end" and isinstance(tool_call_id, str):
+                self._active_tools.pop(tool_call_id, None)
             normalized = normalize_pi_event(event)
             if normalized is not None:
                 kind, payload = normalized
                 await self.broker.publish(self.agent["id"], kind, payload)
             if event.get("type") == "agent_settled":
                 self.store.set_agent_status(self.agent["id"], "settled")
+
+    def stalled_tool_calls(self, timeout_seconds: float) -> list[str]:
+        now = time.monotonic()
+        return sorted(call_id for call_id, last_update in self._active_tools.items() if now - last_update >= timeout_seconds)
 
     async def _read_stderr(self) -> None:
         assert self.process is not None and self.process.stderr is not None
@@ -150,15 +166,18 @@ class PiRpcAgent:
 class AgentManager:
     """Owns live Pi processes. A restart leaves historical sessions intact."""
 
-    def __init__(self, store: DaemonStore, broker: EventBroker, project_root: Path, daemon_url: str, daemon_token: str, pi_binary: str = "pi"):
+    def __init__(self, store: DaemonStore, broker: EventBroker, project_root: Path, daemon_url: str, daemon_token: str, pi_binary: str = "pi", tool_timeout_seconds: float = 300.0, watchdog_poll_seconds: float = 5.0):
         self.store = store
         self.broker = broker
         self.project_root = project_root
         self.daemon_url = daemon_url
         self.daemon_token = daemon_token
         self.pi_binary = pi_binary
+        self.tool_timeout_seconds = tool_timeout_seconds
+        self.watchdog_poll_seconds = watchdog_poll_seconds
         self._agents: dict[str, PiRpcAgent] = {}
         self._reapers: dict[str, asyncio.Task[None]] = {}
+        self._watchdogs: dict[str, asyncio.Task[None]] = {}
 
     async def launch(self, agent_id: str) -> dict[str, Any]:
         if agent_id in self._agents:
@@ -168,6 +187,7 @@ class AgentManager:
         self._agents[agent_id] = process
         try:
             await process.start()
+            self._watchdogs[agent_id] = asyncio.create_task(self._watch_attempt(agent_id, process))
         except Exception:
             self._agents.pop(agent_id, None)
             self.store.set_agent_status(agent_id, "failed")
@@ -188,6 +208,72 @@ class AgentManager:
         else:
             raise ValueError("invalid control action or missing message")
 
+    async def _watch_attempt(self, agent_id: str, process: PiRpcAgent) -> None:
+        """Fail an in-progress task when its Pi child exits or tools stop progressing."""
+        try:
+            while True:
+                await asyncio.sleep(self.watchdog_poll_seconds)
+                task = self.store.task_for_agent(agent_id)
+                if task is None or task["status"] != "in_progress":
+                    return
+                if process.process is None or process.process.returncode is not None:
+                    await self._fail_task_attempt(agent_id, task["id"], "Pi process exited before a terminal task transition")
+                    return
+                stalled = process.stalled_tool_calls(self.tool_timeout_seconds)
+                if stalled:
+                    reason = f"tool inactivity timeout after {self.tool_timeout_seconds:.0f}s: {', '.join(stalled)}"
+                    await self.broker.publish(agent_id, "agent_tool_timeout", {"taskId": task["id"], "toolCallIds": stalled, "timeoutSeconds": self.tool_timeout_seconds})
+                    await process.abort()
+                    self._schedule_reap(agent_id, process)
+                    await self._fail_task_attempt(agent_id, task["id"], reason)
+                    return
+        finally:
+            self._watchdogs.pop(agent_id, None)
+
+    async def _fail_task_attempt(self, agent_id: str, task_id: str, reason: str) -> None:
+        task = self.store.get_task(task_id)
+        if task["status"] != "in_progress":
+            return
+        if agent_id:
+            agent = self.store.get_agent(agent_id)
+            if agent["status"] in {"queued", "starting", "running"}:
+                self.store.set_agent_status(agent_id, "failed")
+        failed = self.store.transition_task(task_id, "failed", reason, agent_id or None)
+        await self.broker.publish(agent_id or None, "task_attempt_failed", {"task": failed, "reason": reason})
+
+    async def recover_orphaned_tasks(self) -> list[str]:
+        """Fail in-progress tasks whose daemon-owned child PID is definitely gone."""
+        recovered: list[str] = []
+        for task in self.store.in_progress_tasks():
+            agent_id = task.get("assigned_agent_id")
+            if not agent_id:
+                continue
+            agent = self.store.get_agent(agent_id)
+            pid = agent.get("pid")
+            try:
+                if pid is not None:
+                    os.kill(pid, 0)
+                    continue
+            except ProcessLookupError:
+                pass
+            except PermissionError:
+                continue
+            await self._fail_task_attempt(agent_id, task["id"], "daemon startup recovery: assigned Pi process is not alive")
+            recovered.append(task["id"])
+        return recovered
+
+    async def recover_task(self, task_id: str, reason: str) -> dict[str, Any]:
+        task = self.store.get_task(task_id)
+        if task["status"] != "in_progress":
+            raise ValueError("only an in-progress task can be recovered")
+        agent_id = task.get("assigned_agent_id")
+        if agent_id:
+            try:
+                await self.control(agent_id, "abort")
+            except (KeyError, RuntimeError):
+                pass
+        await self._fail_task_attempt(agent_id or "", task_id, f"operator recovery: {reason}")
+        return self.store.get_task(task_id)
     def _schedule_reap(self, agent_id: str, process: PiRpcAgent) -> None:
         if agent_id not in self._reapers:
             self._reapers[agent_id] = asyncio.create_task(self._reap_after_abort(agent_id, process))
@@ -211,6 +297,11 @@ class AgentManager:
             self._reapers.pop(agent_id, None)
     async def close(self) -> None:
         """Abort daemon-owned Pi children during application shutdown."""
+        watchdogs = list(self._watchdogs.values())
+        for watchdog in watchdogs:
+            watchdog.cancel()
+        await asyncio.gather(*watchdogs, return_exceptions=True)
+        self._watchdogs.clear()
         processes = list(self._agents.values())
         await asyncio.gather(*(process.abort() for process in processes), return_exceptions=True)
         waiters = [process._wait_task for process in processes if process._wait_task is not None]

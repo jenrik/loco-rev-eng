@@ -179,12 +179,13 @@ main()
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
 - [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, and formatted/coalesced streamed-message timeline
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
+- [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, and startup recovers in-progress tasks whose assigned PID is gone
 
 ## Remaining work
 
 ### Autonomous reverse-engineering daemon
 
-- [ ] **Scheduler recovery policy** — timeout/retry semantics and automatic re-queueing of interrupted task attempts
+- [ ] **Scheduler retry policy** — bounded automatic re-queueing/backoff for failed attempts (the watchdog currently fails safely for explicit operator requeue)
 - [ ] **Transcript history** — expose bounded historical Pi-session transcript links without serving secret-bearing files
 - [ ] **Evidence lifecycle** — retention/eviction policy for content-addressed artifacts and explicit cache refresh controls in the dashboard
 
@@ -325,6 +326,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (stalled-attempt-recovery) | Found a live agent stalled after 3 of 4 parallel reads never completed; added tool-inactivity/dead-PID watchdog, safe operator recovery, and startup stale-task recovery. |
 | 2026-07-27 (dashboard-timeline) | Reworked the live event tail into an activity-sorted agent-filterable timeline with formatted event cards and consolidated streaming deltas. |
 | 2026-07-27 (daemon-reaper-trial) | Re-ran a real no-write Pi→daemon→Ghidra task after the terminal lifecycle fix: task completed, evidence persisted, and the Pi child was reaped; 224K temporary state removed. |
 | 2026-07-27 (daemon-trial) | Ran one live no-write Pi→daemon→Ghidra trial: evidence and a hypothesis persisted, task completed, abort control worked, and 340K temporary state was removed. |

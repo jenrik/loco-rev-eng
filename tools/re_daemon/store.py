@@ -319,6 +319,11 @@ class DaemonStore:
             )
             connection.commit()
 
+    def in_progress_tasks(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute("SELECT * FROM tasks WHERE status = 'in_progress' ORDER BY updated_at ASC").fetchall()
+        return [self._task_row(row) for row in rows]
+
     def ready_tasks(self, job_id: str, limit: int = 10) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 100))
         with self._lock, self._connect() as connection:
