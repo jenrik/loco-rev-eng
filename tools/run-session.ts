@@ -49,6 +49,7 @@ const CLASSES = [
 
 const CONFIG = {
   direction: MODE === "discover" ? DISCOVERY_DIRECTION : null,
+  workflowBinary: { filePath: BINARY },
   maxParallel: 3,                          // hard cap; supervisor decides safe occupancy
   maxIterations: 5,                        // maximum PRIMARY work turns per attempt
   primaryModel: "deepseek/deepseek-v4-pro",

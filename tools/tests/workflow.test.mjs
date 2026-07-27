@@ -178,7 +178,7 @@ async function testSupervisorReceivesValidatedBlock() {
   };
   const pi = { read: async () => fakeClassModule };
   const { run } = await loadFabricProgram("tools/supervisor.ts", { pi, agents });
-  const result = await run({ classes, ghidraDatabase: "testdb", maxParallel: 1 });
+  const result = await run({ classes, ghidraDatabase: "testdb", maxParallel: 1, workflowStatePath: false });
 
   assert.equal(result.blocked, 1);
   assert.match(completionSnapshot, /"status": "blocked"/);
@@ -220,12 +220,42 @@ async function testSupervisorDiscardsStaleLaunchDecision() {
   };
   const pi = { read: async () => fakeClassModule };
   const { run } = await loadFabricProgram("tools/supervisor.ts", { pi, agents });
-  const result = await run({ classes, ghidraDatabase: "testdb", maxParallel: 2 });
+  const result = await run({ classes, ghidraDatabase: "testdb", maxParallel: 2, workflowStatePath: false });
 
   assert.deepEqual(launched, ["A"], "B launch from stale supervisor turn must be discarded");
   assert.equal(result.approved, 1);
   assert.equal(askCount, 3);
   delete globalThis.__workflowLaunches;
+}
+
+async function testExplicitConfigPreservesCanonicalFiles() {
+  const pi = { read: async () => "" };
+  const { normalizeConfig } = await loadFabricProgram("tools/supervisor.ts", { pi, agents: {} });
+  const canonical = classParams({
+    className: "Canonical",
+    headerPath: "game/Canonical.h",
+    implPath: "game/Canonical.cpp",
+  });
+  const normalized = normalizeConfig({
+    className: "Canonical",
+    headerPath: "../../outside.h",
+    implPath: "../../outside.cpp",
+    functions: [{ name: "Wrong::Function", address: "0x401111" }],
+    retry: true,
+    guidance: "retry after dependency",
+  }, { classes: [canonical], ghidraDatabase: "testdb", maxIterations: 5 }, false);
+
+  assert.ok(normalized.config);
+  assert.equal(normalized.config.headerPath, "game/Canonical.h");
+  assert.equal(normalized.config.implPath, "game/Canonical.cpp");
+  assert.deepEqual(normalized.config.functions, canonical.functions);
+  assert.equal(normalized.config.supervisorGuidance, "retry after dependency");
+
+  const unsafeDiscovery = normalizeConfig({
+    className: "Unsafe", headerPath: "../Unsafe.h", implPath: "game/Unsafe.cpp",
+    functions: [{ name: "Unsafe::Run", address: "0x401000" }],
+  }, { ghidraDatabase: "testdb", maxIterations: 5 }, true);
+  assert.match(unsafeDiscovery.error, /unsafe/);
 }
 
 const tests = [
@@ -236,6 +266,7 @@ const tests = [
   testDirectedDiscoveryPromptAndSnapshot,
   testSupervisorReceivesValidatedBlock,
   testSupervisorDiscardsStaleLaunchDecision,
+  testExplicitConfigPreservesCanonicalFiles,
 ];
 
 for (const test of tests) {

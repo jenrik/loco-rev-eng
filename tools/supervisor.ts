@@ -217,11 +217,22 @@ ${JSON.stringify({
 Choose what is safe to start now. Return only the scheduling JSON object.`;
 }
 
-async function loadDecompileClass() {
-  const code = await pi.read("tools/decompile-class.ts");
+async function loadDecompileClass(projectRoot = PROJECT) {
+  const code = await pi.read(`${projectRoot}/tools/decompile-class.ts`);
   const wrapped = "(async () => { " + code + " })()";
   const module = await eval(wrapped);
   return module.decompileClass;
+}
+
+async function loadWorkflowCore(projectRoot = PROJECT) {
+  const code = await pi.read(`${projectRoot}/tools/workflow-core.ts`);
+  const wrapped = "(async () => { " + code + " })()";
+  return await eval(wrapped);
+}
+
+function isSafeDecompiledPath(path) {
+  return typeof path === "string" && path.length > 0 &&
+    !path.startsWith("/") && !path.split("/").includes("..");
 }
 
 function normalizeConfig(start, params, isDiscovery) {
@@ -229,9 +240,14 @@ function normalizeConfig(start, params, isDiscovery) {
   if (!isDiscovery) {
     const canonical = (params.classes || []).find((candidate) => candidate.className === start.className);
     if (!canonical) return { error: `unknown explicit class ${start.className}` };
-    config = { ...canonical, ...start, functions: canonical.functions };
+    // The supervisor may select an explicit target and attach retry guidance, but
+    // it must not redirect a canonical class to unrelated source files/functions.
+    config = { ...canonical, retry: start.retry === true, guidance: start.guidance };
   }
 
+  if (!isSafeDecompiledPath(config.headerPath) || !isSafeDecompiledPath(config.implPath)) {
+    return { error: `${config.className} has an unsafe headerPath or implPath` };
+  }
   if (!config.headerPath || !config.implPath) {
     return { error: `${config.className} is missing headerPath or implPath` };
   }
@@ -279,6 +295,7 @@ function summarizeFinalResults(attemptResults) {
 }
 
 async function run(inputParams) {
+  const projectRoot = inputParams.projectRoot || PROJECT;
   const params = {
     classes: inputParams.classes,
     discover: inputParams.discover || false,
@@ -294,6 +311,12 @@ async function run(inputParams) {
     primaryModel: inputParams.primaryModel || "deepseek/deepseek-v4-pro",
     reviewerModel: inputParams.reviewerModel || "deepseek/deepseek-v4-pro",
     supervisorModel: inputParams.supervisorModel || "deepseek/deepseek-v4-pro",
+    projectRoot,
+    workflowStatePath: inputParams.workflowStatePath === false
+      ? null
+      : (inputParams.workflowStatePath || `${projectRoot}/.pi/workflow/decompilation-state.json`),
+    workflowCorePath: inputParams.workflowCorePath || `${projectRoot}/tools/workflow_core.py`,
+    workflowBinary: inputParams.workflowBinary || {},
   };
 
   const isDiscovery = params.discover && (!params.classes || params.classes.length === 0);
@@ -304,7 +327,15 @@ async function run(inputParams) {
 
   const concurrency = Math.max(1, params.maxParallel);
   params.maxParallel = concurrency;
-  const decompileClass = await loadDecompileClass();
+  const workflow = params.workflowStatePath ? await loadWorkflowCore(params.projectRoot) : null;
+  const workflowOptions = workflow ? {
+    statePath: params.workflowStatePath,
+    corePath: params.workflowCorePath,
+  } : null;
+  if (workflow) {
+    await workflow.workflowCoreCall("init", { binary: params.workflowBinary }, workflowOptions);
+  }
+  const decompileClass = await loadDecompileClass(params.projectRoot);
 
   print(`\n╔══════════════════════════════════════════════╗\n`);
   print(`║ SUPERVISOR — incremental scheduler           ║\n`);
@@ -348,26 +379,101 @@ async function run(inputParams) {
     }
   }
 
-  function launch(config) {
+  async function recordWorkflowOutcome(taskId, result, before) {
+    if (!workflow) return result;
+    try {
+      const after = await workflow.sourceFingerprint(params.projectRoot);
+      const writeAudit = await workflow.workflowCoreCall("validate-write-set", {
+        taskId, before, after,
+      }, workflowOptions);
+      if (writeAudit.unexpected.length > 0) {
+        await workflow.workflowCoreCall("defer", {
+          taskId,
+          status: "deferred",
+          reason: `Unexpected source edits: ${writeAudit.unexpected.join(", ")}`,
+          nextAction: "Review and split unexpected edits into declared work items.",
+          blockedBy: [],
+          evidenceRefs: [],
+          retryWhen: "The write set is corrected or the shared work is explicitly declared.",
+        }, workflowOptions);
+        return {
+          ...result,
+          status: "error",
+          implementationStatus: result.status,
+          error: `Unexpected write-set changes: ${writeAudit.unexpected.join(", ")}`,
+          writeAudit,
+          workflowTaskId: taskId,
+        };
+      }
+
+      if (result.status === "approved") {
+        await workflow.workflowCoreCall("transition", {
+          taskId, status: "integrated", reason: "Independent reviewer approved the target status.",
+        }, workflowOptions);
+      } else if (result.status === "blocked") {
+        const firstBlock = (result.blocks || [])[0] || {};
+        await workflow.workflowCoreCall("defer", {
+          taskId,
+          status: "blocked",
+          reason: result.blockReview && result.blockReview.reason || firstBlock.why || "Validated external dependency.",
+          nextAction: firstBlock.suggestion || "Create a concrete prerequisite or investigation task.",
+          blockedBy: [],
+          evidenceRefs: firstBlock.address ? [firstBlock.address] : [],
+          retryWhen: "The recorded prerequisite or investigation produces new evidence.",
+        }, workflowOptions);
+      } else {
+        await workflow.workflowCoreCall("defer", {
+          taskId,
+          status: "deferred",
+          reason: result.error || result.status || "Attempt did not reach approval.",
+          nextAction: "Resume from the recorded review and PRIMARY output.",
+          blockedBy: [],
+          evidenceRefs: [],
+          retryWhen: "A subsequent supervised attempt is scheduled.",
+        }, workflowOptions);
+      }
+      return { ...result, writeAudit, workflowTaskId: taskId };
+    } catch (error) {
+      return {
+        ...result,
+        status: "error",
+        implementationStatus: result.status,
+        error: `Workflow ledger failure: ${error.message || String(error)}`,
+        workflowTaskId: taskId,
+      };
+    }
+  }
+
+  async function launch(config) {
     const className = config.className;
     const attempt = (attemptsByClass.get(className) || 0) + 1;
     attemptsByClass.set(className, attempt);
     const jobId = nextJobId++;
     const record = { jobId, className, attempt, config, settled: false, result: null, promise: null };
-    record.promise = decompileClass(config).then(
-      (value) => {
-        record.result = { className, attempt, ...value };
-        record.settled = true;
-        stateRevision++;
-        return record.result;
-      },
-      (reason) => {
-        record.result = { className, attempt, status: "error", error: reason && reason.message || String(reason) };
-        record.settled = true;
-        stateRevision++;
-        return record.result;
-      },
-    );
+    let taskId = null;
+    let before = null;
+    if (workflow) {
+      taskId = workflow.workflowTaskId(config);
+      await workflow.workflowCoreCall("upsert-task", workflow.workflowTaskPayload(config, { taskId }), workflowOptions);
+      await workflow.workflowCoreCall("transition", {
+        taskId, status: "active", reason: `Supervisor started attempt ${attempt}.`,
+      }, workflowOptions);
+      before = await workflow.sourceFingerprint(params.projectRoot);
+    }
+    record.promise = (async () => {
+      let result;
+      try {
+        const value = await decompileClass(config);
+        result = { className, attempt, ...value };
+      } catch (reason) {
+        result = { className, attempt, status: "error", error: reason && reason.message || String(reason) };
+      }
+      if (workflow) result = await recordWorkflowOutcome(taskId, result, before);
+      record.result = result;
+      record.settled = true;
+      stateRevision++;
+      return result;
+    })();
     active.set(jobId, record);
     print(`▶ ${className} attempt ${attempt} (${config.functions.length} functions)\n`);
   }
@@ -470,7 +576,7 @@ async function run(inputParams) {
           rejected.push(normalized.error);
           continue;
         }
-        launch(normalized.config);
+        await launch(normalized.config);
         launched++;
       }
 
@@ -515,4 +621,5 @@ return {
   compactResult,
   buildSupervisorInstructions,
   buildSchedulingMessage,
+  normalizeConfig,
 };

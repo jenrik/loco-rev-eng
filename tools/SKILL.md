@@ -17,6 +17,9 @@ Fabric programs for automated decompilation of `loco.exe` classes.
 | `tools/run-session.ts` | Session entry point; opens a fresh Ghidra database and starts the supervisor |
 | `tools/supervisor.ts` | Persistent incremental scheduler for multi-class runs |
 | `tools/decompile-class.ts` | One class: persistent PRIMARY plus one-shot reviewer gates |
+| `tools/workflow-core.ts` | Pi-facing TypeScript bridge to durable workflow state |
+| `tools/workflow_core.py` | Atomic Python JSON CLI for evidence, task, dependency, deferred-work, and write-audit state |
+| `docs/evidence-guided-decompilation-workflow.md` | Long-lived design intent and staged migration plan |
 
 `tools/decompile-parallel.ts` was removed. Its fixed concurrency pool was
 superseded by the dependency-aware scheduler in `supervisor.ts`.
