@@ -87,21 +87,45 @@ struct IDirectDraw4 {
  * SDL renderer bridge
  * ========================================================================= */
 
-/** Ensure SDL-backed primary and backbuffer render targets exist for the
- * current SDL window. They are deliberately separate from untranslated
- * game's void* DirectDraw globals until its COM adapter is reconstructed. */
+/** The translated game renders in the binary's fixed 1280x1024 coordinate
+ * space. The canvas is separate from the physical SDL window. */
+constexpr int SDL3_PRIMARY_CANVAS_WIDTH = 1280;
+constexpr int SDL3_PRIMARY_CANVAS_HEIGHT = 1024;
+
+enum class SDL3PrimaryPresentationMode {
+    Auto,          // Pixel-perfect when it fits; otherwise aspect-preserving fit.
+    PixelPerfect,  // Center the canvas at 1:1, intentionally clipping if required.
+    Fit,           // Always scale uniformly to fit the display with letterboxing.
+};
+
+/** Ensure fixed-size canvas and backbuffer targets exist. They are deliberately
+ * separate from both the physical SDL display and untranslated DirectDraw globals. */
 bool SDL3_EnsurePrimarySurface();
 IDirectDrawSurface4* SDL3_GetPrimarySurface();
 
-/** Copy the primary render target to the SDL window and present it.
- * Returns false only when SDL window/renderer setup is unavailable. */
+/** Select how the logical canvas is projected to the SDL output. */
+void SDL3_SetPrimaryPresentationMode(SDL3PrimaryPresentationMode mode);
+SDL3PrimaryPresentationMode SDL3_GetPrimaryPresentationMode();
+
+/** Project the logical canvas to the SDL window and present it.
+ * Returns false only when canvas/window setup is unavailable. */
 bool SDL3_PresentPrimarySurface();
+
+/** Convert an SDL window-coordinate pointer position to logical canvas space.
+ * Returns false for letterbox/pillarbox margins or unavailable display state. */
+bool SDL3_DisplayToPrimaryCanvas(float display_x, float display_y,
+                                 float* canvas_x, float* canvas_y);
 
 /** Clear the SDL primary render target to an XRGB color. */
 bool SDL3_ClearPrimarySurface(uint32_t xrgb);
 
 /** Composite a decoded resource bitmap at native pixel coordinates. */
 bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y);
+
+/** Draw the host replacement for the original native EDIT control directly
+ * onto the fixed primary canvas. Coordinates are logical canvas pixels. */
+bool SDL3_DrawPrimaryTextInput(int left, int top, int right, int bottom,
+                               const char* text, bool focused);
 
 /* =========================================================================
  * DDRAW helper functions

@@ -15,7 +15,6 @@ PROJECT_ROOT := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 BUILD_DIR    := $(PROJECT_ROOT)build
 DCP_DIR      := $(PROJECT_ROOT)src/decompiled_cpp
 SHIMS_DIR    := $(PROJECT_ROOT)src/sdl3_shims
-DASHBOARD_DIR := $(PROJECT_ROOT)tools/re_daemon/frontend
 
 # Compiler
 CXX        := g++
@@ -66,8 +65,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-<<<<<<< HEAD
-.PHONY: all run clean distclean check help dirs dashboard dashboard-test test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: dirs $(BINARY)
 	@echo ""
@@ -145,6 +143,16 @@ $(SDL3_PRIMARY_PRESENT_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_win
 test-sdl3-primary-present: $(SDL3_PRIMARY_PRESENT_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; SDL_VIDEODRIVER=dummy $(SDL3_PRIMARY_PRESENT_TEST)
 
+# Mode-2 EditWindow::render regression: recovered backdrop resources reach the SDL primary target.
+MODE2_MENU_BACKDROP_TEST := $(BUILD_DIR)/mode2_menu_backdrop_test
+
+$(MODE2_MENU_BACKDROP_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h tests/mode2_menu_backdrop_test.cpp | dirs
+	@echo "=== Testing mode 2 EditWindow backdrop composition ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp tests/mode2_menu_backdrop_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-mode2-menu-backdrop: $(MODE2_MENU_BACKDROP_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MODE2_MENU_BACKDROP_TEST)
+
 # Startup menu sprite diagnostic: real PE IDs → RFH paths → RFD BMPs → SDL textures.
 MENU_SPRITE_VIEWER := $(BUILD_DIR)/menu_sprite_viewer
 
@@ -196,14 +204,6 @@ check:
 	@echo ""
 	@built=$$(find $(BUILD_DIR) -name '*.o' 2>/dev/null | wc -l); echo "  Objects built: $$built / $(words $(ALL_OBJS))"; if [ -f $(BINARY) ]; then echo "  Binary: $(BINARY) ($$(ls -lh $(BINARY) | awk '{print $$5}'))"; else echo "  Binary: not built"; fi
 
-# Autonomous RE dashboard
-dashboard:
-	@cd $(DASHBOARD_DIR) && npm ci --ignore-scripts && npm run build
-
-# Dashboard unit tests
-dashboard-test:
-	@cd $(DASHBOARD_DIR) && npm ci --ignore-scripts && npm test
-
 # Help
 help:
 	@echo "Lego Loco SDL3 -- Unified Build"
@@ -212,9 +212,7 @@ help:
 	@echo "  make run      Build and run"
 	@echo "  make clean    Remove generated build outputs"
 	@echo "  make distclean Reset everything"
-	@echo "  make check          Show status"
-	@echo "  make dashboard      Build the React operator dashboard"
-	@echo "  make dashboard-test Test the React operator dashboard"
+	@echo "  make check    Show status"
 
 
 _test:

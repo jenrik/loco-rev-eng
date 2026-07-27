@@ -65,9 +65,19 @@ class McpStdioClient:
             except TimeoutError:
                 self.process.kill()
                 await self.process.wait()
+        # Cancel and await reader tasks so no background work survives into
+        # uvicorn's graceful-shutdown wait period.
         for task in (self._reader_task, self._stderr_task):
             if task is not None:
                 task.cancel()
+        for task in (self._reader_task, self._stderr_task):
+            if task is not None:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._reader_task = None
+        self._stderr_task = None
         self.process = None
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
@@ -183,9 +193,15 @@ class GhidraAdapter:
     async def close(self) -> None:
         if self._client is not None:
             if self._opened and self.config is not None:
+                # close_database is best-effort at shutdown; the MCP worker may
+                # already be gone.  Use a short timeout so a hung worker does
+                # not stall uvicorn's graceful-shutdown wait.
                 try:
-                    await self._client.call_tool("close_database", {"database": self.config.database_id})
-                except McpError:
+                    await asyncio.wait_for(
+                        self._client.call_tool("close_database", {"database": self.config.database_id}),
+                        timeout=5,
+                    )
+                except (McpError, TimeoutError):
                     # Shutdown must release the process even if the worker already died.
                     pass
             await self._client.close()

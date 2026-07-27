@@ -117,6 +117,11 @@ void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
 void  __thiscall NETMAN_SendPacket(void* netman);               /* 0x43CDF0 */
 void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x466EA0 */
 void  __fastcall CGWND_SetMode(void* mode);                     /* 0x408130 */
+#ifndef _WIN32
+// The host calls the reconstructed C++ implementation, not the legacy
+// pointer-typed ABI bridge used by untranslated x86 call sites.
+void  CGWND_SetMode(int mode);                                  /* 0x408130 */
+#endif
 void  __fastcall DDRAW_InitAudio(void);                         /* 0x4014C2 */
 int   __thiscall Config_ReadInt(void* ini, const char* section,
                                 const char* key, const char* def);  /* 0x448D50 */
@@ -307,6 +312,13 @@ int EditWindow::create(HWND hWndParent)
     if (this->pPanelB) this->pPanelB->create_window(this->hWnd);
 
     /* Create the player-name edit control (EDIT, WS_CHILD, ID 0x411) */
+#ifndef _WIN32
+    // UI_MainMenu_Create at 0x4204D0 creates and subclasses this native
+    // control. The SDL canvas replacement is composed in hostRenderFrame;
+    // do not fabricate a Win32 child window in the host process.
+    this->hwndEdit = nullptr;
+    this->prevEditWndProc = 0;
+#else
     this->hwndEdit = CreateWindowExA(
         0x200,                                  /* WS_EX_CLIENTEDGE */
         "EDIT",
@@ -330,6 +342,7 @@ int EditWindow::create(HWND hWndParent)
 
     /* Set focus to edit control */
     SetFocus(this->hwndEdit);
+#endif
 
     return 1;
 }
@@ -377,12 +390,28 @@ void EditWindow::show()
     std::fprintf(stderr, "[TRACE] EditWindow::show: cursor hidden\n");
 
     /* Set focus to edit control and set player name */
+#ifndef _WIN32
+    // UI_MainMenu_Show (0x4206B0) reads PlayerConfig::name at +0x06.
+    // The host has no native child HWND, so copy the same bounded name into
+    // its canvas EDIT replacement and select it logically by focusing it.
+    this->hostEditText[0] = '\0';
+    if (g_player_config != nullptr) {
+        const char* source = static_cast<const char*>(g_player_config) + 6;
+        size_t length = 0;
+        while (length < 11 && source[length] != '\0') {
+            this->hostEditText[length] = source[length];
+            ++length;
+        }
+        this->hostEditText[length] = '\0';
+    }
+    this->hostEditFocused = true;
+#else
     SetFocus(this->hwndEdit);
     SetWindowTextA(this->hwndEdit, (const char*)((int)g_player_config + 6));
-    std::fprintf(stderr, "[TRACE] EditWindow::show: player name set\n");
-
     /* Send EM_SETSEL (0xB1) -- select end of text (start=0, end=-1) */
     SendMessageA(this->hwndEdit, 0xB1, 0, (void*)-1);
+#endif
+    std::fprintf(stderr, "[TRACE] EditWindow::show: player name set\n");
     std::fprintf(stderr, "[TRACE] EditWindow::show: edit selection set\n");
 
     /* Set NetMan game mode based on netman state */
@@ -906,10 +935,34 @@ void EditWindow::cleanupSprites()
 void EditWindow::render()
 {
 #ifndef _WIN32
-    // UIPANEL_Render @ 0x426EB0 composes through raw x86 surface/vtable
-    // layouts. On the SDL host the typed primary compositor owns that
-    // presentation boundary; the same decoded sprite resources are used.
+    // 0x421758..0x421ABF loads and blits these five resources, in this
+    // exact order, into a 1280x1024 menu surface. The host has no safe
+    // x86 UIPANEL_Surface/COM adapter, so its typed primary target is the
+    // composition boundary. Presentation remains the caller's job, just as
+    // the original function only prepares its offscreen surface.
     if (!SDL3_ClearPrimarySurface(0x002850)) return;
+
+    struct BackdropElement {
+        uint32_t resource_id;
+        int x;
+        int y;
+    };
+    constexpr BackdropElement backdrop[] = {
+        {0x413, 0x000, 0x000},
+        {0x444, 0x0F4, 0x1D6},
+        {0x445, 0x204, 0x0F9},
+        {0x446, 0x11A, 0x0F0},
+        {0x443, 0x20B, 0x2A8},
+    };
+
+    for (const BackdropElement& element : backdrop) {
+        auto* resource = loco::assets::host_resource_manager().get_sprite_by_id(element.resource_id);
+        auto* bitmap = loco::assets::sprite_bitmap(resource);
+        const bool blitted = bitmap != nullptr &&
+            SDL3_BlitSurfaceToPrimary(loco::assets::bitmap_surface(bitmap), element.x, element.y);
+        loco::assets::release_sprite(resource);
+        if (!blitted) return;
+    }
 #else
     void* surface_memory = operator_new(0x20);
     this->pMainSurface = surface_memory
@@ -937,6 +990,231 @@ void EditWindow::render()
     blit_backdrop(0x443, 0x20B, 0x2A8);
 #endif
 }
+
+#ifndef _WIN32
+namespace {
+enum HostMenuButton {
+    kHostNoButton = -1,
+    kHostOptionOne,
+    kHostQuit,
+    kHostPlay,
+    kHostScenario,
+    kHostExit,
+    kHostText,
+};
+
+bool host_point_in_rect(const RECT& rect, float x, float y)
+{
+    // Win32 PtInRect uses left/top inclusive and right/bottom exclusive edges.
+    return x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom;
+}
+
+void host_blit_menu_sprite(const MenuSpriteSlot& slot, const RECT& destination)
+{
+    if (!slot.bitmap) return;
+    SDL3_BlitSurfaceToPrimary(loco::assets::bitmap_surface(slot.bitmap),
+                              destination.left, destination.top);
+}
+
+void host_set_menu_rects(EditWindow& menu)
+{
+    // EditWindow_HandleClick (0x421200) derives each size from the loaded
+    // resource and then subtracts the source-surface crop offset. The SDL
+    // host always renders the whole logical surface, so that offset is zero.
+    const auto set_sprite_rect = [](RECT& rect, int left, int top,
+                                    const MenuSpriteSlot& sprite) {
+        rect.left = left;
+        rect.top = top;
+        rect.right = left + static_cast<int>(loco::assets::sprite_width(sprite.resource));
+        rect.bottom = top + static_cast<int>(loco::assets::sprite_height(sprite.resource));
+    };
+    set_sprite_rect(menu.btnOption1Rect, 0x387, 0x2A5, menu.sprite_403);
+    set_sprite_rect(menu.btnOption2Rect, 0x18B, 0x2A5, menu.sprite_405);
+    set_sprite_rect(menu.btnPlayRect, 0x212, 0x1EA, menu.sprite_407);
+    set_sprite_rect(menu.btnScenarioRect, 0x2C9, 0x1EA, menu.sprite_409);
+    set_sprite_rect(menu.btnExitRect, 0x387, 0x1BD, menu.sprite_40B);
+    set_sprite_rect(menu.btnTextRect, 0x387, 0x231, menu.sprite_40E);
+
+    // 0x4214BA..0x4214EA: SetRect(0x232, 0x2CC, 0x34D, 0x2ED), then
+    // OffsetRect by the negative source-surface crop. The host crop is zero.
+    menu.editBoxRect = {0x232, 0x2CC, 0x34D, 0x2ED};
+}
+
+HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
+{
+    // This is the enabled-button ordering in EditWindow_netPanelWndProc
+    // (0x422D80). The original state fields select which controls are live.
+    const char* const state = _g_netman_state;
+    const bool multiplayer = state && state[7] != 0;
+    const bool alternate_menu = state && state[8] != 0;
+    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
+
+    if (host_point_in_rect(menu.btnOption1Rect, x, y)) return kHostOptionOne;
+    if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
+    if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostPlay;
+    if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostScenario;
+    if (!multiplayer && !alternate_menu && host_point_in_rect(menu.btnExitRect, x, y)) return kHostExit;
+    if (!multiplayer && alternate_menu && host_point_in_rect(menu.btnTextRect, x, y)) return kHostText;
+    return kHostNoButton;
+}
+}  // namespace
+
+/**
+ * Host SDL frame composition.
+ *
+ * Assembly basis: the state-0/state-7 branch at 0x421C31 composes the
+ * prepared 0x500x0x400 backdrop, invokes EditWindow_drawButtons (0x422010),
+ * and overlays resources 0x403 and 0x405 in the two option rectangles.
+ * The host re-composes the fixed canvas rather than performing unsafe x86
+ * surface blits; this method is excluded from the original Windows build.
+ */
+void EditWindow::hostRenderFrame()
+{
+    if (!this->visible || !this->spritesLoaded ||
+        (this->dialogState != 0 && this->dialogState != 7)) return;
+
+    host_set_menu_rects(*this);
+    this->render();
+
+    const char* const state = _g_netman_state;
+    const bool multiplayer = state && state[7] != 0;
+    const bool alternate_menu = state && state[8] != 0;
+    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
+
+    // 0x421C9B -> 0x422010: SP uses 0x407/0x40A/0x40B; MP uses
+    // 0x408/0x409. 0x422223 selects the alternate 0x40C/0x40E pair.
+    if (multiplayer) {
+        host_blit_menu_sprite(this->sprite_408, this->btnPlayRect);
+        if (has_scenario) host_blit_menu_sprite(this->sprite_409, this->btnScenarioRect);
+    } else {
+        host_blit_menu_sprite(this->sprite_407, this->btnPlayRect);
+        if (has_scenario) host_blit_menu_sprite(this->sprite_40A, this->btnScenarioRect);
+        host_blit_menu_sprite(alternate_menu ? this->sprite_40C : this->sprite_40B,
+                              this->btnExitRect);
+        host_blit_menu_sprite(alternate_menu ? this->sprite_40E : this->sprite_40F,
+                              this->btnTextRect);
+    }
+
+    // 0x421C9B draws 0x403 and 0x405. The click feedback paths at
+    // 0x42298A and 0x422AC3 use 0x404 and 0x406 for their selected frames.
+    host_blit_menu_sprite(this->hostHoveredButton == kHostOptionOne ? this->sprite_404 : this->sprite_403,
+                          this->btnOption1Rect);
+    host_blit_menu_sprite(this->hostHoveredButton == kHostQuit ? this->sprite_406 : this->sprite_405,
+                          this->btnOption2Rect);
+
+    // UI_MainMenu_Create (0x4204D0) owns a native EDIT child at this RECT.
+    // The SDL host composes its equivalent into the same logical canvas.
+    SDL3_DrawPrimaryTextInput(this->editBoxRect.left, this->editBoxRect.top,
+                              this->editBoxRect.right, this->editBoxRect.bottom,
+                              this->hostEditText, this->hostEditFocused);
+}
+
+/**
+ * Host pointer adapter for EditWindow_netPanelWndProc (0x422D80) and the
+ * click state changes at 0x422C60..0x422D2E. SDL display coordinates are
+ * inverted through the same canvas projection used by SDL3_PresentPrimarySurface.
+ */
+void EditWindow::hostHandlePointer(float display_x, float display_y, bool pressed)
+{
+    float canvas_x = 0.0f;
+    float canvas_y = 0.0f;
+    const HostMenuButton button = SDL3_DisplayToPrimaryCanvas(display_x, display_y,
+                                                                &canvas_x, &canvas_y)
+        ? host_button_at(*this, canvas_x, canvas_y) : kHostNoButton;
+    this->hostHoveredButton = button;
+    if (!pressed) return;
+
+    if (host_point_in_rect(this->editBoxRect, canvas_x, canvas_y)) {
+        this->hostEditFocused = true;
+        this->hostHoveredButton = kHostNoButton;
+        return;
+    }
+    this->hostEditFocused = false;
+
+    // 0x422AC3..0x422C5D handles option two before the menu state toggles.
+    // Its terminal operation is CGWND_SetMode(10) at 0x422C4C. Mode 10 is
+    // the quit case in CGWND_SetMode (0x4082A1): it plays 0x5026, restores
+    // the display, and posts WM_CLOSE. Preserve that original transition.
+    if (button == kHostQuit) {
+        CGWND_SetMode(10);
+        return;
+    }
+    if (!_g_netman_state) return;
+
+    // Exact state transitions from the remaining original click branches.
+    // The next SDL frame selects the same drawButtons resource branch.
+    switch (button) {
+    case kHostPlay:
+        _g_netman_state[7] = 1;
+        NETMAN_SetGameMode(g_netman, 3);
+        break;
+    case kHostScenario:
+        _g_netman_state[7] = 0;
+        NETMAN_SetGameMode(g_netman, 0);
+        break;
+    case kHostExit:
+        _g_netman_state[8] = 1;
+        break;
+    case kHostText:
+        _g_netman_state[8] = 0;
+        break;
+    default:
+        break;  // Popup-producing option handlers remain on the Win32 path.
+    }
+}
+
+bool EditWindow::hostHandleKey(int32_t key_code)
+{
+    if (!this->hostEditFocused) return false;
+
+    // The unlabelled edit subclass at 0x420B20 forwards only Enter and
+    // Escape WM_KEYDOWN messages to the parent. Its parent handler at
+    // 0x420D57 commits the name for Enter; 0x420C19 takes the quit path
+    // for Escape. Backspace is handled by the native EDIT default proc.
+    if (key_code == 13) {
+        const char* const illegal = ",. /\\[]{}|!@#$%^&*()_+-=~`'\"<>?;:";
+        bool has_alpha = false;
+        bool legal = this->hostEditText[0] != '\0';
+        for (const char* ch = this->hostEditText; legal && *ch; ++ch) {
+            if (std::strchr(illegal, *ch) != nullptr) legal = false;
+            if ((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z')) has_alpha = true;
+        }
+
+        // This mirrors the validated PlayerConfig name copy at +0x06 in
+        // EditWindow_OnPlayerNameChanged (0x422660). The host's unsupported
+        // network/player-list cascade is deliberately left on its Win32 path.
+        if (legal && has_alpha && g_player_config != nullptr) {
+            std::memcpy(static_cast<char*>(g_player_config) + 6, this->hostEditText,
+                        sizeof(this->hostEditText));
+        }
+        return true;
+    }
+    if (key_code == 27) {
+        CGWND_SetMode(10);
+        return true;
+    }
+    if (key_code == 8) {
+        const size_t length = std::strlen(this->hostEditText);
+        if (length != 0) this->hostEditText[length - 1] = '\0';
+        return true;
+    }
+    return false;
+}
+
+void EditWindow::hostHandleTextInput(const char* utf8_text)
+{
+    if (!this->hostEditFocused || !utf8_text) return;
+
+    size_t length = std::strlen(this->hostEditText);
+    // The native ANSI EDIT control uses EM_LIMITTEXT(11). Preserve that byte
+    // bound and retain only printable single-byte input accepted by its font.
+    for (const unsigned char* ch = reinterpret_cast<const unsigned char*>(utf8_text);
+         *ch != '\0' && length < 11; ++ch) {
+        if (*ch >= 0x20 && *ch < 0x7f) this->hostEditText[length++] = static_cast<char>(*ch);
+    }
+    this->hostEditText[length] = '\0';
+}
+#endif  // !_WIN32
 
 /* ================================================================== */
 /* EditWindow::drawButtons -- Draw all main menu buttons                */

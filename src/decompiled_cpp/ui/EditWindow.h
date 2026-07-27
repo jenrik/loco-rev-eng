@@ -118,7 +118,7 @@ public:
     RECT        btnExitRect;        /* +0x11C  Exit button rect            */
     RECT        btnTextRect;        /* +0x12C  Text/action button rect     */
     RECT        btnOption1Rect;     /* +0x13C  Option button 1 rect        */
-    RECT        btnOption2Rect;     /* +0x14C  Option button 2 rect        */
+    RECT        btnOption2Rect;     /* +0x14C  Quit button rect (0x422AC3) */
 
     /* Player-name edit control layout */
     RECT        editBoxRect;        /* +0x15C  edit control RECT           */
@@ -167,6 +167,15 @@ public:
     NameEntryPanel* pPanelA;            /* +0x21C  NameEntryPanel              */
     GameSetupPanel* pPanelB;            /* +0x220  GameSetupPanel              */
 
+#ifndef _WIN32
+    // Host-only state for the SDL composition/input adapter; excluded from
+    // the original Windows object layout.
+    int hostHoveredButton = -1;
+    // The original EDIT control uses EM_LIMITTEXT(11) at 0x420A56.
+    char hostEditText[12] = {};
+    bool hostEditFocused = true;
+#endif
+
     /* ================================================================ */
     /* Constructor / Destructor                                          */
     /* ================================================================ */
@@ -187,6 +196,15 @@ public:
     int  netPanelWndProc(HWND hwnd, UINT msg,            /* 0x422D80 */
                          WPARAM wParam, LPARAM lParam);
     void onPlayerNameChanged();                          /* 0x422660 */
+
+#ifndef _WIN32
+    // Host-only presentation/input boundary. These methods preserve the
+    // original 1280x1024 coordinates but never alter the Win32/x86 object ABI.
+    void hostRenderFrame();
+    void hostHandlePointer(float display_x, float display_y, bool pressed);
+    bool hostHandleKey(int32_t key_code);
+    void hostHandleTextInput(const char* utf8_text);
+#endif
 
 private:
     void netPanelInit();                                 /* 0x422820 */

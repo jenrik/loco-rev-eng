@@ -340,34 +340,69 @@ class AgentManager:
             self._reapers.pop(agent_id, None)
     async def close(self) -> None:
         """Checkpoint active work, then stop daemon-owned Pi children on shutdown."""
+        # 1. Cancel watchdogs immediately so they don't race with shutdown.
         watchdogs = list(self._watchdogs.values())
         for watchdog in watchdogs:
             watchdog.cancel()
         await asyncio.gather(*watchdogs, return_exceptions=True)
         self._watchdogs.clear()
+
         processes = list(self._agents.values())
-        checkpoints = []
+        if not processes:
+            return  # nothing to clean up
+
+        # 2. Checkpoint in-progress tasks with a bounded pause-after-turn.
+        checkpoints: list[tuple[PiRpcAgent, dict[str, Any]]] = []
         for process in processes:
             task = self.store.task_for_agent(process.agent["id"])
             if task is not None and task["status"] == "in_progress":
                 checkpoints.append((process, task))
                 await self.broker.publish(process.agent["id"], "daemon_pause_requested", {"taskId": task["id"]})
-        await asyncio.gather(*(process.pause_after_turn() for process, _task in checkpoints), return_exceptions=True)
+
+        await asyncio.gather(
+            *(process.pause_after_turn() for process, _task in checkpoints),
+            return_exceptions=True,
+        )
+
         for process, task in checkpoints:
             current = self.store.get_task(task["id"])
             if current["status"] == "in_progress":
-                paused = self.store.transition_task(task["id"], "ready", f"daemon shutdown checkpoint: resume session from agent {process.agent['id']}")
+                paused = self.store.transition_task(
+                    task["id"], "ready",
+                    f"daemon shutdown checkpoint: resume session from agent {process.agent['id']}",
+                )
                 self.store.set_agent_status(process.agent["id"], "aborted")
                 await self.broker.publish(process.agent["id"], "task_checkpointed", {"task": paused})
-        await asyncio.gather(*(process.abort() for process in processes), return_exceptions=True)
+
+        # 3. Terminate every remaining process (both checkpointed and idle).
+        #    Sending an abort RPC message is unreliable at shutdown — the child
+        #    may be blocked on a tool call or already exiting.  Terminate first,
+        #    then wait with a firm deadline.
+        for process in processes:
+            try:
+                process._aborted = True
+            except Exception:
+                pass
+            if process.process is not None and process.process.returncode is None:
+                process.process.terminate()
+
+        # 4. Wait for exit-and-stdio-drain tasks with a hard cap.
         waiters = [process._wait_task for process in processes if process._wait_task is not None]
-        try:
-            await asyncio.wait_for(asyncio.gather(*waiters, return_exceptions=True), timeout=10)
-        except TimeoutError:
-            for process in processes:
-                if process.process is not None and process.process.returncode is None:
-                    process.process.kill()
-            await asyncio.gather(*waiters, return_exceptions=True)
+        if waiters:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*waiters, return_exceptions=True), timeout=8,
+                )
+            except TimeoutError:
+                for process in processes:
+                    if process.process is not None and process.process.returncode is None:
+                        try:
+                            process.process.kill()
+                        except Exception:
+                            pass
+                await asyncio.gather(*waiters, return_exceptions=True)
+
+        # 5. Absorb any in-flight reapers before releasing the manager.
         await asyncio.gather(*self._reapers.values(), return_exceptions=True)
         self._reapers.clear()
         self._agents.clear()

@@ -4,7 +4,9 @@
 #ifndef _WIN32
 
 #include "CGWND.h"
+#include "../ui/EditWindow.h"
 #include "../../sdl3_shims/sdl3_ddraw.h"
+#include "../../sdl3_shims/sdl3_window.h"
 #include <SDL3/SDL.h>
 #include <cstdio>
 
@@ -15,6 +17,14 @@ extern "C" {
 
 static SDL_Renderer* g_renderer = nullptr;
 
+extern void* g_ui_main;
+extern int g_game_mode;
+
+static EditWindow* active_host_menu()
+{
+    return g_game_mode == 2 ? static_cast<EditWindow*>(g_ui_main) : nullptr;
+}
+
 static void PumpMessages_SDL3(uint8_t filter)
 {
     if (!g_renderer) {
@@ -22,6 +32,11 @@ static void PumpMessages_SDL3(uint8_t filter)
     }
 
     SDL_Event event;
+    SDL_Window* const text_input_window = SDL3_GetWindow();
+    if (text_input_window) SDL_StartTextInput(text_input_window);
+    const auto stop_text_input = [text_input_window]() {
+        if (text_input_window) SDL_StopTextInput(text_input_window);
+    };
     
     /* Main render loop — runs until quit */
     while (true) {
@@ -30,15 +45,36 @@ static void PumpMessages_SDL3(uint8_t filter)
         bool isMouseEvent = false;
         switch (event.type) {
         case SDL_EVENT_QUIT:
+            stop_text_input();
             return;  /* window close button */
         case SDL_EVENT_KEY_DOWN:
-            if (event.key.key == SDLK_ESCAPE)
+            if (EditWindow* menu = active_host_menu()) {
+                if (menu->hostHandleKey(static_cast<int32_t>(event.key.key))) break;
+            }
+            if (event.key.key == SDLK_ESCAPE) {
+                stop_text_input();
                 return;  /* Escape to quit */
+            }
+            break;
+        case SDL_EVENT_TEXT_INPUT:
+            if (EditWindow* menu = active_host_menu()) {
+                menu->hostHandleTextInput(event.text.text);
+            }
             break;
         case SDL_EVENT_MOUSE_MOTION:
+            if (EditWindow* menu = active_host_menu()) {
+                menu->hostHandlePointer(event.motion.x, event.motion.y, false);
+            }
             if (filter != 0) { isMouseEvent = true; }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                if (EditWindow* menu = active_host_menu()) {
+                    menu->hostHandlePointer(event.button.x, event.button.y, true);
+                }
+            }
+            if (filter != 0) { isMouseEvent = true; }
+            break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
             if (filter != 0) { isMouseEvent = true; }
             break;
@@ -56,6 +92,20 @@ static void PumpMessages_SDL3(uint8_t filter)
 
         /* Game logic tick */
         GameLoop_FrameUpdate();
+
+        // CGWND_SetMode(10) posts WM_CLOSE in the original Win32 pump.
+        // This SDL pump consumes native events directly, so mode 10 is the
+        // equivalent terminal condition after the recovered exit-button path.
+        if (g_game_mode == 10) {
+            stop_text_input();
+            return;
+        }
+
+        // Host-only replacement for the x86 UIPANEL/offscreen-surface path:
+        // compose original EditWindow resources in logical canvas coordinates.
+        if (EditWindow* menu = active_host_menu()) {
+            menu->hostRenderFrame();
+        }
 
         // The primary DirectDraw target is now the sole frame source. The
         // fallback preserves the launch screen until any target exists.

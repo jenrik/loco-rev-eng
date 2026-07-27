@@ -49,7 +49,7 @@ unsigned int CRT_time(unsigned int* t) { return (unsigned int)time((time_t*)t); 
 
 /* ---- Game globals ---- */
 uint32_t g_game_time = 0;
-uint8_t  g_game_mode = 0;
+int32_t  g_game_mode = 0;  /* 0x4851F4: dword, read/written by CGWND_SetMode */
 char     g_empty_string = 0;
 char     g_install_path[256] = ".";
 void*    g_main_window = nullptr;

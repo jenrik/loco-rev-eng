@@ -27,6 +27,8 @@ static uint32_t g_last_bmp_height = 0;
 static IDirectDraw4* g_sdl_ddraw = nullptr;
 static IDirectDrawSurface4* g_sdl_primary_surface = nullptr;
 static IDirectDrawSurface4* g_sdl_backbuffer = nullptr;
+static SDL3PrimaryPresentationMode g_primary_presentation_mode =
+    SDL3PrimaryPresentationMode::Auto;
 
 static SDL_Surface* loadBmpToSdlSurface(const char* path, int bpp)
 {
@@ -394,15 +396,14 @@ bool SDL3_EnsurePrimarySurface()
     if (g_sdl_primary_surface && g_sdl_primary_surface->texture &&
         g_sdl_backbuffer && g_sdl_backbuffer->texture) return true;
 
-    int width = 0;
-    int height = 0;
-    if (!SDL_GetWindowSize(window, &width, &height) || width <= 0 || height <= 0) return false;
-
+    // EditWindow::render (0x4216F0) creates a 0x500 x 0x400 surface.
+    // Keep that binary coordinate space independent of window size so the
+    // display projection cannot clip UI elements on smaller windows.
     DDSURFACEDESC desc{};
     desc.dwSize = sizeof(desc);
     desc.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
-    desc.dwWidth = static_cast<uint32_t>(width);
-    desc.dwHeight = static_cast<uint32_t>(height);
+    desc.dwWidth = SDL3_PRIMARY_CANVAS_WIDTH;
+    desc.dwHeight = SDL3_PRIMARY_CANVAS_HEIGHT;
     if (g_sdl_ddraw->CreateSurface(&desc, &g_sdl_primary_surface, nullptr) != 0 ||
         g_sdl_ddraw->CreateSurface(&desc, &g_sdl_backbuffer, nullptr) != 0) {
         if (g_sdl_primary_surface) { g_sdl_primary_surface->Release(); g_sdl_primary_surface = nullptr; }
@@ -450,15 +451,122 @@ bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y)
     return rendered;
 }
 
+bool SDL3_DrawPrimaryTextInput(int left, int top, int right, int bottom,
+                               const char* text, bool focused)
+{
+    if (!text || right <= left || bottom <= top || !SDL3_EnsurePrimarySurface()) return false;
+
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+
+    // UI_MainMenu_Create (0x4204D0) creates an EDIT child with
+    // WS_EX_CLIENTEDGE. This is the SDL canvas equivalent of that native
+    // recessed light field; it deliberately uses the assembly-derived RECT.
+    const SDL_FRect outer = {static_cast<float>(left), static_cast<float>(top),
+                             static_cast<float>(right - left), static_cast<float>(bottom - top)};
+    SDL_SetRenderDrawColor(renderer, 0x3c, 0x3c, 0x3c, 255);
+    bool rendered = SDL_RenderFillRect(renderer, &outer);
+    const SDL_FRect inner = {static_cast<float>(left + 2), static_cast<float>(top + 2),
+                             static_cast<float>(right - left - 4), static_cast<float>(bottom - top - 4)};
+    SDL_SetRenderDrawColor(renderer, focused ? 0xff : 0xe8, focused ? 0xff : 0xe8,
+                           focused ? 0xff : 0xe8, 255);
+    rendered = SDL_RenderFillRect(renderer, &inner) && rendered;
+
+    // SDL_RenderDebugText is SDL3's fixed 8x8 ASCII bitmap font. Scale it to
+    // 16px so the host field retains the original 33px control height.
+    SDL_SetRenderScale(renderer, 2.0f, 2.0f);
+    SDL_SetRenderDrawColor(renderer, 0x18, 0x18, 0x18, 255);
+    rendered = SDL_RenderDebugText(renderer, static_cast<float>(left + 7) / 2.0f,
+                                   static_cast<float>(top + 8) / 2.0f, text) && rendered;
+    if (focused && std::strlen(text) < 11) {
+        const float caret_x = static_cast<float>(left + 7 + std::strlen(text) * 16) / 2.0f;
+        rendered = SDL_RenderDebugText(renderer, caret_x, static_cast<float>(top + 8) / 2.0f, "_") && rendered;
+    }
+    SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+    SDL_SetRenderTarget(renderer, nullptr);
+    return rendered;
+}
+
+static bool primary_presentation_rect(SDL_Renderer* renderer, SDL_FRect* destination,
+                                      int* output_width, int* output_height)
+{
+    // SDL_GetRenderOutputSize reports physical output pixels even when a
+    // render target is bound, so this handles resizable and high-DPI windows.
+    int width = 0;
+    int height = 0;
+    if (!renderer || !destination || !SDL_GetRenderOutputSize(renderer, &width, &height) ||
+        width <= 0 || height <= 0) return false;
+
+    float scale = 1.0f;
+    if (g_primary_presentation_mode == SDL3PrimaryPresentationMode::Fit ||
+        (g_primary_presentation_mode == SDL3PrimaryPresentationMode::Auto &&
+         (width < SDL3_PRIMARY_CANVAS_WIDTH || height < SDL3_PRIMARY_CANVAS_HEIGHT))) {
+        const float scale_x = static_cast<float>(width) / SDL3_PRIMARY_CANVAS_WIDTH;
+        const float scale_y = static_cast<float>(height) / SDL3_PRIMARY_CANVAS_HEIGHT;
+        scale = scale_x < scale_y ? scale_x : scale_y;
+    }
+
+    *destination = {
+        (width - SDL3_PRIMARY_CANVAS_WIDTH * scale) * 0.5f,
+        (height - SDL3_PRIMARY_CANVAS_HEIGHT * scale) * 0.5f,
+        SDL3_PRIMARY_CANVAS_WIDTH * scale,
+        SDL3_PRIMARY_CANVAS_HEIGHT * scale,
+    };
+    if (output_width) *output_width = width;
+    if (output_height) *output_height = height;
+    return true;
+}
+
+void SDL3_SetPrimaryPresentationMode(SDL3PrimaryPresentationMode mode)
+{
+    g_primary_presentation_mode = mode;
+}
+
+SDL3PrimaryPresentationMode SDL3_GetPrimaryPresentationMode()
+{
+    return g_primary_presentation_mode;
+}
+
 bool SDL3_PresentPrimarySurface()
 {
     if (!SDL3_EnsurePrimarySurface()) return false;
     SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_FRect destination{};
+    if (!primary_presentation_rect(renderer, &destination, nullptr, nullptr)) return false;
+
     SDL_SetRenderTarget(renderer, nullptr);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     if (!SDL_RenderClear(renderer) ||
-        !SDL_RenderTexture(renderer, g_sdl_primary_surface->texture, nullptr, nullptr)) return false;
+        !SDL_RenderTexture(renderer, g_sdl_primary_surface->texture, nullptr, &destination)) return false;
     SDL_RenderPresent(renderer);
+    return true;
+}
+
+bool SDL3_DisplayToPrimaryCanvas(float display_x, float display_y,
+                                 float* canvas_x, float* canvas_y)
+{
+    if (!canvas_x || !canvas_y || !SDL3_EnsurePrimarySurface()) return false;
+
+    SDL_FRect destination{};
+    int output_width = 0;
+    int output_height = 0;
+    if (!primary_presentation_rect(g_sdl_ddraw->renderer, &destination,
+                                   &output_width, &output_height)) return false;
+
+    // SDL mouse events use window coordinates; convert them to the physical
+    // render-output coordinate system before reversing the projection.
+    int window_width = 0;
+    int window_height = 0;
+    if (!SDL_GetWindowSize(g_sdl_ddraw->window, &window_width, &window_height) ||
+        window_width <= 0 || window_height <= 0) return false;
+    const float output_x = display_x * output_width / window_width;
+    const float output_y = display_y * output_height / window_height;
+    if (output_x < destination.x || output_y < destination.y ||
+        output_x >= destination.x + destination.w ||
+        output_y >= destination.y + destination.h) return false;
+
+    *canvas_x = (output_x - destination.x) * SDL3_PRIMARY_CANVAS_WIDTH / destination.w;
+    *canvas_y = (output_y - destination.y) * SDL3_PRIMARY_CANVAS_HEIGHT / destination.h;
     return true;
 }
 
