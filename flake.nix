@@ -58,6 +58,7 @@
               python3                # scripts in tools/ directory
               python3Packages.fastapi # local autonomous RE dashboard API
               python3Packages.uvicorn # ASGI server for the dashboard daemon
+              python3Packages.websockets # Uvicorn WebSocket implementation for live dashboard events
               python3Packages.httpx   # FastAPI dashboard integration tests
 
               # ---- Wine (for running the original Windows binary) ----

@@ -18,7 +18,7 @@ class DaemonWebTests(unittest.TestCase):
                 dashboard = client.get("/")
                 self.assertEqual(dashboard.status_code, 200)
                 self.assertIn("backfillEvents", dashboard.text)
-                self.assertIn("state.lastSequence-250", dashboard.text)
+                self.assertIn("(state.lastSequence||0)-250", dashboard.text)
                 self.assertIn("font-style:italic", dashboard.text)
                 self.assertIn("'empty','empty'", dashboard.text)
                 self.assertIn("event-agent", dashboard.text)

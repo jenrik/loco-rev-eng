@@ -34,7 +34,9 @@ def main() -> None:
         args.state, project_root=Path.cwd(), daemon_url=daemon_url, daemon_token=token,
         pi_binary=args.pi_binary, ghidra_config=ghidra,
     )
-    uvicorn.run(app, host=args.host, port=args.port)
+    # Fail startup clearly if the declared WebSocket runtime dependency is absent;
+    # do not silently degrade the live dashboard to HTTP-only mode.
+    uvicorn.run(app, host=args.host, port=args.port, ws="websockets")
 
 
 if __name__ == "__main__":
