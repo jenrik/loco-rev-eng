@@ -1,68 +1,621 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Lego Loco Autonomous RE</title>
-  <style>
-    :root { color-scheme: dark; } body { font-family: ui-monospace, monospace; margin:2rem; background:#10151c; color:#d9e1e8; } h1,h2 { color:#8ec5ff; } h2 { margin-top:0; }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(22rem,1fr)); gap:1rem; } section { border:1px solid #3b4654; border-radius:.5rem; padding:1rem; background:#17212b; }
-    form { display:grid; gap:.4rem; margin-bottom:1rem; } input,textarea,select,button { font:inherit; padding:.35rem; } textarea { min-height:4rem; } button { cursor:pointer; background:#254c70; color:#fff; border:1px solid #6088ac; border-radius:.25rem; } button.danger { background:#74343a; }
-    .list { max-height:20rem; overflow:auto; } .item { border-top:1px solid #344454; padding:.5rem 0; } .muted { color:#9cabba; } .empty { color:#9cabba; font-style:italic; } #notice { min-height:1.2rem; } .ok { color:#83e58c; } .error { color:#ff9696; }
-    .timeline-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; } .timeline-header label { display:flex; align-items:center; gap:.5rem; color:#b8c6d4; } .timeline-header select { min-width:20rem; max-width:100%; }
-    #event-timeline { max-height:34rem; overflow:auto; border-top:1px solid #344454; } .event { border-left:3px solid #546779; border-bottom:1px solid #2e3b48; padding:.65rem .8rem; } .event.assistant { border-left-color:#6ea8e6; } .event.thinking { border-left-color:#9878d7; } .event.tool { border-left-color:#d3a85a; } .event.error { border-left-color:#df7272; } .event.system { border-left-color:#6fbd9c; }
-    .event-meta { color:#90a1b0; font-size:.78rem; margin-bottom:.35rem; } .event-title { color:#d8e8f8; font-weight:bold; margin-bottom:.35rem; } .event-body { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.4; } .event details { margin-top:.4rem; color:#b8c6d4; } .event pre { margin:.4rem 0 0; max-height:12rem; overflow:auto; white-space:pre-wrap; }
-  </style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lego Loco Autonomous RE — Graph</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:ui-monospace,SFMono-Regular,monospace;background:#0d1117;color:#c9d1d9;overflow:hidden;height:100vh;width:100vw;user-select:none}
+#topbar{position:fixed;top:0;left:0;right:0;height:36px;background:#161b22;border-bottom:1px solid #30363d;display:flex;align-items:center;padding:0 10px;gap:12px;z-index:100}
+#topbar .status{font-size:11px;color:#8b949e;display:flex;align-items:center;gap:6px}
+#topbar .dot{width:8px;height:8px;border-radius:50%;background:#3fb950}
+#topbar .dot.disconnected{background:#f85149}
+#topbar input[type=text]{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:3px 8px;font:inherit;font-size:11px;width:200px;border-radius:4px}
+#topbar select{background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:3px 6px;font:inherit;font-size:11px;border-radius:4px}
+#topbar button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:3px 10px;font:inherit;font-size:11px;cursor:pointer;border-radius:4px}
+#topbar button:hover{background:#30363d}
+#topbar .sep{width:1px;height:20px;background:#30363d}
+#topbar .label{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px}
+#cy-container{position:fixed;top:36px;left:0;right:0;bottom:0;z-index:1}
+#bottom-panel{position:fixed;bottom:0;left:0;right:0;background:#161b22;border-top:1px solid #30363d;z-index:150;transition:transform .25s cubic-bezier(.4,0,.2,1);max-height:55vh;overflow-y:auto}
+#bottom-panel.collapsed{transform:translateY(calc(100% - 36px))}
+#bottom-panel .handle{height:36px;display:flex;align-items:center;padding:0 16px;cursor:pointer;gap:10px;border-bottom:1px solid #30363d;position:sticky;top:0;background:#161b22;z-index:1}
+#bottom-panel .handle .chevron{transition:transform .25s}
+#bottom-panel.collapsed .handle .chevron{transform:rotate(180deg)}
+#bottom-panel .handle .node-title{font-size:12px;font-weight:bold;color:#c9d1d9;flex:1}
+#bottom-panel .handle .node-type{font-size:10px;color:#8b949e;text-transform:uppercase}
+#bottom-panel .content{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;padding:16px}
+#bottom-panel .col{border-right:1px solid #30363d;padding:0 16px}
+#bottom-panel .col:last-child{border-right:none}
+#bottom-panel h3{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e;margin-bottom:10px}
+#bottom-panel .field{margin-bottom:8px;font-size:11px}
+#bottom-panel .field .key{color:#8b949e;display:block;font-size:9px;text-transform:uppercase}
+#bottom-panel .field .value{color:#c9d1d9}
+#bottom-panel .field .value pre{white-space:pre-wrap;max-height:120px;overflow:auto;font-size:10px;background:#0d1117;padding:6px;border-radius:4px;margin-top:4px}
+#bottom-panel button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 12px;font:inherit;font-size:10px;cursor:pointer;border-radius:4px;margin:2px}
+#bottom-panel button:hover{background:#30363d}
+#bottom-panel button.primary{background:#1f6feb;border-color:#1f6feb}
+#bottom-panel button.danger{background:#da3633;border-color:#da3633}
+#bottom-panel .edges-list{font-size:10px}
+#bottom-panel .edges-list .edge-item{padding:4px 0;border-bottom:1px solid #21262d;display:flex;gap:8px}
+#bottom-panel .edges-list .rel{color:#d3a85a;text-transform:uppercase;font-size:8px;min-width:70px}
+#toast{position:fixed;top:44px;right:16px;z-index:300;font-size:11px;padding:8px 14px;border-radius:6px;max-width:360px;transition:opacity .3s;opacity:0;pointer-events:none}
+#toast.show{opacity:1}
+#toast.ok{background:#1a3329;border:1px solid #3fb950;color:#7ee787}
+#toast.err{background:#3b1c1c;border:1px solid #f85149;color:#ffa198}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+@media(max-width:900px){#bottom-panel .content{grid-template-columns:1fr}#bottom-panel .col{border-right:none;border-bottom:1px solid #30363d;padding:12px 0}}
+#ctxmenu .ctx-item:hover{background:#1f6feb}
+</style>
 </head>
 <body>
-  <h1>Autonomous Reverse Engineering</h1>
-  <p id="connection">Connecting…</p><p id="ghidra"></p><p id="notice"></p>
-  <div class="grid">
-    <section><h2>Create job</h2><form id="job-form"><input name="title" placeholder="Title" required><textarea name="goal" placeholder="Evidence-led objective" required></textarea><button>Create job</button></form>
-      <h2>Schedule ready work</h2><form id="schedule-form"><select name="jobId" required><option value="">Select job…</option></select><input name="limit" type="number" min="1" max="8" value="1"><button>Schedule</button></form><div id="jobs" class="list"></div></section>
-    <section><h2>Create task</h2><form id="task-form"><select name="jobId" required><option value="">Select job…</option></select><input name="title" placeholder="Title" required><textarea name="instructions" placeholder="Concrete evidence-led instructions" required></textarea><select name="role"><option>investigator</option><option>transcriber</option><option>validator</option><option>integrator</option><option>reviewer</option></select><input name="writeScope" placeholder="Approved paths, comma separated"><button>Create task</button></form>
-      <h2>Add dependency</h2><form id="dependency-form"><select name="taskId" required><option value="">Select waiting task…</option></select><select name="dependencyId" required><option value="">Select prerequisite task…</option></select><select name="relation"><option>requires</option><option>evidence</option><option>invalidates</option></select><button>Add edge</button></form><h2>Task edges</h2><div id="task-edges" class="list"></div></section>
-    <section><h2>Control agent</h2><form id="agent-form"><select name="agentId" required><option value="">Select agent…</option></select><select name="action"><option>steer</option><option>follow_up</option><option>abort</option></select><textarea name="message" placeholder="Steer/follow-up message (not required for abort)"></textarea><button>Send</button></form><h2>Tasks</h2><div id="tasks" class="list"></div></section>
-  </div>
-  <div class="grid"><section><h2>Write-scope requests</h2><div id="scope-requests" class="list"></div></section><section><h2>Hypotheses</h2><div id="hypotheses" class="list"></div></section><section><h2>Agents</h2><div id="agents" class="list"></div></section></div>
-  <section>
-    <div class="timeline-header"><h2>Live event tail</h2><label>Agent <select id="event-agent"><option value="">All agents</option></select></label></div>
-    <p id="event-summary" class="muted">Loading durable event history…</p><div id="event-timeline"></div>
-  </section>
-  <script>
-    const $=selector=>document.querySelector(selector); const timeline=$('#event-timeline'), agentSelector=$('#event-agent'), summary=$('#event-summary');
-    let sequence=0, refreshTimer=null, timelineEntries=[], currentAgents=[];
-    const notice=(message,bad=false)=>{const node=$('#notice');node.textContent=message;node.className=bad?'error':'ok';setTimeout(()=>node.textContent='',5000);};
-    async function api(path,options={}){const response=await fetch(path,{headers:{'content-type':'application/json'},...options});if(!response.ok)throw new Error((await response.text())||response.statusText);return response.json();}
-    const element=(tag,text='',className='')=>{const node=document.createElement(tag);node.textContent=text;node.className=className;return node;};
-    function action(label,handler,className=''){const button=element('button',label,className);button.type='button';button.onclick=handler;return button;}
-    function renderItems(selector,records,render){const root=$(selector);const items=Array.isArray(records)?records:[];root.replaceChildren(...(items.length?items.map(render):[element('div','empty','empty')]));}
-    function populateSelects(selector,records,placeholder,label){for(const select of document.querySelectorAll(selector)){const previous=select.value,items=Array.isArray(records)?records:[];const empty=element('option',placeholder);empty.value='';select.replaceChildren(empty,...items.map(item=>{const option=element('option',label(item));option.value=item.id;return option;}));select.value=items.some(item=>item.id===previous)?previous:'';}}
-    function renderIdSelectors(state){const jobs=Array.isArray(state.jobs)?state.jobs:[],tasks=Array.isArray(state.tasks)?state.tasks:[],agents=Array.isArray(state.agents)?state.agents:[];populateSelects('select[name=jobId]',jobs,'Select job…',job=>job.title);populateSelects('select[name=taskId]',tasks,'Select waiting task…',task=>task.title);populateSelects('select[name=dependencyId]',tasks,'Select prerequisite task…',task=>task.title);const taskByAgent=new Map(tasks.filter(task=>task.assigned_agent_id).map(task=>[task.assigned_agent_id,task]));populateSelects('select[name=agentId]',agents,'Select agent…',agent=>`${agent.role} — ${taskByAgent.get(agent.id)?.title||'no assigned task'} (${agent.status})`);}
-    function clipped(value,limit=2400){const serialized=typeof value==='string'?value:JSON.stringify(value,null,2);const text=serialized===undefined?'':serialized;return text.length>limit?`${text.slice(0,limit)}…`:text;}
-    function agentName(id){const agent=currentAgents.find(item=>item.id===id);return agent?`${agent.role} · ${id.slice(0,12)}`:(id||'daemon');}
-    function titleCase(value){return value.replaceAll('_',' ').replace(/\b\w/g,letter=>letter.toUpperCase());}
-    function payloadText(value){if(typeof value==='string')return value;if(value&&typeof value.text==='string')return value.text;return clipped(value||'');}
-    function entryFor(event){const payload=event.payload||{};if(event.kind==='assistant_delta'){const kind=payload.deltaType==='thinking_delta'?'thinking':'assistant';const prior=timelineEntries.at(-1);if(prior&&prior.kind===kind&&prior.agent_id===event.agent_id&&prior.lastSequence===event.sequence-1){prior.text+=payloadText(payload.delta);prior.lastSequence=event.sequence;prior.created_at=event.created_at;return prior;}return {kind,agent_id:event.agent_id,firstSequence:event.sequence,lastSequence:event.sequence,created_at:event.created_at,text:payloadText(payload.delta)};}
-      const tool=payload.toolName||payload.toolCallId;let title=titleCase(event.kind);let body='';let details=null;let kind='system';
-      if(event.kind==='tool_started'){title=`Tool started: ${tool||'unknown'}`;body=payload.args?clipped(payload.args,800):'';kind='tool';}
-      else if(event.kind==='tool_finished'){title=`Tool ${payload.isError?'failed':'finished'}: ${tool||'unknown'}`;body=payload.isError?'Tool reported an error.':'Tool result available.';details=payload.result;kind=payload.isError?'error':'tool';}
-      else if(event.kind==='ghidra_evidence_recorded'){title='Ghidra evidence recorded';body=payload.operation||'';kind='tool';}
-      else if(event.kind==='ghidra_cache_hit'){title='Ghidra evidence cache hit';body=payload.operation||'';kind='tool';}
-      else if(event.kind==='agent_stderr'||event.kind==='extension_error'||event.kind==='rpc_protocol_error'){body=clipped(payload);kind='error';}
-      else {body=clipped(payload,1200);}
-      return {kind,agent_id:event.agent_id,firstSequence:event.sequence,lastSequence:event.sequence,created_at:event.created_at,title,body,details};}
-    function ingestEvent(event){if(event.sequence<=sequence)return;sequence=event.sequence;const entry=entryFor(event);if(timelineEntries.at(-1)!==entry)timelineEntries.push(entry);if(timelineEntries.length>250)timelineEntries=timelineEntries.slice(-250);renderTimeline();}
-    function renderTimeline(){const selected=agentSelector.value;const entries=timelineEntries.filter(entry=>!selected||entry.agent_id===selected);timeline.replaceChildren(...(entries.length?entries.map(entry=>{const card=element('article','',`event ${entry.kind}`);card.append(element('div',`#${entry.firstSequence}${entry.lastSequence!==entry.firstSequence?`–${entry.lastSequence}`:''} · ${agentName(entry.agent_id)} · ${entry.created_at||''}`,'event-meta'));if(entry.title)card.append(element('div',entry.title,'event-title'));if(entry.text||entry.body)card.append(element('div',entry.text||entry.body,'event-body'));if(entry.details!=null){const details=document.createElement('details'), label=element('summary','Details');details.append(label);details.append(element('pre',clipped(entry.details)));card.append(details);}return card;}):[element('div','empty','empty')]));summary.textContent=`${entries.length} formatted event${entries.length===1?'':'s'}${selected?` for ${agentName(selected)}`:' across all agents'}; partial streamed messages are consolidated.`;timeline.scrollTop=timeline.scrollHeight;}
-    function activitySequence(agentId){return timelineEntries.reduce((latest,entry)=>entry.agent_id===agentId?Math.max(latest,entry.lastSequence):latest,0);}
-    function renderAgentSelector(agents){const previous=agentSelector.value;const ordered=[...agents].sort((left,right)=>((right.last_activity_sequence||activitySequence(right.id))-(left.last_activity_sequence||activitySequence(left.id)))||right.created_at.localeCompare(left.created_at));const allAgents=element('option','All agents');allAgents.value='';agentSelector.replaceChildren(allAgents);for(const agent of ordered){const option=element('option',`${agent.role} · ${agent.status} · ${agent.id.slice(0,12)}`);option.value=agent.id;agentSelector.append(option);}agentSelector.value=ordered.some(agent=>agent.id===previous)?previous:'';}
-    async function backfillEvents(state){const after=Math.max(0,(state.lastSequence||0)-250);const agents=Array.isArray(state.agents)?state.agents:[];const histories=await Promise.all(agents.map(agent=>api(`/api/agents/${agent.id}/events?after=${after}&limit=250`).catch(()=>({events:[]}))));histories.flatMap(history=>Array.isArray(history.events)?history.events:[]).sort((left,right)=>left.sequence-right.sequence).forEach(ingestEvent);}
-    function render(state){currentAgents=Array.isArray(state.agents)?state.agents:[];renderIdSelectors(state);renderAgentSelector(currentAgents);renderItems('#jobs',state.jobs,job=>{const node=element('div','','item');node.append(element('strong',`${job.title} (${job.status})`),element('div',job.id,'muted'),element('div',job.goal),action('Schedule ready task',async()=>{try{const result=await api(`/api/jobs/${job.id}/schedule?limit=1`,{method:'POST'});notice(Array.isArray(result.launched)&&result.launched.length?'Scheduled one ready task.':'No ready task to schedule.');await refresh();}catch(error){notice(error.message,true);}}));if(job.status==='draft')node.append(action('Start evidence triage',async()=>{try{const result=await api(`/api/jobs/${job.id}/bootstrap`,{method:'POST'});notice(Array.isArray(result.launched)&&result.launched.length?'Initial evidence triage scheduled.':'Initial task created but not launched.');await refresh();}catch(error){notice(error.message,true);}}));return node;});renderItems('#tasks',state.tasks,task=>{const node=element('div','','item');node.append(element('strong',`${task.title} — ${task.status}`),element('div',task.id,'muted'),element('div',task.instructions));if(task.status==='in_progress')node.append(action('Recover',async()=>{const reason=prompt('Why should this stalled attempt be stopped?');if(reason){await api(`/api/tasks/${task.id}/recover`,{method:'POST',body:JSON.stringify({reason})});await refresh();}},'danger'));if(['blocked','deferred','failed'].includes(task.status))node.append(action('Requeue',async()=>{const reason=prompt('Reason for retry/requeue:');if(reason){await api(`/api/tasks/${task.id}/retry`,{method:'POST',body:JSON.stringify({reason})});await refresh();}}));return node;});const taskTitles=new Map((state.tasks||[]).map(task=>[task.id,task.title]));renderItems('#task-edges',state.taskEdges,edge=>{const node=element('div','','item');node.append(element('strong',`${taskTitles.get(edge.task_id)||edge.task_id} — ${edge.relation}`),element('div',`needs ${taskTitles.get(edge.dependency_task_id)||edge.dependency_task_id}`,'muted'));return node;});renderItems('#agents',state.agents,agent=>{const node=element('div','','item');node.append(element('strong',`${agent.role} — ${agent.status}`),element('div',agent.id,'muted'),element('div',agent.task));return node;});renderItems('#hypotheses',state.hypotheses,hypothesis=>{const node=element('div','','item');node.append(element('strong',`${hypothesis.subject} r${hypothesis.revision} (${hypothesis.status})`),element('div',hypothesis.statement),element('div',`Evidence: ${hypothesis.evidence_ids.join(', ')||'none'}`,'muted'));return node;});renderItems('#scope-requests',state.writeScopeRequests,request=>{const node=element('div','','item');node.append(element('strong',`${request.path} — ${request.status}`),element('div',request.reason),element('div',request.agent_id,'muted'));if(request.status==='pending')node.append(action('Approve',()=>resolveScope(request.id,'approved')),action('Reject',()=>resolveScope(request.id,'rejected'),'danger'));if(request.resolution_reason)node.append(element('div',request.resolution_reason,'muted'));return node;});const g=state.ghidra,configured=g.configured?'configured':'not configured';$('#ghidra').textContent=`Ghidra: ${configured}; database=${g.databaseId||'—'}; opened=${g.opened}; restarts=${g.restartCount}`;renderTimeline();}
-    async function resolveScope(id,decision){const reason=prompt(decision==='rejected'?'Rejection reason (required):':'Approval note (optional):');if(decision==='rejected'&&!reason)return;try{await api(`/api/write-scope-requests/${id}/resolve`,{method:'POST',body:JSON.stringify({decision,reason})});notice(`Scope ${decision}.`);await refresh();}catch(error){notice(error.message,true);}}
-    async function refresh(){try{const state=await api('/api/status');await backfillEvents(state);render(state);}catch(error){notice(error.message,true);}}
-    function scheduleRefresh(){if(refreshTimer!==null)return;refreshTimer=setTimeout(()=>{refreshTimer=null;refresh();},250);} agentSelector.addEventListener('change',renderTimeline);
-    function form(id,handler){$(id).addEventListener('submit',async event=>{event.preventDefault();const submittedForm=event.currentTarget;try{await handler(new FormData(submittedForm));submittedForm.reset();await refresh();}catch(error){notice(error.message,true);}});}
-    form('#job-form',data=>api('/api/jobs',{method:'POST',body:JSON.stringify({title:data.get('title'),goal:data.get('goal')})}));form('#task-form',data=>api(`/api/jobs/${data.get('jobId')}/tasks`,{method:'POST',body:JSON.stringify({title:data.get('title'),instructions:data.get('instructions'),role:data.get('role'),write_scope:String(data.get('writeScope')).split(',').map(value=>value.trim()).filter(Boolean)})}));form('#dependency-form',data=>api(`/api/tasks/${data.get('taskId')}/dependencies`,{method:'POST',body:JSON.stringify({dependency_task_id:data.get('dependencyId'),relation:data.get('relation')})}));form('#schedule-form',data=>api(`/api/jobs/${data.get('jobId')}/schedule?limit=${data.get('limit')}`,{method:'POST'}));form('#agent-form',data=>api(`/api/agents/${data.get('agentId')}/control`,{method:'POST',body:JSON.stringify({action:data.get('action'),message:data.get('message')||null})}));
-    const socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);socket.onopen=()=>$('#connection').textContent='Live WebSocket connected';socket.onmessage=event=>{ingestEvent(JSON.parse(event.data));scheduleRefresh();};socket.onclose=()=>$('#connection').textContent='Disconnected; refresh to reconnect';refresh();
-  </script>
+<div id="topbar">
+  <span class="status"><span class="dot" id="conn-dot"></span><span id="conn-text">Connecting…</span></span>
+  <span class="sep"></span>
+  <input type="text" id="search" placeholder="Search nodes…">
+  <span class="label">Job</span>
+  <select id="job-filter"><option value="">All jobs</option></select>
+  <span class="sep"></span>
+  <button id="btn-fit">Fit</button>
+  <button id="btn-reset">Reset Layout</button>
+  <span class="sep"></span>
+  <span class="label" id="node-count">0 nodes</span>
+  <span style="flex:1"></span>
+  <span id="ghidra-status" style="font-size:10px;color:#8b949e"></span>
+</div>
+<div id="cy-container"></div>
+<div id="bottom-panel" class="collapsed">
+  <div class="handle" id="panel-handle"><span class="chevron">▼</span><span class="node-title" id="panel-title">Select a node</span><span class="node-type" id="panel-type"></span></div>
+  <div class="content" id="panel-content"></div>
+</div>
+<div id="toast"></div>
+<script>
+(function(){
+var $=function(s){return document.querySelector(s);};
+var state={jobs:[],tasks:[],agents:[],taskEdges:[],hypotheses:[],writeScopeRequests:[],ghidra:{}};
+var cy=null;
+var selectedNodeId=null;
+var sequence=0;
+
+
+var ROLE_COLORS={investigator:'#4a7fb5',transcriber:'#4a9e6e',validator:'#c4a43e',integrator:'#c47e3e',reviewer:'#b54a4a'};
+
+function esc(s){
+  if(!s)return'';
+  var el=document.createElement('span');
+  el.textContent=s;
+  return el.innerHTML;
+}
+
+async function api(path,opts){
+  opts=opts||{};
+  var res=await fetch(path,Object.assign({headers:{'content-type':'application/json'}},opts));
+  if(!res.ok)throw new Error((await res.text())||res.statusText);
+  return res.json();
+}
+
+function toast(msg,err){
+  var t=$('#toast');
+  t.textContent=msg;
+  t.className=(err?'err':'ok')+' show';
+  clearTimeout(t._tid);
+  t._tid=setTimeout(function(){t.classList.remove('show');},3000);
+}
+
+// ── Build Cytoscape elements ──
+function buildElements(){
+  // Edge-only hierarchy. Jobs connect to initial tasks (no incoming requires).
+  // Requires edges create deeper layers. Agents hang off terminal tasks.
+  var nodes=[],edges=[];
+  var jobIds=new Set(state.jobs.map(function(j){return j.id;}));
+  var taskIds=new Set(state.tasks.map(function(t){return t.id;}));
+
+  // Compute which tasks have incoming requires edges (dependents)
+  var hasIncoming={};
+  (state.taskEdges||[]).forEach(function(e){
+    if(taskIds.has(e.task_id))hasIncoming[e.task_id]=true;
+  });
+
+  // Job nodes
+  state.jobs.forEach(function(job){
+    nodes.push({
+      data:{id:job.id,label:job.title,status:job.status,type:'job',goal:job.goal},
+      classes:'job'
+    });
+  });
+
+  // Task nodes
+  state.tasks.forEach(function(task){
+    nodes.push({
+      data:{id:task.id,label:task.title,status:task.status,type:'task',role:task.role,instructions:task.instructions,jobId:task.job_id},
+      classes:'task role-'+task.role+' status-'+task.status
+    });
+    // Only connect job→task for initial tasks (no incoming requires edge)
+    if(jobIds.has(task.job_id)&&!hasIncoming[task.id]){
+      edges.push({
+        data:{id:'e-contains-'+task.id,source:task.job_id,target:task.id,edgeType:'contains'},
+        classes:'contains'
+      });
+    }
+  });
+
+  // Agent nodes
+  state.agents.forEach(function(agent){
+    var task=state.tasks.find(function(t){return t.assigned_agent_id===agent.id;});
+    nodes.push({
+      data:{id:agent.id,label:agent.role,status:agent.status,type:'agent',role:agent.role,taskDesc:agent.task||''},
+      classes:'agent status-'+agent.status
+    });
+    if(task){
+      edges.push({
+        data:{id:'e-assign-'+agent.id,source:task.id,target:agent.id,edgeType:'assignment'},
+        classes:'assignment'
+      });
+    }
+  });
+
+  // Task dependency edges
+  (state.taskEdges||[]).forEach(function(edge){
+    if(taskIds.has(edge.task_id)&&taskIds.has(edge.dependency_task_id)){
+      edges.push({
+        data:{id:'e-dep-'+edge.dependency_task_id+'-'+edge.task_id,source:edge.dependency_task_id,target:edge.task_id,edgeType:edge.relation,label:edge.relation},
+        classes:edge.relation
+      });
+    }
+  });
+
+  // Hypothesis nodes
+  (state.hypotheses||[]).forEach(function(hyp){
+    nodes.push({
+      data:{id:hyp.id,label:hyp.subject,status:hyp.status,type:'hypothesis',statement:hyp.statement,jobId:hyp.job_id},
+      classes:'hypothesis'
+    });
+    if(jobIds.has(hyp.job_id)){
+      edges.push({
+        data:{id:'e-hyp-'+hyp.id,source:hyp.job_id,target:hyp.id,edgeType:'contains'},
+        classes:'contains'
+      });
+    }
+  });
+
+  return {nodes:nodes,edges:edges};
+}
+
+// ── Cytoscape stylesheet ──
+var CY_STYLE=[
+  // Job compound nodes
+  {selector:'.job',style:{
+    'background-color':'#1a2332','background-opacity':1,
+    'border-color':'#254c70','border-width':3,'border-opacity':1,
+    'shape':'round-rectangle','text-wrap':'wrap','text-max-width':'160px',
+    'label':'data(label)','color':'#c9d1d9','font-size':'12px','font-weight':'bold',
+    'text-valign':'top','text-halign':'center','text-margin-y':'-6',
+    'width':200,'height':60,
+    'padding':'30px'
+  }},
+  {selector:'.job:selected',style:{
+    'border-color':'#58a6ff','border-width':4
+  }},
+  // Task nodes
+  {selector:'.task',style:{
+    'background-color':'#1a2332','background-opacity':1,
+    'shape':'round-rectangle',
+    'label':'data(label)','color':'#c9d1d9','font-size':'10px',
+    'text-wrap':'wrap','text-max-width':'130px',
+    'text-valign':'center','text-halign':'center',
+    'width':155,'height':44
+  }},
+  {selector:'.task:selected',style:{
+    'border-color':'#58a6ff','border-width':3,'border-opacity':1
+  }},
+  {selector:'.role-investigator',style:{'border-color':'#4a7fb5','border-width':2,'border-opacity':1}},
+  {selector:'.role-transcriber',style:{'border-color':'#4a9e6e','border-width':2,'border-opacity':1}},
+  {selector:'.role-validator',style:{'border-color':'#c4a43e','border-width':2,'border-opacity':1}},
+  {selector:'.role-integrator',style:{'border-color':'#c47e3e','border-width':2,'border-opacity':1}},
+  {selector:'.role-reviewer',style:{'border-color':'#b54a4a','border-width':2,'border-opacity':1}},
+  {selector:'.status-completed',style:{'border-opacity':0.5}},
+  {selector:'.status-in_progress',style:{'border-style':'double'}},
+  {selector:'.status-blocked',style:{'border-style':'dashed'}},
+  // Agent nodes
+  {selector:'.agent',style:{
+    'background-color':'#1a2332','shape':'ellipse',
+    'border-color':'#6ea8e6','border-width':2,'border-opacity':1,
+    'label':'data(label)','color':'#8b949e','font-size':'7px',
+    'text-valign':'center','text-halign':'center',
+    'width':32,'height':32
+  }},
+  {selector:'.status-running',style:{'background-color':'#1a3329','border-color':'#3fb950'}},
+  {selector:'.status-stopped',style:{'background-color':'#3b1c1c','border-color':'#f85149'}},
+  // Hypothesis nodes
+  {selector:'.hypothesis',style:{
+    'background-color':'#1a2332','shape':'round-rectangle',
+    'border-color':'#9878d7','border-width':2,'border-opacity':1,
+    'label':'data(label)','color':'#c9d1d9','font-size':'9px',
+    'text-wrap':'wrap','text-max-width':'110px',
+    'text-valign':'center','text-halign':'center',
+    'width':130,'height':36
+  }},
+  // Edges
+  {selector:'edge',style:{
+    'curve-style':'bezier','width':1.5,'line-color':'#30363d',
+    'target-arrow-shape':'triangle','target-arrow-color':'#30363d',
+    'arrow-scale':0.8
+  }},
+  {selector:'.contains',style:{'line-color':'#254c70','target-arrow-color':'#254c70','width':2}},
+  {selector:'.requires',style:{'line-color':'#6ea8e6','target-arrow-color':'#6ea8e6','line-style':'dashed','line-dash-pattern':[6,3]}},
+  {selector:'.evidence',style:{'line-color':'#d3a85a','target-arrow-color':'#d3a85a','line-style':'dashed','line-dash-pattern':[3,4]}},
+  {selector:'.invalidates',style:{'line-color':'#f85149','target-arrow-color':'#f85149','line-style':'dashed','line-dash-pattern':[8,3]}},
+  {selector:'.assignment',style:{'line-color':'#546779','target-arrow-color':'#546779','line-style':'dotted','width':1}}
+];
+
+// ── Initialize Cytoscape ──
+function initCy(){
+  if(cy){cy.destroy();}
+  cy=cytoscape({
+    container:$('#cy-container'),
+    style:CY_STYLE,
+    wheelSensitivity:0.3,
+    minZoom:0.1,maxZoom:3,
+    layout:{name:'preset'} // We'll set positions manually first, then run breadthfirst
+  });
+
+  window._cy=cy;
+
+  cy.on('tap',function(ev){
+    if(ev.target===cy){
+      hidePanel();
+    }
+  });
+
+  cy.on('tap','node',function(ev){
+    selectedNodeId=ev.target.id();
+    showPanel(selectedNodeId);
+  });
+
+  cy.on('cxttap',function(ev){
+    var ele=ev.target;
+    if(ele===cy){
+      // Right-click on background
+      var items=[{label:'➕ New Job',handler:function(){actions.promptNewJob();}}];
+      if(state.jobs.length>0){
+        items.push('-');
+        state.jobs.forEach(function(job){
+          items.push({label:'📋 Add Task → '+job.title,handler:function(){actions.addTaskToJob(job.id);}});
+        });
+      }
+      showContextMenu(ev.originalEvent.clientX,ev.originalEvent.clientY,items);
+    }else{
+      // Right-click on node
+      var type=ele.data('type'),id=ele.id();
+      var items=[];
+      if(type==='job'){
+        items.push({label:'➕ Add Task',handler:function(){actions.addTaskToJob(id);}});
+        items.push({label:'▶ Schedule',handler:function(){actions.scheduleJob(id);}});
+        items.push({label:'🚀 Bootstrap',handler:function(){actions.bootstrapJob(id);}});
+      }else if(type==='task'){
+        items.push({label:'➕ Add Dependency',handler:function(){actions.promptAddEdge(ele);}});
+        if(['blocked','deferred','failed'].indexOf(ele.data('status'))>=0)
+          items.push({label:'🔄 Requeue',handler:function(){actions.retryTask(id);}});
+      }else if(type==='agent'){
+        items.push({label:'🔄 Steer',handler:function(){actions.controlAgent(id,'steer');}});
+        items.push({label:'💬 Follow Up',handler:function(){actions.controlAgent(id,'follow_up');}});
+        items.push({label:'⏹ Abort',handler:function(){actions.controlAgent(id,'abort');}});
+      }
+      if(items.length===0)items.push({label:'No actions',muted:true});
+      showContextMenu(ev.originalEvent.clientX,ev.originalEvent.clientY,items);
+    }
+  });
+
+  // Close context menu on any click outside
+  document.addEventListener('click',function(e){
+    if(contextMenuEl&&!contextMenuEl.contains(e.target))hideContextMenu();
+  });
+
+  
+
+  // Initialize context menus
+  
+}
+
+// HTML context menu (no cxtmenu plugin dependency)
+var contextMenuEl=null;
+function showContextMenu(x,y,items){
+  if(!contextMenuEl){
+    contextMenuEl=document.createElement('div');
+    contextMenuEl.id='ctxmenu';
+    contextMenuEl.style.cssText='position:fixed;display:none;background:#161b22;border:1px solid #30363d;border-radius:6px;min-width:190px;z-index:200;box-shadow:0 4px 12px rgba(0,0,0,.5);overflow:hidden;font-size:11px';
+    document.body.appendChild(contextMenuEl);
+  }
+  var h='';
+  items.forEach(function(it){
+    if(it==='-')h+='<div style="height:1px;background:#30363d;margin:2px 0"></div>';
+    else h+='<div class="ctx-item" style="padding:7px 14px;cursor:pointer;color:#c9d1d9;'+(it.muted?'color:#484f58;cursor:default':'')+'">'+it.label+'</div>';
+  });
+  contextMenuEl.innerHTML=h;
+  contextMenuEl.style.display='block';
+  contextMenuEl.style.left=Math.min(x,window.innerWidth-200)+'px';
+  contextMenuEl.style.top=Math.min(y,window.innerHeight-contextMenuEl.scrollHeight-20)+'px';
+
+  contextMenuEl.querySelectorAll('.ctx-item:not([style*="cursor:default"])').forEach(function(el,i){
+    var nonMuted=[];
+    items.forEach(function(it){if(!it.muted)nonMuted.push(it);});
+    el.addEventListener('click',function(){
+      if(nonMuted[i]&&nonMuted[i].handler)nonMuted[i].handler();
+      hideContextMenu();
+    });
+  });
+}
+function hideContextMenu(){if(contextMenuEl)contextMenuEl.style.display='none';}
+
+// ── Update graph data ──
+function updateGraph(){
+  var elements=buildElements();
+  // Preserve existing node positions if any
+  var oldPos={};
+  if(cy&&cy.nodes().length>0){
+    cy.nodes().forEach(function(n){oldPos[n.id()]=n.position();});
+  }
+
+  // Flat structure — no compound nodes
+  cy.elements().remove();
+  cy.add(elements.nodes.map(function(n){return {group:'nodes',data:n.data,classes:n.classes};}));
+  cy.add(elements.edges.map(function(e){return {group:'edges',data:e.data,classes:e.classes};}));
+
+  // Restore positions or run layout
+  var hasPositions=Object.keys(oldPos).length>0;
+  if(hasPositions){
+    cy.nodes().forEach(function(n){
+      if(oldPos[n.id()]){n.position(oldPos[n.id()]);n.lock();}
+    });
+  }else{
+    runLayout();
+  }
+
+  $('#node-count').textContent=cy.nodes().length+' nodes · '+cy.edges().length+' edges';
+}
+
+function runLayout(){
+  // Breadthfirst with job nodes as explicit roots.
+  // directed:true means edges are followed source→target.
+  // Roots start at top; everything reachable via outgoing edges flows downward.
+  cy.layout({
+    name:'breadthfirst',
+    directed:true,
+    spacingFactor:1.4,
+    avoidOverlap:true,
+    nodeDimensionsIncludeLabels:true,
+    animate:true,
+    animationDuration:500,
+    fit:true,
+    padding:40,
+    roots:'.job'
+  }).run();
+
+  setTimeout(function(){cy.fit(cy.elements(),60);},600);
+}
+
+// ── Bottom panel ──
+function showPanel(nodeId){
+  selectedNodeId=nodeId;
+  var ele=cy.getElementById(nodeId);
+  if(ele.length===0){hidePanel();return;}
+
+  var data=ele.data();
+  var type=data.type;
+
+  var panel=$('#bottom-panel');
+  panel.classList.remove('collapsed');
+  $('#panel-title').textContent=data.label||nodeId;
+  $('#panel-type').textContent=type;
+
+  var content=$('#panel-content');
+  var html='<div class="col"><h3>Details</h3>';
+
+  if(type==='job'){
+    html+=field('ID',nodeId)+field('Status',data.status)+field('Goal','<pre>'+esc(data.goal||'')+'</pre>');
+  }else if(type==='task'){
+    html+=field('ID',nodeId)+field('Status',data.status)+field('Role',data.role)+field('Instructions','<pre>'+esc(data.instructions||'')+'</pre>');
+  }else if(type==='agent'){
+    html+=field('ID',nodeId)+field('Status',data.status)+field('Role',data.role)+field('Task',data.taskDesc);
+  }else if(type==='hypothesis'){
+    html+=field('Subject',data.label)+field('Statement','<pre>'+esc(data.statement||'')+'</pre>')+field('Status',data.status);
+  }
+  html+='</div>';
+
+  html+='<div class="col"><h3>Actions</h3>';
+  if(type==='job'){
+    html+=btn('Schedule',function(){actions.scheduleJob(nodeId);},'primary');
+    html+=btn('Bootstrap',function(){actions.bootstrapJob(nodeId);});
+    html+=btn('Add Task',function(){actions.addTaskToJob(nodeId);});
+  }else if(type==='task'){
+    if(data.status==='in_progress')html+=btn('Recover',function(){actions.recoverTask(nodeId);},'danger');
+    if(['blocked','deferred','failed'].indexOf(data.status)>=0)html+=btn('Requeue',function(){actions.retryTask(nodeId);});
+  }else if(type==='agent'){
+    html+=btn('Steer',function(){actions.controlAgent(nodeId,'steer');});
+    html+=btn('Follow Up',function(){actions.controlAgent(nodeId,'follow_up');});
+    html+=btn('Abort',function(){actions.controlAgent(nodeId,'abort');},'danger');
+  }
+  html+='</div>';
+
+  html+='<div class="col"><h3>Connections</h3><div class="edges-list">';
+  var connected=ele.connectedEdges();
+  if(connected.length===0){
+    html+='<span style="color:#8b949e;font-size:10px">No connections</span>';
+  }else{
+    connected.forEach(function(edge){
+      var src=edge.source(),tgt=edge.target();
+      var otherId=src.id()===nodeId?tgt.id():src.id();
+      var other=cy.getElementById(otherId);
+      var name=other.length>0?other.data('label'):otherId;
+      var dir=src.id()===nodeId?'→':'←';
+      html+='<div class="edge-item"><span class="rel">'+esc(edge.data('edgeType')||'')+'</span><span>'+dir+' '+esc(name)+'</span></div>';
+    });
+  }
+  html+='</div></div>';
+
+  content.innerHTML=html;
+  content.querySelectorAll('button').forEach(function(b){b.addEventListener('click',b._action);});
+  ele.select();
+}
+
+function field(key,value){return '<div class="field"><span class="key">'+key+'</span><span class="value">'+value+'</span></div>';}
+function btn(label,action,cls){var b=document.createElement('button');b.textContent=label;b.className=cls||'';b._action=action;return b.outerHTML;}
+
+function hidePanel(){
+  selectedNodeId=null;
+  $('#bottom-panel').classList.add('collapsed');
+  $('#panel-title').textContent='Select a node';
+  $('#panel-type').textContent='';
+  $('#panel-content').innerHTML='';
+  if(cy)cy.elements().unselect();
+}
+
+// ── Actions ──
+var actions={
+  promptNewJob:function(){
+    var title=prompt('Job title:');
+    if(!title)return;
+    var goal=prompt('Job goal:');
+    if(!goal)return;
+    api('/api/jobs',{method:'POST',body:JSON.stringify({title:title,goal:goal})})
+      .then(function(){toast('Job created');refreshState();})
+      .catch(function(e){toast(e.message,true);});
+  },
+  addTaskToJob:function(jobId){
+    var title=prompt('Task title:');
+    if(!title)return;
+    var instructions=prompt('Instructions:');
+    if(!instructions)return;
+    var role=prompt('Role (investigator/transcriber/validator/integrator/reviewer):','investigator');
+    if(!role)return;
+    api('/api/jobs/'+jobId+'/tasks',{
+      method:'POST',body:JSON.stringify({title:title,instructions:instructions,role:role,write_scope:[]})
+    }).then(function(){toast('Task created');refreshState();})
+      .catch(function(e){toast(e.message,true);});
+  },
+  promptAddEdge:function(taskEle){
+    var taskId=taskEle.id();
+    var others=state.tasks.filter(function(t){return t.id!==taskId;});
+    if(others.length===0){toast('No other tasks to connect to',true);return;}
+    var list=others.map(function(t,i){return '['+i+'] '+t.title+' ('+t.role+')';}).join('\n');
+    var idx=prompt('Choose prerequisite task:\n'+list+'\n\nEnter index:');
+    if(idx===null)return;
+    var dep=others[parseInt(idx)];
+    if(!dep){toast('Invalid',true);return;}
+    var rel=prompt('Relation (requires/evidence/invalidates):','requires');
+    if(!rel)return;
+    api('/api/tasks/'+taskId+'/dependencies',{
+      method:'POST',body:JSON.stringify({dependency_task_id:dep.id,relation:rel})
+    }).then(function(){toast('Edge created');refreshState();})
+      .catch(function(e){toast(e.message,true);});
+  },
+  scheduleJob:async function(jobId){
+    try{var r=await api('/api/jobs/'+jobId+'/schedule?limit=1',{method:'POST'});toast(Array.isArray(r.launched)&&r.launched.length?'Scheduled':'No ready tasks');await refreshState();}
+    catch(e){toast(e.message,true);}
+  },
+  bootstrapJob:async function(jobId){
+    try{await api('/api/jobs/'+jobId+'/bootstrap',{method:'POST'});toast('Bootstrap scheduled');await refreshState();}
+    catch(e){toast(e.message,true);}
+  },
+  recoverTask:async function(taskId){
+    var reason=prompt('Recovery reason:');if(!reason)return;
+    try{await api('/api/tasks/'+taskId+'/recover',{method:'POST',body:JSON.stringify({reason:reason})});toast('Recovery requested');await refreshState();}
+    catch(e){toast(e.message,true);}
+  },
+  retryTask:async function(taskId){
+    var reason=prompt('Retry reason:');if(!reason)return;
+    try{await api('/api/tasks/'+taskId+'/retry',{method:'POST',body:JSON.stringify({reason:reason})});toast('Requeued');await refreshState();}
+    catch(e){toast(e.message,true);}
+  },
+  controlAgent:async function(agentId,action){
+    var msg=action==='abort'?null:prompt(action+' message:');
+    try{await api('/api/agents/'+agentId+'/control',{method:'POST',body:JSON.stringify({action:action,message:msg})});toast('Agent '+action);await refreshState();}
+    catch(e){toast(e.message,true);}
+  }
+};
+window._re=actions;
+
+// ── State ──
+async function refreshState(){
+  try{
+    var ns=await api('/api/status');
+    state=ns;
+    $('#ghidra-status').textContent='Ghidra: '+(ns.ghidra&&ns.ghidra.configured?'ready':'off')+' · DB: '+(ns.ghidra?ns.ghidra.databaseId||'—':'—');
+    updateJobFilter();
+    updateGraph();
+    if(selectedNodeId)showPanel(selectedNodeId);
+  }catch(e){toast(e.message,true);}
+}
+
+function updateJobFilter(){
+  var sel=$('#job-filter'),prev=sel.value;
+  sel.innerHTML='<option value="">All jobs</option>'+state.jobs.map(function(j){return '<option value="'+j.id+'">'+esc(j.title)+'</option>';}).join('');
+  sel.value=prev;
+}
+
+// ── WebSocket ──
+function connectWS(){
+  var proto=location.protocol==='https:'?'wss':'ws';
+  var ws=new WebSocket(proto+'://'+location.host+'/ws');
+  ws.onopen=function(){$('#conn-dot').classList.remove('disconnected');$('#conn-text').textContent='Live';};
+  ws.onmessage=function(e){
+    var ev=JSON.parse(e.data);
+    if(ev.sequence<=sequence)return;sequence=ev.sequence;
+    if(ws._t)clearTimeout(ws._t);
+    ws._t=setTimeout(refreshState,200);
+  };
+  ws.onclose=function(){$('#conn-dot').classList.add('disconnected');$('#conn-text').textContent='Reconnecting…';setTimeout(connectWS,3000);};
+  ws.onerror=function(){$('#conn-dot').classList.add('disconnected');$('#conn-text').textContent='Error';};
+}
+
+// ── Topbar ──
+$('#search').addEventListener('input',function(){
+  var q=$('#search').value.toLowerCase();
+  var jf=$('#job-filter').value;
+  if(!cy)return;
+  cy.nodes().forEach(function(n){
+    var label=(n.data('label')||'').toLowerCase();
+    var match=!q||label.indexOf(q)>=0||n.id().toLowerCase().indexOf(q)>=0;
+    if(match&&jf){
+      if(n.data('type')==='job')match=n.id()===jf;
+      else if(n.data('type')==='task'||n.data('type')==='hypothesis')match=n.data('jobId')===jf;
+      else if(n.data('type')==='agent'){
+        var t=state.tasks.find(function(ta){return ta.assigned_agent_id===n.id();});
+        match=t&&t.job_id===jf;
+      }
+    }
+    n.style('opacity',match?1:0.12);
+  });
+  cy.edges().style('opacity',0.08);
+});
+
+$('#job-filter').addEventListener('change',function(){$('#search').dispatchEvent(new Event('input'));});
+$('#btn-fit').addEventListener('click',function(){if(cy){cy.fit(cy.elements(),40);}});
+
+$('#btn-reset').addEventListener('click',function(){
+  if(!cy)return;
+  cy.nodes().unlock();
+  runLayout();
+});
+
+$('#panel-handle').addEventListener('click',function(){
+  $('#bottom-panel').classList.toggle('collapsed');
+});
+
+window.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){hideContextMenu();hidePanel();}
+  if(e.key==='f'&&e.ctrlKey){e.preventDefault();$('#search').focus();}
+});
+
+// ── Init ──
+initCy();
+connectWS();
+refreshState();
+})();
+</script>
 </body>
 </html>
