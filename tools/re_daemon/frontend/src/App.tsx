@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from './api/client';
 import { ContextMenu, type ContextMenuState } from './components/ContextMenu';
 import { Inspector, type InspectorActions } from './components/Inspector';
+import { InputDialog, useInputDialog } from './components/InputDialog';
 import { GraphCanvas } from './graph/GraphCanvas';
 import { buildGraph } from './graph/buildGraph';
 import type { GraphContextTarget } from './graph/contracts';
@@ -19,6 +20,7 @@ export default function App() {
   const [scopePanelOpen, setScopePanelOpen] = useState(false);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
+  const { request: inputDialog, openInputDialog, resolveInputDialog } = useInputDialog();
 
   const selectedNode = graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const pendingScopes = snapshot.writeScopeRequests.filter((request) => request.status === 'pending');
@@ -39,48 +41,77 @@ export default function App() {
   }, [notify, refresh]);
 
   const newJob = useCallback(() => {
-    const title = window.prompt('Job title:');
-    if (!title) return;
-    const goal = window.prompt('Job goal:');
-    if (!goal) return;
-    void perform(() => api('/api/jobs', { method: 'POST', body: JSON.stringify({ title, goal }) }), 'Job created and triage started');
-  }, [perform]);
+    void (async () => {
+      const values = await openInputDialog({
+        title: 'Create job',
+        fields: [
+          { name: 'title', label: 'Job title', required: true },
+          { name: 'goal', label: 'Job goal', type: 'textarea', required: true },
+        ],
+        submitLabel: 'Create job',
+      });
+      if (!values) return;
+      await perform(
+        () => api('/api/jobs', { method: 'POST', body: JSON.stringify({ title: values.title, goal: values.goal }) }),
+        'Job created and triage started',
+      );
+    })();
+  }, [openInputDialog, perform]);
 
   const addTask = useCallback((jobId: string) => {
-    const title = window.prompt('Task title:');
-    if (!title) return;
-    const instructions = window.prompt('Instructions:');
-    if (!instructions) return;
-    const role = window.prompt('Role (investigator/transcriber/validator/integrator/reviewer):', 'investigator');
-    if (!role) return;
-    void perform(
-      () => api(`/api/jobs/${jobId}/tasks`, {
-        method: 'POST', body: JSON.stringify({ title, instructions, role, write_scope: [] }),
-      }),
-      'Task created',
-    );
-  }, [perform]);
+    void (async () => {
+      const values = await openInputDialog({
+        title: 'Add task',
+        fields: [
+          { name: 'title', label: 'Task title', required: true },
+          { name: 'instructions', label: 'Instructions', type: 'textarea', required: true, rows: 6 },
+          {
+            name: 'role', label: 'Role', type: 'select', defaultValue: 'investigator', required: true,
+            options: ['investigator', 'transcriber', 'validator', 'integrator', 'reviewer'].map((role) => ({ label: role, value: role })),
+          },
+        ],
+        submitLabel: 'Add task',
+      });
+      if (!values) return;
+      await perform(
+        () => api(`/api/jobs/${jobId}/tasks`, {
+          method: 'POST', body: JSON.stringify({
+            title: values.title, instructions: values.instructions, role: values.role, write_scope: [],
+          }),
+        }),
+        'Task created',
+      );
+    })();
+  }, [openInputDialog, perform]);
 
   const addDependency = useCallback((taskId: string) => {
     const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
     const candidates = snapshot.tasks.filter((candidate) => candidate.id !== taskId && candidate.job_id === task?.job_id);
     if (!candidates.length) return notify('No task in this job can be used as a prerequisite', true);
-    const choice = window.prompt(
-      `Choose prerequisite index:
-${candidates.map((candidate, index) => `[${index}] ${candidate.title}`).join('\n')}`,
-    );
-    if (choice === null) return;
-    const dependency = candidates[Number.parseInt(choice, 10)];
-    if (!dependency) return notify('Invalid prerequisite index', true);
-    const relation = window.prompt('Relation (requires/evidence/invalidates):', 'requires');
-    if (!relation) return;
-    void perform(
-      () => api(`/api/tasks/${taskId}/dependencies`, {
-        method: 'POST', body: JSON.stringify({ dependency_task_id: dependency.id, relation }),
-      }),
-      'Dependency created',
-    );
-  }, [notify, perform, snapshot.tasks]);
+    void (async () => {
+      const values = await openInputDialog({
+        title: 'Add dependency',
+        fields: [
+          {
+            name: 'dependencyTaskId', label: 'Prerequisite', type: 'select', required: true,
+            options: candidates.map((candidate) => ({ label: candidate.title, value: candidate.id })),
+          },
+          {
+            name: 'relation', label: 'Relation', type: 'select', defaultValue: 'requires', required: true,
+            options: ['requires', 'evidence', 'invalidates'].map((relation) => ({ label: relation, value: relation })),
+          },
+        ],
+        submitLabel: 'Add dependency',
+      });
+      if (!values) return;
+      await perform(
+        () => api(`/api/tasks/${taskId}/dependencies`, {
+          method: 'POST', body: JSON.stringify({ dependency_task_id: values.dependencyTaskId, relation: values.relation }),
+        }),
+        'Dependency created',
+      );
+    })();
+  }, [notify, openInputDialog, perform, snapshot.tasks]);
 
   const actions: InspectorActions = useMemo(() => ({
     schedule: (jobId) => void perform(() => api(`/api/jobs/${jobId}/schedule?limit=1`, { method: 'POST' }), 'Scheduling evaluated'),
@@ -88,21 +119,56 @@ ${candidates.map((candidate, index) => `[${index}] ${candidate.title}`).join('\n
     addTask,
     addDependency,
     retry: (taskId) => {
-      const reason = window.prompt('Retry reason:');
-      if (reason) void perform(() => api(`/api/tasks/${taskId}/retry`, { method: 'POST', body: JSON.stringify({ reason }) }), 'Task requeued');
+      void (async () => {
+        const values = await openInputDialog({
+          title: 'Requeue task',
+          fields: [{ name: 'reason', label: 'Retry reason', type: 'textarea', required: true }],
+          submitLabel: 'Requeue',
+        });
+        if (!values) return;
+        await perform(
+          () => api(`/api/tasks/${taskId}/retry`, { method: 'POST', body: JSON.stringify({ reason: values.reason }) }),
+          'Task requeued',
+        );
+      })();
     },
     recover: (taskId) => {
-      const reason = window.prompt('Recovery reason:');
-      if (reason) void perform(() => api(`/api/tasks/${taskId}/recover`, { method: 'POST', body: JSON.stringify({ reason }) }), 'Recovery requested');
+      void (async () => {
+        const values = await openInputDialog({
+          title: 'Recover task attempt',
+          description: 'This fails the stuck attempt and reaps its agent process.',
+          fields: [{ name: 'reason', label: 'Recovery reason', type: 'textarea', required: true }],
+          submitLabel: 'Recover attempt',
+          danger: true,
+        });
+        if (!values) return;
+        await perform(
+          () => api(`/api/tasks/${taskId}/recover`, { method: 'POST', body: JSON.stringify({ reason: values.reason }) }),
+          'Recovery requested',
+        );
+      })();
     },
     controlAgent: (agentId, action) => {
-      const message = action === 'abort' ? null : window.prompt(`${action} message:`);
-      if (action !== 'abort' && message === null) return;
-      void perform(() => api(`/api/agents/${agentId}/control`, {
-        method: 'POST', body: JSON.stringify({ action, message }),
-      }), `Agent ${action.replace('_', ' ')} requested`);
+      if (action === 'abort') {
+        void perform(() => api(`/api/agents/${agentId}/control`, {
+          method: 'POST', body: JSON.stringify({ action, message: null }),
+        }), 'Agent abort requested');
+        return;
+      }
+      void (async () => {
+        const actionLabel = action.replace('_', ' ');
+        const values = await openInputDialog({
+          title: `Agent ${actionLabel}`,
+          fields: [{ name: 'message', label: 'Message', type: 'textarea', rows: 6 }],
+          submitLabel: action === 'steer' ? 'Steer agent' : 'Send follow-up',
+        });
+        if (!values) return;
+        await perform(() => api(`/api/agents/${agentId}/control`, {
+          method: 'POST', body: JSON.stringify({ action, message: values.message }),
+        }), `Agent ${actionLabel} requested`);
+      })();
     },
-  }), [addDependency, addTask, perform]);
+  }), [addDependency, addTask, openInputDialog, perform]);
 
   const handleContextMenu = useCallback((target: GraphContextTarget) => {
     const node = target.nodeId ? graph.nodes.find((candidate) => candidate.id === target.nodeId) : null;
@@ -138,6 +204,7 @@ ${candidates.map((candidate, index) => `[${index}] ${candidate.title}`).join('\n
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (document.querySelector('dialog[open]')) return;
       if (event.key === 'Escape') { setMenu(null); setSelectedNodeId(null); setPanelCollapsed(true); }
       if (event.key === 'f' && event.ctrlKey) {
         event.preventDefault();
@@ -154,13 +221,21 @@ ${candidates.map((candidate, index) => `[${index}] ${candidate.title}`).join('\n
   };
 
   const resolveScope = (requestId: string, decision: 'approved' | 'rejected') => {
-    const reason = window.prompt(`Reason for ${decision}:`) ?? undefined;
-    void perform(
-      () => api(`/api/write-scope-requests/${requestId}/resolve`, {
-        method: 'POST', body: JSON.stringify({ decision, reason }),
-      }),
-      `Write scope ${decision}`,
-    );
+    void (async () => {
+      const values = await openInputDialog({
+        title: `${decision === 'approved' ? 'Approve' : 'Reject'} write scope`,
+        fields: [{ name: 'reason', label: 'Reason (optional)', type: 'textarea' }],
+        submitLabel: decision === 'approved' ? 'Approve' : 'Reject',
+        danger: decision === 'rejected',
+      });
+      if (!values) return;
+      await perform(
+        () => api(`/api/write-scope-requests/${requestId}/resolve`, {
+          method: 'POST', body: JSON.stringify({ decision, reason: values.reason || undefined }),
+        }),
+        `Write scope ${decision}`,
+      );
+    })();
   };
 
   return (
@@ -221,6 +296,7 @@ ${candidates.map((candidate, index) => `[${index}] ${candidate.title}`).join('\n
         onToggle={() => setPanelCollapsed((collapsed) => !collapsed)}
         actions={actions}
       />
+      <InputDialog request={inputDialog} onResolve={resolveInputDialog} />
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {(toast || error) && <div className={`toast ${toast?.error || error ? 'toast--error' : ''}`}>{toast?.message ?? error}</div>}
     </main>
