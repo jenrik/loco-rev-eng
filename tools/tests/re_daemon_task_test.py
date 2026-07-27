@@ -68,6 +68,25 @@ class TaskGraphTests(unittest.TestCase):
             self.assertEqual(deferred['transition_reason'], 'need caller xrefs')
             self.assertEqual(store.ready_tasks(job['id']), [])
 
+    def test_terminal_prerequisite_outcomes_release_ready_successors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = DaemonStore(Path(temporary) / 'state.sqlite3')
+            store.initialize()
+            for outcome in ('blocked', 'deferred', 'failed'):
+                with self.subTest(outcome=outcome):
+                    job = store.create_job(f'Terminal {outcome}', 'continue the remaining graph')
+                    prerequisite = store.create_task(job['id'], 'root', 'attempt prerequisite', 'investigator')
+                    successor = store.create_task(job['id'], 'successor', 'inspect settled outcome and continue', 'validator')
+                    store.add_task_dependency(successor['id'], prerequisite['id'])
+                    self.assertEqual([task['id'] for task in store.ready_tasks(job['id'])], [prerequisite['id']])
+                    store.transition_task(prerequisite['id'], outcome, f'{outcome} prerequisite')
+                    self.assertEqual([task['id'] for task in store.ready_tasks(job['id'])], [successor['id']])
+                    dependencies = store.task_dependencies(successor['id'])
+                    self.assertEqual([(item['id'], item['status'], item['transition_reason']) for item in dependencies], [
+                        (prerequisite['id'], outcome, f'{outcome} prerequisite'),
+                    ])
+                    self.assertEqual(store.get_job(job['id'])['status'], 'queued')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

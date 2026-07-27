@@ -105,7 +105,10 @@ revision. Ghidra mutation tools remain unavailable.
 The graph is partial and evidence-led, not a mandatory upfront plan.
 
 - A node represents a concrete investigation or `function × pass` task.
-- A `requires` edge points from a waiting node to a known prerequisite.
+- A `requires` edge points from a waiting node to a known prerequisite. It is
+  an execution-order gate while that prerequisite is `ready` or `in_progress`;
+  any terminal outcome releases the successor so it can inspect the outcome,
+  continue independently where possible, or record its own concrete block.
 - `evidence` and `invalidates` edges document reasoning but do not block work.
 - `blocked` means a concrete prerequisite exists.
 - `deferred` means the next investigation is named but the prerequisite is not
@@ -121,7 +124,9 @@ gates each prerequisite-most new node on the planning task, so no successor can
 race incomplete evidence collection.
 
 After every terminal task transition the scheduler fills one serial autonomous
-capacity slot with the next dependency-ready node. Queued graphs resume at daemon
+capacity slot with the next dependency-ready node. A blocked, deferred, or failed
+prerequisite therefore cannot strand nominally ready descendants or incorrectly
+leave the root job blocked while executable work remains. Queued graphs resume at daemon
 startup. Later workers may expand the partial graph when evidence reveals concrete
 new work; prose plans do not affect scheduling. The daemon never treats a missing
 edge as proof of independence.

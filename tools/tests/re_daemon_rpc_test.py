@@ -87,7 +87,7 @@ class PiRpcManagerTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
-    def test_scheduler_launches_only_ready_tasks_then_unblocks_dependents(self):
+    def test_scheduler_launches_only_ready_tasks_then_advances_after_terminal_prerequisite(self):
         async def scenario():
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -107,7 +107,8 @@ class PiRpcManagerTests(unittest.TestCase):
                 self.assertEqual(len(first), 1)
                 self.assertEqual(first[0]["task"]["id"], prerequisite["id"])
                 self.assertIsNotNone(store.task_for_agent(first[0]["agent"]["id"]))
-                store.transition_task(prerequisite["id"], "completed", "done")
+                store.transition_task(prerequisite["id"], "blocked", "write scope approval is pending")
+                self.assertEqual(store.get_job(job["id"])["status"], "queued")
                 second = await scheduler.schedule(job["id"], 2)
                 self.assertEqual(len(second), 1)
                 self.assertEqual(second[0]["task"]["id"], dependent["id"])

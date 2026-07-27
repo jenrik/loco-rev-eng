@@ -183,6 +183,7 @@ main()
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
 - [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, startup recovers in-progress tasks whose assigned PID is gone, and the RPC reader accepts escaped multi-KiB tool events
 - [x] **Autonomous task-graph driving** — evidence agents atomically persist bounded acyclic follow-on DAGs, initial triage cannot complete with only a prose plan, ready-task claims are race-safe, terminal transitions dispatch the next serial successor, queued graphs resume on startup, and dashboard snapshots render durable edges
+- [x] **Settled dependency advancement** — `requires` edges now gate only active prerequisites; blocked/deferred/failed roots release ready successors, expose their outcomes to successor agents, and keep the root job queued while executable work remains
 
 ## Remaining work
 
@@ -331,6 +332,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (settled-dependency-scheduling) | Fixed autonomous scheduling so terminal blocked/deferred/failed prerequisites release ready successors; root jobs remain queued while executable descendants exist, with prerequisite context, store/RPC regressions, and live-state-copy verification. |
 | 2026-07-27 (html-input-dialog) | Replaced dashboard `window.prompt` input with a reusable native `<dialog>` form across job, task, dependency, recovery, agent-control, and write-scope workflows; rebuilt static assets and passed frontend/web tests. |
 | 2026-07-27 (react-flow-dashboard) | Migrated the autonomous RE dashboard from monolithic Cytoscape HTML to React Flow + lazy ELK behind renderer/layout interfaces; added custom graph elements, operator UI parity, Vite/Nix builds, static assets, and regression coverage. |
 | 2026-07-27 (autonomous-task-graph) | Added agent-driven bounded DAG expansion with idempotency/cycle checks/source gating, atomic scheduler claims, automatic terminal/startup advancement, graph rendering, and end-to-end regression coverage. |

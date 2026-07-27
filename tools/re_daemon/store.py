@@ -18,6 +18,12 @@ TASK_PLAN_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,119}$")
 MAX_EXPANSION_TASKS = 24
 MAX_EXPANSION_EDGES = 64
 
+# A requires edge imposes execution order, not a successful-outcome contract.
+# Once a prerequisite has reached any terminal state, its successor must be
+# allowed to inspect that outcome and continue (or report its own block).
+# Otherwise one blocked/deferred root strands every nominally ready descendant.
+ACTIVE_TASK_STATUSES = ("ready", "in_progress")
+
 
 class DaemonStore:
     """SQLite-backed state store.
@@ -209,8 +215,8 @@ class DaemonStore:
                    AND NOT EXISTS (SELECT 1 FROM task_edges AS edge JOIN tasks AS dependency
                                    ON dependency.id = edge.dependency_task_id
                                    WHERE edge.task_id = task.id AND edge.relation = 'requires'
-                                   AND dependency.status != 'completed') LIMIT 1""",
-                (job_id,),
+                                   AND dependency.status IN (?, ?)) LIMIT 1""",
+                (job_id, *ACTIVE_TASK_STATUSES),
             ).fetchone()
             if ready is not None:
                 status = "queued"
@@ -386,6 +392,18 @@ class DaemonStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def task_dependencies(self, task_id: str) -> list[dict[str, Any]]:
+        """Return direct prerequisites with their terminal outcome context."""
+        self.get_task(task_id)
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """SELECT dependency.*, edge.relation FROM task_edges AS edge
+                   JOIN tasks AS dependency ON dependency.id = edge.dependency_task_id
+                   WHERE edge.task_id = ? ORDER BY dependency.created_at ASC""",
+                (task_id,),
+            ).fetchall()
+        return [self._task_row(row) for row in rows]
+
     def in_progress_tasks(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
             rows = connection.execute("SELECT * FROM tasks WHERE status = 'in_progress' ORDER BY updated_at ASC").fetchall()
@@ -412,11 +430,11 @@ class DaemonStore:
                     JOIN tasks AS dependency ON dependency.id = edge.dependency_task_id
                     WHERE edge.task_id = task.id
                       AND edge.relation = 'requires'
-                      AND dependency.status != 'completed'
+                      AND dependency.status IN (?, ?)
                   )
                 ORDER BY task.created_at ASC LIMIT ?
                 """,
-                (job_id, limit),
+                (job_id, *ACTIVE_TASK_STATUSES, limit),
             ).fetchall()
             for row in rows:
                 updated = connection.execute(
@@ -447,11 +465,11 @@ class DaemonStore:
                     JOIN tasks AS dependency ON dependency.id = edge.dependency_task_id
                     WHERE edge.task_id = task.id
                       AND edge.relation = 'requires'
-                      AND dependency.status != 'completed'
+                      AND dependency.status IN (?, ?)
                   )
                 ORDER BY task.created_at ASC LIMIT ?
                 """,
-                (job_id, limit),
+                (job_id, *ACTIVE_TASK_STATUSES, limit),
             ).fetchall()
         return [self._task_row(row) for row in rows]
 

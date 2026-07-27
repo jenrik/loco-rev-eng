@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "re_get_task",
     label: "Get RE Task",
-    description: "Read the daemon-assigned reverse-engineering task, goal, and approved write scope.",
+    description: "Read the daemon-assigned reverse-engineering task, direct prerequisite outcomes, goal, and approved write scope.",
     parameters: Type.Object({}),
     async execute() {
       const context = await daemonRequest(`/internal/agents/${agentId}/context`);
