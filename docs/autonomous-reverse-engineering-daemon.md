@@ -82,9 +82,13 @@ are `observed` only when directly supported by bytes/disassembly, while names,
 class ownership, and inferred semantics remain `tentative` hypotheses until
 validated.
 
-The first daemon slice defines the adapter interface and uses a test adapter.
-Connecting the project’s existing Ghidra MCP service is a distinct integration
-step; no agent is considered Ghidra-capable until that adapter is healthy.
+The daemon now owns an MCP stdio child configured with an explicit command (for
+this environment, `re-mcp-ghidra proxy`) and connects it to a fresh raw-binary
+database ID. It waits for analysis before accepting calls, serializes all calls,
+and exposes only the read-only allowlist. The integration is real: the adapter
+has opened `loco.exe` through the configured service and completed an allowlisted
+function-list query. Every response is persisted as a content-addressed evidence
+revision. Ghidra mutation tools remain unavailable.
 
 ## Task graph and deferred work
 
@@ -143,8 +147,9 @@ Core tables are:
 - `tasks` and `task_edges` — partial evidence graph;
 - `agents` — role, process/session metadata, status, task ownership;
 - `events` — normalized agent and daemon events;
-- `evidence_revisions` and `hypotheses` — raw artifacts and interpretations;
-- `write_scope_requests` — approved, pending, or rejected cross-file changes.
+- `evidence_revisions` — raw content-addressed artifacts and their request provenance;
+- `write_scope_requests` — pending cross-file changes; approval/rejection is a planned operator workflow;
+- hypotheses remain explicit agent events until their revisioned table is delivered.
 
 Raw large artifacts are content-addressed files under the daemon state root;
 the database stores digests and metadata. Database writes are performed only by
@@ -160,19 +165,28 @@ the daemon.
 - Ghidra mutation operations are disabled by default. The initial adapter is
   read-only (`decompile`, `disassemble`, xrefs, structures, names, strings).
 
-## Delivery phases
+## Delivery status
+
+Implemented foundations:
 
 1. **Daemon vertical slice:** SQLite store, normalized event recorder, FastAPI
    status/history API, WebSocket broadcast, static dashboard, and tests.
 2. **Pi process manager:** launch a mock/Pi RPC agent, persist live events,
-   implement stop/steer/follow-up, and replay logs after restart.
-3. **Pi extension:** task/evidence tools and enforced write scopes.
-4. **Ghidra adapter:** route read-only project Ghidra MCP operations through
-   the daemon and persist evidence revisions.
-5. **Autonomous scheduler:** launch role agents from ready task nodes and
-   consume structured outcomes/deferrals.
-6. **Selective worktrees:** use isolated branches only for tasks declared
+   and implement stop/steer/follow-up transport.
+3. **Pi extension:** task/evidence/Ghidra tools and enforced initial write scope.
+4. **Ghidra adapter:** daemon-owned, read-only project MCP calls with raw-binary
+   open/analysis, serialized calls, and content-addressed evidence revisions.
+5. **Autonomous scheduler:** dependency-gated launch of role agents and durable
+   completion/block/defer transitions.
+
+Remaining delivery work:
+
+1. **Operational recovery:** Ghidra cache/restart/cleanup and interrupted-agent
+   retry policy.
+2. **Operator workflow:** browser controls, revisioned hypotheses, and approved
+   write-scope escalation.
+3. **Selective worktrees:** use isolated branches only for tasks declared
    independent; keep shared integration serial.
 
-Each phase must work independently and have integration tests before the next
-phase is enabled.
+Every foundation has focused tests; each remaining step must add integration
+coverage before it is enabled.

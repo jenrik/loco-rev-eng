@@ -7,19 +7,27 @@
     body { font-family: ui-monospace, monospace; margin: 2rem; background: #10151c; color: #d9e1e8; }
     h1 { color: #8ec5ff; } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(22rem,1fr)); gap:1rem; }
     section { border:1px solid #3b4654; border-radius:.5rem; padding:1rem; background:#17212b; }
-    pre { max-height:28rem; overflow:auto; white-space:pre-wrap; } .running { color:#83e58c; } .queued { color:#ffd479; }
+    pre { max-height:26rem; overflow:auto; white-space:pre-wrap; } .ok { color:#83e58c; } .warn { color:#ffd479; }
   </style>
 </head>
 <body>
   <h1>Autonomous Reverse Engineering</h1>
-  <p id="connection">Connecting…</p>
-  <div class="grid"><section><h2>Jobs</h2><pre id="jobs"></pre></section><section><h2>Agents</h2><pre id="agents"></pre></section></div>
+  <p id="connection">Connecting…</p><p id="ghidra"></p>
+  <div class="grid">
+    <section><h2>Jobs</h2><pre id="jobs"></pre></section>
+    <section><h2>Tasks</h2><pre id="tasks"></pre></section>
+    <section><h2>Agents</h2><pre id="agents"></pre></section>
+  </div>
   <section><h2>Live event tail</h2><pre id="tail"></pre></section>
   <script>
     const tail = document.querySelector('#tail'); let sequence = 0;
     const render = async () => { const state = await fetch('/api/status').then(r => r.json());
       document.querySelector('#jobs').textContent = JSON.stringify(state.jobs, null, 2);
-      document.querySelector('#agents').textContent = JSON.stringify(state.agents, null, 2); sequence = state.lastSequence; };
+      document.querySelector('#tasks').textContent = JSON.stringify(state.tasks, null, 2);
+      document.querySelector('#agents').textContent = JSON.stringify(state.agents, null, 2);
+      const g = state.ghidra; const configured = g.configured ? 'configured' : 'not configured';
+      document.querySelector('#ghidra').textContent = `Ghidra: ${configured}; database=${g.databaseId || '—'}; opened=${g.opened}`;
+      sequence = Math.max(sequence, state.lastSequence); };
     const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
     socket.onopen = () => document.querySelector('#connection').textContent = 'Live WebSocket connected';
     socket.onmessage = event => { const item = JSON.parse(event.data); if (item.sequence <= sequence) return; sequence = item.sequence;

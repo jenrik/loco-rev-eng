@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .broker import EventBroker
+from .mcp import GhidraAdapter, GhidraConfig, McpError
 from .pi_rpc import AgentManager
+from .scheduler import AutonomousScheduler
 from .store import DaemonStore
 
 
@@ -28,6 +30,19 @@ class CreateAgent(BaseModel):
     write_scope: list[str] = Field(default_factory=list)
 
 
+class CreateTask(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    instructions: str = Field(min_length=1, max_length=16000)
+    role: str = Field(min_length=1, max_length=80)
+    write_scope: list[str] = Field(default_factory=list)
+    status: str = Field(default="ready", pattern="^(ready|blocked|deferred)$")
+
+
+class CreateTaskDependency(BaseModel):
+    dependency_task_id: str = Field(min_length=1)
+    relation: str = Field(default="requires", pattern="^(requires|evidence|invalidates)$")
+
+
 class AgentControl(BaseModel):
     action: str = Field(pattern="^(steer|follow_up|abort)$")
     message: str | None = Field(default=None, max_length=16000)
@@ -38,26 +53,59 @@ class RecordEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class GhidraQuery(BaseModel):
+    operation: str = Field(min_length=1, max_length=100)
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskTransition(BaseModel):
+    status: str = Field(pattern="^(completed|blocked|deferred|failed)$")
+    reason: str | None = Field(default=None, max_length=16000)
+
+
+class WriteScopeRequest(BaseModel):
+    path: str = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=16000)
+
+
 def create_app(
     state_path: str | Path,
     project_root: str | Path | None = None,
     daemon_url: str = "http://127.0.0.1:8765",
     daemon_token: str = "",
     pi_binary: str = "pi",
+    ghidra_config: GhidraConfig | None = None,
 ) -> FastAPI:
     state_path = Path(state_path)
     project_root = Path(project_root or Path.cwd())
     store = DaemonStore(state_path)
     store.initialize()
     broker = EventBroker(store)
+    ghidra = GhidraAdapter(ghidra_config)
+    manager = AgentManager(store, broker, project_root, daemon_url, daemon_token, pi_binary)
+    scheduler = AutonomousScheduler(store, broker, manager, state_path)
     static_dir = Path(__file__).with_name("static")
 
-    app = FastAPI(title="Lego Loco Autonomous RE")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        try:
+            yield
+        finally:
+            await manager.close()
+            await ghidra.close()
+
+    app = FastAPI(title="Lego Loco Autonomous RE", lifespan=lifespan)
     app.state.store = store
     app.state.broker = broker
     app.state.daemon_token = daemon_token
-    app.state.agent_manager = AgentManager(store, broker, project_root, daemon_url, daemon_token, pi_binary)
+    app.state.ghidra = ghidra
+    app.state.agent_manager = manager
+    app.state.scheduler = scheduler
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    def require_internal(token: str | None) -> None:
+        if app.state.daemon_token and token != app.state.daemon_token:
+            raise HTTPException(status_code=403, detail="invalid daemon capability")
 
     @app.get("/")
     def dashboard() -> FileResponse:
@@ -65,13 +113,54 @@ def create_app(
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
-        return store.snapshot()
+        return {**store.snapshot(), "ghidra": ghidra.status()}
+
+    @app.get("/api/ghidra/status")
+    def ghidra_status() -> dict[str, Any]:
+        return ghidra.status()
 
     @app.post("/api/jobs")
     async def create_job(request: CreateJob) -> dict[str, Any]:
         job = store.create_job(request.title, request.goal)
         await broker.publish(None, "job_created", {"job": job})
         return job
+
+    @app.post("/api/jobs/{job_id}/tasks")
+    async def create_task(job_id: str, request: CreateTask) -> dict[str, Any]:
+        try:
+            task = store.create_task(job_id, request.title, request.instructions, request.role, request.write_scope, request.status)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown job") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(None, "task_created", {"task": task})
+        return task
+
+    @app.get("/api/jobs/{job_id}/tasks")
+    def list_tasks(job_id: str) -> dict[str, Any]:
+        try:
+            return {"tasks": store.list_tasks(job_id)}
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown job") from None
+
+    @app.post("/api/tasks/{task_id}/dependencies")
+    async def create_task_dependency(task_id: str, request: CreateTaskDependency) -> dict[str, Any]:
+        try:
+            store.add_task_dependency(task_id, request.dependency_task_id, request.relation)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown task") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(None, "task_dependency_created", {"taskId": task_id, **request.model_dump()})
+        return {"ok": True}
+
+    @app.post("/api/jobs/{job_id}/schedule")
+    async def schedule(job_id: str, limit: int = Query(default=1, ge=1, le=8)) -> dict[str, Any]:
+        try:
+            launched = await scheduler.schedule(job_id, limit)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown job") from None
+        return {"launched": launched}
 
     @app.post("/api/jobs/{job_id}/agents")
     async def create_agent(job_id: str, request: CreateAgent) -> dict[str, Any]:
@@ -86,7 +175,7 @@ def create_app(
     @app.post("/api/agents/{agent_id}/start")
     async def start_agent(agent_id: str) -> dict[str, Any]:
         try:
-            return await app.state.agent_manager.launch(agent_id)
+            return await manager.launch(agent_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown agent") from None
         except Exception as error:
@@ -95,7 +184,7 @@ def create_app(
     @app.post("/api/agents/{agent_id}/control")
     async def control_agent(agent_id: str, request: AgentControl) -> dict[str, Any]:
         try:
-            await app.state.agent_manager.control(agent_id, request.action, request.message)
+            await manager.control(agent_id, request.action, request.message)
         except KeyError:
             raise HTTPException(status_code=404, detail="agent is not live") from None
         except ValueError as error:
@@ -110,10 +199,6 @@ def create_app(
             raise HTTPException(status_code=404, detail="unknown agent") from None
         return {"events": store.events_after(after, agent_id, limit)}
 
-    def require_internal(token: str | None) -> None:
-        if app.state.daemon_token and token != app.state.daemon_token:
-            raise HTTPException(status_code=403, detail="invalid daemon capability")
-
     @app.get("/internal/agents/{agent_id}/context")
     async def agent_context(agent_id: str, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
         require_internal(x_re_daemon_token)
@@ -122,7 +207,7 @@ def create_app(
             job = store.get_job(agent["job_id"])
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown agent") from None
-        return {"agent": agent, "job": job}
+        return {"agent": agent, "job": job, "task": store.task_for_agent(agent_id), "ghidra": ghidra.status()}
 
     @app.post("/internal/agents/{agent_id}/events")
     async def record_agent_event(agent_id: str, request: RecordEvent, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
@@ -132,6 +217,46 @@ def create_app(
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown agent") from None
         return await broker.publish(agent_id, request.kind, request.payload)
+
+    @app.post("/internal/agents/{agent_id}/ghidra")
+    async def query_ghidra(agent_id: str, request: GhidraQuery, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
+        require_internal(x_re_daemon_token)
+        try:
+            agent = store.get_agent(agent_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown agent") from None
+        task = store.task_for_agent(agent_id)
+        try:
+            response = await ghidra.query(request.operation, request.arguments)
+        except McpError as error:
+            await broker.publish(agent_id, "ghidra_query_failed", {"operation": request.operation, "error": str(error)})
+            raise HTTPException(status_code=503, detail=str(error)) from error
+        evidence = store.record_evidence(agent["job_id"], task["id"] if task else None, agent_id, "ghidra", request.operation, request.arguments, response)
+        await broker.publish(agent_id, "ghidra_evidence_recorded", {"operation": request.operation, "evidence": evidence})
+        return {"evidence": evidence, "response": response}
+
+    @app.post("/internal/agents/{agent_id}/task/transition")
+    async def transition_agent_task(agent_id: str, request: TaskTransition, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
+        require_internal(x_re_daemon_token)
+        task = store.task_for_agent(agent_id)
+        if task is None:
+            raise HTTPException(status_code=409, detail="agent has no scheduler-assigned task")
+        try:
+            transitioned = store.transition_task(task["id"], request.status, request.reason, agent_id)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(agent_id, "task_transitioned", {"task": transitioned})
+        return transitioned
+
+    @app.post("/internal/agents/{agent_id}/write-scope-requests")
+    async def request_agent_write_scope(agent_id: str, request: WriteScopeRequest, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
+        require_internal(x_re_daemon_token)
+        try:
+            scope_request = store.request_write_scope(agent_id, (store.task_for_agent(agent_id) or {}).get("id"), request.path, request.reason)
+        except (KeyError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(agent_id, "write_scope_requested", {"request": scope_request})
+        return scope_request
 
     @app.websocket("/ws")
     async def websocket_events(websocket: WebSocket) -> None:

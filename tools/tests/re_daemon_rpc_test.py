@@ -8,6 +8,7 @@ import unittest
 
 from tools.re_daemon.broker import EventBroker
 from tools.re_daemon.pi_rpc import AgentManager
+from tools.re_daemon.scheduler import AutonomousScheduler
 from tools.re_daemon.store import DaemonStore
 
 
@@ -56,6 +57,33 @@ class PiRpcManagerTests(unittest.TestCase):
                 self.assertIn("tool_started", [event["kind"] for event in events])
                 self.assertIn("tool_finished", [event["kind"] for event in events])
                 self.assertNotIn("message_update", [event["kind"] for event in events])
+
+        asyncio.run(scenario())
+
+    def test_scheduler_launches_only_ready_tasks_then_unblocks_dependents(self):
+        async def scenario():
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                fake_pi = root / "fake-pi"
+                fake_pi.write_text(FAKE_PI.replace("__PYTHON__", sys.executable), encoding="utf-8")
+                fake_pi.chmod(0o755)
+                store = DaemonStore(root / "state.sqlite3")
+                store.initialize()
+                job = store.create_job("task graph", "validate")
+                prerequisite = store.create_task(job["id"], "inspect", "inspect assembly", "investigator")
+                dependent = store.create_task(job["id"], "validate", "validate C++", "validator")
+                store.add_task_dependency(dependent["id"], prerequisite["id"])
+                broker = EventBroker(store)
+                manager = AgentManager(store, broker, Path.cwd(), "http://127.0.0.1:8765", "not-logged", str(fake_pi))
+                scheduler = AutonomousScheduler(store, broker, manager, root / "state.sqlite3")
+                first = await scheduler.schedule(job["id"], 2)
+                self.assertEqual(len(first), 1)
+                self.assertEqual(first[0]["task"]["id"], prerequisite["id"])
+                self.assertIsNotNone(store.task_for_agent(first[0]["agent"]["id"]))
+                store.transition_task(prerequisite["id"], "completed", "done")
+                second = await scheduler.schedule(job["id"], 2)
+                self.assertEqual(len(second), 1)
+                self.assertEqual(second[0]["task"]["id"], dependent["id"])
 
         asyncio.run(scenario())
 

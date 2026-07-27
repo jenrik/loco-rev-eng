@@ -185,3 +185,17 @@ class AgentManager:
             await process.follow_up(message)
         else:
             raise ValueError("invalid control action or missing message")
+
+    async def close(self) -> None:
+        """Abort daemon-owned Pi children during application shutdown."""
+        processes = list(self._agents.values())
+        await asyncio.gather(*(process.abort() for process in processes), return_exceptions=True)
+        waiters = [process._wait_task for process in processes if process._wait_task is not None]
+        try:
+            await asyncio.wait_for(asyncio.gather(*waiters, return_exceptions=True), timeout=10)
+        except TimeoutError:
+            for process in processes:
+                if process.process is not None and process.process.returncode is None:
+                    process.process.kill()
+            await asyncio.gather(*waiters, return_exceptions=True)
+        self._agents.clear()

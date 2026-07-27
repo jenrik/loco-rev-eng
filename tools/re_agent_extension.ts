@@ -69,6 +69,28 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "re_ghidra_query",
+    label: "Query Ghidra",
+    description: "Run an allowlisted read-only Ghidra operation through the daemon and record immutable evidence.",
+    parameters: Type.Object({
+      operation: StringEnum([
+        "decompile_function", "disassemble_function", "list_functions", "get_xrefs_to", "get_xrefs_from",
+        "list_structures", "get_structure", "list_names", "get_strings", "find_code_by_string",
+      ] as const),
+      arguments: Type.Object({}, { additionalProperties: true }),
+    }),
+    async execute(_id, params) {
+      const result = await daemonRequest(`/internal/agents/${agentId}/ghidra`, {
+        method: "POST", body: JSON.stringify(params),
+      });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result.response, null, 2) }],
+        details: { evidence: result.evidence },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "re_record_observation",
     label: "Record RE Observation",
     description: "Record a Ghidra-backed observation or tentative hypothesis in the daemon event history.",
@@ -87,18 +109,31 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    name: "re_defer_task",
-    label: "Defer RE Task",
-    description: "Record a concrete unresolved reverse-engineering issue and its next investigation step.",
+    name: "re_transition_task",
+    label: "Transition RE Task",
+    description: "Report a scheduler-assigned task as completed, blocked, deferred, or failed.",
     parameters: Type.Object({
-      reason: Type.String(),
-      nextAction: Type.String(),
+      status: StringEnum(["completed", "blocked", "deferred", "failed"] as const),
+      reason: Type.Optional(Type.String()),
     }),
     async execute(_id, params) {
-      const event = await daemonRequest(`/internal/agents/${agentId}/events`, {
-        method: "POST", body: JSON.stringify({ kind: "task_deferred", payload: params }),
+      const task = await daemonRequest(`/internal/agents/${agentId}/task/transition`, {
+        method: "POST", body: JSON.stringify(params),
       });
-      return { content: [{ type: "text", text: "Recorded deferred task." }], details: event };
+      return { content: [{ type: "text", text: `Task transitioned to ${params.status}.` }], details: task };
+    },
+  });
+
+  pi.registerTool({
+    name: "re_defer_task",
+    label: "Defer RE Task",
+    description: "Defer the assigned task with a concrete reason and next investigation step.",
+    parameters: Type.Object({ reason: Type.String(), nextAction: Type.String() }),
+    async execute(_id, params) {
+      const task = await daemonRequest(`/internal/agents/${agentId}/task/transition`, {
+        method: "POST", body: JSON.stringify({ status: "deferred", reason: `${params.reason}\nNext action: ${params.nextAction}` }),
+      });
+      return { content: [{ type: "text", text: "Recorded deferred task." }], details: task };
     },
   });
 
@@ -108,10 +143,10 @@ export default function (pi: ExtensionAPI) {
     description: "Request a new source-file write scope instead of editing an undeclared file.",
     parameters: Type.Object({ path: Type.String(), reason: Type.String() }),
     async execute(_id, params) {
-      const event = await daemonRequest(`/internal/agents/${agentId}/events`, {
-        method: "POST", body: JSON.stringify({ kind: "write_scope_requested", payload: params }),
+      const request = await daemonRequest(`/internal/agents/${agentId}/write-scope-requests`, {
+        method: "POST", body: JSON.stringify(params),
       });
-      return { content: [{ type: "text", text: `Requested write scope for ${params.path}; do not edit it until approved.` }], details: event };
+      return { content: [{ type: "text", text: `Requested write scope for ${params.path}; do not edit it until approved.` }], details: request };
     },
   });
 }
