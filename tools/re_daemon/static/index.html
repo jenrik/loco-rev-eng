@@ -26,9 +26,32 @@ body{font-family:ui-monospace,SFMono-Regular,monospace;background:#0d1117;color:
 #bottom-panel.collapsed .handle .chevron{transform:rotate(180deg)}
 #bottom-panel .handle .node-title{font-size:12px;font-weight:bold;color:#c9d1d9;flex:1}
 #bottom-panel .handle .node-type{font-size:10px;color:#8b949e;text-transform:uppercase}
-#bottom-panel .content{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;padding:16px}
+#bottom-panel .content{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0;padding:16px;height:auto}
+#bottom-panel .content.agent-layout{grid-template-columns:1fr 2fr;padding:0;height:calc(100% - 36px)}
 #bottom-panel .col{border-right:1px solid #30363d;padding:0 16px}
+#bottom-panel .content.agent-layout .col{padding:16px;overflow-y:auto}
 #bottom-panel .col:last-child{border-right:none}
+#bottom-panel .log-empty{color:#8b949e;font-size:11px;font-style:italic;padding:16px}
+#bottom-panel .log-entry{padding:6px 0;border-bottom:1px solid #21262d;font-size:10px}
+#bottom-panel .log-entry .log-time{color:#484f58;font-size:9px;display:block;margin-bottom:2px}
+#bottom-panel .log-entry .log-kind{color:#d3a85a;text-transform:uppercase;font-size:8px;letter-spacing:.3px;margin-right:6px}
+#bottom-panel .log-entry .log-msg{color:#c9d1d9;word-break:break-word}
+#bottom-panel .log-entry.log-turn{border-top:1px solid #30363d;padding-top:8px;margin-top:4px}
+#bottom-panel .log-entry.log-thinking{color:#8b949e;font-style:italic}
+#bottom-panel .log-entry.log-thinking .log-thinking-toggle{color:#58a6ff;cursor:pointer;font-style:normal;font-size:9px;margin-right:4px}
+#bottom-panel .log-entry.log-thinking .log-thinking-body{display:none;margin-top:4px;padding:6px 8px;background:#0d1117;border-radius:4px;white-space:pre-wrap;max-height:200px;overflow-y:auto;font-style:normal;color:#8b949e}
+#bottom-panel .log-entry.log-thinking.expanded .log-thinking-body{display:block}
+#bottom-panel .log-entry.log-tool{color:#4a9e6e}
+#bottom-panel .log-entry.log-tool .log-tool-name{color:#7ee787;font-weight:bold}
+#bottom-panel .log-entry.log-tool.log-tool-error{color:#f85149}
+#bottom-panel .log-entry.log-tool .log-tool-result{max-height:160px;overflow-y:auto;margin-top:4px;padding:4px 8px;background:#0d1117;border-radius:4px;white-space:pre-wrap;font-size:9px}
+#bottom-panel .log-entry .log-msg .log-agent{color:#6ea8e6}
+#bottom-panel .log-entry .log-msg .log-task{color:#4a9e6e}
+#bottom-panel .log-header{position:sticky;top:0;background:#161b22;z-index:1;padding:12px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:8px}
+#bottom-panel .log-header h3{margin:0;flex:1}
+#bottom-panel .log-header button{font-size:9px;padding:2px 8px}
+#bottom-panel .log-streaming .log-stream-dot{display:inline-block;width:6px;height:6px;background:#3fb950;border-radius:50%;margin-right:6px;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 #bottom-panel h3{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#8b949e;margin-bottom:10px}
 #bottom-panel .field{margin-bottom:8px;font-size:11px}
 #bottom-panel .field .key{color:#8b949e;display:block;font-size:9px;text-transform:uppercase}
@@ -48,7 +71,7 @@ body{font-family:ui-monospace,SFMono-Regular,monospace;background:#0d1117;color:
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
-@media(max-width:900px){#bottom-panel .content{grid-template-columns:1fr}#bottom-panel .col{border-right:none;border-bottom:1px solid #30363d;padding:12px 0}}
+@media(max-width:900px){#bottom-panel .content,#bottom-panel .content.agent-layout{grid-template-columns:1fr}#bottom-panel .col{border-right:none;border-bottom:1px solid #30363d;padding:12px 0}}
 #ctxmenu .ctx-item:hover{background:#1f6feb}
 </style>
 </head>
@@ -77,6 +100,8 @@ body{font-family:ui-monospace,SFMono-Regular,monospace;background:#0d1117;color:
 (function(){
 var $=function(s){return document.querySelector(s);};
 var state={jobs:[],tasks:[],agents:[],taskEdges:[],hypotheses:[],writeScopeRequests:[],ghidra:{}};
+window._agentLog=[];
+var _btnReg={},_btnSeq=0;
 var cy=null;
 var selectedNodeId=null;
 var sequence=0;
@@ -193,9 +218,9 @@ var CY_STYLE=[
     'border-color':'#254c70','border-width':3,'border-opacity':1,
     'shape':'round-rectangle','text-wrap':'wrap','text-max-width':'160px',
     'label':'data(label)','color':'#c9d1d9','font-size':'12px','font-weight':'bold',
-    'text-valign':'top','text-halign':'center','text-margin-y':'-6',
-    'width':200,'height':60,
-    'padding':'30px'
+    'text-valign':'center','text-halign':'center',
+    'width':200,'height':50,
+    'padding':'16px'
   }},
   {selector:'.job:selected',style:{
     'border-color':'#58a6ff','border-width':4
@@ -311,7 +336,41 @@ function initCy(){
   });
 
   // Close context menu on any click outside
-  document.addEventListener('click',function(e){
+  
+  // ── Hover: highlight node neighbourhood ──
+  cy.on('mouseover','node',function(ev){
+    var node=ev.target;
+    var neigh=node.closedNeighborhood(); // node + connected nodes + connecting edges
+    cy.elements().not(neigh).style('opacity',0.15);
+    neigh.style('opacity',1);
+  });
+  cy.on('mouseout','node',function(){
+    // Restore any filter dimming from search/job-filter
+    var q=$('#search').value.toLowerCase();
+    var jf=$('#job-filter').value;
+    var hasFilter=!!(q||jf);
+    if(hasFilter){
+      // Re-apply filter state
+      cy.nodes().forEach(function(n){
+        var label=(n.data('label')||'').toLowerCase();
+        var match=!q||label.indexOf(q)>=0||n.id().toLowerCase().indexOf(q)>=0;
+        if(match&&jf){
+          if(n.data('type')==='job')match=n.id()===jf;
+          else if(n.data('type')==='task'||n.data('type')==='hypothesis')match=n.data('jobId')===jf;
+          else if(n.data('type')==='agent'){
+            var t=state.tasks.find(function(ta){return ta.assigned_agent_id===n.id();});
+            match=t&&t.job_id===jf;
+          }
+        }
+        n.style('opacity',match?1:0.12);
+      });
+      cy.edges().style('opacity',0.08);
+    }else{
+      cy.elements().style('opacity',1);
+    }
+  });
+
+document.addEventListener('click',function(e){
     if(contextMenuEl&&!contextMenuEl.contains(e.target))hideContextMenu();
   });
 
@@ -413,57 +472,215 @@ function showPanel(nodeId){
   $('#panel-type').textContent=type;
 
   var content=$('#panel-content');
-  var html='<div class="col"><h3>Details</h3>';
+  var isAgent=type==='agent';
 
-  if(type==='job'){
-    html+=field('ID',nodeId)+field('Status',data.status)+field('Goal','<pre>'+esc(data.goal||'')+'</pre>');
-  }else if(type==='task'){
-    html+=field('ID',nodeId)+field('Status',data.status)+field('Role',data.role)+field('Instructions','<pre>'+esc(data.instructions||'')+'</pre>');
-  }else if(type==='agent'){
-    html+=field('ID',nodeId)+field('Status',data.status)+field('Role',data.role)+field('Task',data.taskDesc);
-  }else if(type==='hypothesis'){
-    html+=field('Subject',data.label)+field('Statement','<pre>'+esc(data.statement||'')+'</pre>')+field('Status',data.status);
-  }
-  html+='</div>';
-
-  html+='<div class="col"><h3>Actions</h3>';
-  if(type==='job'){
-    html+=btn('Schedule',function(){actions.scheduleJob(nodeId);},'primary');
-    html+=btn('Bootstrap',function(){actions.bootstrapJob(nodeId);});
-    html+=btn('Add Task',function(){actions.addTaskToJob(nodeId);});
-  }else if(type==='task'){
-    if(data.status==='in_progress')html+=btn('Recover',function(){actions.recoverTask(nodeId);},'danger');
-    if(['blocked','deferred','failed'].indexOf(data.status)>=0)html+=btn('Requeue',function(){actions.retryTask(nodeId);});
-  }else if(type==='agent'){
-    html+=btn('Steer',function(){actions.controlAgent(nodeId,'steer');});
-    html+=btn('Follow Up',function(){actions.controlAgent(nodeId,'follow_up');});
-    html+=btn('Abort',function(){actions.controlAgent(nodeId,'abort');},'danger');
-  }
-  html+='</div>';
-
-  html+='<div class="col"><h3>Connections</h3><div class="edges-list">';
-  var connected=ele.connectedEdges();
-  if(connected.length===0){
-    html+='<span style="color:#8b949e;font-size:10px">No connections</span>';
+  if(isAgent){
+    content.classList.add('agent-layout');
   }else{
-    connected.forEach(function(edge){
-      var src=edge.source(),tgt=edge.target();
-      var otherId=src.id()===nodeId?tgt.id():src.id();
-      var other=cy.getElementById(otherId);
-      var name=other.length>0?other.data('label'):otherId;
-      var dir=src.id()===nodeId?'→':'←';
-      html+='<div class="edge-item"><span class="rel">'+esc(edge.data('edgeType')||'')+'</span><span>'+dir+' '+esc(name)+'</span></div>';
-    });
+    content.classList.remove('agent-layout');
   }
-  html+='</div></div>';
 
-  content.innerHTML=html;
-  content.querySelectorAll('button').forEach(function(b){b.addEventListener('click',b._action);});
+  if(isAgent){
+    // ── Agent layout: 1fr details+actions | 2fr live log ──
+    var left='<div class="col"><h3>Details</h3>';
+    left+=field('ID',nodeId)+field('Status',data.status)+field('Role',data.role)+field('Task',data.taskDesc);
+    left+='<h3 style="margin-top:16px">Actions</h3>';
+    left+=btn('Steer',function(){actions.controlAgent(nodeId,'steer');});
+    left+=btn('Follow Up',function(){actions.controlAgent(nodeId,'follow_up');});
+    left+=btn('Abort',function(){actions.controlAgent(nodeId,'abort');},'danger');
+    left+='</div>';
+
+    var right='<div class="col" id="log-col"><div class="log-header"><h3>Live Log</h3><button id="btn-log-clear">Clear</button></div><div id="log-entries">';
+    right+=renderAgentLog(nodeId);
+    right+='</div></div>';
+
+    content.innerHTML=left+right;
+    content.querySelectorAll('button').forEach(function(b){if(b.id&&_btnReg[b.id])b.addEventListener('click',_btnReg[b.id]);});
+
+    var clearBtn=$('#btn-log-clear');
+    if(clearBtn)clearBtn.addEventListener('click',function(){
+      window._agentLog=window._agentLog.filter(function(e){return e.agentId!==nodeId;});
+      showPanel(nodeId);
+    });
+
+    // Scroll log to bottom
+    setTimeout(function(){
+      var logCol=$('#log-col');
+      if(logCol)logCol.scrollTop=logCol.scrollHeight;
+    },0);
+
+  }else{
+    // ── Original 3-column layout for non-agent nodes ──
+    var html='<div class="col"><h3>Details</h3>';
+    if(type==='job'){
+      html+=field('ID',nodeId)+field('Status',data.status)+field('Goal','<pre>'+esc(data.goal||'')+'</pre>');
+    }else if(type==='task'){
+      html+=field('ID',nodeId)+field('Status',data.status)+field('Role',data.role)+field('Instructions','<pre>'+esc(data.instructions||'')+'</pre>');
+    }else if(type==='hypothesis'){
+      html+=field('Subject',data.label)+field('Statement','<pre>'+esc(data.statement||'')+'</pre>')+field('Status',data.status);
+    }
+    html+='</div>';
+
+    html+='<div class="col"><h3>Actions</h3>';
+    if(type==='job'){
+      html+=btn('Schedule',function(){actions.scheduleJob(nodeId);},'primary');
+      html+=btn('Bootstrap',function(){actions.bootstrapJob(nodeId);});
+      html+=btn('Add Task',function(){actions.addTaskToJob(nodeId);});
+    }else if(type==='task'){
+      if(data.status==='in_progress')html+=btn('Recover',function(){actions.recoverTask(nodeId);},'danger');
+      if(['blocked','deferred','failed'].indexOf(data.status)>=0)html+=btn('Requeue',function(){actions.retryTask(nodeId);});
+    }
+    html+='</div>';
+
+    html+='<div class="col"><h3>Connections</h3><div class="edges-list">';
+    var connected=ele.connectedEdges();
+    if(connected.length===0){
+      html+='<span style="color:#8b949e;font-size:10px">No connections</span>';
+    }else{
+      connected.forEach(function(edge){
+        var src=edge.source(),tgt=edge.target();
+        var otherId=src.id()===nodeId?tgt.id():src.id();
+        var other=cy.getElementById(otherId);
+        var name=other.length>0?other.data('label'):otherId;
+        var dir=src.id()===nodeId?'→':'←';
+        html+='<div class="edge-item"><span class="rel">'+esc(edge.data('edgeType')||'')+'</span><span>'+dir+' '+esc(name)+'</span></div>';
+      });
+    }
+    html+='</div></div>';
+    content.innerHTML=html;
+    content.querySelectorAll('button').forEach(function(b){if(b.id&&_btnReg[b.id])b.addEventListener('click',_btnReg[b.id]);});
+  }
+
   ele.select();
 }
 
+// ── Agent log renderer: accumulates streaming deltas into turns ──
+function renderAgentLog(agentId){
+  var entries=(window._agentLog||[]).filter(function(e){return e.agentId===agentId;});
+  if(entries.length===0)return '<div class="log-empty">No events yet. Agent output will appear here in real time.</div>';
+
+  var turns=[];
+  var currentTurn=null;
+  var pendingThinking='';
+  var pendingText='';
+  var latestTime='';
+
+  function flushThinking(){
+    if(pendingThinking){
+      if(!currentTurn)currentTurn=newTurn();
+      currentTurn.thinking.push({text:pendingThinking,collapsed:true});
+      pendingThinking='';
+    }
+  }
+  function flushText(){
+    if(pendingText){
+      if(!currentTurn)currentTurn=newTurn();
+      currentTurn.textBlocks.push(pendingText);
+      pendingText='';
+    }
+  }
+  function newTurn(){
+    flushThinking();flushText();
+    var t={turnIdx:turns.length,thinking:[],textBlocks:[],tools:[],time:latestTime};
+    turns.push(t);
+    return t;
+  }
+
+  entries.forEach(function(e){
+    latestTime=e.time;
+    if(e.kind==='turn_start'){
+      flushThinking();flushText();
+      currentTurn=newTurn();
+      currentTurn.time=e.time;
+    }else if(e.kind==='turn_end'){
+      flushThinking();flushText();
+      currentTurn=null;
+    }else if(e.kind==='assistant_delta'){
+      if(e.deltaType==='thinking_delta'){
+        flushText();
+        pendingThinking+=e.delta||'';
+      }else if(e.deltaType==='text_delta'){
+        flushThinking();
+        pendingText+=e.delta||'';
+      }
+    }else if(e.kind==='assistant_stream_state'){
+      if(e.deltaType==='done'||e.deltaType==='error'){
+        flushThinking();flushText();
+      }
+    }else if(e.kind==='tool_started'){
+      flushThinking();flushText();
+      if(!currentTurn)currentTurn=newTurn();
+      currentTurn.tools.push({name:e.toolName,id:e.toolCallId,args:e.args,status:'running',time:e.time});
+    }else if(e.kind==='tool_finished'){
+      flushThinking();flushText();
+      for(var i=turns.length-1;i>=0;i--){
+        var tools=turns[i].tools;
+        for(var j=tools.length-1;j>=0;j--){
+          if(tools[j].id===e.toolCallId){
+            tools[j].status=e.isError?'error':'done';
+            tools[j].result=e.result;
+            tools[j].time=e.time;
+            i=-1;break;
+          }
+        }
+      }
+    }else if(e.kind==='message_finished'){
+      flushThinking();flushText();
+    }
+  });
+  flushThinking();flushText();
+
+  // Render newest-first (last 15 turns)
+  var recent=turns.slice(-15).reverse();
+  var html='';
+  recent.forEach(function(turn){
+    html+='<div class="log-entry log-turn"><span class="log-time">Turn '+(turn.turnIdx+1)+' &middot; '+new Date(turn.time||Date.now()).toLocaleTimeString()+'</span></div>';
+
+    turn.thinking.forEach(function(block,ti){
+      html+='<div class="log-entry log-thinking'+(block.collapsed?'':' expanded')+'">';
+      html+='<span class="log-thinking-toggle" onclick="toggleThinking(this)">'+(block.collapsed?'▶':'▼')+' Thinking</span>';
+      html+='<div class="log-thinking-body">'+esc(block.text)+'</div>';
+      html+='</div>';
+    });
+
+    turn.textBlocks.forEach(function(text){
+      html+='<div class="log-entry"><span class="log-msg">'+esc(text)+'</span></div>';
+    });
+
+    turn.tools.forEach(function(tool){
+      var cls=tool.status==='error'?' log-tool-error':'';
+      html+='<div class="log-entry log-tool'+cls+'"><span class="log-msg">';
+      html+='<span class="log-tool-name">'+esc(tool.name)+'</span>';
+      if(tool.args)html+=' <span style="color:#8b949e;font-size:9px">'+esc(JSON.stringify(tool.args).substring(0,120))+'</span>';
+      if(tool.status==='error')html+=' <span style="color:#f85149">(failed)</span>';
+      if(tool.status==='done')html+=' <span style="color:#3fb950">(done)</span>';
+      if(tool.status==='running')html+=' <span style="color:#d3a85a">(running)</span>';
+      if(tool.result){
+        var rt=typeof tool.result==='string'?tool.result:JSON.stringify(tool.result,null,2);
+        html+='<div class="log-tool-result">'+esc(rt.substring(0,2000))+'</div>';
+      }
+      html+='</span></div>';
+    });
+  });
+
+  // Streaming indicator
+  var last=entries[entries.length-1];
+  if(last && (last.kind==='assistant_delta'||last.kind==='tool_progress')){
+    if(Date.now()-last.time<5000){
+      html+='<div class="log-entry log-streaming"><span class="log-msg"><span class="log-stream-dot"></span>Streaming…</span></div>';
+    }
+  }
+
+  return html;
+}
+
+function toggleThinking(el){
+  var block=el.parentElement;
+  block.classList.toggle('expanded');
+  el.textContent=block.classList.contains('expanded')?'▼ Thinking':'▶ Thinking';
+}
 function field(key,value){return '<div class="field"><span class="key">'+key+'</span><span class="value">'+value+'</span></div>';}
-function btn(label,action,cls){var b=document.createElement('button');b.textContent=label;b.className=cls||'';b._action=action;return b.outerHTML;}
+function btn(label,action,cls){var id='btn-'+(++_btnSeq);_btnReg[id]=action;return '<button id="'+id+'" class="'+(cls||'')+'">'+label+'</button>';}
 
 function hidePanel(){
   selectedNodeId=null;
@@ -565,9 +782,54 @@ function connectWS(){
   ws.onmessage=function(e){
     var ev=JSON.parse(e.data);
     if(ev.sequence<=sequence)return;sequence=ev.sequence;
+    // Build log entry
+    var entry={time:Date.now(),kind:ev.kind,agentId:ev.agent_id,sequence:ev.sequence};
+    if(ev.payload){
+      if(ev.payload.task)    {entry.taskId=ev.payload.task.id;entry.label=ev.payload.task.title;entry.status=ev.payload.task.status;entry.role=ev.payload.task.role;entry.automatic=ev.payload.automatic;}
+      if(ev.payload.agent)   {entry.label=entry.label||ev.payload.agent.role;entry.agentId=entry.agentId||ev.payload.agent.id;}
+      if(ev.payload.job)     {entry.label=entry.label||ev.payload.job.title;}
+      if(ev.payload.request) {entry.path=ev.payload.request.path;entry.decision=ev.payload.request.status;}
+      if(ev.payload.relation) entry.relation=ev.payload.relation;
+      if(ev.payload.operation) entry.operation=ev.payload.operation;
+      if(ev.payload.hypothesis) entry.subject=ev.payload.hypothesis.subject;
+      if(ev.payload.rationale){entry.tasks=ev.payload.tasks;entry.edgeCount=ev.payload.edgeCount;}
+      if(ev.payload.completedTaskId) entry.completedTaskId=ev.payload.completedTaskId;
+      if(ev.payload.launchedTaskIds) entry.launchedTaskIds=ev.payload.launchedTaskIds;
+      if(ev.payload.error) entry.error=ev.payload.error;
+      if(ev.payload.expansionId){entry.tasks=entry.tasks||ev.payload.tasks;}
+      // Streaming fields
+      if(ev.payload.deltaType)entry.deltaType=ev.payload.deltaType;
+      if(ev.payload.delta!=null)entry.delta=ev.payload.delta;
+      if(ev.payload.toolCallId)entry.toolCallId=ev.payload.toolCallId;
+      if(ev.payload.toolName)entry.toolName=ev.payload.toolName;
+      if(ev.payload.args)entry.args=ev.payload.args;
+      if(ev.payload.isError!=null)entry.isError=ev.payload.isError;
+      if(ev.payload.result!=null)entry.result=ev.payload.result;
+    }
+    window._agentLog.push(entry);
+    if(window._agentLog.length>2000)window._agentLog=window._agentLog.slice(-2000);
+
+    var isStreamingDelta=(ev.kind==='assistant_delta'||ev.kind==='tool_progress');
+    var panelOpen=selectedNodeId && !$('#bottom-panel').classList.contains('collapsed');
+    var isAgentPanel=panelOpen && $('#panel-content').classList.contains('agent-layout');
+
+    if(isStreamingDelta && isAgentPanel){
+      updateAgentLogDOM(selectedNodeId);
+    }else if(panelOpen && !isStreamingDelta){
+      showPanel(selectedNodeId);
+    }
+
     if(ws._t)clearTimeout(ws._t);
-    ws._t=setTimeout(refreshState,200);
+    ws._t=setTimeout(refreshState,isStreamingDelta?500:200);
   };
+
+function updateAgentLogDOM(agentId){
+  var logEntries=$('#log-entries');
+  if(!logEntries)return;
+  logEntries.innerHTML=renderAgentLog(agentId);
+  var logCol=$('#log-col');
+  if(logCol)logCol.scrollTop=logCol.scrollHeight;
+}
   ws.onclose=function(){$('#conn-dot').classList.add('disconnected');$('#conn-text').textContent='Reconnecting…';setTimeout(connectWS,3000);};
   ws.onerror=function(){$('#conn-dot').classList.add('disconnected');$('#conn-text').textContent='Error';};
 }
@@ -576,6 +838,7 @@ function connectWS(){
 $('#search').addEventListener('input',function(){
   var q=$('#search').value.toLowerCase();
   var jf=$('#job-filter').value;
+  var hasFilter=!!(q||jf);
   if(!cy)return;
   cy.nodes().forEach(function(n){
     var label=(n.data('label')||'').toLowerCase();
@@ -590,10 +853,8 @@ $('#search').addEventListener('input',function(){
     }
     n.style('opacity',match?1:0.12);
   });
-  cy.edges().style('opacity',0.08);
-});
-
-$('#job-filter').addEventListener('change',function(){$('#search').dispatchEvent(new Event('input'));});
+  cy.edges().style('opacity',hasFilter?0.08:1);
+});$('#job-filter').addEventListener('change',function(){$('#search').dispatchEvent(new Event('input'));});
 $('#btn-fit').addEventListener('click',function(){if(cy){cy.fit(cy.elements(),40);}});
 
 $('#btn-reset').addEventListener('click',function(){
