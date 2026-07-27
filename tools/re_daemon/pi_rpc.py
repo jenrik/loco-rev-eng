@@ -14,6 +14,11 @@ from .normalize import normalize_pi_event
 from .store import DaemonStore
 
 
+# Pi serializes each RPC event on one JSONL record. A read result may be 50KiB
+# before JSON escaping, exceeding asyncio's 64KiB default line limit.
+RPC_STREAM_LIMIT_BYTES = 2 * 1024 * 1024
+
+
 def role_instructions(role: str) -> str:
     shared = (
         "You are an autonomous Lego Loco reverse-engineering worker. The raw binary and "
@@ -42,6 +47,7 @@ class PiRpcAgent:
         daemon_url: str,
         daemon_token: str,
         pi_binary: str = "pi",
+        rpc_stream_limit: int = RPC_STREAM_LIMIT_BYTES,
     ):
         self.store = store
         self.broker = broker
@@ -50,6 +56,7 @@ class PiRpcAgent:
         self.daemon_url = daemon_url
         self.daemon_token = daemon_token
         self.pi_binary = pi_binary
+        self.rpc_stream_limit = rpc_stream_limit
         self.process: asyncio.subprocess.Process | None = None
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
@@ -86,6 +93,7 @@ class PiRpcAgent:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=self.rpc_stream_limit,
         )
         self.store.set_agent_status(self.agent["id"], "running", self.process.pid)
         await self.broker.publish(self.agent["id"], "daemon_started", {"pid": self.process.pid})
@@ -117,7 +125,14 @@ class PiRpcAgent:
     async def _read_stdout(self) -> None:
         assert self.process is not None and self.process.stdout is not None
         while True:
-            line = await self.process.stdout.readline()
+            try:
+                line = await self.process.stdout.readline()
+            except ValueError as error:
+                await self.broker.publish(self.agent["id"], "rpc_stdout_limit_exceeded", {"limitBytes": self.rpc_stream_limit, "error": str(error)})
+                self._aborted = True
+                if self.process.returncode is None:
+                    self.process.terminate()
+                return
             if not line:
                 return
             try:

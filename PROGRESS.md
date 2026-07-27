@@ -179,7 +179,7 @@ main()
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
 - [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, formatted/coalesced streamed-message timeline, and declared Uvicorn WebSocket runtime
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
-- [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, and startup recovers in-progress tasks whose assigned PID is gone
+- [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, startup recovers in-progress tasks whose assigned PID is gone, and the RPC reader accepts escaped multi-KiB tool events
 
 ## Remaining work
 
@@ -326,6 +326,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (rpc-framing) | Found large escaped `read` result JSONL records exceeded asyncio’s 64KiB reader limit, silently halting stdout consumption and stalling sibling parallel reads; raised the bounded limit to 2MiB with regression coverage. |
 | 2026-07-27 (websocket-runtime) | Fixed live dashboard upgrades by declaring Uvicorn’s WebSocket runtime in Nix and enforcing it at startup; verified HTTP 101 handshake. |
 | 2026-07-27 (stalled-attempt-recovery) | Found a live agent stalled after 3 of 4 parallel reads never completed; added tool-inactivity/dead-PID watchdog, safe operator recovery, and startup stale-task recovery. |
 | 2026-07-27 (dashboard-timeline) | Reworked the live event tail into an activity-sorted agent-filterable timeline with formatted event cards and consolidated streaming deltas. |

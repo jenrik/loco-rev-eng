@@ -31,6 +31,20 @@ for line in sys.stdin:
 """
 
 
+FAKE_LARGE_EVENT_PI = """#!__PYTHON__
+import json
+import sys
+for line in sys.stdin:
+    command = json.loads(line)
+    if command.get('type') == 'prompt':
+        print(json.dumps({'type': 'agent_start'}), flush=True)
+        print(json.dumps({'type': 'tool_execution_start', 'toolCallId': 'large-read', 'toolName': 'read', 'args': {'path': 'large.cpp'}}), flush=True)
+        result = {'content': [{'type': 'text', 'text': ('line\\n' * 20000)}]}
+        print(json.dumps({'type': 'tool_execution_end', 'toolCallId': 'large-read', 'toolName': 'read', 'result': result, 'isError': False}), flush=True)
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
+        break
+"""
+
 FAKE_STALLED_PI = """#!__PYTHON__
 import json
 import sys
@@ -149,6 +163,31 @@ class PiRpcManagerTests(unittest.TestCase):
                 self.assertEqual(await manager.recover_orphaned_tasks(), [task["id"]])
                 self.assertEqual(store.get_task(task["id"])["status"], "failed")
                 self.assertEqual(store.get_agent(agent["id"])["status"], "failed")
+
+        asyncio.run(scenario())
+
+    def test_reads_large_jsonl_tool_event_without_stalling_stdout(self):
+        async def scenario():
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                fake_pi = root / "large-event-pi"
+                fake_pi.write_text(FAKE_LARGE_EVENT_PI.replace("__PYTHON__", sys.executable), encoding="utf-8")
+                fake_pi.chmod(0o755)
+                store = DaemonStore(root / "state.sqlite3")
+                store.initialize()
+                job = store.create_job("large", "large event")
+                agent = store.create_agent(job["id"], "investigator", "read one large file", str(root / "session"))
+                manager = AgentManager(store, EventBroker(store), Path.cwd(), "http://127.0.0.1:8765", "not-logged", str(fake_pi))
+                await manager.launch(agent["id"])
+                for _ in range(200):
+                    if store.get_agent(agent["id"])["status"] == "settled":
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertEqual(store.get_agent(agent["id"])["status"], "settled")
+                kinds = [event["kind"] for event in store.events_after(agent_id=agent["id"], limit=100)]
+                self.assertIn("tool_finished", kinds)
+                self.assertNotIn("rpc_stdout_limit_exceeded", kinds)
+                await manager.close()
 
         asyncio.run(scenario())
 

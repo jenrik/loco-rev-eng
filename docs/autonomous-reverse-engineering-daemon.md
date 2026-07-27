@@ -33,8 +33,10 @@ processes, sends RPC `prompt`, `steer`, `follow_up`, and `abort` commands, and
 normalizes the JSONL event stream from each process. A terminal task transition
 requests abort, then reaps the idle RPC child after a brief response-flush grace
 period. A watchdog fails an attempt after bounded tool inactivity or a definitely
-dead child PID; startup performs the same dead-PID recovery for stale tasks. It
-is the only writer to the database, avoiding races between agents.
+dead child PID; startup performs the same dead-PID recovery for stale tasks.
+Its subprocess JSONL reader accepts 2MiB records because Pi read results can
+exceed asyncio's 64KiB default after JSON escaping. It is the only writer to
+the database, avoiding races between agents.
 
 A local SQLite database in WAL mode is appropriate for this single-host,
 read-heavy dashboard. WAL permits concurrent readers with one writer but does
