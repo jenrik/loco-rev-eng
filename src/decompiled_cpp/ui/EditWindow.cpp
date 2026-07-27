@@ -8,6 +8,8 @@
 
 #include "EditWindow.h"
 #include "UI_Utils.h"
+#include "NameEntryPanel.h"
+#include "GameSetupPanel.h"
 #include "resource_manager_sdl3.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
@@ -129,16 +131,7 @@ void  __fastcall EditWindow_render(void* self);                    /* 0x4216F0 *
 void  __thiscall EditWindow_drawText(void* self, RECT* rect, int ci,
                                       void* fontRes, void* fontBmp); /* 0x422440 */
 void  __thiscall EditWindow_updateButton(void* self, RECT* rect);   /* 0x422570 */
-void  __stdcall RESDATA_FreeWindow(void* window);                  /* 0x460B70 */
-
-void*   __thiscall NameEntryPanel_Ctor(void* self, HINSTANCE hInst,
-                                        UINT resId);               /* 0x440F20 */
-void    __thiscall NameEntryPanel_CreateWindow(void* self,
-                                                HWND hWnd);        /* 0x440F30 */
-void*   __thiscall CGWND_GameSetup_Ctor(void* self, HINSTANCE hInst,
-                                         UINT resId);              /* 0x408A70 */
-void    __thiscall CGWND_GameSetup_Create(void* self,
-                                           HWND hWnd);             /* 0x408B30 */
+void  __stdcall RESDATA_FreeWindow(PopupWindow* window);           /* 0x460B70 */
 
 void    __fastcall Town_BlitElement(void* src, int sx, int sy,
                                     int sw, int sh, void* dst,
@@ -201,6 +194,17 @@ EditWindow::EditWindow(HINSTANCE hInstance, UINT resourceId) :
     g_editwindow_ptr = this;
 }
 
+// Repeated binary sequence (base_destructor, hide, setState(7)).
+// PopupWindow models the observed virtual destructor and HWND field.
+static void destroy_popup_window(PopupWindow*& popup, LONG saved_wnd_proc)
+{
+    if (!popup) return;
+    SetWindowLongA(popup->hWnd, -4, saved_wnd_proc);
+    RESDATA_FreeWindow(popup);
+    delete popup;
+    popup = nullptr;
+}
+
 /* ================================================================== */
 /* EditWindow::scalar deleting destructor (vtable[0])                   */
 /* Address: 0x4203A0                                                    */
@@ -219,23 +223,12 @@ void EditWindow::base_destructor()
     /* Reset vtable for partial destruction */
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
-    /* Release PanelB (GameSetupPanel at +0x220) via vtable[0] */
-    if (this->pPanelB != NULL) {
-        void** vtbl = *(void***)this->pPanelB;
-        typedef void* (__thiscall* DtorFn)(void*, byte);
-        DtorFn dtor = (DtorFn)vtbl[0];
-        dtor(this->pPanelB, 1);
-        this->pPanelB = NULL;                    /* +0x220 */
-    }
-
-    /* Release PanelA (NameEntryPanel at +0x21C) via vtable[0] */
-    if (this->pPanelA != NULL) {
-        void** vtbl = *(void***)this->pPanelA;
-        typedef void* (__thiscall* DtorFn)(void*, byte);
-        DtorFn dtor = (DtorFn)vtbl[0];
-        dtor(this->pPanelA, 1);
-        this->pPanelA = NULL;                    /* +0x21C */
-    }
+    // These are fully reconstructed UI classes: ordinary C++ ownership
+    // replaces the binary scalar-deleting-destructor vtable dispatch.
+    delete this->pPanelB;
+    this->pPanelB = nullptr;
+    delete this->pPanelA;
+    this->pPanelA = nullptr;
 
     /* Delete GDI brushes */
     if (this->hbrSolid != NULL) {
@@ -252,22 +245,7 @@ void EditWindow::base_destructor()
         EditWindow_cleanupSprites(this);
     }
 
-    /* Free popup window at +0x210 */
-    if (this->pPopupWindow != NULL) {
-        /* Restore original WndProc */
-        SetWindowLongA(*(HWND*)((int)this->pPopupWindow + 4), -4,
-                       this->savedPopupWndProc);      /* +0x218 */
-        RESDATA_FreeWindow(this->pPopupWindow);
-
-        /* Destroy via vtable[0] */
-        void** vtbl = *(void***)this->pPopupWindow;
-        if (vtbl != NULL) {
-            typedef void* (__thiscall* DtorFn)(void*, byte);
-            DtorFn dtor = (DtorFn)vtbl[0];
-            dtor(this->pPopupWindow, 1);
-        }
-        this->pPopupWindow = NULL;                   /* +0x210 */
-    }
+    destroy_popup_window(this->pPopupWindow, this->savedPopupWndProc);
 
     /* Release music resource 0x5015 */
     int musicRes = ResourceManager_GetStringById((void**)&g_resmgr, 0x5015);
@@ -312,23 +290,11 @@ int EditWindow::create(HWND hWndParent)
         return 0;
     }
 
-    /* Create PanelA -- NameEntryPanel (0x1E4 bytes, resource 0x1F6) */
-    void* panelABuf = operator_new(0x1E4);
-    if (panelABuf != NULL) {
-        this->pPanelA = NameEntryPanel_Ctor(panelABuf, this->hInstance, 0x1F6);
-    } else {
-        this->pPanelA = NULL;
-    }
-    NameEntryPanel_CreateWindow(this->pPanelA, this->hWnd);
-
-    /* Create PanelB -- GameSetupPanel (0x260 bytes, resource 0x1F9) */
-    void* panelBBuf = operator_new(0x260);
-    if (panelBBuf != NULL) {
-        this->pPanelB = CGWND_GameSetup_Ctor(panelBBuf, this->hInstance, 0x1F9);
-    } else {
-        this->pPanelB = NULL;
-    }
-    CGWND_GameSetup_Create(this->pPanelB, this->hWnd);
+    /* Construct the reconstructed child panels directly. */
+    this->pPanelA = new NameEntryPanel(this->hInstance, 0x1F6);
+    if (this->pPanelA) this->pPanelA->create_window(this->hWnd);
+    this->pPanelB = new GameSetupPanel(this->hInstance, 0x1F9);
+    if (this->pPanelB) this->pPanelB->create_window(this->hWnd);
 
     /* Create the player-name edit control (EDIT, WS_CHILD, ID 0x411) */
     this->hwndEdit = CreateWindowExA(
@@ -439,22 +405,7 @@ void EditWindow::hide()
     /* Clear popup flag */
     this->hasPopup = 0;                              /* +0xF4 */
 
-    /* Free popup window */
-    if (this->pPopupWindow != NULL) {
-        /* Restore original WndProc */
-        SetWindowLongA(*(HWND*)((int)this->pPopupWindow + 4), -4,
-                       this->savedPopupWndProc);      /* +0x218 */
-        RESDATA_FreeWindow(this->pPopupWindow);
-
-        /* Destroy the popup window */
-        void** vtbl = *(void***)this->pPopupWindow;
-        if (vtbl != NULL) {
-            typedef void* (__thiscall* DtorFn)(void*, byte);
-            DtorFn dtor = (DtorFn)vtbl[0];
-            dtor(this->pPopupWindow, 1);
-        }
-        this->pPopupWindow = NULL;                   /* +0x210 */
-    }
+    destroy_popup_window(this->pPopupWindow, this->savedPopupWndProc);
 
     /* Set state to hidden */
     this->setState(1);
@@ -474,145 +425,54 @@ void EditWindow::hide()
 /* ================================================================== */
 void EditWindow::setState(int32_t state)
 {
-    int32_t prevState = this->dialogState;           /* +0xE8 */
-    this->dialogState = state;                       /* +0xE8 */
+    const int32_t previous_state = this->dialogState;
+    this->dialogState = state;
 
     switch (state) {
-
-    case 1: /* Hidden */
-        PlaySoundA(NULL, NULL, 0);                    /* SND_PURGE */
+    case 1:
+        PlaySoundA(nullptr, nullptr, 0);
         ShowWindow(this->hwndEdit, SW_HIDE);
         return;
-
-    case 2: /* Loading */
+    case 2:
         ShowWindow(this->hwndEdit, SW_HIDE);
-
-        /* Hide PanelA */
-        {
-            void** vtblA = *(void***)this->pPanelA;
-            typedef void (__thiscall* ShowHideFn)(void*);
-            ShowHideFn hide = (ShowHideFn)vtblA[2];  /* vtable[2] = Show */
-            hide(this->pPanelA);                     /* "show" clears on first call */
-        }
-
-        /* If previous state was 4 or 5, also hide PanelB */
-        if (prevState == 4 || prevState == 5) {
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* HideFn)(void*);
-            HideFn hide = (HideFn)vtblB[1];          /* vtable[1] = Hide */
-            hide(this->pPanelB);
-        }
+        this->pPanelA->show();
+        if (previous_state == 4 || previous_state == 5) this->pPanelB->hide();
         return;
-
-    case 3: /* Check-config -- determine SP vs MP */
-        /* Hide PanelA */
-        {
-            void** vtblA = *(void***)this->pPanelA;
-            typedef void (__thiscall* HideFn)(void*);
-            HideFn hide = (HideFn)vtblA[1];
-            hide(this->pPanelA);
-        }
-
+    case 3:
+        this->pPanelA->hide();
         if (*(char*)(_g_netman_state + 0x18) == 0) {
-            /* Single-player */
-            this->dialogState = 4;                    /* +0xE8 */
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* ShowFn)(void*);
-            ShowFn show = (ShowFn)vtblB[2];          /* vtable[2] = Show */
-            show(this->pPanelB);
+            this->dialogState = 4;
         } else {
-            /* Multiplayer */
-            this->dialogState = 5;                    /* +0xE8 */
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* ShowFn)(void*);
-            ShowFn show = (ShowFn)vtblB[2];
-            show(this->pPanelB);
+            this->dialogState = 5;
         }
+        this->pPanelB->show();
         return;
-
-    case 4: /* Single-player */
+    case 4:
+    case 5:
         ShowWindow(this->hwndEdit, SW_HIDE);
-        {
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* ShowFn)(void*);
-            ShowFn show = (ShowFn)vtblB[2];
-            show(this->pPanelB);
-        }
+        this->pPanelB->show();
         return;
-
-    case 5: /* Multiplayer */
-        ShowWindow(this->hwndEdit, SW_HIDE);
-        {
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* ShowFn)(void*);
-            ShowFn show = (ShowFn)vtblB[2];
-            show(this->pPanelB);
-        }
-        return;
-
-    case 6: /* Start game */
-        {
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* HideFn)(void*);
-            HideFn hide = (HideFn)vtblB[1];
-            hide(this->pPanelB);
-        }
-        {
-            void** vtblA = *(void***)this->pPanelA;
-            typedef void (__thiscall* HideFn)(void*);
-            HideFn hide = (HideFn)vtblA[1];
-            hide(this->pPanelA);
-        }
-
-        if (*(char*)(_g_netman_state + 7) != 0) {
-            NETMAN_SetGameMode(g_netman, 1);
-        }
-
+    case 6:
+        this->pPanelB->hide();
+        this->pPanelA->hide();
+        if (*(char*)(_g_netman_state + 7) != 0) NETMAN_SetGameMode(g_netman, 1);
         WIN32_ResumeThread(_g_network_thread, 1);
         CGWND_SetMode((void*)1);
         return;
-
-    case 7: /* Return from game */
-        /* Free popup window if exists */
-        if (this->pPopupWindow != NULL) {
-            SetWindowLongA(*(HWND*)((int)this->pPopupWindow + 4), -4,
-                           this->savedPopupWndProc);
-            RESDATA_FreeWindow(this->pPopupWindow);
-
-            void** vtbl = *(void***)this->pPopupWindow;
-            if (vtbl != NULL) {
-                typedef void* (__thiscall* DtorFn)(void*, byte);
-                DtorFn dtor = (DtorFn)vtbl[0];
-                dtor(this->pPopupWindow, 1);
-            }
-            this->pPopupWindow = NULL;
-            this->previousState = 99;                    /* +0xEC special marker */
+    case 7:
+        if (this->pPopupWindow) {
+            destroy_popup_window(this->pPopupWindow, this->savedPopupWndProc);
+            this->previousState = 99;
         }
-
-        /* Play intro music */
-        if (prevState == 0) {
-            DDRAW_InitAudio();
-        }
-        if (prevState == 0 || prevState == 1) {
+        if (previous_state == 0) DDRAW_InitAudio();
+        if (previous_state == 0 || previous_state == 1) {
             char path[1284];
             wsprintfA(path, "%s\\video\\music.wav", &g_install_path);
-            PlaySoundA(path, NULL, 9);   /* SND_FILENAME | SND_ASYNC | SND_LOOP */
+            PlaySoundA(path, nullptr, 9);
         }
-
-        {
-            void** vtblB = *(void***)this->pPanelB;
-            typedef void (__thiscall* HideFn)(void*);
-            HideFn hide = (HideFn)vtblB[1];
-            hide(this->pPanelB);
-        }
-        {
-            void** vtblA = *(void***)this->pPanelA;
-            typedef void (__thiscall* HideFn)(void*);
-            HideFn hide = (HideFn)vtblA[1];
-            hide(this->pPanelA);
-        }
+        this->pPanelB->hide();
+        this->pPanelA->hide();
         return;
-
     default:
         return;
     }

@@ -214,6 +214,7 @@ main()
 - [ ] **Palette cycling support** — Currently palettes are baked at load time; palette animations (water, sky) need runtime palette swaps
 - [ ] **GDI DC shim** — `GetDC`/`ReleaseDC` currently stubbed; needed for some UI rendering paths
 - [ ] **Complete ResourceManager consumers** — connect cached WAV data to `GameAudio`, parse BUT descriptors and ANI frames for their actual UI/cursor call sites, and map tile DAT semantics into the decompiled world objects; lookup, DAT animation metadata, color keys, and generic archive blobs are now live.
+- [ ] **Continue EditWindow raw-access cleanup** — panel and popup ownership are typed; reverse engineer inherited slots 0x425FD0/0x426020/0x426130 before replacing the five remaining self-vtable dispatches.
 - [ ] **DDRAW sprite data** — `DDRAW_SpriteData` loading/management (native .c files)
 
 ### Priority 4: Audio completeness
@@ -312,6 +313,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (editwindow-typed-panels) | Replaced EditWindow child-panel construction/destruction and state dispatch with NameEntryPanel/GameSetupPanel C++ methods; modeled the popup lifetime as a virtual C++ object. |
 | 2026-07-26 (resmgr-typed-cleanup) | Replaced raw menu sprite offsets and resource vtable calls in EditWindow/viewer with typed SpriteResource/SpriteBitmap accessors; legacy ABI table is confined and documented in the bridge. |
 | 2026-07-26 (resmgr-dat-nonbmp) | Added paired DAT button/animation parsing, RGB magenta source color-key handling, and typed RFH/RFD asset blobs; regression validates startup metadata plus WAV, compressed BUT, and ANI resources. |
 | 2026-07-26 (resmgr-sprite-bridge) | Replaced ResourceManager_Init/GetById null stubs with validated PE RT_STRING → RFH/RFD BMP SDL-surface caching; test verifies 0x407 dimensions and vtable[4]/[8] ABI. |
