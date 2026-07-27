@@ -59,6 +59,28 @@ class GhidraAdapterTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    def test_restarts_once_after_worker_exit(self):
+        async def scenario():
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = root / 'first-call'
+                server = root / 'recovering-mcp'
+                script = FAKE_MCP.replace('__PYTHON__', sys.executable).replace(
+                    "if call['name'] == 'ghidra_decompile_function':",
+                    f"if call['name'] == 'ghidra_decompile_function' and not __import__('pathlib').Path({str(marker)!r}).exists():\n            __import__('pathlib').Path({str(marker)!r}).touch()\n            sys.exit(0)\n        if call['name'] == 'ghidra_decompile_function':",
+                )
+                server.write_text(script, encoding='utf-8')
+                server.chmod(0o755)
+                binary = root / 'loco.exe'
+                binary.write_bytes(b'MZ')
+                adapter = GhidraAdapter(GhidraConfig((str(server),), binary, 'recover-db'))
+                result = await adapter.query('decompile_function', {'address': '0x401000'})
+                self.assertEqual(result['content'][0]['type'], 'text')
+                self.assertEqual(adapter.status()['restartCount'], 1)
+                await adapter.close()
+
+        asyncio.run(scenario())
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -6,7 +6,7 @@ import path from "node:path";
 const daemonUrl = process.env.RE_DAEMON_URL;
 const daemonToken = process.env.RE_DAEMON_TOKEN;
 const agentId = process.env.RE_AGENT_ID;
-const allowedWrites: string[] = (() => {
+const initialAllowedWrites: string[] = (() => {
   try { return JSON.parse(process.env.RE_ALLOWED_WRITES || "[]"); } catch { return []; }
 })();
 
@@ -34,16 +34,25 @@ function normalizedProjectPath(candidate: unknown): string | null {
   return relative.split(path.sep).join("/");
 }
 
-function isAllowedWrite(candidate: unknown): boolean {
+async function isAllowedWrite(candidate: unknown): Promise<boolean> {
   const relative = normalizedProjectPath(candidate);
-  return relative !== null && allowedWrites.includes(relative);
+  if (relative === null) return false;
+  // Scope approvals may arrive after the Pi process starts, so the daemon is
+  // authoritative. The launch-time scope is only a safe fallback if it cannot
+  // yet be contacted.
+  try {
+    const context = await daemonRequest(`/internal/agents/${agentId}/context`);
+    return Array.isArray(context.agent?.write_scope) && context.agent.write_scope.includes(relative);
+  } catch {
+    return initialAllowedWrites.includes(relative);
+  }
 }
 
 export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event) => {
     if (event.toolName === "write" || event.toolName === "edit") {
       const file = event.input.path;
-      if (!isAllowedWrite(file)) {
+      if (!(await isAllowedWrite(file))) {
         return { block: true, reason: `Write outside approved scope. Use re_request_write_scope before editing ${String(file)}.` };
       }
     }
@@ -78,6 +87,7 @@ export default function (pi: ExtensionAPI) {
         "list_structures", "get_structure", "list_names", "get_strings", "find_code_by_string",
       ] as const),
       arguments: Type.Object({}, { additionalProperties: true }),
+      use_cache: Type.Optional(Type.Boolean({ description: "Use an existing identical evidence capture when available" })),
     }),
     async execute(_id, params) {
       const result = await daemonRequest(`/internal/agents/${agentId}/ghidra`, {
@@ -105,6 +115,25 @@ export default function (pi: ExtensionAPI) {
         method: "POST", body: JSON.stringify({ kind: "observation_recorded", payload }),
       });
       return { content: [{ type: "text", text: `Recorded ${params.confidence} observation for ${params.address}.` }], details: event };
+    },
+  });
+
+  pi.registerTool({
+    name: "re_record_hypothesis",
+    label: "Record RE Hypothesis",
+    description: "Append a revisable, evidence-linked interpretation; do not use this for directly observed disassembly facts.",
+    parameters: Type.Object({
+      subject: Type.String({ description: "Stable subject, e.g. 'Building::Draw@0x4343B0 ownership'" }),
+      statement: Type.String(),
+      evidence_ids: Type.Array(Type.String(), { description: "Evidence revision IDs supporting or refuting this revision" }),
+      status: StringEnum(["tentative", "supported", "rejected", "superseded"] as const),
+      supersedes_id: Type.Optional(Type.String()),
+    }),
+    async execute(_id, params) {
+      const hypothesis = await daemonRequest(`/internal/agents/${agentId}/hypotheses`, {
+        method: "POST", body: JSON.stringify(params),
+      });
+      return { content: [{ type: "text", text: `Recorded hypothesis revision ${hypothesis.revision}.` }], details: hypothesis };
     },
   });
 
@@ -143,10 +172,12 @@ export default function (pi: ExtensionAPI) {
     description: "Request a new source-file write scope instead of editing an undeclared file.",
     parameters: Type.Object({ path: Type.String(), reason: Type.String() }),
     async execute(_id, params) {
+      const relative = normalizedProjectPath(params.path);
+      if (relative === null) throw new Error("Write-scope path must be a project-relative file path.");
       const request = await daemonRequest(`/internal/agents/${agentId}/write-scope-requests`, {
-        method: "POST", body: JSON.stringify(params),
+        method: "POST", body: JSON.stringify({ ...params, path: relative }),
       });
-      return { content: [{ type: "text", text: `Requested write scope for ${params.path}; do not edit it until approved.` }], details: request };
+      return { content: [{ type: "text", text: `Requested write scope for ${relative}; do not edit it until approved.` }], details: request };
     },
   });
 }

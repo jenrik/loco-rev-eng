@@ -21,6 +21,13 @@ class DaemonWebTests(unittest.TestCase):
                     json={"role": "validator", "task": "Validate Draw", "write_scope": ["src/decompiled_cpp/game/Building.cpp"]},
                 ).json()
                 self.assertEqual(agent["write_scope"], ["src/decompiled_cpp/game/Building.cpp"])
+                deferred = client.post(
+                    f"/api/jobs/{job['id']}/tasks",
+                    json={"title": "retry me", "instructions": "recheck xrefs", "role": "investigator", "status": "deferred"},
+                ).json()
+                retried = client.post(f"/api/tasks/{deferred['id']}/retry", json={"reason": "operator supplied new evidence"})
+                self.assertEqual(retried.status_code, 200)
+                self.assertEqual(retried.json()["status"], "ready")
 
                 with client.websocket_connect("/ws") as socket:
                     response = client.post(
@@ -72,6 +79,30 @@ for line in sys.stdin:
                 payload = response.json()
                 self.assertEqual(payload['evidence']['source'], 'ghidra')
                 self.assertEqual(payload['response']['content'][0]['text'], 'decompiled')
+                cached = client.post(
+                    f"/internal/agents/{agent['id']}/ghidra",
+                    headers={'x-re-daemon-token': 'test-capability'},
+                    json={'operation': 'decompile_function', 'arguments': {'address': '0x401000'}},
+                ).json()
+                self.assertTrue(cached['cacheHit'])
+                hypothesis = client.post(
+                    f"/internal/agents/{agent['id']}/hypotheses",
+                    headers={'x-re-daemon-token': 'test-capability'},
+                    json={'subject': 'test function', 'statement': 'returns decompiled value', 'evidence_ids': [payload['evidence']['id']]},
+                )
+                self.assertEqual(hypothesis.status_code, 200)
+                self.assertEqual(client.get(f"/api/jobs/{job['id']}/hypotheses").json()['hypotheses'][0]['revision'], 1)
+                scope = client.post(
+                    f"/internal/agents/{agent['id']}/write-scope-requests",
+                    headers={'x-re-daemon-token': 'test-capability'},
+                    json={'path': 'game/Building.h', 'reason': 'need named field'},
+                ).json()
+                approved = client.post(
+                    f"/api/write-scope-requests/{scope['id']}/resolve", json={'decision': 'approved', 'reason': 'approved by test'}
+                )
+                self.assertEqual(approved.status_code, 200)
+                context = client.get(f"/internal/agents/{agent['id']}/context", headers={'x-re-daemon-token': 'test-capability'}).json()
+                self.assertIn('game/Building.h', context['agent']['write_scope'])
 
 
 if __name__ == "__main__":

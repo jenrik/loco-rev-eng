@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -163,6 +164,8 @@ class GhidraAdapter:
         self._lock = asyncio.Lock()
         self._opened = False
         self.last_error: str | None = None
+        self.restart_count = 0
+        self.binary_digest = self._digest_binary(config.binary_path) if config is not None and config.binary_path.is_file() else None
 
     def status(self) -> dict[str, Any]:
         return {
@@ -171,6 +174,8 @@ class GhidraAdapter:
             "binaryPath": str(self.config.binary_path) if self.config else None,
             "opened": self._opened,
             "lastError": self.last_error,
+            "restartCount": self.restart_count,
+            "binaryDigest": self.binary_digest,
         }
 
     async def close(self) -> None:
@@ -191,21 +196,41 @@ class GhidraAdapter:
             raise McpError(f"operation is not in the read-only Ghidra allowlist: {operation}")
         if not isinstance(arguments, dict):
             raise McpError("Ghidra arguments must be an object")
+        request = dict(arguments)
+        supplied_database = request.get("database")
+        if supplied_database is not None and supplied_database != self.config.database_id:
+            raise McpError("requested database differs from the daemon-owned database")
+        request["database"] = self.config.database_id
         async with self._lock:
-            try:
-                await self._ensure_open()
-                request = dict(arguments)
-                supplied_database = request.get("database")
-                if supplied_database is not None and supplied_database != self.config.database_id:
-                    raise McpError("requested database differs from the daemon-owned database")
-                request["database"] = self.config.database_id
-                result = await self._client.call_tool(self.OPERATIONS[operation], request)
-                self.last_error = None
-                return result
-            except Exception as error:
-                self.last_error = str(error)
-                raise
+            for attempt in range(2):
+                try:
+                    await self._ensure_open()
+                    result = await self._client.call_tool(self.OPERATIONS[operation], request)
+                    self.last_error = None
+                    return result
+                except McpError as error:
+                    self.last_error = str(error)
+                    if attempt:
+                        raise
+                    await self._restart()
+        raise AssertionError("unreachable")
 
+    @staticmethod
+    def _digest_binary(binary_path: Path) -> str:
+        digest = hashlib.sha256()
+        with binary_path.open("rb") as binary:
+            for chunk in iter(lambda: binary.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    async def _restart(self) -> None:
+        """Discard a failed worker and reopen the daemon-owned database once."""
+        if self._client is not None:
+            await self._client.close()
+        assert self.config is not None
+        self._client = McpStdioClient(list(self.config.command))
+        self._opened = False
+        self.restart_count += 1
     async def _ensure_open(self) -> None:
         assert self.config is not None and self._client is not None
         if self._client.process is None or self._client.process.returncode is not None:

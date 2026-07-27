@@ -126,11 +126,34 @@ class DaemonStore:
                     reason TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    resolved_at TEXT
+                    resolved_at TEXT,
+                    resolution_reason TEXT
+                )
+            """)
+            scope_columns = {row[1] for row in connection.execute("PRAGMA table_info(write_scope_requests)")}
+            if "resolution_reason" not in scope_columns:
+                connection.execute("ALTER TABLE write_scope_requests ADD COLUMN resolution_reason TEXT")
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS hypotheses (
+                    id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+                    task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+                    agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+                    subject TEXT NOT NULL,
+                    statement TEXT NOT NULL,
+                    evidence_ids_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL,
+                    hypothesis_key TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    supersedes_id TEXT REFERENCES hypotheses(id) ON DELETE SET NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(hypothesis_key, revision)
                 )
             """)
             connection.execute("CREATE INDEX IF NOT EXISTS tasks_job_status ON tasks(job_id, status)")
             connection.execute("CREATE INDEX IF NOT EXISTS evidence_task_operation ON evidence_revisions(task_id, operation)")
+            connection.execute("CREATE INDEX IF NOT EXISTS hypotheses_job_subject ON hypotheses(job_id, subject, revision)")
+            connection.execute("CREATE INDEX IF NOT EXISTS scope_requests_status ON write_scope_requests(status, created_at)")
             connection.commit()
 
     def create_job(self, title: str, goal: str) -> dict[str, Any]:
@@ -385,6 +408,125 @@ class DaemonStore:
             row = connection.execute("SELECT * FROM evidence_revisions WHERE id = ?", (evidence_id,)).fetchone()
         return dict(row)
 
+    def find_evidence(self, job_id: str, source: str, operation: str, request: dict[str, Any]) -> dict[str, Any] | None:
+        request_json = json.dumps(request, separators=(",", ":"), sort_keys=True)
+        evidence_key = hashlib.sha256(f"{source}\0{operation}\0{request_json}".encode("utf-8")).hexdigest()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM evidence_revisions WHERE job_id = ? AND evidence_key = ? ORDER BY revision DESC LIMIT 1", (job_id, evidence_key)
+            ).fetchone()
+        return self.load_evidence(row["id"]) if row is not None else None
+
+    @staticmethod
+    def _hypothesis_row(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        result["evidence_ids"] = json.loads(result.pop("evidence_ids_json", "[]"))
+        return result
+
+    def record_hypothesis(
+        self, job_id: str, task_id: str | None, agent_id: str | None, subject: str, statement: str,
+        evidence_ids: list[str], status: str = "tentative", supersedes_id: str | None = None,
+    ) -> dict[str, Any]:
+        if status not in {"tentative", "supported", "rejected", "superseded"}:
+            raise ValueError("invalid hypothesis status")
+        if not subject.strip() or not statement.strip():
+            raise ValueError("hypothesis subject and statement are required")
+        self.get_job(job_id)
+        if task_id is not None:
+            self.get_task(task_id)
+        if agent_id is not None:
+            self.get_agent(agent_id)
+        evidence_ids = list(dict.fromkeys(evidence_ids))
+        with self._lock, self._connect() as connection:
+            for evidence_id in evidence_ids:
+                evidence = connection.execute("SELECT job_id FROM evidence_revisions WHERE id = ?", (evidence_id,)).fetchone()
+                if evidence is None or evidence["job_id"] != job_id:
+                    raise ValueError("hypothesis evidence must belong to the same job")
+            if supersedes_id is not None:
+                predecessor = connection.execute("SELECT job_id FROM hypotheses WHERE id = ?", (supersedes_id,)).fetchone()
+                if predecessor is None or predecessor["job_id"] != job_id:
+                    raise ValueError("superseded hypothesis must belong to the same job")
+            normalized_subject = subject.strip()
+            hypothesis_key = hashlib.sha256(f"{job_id}\0{normalized_subject}".encode("utf-8")).hexdigest()
+            revision = connection.execute(
+                "SELECT COALESCE(MAX(revision), 0) + 1 FROM hypotheses WHERE hypothesis_key = ?", (hypothesis_key,)
+            ).fetchone()[0]
+            hypothesis_id = f"hypothesis-{uuid4().hex}"
+            connection.execute(
+                """
+                INSERT INTO hypotheses(id, job_id, task_id, agent_id, subject, statement, evidence_ids_json, status, hypothesis_key, revision, supersedes_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (hypothesis_id, job_id, task_id, agent_id, normalized_subject, statement.strip(), json.dumps(evidence_ids), status, hypothesis_key, revision, supersedes_id),
+            )
+            connection.commit()
+            row = connection.execute("SELECT * FROM hypotheses WHERE id = ?", (hypothesis_id,)).fetchone()
+        return self._hypothesis_row(row)
+
+    def list_hypotheses(self, job_id: str) -> list[dict[str, Any]]:
+        self.get_job(job_id)
+        with self._lock, self._connect() as connection:
+            rows = connection.execute("SELECT * FROM hypotheses WHERE job_id = ? ORDER BY created_at DESC, revision DESC", (job_id,)).fetchall()
+        return [self._hypothesis_row(row) for row in rows]
+
+    def list_write_scope_requests(self, status: str | None = None) -> list[dict[str, Any]]:
+        if status is not None and status not in {"pending", "approved", "rejected"}:
+            raise ValueError("invalid write scope status")
+        query = "SELECT * FROM write_scope_requests"
+        values: tuple[Any, ...] = ()
+        if status is not None:
+            query += " WHERE status = ?"
+            values = (status,)
+        query += " ORDER BY created_at ASC"
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(query, values).fetchall()
+        return [dict(row) for row in rows]
+
+    def resolve_write_scope_request(self, request_id: str, decision: str, reason: str | None = None) -> dict[str, Any]:
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("write scope decision must be approved or rejected")
+        if decision == "rejected" and not (reason or "").strip():
+            raise ValueError("rejected write scope requests require a reason")
+        with self._lock, self._connect() as connection:
+            request = connection.execute("SELECT * FROM write_scope_requests WHERE id = ?", (request_id,)).fetchone()
+            if request is None:
+                raise KeyError(request_id)
+            if request["status"] != "pending":
+                raise ValueError("write scope request has already been resolved")
+            if decision == "approved":
+                if request["task_id"] is not None:
+                    task = connection.execute("SELECT write_scope_json FROM tasks WHERE id = ?", (request["task_id"],)).fetchone()
+                    if task is not None:
+                        scope = list(dict.fromkeys(json.loads(task["write_scope_json"]) + [request["path"]]))
+                        connection.execute("UPDATE tasks SET write_scope_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(scope), request["task_id"]))
+                agent = connection.execute("SELECT write_scope_json FROM agents WHERE id = ?", (request["agent_id"],)).fetchone()
+                if agent is not None:
+                    scope = list(dict.fromkeys(json.loads(agent["write_scope_json"]) + [request["path"]]))
+                    connection.execute("UPDATE agents SET write_scope_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", (json.dumps(scope), request["agent_id"]))
+            connection.execute(
+                "UPDATE write_scope_requests SET status = ?, resolution_reason = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (decision, reason.strip() if reason else None, request_id),
+            )
+            connection.commit()
+            row = connection.execute("SELECT * FROM write_scope_requests WHERE id = ?", (request_id,)).fetchone()
+        return dict(row)
+
+    def requeue_task(self, task_id: str, reason: str) -> dict[str, Any]:
+        if not reason.strip():
+            raise ValueError("requeue reason is required")
+        with self._lock, self._connect() as connection:
+            row = connection.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+            if row["status"] not in {"blocked", "deferred", "failed"}:
+                raise ValueError("only blocked, deferred, or failed tasks can be requeued")
+            connection.execute(
+                "UPDATE tasks SET status = 'ready', assigned_agent_id = NULL, transition_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (reason.strip(), task_id),
+            )
+            connection.commit()
+        return self.get_task(task_id)
+
     def load_evidence(self, evidence_id: str) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
             row = connection.execute("SELECT * FROM evidence_revisions WHERE id = ?", (evidence_id,)).fetchone()
@@ -417,5 +559,7 @@ class DaemonStore:
             jobs = [dict(row) for row in connection.execute("SELECT * FROM jobs ORDER BY created_at DESC")]
             agents = [self._agent_row(row) for row in connection.execute("SELECT * FROM agents ORDER BY created_at DESC")]
             tasks = [self._task_row(row) for row in connection.execute("SELECT * FROM tasks ORDER BY created_at DESC")]
+            hypotheses = [self._hypothesis_row(row) for row in connection.execute("SELECT * FROM hypotheses ORDER BY created_at DESC, revision DESC")]
+            write_scope_requests = [dict(row) for row in connection.execute("SELECT * FROM write_scope_requests ORDER BY created_at DESC")]
             last_sequence = connection.execute("SELECT COALESCE(MAX(sequence), 0) FROM events").fetchone()[0]
-        return {"jobs": jobs, "agents": agents, "tasks": tasks, "lastSequence": last_sequence}
+        return {"jobs": jobs, "agents": agents, "tasks": tasks, "hypotheses": hypotheses, "writeScopeRequests": write_scope_requests, "lastSequence": last_sequence}

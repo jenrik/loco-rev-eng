@@ -6,12 +6,11 @@ import argparse
 import os
 from pathlib import Path
 import secrets
-import shlex
 
 import uvicorn
 
 from .app import create_app
-from .mcp import GhidraConfig
+from .settings import SettingsError, load_ghidra_config
 
 
 def main() -> None:
@@ -23,16 +22,12 @@ def main() -> None:
     parser.add_argument("--ghidra-command", help="Shell-style command for the read-only Ghidra MCP stdio proxy")
     parser.add_argument("--ghidra-binary", type=Path, help="Raw binary opened by the daemon-owned Ghidra database")
     parser.add_argument("--ghidra-database", help="Unique Ghidra database ID for this daemon process")
+    parser.add_argument("--ghidra-config", type=Path, help="Non-secret project-local Ghidra command/binary JSON")
     args = parser.parse_args()
-    if bool(args.ghidra_command) != bool(args.ghidra_binary):
-        parser.error("--ghidra-command and --ghidra-binary must be supplied together")
-    ghidra = None
-    if args.ghidra_command:
-        ghidra = GhidraConfig(
-            tuple(shlex.split(args.ghidra_command)),
-            args.ghidra_binary.resolve(),
-            args.ghidra_database or f"re-daemon-{os.getpid()}",
-        )
+    try:
+        ghidra = load_ghidra_config(Path.cwd(), args.ghidra_config, args.ghidra_command, args.ghidra_binary, args.ghidra_database, os.getpid())
+    except SettingsError as error:
+        parser.error(str(error))
     token = secrets.token_urlsafe(32)
     daemon_url = f"http://{args.host}:{args.port}"
     app = create_app(

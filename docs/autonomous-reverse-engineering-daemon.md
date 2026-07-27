@@ -148,8 +148,8 @@ Core tables are:
 - `agents` — role, process/session metadata, status, task ownership;
 - `events` — normalized agent and daemon events;
 - `evidence_revisions` — raw content-addressed artifacts and their request provenance;
-- `write_scope_requests` — pending cross-file changes; approval/rejection is a planned operator workflow;
-- hypotheses remain explicit agent events until their revisioned table is delivered.
+- `hypotheses` — append-only, evidence-linked interpretation revisions;
+- `write_scope_requests` — pending/approved/rejected cross-file changes, with the approval atomically extending the assigned agent and task scopes.
 
 Raw large artifacts are content-addressed files under the daemon state root;
 the database stores digests and metadata. Database writes are performed only by
@@ -178,13 +178,18 @@ Implemented foundations:
    open/analysis, serialized calls, and content-addressed evidence revisions.
 5. **Autonomous scheduler:** dependency-gated launch of role agents and durable
    completion/block/defer transitions.
+6. **Ghidra lifecycle:** non-secret project configuration, job-scoped evidence
+   cache reuse, binary identity health, database shutdown cleanup, and one
+   bounded worker restart.
+7. **Operator workflow:** browser job/task/edge/schedule/agent controls,
+   append-only hypotheses, and dynamically enforced write-scope approvals.
 
 Remaining delivery work:
 
-1. **Operational recovery:** Ghidra cache/restart/cleanup and interrupted-agent
-   retry policy.
-2. **Operator workflow:** browser controls, revisioned hypotheses, and approved
-   write-scope escalation.
+1. **Scheduler recovery:** retry/timeout/cancellation semantics and automatic
+   re-queueing of interrupted task attempts.
+2. **Safe history and retention:** bounded Pi-session transcript access without
+   serving secrets, plus artifact retention/eviction and dashboard cache refresh.
 3. **Selective worktrees:** use isolated branches only for tasks declared
    independent; keep shared integration serial.
 

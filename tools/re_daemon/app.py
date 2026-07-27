@@ -56,6 +56,24 @@ class RecordEvent(BaseModel):
 class GhidraQuery(BaseModel):
     operation: str = Field(min_length=1, max_length=100)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    use_cache: bool = True
+
+
+class RecordHypothesis(BaseModel):
+    subject: str = Field(min_length=1, max_length=500)
+    statement: str = Field(min_length=1, max_length=16000)
+    evidence_ids: list[str] = Field(default_factory=list)
+    status: str = Field(default="tentative", pattern="^(tentative|supported|rejected|superseded)$")
+    supersedes_id: str | None = Field(default=None, min_length=1)
+
+
+class ResolveWriteScopeRequest(BaseModel):
+    decision: str = Field(pattern="^(approved|rejected)$")
+    reason: str | None = Field(default=None, max_length=16000)
+
+
+class RequeueTask(BaseModel):
+    reason: str = Field(min_length=1, max_length=16000)
 
 
 class TaskTransition(BaseModel):
@@ -154,6 +172,39 @@ def create_app(
         await broker.publish(None, "task_dependency_created", {"taskId": task_id, **request.model_dump()})
         return {"ok": True}
 
+    @app.get("/api/jobs/{job_id}/hypotheses")
+    def list_hypotheses(job_id: str) -> dict[str, Any]:
+        try:
+            return {"hypotheses": store.list_hypotheses(job_id)}
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown job") from None
+
+    @app.get("/api/write-scope-requests")
+    def list_write_scope_requests(status: str | None = Query(default=None, pattern="^(pending|approved|rejected)$")) -> dict[str, Any]:
+        return {"requests": store.list_write_scope_requests(status)}
+
+    @app.post("/api/write-scope-requests/{request_id}/resolve")
+    async def resolve_write_scope_request(request_id: str, request: ResolveWriteScopeRequest) -> dict[str, Any]:
+        try:
+            scope_request = store.resolve_write_scope_request(request_id, request.decision, request.reason)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown write scope request") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(scope_request["agent_id"], "write_scope_resolved", {"request": scope_request})
+        return scope_request
+
+    @app.post("/api/tasks/{task_id}/retry")
+    async def retry_task(task_id: str, request: RequeueTask) -> dict[str, Any]:
+        try:
+            task = store.requeue_task(task_id, request.reason)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown task") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(None, "task_requeued", {"task": task})
+        return task
+
     @app.post("/api/jobs/{job_id}/schedule")
     async def schedule(job_id: str, limit: int = Query(default=1, ge=1, le=8)) -> dict[str, Any]:
         try:
@@ -226,6 +277,12 @@ def create_app(
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown agent") from None
         task = store.task_for_agent(agent_id)
+        if request.use_cache:
+            cached = store.find_evidence(agent["job_id"], "ghidra", request.operation, request.arguments)
+            if cached is not None:
+                evidence = {key: value for key, value in cached.items() if key != "response"}
+                await broker.publish(agent_id, "ghidra_cache_hit", {"operation": request.operation, "evidence": evidence})
+                return {"evidence": evidence, "response": cached["response"], "cacheHit": True}
         try:
             response = await ghidra.query(request.operation, request.arguments)
         except McpError as error:
@@ -233,7 +290,25 @@ def create_app(
             raise HTTPException(status_code=503, detail=str(error)) from error
         evidence = store.record_evidence(agent["job_id"], task["id"] if task else None, agent_id, "ghidra", request.operation, request.arguments, response)
         await broker.publish(agent_id, "ghidra_evidence_recorded", {"operation": request.operation, "evidence": evidence})
-        return {"evidence": evidence, "response": response}
+        return {"evidence": evidence, "response": response, "cacheHit": False}
+
+    @app.post("/internal/agents/{agent_id}/hypotheses")
+    async def record_agent_hypothesis(agent_id: str, request: RecordHypothesis, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
+        require_internal(x_re_daemon_token)
+        try:
+            agent = store.get_agent(agent_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="unknown agent") from None
+        task = store.task_for_agent(agent_id)
+        try:
+            hypothesis = store.record_hypothesis(
+                agent["job_id"], task["id"] if task else None, agent_id, request.subject, request.statement,
+                request.evidence_ids, request.status, request.supersedes_id,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(agent_id, "hypothesis_recorded", {"hypothesis": hypothesis})
+        return hypothesis
 
     @app.post("/internal/agents/{agent_id}/task/transition")
     async def transition_agent_task(agent_id: str, request: TaskTransition, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
