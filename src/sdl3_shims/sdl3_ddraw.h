@@ -97,6 +97,12 @@ IDirectDrawSurface4* SDL3_GetPrimarySurface();
  * Returns false only when SDL window/renderer setup is unavailable. */
 bool SDL3_PresentPrimarySurface();
 
+/** Clear the SDL primary render target to an XRGB color. */
+bool SDL3_ClearPrimarySurface(uint32_t xrgb);
+
+/** Composite a decoded resource bitmap at native pixel coordinates. */
+bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y);
+
 /* =========================================================================
  * DDRAW helper functions
  *

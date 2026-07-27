@@ -93,6 +93,7 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **Enabled-source build restored** — Fixed stale class labels, host-only x86 layout assertion, DirectDraw stub linkage/signature corruption, and remaining declaration mismatches. Root `make` now compiles and links every enabled source into `build/lego_loco`.
 - [x] **DPlayConfig initialization** — Reconstructed `GameConfig_constructor` (0x440C60) from Ghidra as the 0xB0-byte DPlayConfig defaults at DAT_004FD3A8. The legacy menu alias now points at initialized storage; `make test-dplay-config` verifies all recovered defaults.
 - [x] **Typed TrainSubsystem bootstrap** — Replaced EditWindow’s null `TrainSubsystem_Ctor` pointer call with the existing typed `TrainSubsystem` constructor (0x438BC0). SDL’s DirectPlay boundary now reports an empty provider list, preserving the original constructor flow without a Win32 DirectPlay runtime.
+- [x] **SDL UIPANEL composition boundary** — Grounded the original `UIPANEL_Render` control flow (0x426EB0) and replaced its unsafe x86-vtable host call with typed composition of decoded EditWindow sprites into the SDL primary target. The primary-surface regression now verifies a source surface blit reaches the presented window.
 
 ### Phase 6: Native C compilation (2026-07-24)
 
@@ -318,6 +319,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (uipanel-sdl-composition) | Recovered UIPANEL_Render (0x426EB0), added typed SDL primary surface clear/blit operations, and rendered decoded menu sprites without raw x86 vtable access. |
 | 2026-07-27 (train-subsystem-bootstrap) | Decompiled TrainSubsystem_Ctor (0x438BC0) and worker setup, replaced the null ctor pointer with typed construction, and added an empty-provider SDL DirectPlay boundary. |
 | 2026-07-27 (dplay-config) | Decompiled GameConfig_constructor (0x440C60) and replaced its null host stub with the DPlayConfig defaults; mode-2 startup now advances to the unimplemented TrainSubsystem function pointer. |
 | 2026-07-27 (enabled-build-restored) | Repaired the remaining enabled-source compilation failures; root make now links the 3.6M host binary. |

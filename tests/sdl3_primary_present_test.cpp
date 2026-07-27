@@ -20,10 +20,20 @@ int main()
         return 1;
     }
 
-    SDL_SetRenderTarget(renderer, primary->texture);
-    SDL_SetRenderDrawColor(renderer, 0x24, 0x68, 0xac, 0xff);
-    SDL_RenderClear(renderer);
-    SDL_SetRenderTarget(renderer, nullptr);
+    SDL_Surface* sprite = SDL_CreateSurface(2, 2, SDL_PIXELFORMAT_XRGB8888);
+    const bool sprite_ready = sprite &&
+        SDL_WriteSurfacePixel(sprite, 0, 0, 0xd0, 0x30, 0x20, 0xff) &&
+        SDL_WriteSurfacePixel(sprite, 1, 0, 0xd0, 0x30, 0x20, 0xff) &&
+        SDL_WriteSurfacePixel(sprite, 0, 1, 0xd0, 0x30, 0x20, 0xff) &&
+        SDL_WriteSurfacePixel(sprite, 1, 1, 0xd0, 0x30, 0x20, 0xff) &&
+        SDL3_ClearPrimarySurface(0x2468ac) &&
+        SDL3_BlitSurfaceToPrimary(sprite, 5, 7);
+    if (sprite) SDL_DestroySurface(sprite);
+    if (!sprite_ready) {
+        std::fprintf(stderr, "FAIL: could not compose source surface: %s\n", SDL_GetError());
+        SDL3_WindowQuit();
+        return 1;
+    }
     if (!SDL3_PresentPrimarySurface()) {
         std::fprintf(stderr, "FAIL: primary surface was not presented: %s\n", SDL_GetError());
         SDL3_WindowQuit();
@@ -32,11 +42,11 @@ int main()
 
     SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
     Uint8 red = 0, green = 0, blue = 0, alpha = 0;
-    const bool rendered = pixels && SDL_ReadSurfacePixel(pixels, 0, 0, &red, &green, &blue, &alpha);
+    const bool rendered = pixels && SDL_ReadSurfacePixel(pixels, 5, 7, &red, &green, &blue, &alpha);
     if (pixels) SDL_DestroySurface(pixels);
     SDL3_WindowQuit();
-    if (!rendered || red != 0x24 || green != 0x68 || blue != 0xac || alpha != 0xff) {
-        std::fprintf(stderr, "FAIL: primary pixel was not copied to the window (%u,%u,%u,%u)\n", red, green, blue, alpha);
+    if (!rendered || red != 0xd0 || green != 0x30 || blue != 0x20 || alpha != 0xff) {
+        std::fprintf(stderr, "FAIL: composited sprite pixel was not copied to the window (%u,%u,%u,%u)\n", red, green, blue, alpha);
         return 1;
     }
     std::puts("PASS: SDL primary surface is composited and presented");

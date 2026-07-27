@@ -422,6 +422,34 @@ IDirectDrawSurface4* SDL3_GetPrimarySurface()
     return SDL3_EnsurePrimarySurface() ? g_sdl_primary_surface : nullptr;
 }
 
+bool SDL3_ClearPrimarySurface(uint32_t xrgb)
+{
+    if (!SDL3_EnsurePrimarySurface()) return false;
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+    SDL_SetRenderDrawColor(renderer, (xrgb >> 16) & 0xFF,
+                            (xrgb >> 8) & 0xFF, xrgb & 0xFF, 255);
+    const bool cleared = SDL_RenderClear(renderer);
+    SDL_SetRenderTarget(renderer, nullptr);
+    return cleared;
+}
+
+bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y)
+{
+    if (!source || !SDL3_EnsurePrimarySurface()) return false;
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, source);
+    if (!texture) return false;
+
+    SDL_FRect destination = { static_cast<float>(x), static_cast<float>(y),
+                              static_cast<float>(source->w), static_cast<float>(source->h) };
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+    const bool rendered = SDL_RenderTexture(renderer, texture, nullptr, &destination);
+    SDL_SetRenderTarget(renderer, nullptr);
+    SDL_DestroyTexture(texture);
+    return rendered;
+}
+
 bool SDL3_PresentPrimarySurface()
 {
     if (!SDL3_EnsurePrimarySurface()) return false;

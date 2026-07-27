@@ -12,6 +12,7 @@
 #include "GameSetupPanel.h"
 #include "../game/Train.h"
 #include "resource_manager_sdl3.h"
+#include "sdl3_ddraw.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
 #include <cstring>
@@ -362,22 +363,27 @@ void EditWindow::show()
     /* Call base class Show (creates timer, captures mouse) */
     std::fprintf(stderr, "[TRACE] EditWindow::show: base show\n");
     this->UI_WindowBase::show();
+    std::fprintf(stderr, "[TRACE] EditWindow::show: base shown\n");
 
     /* Bring window to top */
     BringWindowToTop(this->hWnd);
+    std::fprintf(stderr, "[TRACE] EditWindow::show: window raised\n");
 
     /* Hide the OS cursor */
     int cursorVis = ShowCursor(FALSE);
     while (cursorVis >= 0) {
         cursorVis = ShowCursor(FALSE);
     }
+    std::fprintf(stderr, "[TRACE] EditWindow::show: cursor hidden\n");
 
     /* Set focus to edit control and set player name */
     SetFocus(this->hwndEdit);
     SetWindowTextA(this->hwndEdit, (const char*)((int)g_player_config + 6));
+    std::fprintf(stderr, "[TRACE] EditWindow::show: player name set\n");
 
     /* Send EM_SETSEL (0xB1) -- select end of text (start=0, end=-1) */
     SendMessageA(this->hwndEdit, 0xB1, 0, (void*)-1);
+    std::fprintf(stderr, "[TRACE] EditWindow::show: edit selection set\n");
 
     /* Set NetMan game mode based on netman state */
     if (*(char*)(_g_netman_state + 7) == 0) {
@@ -385,6 +391,7 @@ void EditWindow::show()
     } else {
         NETMAN_SetGameMode(g_netman, 3);     /* Multiplayer */
     }
+    std::fprintf(stderr, "[TRACE] EditWindow::show: network mode set\n");
 
     /* Transition based on previousState */
     if (this->previousState == 0) {
@@ -896,6 +903,12 @@ void EditWindow::cleanupSprites()
 /* ================================================================== */
 void EditWindow::render()
 {
+#ifndef _WIN32
+    // UIPANEL_Render @ 0x426EB0 composes through raw x86 surface/vtable
+    // layouts. On the SDL host the typed primary compositor owns that
+    // presentation boundary; the same decoded sprite resources are used.
+    if (!SDL3_ClearPrimarySurface(0x002850)) return;
+#else
     void* surface_memory = operator_new(0x20);
     this->pMainSurface = surface_memory
         ? static_cast<UIPANEL_Surface*>(UIPANEL_CreateSurface(surface_memory)) : nullptr;
@@ -905,9 +918,13 @@ void EditWindow::render()
         auto* resource = loco::assets::host_resource_manager().get_sprite_by_id(resource_id);
         auto* bitmap = loco::assets::sprite_bitmap(resource);
         if (bitmap) {
+#ifndef _WIN32
+            SDL3_BlitSurfaceToPrimary(loco::assets::bitmap_surface(bitmap), x, y);
+#else
             const int width = static_cast<int>(loco::assets::bitmap_width(bitmap));
             const int height = static_cast<int>(loco::assets::bitmap_height(bitmap));
             Town_BlitElement(bitmap, 0, 0, width, height, this->pMainSurface, x, y, width, height, 0);
+#endif
         }
         loco::assets::release_sprite(resource);
     };
@@ -916,6 +933,7 @@ void EditWindow::render()
     blit_backdrop(0x445, 0x204, 0xF9);
     blit_backdrop(0x446, 0x11A, 0xF0);
     blit_backdrop(0x443, 0x20B, 0x2A8);
+#endif
 }
 
 /* ================================================================== */

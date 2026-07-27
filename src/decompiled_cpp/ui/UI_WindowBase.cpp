@@ -6,6 +6,9 @@
  */
 
 #include "UI_WindowBase.h"
+#ifndef _WIN32
+#include "sdl3_ddraw.h"
+#endif
 
 /* ================================================================== */
 /* External references                                                 */
@@ -240,7 +243,13 @@ void UI_WindowBase::show()
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: unlock primary\n");
     DDRAW_UnlockPrimary(this->hWnd);
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: render panel\n");
+#ifdef _WIN32
     UIPANEL_Render(this, 1);
+#else
+    // The SDL compositor receives the decoded EditWindow sprites directly;
+    // do not reinterpret this 64-bit UI_WindowBase as the x86 UIPANEL layout.
+    SDL3_PresentPrimarySurface();
+#endif
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: unlock primary complete\n");
     DDRAW_UnlockPrimary(this->hWnd);
 
