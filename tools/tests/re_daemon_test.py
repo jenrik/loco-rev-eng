@@ -27,6 +27,15 @@ class DaemonStoreTests(unittest.TestCase):
         self.assertEqual([event["sequence"] for event in replay], [second["sequence"]])
         self.assertEqual(self.store.snapshot()["agents"][0]["status"], "queued")
 
+    def test_snapshot_orders_agents_by_latest_event(self):
+        job = self.store.create_job("Activity", "Order agent selector")
+        first = self.store.create_agent(job["id"], "investigator", "older", "sessions/first")
+        second = self.store.create_agent(job["id"], "validator", "newer", "sessions/second")
+        self.store.record_event(first["id"], "assistant_delta", {"delta": "most recent"})
+        agents = self.store.snapshot()["agents"]
+        self.assertEqual([agent["id"] for agent in agents[:2]], [first["id"], second["id"]])
+        self.assertGreater(agents[0]["last_activity_sequence"], agents[1]["last_activity_sequence"])
+
     def test_broker_publishes_durable_event(self):
         job = self.store.create_job("Test", "Goal")
         agent = self.store.create_agent(job["id"], "investigator", "Task", "sessions/agent")

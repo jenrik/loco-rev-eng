@@ -557,7 +557,13 @@ class DaemonStore:
     def snapshot(self) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
             jobs = [dict(row) for row in connection.execute("SELECT * FROM jobs ORDER BY created_at DESC")]
-            agents = [self._agent_row(row) for row in connection.execute("SELECT * FROM agents ORDER BY created_at DESC")]
+            agents = [self._agent_row(row) for row in connection.execute("""
+                SELECT agent.*, COALESCE(MAX(event.sequence), 0) AS last_activity_sequence
+                FROM agents AS agent
+                LEFT JOIN events AS event ON event.agent_id = agent.id
+                GROUP BY agent.id
+                ORDER BY last_activity_sequence DESC, agent.created_at DESC
+            """)]
             tasks = [self._task_row(row) for row in connection.execute("SELECT * FROM tasks ORDER BY created_at DESC")]
             hypotheses = [self._hypothesis_row(row) for row in connection.execute("SELECT * FROM hypotheses ORDER BY created_at DESC, revision DESC")]
             write_scope_requests = [dict(row) for row in connection.execute("SELECT * FROM write_scope_requests ORDER BY created_at DESC")]

@@ -177,7 +177,7 @@ main()
 - [x] **Evidence-led task scheduler** — SQLite tasks/requirement edges/write-scope requests, dependency-gated launch of role agents, and durable agent task transitions
 - [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
-- [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, and bounded replay of persisted recent agent events after page load/reconnect
+- [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, and formatted/coalesced streamed-message timeline
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
 
 ## Remaining work
@@ -325,6 +325,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (dashboard-timeline) | Reworked the live event tail into an activity-sorted agent-filterable timeline with formatted event cards and consolidated streaming deltas. |
 | 2026-07-27 (daemon-reaper-trial) | Re-ran a real no-write Pi→daemon→Ghidra task after the terminal lifecycle fix: task completed, evidence persisted, and the Pi child was reaped; 224K temporary state removed. |
 | 2026-07-27 (daemon-trial) | Ran one live no-write Pi→daemon→Ghidra trial: evidence and a hypothesis persisted, task completed, abort control worked, and 340K temporary state was removed. |
 | 2026-07-27 (autonomous-re-daemon) | Added Ghidra worker recovery, project-local non-secret config, job-scoped evidence caching, revisioned hypotheses, operator scope approvals with dynamic enforcement, and browser scheduling/agent controls. |
