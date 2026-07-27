@@ -324,6 +324,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (daemon-trial) | Ran one live no-write Pi→daemon→Ghidra trial: evidence and a hypothesis persisted, task completed, abort control worked, and 340K temporary state was removed. |
 | 2026-07-27 (autonomous-re-daemon) | Added Ghidra worker recovery, project-local non-secret config, job-scoped evidence caching, revisioned hypotheses, operator scope approvals with dynamic enforcement, and browser scheduling/agent controls. |
 | 2026-07-27 (autonomous-re-daemon) | Added daemon-owned read-only Ghidra MCP adapter, content-addressed evidence revisions, dependency-gated task scheduler, durable task outcomes/scope requests, and real loco.exe MCP integration probe. |
 | 2026-07-27 (autonomous-re-daemon) | Pivoted to active daemon design; implemented SQLite event store, Pi RPC manager, custom Pi extension, local FastAPI/WebSocket dashboard, and 6 daemon tests. |
