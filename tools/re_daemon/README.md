@@ -9,7 +9,7 @@ nix develop . --command python3 -m tools.re_daemon
 
 The daemon binds to loopback by default. Its SQLite state, Pi sessions, and cached artifacts live under `.pi/re-daemon/` unless `--state` is supplied.
 
-The current daemon supports durable jobs/tasks/agents/evidence, dependency-gated scheduling, live WebSocket tailing, per-agent Pi RPC process control, capability-protected extension calls, and bounded normalized event logging.
+The current daemon supports durable jobs/tasks/agents/evidence, agent-driven bounded task-graph expansion, dependency-gated autonomous successor dispatch, live WebSocket tailing, per-agent Pi RPC process control, capability-protected extension calls, and bounded normalized event logging.
 
 To enable Ghidra, supply a daemon-owned MCP stdio command and the raw binary. The existing Ghidra service uses `re-mcp-ghidra proxy`; use the absolute executable that owns that configured service (the project Nix shell does not add it automatically):
 
@@ -38,6 +38,7 @@ Run the daemon tests:
 
 ```bash
 PYTHONPATH=. python3 tools/tests/re_daemon_test.py
+PYTHONPATH=. python3 tools/tests/re_daemon_task_test.py
 PYTHONPATH=. python3 tools/tests/re_daemon_rpc_test.py
 nix develop . --command python3 -m unittest tools.tests.re_daemon_web_test -v
 ```

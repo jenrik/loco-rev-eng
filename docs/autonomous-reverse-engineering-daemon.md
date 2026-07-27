@@ -113,9 +113,18 @@ The graph is partial and evidence-led, not a mandatory upfront plan.
 
 The scheduler starts only ready, in-scope work. Submitting a job automatically
 creates and dispatches one read-only `Initial evidence triage` investigator task;
-existing empty drafts can be bootstrapped once from the operator UI. It may create
-an investigation node when new uncertainty is encountered. It never treats a
-missing edge as proof of independence.
+existing empty drafts can be bootstrapped once from the operator UI. The triage
+agent must call `re_expand_task_graph` before it can report completion. That call
+atomically persists a bounded set of concrete nodes and edges, rejects cyclic
+`requires` plans, and is idempotent for an identical retry. The daemon automatically
+gates each prerequisite-most new node on the planning task, so no successor can
+race incomplete evidence collection.
+
+After every terminal task transition the scheduler fills one serial autonomous
+capacity slot with the next dependency-ready node. Queued graphs resume at daemon
+startup. Later workers may expand the partial graph when evidence reveals concrete
+new work; prose plans do not affect scheduling. The daemon never treats a missing
+edge as proof of independence.
 
 ## Dashboard and operator controls
 
@@ -188,8 +197,9 @@ Implemented foundations:
 3. **Pi extension:** task/evidence/Ghidra tools and enforced initial write scope.
 4. **Ghidra adapter:** daemon-owned, read-only project MCP calls with raw-binary
    open/analysis, serialized calls, and content-addressed evidence revisions.
-5. **Autonomous scheduler:** dependency-gated launch of role agents and durable
-   completion/block/defer transitions.
+5. **Autonomous scheduler:** dependency-gated launch of role agents, agent-driven
+   bounded DAG expansion, atomic claims, startup resume, automatic successor
+   dispatch, and durable completion/block/defer transitions.
 6. **Ghidra lifecycle:** non-secret project configuration, job-scoped evidence
    cache reuse, binary identity health, database shutdown cleanup, and one
    bounded worker restart.

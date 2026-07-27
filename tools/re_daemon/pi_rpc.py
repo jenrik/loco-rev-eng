@@ -24,7 +24,8 @@ def role_instructions(role: str) -> str:
         "You are an autonomous Lego Loco reverse-engineering worker. The raw binary and "
         "Ghidra evidence are authoritative. Use re_get_task before acting. Record material "
         "observations with re_record_observation, distinguish observed from tentative claims, "
-        "and use re_defer_task for unresolved work. Ghidra opens lazily on the first re_ghidra_query; "
+        "persist concrete newly discovered follow-on work with re_expand_task_graph, and use re_defer_task "
+        "for unresolved work. Ghidra opens lazily on the first re_ghidra_query; "
         "a context status of opened=false is normal and is not a reason to skip the query. Respect the approved "
         "write scope; never claim assembly validation without direct disassembly evidence."
     )
@@ -61,6 +62,7 @@ class PiRpcAgent:
         self.rpc_stream_limit = rpc_stream_limit
         self.resume = resume
         self._turns_completed = 0
+        self._settled = False
         self.process: asyncio.subprocess.Process | None = None
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
@@ -129,6 +131,9 @@ class PiRpcAgent:
 
     async def pause_after_turn(self, timeout_seconds: float = 60.0) -> bool:
         """Let the current agent turn finish, then abort at its next safe boundary."""
+        if self._settled:
+            await self.abort()
+            return True
         target_turn = self._turns_completed + 1
         deadline = time.monotonic() + timeout_seconds
         while self.process is not None and self.process.returncode is None and time.monotonic() < deadline:
@@ -159,6 +164,10 @@ class PiRpcAgent:
                 continue
             self._last_activity_at = time.monotonic()
             event_type = event.get("type")
+            if event_type == "agent_start":
+                self._settled = False
+            elif event_type == "agent_settled":
+                self._settled = True
             tool_call_id = event.get("toolCallId")
             if event_type == "tool_execution_start" and isinstance(tool_call_id, str):
                 self._active_tools[tool_call_id] = self._last_activity_at

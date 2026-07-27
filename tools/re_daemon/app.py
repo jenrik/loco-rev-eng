@@ -85,6 +85,26 @@ class TaskTransition(BaseModel):
     reason: str | None = Field(default=None, max_length=16000)
 
 
+class TaskGraphTask(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=200)
+    instructions: str = Field(min_length=1, max_length=16000)
+    role: str = Field(pattern="^(investigator|transcriber|validator|integrator|reviewer)$")
+    write_scope: list[str] = Field(default_factory=list)
+
+
+class TaskGraphDependency(BaseModel):
+    task_key: str = Field(min_length=1, max_length=120)
+    dependency_key: str = Field(min_length=1, max_length=120)
+    relation: str = Field(default="requires", pattern="^(requires|evidence|invalidates)$")
+
+
+class ExpandTaskGraph(BaseModel):
+    rationale: str = Field(min_length=1, max_length=16000)
+    tasks: list[TaskGraphTask] = Field(min_length=1, max_length=24)
+    dependencies: list[TaskGraphDependency] = Field(default_factory=list, max_length=64)
+
+
 class WriteScopeRequest(BaseModel):
     path: str = Field(min_length=1)
     reason: str = Field(min_length=1, max_length=16000)
@@ -111,6 +131,11 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await manager.recover_orphaned_tasks()
+        # A restart must resume a queued autonomous graph without waiting for an
+        # operator to press Schedule. Capacity remains serial by default.
+        for job in store.snapshot()["jobs"]:
+            if job["status"] == "queued":
+                await scheduler.drive(job["id"])
         try:
             yield
         finally:
@@ -153,9 +178,11 @@ def create_app(
                 "Inspect the most relevant existing source and project records, then make up to six targeted "
                 "re_ghidra_query calls against the highest-risk claims. Record direct binary facts with "
                 "re_record_observation and nontrivial interpretations with re_record_hypothesis citing evidence IDs. "
-                "Do not edit files. Finish with re_transition_task: mark completed only after recording sufficient "
-                "evidence and include a prioritized follow-on task plan with addresses, pass, prerequisites, and "
-                "safe write scope. If Ghidra or required evidence is unavailable, mark blocked with the concrete cause."
+                "Do not edit files. Before marking this triage completed, call re_expand_task_graph exactly once with "
+                "a small executable follow-on DAG: concrete address/pass tasks, explicit requires edges, evidence-backed "
+                "instructions, and the narrowest safe write scopes. A prose plan in the completion reason is not enough. "
+                "Then call re_transition_task completed. If Ghidra or required evidence is unavailable, mark blocked "
+                "with the concrete cause instead of inventing graph nodes."
             ),
             "investigator",
         )
@@ -357,12 +384,34 @@ def create_app(
         await broker.publish(agent_id, "hypothesis_recorded", {"hypothesis": hypothesis})
         return hypothesis
 
+    @app.post("/internal/agents/{agent_id}/task/expand")
+    async def expand_agent_task_graph(agent_id: str, request: ExpandTaskGraph, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
+        require_internal(x_re_daemon_token)
+        try:
+            expansion = store.expand_task_graph(
+                agent_id, request.rationale,
+                [task.model_dump() for task in request.tasks],
+                [edge.model_dump() for edge in request.dependencies],
+            )
+        except (KeyError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        await broker.publish(agent_id, "task_graph_expanded", {
+            "expansionId": expansion["id"], "sourceTaskId": expansion["sourceTaskId"],
+            "tasks": [{key: task[key] for key in ("id", "key", "title", "role")} for task in expansion["tasks"]],
+            "edgeCount": len(expansion["edges"]), "idempotentReplay": expansion["idempotentReplay"],
+        })
+        return expansion
+
     @app.post("/internal/agents/{agent_id}/task/transition")
     async def transition_agent_task(agent_id: str, request: TaskTransition, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
         require_internal(x_re_daemon_token)
         task = store.task_for_agent(agent_id)
         if task is None:
             raise HTTPException(status_code=409, detail="agent has no scheduler-assigned task")
+        if task["status"] != "in_progress":
+            raise HTTPException(status_code=409, detail="assigned task is no longer in progress")
+        if request.status == "completed" and task["title"] == "Initial evidence triage" and not store.has_task_expansion(task["id"]):
+            raise HTTPException(status_code=409, detail="initial triage must persist a follow-on graph with re_expand_task_graph before completion")
         try:
             transitioned = store.transition_task(task["id"], request.status, request.reason, agent_id)
         except ValueError as error:
@@ -377,6 +426,11 @@ def create_app(
             await broker.publish(agent_id, "terminal_abort_unavailable", {"taskId": task["id"], "error": str(error)})
         else:
             await broker.publish(agent_id, "terminal_abort_requested", {"taskId": task["id"], "status": request.status})
+        launched = await scheduler.drive(task["job_id"])
+        await broker.publish(None, "task_graph_advanced", {
+            "jobId": task["job_id"], "completedTaskId": task["id"],
+            "launchedTaskIds": [item["task"]["id"] for item in launched],
+        })
         return transitioned
 
     @app.post("/internal/agents/{agent_id}/write-scope-requests")

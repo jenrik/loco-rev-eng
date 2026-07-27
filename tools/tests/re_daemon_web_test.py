@@ -73,6 +73,7 @@ for line in sys.stdin:
     command = json.loads(line)
     if command.get('type') == 'prompt':
         print(json.dumps({'type': 'agent_start'}), flush=True)
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
     elif command.get('type') == 'abort':
         print(json.dumps({'type': 'agent_settled'}), flush=True)
         break
@@ -176,6 +177,95 @@ for line in sys.stdin:
                 context = client.get(f"/internal/agents/{agent['id']}/context", headers={'x-re-daemon-token': 'test-capability'}).json()
                 self.assertIn('game/Building.h', context['agent']['write_scope'])
 
+    def test_startup_resumes_a_queued_graph(self):
+        fake_pi = """#!__PYTHON__
+import json
+import sys
+for line in sys.stdin:
+    command = json.loads(line)
+    if command.get('type') == 'prompt':
+        print(json.dumps({'type': 'agent_start'}), flush=True)
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
+    elif command.get('type') == 'abort':
+        break
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / 'fake-pi'
+            executable.write_text(fake_pi.replace('__PYTHON__', sys.executable), encoding='utf-8')
+            executable.chmod(0o755)
+            app = create_app(root / 'state.sqlite3', project_root=Path.cwd(), daemon_token='test-capability', pi_binary=str(executable))
+            job = app.state.store.create_job('resume graph', 'continue queued work')
+            task = app.state.store.create_task(job['id'], 'queued validation', 'validate one function', 'validator')
+            with TestClient(app) as client:
+                current = app.state.store.get_task(task['id'])
+                self.assertEqual(current['status'], 'in_progress')
+                self.assertIsNotNone(current['assigned_agent_id'])
+                completed = client.post(
+                    f"/internal/agents/{current['assigned_agent_id']}/task/transition",
+                    headers={'x-re-daemon-token': 'test-capability'},
+                    json={'status': 'completed', 'reason': 'startup resume verified'},
+                )
+                self.assertEqual(completed.status_code, 200)
+
+    def test_agent_expands_graph_and_completion_launches_successor(self):
+        fake_pi = """#!__PYTHON__
+import json
+import sys
+for line in sys.stdin:
+    command = json.loads(line)
+    if command.get('type') == 'prompt':
+        print(json.dumps({'type': 'agent_start'}), flush=True)
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
+    elif command.get('type') == 'abort':
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
+        break
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / 'fake-pi'
+            executable.write_text(fake_pi.replace('__PYTHON__', sys.executable), encoding='utf-8')
+            executable.chmod(0o755)
+            app = create_app(root / 'state.sqlite3', project_root=Path.cwd(), daemon_token='test-capability', pi_binary=str(executable))
+            with TestClient(app) as client:
+                created = client.post('/api/jobs', json={'title': 'autonomous', 'goal': 'validate 0x4343B0'}).json()
+                source_agent = created['launched'][0]['agent']['id']
+                headers = {'x-re-daemon-token': 'test-capability'}
+                refused = client.post(
+                    f"/internal/agents/{source_agent}/task/transition", headers=headers,
+                    json={'status': 'completed', 'reason': 'prose plan only'},
+                )
+                self.assertEqual(refused.status_code, 409)
+                expansion = client.post(
+                    f"/internal/agents/{source_agent}/task/expand", headers=headers,
+                    json={
+                        'rationale': 'Triage evidence identifies one bounded validation pass.',
+                        'tasks': [{
+                            'key': 'validate-4343b0', 'title': 'Validate Draw 0x4343B0',
+                            'instructions': 'Compare implementation with disassembly at 0x4343B0.',
+                            'role': 'validator', 'write_scope': [],
+                        }],
+                        'dependencies': [],
+                    },
+                )
+                self.assertEqual(expansion.status_code, 200)
+                successor_id = expansion.json()['tasks'][0]['id']
+                completed = client.post(
+                    f"/internal/agents/{source_agent}/task/transition", headers=headers,
+                    json={'status': 'completed', 'reason': 'evidence and graph persisted'},
+                )
+                self.assertEqual(completed.status_code, 200)
+                status = client.get('/api/status').json()
+                successor = next(task for task in status['tasks'] if task['id'] == successor_id)
+                self.assertEqual(successor['status'], 'in_progress')
+                self.assertIsNotNone(successor['assigned_agent_id'])
+                self.assertTrue(any(edge['task_id'] == successor_id and edge['dependency_task_id'] == created['initialTask']['id'] for edge in status['taskEdges']))
+                successor_done = client.post(
+                    f"/internal/agents/{successor['assigned_agent_id']}/task/transition", headers=headers,
+                    json={'status': 'completed', 'reason': 'validation complete'},
+                )
+                self.assertEqual(successor_done.status_code, 200)
+
     def test_terminal_task_transition_aborts_live_pi_attempt(self):
         fake_pi = """#!__PYTHON__
 import json
@@ -184,6 +274,7 @@ for line in sys.stdin:
     command = json.loads(line)
     if command.get('type') == 'prompt':
         print(json.dumps({'type': 'agent_start'}), flush=True)
+        print(json.dumps({'type': 'agent_settled'}), flush=True)
     elif command.get('type') == 'abort':
         print(json.dumps({'type': 'agent_settled'}), flush=True)
         break

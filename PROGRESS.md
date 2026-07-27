@@ -180,6 +180,7 @@ main()
 - [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, formatted/coalesced streamed-message timeline, and declared Uvicorn WebSocket runtime
 - [x] **Terminal task lifecycle** — every agent-reported terminal outcome requests Pi abort and boundedly reaps the idle RPC process; validated against a real Pi→Ghidra trial
 - [x] **Stalled-attempt recovery** — watchdog fails/reaps stuck tool calls after bounded inactivity, marks stale agent records failed, startup recovers in-progress tasks whose assigned PID is gone, and the RPC reader accepts escaped multi-KiB tool events
+- [x] **Autonomous task-graph driving** — evidence agents atomically persist bounded acyclic follow-on DAGs, initial triage cannot complete with only a prose plan, ready-task claims are race-safe, terminal transitions dispatch the next serial successor, queued graphs resume on startup, and dashboard snapshots render durable edges
 
 ## Remaining work
 
@@ -326,6 +327,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (autonomous-task-graph) | Added agent-driven bounded DAG expansion with idempotency/cycle checks/source gating, atomic scheduler claims, automatic terminal/startup advancement, graph rendering, and end-to-end regression coverage. |
 | 2026-07-27 (automatic-job-kickoff) | Job submission now creates and dispatches a read-only initial evidence triage task; added one-click bootstrap for existing empty drafts. |
 | 2026-07-27 (job-status-singleton) | Reconciled dashboard job state from runnable/in-progress/terminal tasks and added an exclusive state-file lock after stale queued/running jobs and three competing daemon processes were observed. |
 | 2026-07-27 (ghidra-proxy-names) | Found the adapter sent Pi-decorated `ghidra_*` names to the direct re-mcp-ghidra proxy, which exposes unprefixed names; corrected open/wait/close/query mappings and verified a live decompile. |

@@ -6,10 +6,17 @@ from contextlib import contextmanager
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import threading
 from typing import Any
 from uuid import uuid4
+
+
+AUTONOMOUS_TASK_ROLES = {"investigator", "transcriber", "validator", "integrator", "reviewer"}
+TASK_PLAN_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,119}$")
+MAX_EXPANSION_TASKS = 24
+MAX_EXPANSION_EDGES = 64
 
 
 class DaemonStore:
@@ -100,6 +107,19 @@ class DaemonStore:
                 )
             """)
             connection.execute("""
+                CREATE TABLE IF NOT EXISTS task_expansions (
+                    id TEXT PRIMARY KEY,
+                    job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+                    source_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                    source_agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                    rationale TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(source_task_id, request_digest)
+                )
+            """)
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS evidence_revisions (
                     id TEXT PRIMARY KEY,
                     job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
@@ -151,6 +171,8 @@ class DaemonStore:
                 )
             """)
             connection.execute("CREATE INDEX IF NOT EXISTS tasks_job_status ON tasks(job_id, status)")
+            connection.execute("CREATE INDEX IF NOT EXISTS task_edges_task ON task_edges(task_id, relation)")
+            connection.execute("CREATE INDEX IF NOT EXISTS task_expansions_source ON task_expansions(source_task_id, created_at)")
             connection.execute("CREATE INDEX IF NOT EXISTS evidence_task_operation ON evidence_revisions(task_id, operation)")
             connection.execute("CREATE INDEX IF NOT EXISTS hypotheses_job_subject ON hypotheses(job_id, subject, revision)")
             connection.execute("CREATE INDEX IF NOT EXISTS scope_requests_status ON write_scope_requests(status, created_at)")
@@ -341,8 +363,10 @@ class DaemonStore:
     def add_task_dependency(self, task_id: str, dependency_task_id: str, relation: str = "requires") -> None:
         if relation not in {"requires", "evidence", "invalidates"}:
             raise ValueError("invalid task edge relation")
-        self.get_task(task_id)
-        self.get_task(dependency_task_id)
+        task = self.get_task(task_id)
+        dependency = self.get_task(dependency_task_id)
+        if task["job_id"] != dependency["job_id"]:
+            raise ValueError("task dependencies must stay within one job")
         with self._lock, self._connect() as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO task_edges(task_id, dependency_task_id, relation) VALUES (?, ?, ?)",
@@ -350,10 +374,66 @@ class DaemonStore:
             )
             connection.commit()
 
+    def list_task_edges(self, job_id: str) -> list[dict[str, Any]]:
+        self.get_job(job_id)
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """SELECT edge.* FROM task_edges AS edge
+                   JOIN tasks AS task ON task.id = edge.task_id
+                   WHERE task.job_id = ?
+                   ORDER BY task.created_at ASC, edge.rowid ASC""",
+                (job_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def in_progress_tasks(self) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
             rows = connection.execute("SELECT * FROM tasks WHERE status = 'in_progress' ORDER BY updated_at ASC").fetchall()
         return [self._task_row(row) for row in rows]
+
+    def count_in_progress_tasks(self, job_id: str) -> int:
+        self.get_job(job_id)
+        with self._lock, self._connect() as connection:
+            return int(connection.execute(
+                "SELECT COUNT(*) FROM tasks WHERE job_id = ? AND status = 'in_progress'", (job_id,)
+            ).fetchone()[0])
+
+    def claim_ready_tasks(self, job_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Atomically claim dependency-ready work and retain resume provenance."""
+        limit = max(1, min(limit, 100))
+        claimed: list[dict[str, Any]] = []
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT task.* FROM tasks AS task
+                WHERE task.job_id = ? AND task.status = 'ready'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM task_edges AS edge
+                    JOIN tasks AS dependency ON dependency.id = edge.dependency_task_id
+                    WHERE edge.task_id = task.id
+                      AND edge.relation = 'requires'
+                      AND dependency.status != 'completed'
+                  )
+                ORDER BY task.created_at ASC LIMIT ?
+                """,
+                (job_id, limit),
+            ).fetchall()
+            for row in rows:
+                updated = connection.execute(
+                    """UPDATE tasks SET status = 'in_progress', transition_reason = 'claimed by daemon scheduler',
+                       updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'ready'""",
+                    (row["id"],),
+                )
+                if updated.rowcount != 1:
+                    continue
+                task = self._task_row(row)
+                task["_claim_previous_reason"] = task.get("transition_reason")
+                task["status"] = "in_progress"
+                task["transition_reason"] = "claimed by daemon scheduler"
+                claimed.append(task)
+            self._refresh_job_status(connection, job_id)
+            connection.commit()
+        return claimed
 
     def ready_tasks(self, job_id: str, limit: int = 10) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 100))
@@ -374,6 +454,179 @@ class DaemonStore:
                 (job_id, limit),
             ).fetchall()
         return [self._task_row(row) for row in rows]
+
+    def expand_task_graph(
+        self,
+        agent_id: str,
+        rationale: str,
+        tasks: list[dict[str, Any]],
+        dependencies: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically add a bounded, acyclic follow-on plan from an active task.
+
+        Each prerequisite-most new node automatically requires the source task,
+        so an operator scheduling click cannot race the planning agent's final
+        evidence and terminal transition. Identical requests are idempotent.
+        """
+        rationale = rationale.strip()
+        dependencies = dependencies or []
+        if not rationale:
+            raise ValueError("task graph expansion requires a rationale")
+        if not 1 <= len(tasks) <= MAX_EXPANSION_TASKS:
+            raise ValueError(f"task graph expansion must contain 1-{MAX_EXPANSION_TASKS} tasks")
+        if len(dependencies) > MAX_EXPANSION_EDGES:
+            raise ValueError(f"task graph expansion may contain at most {MAX_EXPANSION_EDGES} edges")
+
+        normalized_tasks: list[dict[str, Any]] = []
+        keys: set[str] = set()
+        for specification in tasks:
+            key = specification.get("key")
+            title = specification.get("title")
+            instructions = specification.get("instructions")
+            role = specification.get("role")
+            scope = specification.get("write_scope", [])
+            if not isinstance(key, str) or TASK_PLAN_KEY.fullmatch(key) is None:
+                raise ValueError("task keys must be 1-120 safe semantic characters")
+            if key in keys:
+                raise ValueError(f"duplicate task key: {key}")
+            if not isinstance(title, str) or not title.strip() or len(title.strip()) > 200:
+                raise ValueError(f"task {key} requires a title of at most 200 characters")
+            if not isinstance(instructions, str) or not instructions.strip() or len(instructions.strip()) > 16000:
+                raise ValueError(f"task {key} requires concrete instructions of at most 16000 characters")
+            if role not in AUTONOMOUS_TASK_ROLES:
+                raise ValueError(f"task {key} has unsupported autonomous role: {role}")
+            if not isinstance(scope, list):
+                raise ValueError(f"task {key} write_scope must be an array")
+            scope = list(dict.fromkeys(scope))
+            if any(not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/") for path in scope):
+                raise ValueError(f"task {key} write_scope must contain safe relative paths")
+            keys.add(key)
+            normalized_tasks.append({
+                "key": key, "title": title.strip(), "instructions": instructions.strip(),
+                "role": role, "write_scope": scope,
+            })
+
+        normalized_dependencies: list[dict[str, str]] = []
+        seen_edges: set[tuple[str, str, str]] = set()
+        requires: dict[str, set[str]] = {key: set() for key in keys}
+        for edge in dependencies:
+            task_key = edge.get("task_key")
+            dependency_key = edge.get("dependency_key")
+            relation = edge.get("relation", "requires")
+            if task_key not in keys or dependency_key not in keys:
+                raise ValueError("task graph edges may reference only keys in the same expansion")
+            if task_key == dependency_key:
+                raise ValueError("a task cannot depend on itself")
+            if relation not in {"requires", "evidence", "invalidates"}:
+                raise ValueError(f"invalid task edge relation: {relation}")
+            identity = (task_key, dependency_key, relation)
+            if identity in seen_edges:
+                continue
+            seen_edges.add(identity)
+            normalized_dependencies.append({
+                "task_key": task_key, "dependency_key": dependency_key, "relation": relation,
+            })
+            if relation == "requires":
+                requires[task_key].add(dependency_key)
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        def visit(key: str) -> None:
+            if key in visiting:
+                raise ValueError("requires edges must form an acyclic graph")
+            if key in visited:
+                return
+            visiting.add(key)
+            for dependency_key in requires[key]:
+                visit(dependency_key)
+            visiting.remove(key)
+            visited.add(key)
+        for key in keys:
+            visit(key)
+
+        canonical_request = json.dumps(
+            {"rationale": rationale, "tasks": normalized_tasks, "dependencies": normalized_dependencies},
+            separators=(",", ":"), sort_keys=True,
+        )
+        request_digest = hashlib.sha256(canonical_request.encode("utf-8")).hexdigest()
+
+        with self._lock, self._connect() as connection:
+            source = connection.execute(
+                """SELECT task.* FROM tasks AS task JOIN agents AS agent
+                   ON agent.id = task.assigned_agent_id
+                   WHERE agent.id = ? AND task.status = 'in_progress' AND task.job_id = agent.job_id""",
+                (agent_id,),
+            ).fetchone()
+            if source is None:
+                raise ValueError("only the agent assigned to an in-progress task may expand its graph")
+            existing = connection.execute(
+                "SELECT result_json FROM task_expansions WHERE source_task_id = ? AND request_digest = ?",
+                (source["id"], request_digest),
+            ).fetchone()
+            if existing is not None:
+                result = json.loads(existing["result_json"])
+                result["idempotentReplay"] = True
+                return result
+
+            ids = {specification["key"]: f"task-{uuid4().hex}" for specification in normalized_tasks}
+            for specification in normalized_tasks:
+                connection.execute(
+                    """INSERT INTO tasks(id, job_id, title, instructions, role, status, write_scope_json)
+                       VALUES (?, ?, ?, ?, ?, 'ready', ?)""",
+                    (
+                        ids[specification["key"]], source["job_id"], specification["title"],
+                        specification["instructions"], specification["role"], json.dumps(specification["write_scope"]),
+                    ),
+                )
+
+            result_edges: list[dict[str, Any]] = []
+            for edge in normalized_dependencies:
+                task_id = ids[edge["task_key"]]
+                dependency_id = ids[edge["dependency_key"]]
+                connection.execute(
+                    "INSERT INTO task_edges(task_id, dependency_task_id, relation) VALUES (?, ?, ?)",
+                    (task_id, dependency_id, edge["relation"]),
+                )
+                result_edges.append({**edge, "task_id": task_id, "dependency_task_id": dependency_id, "automatic": False})
+
+            # Nodes without an internal blocking prerequisite are the executable
+            # roots of this expansion. Gate each on the source task automatically.
+            for key in sorted(keys):
+                if requires[key]:
+                    continue
+                connection.execute(
+                    "INSERT INTO task_edges(task_id, dependency_task_id, relation) VALUES (?, ?, 'requires')",
+                    (ids[key], source["id"]),
+                )
+                result_edges.append({
+                    "task_key": key, "dependency_key": "$source", "task_id": ids[key],
+                    "dependency_task_id": source["id"], "relation": "requires", "automatic": True,
+                })
+
+            expansion_id = f"expansion-{uuid4().hex}"
+            result = {
+                "id": expansion_id,
+                "jobId": source["job_id"],
+                "sourceTaskId": source["id"],
+                "rationale": rationale,
+                "tasks": [{**specification, "id": ids[specification["key"]], "status": "ready"} for specification in normalized_tasks],
+                "edges": result_edges,
+                "idempotentReplay": False,
+            }
+            connection.execute(
+                """INSERT INTO task_expansions(id, job_id, source_task_id, source_agent_id, rationale, request_digest, result_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (expansion_id, source["job_id"], source["id"], agent_id, rationale, request_digest, json.dumps(result)),
+            )
+            self._refresh_job_status(connection, source["job_id"])
+            connection.commit()
+        return result
+
+    def has_task_expansion(self, task_id: str) -> bool:
+        with self._lock, self._connect() as connection:
+            return connection.execute(
+                "SELECT 1 FROM task_expansions WHERE source_task_id = ? LIMIT 1", (task_id,)
+            ).fetchone() is not None
 
     def transition_task(self, task_id: str, status: str, reason: str | None = None, agent_id: str | None = None) -> dict[str, Any]:
         allowed = {"ready", "in_progress", "completed", "blocked", "deferred", "failed"}
@@ -608,7 +861,8 @@ class DaemonStore:
                 ORDER BY last_activity_sequence DESC, agent.created_at DESC
             """)]
             tasks = [self._task_row(row) for row in connection.execute("SELECT * FROM tasks ORDER BY created_at DESC")]
+            task_edges = [dict(row) for row in connection.execute("SELECT * FROM task_edges ORDER BY rowid ASC")]
             hypotheses = [self._hypothesis_row(row) for row in connection.execute("SELECT * FROM hypotheses ORDER BY created_at DESC, revision DESC")]
             write_scope_requests = [dict(row) for row in connection.execute("SELECT * FROM write_scope_requests ORDER BY created_at DESC")]
             last_sequence = connection.execute("SELECT COALESCE(MAX(sequence), 0) FROM events").fetchone()[0]
-        return {"jobs": jobs, "agents": agents, "tasks": tasks, "hypotheses": hypotheses, "writeScopeRequests": write_scope_requests, "lastSequence": last_sequence}
+        return {"jobs": jobs, "agents": agents, "tasks": tasks, "taskEdges": task_edges, "hypotheses": hypotheses, "writeScopeRequests": write_scope_requests, "lastSequence": last_sequence}

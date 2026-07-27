@@ -138,6 +138,45 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "re_expand_task_graph",
+    label: "Expand RE Task Graph",
+    description: "Atomically persist a bounded follow-on DAG discovered from evidence. Keys are local to this call; each edge means task_key waits for dependency_key. Prerequisite-most nodes are automatically gated on the current task.",
+    promptSnippet: "Persist concrete evidence-led follow-on tasks and dependency edges",
+    promptGuidelines: [
+      "Use re_expand_task_graph before completing initial evidence triage; a prose task plan does not populate the daemon graph.",
+      "Use re_expand_task_graph only for concrete discovered work, with narrow write scopes and explicit requires edges.",
+    ],
+    parameters: Type.Object({
+      rationale: Type.String({ description: "Evidence-led reason these nodes are the smallest useful next work" }),
+      tasks: Type.Array(Type.Object({
+        key: Type.String({ description: "Short semantic key local to this expansion, e.g. disasm-4343b0" }),
+        title: Type.String(),
+        instructions: Type.String({ description: "Concrete address/pass/evidence instructions and completion condition" }),
+        role: StringEnum(["investigator", "transcriber", "validator", "integrator", "reviewer"] as const),
+        write_scope: Type.Optional(Type.Array(Type.String({ description: "Project-relative source file" }))),
+      }), { minItems: 1, maxItems: 24 }),
+      dependencies: Type.Optional(Type.Array(Type.Object({
+        task_key: Type.String({ description: "Waiting task key" }),
+        dependency_key: Type.String({ description: "Prerequisite task key" }),
+        relation: Type.Optional(StringEnum(["requires", "evidence", "invalidates"] as const)),
+      }), { maxItems: 64 })),
+    }),
+    async execute(_id, params) {
+      const expansion = await daemonRequest(`/internal/agents/${agentId}/task/expand`, {
+        method: "POST", body: JSON.stringify(params),
+      });
+      return {
+        content: [{ type: "text", text: `Persisted ${expansion.tasks.length} task(s) and ${expansion.edges.length} edge(s).` }],
+        details: {
+          id: expansion.id, sourceTaskId: expansion.sourceTaskId, idempotentReplay: expansion.idempotentReplay,
+          tasks: expansion.tasks.map((task: any) => ({ id: task.id, key: task.key, title: task.title, role: task.role })),
+          edges: expansion.edges.map((edge: any) => ({ task_id: edge.task_id, dependency_task_id: edge.dependency_task_id, relation: edge.relation })),
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "re_transition_task",
     label: "Transition RE Task",
     description: "Report a scheduler-assigned task as completed, blocked, deferred, or failed.",
