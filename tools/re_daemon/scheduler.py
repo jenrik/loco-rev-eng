@@ -23,16 +23,27 @@ class AutonomousScheduler:
     async def schedule(self, job_id: str, limit: int = 1) -> list[dict[str, Any]]:
         launched: list[dict[str, Any]] = []
         for task in self.store.ready_tasks(job_id, limit):
+            # A clean daemon shutdown preserves the prior session directory so
+            # Pi can restore it with --continue and receive the automatic
+            # continuation prompt.
+            resume = False
+            session_dir = str(self.state_path.parent / "sessions" / f"session-{uuid4().hex}")
+            if (task.get("transition_reason") or "").startswith("daemon shutdown checkpoint:") and task.get("assigned_agent_id"):
+                try:
+                    previous = self.store.get_agent(task["assigned_agent_id"])
+                    session_dir = previous["session_dir"]
+                    resume = True
+                except KeyError:
+                    pass
             # Claim before launch so two scheduling calls cannot start the same task.
             self.store.transition_task(task["id"], "in_progress", "claimed by daemon scheduler")
-            session_dir = str(self.state_path.parent / "sessions" / f"session-{uuid4().hex}")
             agent = self.store.create_agent(
                 task["job_id"], task["role"], task["instructions"], session_dir, task["write_scope"]
             )
             self.store.transition_task(task["id"], "in_progress", "launched", agent["id"])
             await self.broker.publish(agent["id"], "task_claimed", {"task": self.store.get_task(task["id"])})
             try:
-                await self.manager.launch(agent["id"])
+                await self.manager.launch(agent["id"], resume=resume)
             except Exception as error:
                 self.store.transition_task(task["id"], "ready", f"launch failed: {error}")
                 await self.broker.publish(agent["id"], "task_launch_failed", {"taskId": task["id"], "error": str(error)})

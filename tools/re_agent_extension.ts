@@ -80,7 +80,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "re_ghidra_query",
     label: "Query Ghidra",
-    description: "Run an allowlisted read-only Ghidra operation through the daemon and record immutable evidence.",
+    description: "Run an allowlisted read-only Ghidra operation through the daemon and record immutable evidence. The daemon opens its raw-binary database lazily on this first call; use this even when re_get_task reports opened=false.",
     parameters: Type.Object({
       operation: StringEnum([
         "decompile_function", "disassemble_function", "list_functions", "get_xrefs_to", "get_xrefs_from",

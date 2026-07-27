@@ -24,8 +24,9 @@ def role_instructions(role: str) -> str:
         "You are an autonomous Lego Loco reverse-engineering worker. The raw binary and "
         "Ghidra evidence are authoritative. Use re_get_task before acting. Record material "
         "observations with re_record_observation, distinguish observed from tentative claims, "
-        "and use re_defer_task for unresolved work. Respect the approved write scope; never "
-        "claim assembly validation without direct disassembly evidence."
+        "and use re_defer_task for unresolved work. Ghidra opens lazily on the first re_ghidra_query; "
+        "a context status of opened=false is normal and is not a reason to skip the query. Respect the approved "
+        "write scope; never claim assembly validation without direct disassembly evidence."
     )
     role_specific = {
         "investigator": "Discover narrowly scoped evidence and next investigations; do not make broad code changes.",
@@ -48,6 +49,7 @@ class PiRpcAgent:
         daemon_token: str,
         pi_binary: str = "pi",
         rpc_stream_limit: int = RPC_STREAM_LIMIT_BYTES,
+        resume: bool = False,
     ):
         self.store = store
         self.broker = broker
@@ -57,6 +59,8 @@ class PiRpcAgent:
         self.daemon_token = daemon_token
         self.pi_binary = pi_binary
         self.rpc_stream_limit = rpc_stream_limit
+        self.resume = resume
+        self._turns_completed = 0
         self.process: asyncio.subprocess.Process | None = None
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
@@ -81,6 +85,7 @@ class PiRpcAgent:
         })
         command = [
             self.pi_binary, "--mode", "rpc", "--no-extensions", "--session-dir", str(session_dir),
+            *( ["--continue"] if self.resume else [] ),
             "--name", self.agent["id"], "--extension", str(extension),
             "--append-system-prompt", role_instructions(self.agent["role"]),
         ]
@@ -100,7 +105,7 @@ class PiRpcAgent:
         self._stdout_task = asyncio.create_task(self._read_stdout())
         self._stderr_task = asyncio.create_task(self._read_stderr())
         self._wait_task = asyncio.create_task(self._wait_for_exit())
-        await self.send("prompt", {"id": "initial", "message": self.agent["task"]})
+        await self.send("prompt", {"id": "initial", "message": "continue" if self.resume else self.agent["task"]})
 
     async def send(self, command_type: str, payload: dict[str, Any]) -> None:
         if self.process is None or self.process.stdin is None or self.process.returncode is not None:
@@ -121,6 +126,18 @@ class PiRpcAgent:
         self._aborted = True
         if self.process is not None and self.process.returncode is None:
             await self.send("abort", {})
+
+    async def pause_after_turn(self, timeout_seconds: float = 60.0) -> bool:
+        """Let the current agent turn finish, then abort at its next safe boundary."""
+        target_turn = self._turns_completed + 1
+        deadline = time.monotonic() + timeout_seconds
+        while self.process is not None and self.process.returncode is None and time.monotonic() < deadline:
+            if self._turns_completed >= target_turn:
+                await self.abort()
+                return True
+            await asyncio.sleep(0.1)
+        await self.abort()
+        return False
 
     async def _read_stdout(self) -> None:
         assert self.process is not None and self.process.stdout is not None
@@ -153,6 +170,8 @@ class PiRpcAgent:
             if normalized is not None:
                 kind, payload = normalized
                 await self.broker.publish(self.agent["id"], kind, payload)
+            if event.get("type") == "turn_end":
+                self._turns_completed += 1
             if event.get("type") == "agent_settled":
                 self.store.set_agent_status(self.agent["id"], "settled")
 
@@ -194,11 +213,11 @@ class AgentManager:
         self._reapers: dict[str, asyncio.Task[None]] = {}
         self._watchdogs: dict[str, asyncio.Task[None]] = {}
 
-    async def launch(self, agent_id: str) -> dict[str, Any]:
+    async def launch(self, agent_id: str, *, resume: bool = False) -> dict[str, Any]:
         if agent_id in self._agents:
             raise RuntimeError("agent already has a live process")
         agent = self.store.get_agent(agent_id)
-        process = PiRpcAgent(self.store, self.broker, agent, self.project_root, self.daemon_url, self.daemon_token, self.pi_binary)
+        process = PiRpcAgent(self.store, self.broker, agent, self.project_root, self.daemon_url, self.daemon_token, self.pi_binary, resume=resume)
         self._agents[agent_id] = process
         try:
             await process.start()
@@ -311,13 +330,26 @@ class AgentManager:
                 self._agents.pop(agent_id, None)
             self._reapers.pop(agent_id, None)
     async def close(self) -> None:
-        """Abort daemon-owned Pi children during application shutdown."""
+        """Checkpoint active work, then stop daemon-owned Pi children on shutdown."""
         watchdogs = list(self._watchdogs.values())
         for watchdog in watchdogs:
             watchdog.cancel()
         await asyncio.gather(*watchdogs, return_exceptions=True)
         self._watchdogs.clear()
         processes = list(self._agents.values())
+        checkpoints = []
+        for process in processes:
+            task = self.store.task_for_agent(process.agent["id"])
+            if task is not None and task["status"] == "in_progress":
+                checkpoints.append((process, task))
+                await self.broker.publish(process.agent["id"], "daemon_pause_requested", {"taskId": task["id"]})
+        await asyncio.gather(*(process.pause_after_turn() for process, _task in checkpoints), return_exceptions=True)
+        for process, task in checkpoints:
+            current = self.store.get_task(task["id"])
+            if current["status"] == "in_progress":
+                paused = self.store.transition_task(task["id"], "ready", f"daemon shutdown checkpoint: resume session from agent {process.agent['id']}")
+                self.store.set_agent_status(process.agent["id"], "aborted")
+                await self.broker.publish(process.agent["id"], "task_checkpointed", {"task": paused})
         await asyncio.gather(*(process.abort() for process in processes), return_exceptions=True)
         waiters = [process._wait_task for process in processes if process._wait_task is not None]
         try:

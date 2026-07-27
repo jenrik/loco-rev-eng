@@ -304,7 +304,8 @@ def create_app(
             job = store.get_job(agent["job_id"])
         except KeyError:
             raise HTTPException(status_code=404, detail="unknown agent") from None
-        return {"agent": agent, "job": job, "task": store.task_for_agent(agent_id), "ghidra": ghidra.status()}
+        ghidra_context = {**ghidra.status(), "queryInstruction": "The database opens lazily when re_ghidra_query is called. opened=false means idle, not unavailable."}
+        return {"agent": agent, "job": job, "task": store.task_for_agent(agent_id), "ghidra": ghidra_context}
 
     @app.post("/internal/agents/{agent_id}/events")
     async def record_agent_event(agent_id: str, request: RecordEvent, x_re_daemon_token: str | None = Header(default=None)) -> dict[str, Any]:
