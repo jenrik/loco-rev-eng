@@ -28,9 +28,11 @@ Browser dashboard
 
 ### Python daemon
 
-The daemon owns all durable state and all process control. It starts and stops Pi
-processes, sends RPC `prompt`, `steer`, `follow_up`, and `abort` commands, and
-normalizes the JSONL event stream from each process. A terminal task transition
+The daemon owns all durable state and all process control. An exclusive lock on
+the SQLite state path prevents multiple daemon processes from controlling the
+same work queue. It starts and stops Pi processes, sends RPC `prompt`, `steer`,
+`follow_up`, and `abort` commands, and normalizes the JSONL event stream from
+each process. A terminal task transition
 requests abort, then reaps the idle RPC child after a brief response-flush grace
 period. A watchdog fails an attempt after bounded tool inactivity or a definitely
 dead child PID; startup performs the same dead-PID recovery for stale tasks.

@@ -10,6 +10,7 @@ import secrets
 import uvicorn
 
 from .app import create_app
+from .instance_lock import acquire_daemon_lock
 from .settings import SettingsError, load_ghidra_config
 
 
@@ -30,13 +31,17 @@ def main() -> None:
         parser.error(str(error))
     token = secrets.token_urlsafe(32)
     daemon_url = f"http://{args.host}:{args.port}"
-    app = create_app(
-        args.state, project_root=Path.cwd(), daemon_url=daemon_url, daemon_token=token,
-        pi_binary=args.pi_binary, ghidra_config=ghidra,
-    )
-    # Fail startup clearly if the declared WebSocket runtime dependency is absent;
-    # do not silently degrade the live dashboard to HTTP-only mode.
-    uvicorn.run(app, host=args.host, port=args.port, ws="websockets")
+    try:
+        with acquire_daemon_lock(args.state):
+            app = create_app(
+                args.state, project_root=Path.cwd(), daemon_url=daemon_url, daemon_token=token,
+                pi_binary=args.pi_binary, ghidra_config=ghidra,
+            )
+            # Fail startup clearly if the declared WebSocket runtime dependency is absent;
+            # do not silently degrade the live dashboard to HTTP-only mode.
+            uvicorn.run(app, host=args.host, port=args.port, ws="websockets")
+    except RuntimeError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

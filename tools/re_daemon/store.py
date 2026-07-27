@@ -162,7 +162,7 @@ class DaemonStore:
         job_id = f"job-{uuid4().hex}"
         with self._lock, self._connect() as connection:
             connection.execute(
-                "INSERT INTO jobs(id, title, goal, status) VALUES (?, ?, ?, 'queued')",
+                "INSERT INTO jobs(id, title, goal, status) VALUES (?, ?, ?, 'draft')",
                 (job_id, title.strip(), goal.strip()),
             )
             connection.commit()
@@ -174,6 +174,36 @@ class DaemonStore:
         if row is None:
             raise KeyError(job_id)
         return dict(row)
+
+    def _refresh_job_status(self, connection: sqlite3.Connection, job_id: str) -> str:
+        statuses = [row["status"] for row in connection.execute("SELECT status FROM tasks WHERE job_id = ?", (job_id,))]
+        if not statuses:
+            status = "draft"
+        elif "in_progress" in statuses:
+            status = "running"
+        else:
+            ready = connection.execute(
+                """SELECT 1 FROM tasks AS task WHERE task.job_id = ? AND task.status = 'ready'
+                   AND NOT EXISTS (SELECT 1 FROM task_edges AS edge JOIN tasks AS dependency
+                                   ON dependency.id = edge.dependency_task_id
+                                   WHERE edge.task_id = task.id AND edge.relation = 'requires'
+                                   AND dependency.status != 'completed') LIMIT 1""",
+                (job_id,),
+            ).fetchone()
+            if ready is not None:
+                status = "queued"
+            elif all(task_status == "completed" for task_status in statuses):
+                status = "completed"
+            elif "failed" in statuses:
+                status = "failed"
+            else:
+                status = "blocked"
+        connection.execute("UPDATE jobs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != ?", (status, job_id, status))
+        return status
+
+    def _refresh_all_job_statuses(self, connection: sqlite3.Connection) -> None:
+        for row in connection.execute("SELECT id FROM jobs").fetchall():
+            self._refresh_job_status(connection, row["id"])
 
     def create_agent(self, job_id: str, role: str, task: str, session_dir: str, write_scope: list[str] | None = None) -> dict[str, Any]:
         if not role.strip() or not task.strip() or not session_dir.strip():
@@ -188,7 +218,7 @@ class DaemonStore:
                 "INSERT INTO agents(id, job_id, role, task, status, session_dir, write_scope_json) VALUES (?, ?, ?, ?, 'queued', ?, ?)",
                 (agent_id, job_id, role.strip(), task.strip(), session_dir, json.dumps(write_scope)),
             )
-            connection.execute("UPDATE jobs SET status = 'running', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (job_id,))
+            self._refresh_job_status(connection, job_id)
             connection.commit()
         return self.get_agent(agent_id)
 
@@ -280,6 +310,7 @@ class DaemonStore:
                 "INSERT INTO tasks(id, job_id, title, instructions, role, status, write_scope_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (task_id, job_id, title.strip(), instructions.strip(), role.strip(), status, json.dumps(write_scope)),
             )
+            self._refresh_job_status(connection, job_id)
             connection.commit()
         return self.get_task(task_id)
 
@@ -351,6 +382,9 @@ class DaemonStore:
         if status in {"blocked", "deferred", "failed"} and not (reason or "").strip():
             raise ValueError(f"{status} tasks require a reason")
         with self._lock, self._connect() as connection:
+            task_row = connection.execute("SELECT job_id FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if task_row is None:
+                raise KeyError(task_id)
             if agent_id is None:
                 result = connection.execute(
                     "UPDATE tasks SET status = ?, transition_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -363,6 +397,7 @@ class DaemonStore:
                 )
             if result.rowcount != 1:
                 raise KeyError(task_id)
+            self._refresh_job_status(connection, task_row["job_id"])
             connection.commit()
         return self.get_task(task_id)
 
@@ -520,7 +555,7 @@ class DaemonStore:
         if not reason.strip():
             raise ValueError("requeue reason is required")
         with self._lock, self._connect() as connection:
-            row = connection.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            row = connection.execute("SELECT status, job_id FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
                 raise KeyError(task_id)
             if row["status"] not in {"blocked", "deferred", "failed"}:
@@ -529,6 +564,7 @@ class DaemonStore:
                 "UPDATE tasks SET status = 'ready', assigned_agent_id = NULL, transition_reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (reason.strip(), task_id),
             )
+            self._refresh_job_status(connection, row["job_id"])
             connection.commit()
         return self.get_task(task_id)
 
@@ -561,6 +597,8 @@ class DaemonStore:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
+            self._refresh_all_job_statuses(connection)
+            connection.commit()
             jobs = [dict(row) for row in connection.execute("SELECT * FROM jobs ORDER BY created_at DESC")]
             agents = [self._agent_row(row) for row in connection.execute("""
                 SELECT agent.*, COALESCE(MAX(event.sequence), 0) AS last_activity_sequence

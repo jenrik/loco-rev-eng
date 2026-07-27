@@ -174,7 +174,7 @@ main()
 
 - [x] **Daemon vertical slice** — active design, SQLite WAL event/task store, normalized Pi RPC event recorder, local FastAPI/WebSocket dashboard, capability-protected internal API, Pi RPC lifecycle manager, and custom Pi task/write-scope extension
 - [x] **Read-only Ghidra adapter** — daemon-owned MCP stdio client opens raw `loco.exe`, waits for analysis, serializes an allowlisted query set with verified direct proxy names, and stores content-addressed evidence revisions
-- [x] **Evidence-led task scheduler** — SQLite tasks/requirement edges/write-scope requests, dependency-gated launch of role agents, and durable agent task transitions
+- [x] **Evidence-led task scheduler** — SQLite tasks/requirement edges/write-scope requests, dependency-gated launch of role agents, durable agent task transitions, and task-derived job states (`draft`/`queued`/`running`/terminal)
 - [x] **Ghidra lifecycle and cache policy** — non-secret project-local command discovery, job-scoped evidence cache reuse, binary identity health, one-time worker restart, and database close on shutdown
 - [x] **Hypothesis and approval workflow** — append-only evidence-linked hypothesis revisions, operator scope approval/rejection, and dynamic Pi write-scope enforcement
 - [x] **Browser operator controls** — local dashboard forms for jobs/tasks/edges/scheduling/agent controls, task requeue, write-scope decisions, bounded replay, activity-sorted agent selector, formatted/coalesced streamed-message timeline, and declared Uvicorn WebSocket runtime
@@ -326,6 +326,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (job-status-singleton) | Reconciled dashboard job state from runnable/in-progress/terminal tasks and added an exclusive state-file lock after stale queued/running jobs and three competing daemon processes were observed. |
 | 2026-07-27 (ghidra-proxy-names) | Found the adapter sent Pi-decorated `ghidra_*` names to the direct re-mcp-ghidra proxy, which exposes unprefixed names; corrected open/wait/close/query mappings and verified a live decompile. |
 | 2026-07-27 (rpc-framing) | Found large escaped `read` result JSONL records exceeded asyncio’s 64KiB reader limit, silently halting stdout consumption and stalling sibling parallel reads; raised the bounded limit to 2MiB with regression coverage. |
 | 2026-07-27 (websocket-runtime) | Fixed live dashboard upgrades by declaring Uvicorn’s WebSocket runtime in Nix and enforcing it at startup; verified HTTP 101 handshake. |
