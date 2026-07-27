@@ -1,6 +1,6 @@
 # Evidence-Guided Decompilation Workflow — Design Intent
 
-**Status:** Proposed architecture; the durable CLI core is the first implementation slice.
+**Status:** Superseded as the runtime architecture by `autonomous-reverse-engineering-daemon.md`. Its evidence/task model remains useful migration input.
 
 ## 1. Purpose
 

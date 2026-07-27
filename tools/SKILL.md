@@ -19,7 +19,10 @@ Fabric programs for automated decompilation of `loco.exe` classes.
 | `tools/decompile-class.ts` | One class: persistent PRIMARY plus one-shot reviewer gates |
 | `tools/workflow-core.ts` | Pi-facing TypeScript bridge to durable workflow state |
 | `tools/workflow_core.py` | Atomic Python JSON CLI for evidence, task, dependency, deferred-work, and write-audit state |
-| `docs/evidence-guided-decompilation-workflow.md` | Long-lived design intent and staged migration plan |
+| `docs/evidence-guided-decompilation-workflow.md` | Superseded evidence/task-model design retained as migration input |
+| `tools/re_daemon/` | Active Python daemon: durable state, Pi RPC lifecycle, event normalization, API, and dashboard |
+| `tools/re_agent_extension.ts` | Custom Pi extension for daemon-backed RE task tools and write-scope guard |
+| `docs/autonomous-reverse-engineering-daemon.md` | Active runtime design and phased delivery plan |
 
 `tools/decompile-parallel.ts` was removed. Its fixed concurrency pool was
 superseded by the dependency-aware scheduler in `supervisor.ts`.

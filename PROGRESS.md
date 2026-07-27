@@ -170,7 +170,18 @@ main()
 - [x] **Workflow regression suite** — covers PARTIAL, rejected/legitimate blocks, review failure, directed discovery, and stale scheduling decisions
 - [x] **Evidence-guided workflow foundation** — documented design intent; added lock-protected Python JSON core, Pi TypeScript bridge, durable attempt outcome ledger, source write-set audit, and CLI/integration regression tests
 
+### Autonomous reverse-engineering daemon pivot (2026-07-27)
+
+- [x] **Daemon vertical slice** — active design, SQLite WAL event/task store, normalized Pi RPC event recorder, local FastAPI/WebSocket dashboard, capability-protected internal API, Pi RPC lifecycle manager, and custom Pi task/write-scope extension
+
 ## Remaining work
+
+### Autonomous reverse-engineering daemon
+
+- [ ] **Ghidra adapter** — route read-only decompile/disassemble/xref/structure operations through the daemon and persist revisioned evidence
+- [ ] **Evidence/task tables** — migrate partial graph, hypotheses, deferrals, and write-scope approval into SQLite-backed daemon state
+- [ ] **Autonomous scheduler** — launch role agents from ready tasks and consume structured outcomes
+- [ ] **Dashboard controls** — expose live steer/follow-up/abort/retry and historical transcript links
 
 ### Priority 1: #ifdef pivot — first wave
 
@@ -309,6 +320,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 | Date | Summary |
 |------|---------|
+| 2026-07-27 (autonomous-re-daemon) | Pivoted to active daemon design; implemented SQLite event store, Pi RPC manager, custom Pi extension, local FastAPI/WebSocket dashboard, and 6 daemon tests. |
 | 2026-07-27 (evidence-workflow-core) | Added the evidence-guided workflow design, atomic Python ledger/cache CLI, Pi bridge, supervisor attempt persistence and write-audit integration, plus 13 workflow/core tests. |
 | 2026-07-26 (gamesetuppanel-review2) | **GameSetupPanel review fixes (6 issues)**: (BLOCKER 1) Removed duplicate class definition from vtable_stubs.cpp (ODR violation). (BLOCKER 2) Created stubs/gamesetuppanel_network_stubs.cpp with 4 extended vtable method stubs (HandleMapClick 0x40ABA0, SelectLayoutEntry 0x40AAF0, SendScenarioSelect 0x40AC50, ConnectToNetworkGame 0x40AA20) using assert(!"stub") + TODO annotations, tracked in PROGRESS.md. (BLOCKER 3) void* currentList → LayoutListNode* currentList; drawLayoutList(void*) → drawLayoutList(LayoutListNode*). (BLOCKER 4) Renamed RESMGR_ReleaseSoundResource → ReleaseSoundResource (Ghidra prefix removal) in ResourceManager.h and call site. (BLOCKER 5) Added NOTE comment for int32_t-to-ResourceEntry* cast. (WARNING) ResourceManager.h GetById return type documented. Compilation: PASS. |
 | 2026-07-26 (workflow-scheduler) | Replaced upfront work queues with incremental supervisor decisions; added persistent PARTIAL-aware primaries, strict block validation, settled completion buffering, directed discovery objectives, and 7 regression tests. |

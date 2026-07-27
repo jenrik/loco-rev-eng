@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lego Loco Autonomous RE</title>
+  <style>
+    body { font-family: ui-monospace, monospace; margin: 2rem; background: #10151c; color: #d9e1e8; }
+    h1 { color: #8ec5ff; } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(22rem,1fr)); gap:1rem; }
+    section { border:1px solid #3b4654; border-radius:.5rem; padding:1rem; background:#17212b; }
+    pre { max-height:28rem; overflow:auto; white-space:pre-wrap; } .running { color:#83e58c; } .queued { color:#ffd479; }
+  </style>
+</head>
+<body>
+  <h1>Autonomous Reverse Engineering</h1>
+  <p id="connection">Connecting…</p>
+  <div class="grid"><section><h2>Jobs</h2><pre id="jobs"></pre></section><section><h2>Agents</h2><pre id="agents"></pre></section></div>
+  <section><h2>Live event tail</h2><pre id="tail"></pre></section>
+  <script>
+    const tail = document.querySelector('#tail'); let sequence = 0;
+    const render = async () => { const state = await fetch('/api/status').then(r => r.json());
+      document.querySelector('#jobs').textContent = JSON.stringify(state.jobs, null, 2);
+      document.querySelector('#agents').textContent = JSON.stringify(state.agents, null, 2); sequence = state.lastSequence; };
+    const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+    socket.onopen = () => document.querySelector('#connection').textContent = 'Live WebSocket connected';
+    socket.onmessage = event => { const item = JSON.parse(event.data); if (item.sequence <= sequence) return; sequence = item.sequence;
+      tail.textContent += JSON.stringify(item) + '\n'; tail.scrollTop = tail.scrollHeight; render(); };
+    socket.onclose = () => document.querySelector('#connection').textContent = 'Disconnected; refresh to reconnect';
+    render();
+  </script>
+</body>
+</html>
