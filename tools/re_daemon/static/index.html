@@ -9,7 +9,7 @@
     section { border:1px solid #3b4654; border-radius:.5rem; padding:1rem; background:#17212b; } pre { max-height:20rem; overflow:auto; white-space:pre-wrap; }
     form { display:grid; gap:.4rem; margin-bottom:1rem; } input, textarea, select, button { font:inherit; padding:.35rem; } textarea { min-height:4rem; }
     button { cursor:pointer; background:#254c70; color:#fff; border:1px solid #6088ac; border-radius:.25rem; } button.danger { background:#74343a; } button.warn { background:#725c28; }
-    .list { max-height:20rem; overflow:auto; } .item { border-top:1px solid #344454; padding:.5rem 0; } .muted { color:#9cabba; } #notice { min-height:1.2rem; } .ok { color:#83e58c; } .error { color:#ff9696; }
+    .list { max-height:20rem; overflow:auto; } .item { border-top:1px solid #344454; padding:.5rem 0; } .muted { color:#9cabba; } .empty { color:#9cabba; font-style:italic; } #notice { min-height:1.2rem; } .ok { color:#83e58c; } .error { color:#ff9696; }
   </style>
 </head>
 <body>
@@ -32,7 +32,7 @@
     async function api(path, options={}) { const response = await fetch(path, {headers:{'content-type':'application/json'}, ...options}); if (!response.ok) throw new Error((await response.text()) || response.statusText); return response.json(); }
     const element = (tag, text='', className='') => { const node=document.createElement(tag); node.textContent=text; node.className=className; return node; };
     function action(label, handler, className='') { const button=element('button',label,className); button.type='button'; button.onclick=handler; return button; }
-    function renderItems(selector, records, render) { const root=$(selector); root.replaceChildren(...records.map(render)); }
+    function renderItems(selector, records, render) { const root=$(selector); root.replaceChildren(...(records.length ? records.map(render) : [element('div','empty','empty')])); }
     function eventText(event) { const payload=event.payload||{}; if(event.kind==='assistant_delta') return `${event.sequence} ${event.agent_id||'daemon'} assistant: ${payload.delta||''}`; const text=JSON.stringify(event); return text.length>2000?`${text.slice(0,2000)}…`:text; }
     function appendEvent(event) { if(event.sequence<=sequence) return; sequence=event.sequence; tailLines.push(eventText(event)); if(tailLines.length>200) tailLines.splice(0,tailLines.length-200); tail.textContent=tailLines.join('\n'); tail.scrollTop=tail.scrollHeight; }
     async function backfillEvents(state) { const after=Math.max(0,state.lastSequence-200); const histories=await Promise.all(state.agents.map(agent=>api(`/api/agents/${agent.id}/events?after=${after}&limit=200`).catch(()=>({events:[]})))); const events=histories.flatMap(history=>history.events).sort((left,right)=>left.sequence-right.sequence).slice(-200); events.forEach(appendEvent); }

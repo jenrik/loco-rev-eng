@@ -19,6 +19,8 @@ class DaemonWebTests(unittest.TestCase):
                 self.assertEqual(dashboard.status_code, 200)
                 self.assertIn("backfillEvents", dashboard.text)
                 self.assertIn("state.lastSequence-200", dashboard.text)
+                self.assertIn("font-style:italic", dashboard.text)
+                self.assertIn("'empty','empty'", dashboard.text)
                 job = client.post("/api/jobs", json={"title": "Validate Draw", "goal": "Check 0x4343B0"}).json()
                 agent = client.post(
                     f"/api/jobs/{job['id']}/agents",
