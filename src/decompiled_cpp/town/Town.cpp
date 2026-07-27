@@ -131,11 +131,11 @@ extern "C" {
     void   SetTimer(HWND hWnd, UINT_PTR id, UINT timeout, void* proc);
     void   EnableWindow(HWND hWnd, BOOL enable);
     void   PostMessageA(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    void   DefWindowProcA(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    LRESULT DefWindowProcA(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
     void   PostQuitMessage(int exit_code);
     void   Sleep(DWORD ms);
     int    GetLastError();
-    void   CreateDirectoryA(const char* path, void* security);
+    BOOL   CreateDirectoryA(const char* path, void* security);
     HANDLE CreateFileA(const char* name, DWORD access, DWORD share,
                        void* security, DWORD creation, DWORD flags, HANDLE tmpl);
     BOOL   ReadFile(HANDLE hFile, void* buf, DWORD n, DWORD* read, void* ovlp);
@@ -164,7 +164,7 @@ extern void* g_dplay;                   /* 0x4FD1F4 — DirectPlay interface */
 extern void* g_netman;                  /* 0x4FD33C — Network manager */
 extern void* g_audio_mgr;               /* 0x4FD14C — Audio manager */
 extern char   g_ddraw_active;           /* 0x485268 — 1 = DirectDraw active */
-extern char   g_demo_mode;              /* 0x4852BC — 1 = demo mode */
+extern int32_t g_demo_mode;              /* 0x4A9918 — 1 = demo mode */
 extern char   g_game_mode;              /* 0x4852AC — current game mode */
 extern int    g_cursor_world_x;         /* 0x4FD348 — cursor world X */
 extern int    g_cursor_world_y;         /* 0x4FD34C — cursor world Y */
@@ -201,8 +201,25 @@ extern void (*g_SetRect)(RECT*, int, int, int, int);       /* 0x477384 */
 extern BOOL (*g_IntersectRect)(RECT*, const RECT*, const RECT*); /* 0x47726C */
 extern BOOL (*g_IsRectEmpty)(const RECT*);                  /* 0x477268 */
 
+/* Missing Win32 API constants (not in compat.h yet) */
+#ifndef FORMAT_MESSAGE_FROM_SYSTEM
+#define FORMAT_MESSAGE_FROM_SYSTEM     0x00001000
+#endif
+#ifndef LANG_NEUTRAL
+#define LANG_NEUTRAL                   0x00
+#endif
+#ifndef SUBLANG_DEFAULT
+#define SUBLANG_DEFAULT                0x01
+#endif
+#ifndef MAKELANGID
+#define MAKELANGID(p, s)               ((((WORD)(s)) << 10) | (WORD)(p))
+#endif
+#ifndef MB_ICONERROR
+#define MB_ICONERROR                    MB_ICONSTOP
+#endif
+
 /* Hook procedure for OPENFILENAME custom dialog */
-extern LRESULT __stdcall SaveAsDlgHook(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
+extern LRESULT SaveAsDlgHook(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam);
 /* 0x419FD0 — custom hook for GetSaveFileNameA */
 
 /* ================================================================== */
@@ -474,10 +491,10 @@ char Town::handle_tile_click()
     /* Load animation resources 0x3805 and 0x3804 via vtable[6]        */
     char loaded;
     loaded = ((char (*)(void*, int, int, int))(*(void***)this)[6])(
-                 0x3805, -1, 0);
+                 this, 0x3805, -1, 0);
     if (loaded) {
         loaded = ((char (*)(void*, int, int, int))(*(void***)this->child_panel)[6])(
-                     0x3804, -1, 0);
+                     this->child_panel, 0x3804, -1, 0);
         if (loaded) {
             /* Create overlay UIPANEL surface for placement feedback   */
             void* surface_obj = operator_new(0x20);
@@ -663,7 +680,7 @@ void Town::deselect_building()
         0);
 
     uint32_t panel_flags = 0;
-    if (*(char*)(*(int*)(*(intptr_t)this->panel_graphics + 0x20) + 0x16 +
+    if (*(char*)(*(int*)((intptr_t)this->panel_graphics + 0x20) + 0x16 +
                  this->selected_building_type * 0x18) == 1) {
         panel_flags = 0x20;
     }
@@ -1365,7 +1382,7 @@ int Town::postcard_command_handler(void* control, uint32_t wParam, uint32_t lPar
     }
 
     char handled = ((char (*)(void*, uint32_t, uint32_t))(
-        *(void***)control)[2])(wParam, lParam);
+        *(void***)control)[2])(control, wParam, lParam);
     if (handled == 0) {
         return 0;
     }
@@ -2038,7 +2055,8 @@ byte Town::save_postcard_as()
         *(int*)((intptr_t)this->overlay_panel + 0x10) + 0x14); /* overlay bottom + offset */
 
     /* Center viewport via vtable[3]                                    */
-    ((void (*)(void*, int, int))(*(void***)this)[3])(
+    ((void (*)(void*, int, int, int, int))(*(void***)this)[3])(
+        this,
         *(int*)((intptr_t)this + 0x60),   /* child_panel[0] area */
         *(int*)((intptr_t)this + 0x64),   /* child_panel[4] area */
         0, 1);
@@ -2288,7 +2306,7 @@ void Train_HandleTrackBuild(void* msg)
 /* Called by: EditWindow_render, Cursor_InitBackground,                */
 /*            CGWND_TrackPiece_Render, UIPANEL_DrawButton              */
 /* ================================================================== */
-void Town::blit_element(
+void Town::BlitElement(
     int dest_x, int dest_y, int dest_w, int dest_h,
     void* element, int clip_left, int clip_top,
     int clip_right, int clip_bottom, uint32_t flags)
