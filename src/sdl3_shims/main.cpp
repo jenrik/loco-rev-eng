@@ -66,9 +66,9 @@ int main(int argc, char* argv[])
         std::fprintf(stderr, "WARNING: GameLoop_Setup failed with %d, continuing anyway\n", setup_result);
     }
 
-    TRACE("Transitioning to mode 1 (main menu)...");
-    CGWND_SetMode(1);
-    TRACE("Mode 1 set");
+    TRACE("Transitioning to mode 2 (main-menu UI)...");
+    CGWND_SetMode(2);
+    TRACE("Mode 2 set");
 
     TRACE("Entering CGWND_PumpMessages (main loop)...");
     CGWND_PumpMessages(cgwnd, 0);

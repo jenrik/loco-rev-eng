@@ -115,6 +115,12 @@ static const char S_SETTING2[] = "Setting2";
 static const char S_SETTING3[] = "Setting3";
 static const char S_GAMELOOP[] = "GameLoop";
 
+static void trace_setup_stage(const char* stage)
+{
+    std::fprintf(stderr, "[TRACE] GameLoop_Setup: %s\n", stage);
+    std::fflush(stderr);
+}
+
 
 /* ================================================================== */
 /* GameLoop_Setup - One-time game initialization                        */
@@ -134,6 +140,7 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     void* mem;
 
     /* Step 1: Apply display mode */
+    trace_setup_stage("step 1: mode reset");
     CGWND_SetMode(0);
 
     /* Step 2: Seed RNG */
@@ -152,52 +159,64 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     g_train          = nullptr;
 
     /* Allocate ScriptEngine (0x1C bytes) */
+    trace_setup_stage("step 3a: ScriptEngine");
     mem = operator_new(0x1C);
     g_train_resources = mem ? ScriptEngine_constructor(mem) : nullptr;
 
     /* Allocate GameConfig (0xB0 bytes) */
+    trace_setup_stage("step 3b: GameConfig");
     mem = operator_new(0xB0);
     g_game_config = mem ? GameConfig_constructor(mem) : nullptr;
 
     /* Allocate NETMAN (0x804 bytes) */
+    trace_setup_stage("step 3c: Netman");
     mem = operator_new(0x804);
     g_netman = mem ? NETMAN_constructor(mem) : nullptr;
 
     /* Allocate DirectPlay (0xBE4 bytes) */
+    trace_setup_stage("step 3d: DirectPlay");
     mem = operator_new(0xBE4);
     g_dplay = mem ? NetworkPlayerList_ctor(mem) : nullptr;
 
     /* Allocate PlayerRecord (0x124 bytes) */
+    trace_setup_stage("step 3e: PlayerRecord");
     mem = operator_new(0x124);
     g_player_config = mem ? PlayerRecord_constructor(mem) : nullptr;
 
     /* Allocate PixelDataCache (0x18 bytes) */
+    trace_setup_stage("step 3f: PixelDataCache");
     mem = operator_new(0x18);
     g_dplay_config = mem ? PixelDataCache_Ctor(mem) : nullptr;
 
+    trace_setup_stage("step 4: config");
     /* Step 4: Read mouse settings from lego.ini */
     g_mouse_spi3[0] = Config_GetIniInt(g_config_ini, S_MOUSE, S_SETTING1, 0);
     g_mouse_spi4[0] = Config_GetIniInt(g_config_ini, S_MOUSE, S_SETTING2, 0);
     g_mouse_spi5[0] = Config_GetIniInt(g_config_ini, S_MOUSE, S_SETTING3, 0);
 
+    trace_setup_stage("step 5: main window");
     /* Step 5: Create main game window */
     if (!((CGWND*)cgwnd)->RegisterWindowClass()) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 5\n"); std::fflush(stderr);
         return -1;
     }
 
+    trace_setup_stage("step 6: tilemap");
     /* Step 6: Initialize tilemap */
     TileMap_Init(g_tilemap, 0);
 
+    trace_setup_stage("step 7: input config");
     /* Step 7: Load input config */
     INPUT_LoadConfig((void*)&DAT_004a99b0);
 
+    trace_setup_stage("step 8: resources");
     /* Step 8: Initialize resource manager */
     if (!ResourceManager_Init(g_resmgr)) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 8\n"); std::fflush(stderr);
         return -1;
     }
 
+    trace_setup_stage("step 9: UI subsystems");
     /* Step 9: Initialize all subsystems */
     if (((CGWND*)cgwnd)->InitAllSubsystems() != 0) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 9\n"); std::fflush(stderr);

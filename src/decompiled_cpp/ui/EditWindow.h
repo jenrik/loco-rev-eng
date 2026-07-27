@@ -1,3 +1,4 @@
+// Status: TRANSCRIBED
 /**
  * EditWindow.h — Full-screen main menu dialog controller (UI_MainMenu)
  *
@@ -55,13 +56,26 @@
 /* ================================================================== */
 
 struct UIPANEL_Surface;
+class NameEntryPanel;
+class GameSetupPanel;
+/** Popup window ABI fragment: virtual destructor at +0x00, HWND at +0x04 in
+ * the original x86 object. The compiler performs the observed virtual delete. */
+class PopupWindow {
+public:
+    virtual ~PopupWindow() = default;
+    HWND hWnd;
+};
+namespace loco::assets {
+class SpriteResource;
+class SpriteBitmap;
+}
 
 /* ================================================================== */
-/* MenuSpriteSlot -- 8-byte pair storing one menu button sprite        */
+/* MenuSpriteSlot -- host-side typed sprite pair                       */
 /* ================================================================== */
 struct MenuSpriteSlot {
-    void*    pResource;         /* +0x00  RESDATA pointer for this sprite   */
-    int32_t  hBitmap;           /* +0x04  bitmap handle / surface pointer   */
+    loco::assets::SpriteResource* resource;
+    loco::assets::SpriteBitmap*   bitmap;
 };
 
 /* ================================================================== */
@@ -147,11 +161,11 @@ public:
     HBRUSH      hbrHatch;           /* +0x208  hatch brush (5, 0x0A5C0A)   */
 
     HWND        hwndEdit;           /* +0x20C  player-name edit control    */
-    void*       pPopupWindow;       /* +0x210  popup window                */
+    PopupWindow* pPopupWindow;      /* +0x210  popup window                */
     LONG        prevEditWndProc;    /* +0x214  saved edit WNDPROC          */
     LONG        savedPopupWndProc;  /* +0x218  saved popup WNDPROC         */
-    void*       pPanelA;            /* +0x21C  NameEntryPanel              */
-    void*       pPanelB;            /* +0x220  GameSetupPanel              */
+    NameEntryPanel* pPanelA;            /* +0x21C  NameEntryPanel              */
+    GameSetupPanel* pPanelB;            /* +0x220  GameSetupPanel              */
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */

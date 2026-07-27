@@ -109,14 +109,11 @@ static void __thiscall DestroySessionInternal(DPLAY_SessionData* session, const 
                   sizeof(session->track_entries));
 }
 
-/** DPLAY_SessionData scalar deleting cleanup — Address: 0x442EA0. */
-void* __thiscall DPLAY_SessionData::Cleanup(uint8_t flags)
+/** DPLAY_SessionData destructor body — Address: 0x442EA0. */
+DPLAY_SessionData::~DPLAY_SessionData()
 {
-    if ((flags & 1) != 0) {
-        GLOBAL_free(this);
-        return NULL;
-    }
-    return this;
+    // The original body has no object-owned cleanup; MSVC's scalar-deleting
+    // wrapper performs heap release when invoked through delete.
 }
 
 /* ================================================================== */

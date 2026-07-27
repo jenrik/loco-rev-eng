@@ -9,6 +9,7 @@
  */
 
 #include "sdl3_ddraw.h"
+#include "sdl3_window.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +21,12 @@
 /* BMP dimension cache (set by DDRAW_LoadBmpToSurface, read by helpers) */
 static uint32_t g_last_bmp_width  = 0;
 static uint32_t g_last_bmp_height = 0;
+
+// Host-only SDL ownership. The translated program's legacy void* DirectDraw
+// globals remain untouched until their COM-compatible adapter is complete.
+static IDirectDraw4* g_sdl_ddraw = nullptr;
+static IDirectDrawSurface4* g_sdl_primary_surface = nullptr;
+static IDirectDrawSurface4* g_sdl_backbuffer = nullptr;
 
 static SDL_Surface* loadBmpToSdlSurface(const char* path, int bpp)
 {
@@ -65,16 +72,23 @@ static SDL_Surface* loadBmpToSdlSurface(const char* path, int bpp)
     return converted;
 }
 
+IDirectDrawSurface4::IDirectDrawSurface4()
+    : texture(nullptr)
+    , cpu_surface(nullptr)
+    , width(0)
+    , height(0)
+    , color_key(0)
+    , has_color_key(false)
+{}
+
+IDirectDrawSurface4::~IDirectDrawSurface4()
+{
+    if (texture) SDL_DestroyTexture(texture);
+    if (cpu_surface) SDL_DestroySurface(cpu_surface);
+}
+
 int IDirectDrawSurface4::Release()
 {
-    if (texture) {
-        SDL_DestroyTexture(texture);
-        texture = nullptr;
-    }
-    if (cpu_surface) {
-        SDL_DestroySurface(cpu_surface);
-        cpu_surface = nullptr;
-    }
     delete this;
     return 0;
 }
@@ -96,22 +110,22 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
             uint8_t g = (fx->dwFillColor >> 8)  & 0xFF;
             uint8_t b =  fx->dwFillColor        & 0xFF;
 
-            SDL_SetRenderTarget(g_ddraw->renderer, texture);
-            SDL_SetRenderDrawColor(g_ddraw->renderer, r, g, b, 255);
+            SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
+            SDL_SetRenderDrawColor(g_sdl_ddraw->renderer, r, g, b, 255);
             if (dst_rect) {
                 SDL_FRect fr = { (float)dst_rect->x, (float)dst_rect->y,
                                  (float)dst_rect->w, (float)dst_rect->h };
-                SDL_RenderFillRect(g_ddraw->renderer, &fr);
+                SDL_RenderFillRect(g_sdl_ddraw->renderer, &fr);
             } else {
-                SDL_RenderFillRect(g_ddraw->renderer, nullptr);
+                SDL_RenderFillRect(g_sdl_ddraw->renderer, nullptr);
             }
-            SDL_SetRenderTarget(g_ddraw->renderer, nullptr);
+            SDL_SetRenderTarget(g_sdl_ddraw->renderer, nullptr);
         }
         return 0;
     }
 
     /* Texture-to-texture blit */
-    SDL_SetRenderTarget(g_ddraw->renderer, texture);
+    SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
 
     SDL_FRect dst = dst_rect
         ? SDL_FRect{ (float)dst_rect->x, (float)dst_rect->y,
@@ -134,14 +148,14 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
         SDL_SetTextureColorMod(src->texture, r, g, b);
     }
 
-    SDL_RenderTexture(g_ddraw->renderer, src->texture, src_frect, &dst);
+    SDL_RenderTexture(g_sdl_ddraw->renderer, src->texture, src_frect, &dst);
 
     /* Reset color mod */
     if (src->has_color_key) {
         SDL_SetTextureColorMod(src->texture, 255, 255, 255);
     }
 
-    SDL_SetRenderTarget(g_ddraw->renderer, nullptr);
+    SDL_SetRenderTarget(g_sdl_ddraw->renderer, nullptr);
     return 0;
 }
 
@@ -176,9 +190,9 @@ int IDirectDrawSurface4::Lock(const SDL_Rect* rect,
     if (!cpu_surface) return -1;
 
     /* Read back texture to CPU surface */
-    SDL_SetRenderTarget(g_ddraw->renderer, texture);
-    SDL_Surface* readback = SDL_RenderReadPixels(g_ddraw->renderer, nullptr);
-    SDL_SetRenderTarget(g_ddraw->renderer, nullptr);
+    SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
+    SDL_Surface* readback = SDL_RenderReadPixels(g_sdl_ddraw->renderer, nullptr);
+    SDL_SetRenderTarget(g_sdl_ddraw->renderer, nullptr);
     if (readback) {
         /* Convert to our desired format and copy pixels */
         SDL_Surface* converted = SDL_ConvertSurface(readback, SDL_PIXELFORMAT_XRGB8888);
@@ -361,6 +375,94 @@ int IDirectDraw4::GetDeviceIdentifier(void* a, int b)
 }
 
 /* =========================================================================
+ * SDL primary-surface bridge
+ * ========================================================================= */
+
+bool SDL3_EnsurePrimarySurface()
+{
+    SDL_Renderer* renderer = SDL3_GetRenderer();
+    SDL_Window* window = SDL3_GetWindow();
+    if (!renderer || !window) return false;
+
+    if (!g_sdl_ddraw) {
+        g_sdl_ddraw = new IDirectDraw4();
+        if (!g_sdl_ddraw) return false;
+        g_sdl_ddraw->renderer = renderer;
+        g_sdl_ddraw->window = window;
+        g_sdl_ddraw->owned = false;
+    }
+    if (g_sdl_primary_surface && g_sdl_primary_surface->texture &&
+        g_sdl_backbuffer && g_sdl_backbuffer->texture) return true;
+
+    int width = 0;
+    int height = 0;
+    if (!SDL_GetWindowSize(window, &width, &height) || width <= 0 || height <= 0) return false;
+
+    DDSURFACEDESC desc{};
+    desc.dwSize = sizeof(desc);
+    desc.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
+    desc.dwWidth = static_cast<uint32_t>(width);
+    desc.dwHeight = static_cast<uint32_t>(height);
+    if (g_sdl_ddraw->CreateSurface(&desc, &g_sdl_primary_surface, nullptr) != 0 ||
+        g_sdl_ddraw->CreateSurface(&desc, &g_sdl_backbuffer, nullptr) != 0) {
+        if (g_sdl_primary_surface) { g_sdl_primary_surface->Release(); g_sdl_primary_surface = nullptr; }
+        if (g_sdl_backbuffer) { g_sdl_backbuffer->Release(); g_sdl_backbuffer = nullptr; }
+        return false;
+    }
+
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+    SDL_SetRenderDrawColor(renderer, 0, 40, 80, 255);
+    SDL_RenderClear(renderer);
+    SDL_SetRenderTarget(renderer, nullptr);
+    return true;
+}
+
+IDirectDrawSurface4* SDL3_GetPrimarySurface()
+{
+    return SDL3_EnsurePrimarySurface() ? g_sdl_primary_surface : nullptr;
+}
+
+bool SDL3_ClearPrimarySurface(uint32_t xrgb)
+{
+    if (!SDL3_EnsurePrimarySurface()) return false;
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+    SDL_SetRenderDrawColor(renderer, (xrgb >> 16) & 0xFF,
+                            (xrgb >> 8) & 0xFF, xrgb & 0xFF, 255);
+    const bool cleared = SDL_RenderClear(renderer);
+    SDL_SetRenderTarget(renderer, nullptr);
+    return cleared;
+}
+
+bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y)
+{
+    if (!source || !SDL3_EnsurePrimarySurface()) return false;
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, source);
+    if (!texture) return false;
+
+    SDL_FRect destination = { static_cast<float>(x), static_cast<float>(y),
+                              static_cast<float>(source->w), static_cast<float>(source->h) };
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+    const bool rendered = SDL_RenderTexture(renderer, texture, nullptr, &destination);
+    SDL_SetRenderTarget(renderer, nullptr);
+    SDL_DestroyTexture(texture);
+    return rendered;
+}
+
+bool SDL3_PresentPrimarySurface()
+{
+    if (!SDL3_EnsurePrimarySurface()) return false;
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_SetRenderTarget(renderer, nullptr);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    if (!SDL_RenderClear(renderer) ||
+        !SDL_RenderTexture(renderer, g_sdl_primary_surface->texture, nullptr, nullptr)) return false;
+    SDL_RenderPresent(renderer);
+    return true;
+}
+
+/* =========================================================================
  * DDRAW helper functions
  * ========================================================================= */
 
@@ -369,7 +471,7 @@ IDirectDrawSurface4* DDRAW_LoadBmpToSurface(
 {
     (void)unk1; (void)unk2; (void)unk3;
 
-    if (!g_ddraw || !g_ddraw->renderer) return nullptr;
+    if (!g_sdl_ddraw || !g_sdl_ddraw->renderer) return nullptr;
 
     SDL_Surface* raw = loadBmpToSdlSurface(path, bpp);
     if (!raw) return nullptr;
@@ -381,7 +483,7 @@ IDirectDrawSurface4* DDRAW_LoadBmpToSurface(
     surf->width  = raw->w;
     surf->height = raw->h;
 
-    surf->texture = SDL_CreateTextureFromSurface(g_ddraw->renderer, raw);
+    surf->texture = SDL_CreateTextureFromSurface(g_sdl_ddraw->renderer, raw);
     SDL_DestroySurface(raw);
 
     if (!surf->texture) {
@@ -412,8 +514,6 @@ void DDRAW_PresentRect(void* rect, void* hwnd, int* scroll, int force)
 {
     (void)rect; (void)hwnd; (void)scroll; (void)force;
 
-    if (!g_ddraw || !g_ddraw->renderer) return;
-
-    SDL_RenderPresent(g_ddraw->renderer);
+    SDL3_PresentPrimarySurface();
 }
 

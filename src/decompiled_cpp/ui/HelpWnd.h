@@ -265,7 +265,7 @@ public:
      * Inherited from GameWindow; calls Cursor_SetMode internally.
      * Address: 0x414340.
      */
-    void set_mode(void* countPtr, void* dataPtr, int modeA, int modeB) override;
+    void set_mode(void* countPtr, void* dataPtr, int modeA, int modeB);
 
     /**
      * cleanup_sprites — Destroy all 9 ButtonSprite objects. vtable[4] override.

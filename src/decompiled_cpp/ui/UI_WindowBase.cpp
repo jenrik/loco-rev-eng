@@ -6,6 +6,9 @@
  */
 
 #include "UI_WindowBase.h"
+#ifndef _WIN32
+#include "sdl3_ddraw.h"
+#endif
 
 /* ================================================================== */
 /* External references                                                 */
@@ -219,18 +222,38 @@ void UI_WindowBase::show()
 
     this->captureFlag = 0;                  /* +0x3C */
 
+#ifdef _WIN32
     SetCapture(this->hWnd);
+#else
+    // SDL routes input through its event queue; there is no Win32 capture
+    // import to call on the host.
+#endif
 
-    /* Hide the OS cursor — loop until ShowCursor returns < 0 */
+    /* Hide the OS cursor — loop until ShowCursor returns < 0. */
+#ifdef _WIN32
     int cursorVis = ShowCursor(FALSE);
     while (cursorVis >= 0) {
         cursorVis = ShowCursor(FALSE);
     }
+#else
+    // SDL cursor ownership is handled by the window shim. Do not call the
+    // unresolved Win32 import or emulate its counter in a busy loop.
+#endif
 
+    std::fprintf(stderr, "[TRACE] UI_WindowBase::show: unlock primary\n");
     DDRAW_UnlockPrimary(this->hWnd);
+    std::fprintf(stderr, "[TRACE] UI_WindowBase::show: render panel\n");
+#ifdef _WIN32
     UIPANEL_Render(this, 1);
+#else
+    // The SDL compositor receives the decoded EditWindow sprites directly;
+    // do not reinterpret this 64-bit UI_WindowBase as the x86 UIPANEL layout.
+    SDL3_PresentPrimarySurface();
+#endif
+    std::fprintf(stderr, "[TRACE] UI_WindowBase::show: unlock primary complete\n");
     DDRAW_UnlockPrimary(this->hWnd);
 
+    std::fprintf(stderr, "[TRACE] UI_WindowBase::show: show window\n");
     EnableWindow(this->hWnd, FALSE);
     ShowWindow(this->hWnd, SW_SHOW);        /* SW_SHOW = 5 */
 
@@ -296,11 +319,9 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     self->hWndParent   = hParent;
 
     /* Register WNDCLASS */
-    WNDCLASSA wc;
-    /* Zero-initialize the full struct (10 dwords = 40 bytes) */
-    for (int i = 0; i < 10; i++) {
-        ((int*)&wc)[i] = 0;
-    }
+    // The original zeros 40 bytes for x86 WNDCLASS. Value initialization is
+    // layout-safe on the 64-bit SDL host as well.
+    WNDCLASSA wc{};
     wc.style       = CS_HREDRAW | CS_VREDRAW;  /* 3 = CS_HREDRAW | CS_VREDRAW */
     if (classStyle != 0) {
         wc.style   = classStyle;
@@ -352,7 +373,12 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     self->windowCreated = 1;
     self->on_create();
 
+#ifdef _WIN32
     Cursor_SetupSurface((int)self);  /* set up cursor surface for this window */
+#else
+    // Cursor_SetupSurface has not yet been reconstructed for the host and its
+    // original int pointer ABI truncates this on 64-bit. SDL owns the cursor.
+#endif
     ShowWindow(self->hWnd, nCmdShow);
     UpdateWindow(self->hWnd);
 

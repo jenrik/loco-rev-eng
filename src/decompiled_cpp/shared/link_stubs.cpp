@@ -309,11 +309,7 @@ void GameAudio_AllocChannel(void*,int32_t,void**,int32_t,int32_t,int32_t,int32_t
 /* GameAudio_StopAll */
 void GameAudio_StopAll(GameAudio*){}
 
-/* ResourceManager_GetById — C++ overloads */
-void*ResourceManager_GetById(void*,int32_t){return 0;}     /* _Z23ResourceManager_GetByIdPvi */
-void*ResourceManager_GetById(void*,uint32_t){return 0;}    /* _Z23ResourceManager_GetByIdPvj */
-void*ResourceManager_GetById(void**,int32_t){return 0;}    /* _Z23ResourceManager_GetByIdPPvi */
-void*ResourceManager_GetById(void**,uint32_t){return 0;}   /* _Z23ResourceManager_GetByIdPPvj */
+/* ResourceManager_GetById overloads live in sdl3_shims/resource_manager_sdl3.cpp. */
 
 /* RESMGR_LoadSoundResource — C++ overloads */
 void RESMGR_LoadSoundResource(int32_t){}                   /* _Z24RESMGR_LoadSoundResourcei */

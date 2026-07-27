@@ -41,7 +41,6 @@ struct TimerInfo {
     SDL_TimerID sdl_timer_id;
 };
 static std::map<uintptr_t, TimerInfo> g_timers;
-static uintptr_t g_next_timer_id = 1;
 
 /* Window class registry — maps class name to WNDCLASSA */
 static std::map<std::string, WNDCLASSA> g_window_classes;

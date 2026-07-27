@@ -16,11 +16,12 @@
  *   - Multiplayer sync and position broadcasting
  *
  * Sub-objects:
- *   - GAMESTATE_EditorState (0x20 bytes) at +0x20
+ *   - EditorState (0x20 bytes) at +0x20
  *   - VehicleEditor (0x450 bytes each, max 4) at +0x10[0..3]
  */
 
 #include "Vehicle.h"
+#include "../world/EditorState.h"
 #include "core/VehicleEditor.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
@@ -32,11 +33,11 @@ void  GLOBAL_free(void* ptr);                           /* 0x465CD0 */
 
 extern "C" {
     /* EditorState subsystem */
-    void* __thiscall GAMESTATE_EditorState_Ctor(void* this_, uint8_t param_1);
+    void* __thiscall EditorState_Ctor(void* this_, uint8_t param_1);
     void  __fastcall GAMESTATE_InitTrackAtPosition(void* editor_state, int32_t x, int32_t y);
     uint32_t __fastcall GAMESTATE_UpdateVehiclePlacement(void* editor_state, void* vehicle);
-    void  __fastcall GAMESTATE_EditorState_Copy(void* dst, void* src);
-    void  __fastcall GAMESTATE_EditorState_Detach(void* editor_state);
+    void  __fastcall EditorState_Copy(void* dst, void* src);
+    void  __fastcall EditorState_Detach(void* editor_state);
 
     /* VehicleEditor subsystem */
     void* __thiscall VehicleEditor_Ctor(void* this_, int32_t param_1,
@@ -153,10 +154,10 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     this->editors[3] = 0;
     this->direction = 0;            /* +0x60 */
 
-    /* Create GAMESTATE_EditorState sub-object (0x20 bytes) */
+    /* Create EditorState sub-object (0x20 bytes) */
     void* state = operator_new(0x20);
     if (state != 0) {
-        state = GAMESTATE_EditorState_Ctor(state, param_3);
+        state = EditorState_Ctor(state, param_3);
     }
     this->editor_state = state;     /* +0x20 */
     this->stop_timer = 0;           /* +0x28 */
@@ -212,7 +213,7 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
 
                 GAMESTATE_InitTrackAtPosition(this->editor_state, -1, -1);
 
-                int32_t track_idx = ((GAMESTATE_EditorState*)this->editor_state)->pos_x + 0x0C;
+                int32_t track_idx = ((EditorState*)this->editor_state)->pos_x + 0x0C;
                 VehicleEditor_InitTracks(this->editors[0], track_idx, -1);
 
                 int16_t net_x = (track_idx < 0) ? -1 : (int16_t)(track_idx >> 4);
@@ -525,7 +526,7 @@ uint8_t Vehicle::HandleStop()
         return 0;
     }
 
-    int32_t* target = ((GAMESTATE_EditorState*)this->editor_state)->building;
+    int32_t* target = reinterpret_cast<int32_t*>(((EditorState*)this->editor_state)->building);
     if (target == 0) {
         return 0;
     }
@@ -683,17 +684,17 @@ uint8_t Vehicle::UpdateEngineSound()
 
     /* --- Copy editor state and run placement iteration --- */
     int16_t* target_count = (int16_t*)(
-        *(int32_t*)(((GAMESTATE_EditorState*)this->editor_state)->building + 0x114));
+        *(int32_t**)(reinterpret_cast<uint8_t*>(((EditorState*)this->editor_state)->building) + 0x114));
     *target_count = *target_count - 1;
 
     if (this->active_editor == 1) {
         /* ActiveEditor 1: copy from rear wheel of last editor */
-        GAMESTATE_EditorState_Copy(
+        EditorState_Copy(
             this->editor_state,
             ((VehicleEditor*)this->editors[this->editor_count])->end_b);
 
         target_count = (int16_t*)(
-            *(int32_t*)(((GAMESTATE_EditorState*)this->editor_state)->building + 0x114));
+            *(int32_t**)(reinterpret_cast<uint8_t*>(((EditorState*)this->editor_state)->building) + 0x114));
         *target_count = *target_count + 1;
 
         /* Run exactly 12 placement iterations */
@@ -702,12 +703,12 @@ uint8_t Vehicle::UpdateEngineSound()
         }
     } else {
         /* Forward: copy from front wheel of first editor */
-        GAMESTATE_EditorState_Copy(
+        EditorState_Copy(
             this->editor_state,
             ((VehicleEditor*)this->editors[0])->end_a);
 
         target_count = (int16_t*)(
-            *(int32_t*)(((GAMESTATE_EditorState*)this->editor_state)->building + 0x114));
+            *(int32_t**)(reinterpret_cast<uint8_t*>(((EditorState*)this->editor_state)->building) + 0x114));
         *target_count = *target_count + 1;
 
         /* Run placement iterations, stop if failure, max 12 */
@@ -720,15 +721,15 @@ uint8_t Vehicle::UpdateEngineSound()
 
     /* Post-placement state adjustment */
     if (this->direction == 4 &&
-        ((GAMESTATE_EditorState*)this->editor_state)->move_state == 2) {
-        ((GAMESTATE_EditorState*)this->editor_state)->move_state = 4;
+        ((EditorState*)this->editor_state)->move_state == 2) {
+        ((EditorState*)this->editor_state)->move_state = 4;
     }
 
     VehicleEditor_CheckBounds((int32_t)this->editor_state);
     VehicleEditor_CheckBounds2((int32_t)this->editor_state);
 
     /* --- Handle editor state result (+0x1C) --- */
-    switch (((GAMESTATE_EditorState*)this->editor_state)->edit_state) {
+    switch (((EditorState*)this->editor_state)->edit_state) {
     case 0: {
         /* Check if first and last editor have exclusion state 4 or 5 */
         int32_t first_state = ((VehicleEditor*)this->editors[0])->edge_dir_b;
@@ -876,7 +877,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
     }
 
     /* --- Set editor state position --- */
-    uint8_t* editor_state = (uint8_t*)(GAMESTATE_EditorState*)this->editor_state;
+    uint8_t* editor_state = (uint8_t*)(EditorState*)this->editor_state;
     *(int32_t**)(editor_state + 0x14) = target;
 
     /* Copy position from front wheel of first editor to editor state */
@@ -1233,7 +1234,7 @@ uint8_t Vehicle::IsMoving()
     }
 
     /* Check if target building exists and is a road/building tile */
-    int32_t* target = ((GAMESTATE_EditorState*)this->editor_state)->building;
+    int32_t* target = reinterpret_cast<int32_t*>(((EditorState*)this->editor_state)->building);
     if (target == 0) {
         return 1;   /* no target = assume moving */
     }

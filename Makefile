@@ -52,7 +52,7 @@ NATIVE_ALL := $(wildcard $(DCP_DIR)/native/*.c)
 NATIVE_BROKEN := $(DCP_DIR)/native/buildingpanel_wndproc.c $(DCP_DIR)/native/config_ini.c $(DCP_DIR)/native/DDRAW_BlitHBITMAPToSurface.c $(DCP_DIR)/native/ddraw_building_sprites.c $(DCP_DIR)/native/ddraw_helpers.c $(DCP_DIR)/native/DDRAW_LoadBmpToSurface.c $(DCP_DIR)/native/game_loop_setup.c $(DCP_DIR)/native/gamestate_handlers.c $(DCP_DIR)/native/helpwnd_support.c $(DCP_DIR)/native/input_place.c $(DCP_DIR)/native/input_world.c $(DCP_DIR)/native/ui_childwindow.c $(DCP_DIR)/native/UI_DefWndProc.c $(DCP_DIR)/native/ui_manager.c $(DCP_DIR)/native/ui_position.c $(DCP_DIR)/native/UI_ProcessObjectTimers.c $(DCP_DIR)/native/ui_window_class.c $(DCP_DIR)/native/win32_network.c $(DCP_DIR)/native/win32_stream.c $(DCP_DIR)/native/winmain.c $(DCP_DIR)/native/world_enumerate_assets.c $(DCP_DIR)/native/ui_scroll_list.c $(DCP_DIR)/native/sprite_tilemap.c $(DCP_DIR)/native/math_huf_helpers.c $(DCP_DIR)/native/huf_decode.c $(DCP_DIR)/native/math_helpers.c $(DCP_DIR)/native/DDRAW_PresentRect.c $(DCP_DIR)/native/cgwnd_present.c $(DCP_DIR)/native/ui_window_update.c $(DCP_DIR)/native/win32_postquit.c $(DCP_DIR)/native/win32_thread.c
 NATIVE_SRCS := $(filter-out $(NATIVE_BROKEN), $(NATIVE_ALL))
 
-SHIM_SRCS := $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
+SHIM_SRCS := $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
 
 # Derived objects
 DCP_OBJS    := $(patsubst $(DCP_DIR)/%.cpp, $(BUILD_DIR)/dcp/%.o, $(DCP_CPP_SRCS))
@@ -66,7 +66,8 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all run clean distclean check help dirs dashboard dashboard-test
+<<<<<<< HEAD
+.PHONY: all run clean distclean check help dirs dashboard dashboard-test test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: dirs $(BINARY)
 	@echo ""
@@ -104,6 +105,61 @@ $(BUILD_DIR)/shims/%.o: $(SHIMS_DIR)/%.c
 # Dirs
 dirs:
 	@mkdir -p $(sort $(dir $(ALL_OBJS)))
+
+# Asset archive regression test — validates real RFH indexing and Huf_Decode @ 0x45C830.
+RESOURCE_ARCHIVE_TEST := $(BUILD_DIR)/resource_archive_test
+
+$(RESOURCE_ARCHIVE_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h tests/resource_archive_test.cpp | dirs
+	@echo "=== Testing RFD/RFH archive ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp tests/resource_archive_test.cpp -o $@
+
+test-resource-archive: $(RESOURCE_ARCHIVE_TEST)
+	@$(RESOURCE_ARCHIVE_TEST) $(PROJECT_ROOT)lego-loco-unpacked/art-res
+
+RESOURCE_MANAGER_SDL3_TEST := $(BUILD_DIR)/resource_manager_sdl3_test
+
+$(RESOURCE_MANAGER_SDL3_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h tests/resource_manager_sdl3_test.cpp | dirs
+	@echo "=== Testing ResourceManager sprite bridge ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp tests/resource_manager_sdl3_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-resource-manager-sdl3: $(RESOURCE_MANAGER_SDL3_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(RESOURCE_MANAGER_SDL3_TEST)
+
+# DPlayConfig regression: defaults recovered from GameConfig_constructor @ 0x440C60.
+DPLAY_CONFIG_TEST := $(BUILD_DIR)/dplay_config_test
+
+$(DPLAY_CONFIG_TEST): $(DCP_DIR)/network/DPlayConfig.h tests/dplay_config_test.cpp | dirs
+	@echo "=== Testing DPlayConfig defaults ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror tests/dplay_config_test.cpp -o $@
+
+test-dplay-config: $(DPLAY_CONFIG_TEST)
+	@$(DPLAY_CONFIG_TEST)
+
+# SDL primary-target regression: validates the CGWND frame source reaches the window.
+SDL3_PRIMARY_PRESENT_TEST := $(BUILD_DIR)/sdl3_primary_present_test
+
+$(SDL3_PRIMARY_PRESENT_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h tests/sdl3_primary_present_test.cpp | dirs
+	@echo "=== Testing SDL primary-surface presentation ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp tests/sdl3_primary_present_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-sdl3-primary-present: $(SDL3_PRIMARY_PRESENT_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; SDL_VIDEODRIVER=dummy $(SDL3_PRIMARY_PRESENT_TEST)
+
+# Startup menu sprite diagnostic: real PE IDs → RFH paths → RFD BMPs → SDL textures.
+MENU_SPRITE_VIEWER := $(BUILD_DIR)/menu_sprite_viewer
+
+$(MENU_SPRITE_VIEWER): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h tools/menu_sprite_viewer.cpp | dirs
+	@echo "=== Building real startup sprite viewer ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp tools/menu_sprite_viewer.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+menu-sprite-viewer: $(MENU_SPRITE_VIEWER)
+
+run-menu-sprite-viewer: $(MENU_SPRITE_VIEWER)
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && exec $(MENU_SPRITE_VIEWER)
+
+test-menu-sprite-viewer: $(MENU_SPRITE_VIEWER)
+	@echo "=== Rendering one real startup-menu frame (SDL dummy driver) ==="
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MENU_SPRITE_VIEWER) --frames 1
 
 # Run
 run: $(BINARY)

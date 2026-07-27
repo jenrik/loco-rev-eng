@@ -387,8 +387,8 @@ public:
 struct DPLAY_SessionData {
     /* +0x00: compiler-managed dispatch pointer (binary table 0x00478268) */
     /* vtable at +0x00 is compiler-managed via virtual methods */
-    /** Scalar deleting cleanup, address: 0x442EA0. */
-    virtual void Cleanup(uint8_t flags);
+    /** Destructor body, address: 0x442EA0. The scalar-deleting wrapper is compiler-generated. */
+    virtual ~DPLAY_SessionData();
 
     /* +0x04 (4 bytes): Padding / reserved */
     uint8_t     _pad_04[4];

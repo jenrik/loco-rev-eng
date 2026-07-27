@@ -11,7 +11,7 @@
  *   - Raw vtable dispatch → virtual method calls (CarObject, SpriteObject)
  *   - (uint8_t*)ptr+offset → named InboundTrainNode field access
  *   - void* typed fields → Building*, InboundTrainNode*, int32_t
- *   - int32_t params to Netman*/InboundTrainNode* typed pointers
+ *   - int32_t parameters replaced with Netman and InboundTrainNode pointers
  *   - SendGameStart off-by-one: verified 1-based indexing (ci=1..cc)
  *   - __thiscall/__fastcall removed from DPlayManager.h dependency
  *

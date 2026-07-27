@@ -10,6 +10,9 @@
 
 /* Subsystem class headers — for InitAllSubsystems */
 #include "../ui/EditWindow.h"
+// The host menu bootstrap intentionally stops after EditWindow. The remaining
+// original startup chain is retained for the Windows/binary-faithful build.
+#ifdef _WIN32
 #include "../town/Town.h"
 #include "../ui/PostcardPreviewWindow.h"
 #include "../ui/TrainStationWindow.h"
@@ -17,6 +20,7 @@
 #include "../input/Cursor.h"
 #include "../ui/HelpWnd.h"
 #include "../ui/AboutDialog.h"
+#endif
 
 #ifndef _WIN32
 #include <SDL3/SDL.h>
@@ -590,12 +594,8 @@ void CGWND_SetMode(int new_mode)
         {
             extern void Game_SetScreenMode(void* game, int a, int b, int c);
             Game_SetScreenMode(g_game, 0, 1, 0);
-
-            void** ui_vt = *(void***)g_ui_main;
-            ((void(__thiscall*)())ui_vt[0x08 / 4])();
+            if (g_ui_main) static_cast<EditWindow*>(g_ui_main)->show();
         }
-
-
         return;
 
     case 3:
@@ -1033,6 +1033,21 @@ int CGWND::InitAllSubsystems()
     HWND      hWndParent = this->hWnd;         /* +0x08: main game HWND */
     HINSTANCE hInst      = this->hInstance;     /* +0x0C */
 
+#ifndef _WIN32
+    // Capability milestone: mode 2 needs only the original first subsystem,
+    // EditWindow. Do not fabricate unavailable world/town/cursor objects.
+    std::fprintf(stderr, "[TRACE] InitAllSubsystems: construct EditWindow\n");
+    auto* menu = new EditWindow(hInst, 0x1F8);
+    if (!menu) return -2;
+    std::fprintf(stderr, "[TRACE] InitAllSubsystems: create EditWindow\n");
+    if (!menu->create(hWndParent)) {
+        delete menu;
+        return -3;
+    }
+    std::fprintf(stderr, "[TRACE] InitAllSubsystems: EditWindow ready\n");
+    g_ui_main = menu;
+    return 0;
+#else
     /* 1. UI_MainMenu — EditWindow, 0x224 bytes, res 0x1F8. Ctor: 0x420310 */
     g_ui_main = new EditWindow(hInst, 0x1F8);
     if (g_ui_main == nullptr) return -2;
@@ -1094,5 +1109,6 @@ int CGWND::InitAllSubsystems()
         { destroy_subsystem(g_about); destroy_subsystem(g_audio_mgr); destroy_subsystem(g_cursor); destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -17; }
 
     return 0;
+#endif
 }
 

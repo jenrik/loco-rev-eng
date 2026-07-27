@@ -44,8 +44,8 @@ void* AssetMgr_LoadFile(void* mgr, const char* name,
 /* ================================================================== */
 /* UI / Input helpers — C++ linkage                                     */
 /* ================================================================== */
-char  EditWindow::WndProc(void* stream);                       /* 0x41E9F0 */
-void  EditWindow::ExitGame(uint32_t param, int zero);          /* 0x4203E0 */
+char  ScriptedObject_ParseStream(void* stream);                /* 0x41E9F0 */
+void  ScriptedObject_InitBase(uint32_t resource_id, int zero);  /* 0x4203E0 */
 char  UI_ChildWindow_Render(void* obj, void* stream);           /* 0x424E00 */
 
 /* Panel helpers declared in Panel.h */
@@ -313,7 +313,7 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
        dat_path = g_scene_name + name_suffix + ".dat"
        audio_channel (at +0x48) = g_scene_name + name_suffix + ".bmp" */
     CRT_sprintf_buf(dat_path, "%s%s.dat", g_scene_name, name_suffix);
-    CRT_sprintf_buf(this->audio_channel, "%s%s.bmp", g_scene_name, name_suffix);
+    CRT_sprintf_buf(this->script_bitmap_path, "%s%s.bmp", g_scene_name, name_suffix);
 
     /* Try loading from RFD archive (asset manager) first */
     if (g_asset_mgr != NULL) {
@@ -337,8 +337,8 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
                     if ((*(uint8_t*)((char*)parsed_stream + v4 + 8) & 4) == 0) {
                         char loaded;
 
-                        /* Step 1: Parse script via EditWindow::WndProc */
-                        loaded = EditWindow::WndProc(parsed_stream); /* 0x41E9F0 */
+                        /* Step 1: Parse script via ScriptedObject_ParseStream */
+                        loaded = ScriptedObject_ParseStream(parsed_stream); /* 0x41E9F0 */
                         this->sub_entity[0x82] = loaded;
 
                         /* Step 2: Render child window */
@@ -377,7 +377,7 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
         if ((*(uint8_t*)((char*)stream_handle + idx + 8) & 4) == 0) {
             char loaded;
 
-            loaded = EditWindow::WndProc(stream_handle);      /* 0x41E9F0 */
+            loaded = ScriptedObject_ParseStream(stream_handle);      /* 0x41E9F0 */
             this->sub_entity[0x82] = loaded;
 
             if (loaded != 0) {
@@ -416,7 +416,7 @@ void ScriptedObject::MoveTo(int x, int y)
             }
 
             /* Get sprite frame width from RESDATA (+0x14 = frame_width) */
-            sprite_width = ((RESDATA*)this->resource)->frame_width;
+            sprite_width = ((RESDATA*)this->surface_ref)->frame_width;
 
             /* Check against ScriptEngine right bound */
             if (this->script_engine_active != 0) {
@@ -446,7 +446,7 @@ void ScriptedObject::MoveTo(int x, int y)
                 x = this->scroll_panel_offset;
             }
             else {
-                sprite_width = ((RESDATA*)this->resource)->frame_width;
+                sprite_width = ((RESDATA*)this->surface_ref)->frame_width;
                 if (x > g_world_width - sprite_width) {
                     x = g_world_width - sprite_width;
                 }
@@ -458,7 +458,7 @@ void ScriptedObject::MoveTo(int x, int y)
             y = 0;
         }
         else {
-            int height = this->source_rect.bottom;     /* +0x3C */
+            int height = this->screen_rect.bottom;     /* +0x3C */
             if (y > g_world_height - height) {
                 y = g_world_height - height;
             }
@@ -489,7 +489,7 @@ void ScriptedObject::MoveTo(int x, int y)
         }
     }
     else {  /* Direction flag == 1 — positive direction */
-        int sprite_w = ((RESDATA*)this->resource)->frame_width;
+        int sprite_w = ((RESDATA*)this->surface_ref)->frame_width;
 
         if (this->script_engine_active != 0) {
             se_vmove(this, sprite_w + x, y + 14);
@@ -565,8 +565,8 @@ void ScriptedObject::RemoveChild()
         this->child_script_ptr = NULL;
     }
 
-    /* Call base destructor (EditWindow::ExitGame with 0,0) */
-    EditWindow::ExitGame(0, 0);                              /* 0x41E620 (via 0x4203E0) */
+    /* Call base destructor (ScriptedObject_InitBase with 0,0) */
+    ScriptedObject_InitBase(0, 0);                              /* 0x41E620 (via 0x4203E0) */
 }
 
 /* ================================================================== */
@@ -577,7 +577,7 @@ void ScriptedObject::RemoveChild()
 ScriptedObject* ScriptedObject::AddChild(uint32_t resource_id, const char* name_suffix)
 {
     /* Initialize base via ExitGame */
-    EditWindow::ExitGame(resource_id, 0);                     /* 0x4203E0 */
+    ScriptedObject_InitBase(resource_id, 0);                     /* 0x4203E0 */
 
     /* Clear child script pointer */
     this->child_script_ptr = NULL;
@@ -762,7 +762,7 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
             }
 
             /* Create new tooltip if visible */
-            if (this->visible != 0) {
+            if (this->initialized != 0) {
                 this->tooltip_handle = (int32_t)(intptr_t)UI_CreateTooltip(
                     g_tooltip_mgr, 0x3879, 1,
                     this->screen_rect.left + 0x32,

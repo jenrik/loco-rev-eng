@@ -251,7 +251,6 @@ void* RESMGR_GetById(void*, unsigned int) { STUB("RESMGR_GetById"); return NULL;
 void* RESMGR_LoadSoundResource() { STUB("RESMGR_LoadSoundResource"); return NULL; }
 void  RESMGR_PlaySound() { STUB("RESMGR_PlaySound"); }
 void  RESMGR_ReleaseSoundResource() { STUB("RESMGR_ReleaseSoundResource"); }
-void* ResourceManager_GetById() { STUB("ResourceManager_GetById"); return NULL; }
 void* ResourceManager_GetStringById() { STUB("ResourceManager_GetStringById"); return (void*)""; }
 
 /* =========================================================================

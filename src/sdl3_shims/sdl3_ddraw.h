@@ -84,13 +84,24 @@ struct IDirectDraw4 {
 };
 
 /* =========================================================================
- * Globals — declared here, defined in sdl3_ddraw.cpp
+ * SDL renderer bridge
  * ========================================================================= */
 
-extern IDirectDraw4*        g_ddraw;
-extern IDirectDrawSurface4* g_primary_surface;
-extern IDirectDrawSurface4* g_backbuffer;
-extern uint8_t              g_surface_lost;
+/** Ensure SDL-backed primary and backbuffer render targets exist for the
+ * current SDL window. They are deliberately separate from untranslated
+ * game's void* DirectDraw globals until its COM adapter is reconstructed. */
+bool SDL3_EnsurePrimarySurface();
+IDirectDrawSurface4* SDL3_GetPrimarySurface();
+
+/** Copy the primary render target to the SDL window and present it.
+ * Returns false only when SDL window/renderer setup is unavailable. */
+bool SDL3_PresentPrimarySurface();
+
+/** Clear the SDL primary render target to an XRGB color. */
+bool SDL3_ClearPrimarySurface(uint32_t xrgb);
+
+/** Composite a decoded resource bitmap at native pixel coordinates. */
+bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y);
 
 /* =========================================================================
  * DDRAW helper functions
