@@ -229,7 +229,7 @@ void Cursor::show(void* playerData)
             this->obj_184 = nullptr;
         }
 
-        this->obj_184 = playerData;                                  /* +0x184 */
+        this->obj_184 = (CursorEditorRecord*)playerData;            /* +0x184 */
 
         /* Copy player name from playerData+0x43 into edit control */
         SetWindowTextA(this->hEditWnd, (const char*)((intptr_t)playerData + 0x43));

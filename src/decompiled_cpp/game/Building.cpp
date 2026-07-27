@@ -7,6 +7,7 @@
  */
 
 #include "Building.h"
+#include "BuildingMgr.h"
 #include "../core/GameObject.h"
 #include <cmath>
 #include <cstdlib>
@@ -49,9 +50,6 @@ class BuildingMgr;
 class InputMgr;
 class TileMap;
 
-/* BuildingMgr helpers */
-extern void BuildingMgr_CompactCollections(BuildingMgr* bldg_mgr);      /* 0x434870 */
-
 /* Heap allocation */
 extern void* operator_new(size_t size);                                  /* 0x465CE0 */
 
@@ -65,7 +63,7 @@ extern TileMap*     g_tilemap;
 extern void*        TileMap_GetObjectAt(TileMap* tilemap, int tx, int ty, int flags);
 extern uint8_t      g_building_animating;
 extern void*        CRT_localtime(const time_t* timer);
-extern int          Game_CheckTimeInRange(void* tm, int* start, int* end);
+extern int          Game_CheckTimeInRange(int* current_time, int* start, int* end);  /* 0x40CA40 */
 extern int          Vehicle_GetOccupantCount(void* v);
 extern uint8_t      g_is_game_active;
 
@@ -78,13 +76,17 @@ extern void Game_SelectGameObject(void* game, void* obj);
 /* Game singleton — used for selection/deselection */
 extern void* g_game;
 
-/* TileMap helpers — used by StepToward, TeleportTo, FindNearestConnectionNode */
-extern int      TileMap_PathDistance(void* tilemap, int x1, int y1, int x2, int y2);  /* 0x45c7a0 */
+/* TileMap helpers — used by StepToward, TeleportTo */
 extern void*    TileMap_FindTileByType(void* tilemap, int x, int y,
                                       int search_flags, int tile_type);               /* 0x457ce0 */
 
-/* NodeSet helper — used by FindNearestConnectionNode */
-extern uint8_t  NodeSet_GetConnectionFlag(void* ns, uint32_t idx);                    /* 0x45dd80 */
+/* Math helpers — used by StepToward, FindNearestConnectionNode */
+extern int      Math_DistSquared(int x1, int y1, int x2, int y2);                     /* 0x45C7A0 */
+extern uint8_t  Math_PointOnLineSegment(int px, int py, int ax, int ay, int bx, int by); /* 0x45C7C0 */
+
+/* Asset manager — used by StepToward, FindNearestConnectionNode */
+extern void*    g_asset_mgr;                                                       /* asset manager singleton */
+extern uint8_t  AssetMgr_ReadPairValue(void* mgr, uint32_t a, uint32_t b);        /* 0x45DD80 */
 
 /* ROM string at 0x47E4FC in .rdata */
 static const wchar_t PARTY_STRING[] = L"PARTY";
@@ -99,20 +101,14 @@ static const wchar_t PARTY_STRING[] = L"PARTY";
 /* ================================================================== */
 Building::Building(int resource_id)
 {
-    /* Step 1: Initialize base class via shared base constructor.
-     * This calls InitBase() for Entity-level resource loading,
-     * initializes all Building-specific fields.                      */
-    this->BaseCtor(resource_id);                /* +0x433A20 */
+    /* Delegate all initialization to the shared BaseCtor.
+     * base_only=false: full Building initialization including
+     * occupant_ptr at +0xF0.                                        */
+    this->BaseCtor(resource_id, false);         /* +0x433A20 */
 
-    /* Step 2: Set occupation level to 4 (redundant with BaseCtor
-     * but ensures correctness).                                     */
+    /* Ensure occupation level (redundant with BaseCtor but matches
+     * the binary which also writes it twice).                       */
     this->occupation_level = 4;                 /* +0x88 */
-
-    /* Step 3: Zero the occupant cross-reference pointer.
-     * Offset +0xF0 is a bidirectional link: in a Building it points
-     * to the occupying entity; in an occupant entity it points to
-     * the building.                                                */
-    this->occupant_ptr = nullptr;               /* +0xF0 */
 }
 
 
@@ -130,101 +126,12 @@ Building::Building(int resource_id)
 /* ================================================================== */
 Building::Building(int resource_id, bool base_only)
 {
-    /* --- Step 1: Initialize Entity-level resource data ---
-     * In the binary, Entity::Entity() (0x405790) is called which:
-     *   1. Calls GameObject::GameObject() — sets vtable, type, zero-fields
-     *   2. If resource_id > 0: calls InitBase(resource_id, anim_idx, false)
-     * In C++, Entity is already constructed via the ctor chain, so we
-     * call InitBase directly for resource loading.                     */
-    this->InitBase(resource_id, -1, false);
-
-    /* --- Step 2: Initialize Building-specific byte flags --- */
-    this->disabled          = 0;            /* +0x89 — building is active */
-    this->occupation_level  = 4;            /* +0x88 — starts at level 4  */
-    this->field_e4          = 0;            /* +0xE4 */
-
-    /* --- Step 3: Record creation timestamp --- */
-    this->create_time = g_game_time;        /* +0x94 */
-
-    /* --- Step 4: Get resource pointer --- */
-    RESDATA* resource = (RESDATA*)this->parent;  /* +0x40 */
-
-    /* --- Step 5: Store the resource ID --- */
-    this->field_64 = resource_id;           /* +0x64 */
-
-    /* --- Step 6: Zero / -1 initialize all remaining fields --- */
-    this->field_68 = 0;                     /* +0x68 */
-    this->occupant_a         = nullptr;     /* +0x8C */
-    this->occupant_b         = nullptr;     /* +0x90 */
-    this->field_dc           = 0;           /* +0xDC */
-    this->conn_building_a    = -1;          /* +0x98 */
-    this->conn_building_b    = -1;          /* +0x9C */
-    this->waypoint_x1        = -1;          /* +0xD4 */
-    this->waypoint_y1        = -1;          /* +0xD8 */
-    this->dest_x             = -1;          /* +0xCC */
-    this->dest_y             = -1;          /* +0xD0 */
-    this->target_x           = -1;          /* +0xA8 */
-    this->target_y           = -1;          /* +0xAC */
-    this->prev_target_x      = -1;          /* +0xC4 */
-    this->prev_target_y      = -1;          /* +0xC8 */
-    this->search_x1          = -1;          /* +0xB0 */
-    this->search_y1          = -1;          /* +0xB4 */
-    this->field_e0           = 0;           /* +0xE0 */
-    this->next_action_time   = 0;           /* +0xA0 */
-    this->field_a4           = 0;           /* +0xA4 */
-    this->last_action        = 0;           /* +0xE8 */
-    this->field_ec           = 0;           /* +0xEC */
-
-    /* --- Step 7: When base_only, skip occupant_ptr init.
-     * The Train subclass is only 0xF0 bytes and does not have
-     * the occupant_ptr field at +0xF0.                              */
-    if (!base_only) {
-        this->occupant_ptr = nullptr;       /* +0xF0 */
-    }
-
-    /* --- Step 8: Set the building's name --- */
-    if (resource != nullptr) {
-        char* res_name = (char*)resource + RESNAME_OFFSET;  /* +0x14D */
-
-        if (*res_name == '\0') {
-            /* Branch A: No resource-provided name.
-             * Generate a random name from the game's String Table.  */
-            UINT name_id;
-            uint32_t rand_val = CRT_rand();                     /* +0x466150 */
-
-            if (*(uint32_t*)((uint8_t*)resource + RESCLASS_OFFSET) == 0x4D) {
-                /* Residential: "M" = Minifigure house */
-                name_id = (rand_val % RESIDENTIAL_NAME_COUNT) + RESIDENTIAL_NAME_BASE;
-            } else {
-                /* Commercial / Industrial */
-                name_id = (rand_val % COMMERCIAL_NAME_COUNT) + COMMERCIAL_NAME_BASE;
-            }
-
-            /* Load name from executable's string table. */
-            HINSTANCE hInst = *(HINSTANCE*)((uint8_t*)g_main_window + 0x0C);
-            LoadStringA(hInst, name_id, this->name, 10);
-        } else {
-            /* Branch B: Resource has a custom name. */
-            this->CopyName(res_name);                           /* +0x405E20 */
-
-            /* Check building sub-type at resource+0x08.
-             * If type == STATION (7), compact BuildingMgr collections. */
-            uint8_t sub_type = *(uint8_t*)((uint8_t*)resource + 0x08);
-            if (sub_type == SUBTYPE_STATION) {
-                BuildingMgr_CompactCollections(g_building_mgr); /* +0x434870 */
-            }
-
-            /* PARTY mode trigger — DECOMPILER NOTE:
-             * The check is inverted: party mode activates when the
-             * resource name does NOT contain "PARTY". This is binary-
-             * correct behavior per Ghidra.                              */
-            if (CRT_wcsstr((const wchar_t*)res_name, PARTY_STRING) == 0) {
-                g_is_party_mode    = 1;
-                g_party_start_time = g_game_time;
-            }
-        }
-    }
+    /* Delegate to the single shared BaseCtor at 0x433A20.
+     * When base_only=true (Train subclass): skips occupant_ptr at +0xF0
+     * since Train is only 0xF0 bytes and doesn't have that field.   */
+    this->BaseCtor(resource_id, base_only);
 }
+
 
 
 /* ================================================================== */
@@ -259,7 +166,7 @@ Building::~Building()
 /*   4. If sub-type == STATION (7), compacts BuildingMgr collections   */
 /*   5. If resource name does NOT contain "PARTY", activates party mode */
 /* ================================================================== */
-void Building::BaseCtor(int resource_id)
+void Building::BaseCtor(int resource_id, bool base_only)
 {
     /* --- Step 1: Initialize Entity-level resource data ---
      * In the binary, Entity::Entity() (0x405790) is called which:
@@ -307,6 +214,14 @@ void Building::BaseCtor(int resource_id)
     this->next_action_time   = 0;           /* +0xA0 */
     this->field_a4           = 0;           /* +0xA4 */
     this->last_action        = 0;           /* +0xE8 */
+    this->field_ec           = 0;           /* +0xEC */
+
+    /* --- Step 6a: When base_only, skip occupant_ptr init.
+     * The Train subclass is only 0xF0 bytes and does not have
+     * the occupant_ptr field at +0xF0.                              */
+    if (!base_only) {
+        this->occupant_ptr = nullptr;       /* +0xF0 */
+    }
 
     /* --- Step 7: Set the building's name --- */
     if (resource != nullptr) {
@@ -342,7 +257,7 @@ void Building::BaseCtor(int resource_id)
              * If type == STATION (7), compact BuildingMgr collections.   */
             uint8_t sub_type = *(uint8_t*)((uint8_t*)resource + 0x08);
             if (sub_type == SUBTYPE_STATION) {
-                BuildingMgr_CompactCollections(g_building_mgr); /* +0x434870 */
+                g_building_mgr->CompactCollections();  /* +0x434870 */
             }
 
             /* PARTY mode trigger — DECOMPILER NOTE:
@@ -476,7 +391,7 @@ void Building::BaseCleanup()
 /*   4. Normal mode: decide action if idle, poll completion if active  */
 /*   5. Post-update: refresh animation if idle and visible             */
 /* ================================================================== */
-void Building::Update(void* /*next_entity*/)
+void Building::Update(void* next_entity)
 {
     /* Step 1: Early exit if disabled */
     if (this->disabled != 0) {                              /* +0x89 */
@@ -492,9 +407,10 @@ void Building::Update(void* /*next_entity*/)
     }
 
     /* Step 2: Party mode fast-path.
-     * In party mode, bypass normal AI and delegate to PartyModeUpdate. */
-    if (g_is_party_mode != 0) {                             /* 0x48548C */
-        this->PartyModeUpdate(nullptr);
+     * Binary: if (g_is_party_mode && param_1 != 0) → PartyModeUpdate(param_1).
+     * When next_entity is null, falls through to normal AI even in party mode. */
+    if (g_is_party_mode != 0 && next_entity != nullptr) {   /* 0x48548C */
+        this->PartyModeUpdate(next_entity);
         goto post_update;
     }
 
@@ -546,7 +462,7 @@ void Building::Update(void* /*next_entity*/)
 
             if (this->target_x == cur_x && this->target_y == cur_y) {
                 /* At target — finalize the action */
-                this->HandleAction();                        /* +0x434100 */
+                this->HandleAction(this->last_action);      /* +0x434100 */
             } else {
                 /* Not at target — advance one step */
                 this->StepToward(cur_x, cur_y);
@@ -731,9 +647,9 @@ void Building::RemoveOccupant()
     }
 
     /* --- Step 4: Read building's frame data for sprite offset --- */
-    void* frame_data = *(void**)((uint8_t*)this + 0x40);
-    int16_t offset_x = *(int16_t*)((uint8_t*)frame_data + 0x32);
-    int16_t offset_y = *(int16_t*)((uint8_t*)frame_data + 0x34);
+    RESDATA* frame_data = (RESDATA*)this->resource;     /* +0x40 */
+    int16_t offset_x = (frame_data != nullptr) ? *(int16_t*)((uint8_t*)frame_data + 0x32) : 0;
+    int16_t offset_y = (frame_data != nullptr) ? *(int16_t*)((uint8_t*)frame_data + 0x34) : 0;
 
     int exit_x, exit_y;
     int move_tx = this->dest_x;                             /* +0xCC */
@@ -941,7 +857,7 @@ int Building::DecideAction()
      * Occupant's resource is at Entity::resource (+0x40). */
     if (this->occupant_b != nullptr) {                     /* +0x90 */
         RESDATA* resource = (RESDATA*)this->occupant_b->resource;
-        if (Game_CheckTimeInRange(time_info,
+        if (Game_CheckTimeInRange((int*)time_info,
                 (int*)((uint8_t*)resource + 0x534),
                 (int*)((uint8_t*)resource + 0x548))) {
             return 2;  /* spawn */
@@ -952,7 +868,7 @@ int Building::DecideAction()
      * If time is OUTSIDE its active window, go there. */
     if (this->occupant_a != nullptr) {                     /* +0x8C */
         RESDATA* resource = (RESDATA*)this->occupant_a->resource;
-        if (!Game_CheckTimeInRange(time_info,
+        if (!Game_CheckTimeInRange((int*)time_info,
                 (int*)((uint8_t*)resource + 0x534),
                 (int*)((uint8_t*)resource + 0x548))) {
             return 1;  /* occupy */
@@ -1057,7 +973,7 @@ int Building::FindPathToTarget()
             int vs = *(int*)((uint8_t*)vehicle + 0x5C);
             if (vs == 0 || vs == 1) {  /* idle or boarding */
                 if (Vehicle_GetOccupantCount(vehicle) != 0) {
-                    this->AddOccupant(vehicle);
+                    this->AddOccupant((Entity*)vehicle);
                     return 1;
                 }
             }
@@ -1085,7 +1001,7 @@ int Building::FindPathToTarget()
             int vs = *(int*)((uint8_t*)vehicle + 0x5C);
             if (vs == 0 || vs == 1) {
                 if (Vehicle_GetOccupantCount(vehicle) != 0) {
-                    this->AddOccupant(vehicle);
+                    this->AddOccupant((Entity*)vehicle);
                     return 1;
                 }
             }
@@ -1149,13 +1065,12 @@ void Building::MoveToTarget()
 /* Building::HandleAction — Finalize current action at target          */
 /* Address: 0x434100                                                   */
 /* ================================================================== */
-void Building::HandleAction()
+void Building::HandleAction(int action)
 {
     if (!this->visible) return;
     if (g_selected_building == this && g_building_animating) return;
 
     this->field_a4 = 0;
-    int action = this->last_action;
 
     if (action == 1) {
         Entity* ob = this->occupant_a;
@@ -1555,8 +1470,9 @@ int Building::IsActionComplete()
 /* requires decompilation of all branch cases from the disassembly.     */
 /*                                                                      */
 /* Called helpers:                                                      */
-/*   TileMap_PathDistance    (0x45c7a0) — tile-path distance compute    */
-/*   TileMap_FindTileByType  (0x457ce0) — tile search by type          */
+/*   Math_PointOnLineSegment (0x45C7C0) — line-segment collision test   */
+/*   AssetMgr_ReadPairValue  (0x45DD80) — connection graph lookup       */
+/*   TileMap_FindTileByType  (0x457ce0) — tile search by type           */
 /* ================================================================== */
 void Building::StepToward(int x, int y)
 {
@@ -1567,58 +1483,106 @@ void Building::StepToward(int x, int y)
     /* --- Step 2: Look up tile at target tile position --- */
     void* tile = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);  /* 0x455620 */
 
-    uint16_t tile_type = 0;
+    uint8_t tile_type = 0;
     if (tile != nullptr) {
         RESDATA* tile_res = *(RESDATA**)((uint8_t*)tile + 0x40);
         tile_type = (tile_res != nullptr) ? *(uint8_t*)((uint8_t*)tile_res + 0x08) : 0;
     }
 
-    /* --- Step 3: Branch on tile type ---
+    /* --- Step 3: Branch on tile type (binary: 0x432B50) ---
      *
-     * Type 0x0C (walkable surface) or Type 3 (road) with no occupant:
-     *   Use path-finding to locate a connecting road tile (type 0x30),
-     *   update search position, and step toward it.
+     * Branch (a): Type 0x0C (walkable) or Type 3 (road) WITH occupant.
+     *   Binary condition: cVar2 == '\f' || (cVar2 == '\x03' && param_1[0x3c] != 0)
+     *   param_1[0x3c] = this->occupant_ptr (+0xF0). Confirmed at 0x432B50.
      *
-     * The binary at 0x432B50–0x432D30 handles additional tile types:
-     *   - 0x12 / 0x13 (horizontal/vertical road): lane-offset positioning
-     *   - 0xC6C / 0xC6E (rail tiles): block passage
-     *   - Connection node tiles: direction selection and node traversal
+     * Branch (b): All other types → fallback direct step toward target.
      *
-     * These additional branches are documented above and tracked for
-     * full decompilation in PROGRESS.md.                              */
-    if (tile_type == 0x0C || (tile_type == 3 && this->occupant_ptr == nullptr)) {
-        /* Compute path distance from target to current via world pos.
-         * Result is stored but the return value is used in the binary
-         * for connection-node ranking in branch (d).                 */
-        int path_dist = TileMap_PathDistance(g_tilemap,
-            this->target_x, this->target_y, x, y);
+     * Within branch (a), the binary has two sub-cases:
+     *   (c) Lane-offset: conn_node_id at tile+0xE4 == 0xFFFFFFFF
+     *       → scans 4 connection slots at tile+0xD8 for lane selection.
+     *   (d) Connection-node traversal: conn_node_id != 0xFFFFFFFF
+     *       → uses AssetMgr_ReadPairValue + Math_PointOnLineSegment. */
+    if (tile_type == 0x0C || (tile_type == 3 && this->occupant_ptr != nullptr)) {
+        /* --- Step 3a: Determine connection node at tile+0xE4 --- */
+        uint32_t conn_node_id = (tile != nullptr)
+            ? *(uint32_t*)((uint8_t*)tile + 0xE4) : 0xFFFFFFFF;
 
-        /* Search for a connecting road tile of type 0x30 near target. */
-        void* road_tile = TileMap_FindTileByType(g_tilemap, x, y, 0x0C, 0x30);
+        if (conn_node_id == 0xFFFFFFFF) {
+            /* Branch (c): Lane-offset computation (0x432B80–0x432D30).
+             *
+             * No connection node → scan 4 "lane" slots at tile+0xD8
+             * (uint32_t each). Identical dest means no selection needed.
+             * Otherwise pick the lane with the highest count, then read
+             * the connected tile from tile+0xC4[lane*4].             */
+            if (x != this->target_x || y != this->target_y) {
+                uint8_t best_lane = 0;
+                uint32_t best_count = 0;
+                for (int lane = 0; lane < 4; lane++) {
+                    uint32_t count = *(uint32_t*)((uint8_t*)tile + 0xD8 + lane * 4);
+                    if (count != 0 && (best_count == 0 || count < best_count)) {
+                        best_count = count;
+                        best_lane = lane;
+                    }
+                }
+                void* conn = *(void**)((uint8_t*)tile + 0xC4 + best_lane * 4);
+                if (conn != nullptr) {
+                    this->dest_x = *(int32_t*)((uint8_t*)conn + 0x4C);
+                    this->dest_y = *(int32_t*)((uint8_t*)conn + 0x50);
+                    return;
+                }
+            }
+        } else {
+            /* Branch (d): Connection-node traversal (0x432C50–0x432F80).
+             *
+             * Valid node ID → follow the connection graph:
+             *  1. Get connected tile via tile+0xC4[node_id*4]
+             *  2. AssetMgr_ReadPairValue for direction mask
+             *  3. Math_PointOnLineSegment for path validation
+             *  4. If direction differs from node_id, switch lanes
+             *  5. Set track/dest to final tile position              */
+            void* conn = *(void**)((uint8_t*)tile + 0xC4 + conn_node_id * 4);
+            if (conn != nullptr) {
+                uint32_t peer_node = *(uint32_t*)((uint8_t*)conn + 0xE4);
+                uint8_t dir = AssetMgr_ReadPairValue(
+                    g_asset_mgr, peer_node, this->track_node_id);
 
-        if (road_tile != nullptr) {
-            /* Found a connecting road tile — update search position.
-             * Read the tile's world position at +0x4C/+0x50.         */
-            this->search_x1 = *(int32_t*)((uint8_t*)road_tile + 0x4C);  /* +0xB0 */
-            this->search_y1 = *(int32_t*)((uint8_t*)road_tile + 0x50);  /* +0xB4 */
+                int conn_x = *(int32_t*)((uint8_t*)conn + 0x4C);
+                int conn_y = *(int32_t*)((uint8_t*)conn + 0x50);
+                int tile_x2 = *(int32_t*)((uint8_t*)tile + 0x4C);
+                int tile_y2 = *(int32_t*)((uint8_t*)tile + 0x50);
 
-            /* Advance dest toward the road tile position by ±4 pixels.
-             * This is a fixed-step movement; the binary may use a
-             * variable step based on road type for lane positioning. */
-            int road_x = this->search_x1;
-            int road_y = this->search_y1;
-            if (this->dest_x < road_x) this->dest_x += 4;
-            else if (this->dest_x > road_x) this->dest_x -= 4;
-            if (this->dest_y < road_y) this->dest_y += 4;
-            else if (this->dest_y > road_y) this->dest_y -= 4;
-            return;
+                uint8_t on_seg = Math_PointOnLineSegment(
+                    this->track_x, this->track_y,
+                    tile_x2, tile_y2, conn_x, conn_y);
+
+                if (on_seg == 0 &&
+                    ((dir - 2) & 3) == conn_node_id &&
+                    *(void**)((uint8_t*)tile + 0xC4 + dir * 4) != nullptr) {
+                    conn_node_id = dir;
+                }
+
+                void* final_tile = *(void**)((uint8_t*)tile + 0xC4 + conn_node_id * 4);
+                if (final_tile != nullptr) {
+                    this->track_x = *(int32_t*)((uint8_t*)final_tile + 0x4C);
+                    this->track_y = *(int32_t*)((uint8_t*)final_tile + 0x50);
+                    this->track_node_id = *(uint32_t*)((uint8_t*)final_tile + 0xE4);
+
+                    if (this->track_node_id == conn_node_id) {
+                        this->dest_x = this->track_x;
+                        this->dest_y = this->track_y;
+                    } else {
+                        if (this->dest_x < this->track_x) this->dest_x += 4;
+                        else if (this->dest_x > this->track_x) this->dest_x -= 4;
+                        if (this->dest_y < this->track_y) this->dest_y += 4;
+                        else if (this->dest_y > this->track_y) this->dest_y -= 4;
+                    }
+                    return;
+                }
+            }
         }
     }
 
-    /* --- Step 4: Fallback — advance dest directly toward (x,y) ---
-     * Move ±4 pixels in each axis, clamping toward the target.
-     * Used when no road tile is found or tile type doesn't match
-     * the path-following branches.                                  */
+    /* --- Step 4: Fallback — advance dest directly toward (x,y) --- */
     if (this->dest_x < x) {
         this->dest_x += 4;                          /* +0xCC */
     } else if (this->dest_x > x) {
@@ -1764,8 +1728,13 @@ void Building::PostMoveDispatch()
      * matching building's 5-slot child array at host+0xA4, increments
      * host's child_count at host+0x8E, and sets this->occupant_b = host.
      *
-     * DECOMPILER NOTE: The binary calls g_building_mgr->vtable[0x20]
-     * for iteration; we use the BuildingCollection API directly. */
+     * DECOMPILER NOTE: The binary at 0x433D98 calls
+     * g_building_mgr->vtable[0x20](index) for iteration. The C++
+     * uses BuildingCollection::GetItem() directly which is equivalent
+     * (BuildingCollection vtable[8] = GetItem). BuildingMgr does not
+     * override vtable[0x20] — it's a compiler-generated passthrough
+     * to the 'buildings' member collection.
+     * TODO: Verify BuildingMgr vtable layout at 0x477F70 slot [0x20]. */
     if (g_building_mgr != nullptr && this->resource != nullptr) {
         RESDATA* my_res = (RESDATA*)this->resource;     /* +0x40 */
         uint8_t my_sub_type = *(uint8_t*)((uint8_t*)my_res + 0x08);
@@ -1925,31 +1894,36 @@ uint8_t Building::CheckPlacementCollision(int x, int y)
 /* ================================================================== */
 uint32_t Building::FindNearestConnectionNode(void* node_set, uint32_t current_node_id)
 {
-    /* Compute baseline distance from target to world position */
-    int best_dist = TileMap_PathDistance(g_tilemap,
+    /* Binary at 0x4343F0 calls Math_DistSquared (0x45C7A0) for
+     * squared Euclidean distance computation, then calls
+     * AssetMgr_ReadPairValue (0x45DD80) for connection flags. */
+
+    /* Compute baseline squared distance: self world_pos → target */
+    int best_dist = Math_DistSquared(
         this->world_x, this->world_y, this->target_x, this->target_y);
 
-    /* Get node count from node_set */
+    /* node_set layout:
+     *   +0x00: uint32_t count
+     *   +0x08: Entity* nodes[] */
     uint32_t count = *(uint32_t*)node_set;          /* +0x00 */
     uint32_t best_idx = current_node_id;
-
-    /* node array at node_set + 0x08 */
     void** node_array = (void**)((uint8_t*)node_set + 0x08);
 
     for (uint32_t i = 0; i < count; i++) {
-        /* Get connection flag for this node via 0x45dd80 */
-        uint8_t flag = NodeSet_GetConnectionFlag(node_set, i);
+        /* AssetMgr_ReadPairValue(this=node_set, a=current_node_id, b=i)
+         * Returns 0-3 = valid connection direction,
+         *         0x80 = empty but valid,
+         *         0xFF = invalid/nonexistent. */
+        uint8_t flag = AssetMgr_ReadPairValue(node_set, current_node_id, i);
 
-        /* Skip blocked nodes (flag 0x80 or 0xFF) */
         if (flag == 0x80 || flag == 0xFF) {
             continue;
         }
 
-        /* Get this node's entity and its position */
         Entity* node_entity = (Entity*)node_array[i];
         if (node_entity == nullptr) continue;
 
-        int node_dist = TileMap_PathDistance(g_tilemap,
+        int node_dist = Math_DistSquared(
             this->target_x, this->target_y,
             node_entity->world_x, node_entity->world_y);
 
@@ -1992,7 +1966,7 @@ void Building::SetName(const char* name)
     if (res != nullptr) {
         uint8_t sub_type = *(uint8_t*)((uint8_t*)res + 0x08);
         if (sub_type == SUBTYPE_STATION) {
-            BuildingMgr_CompactCollections(g_building_mgr);  /* 0x434870 */
+            g_building_mgr->CompactCollections();   /* 0x434870 */
         }
     }
 

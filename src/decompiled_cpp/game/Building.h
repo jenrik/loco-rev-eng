@@ -39,6 +39,13 @@
  *   [22] +0x58: IsActionComplete() -> int (0x432FD0)
  *   [23] +0x5C: PartyModeUpdate(Building* next_building) (0x433220)
  *
+ * NOTE: C++ virtual declaration order does not yet match the binary vtable
+ * slot order above. The virtual methods are currently interleaved with
+ * non-virtual helpers in logical groups (AI, movement, name management).
+ * Since no literal vtable dispatch remains in the codebase, this has no
+ * runtime effect. Reordering will be completed during the INTEGRATION pass
+ * (Pass 3) when the class hierarchy is finalized.
+ *
  * Compiler-managed (not in C++):
  *   scalar deleting destructor wrapper at 0x432720
  *   vector deleting destructor wrapper at 0x4327A0 (calls BaseDtor)
@@ -132,8 +139,12 @@ public:
      * InitBase() for Entity-level resource init, then initializes
      * all Building-specific fields, generates random name or copies
      * resource name, handles PARTY mode easter egg trigger.
+     *
+     * @param resource_id  Resource ID to load
+     * @param base_only    If true, skip occupant_ptr (+0xF0) init
+     *                     (Train subclass is 0xF0 bytes, no occupant_ptr)
      */
-    void BaseCtor(int resource_id);
+    void BaseCtor(int resource_id, bool base_only);
 
     /**
      * Base destructor body (real cleanup logic).
@@ -162,16 +173,27 @@ public:
 
     /**
      * Main Building update tick.
-     * Address: 0x4327B0
+     * Address: 0x4327B0 — Vtable slot [15] (+0x3C), NEW virtual.
+     *
+     * This does NOT override Entity::Update() (slot [10]) — they occupy
+     * distinct vtable slots and have different signatures. The binary
+     * calls Entity::Update() internally for animation frame advancement
+     * (see CheckTimeout), and Building::Update(void*) for AI dispatch.
      *
      * Skips normal AI when party mode is active (dispatches to
-     * PartyModeUpdate). Otherwise runs occupation/action
-     * state machine.
+     * PartyModeUpdate, forwarding next_entity). Otherwise runs
+     * occupation/action state machine.
      *
-     * DECOMPILER NOTE: next_entity is passed from BuildingMgr_UpdateAll
-     * iteration but is unused in the current implementation.
+     * @param next_entity  Forwarded to PartyModeUpdate for connection
+     *                     building lookup; may be null when called from
+     *                     contexts without iteration state.
      */
-    void Update(void* next_entity) override;
+    virtual void Update(void* next_entity);
+
+    // Expose Entity::Update() (vtable slot [10], no params) alongside
+    // Building::Update(void*) (vtable slot [15]). Without this using
+    // declaration, the parameterless overload is hidden by name hiding.
+    using Entity::Update;
 
     /* ================================================================ */
     /* Occupant management                                               */
@@ -274,10 +296,10 @@ public:
      * Execute the current action.
      * Address: 0x434100
      *
-     * Uses last_action (+0xE8) to determine which action to finalize.
+     * @param action  Action from last_action (+0xE8) to finalize.
      * In party mode, suppresses random wander timer reset for case-3.
      */
-    void HandleAction();
+    void HandleAction(int action);
 
     /* ================================================================ */
     /* Serialization                                                     */

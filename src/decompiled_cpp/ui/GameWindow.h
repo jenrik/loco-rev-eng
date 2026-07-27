@@ -31,20 +31,26 @@
  *     └─ AudioMgr / HelpWnd        (vtable 0x478428)
  *
  * Vtable layout (8 entries, 0x20 bytes):
- *   [0] +0x00: scalar deleting destructor     (GameWindow_Dtor,            0x413B50)
- *   [1] +0x04: Hide                           (GameWindow_Hide,            0x413C10)
- *   [2] +0x08: Show                           (GameWindow_Show,            0x413D10)
- *   [3] +0x0C: set_mode                       (default: Cursor_SetMode,    0x414340)
- *   [4] +0x10: method_4                       (default: stub at 0x426130)
- *   [5] +0x14: Create                         (GameWindow_Create,          0x413DE0)
- *   [6] +0x18: update_client_rect / Init      (default: Cursor_UpdateClientRect, 0x4140A0)
- *   [7] +0x1C: on_show                        (default: stub at 0x426130)
+ *   [0] +0x00: ~GameWindow (scalar deleting dtor) (0x413B50)
+ *   [1] +0x04: hide                            (0x413C10)
+ *   [2] +0x08: show                            (0x413D10)
+ *   [3] +0x0C: set_mode                        (default: Cursor_SetMode,    0x414340)
+ *   [4] +0x10: cleanup_sprites                 (default: stub at 0x426130)
+ *   [5] +0x14: create                          (0x413DE0)
+ *   [6] +0x18: init                            (default: Cursor_UpdateClientRect, 0x4140A0)
+ *   [7] +0x1C: update_anim                     (default: stub at 0x426130)
  */
+
+// Status: TRANSCRIBED
 
 #pragma once
 
 #include "../shared/types.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
+
+/* Forward declaration: DDraw surface type used for backbuffer and aux pointers */
+struct IDirectDrawSurface4;
+
 /* ================================================================== */
 /* GameWindow class                                                     */
 /* ================================================================== */
@@ -68,13 +74,13 @@ public:
     int32_t    rectRight;              // +0x20  window rect right
     int32_t    rectBottom;             // +0x24  window rect bottom
 
-    int32_t    field_28;               // +0x28  zeroed in ctor
-    int32_t    field_2C;               // +0x2C  zeroed in ctor
+    int32_t    field_28;               // +0x28  zeroed in create() when backbufferSurface is NULL
+    int32_t    field_2C;               // +0x2C  zeroed in create() when backbufferSurface is NULL
 
     int32_t    width;                  // +0x30  window width  (from Create nWidth param)
     int32_t    height;                 // +0x34  window height (from Create nHeight param)
 
-    void*      backbufferSurface;      // +0x38  IDirectDrawSurface* — own offscreen surface
+    IDirectDrawSurface4* backbufferSurface; // +0x38  own offscreen surface (DDraw backbuffer)
                                        //         released via vtable[2] in base dtor
 
     int32_t    defaultWidth;           // +0x3C  default width  (set to 0x20 in ctor)
@@ -98,14 +104,11 @@ public:
     int32_t    field_60;               // +0x60  NOT zeroed in ctor
     int32_t    field_64;               // +0x64  NOT zeroed in ctor
 
-    int32_t    field_68;               // +0x68  zeroed in ctor
-    int32_t    field_6C;               // +0x6C  zeroed in ctor
-    int32_t    field_70;               // +0x70  zeroed in ctor
-    int32_t    field_74;               // +0x74  zeroed in ctor
-    int32_t    field_78;               // +0x78  zeroed in ctor
-    int32_t    field_7C;               // +0x7C  zeroed in ctor
-    int32_t    field_80;               // +0x80  zeroed in ctor
-    int32_t    field_84;               // +0x84  zeroed in ctor
+    int32_t    reserved_work[8];        // +0x68  scratch fields; zeroed in ctor,
+                                       //         cleared by set_mode(resetPos=1).
+                                       //         Indices: [0]=+0x68, [1]=+0x6C, [2]=+0x70,
+                                       //         [3]=+0x74, [4]=+0x78, [5]=+0x7C,
+                                       //         [6]=+0x80, [7]=+0x84
 
     uint8_t    captureFlag;            // +0x88  byte — mouse capture flag
                                        //         checked in Hide for ReleaseCapture
@@ -114,16 +117,17 @@ public:
     /* Auxiliary DirectDraw sub-objects (released in base dtor) */
     int32_t    ddrawAuxCount1;         // +0x90  aux object 1 count/flag (zeroed in ctor)
     int32_t    ddrawAuxField1;         // +0x94  aux object 1 field  (zeroed in ctor)
-    void*      ddrawAuxPtr1;           // +0x98  aux object 1 pointer (NOT zeroed in ctor)
+    IDirectDrawSurface4* ddrawAuxPtr1; // +0x98  aux DDraw surface 1 (NOT zeroed in ctor)
 
     int32_t    ddrawAuxCount2;         // +0x9C  aux object 2 count/flag (zeroed in ctor)
     int32_t    ddrawAuxField2;         // +0xA0  aux object 2 field  (zeroed in ctor)
-    void*      ddrawAuxPtr2;           // +0xA4  aux object 2 pointer (NOT zeroed in ctor)
+    IDirectDrawSurface4* ddrawAuxPtr2; // +0xA4  aux DDraw surface 2 (NOT zeroed in ctor)
 
     char       title[50];              // +0xA8  window title string (50 bytes)
                                        //         loaded via FormatResourceString in ctor
                                        //         used as WNDCLASS.lpszClassName in Create
 
+    uint8_t    _pad_DA;                 // +0xDA  padding byte
     uint8_t    createdFlag;            // +0xDB  byte — 1 = window has been created
                                        //         set in Create before calling vtable[6] init callback
 
@@ -131,20 +135,20 @@ public:
     int32_t    windowY;                // +0xE0  window top  Y position (stored from Create y param)
 
     int32_t    windowWidth;            // +0xE4  window width (from Create nWidth, overwritten
-                                       //         by update_client_rect with GetClientRect result)
+                                       //         by init() with GetClientRect result)
     int32_t    windowHeight;           // +0xE8  window height (from Create nHeight, overwritten
-                                       //         by update_client_rect with GetClientRect result)
+                                       //         by init() with GetClientRect result)
 
-    int32_t    workWidth;              // +0xEC  working rect width  (set by update_client_rect)
-    int32_t    workHeight;             // +0xF0  working rect height (set by update_client_rect)
+    int32_t    workWidth;              // +0xEC  working rect width  (set by init())
+    int32_t    workHeight;             // +0xF0  working rect height (set by init())
 
-    /* Temporary rect used by update_client_rect for GetClientRect output */
+    /* Temporary rect used by init() for GetClientRect output */
     int32_t    tempLeft;               // +0xF4  temporary rect left
     int32_t    tempTop;                // +0xF8  temporary rect top
     int32_t    tempRight;              // +0xFC  temporary rect right
     int32_t    tempBottom;             // +0x100 temporary rect bottom
 
-    /* Client rectangle (copied from temp rect by update_client_rect).
+    /* Client rectangle (copied from temp rect by init()).
        also used as width/height offsets by SetPosition. */
     int32_t    clientLeft;             // +0x104 cached client rect left
     int32_t    clientTop;              // +0x108 cached client rect top
@@ -198,9 +202,11 @@ public:
     virtual ~GameWindow();
 
     /**
-     * on_show callback (vtable[7]). Fired after window is shown.
+     * update_anim — vtable[7] callback. Fired after window is shown.
+     * Address: 0x426130 (default stub)
+     * Overridden by HelpWnd as update_anim (0x450450).
      */
-    virtual void on_show(int param);
+    virtual void update_anim(int param);
 
     /**
      * Base destructor body (called by scalar deleting destructor).
@@ -221,6 +227,36 @@ public:
     void base_destructor();
 
     /**
+     * set_mode — vtable[3] callback. Set cursor/animation state.
+     * Address: 0x414340 (default impl: Cursor_SetMode)
+     *
+     * If stateId matches current, no-op (unless stateId=0 → early return).
+     * Updates field_14/field_44/field_48. If resetPos, zeroes reserved_work
+     * block. If forceRedraw and !visible, triggers UnlockPrimary →
+     * UpdateDirtyRect → UnlockAllSurfaces → RenderWithViewport.
+     *
+     * @param stateId      New state ID (0 = hide cursor)
+     * @param resdata      Resource data pointer (stored at +0x44)
+     * @param resetPos     If non-zero, zero the reserved_work block (+0x68..+0x84)
+     * @param forceRedraw  If non-zero, force a dirty-rect render cycle
+     */
+    virtual void set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw);
+
+    /**
+     * cleanup_sprites — vtable[4] callback.
+     * Address: 0x426130 (default stub)
+     * Overridden by HelpWnd as cleanup_sprites (0x451440).
+     */
+    virtual void cleanup_sprites();
+
+    /**
+     * init — vtable[6] callback.
+     * Address: 0x4140A0 (default: Cursor_UpdateClientRect)
+     * Overridden by HelpWnd as init (0x451180).
+     */
+    virtual void init();
+
+    /**
      * Hide the window (vtable[1]).
      * Address: 0x413C10
      *
@@ -231,7 +267,7 @@ public:
      * Called by: HelpWnd_Hide @ 0x450AE4, TrainStationWindow_Hide @ 0x436F78,
      *            CGWND_Screensaver_Hide @ 0x40F48D
      */
-    void hide();
+    virtual void hide();
 
     /**
      * Show the window (vtable[2]).
@@ -245,7 +281,7 @@ public:
      * Called by: HelpWnd_Show @ 0x4503F9, TrainStationWindow_Show @ 0x436EC4,
      *            AboutDialog (via vtable dispatch @ 0x40F2AA)
      */
-    void show();
+    virtual void show();
 
     /**
      * SetPosition — Reposition the window.
@@ -276,7 +312,7 @@ public:
      *      WS_CLIPSIBLINGS | WS_CLIPCHILDREN). The 'this' pointer is
      *      passed as the CREATESTRUCT lpCreateParams.
      *   4. Sets createdFlag = 1
-     *   5. Fires vtable[6] (update_client_rect / Init callback)
+     *   5. Fires vtable[6] (init callback)
      *   6. Calls Cursor_InitSprites to set up cursor overlay
      *   7. Creates an offscreen DDraw surface (if not already present)
      *      via IDirectDraw4::CreateSurface with DDSD_CAPS|DDSD_WIDTH|
@@ -303,7 +339,9 @@ public:
      * @param showCursor    Byte: 0 = don't capture cursor on close, 1 = capture
      * @return              1 on success, 0 on failure
      */
-    int create(int nCmdShow, HWND hWndParent, int x, int y,
+    virtual int create(int nCmdShow, HWND hWndParent, int x, int y,
                int nWidth, int nHeight, HMENU hMenu, HICON hIcon,
                UINT classStyle, int unused1, int unused2, uint8_t showCursor);
 };
+
+static_assert(sizeof(GameWindow) == 0x118, "GameWindow size must be 0x118 bytes");

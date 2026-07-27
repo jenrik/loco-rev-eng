@@ -35,7 +35,7 @@ void   DirectPlay_Close(void* peer);          /* 0x00461990 */
 int    DirectPlay_HostSession(void* peer, int enable, int max_players, int a, int b); /* 0x0045EDE0 */
 int    DirectPlay_ConnectToSession(void* peer, char* player_name, char* session_name, char* pwd); /* 0x0045F050 */
 int    DirectPlay_SetSessionDesc(void* peer, char* desc); /* 0x0045FB70 */
-void   DirectPlay_HandleMessages(void);       /* 0x00460090 */
+void   DirectPlay_HandleMessages(void);       /* 0x45F390 */
 
 /* Win32 I/O */
 int    __stdcall CreateFileA(const char* lpFileName, uint32_t dwDesiredAccess,
@@ -186,24 +186,6 @@ struct NetworkMsg {
 
 
 /* ================================================================== */
-/* PlayerConnectionNode — used for attachment transfers                 */
-/* ================================================================== */
-
-struct PlayerConnectionNode {
-    int32_t   player_id;       /* +0x00 */
-    uint16_t  sub_type;        /* +0x04 */
-    uint16_t  extra_info;      /* +0x06 */
-    uint8_t   transfer_state;  /* +0x08 (0=FIRST, 1=INTERIM, 2=FINAL) */
-    uint8_t   _pad_09;         /* +0x09 */
-    uint16_t  notify_id;       /* +0x0A receiver-side completion ID */
-    int32_t   file_handle;     /* +0x0C */
-    int16_t   throttle;        /* +0x10 */
-    uint16_t  sequence_num;    /* +0x12 */
-    uint8_t   _pad_14[4];      /* +0x14 */
-    void*     next;            /* +0x18 */
-};
-
-
 /**
  * TrainSubsystem::TrainSubsystem
  * Address: 0x438BC0

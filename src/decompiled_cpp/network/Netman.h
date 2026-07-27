@@ -73,6 +73,8 @@
 #pragma once
 
 #include "../shared/types.h"
+#include "../resources/ResourceManager.h"
+class AssetMgr;  /* forward declaration for g_asset_mgr */
 
 /* ================================================================== */
 /* Packet type constants used by the network subsystem                 */
@@ -866,7 +868,7 @@ extern "C" {
     void    __stdcall MessageBeep(uint32_t uType);
     int32_t __stdcall MessageBoxA(void* hWnd, const char* lpText,
                                    const char* lpCaption, uint32_t uType);
-    int32_t __stdcall OutputDebugStringA(const char* lpOutputString);
+    void    __stdcall OutputDebugStringA(const char* lpOutputString);
     int32_t __stdcall Sleep(uint32_t dwMilliseconds);
 }
 
@@ -881,7 +883,7 @@ extern char     g_install_path[];     /* 0x4A99C8 — installation path  */
 extern uint16_t g_player_id;          /* 0x4AAD46 — global player ID   */
 extern uint16_t g_player_color;       /* 0x4AAD48 — global player color*/
 extern void*    g_tilemap;            /* 0x4AAD08 — tilemap object     */
-extern void*    g_asset_mgr;          /* 0x485600 — asset manager ptr  */
+extern AssetMgr* g_asset_mgr;          /* 0x485600 — asset manager ptr  */
 extern void*    g_net_host_info;      /* 0x4FD3A8 — net host info struct */
 extern void*    g_ui_main;            /* 0x4A8860 — main UI window ptr */
 extern void*    g_listener_x;         /* 0x486BBC — listener position x */
@@ -889,15 +891,14 @@ extern void*    g_listener_y;         /* 0x486BC0 — listener position y */
 extern void*    _g_dplay;             /* 0x4FD3A8 — DPLAY/NetworkPlayerList instance */
 extern void*    _g_dplay_config;      /* 0x4FD3AC — DPLAY config instance */
 extern int32_t  g_object_count;       /* 0x4AAD04 — object count       */
-extern void*    _g_netman;            /* 0x4FD3AC — Netman singleton pointer */
+extern Netman*  _g_netman;            /* 0x4FD3AC — Netman singleton pointer */
 extern void*    g_player_config;      /* 0x4AA4A8 — PlayerConfig singleton */
 extern char     g_empty_string;       /* 0x4851D0 — empty string constant  */
-extern void*    g_resmgr;             /* 0x4855E8 — resource manager */
 
 /* -- CRT helpers (C++ linkage) -- */
 void* operator_new(size_t size);              /* 0x465CE0 */
 void  GLOBAL_free(void* ptr);                  /* 0x465CD0 */
-void  CRT_exit(const char** msg, void* ctx);  /* 0x466CE0 */
+void  CRT_exit(const char** msg, const char** fileLine);  /* 0x466CE0 */
 int32_t CRT_atoi(const char* str);            /* 0x466390 */
 void  CRT_itoa(int32_t val, char* buf, int32_t radix); /* 0x4663D0 */
 int32_t CRT_rand(void);                       /* 0x466150 */
@@ -998,7 +999,7 @@ void* WIN32_StreamOpenFile(void* stream, const char* path,
 void  WIN32_StreamRead(void* stream, void* buf, int32_t size);
 
 /* -- Asset manager -- */
-int32_t* AssetMgr_LoadFile(void* mgr, const char* path, int32_t* out_size);
+uint8_t* AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t* out_size);
 
 /* -- NET class helpers -- */
 uint32_t NET_Dtor(uint8_t param1, uint8_t param2, uint8_t param3);

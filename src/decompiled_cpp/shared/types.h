@@ -255,7 +255,8 @@ struct UISprite {
 /* Global variables — declared extern; defined in their owning module   */
 /* ================================================================== */
 extern uint32_t  g_game_time;           /* 0x4A99B4 — global game tick counter */
-extern HWND      g_main_window;         /* 0x4AA4A0 — main window handle       */
+extern HWND      g_main_window;
+extern void*     _g_primary_surface;   /* 0x4FD3C4 — primary DirectDraw surface */
 extern uint8_t   g_is_party_mode;       /* 0x48548C — 1 = party mode active    */
 extern uint32_t  g_party_start_time;    /* 0x485490 — tick when party started  */
 extern void     *g_config_ini;          /* 0x485484 — config/INI object handle  */

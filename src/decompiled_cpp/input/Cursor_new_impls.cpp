@@ -17,7 +17,7 @@ void Cursor::init_editor_sprites()
     }
 
     /* Load editor sprite sheet resource 0x3CB9 */
-    int* resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x3CB9);
+    RESDATA* resdata = (RESDATA*)ResourceManager_GetById(&g_resmgr, 0x3CB9);
     this->editor_resdata = resdata;                          /* +0x1F0 */
 
     if (resdata != nullptr) {
@@ -507,6 +507,8 @@ void Cursor::blit_edit_preview()
         int hdcVal = ((int)(intptr_t)this->obj_184 >> 8) & 0xFFFFFF;
         hdcVal = (hdcVal << 8) | this->field_188;
 
+        /* Ghidra @ 0x4437C0: DPLAY_RenderPlayer last param is RECT*, not int*.
+         * Pass address of edit_preview_rect (the binary uses LEA, not MOV). */
         DPLAY_RenderPlayer(
             dplay,
             (HDC)(intptr_t)hdcVal,
@@ -515,7 +517,7 @@ void Cursor::blit_edit_preview()
             this->edit_preview_rect.left,
             this->edit_preview_rect.top,
             this->edit_preview_rect.right,
-            (int*)(intptr_t)this->edit_preview_rect.bottom);
+            &this->edit_preview_rect);
     }
 }
 
@@ -852,7 +854,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
 /* ================================================================== */
 uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 {
-    int prevStartIdx = this->palette_end_idx;              /* +0x2BC */
+    int prevStartIdx = this->palette_start_idx;            /* +0x2BC — Ghidra @ 0x419260 reads *(this+700) = palette_start_idx */
     this->field_2B4 = 1;  /* has_next_page = true */
 
     if (prevStartIdx >= 1) {
@@ -1371,15 +1373,14 @@ void Cursor::upload_custom_content()
         uint16_t uploadId = NET_UploadAsset(4, filePath);
         this->obj_184->upload_id = uploadId;
 
-        /* Check if it's a WAV file (check extension for ".WAV") */
+        /* Check if it's a WAV file (search for ".WAV" extension).
+         * Ghidra @ 0x419EB9: CRT_wcsstr is misidentified — the binary calls
+         * CRT strstr (MSVC _strstr) with an ASCII ".WAV" needle at 0x47E4C8.
+         * The first arg is filePath + strlen - 4 (last 4 chars = extension). */
         uint32_t fileLen = strlen(filePath);
-        uint8_t* extCheck = (uint8_t*)filePath + fileLen;
-
-        /* Search for ".WAV" substring from end */
         int hasWavExt = 0;
-        {
-            const uint16_t wavStr[] = { '.', 'W', 'A', 'V', 0 };
-            hasWavExt = (CRT_wcsstr((uint8_t*)filePath, wavStr) != nullptr);
+        if (fileLen >= 4) {
+            hasWavExt = (strstr(filePath + fileLen - 4, ".WAV") != nullptr);
         }
 
         if (hasWavExt) {
@@ -1399,14 +1400,12 @@ void Cursor::upload_custom_content()
 
     /* Clean up */
     /* Update upload status sprite.
-     * TODO: Ghidra @ 0x419B10 — verify the sprite index. toolbar_sprites[0xBB]
-     *       (index 187) exceeds the [64] array bounds. The computed offset
-     *       +0x48C + 0xBB*4 = +0x778 is past the class size of 0x740.
-     *       The binary likely accesses a different field; this is a
-     *       transcription error needing Ghidra cross-reference. */
-    int spriteIdx = 0xBB;
-    if (spriteIdx >= 0 && spriteIdx < 64) {
-        Sprite_SetState((void*)(intptr_t)this->toolbar_sprites[spriteIdx], uploadStatus, nullptr);
+     * Ghidra @ 0x419F32: Sprite_SetState(param_1[0xBB], upload_id!=0, 0)
+     * param_1[0xBB] = byte offset 0x2EC = sprite_2EC (resource 0x3CBC).
+     * Second arg is (obj_184->upload_id != 0) → 0 or 1. */
+    {
+        int uploadState = (this->obj_184 != nullptr && this->obj_184->upload_id != 0) ? 1 : 0;
+        Sprite_SetState(this->sprite_2EC, uploadState, nullptr);
     }
     UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 

@@ -1,3 +1,4 @@
+// Status: TRANSCRIBED
 /**
  * Train.cpp — Building-derived Train entity implementation
  *
@@ -6,6 +7,7 @@
  */
 
 #include "Train.h"
+#include <cstring>
 #include <new>
 
 extern void* operator_new(size_t size);                 /* 0x465CE0 */

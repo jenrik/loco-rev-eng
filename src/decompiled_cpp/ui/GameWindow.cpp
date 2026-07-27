@@ -10,15 +10,18 @@
  * include AboutDialog, TrainStationWindow, and AudioMgr (HelpWnd).
  */
 
+// Status: TRANSCRIBED
+
 #include "GameWindow.h"
+#include "../stubs/ddraw.h"
 #include "../shared/vtable_addrs.h"
-/* vtable_addrs.h removed — compiler manages vtables via virtual methods */
+/* vtable_addrs.h: VTBL_* reference constants for documentation and cross-validation */
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
 
-/* CRT / memory management */
-    extern void __cdecl GLOBAL_free(void* ptr);                     /* 0x465CD0 */
+/* Shared GameWindow window procedure (0x415900) */
+extern LRESULT CALLBACK GameWindow_WndProc(HWND, UINT, WPARAM, LPARAM);
 
 #ifdef _WIN32
 extern "C" {
@@ -68,25 +71,31 @@ static inline int GetWindowTextA(HWND, char* buf, int max) {
 #endif /* !_WIN32 */
 
 /* Game window subsystem functions */
-extern void __fastcall Cursor_InitSprites(GameWindow* this_);              /* 0x414130 */
-extern void __thiscall Cursor_UnlockAllSurfaces(GameWindow* this_);        /* 0x414EF0 */
-extern void __thiscall Cursor_SetCapture(GameWindow* this_, byte capture); /* 0x414290 */
+extern void Cursor_InitSprites(GameWindow* this_);                        /* 0x414130 */
+extern void Cursor_UnlockAllSurfaces(GameWindow* this_);                  /* 0x414EF0 */
+extern void Cursor_UpdateDirtyRect(GameWindow* this_, uint8_t flag);      /* 0x414770 (set_mode helper) */
+extern void Cursor_RenderWithViewport(GameWindow* this_, uint8_t param);  /* 0x414810 (set_mode helper) */
+extern void Cursor_SetCapture(GameWindow* this_, byte capture);           /* 0x414290 */
 extern void __cdecl    DDRAW_UnlockPrimary(HWND hWnd);                     /* 0x45B940 */
-extern void __thiscall FormatResourceString(void* resmgr, int string_id,
-                                            char* out_buf, int max_len);   /* 0x447330 */
+extern void FormatResourceString(void* resmgr, int string_id,
+                                      char* out_buf, int max_len);         /* 0x447330 */
 
 /* DDraw surface helpers (defined in native/ddraw_helpers.c) */
 extern void __cdecl DDRAW_GetSurfaceWidthHeight(void* surf,
                                                 uint16_t* out_w,
                                                 uint16_t* out_h);          /* 0x4014E0 */
-extern int  __cdecl DDRAW_SetSurfaceFormat(void* surf, int fmt);           /* 0x45B9B0 */
+extern int  __cdecl DDRAW_SetSurfaceFormat(void* surf, void* desc);        /* 0x45B9B0 */
 extern int  __cdecl DDRAW_RestoreSurfaces(void* surf, void* desc);         /* 0x45BA50 */
 
 /* ================================================================== */
 /* Global variable references                                           */
 /* ================================================================== */
 
-extern void*  g_resmgr;             /* 0x4855E8 — ResourceManager singleton */
+/* ResourceManager is an embedded object at 0x4855E8, not a pointer.
+ * FormatResourceString receives &g_resmgr (ResourceManager*) as this. */
+class ResourceManager;
+extern ResourceManager g_resmgr;                                    /* 0x4855E8 */
+
 extern void*  g_ddraw;              /* 0x485440 — IDirectDraw4* */
 extern void*  g_backbuffer;         /* 0x4FD3C0 — main scene backbuffer (IDirectDrawSurface*) */
 extern void*  g_primary_surface;    /* 0x4FD3C4 — primary surface (IDirectDrawSurface*) */
@@ -156,15 +165,16 @@ GameWindow::GameWindow(HINSTANCE hInstance, UINT resId)
 
     /* +0x10 */ this->resourceId        = resId;
 
-    /* Zero reserved work fields (8 DWORDs at +0x68..+0x84) */
-    /* +0x68 */ this->field_68 = 0;
-    /* +0x70 */ this->field_70 = 0;
-    /* +0x6C */ this->field_6C = 0;
-    /* +0x74 */ this->field_74 = 0;
-    /* +0x78 */ this->field_78 = 0;
-    /* +0x80 */ this->field_80 = 0;
-    /* +0x7C */ this->field_7C = 0;
-    /* +0x84 */ this->field_84 = 0;
+    /* Zero reserved work fields (8 DWORDs at +0x68..+0x84).
+     * Binary zeroes in non-sequential order; array order matches field layout. */
+    this->reserved_work[0] = 0;                             /* +0x68 */
+    this->reserved_work[1] = 0;                             /* +0x6C */
+    this->reserved_work[2] = 0;                             /* +0x70 */
+    this->reserved_work[3] = 0;                             /* +0x74 */
+    this->reserved_work[4] = 0;                             /* +0x78 */
+    this->reserved_work[5] = 0;                             /* +0x7C */
+    this->reserved_work[6] = 0;                             /* +0x80 */
+    this->reserved_work[7] = 0;                             /* +0x84 */
 
     /* Load window title from string resources into +0xA8 (50 bytes max) */
     FormatResourceString(&g_resmgr, resId, this->title, sizeof(this->title));
@@ -200,9 +210,7 @@ void GameWindow::base_destructor()
 
     /* Release auxiliary DDraw object 1 */
     if (this->ddrawAuxCount1 != 0) {                            /* +0x90 */
-        void* obj = this->ddrawAuxPtr1;                         /* +0x98 */
-        void** vtab = *(void***)obj;
-        ((void (__fastcall*)(void*))(vtab[2]))(obj);            /* vtable[2] = Release */
+        ((IDirectDrawSurface4*)this->ddrawAuxPtr1)->Release();  /* +0x98, vtable[2] */
         this->ddrawAuxField1 = 0;                               /* +0x94 */
         this->ddrawAuxPtr1   = NULL;                            /* +0x98 */
         this->ddrawAuxCount1 = 0;                               /* +0x90 */
@@ -210,9 +218,7 @@ void GameWindow::base_destructor()
 
     /* Release auxiliary DDraw object 2 */
     if (this->ddrawAuxCount2 != 0) {                            /* +0x9C */
-        void* obj = this->ddrawAuxPtr2;                         /* +0xA4 */
-        void** vtab = *(void***)obj;
-        ((void (__fastcall*)(void*))(vtab[2]))(obj);            /* vtable[2] = Release */
+        ((IDirectDrawSurface4*)this->ddrawAuxPtr2)->Release();  /* +0xA4, vtable[2] */
         this->ddrawAuxField2 = 0;                               /* +0xA0 */
         this->ddrawAuxPtr2   = NULL;                            /* +0xA4 */
         this->ddrawAuxCount2 = 0;                               /* +0x9C */
@@ -222,8 +228,7 @@ void GameWindow::base_destructor()
     if (this->cursorRefcount != 0) {                            /* +0x5C */
         g_cursor_refcount--;
         if (g_cursor_refcount == 0 && g_cursor_back != NULL) {
-            void** vtab = *(void***)g_cursor_back;
-            ((void (__fastcall*)(void*))(vtab[2]))(g_cursor_back);  /* vtable[2] = Release */
+            ((IDirectDrawSurface4*)g_cursor_back)->Release();   /* vtable[2] = Release */
             g_cursor_back     = NULL;
             g_cursor_refcount = 0;
         }
@@ -231,10 +236,8 @@ void GameWindow::base_destructor()
     }
 
     /* Release own backbuffer surface */
-    void* surf = this->backbufferSurface;                        /* +0x38 */
-    if (surf != NULL) {
-        void** vtab = *(void***)surf;
-        ((void (__fastcall*)(void*))(vtab[2]))(surf);            /* vtable[2] = Release */
+    if (this->backbufferSurface != NULL) {                      /* +0x38 */
+        ((IDirectDrawSurface4*)this->backbufferSurface)->Release(); /* vtable[2] */
         this->backbufferSurface = NULL;                         /* +0x38 */
     }
 }
@@ -295,19 +298,16 @@ void GameWindow::hide()
 
     /* Restore primary surface if lost */
     if (g_surface_lost != 0) {                       /* 0x4FD218 */
-        void** primVtab = *(void***)g_primary_surface;               /* 0x4FD3C4 */
-        int result = ((int (__stdcall*)(void*, void*))(primVtab[0x80/4]))
-                        (g_primary_surface, NULL);                  /* vtable[32] = Restore */
+        int result = ((IDirectDrawSurface4*)g_primary_surface)->Restore();  /* 0x4FD3C4, vtable[32] */
         if (result == 0) {
             g_surface_lost = 0;
         }
     }
 
     /* Blt: save screen content below window from primary to backbuffer */
-    void** bbVtab = *(void***)g_backbuffer;                         /* 0x4FD3C0 */
-    ((void (__stdcall*)(void*, RECT*, void*, RECT*, DWORD, void*))(bbVtab[0x14/4]))
-        (g_backbuffer, &destRect, g_primary_surface, &srcRect,
-         DDBLT_WAIT, NULL);                                         /* vtable[5] = Blt */
+    ((IDirectDrawSurface4*)g_backbuffer)->Blt(                     /* 0x4FD3C0, vtable[5] */
+        &destRect, g_primary_surface, &srcRect,
+        DDBLT_WAIT, NULL);
 
     Cursor_UnlockAllSurfaces(this);
 
@@ -346,20 +346,74 @@ void GameWindow::show()
     this->visible  = 1;                             /* +0x58 */
     this->visible2 = 1;                             /* +0x114 */
 
-    /* Fire vtable[7] callback (on_show) with arg=0 */
-    this->on_show(0);
+    /* Fire vtable[7] callback (update_anim) with arg=0 */
+    this->update_anim(0);
 
     /* Unlock primary surface */
     DDRAW_UnlockPrimary(this->hWnd);                /* +0x08 */
 
     /* Blt: restore window content from its private surface to main backbuffer */
-    void** bbVtab = *(void***)g_backbuffer;                         /* 0x4FD3C0 */
-    ((void (__stdcall*)(void*, RECT*, void*, RECT*, DWORD, void*))(bbVtab[0x14/4]))
-        (g_backbuffer, (RECT*)&this->rectLeft,                       /* +0x18 dest rect */
-         this->backbufferSurface, (RECT*)&this->rectLeft,            /* +0x38 src surface, +0x18 src rect */
-         DDBLT_WAIT, NULL);                                          /* vtable[5] = Blt */
+    ((IDirectDrawSurface4*)g_backbuffer)->Blt(                     /* 0x4FD3C0, vtable[5] */
+        (RECT*)&this->rectLeft,                                     /* +0x18 dest rect */
+        this->backbufferSurface,                                    /* +0x38 src surface */
+        (RECT*)&this->rectLeft,                                     /* +0x18 src rect */
+        DDBLT_WAIT, NULL);
 
     Cursor_UnlockAllSurfaces(this);
+}
+
+/* ================================================================== */
+/* GameWindow::set_mode — vtable[3] callback                             */
+/* Address: 0x414340 (default impl: Cursor_SetMode)                      */
+/*                                                                     */
+/* Sets the cursor/animation state. If stateId matches current and is   */
+/* non-zero, skips to the resetRedraw/forceRedraw phase. Otherwise      */
+/* updates field_14, field_44, field_48. If resetPos is set, zeroes     */
+/* the reserved_work block (+0x68..+0x84). If forceRedraw is set and    */
+/* window is not yet visible, performs a dirty-rect render cycle.       */
+/*                                                                     */
+/* Binary signature: (int32_t stateId, void* resdata, uint8_t resetPos, */
+/*                    uint8_t forceRedraw)                               */
+/* ================================================================== */
+void GameWindow::set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw)
+{
+    /* If state hasn't changed and is non-zero, skip to redraw phase */
+    if (this->field_14 == stateId) {                        /* +0x14 */
+        if (stateId == 0) {
+            return;
+        }
+        if (this->field_14 == stateId) {
+            goto do_redraw;
+        }
+    }
+
+    /* Update state */
+    this->field_14 = stateId;                               /* +0x14 */
+    this->field_44 = (int32_t)resdata;                      /* +0x44 */
+    this->field_48 = 0;                                     /* +0x48 */
+
+do_redraw:
+    /* Zero the reserved work block if requested */
+    if (resetPos != 0) {
+        this->reserved_work[0] = 0;                         /* +0x68 */
+        this->reserved_work[1] = 0;                         /* +0x6C */
+        this->reserved_work[2] = 0;                         /* +0x70 */
+        this->reserved_work[3] = 0;                         /* +0x74 */
+        this->reserved_work[4] = 0;                         /* +0x78 */
+        this->reserved_work[5] = 0;                         /* +0x7C */
+        this->reserved_work[6] = 0;                         /* +0x80 */
+        this->reserved_work[7] = 0;                         /* +0x84 */
+    }
+
+    /* Force a redraw cycle if requested and window is not visible yet */
+    if (forceRedraw != 0 && this->visible == 0) {           /* +0x58 */
+        DDRAW_UnlockPrimary(this->hWnd);
+        Cursor_UpdateDirtyRect(this, resetPos == 0);
+        Cursor_UnlockAllSurfaces(this);
+        if (this->captureFlag != 0) {                       /* +0x88 */
+            Cursor_RenderWithViewport(this, resetPos);
+        }
+    }
 }
 
 /* ================================================================== */
@@ -389,7 +443,43 @@ void GameWindow::set_position(int x, int y)
                  x, y,
                  newRight  - x,                  /* width */
                  newBottom - y,                  /* height */
-                 0x140);                         /* SWP_NOZORDER | SWP_NOACTIVATE */
+                 0x140);                         /* SWP_NOCOPYBITS | SWP_SHOWWINDOW */
+}
+
+/* ================================================================== */
+/* GameWindow::init — vtable[6] callback                                 */
+/* Address: 0x4140A0 (default impl: Cursor_UpdateClientRect)            */
+/*                                                                     */
+/* Called after window creation (create() fires this via vtable).       */
+/* Gets the client rectangle via GetClientRect, stores it in the        */
+/* temp rect (+0xF4) and client rect (+0x104) fields, then computes     */
+/* working dimensions (+0xEC/+0xF0). Guarded by createdFlag (+0xDB).   */
+/*                                                                     */
+/* Overridden by HelpWnd::init (0x451180) and AboutDialog::Init.       */
+/* ================================================================== */
+void GameWindow::init()
+{
+    /* Only execute if the window has been created */
+    if (this->createdFlag == 0) {                           /* +0xDB */
+        return;
+    }
+
+    /* Get the client rectangle into the temp rect at +0xF4 */
+    GetClientRect(this->hWnd, (RECT*)&this->tempLeft);     /* +0x08, +0xF4 */
+
+    /* Compute window dimensions from temp rect */
+    this->windowWidth  = this->tempRight  - this->tempLeft;  /* +0xE4 */
+    this->windowHeight = this->tempBottom - this->tempTop;   /* +0xE8 */
+
+    /* Copy temp rect to client rect */
+    this->clientLeft   = this->tempLeft;                     /* +0x104 */
+    this->clientTop    = this->tempTop;                      /* +0x108 */
+    this->clientWidth  = this->tempRight;                    /* +0x10C */
+    this->clientHeight = this->tempBottom;                   /* +0x110 */
+
+    /* Compute working dimensions from client rect edges */
+    this->workWidth  = this->clientWidth  - this->clientLeft;  /* +0xEC */
+    this->workHeight = this->clientHeight - this->clientTop;   /* +0xF0 */
 }
 
 /* ================================================================== */
@@ -444,7 +534,7 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
         wc.style     = classStyle;                  /* caller override */
     }
     wc.hInstance     = this->hInstance;              /* +0x04 */
-    wc.lpfnWndProc   = (WNDPROC)0x415900;            /* Shared GameWindow WndProc */
+    wc.lpfnWndProc   = GameWindow_WndProc;            /* 0x415900, shared GameWindow WndProc */
     wc.cbClsExtra    = 0;
     wc.cbWndExtra    = 0;
     wc.hIcon         = hIcon;
@@ -488,27 +578,37 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
 
     /* Mark window as created and fire init callback (vtable[6]) */
     this->createdFlag = 1;                     /* +0xDB */
-    {
-    }
+    this->init();
 
     /* Set up cursor sprite overlay */
     Cursor_InitSprites(this);
 
     /* ---- Create offscreen DDraw surface (if not already present) ---- */
     if (this->backbufferSurface == NULL) {     /* +0x38 */
-        /* Stack-allocated DDSURFACEDESC2 (0x7C bytes = 31 DWORDs) */
+        /* Stack-allocated DDSURFACEDESC2 (0x7C bytes = 31 DWORDs).
+         * We use a local struct rather than stubs/ddraw.h's type because
+         * the stub definition may not match the binary's exact field layout.
+         * All offsets verified against Ghidra disassembly at 0x413DE0:
+         * ddsCaps is at +0x68 (0xA8-0x40=0x68 from struct base at ESP+0x40). */
         struct DDSurfaceDesc {
-            DWORD dwSize;       /* +0x00 */
-            DWORD dwFlags;      /* +0x04 */
-            DWORD dwHeight;     /* +0x08 */
-            DWORD dwWidth;      /* +0x0C */
-            /* ... omitted fields zeroed ... */
-            DWORD caps;         /* +0x18 — DDSCAPS */
+            DWORD dwSize;           /* +0x00 */
+            DWORD dwFlags;          /* +0x04 */
+            DWORD dwHeight;         /* +0x08 */
+            DWORD dwWidth;          /* +0x0C */
+            LONG  lPitch;           /* +0x10 */
+            DWORD dwBackBufferCount;/* +0x14 */
+            DWORD dwMipMapCount;    /* +0x18 */
+            DWORD dwAlphaBitDepth;  /* +0x1C */
+            DWORD dwReserved;       /* +0x20 */
+            void* lpSurface;        /* +0x24 */
+            uint8_t _pad_28[0x40];  /* +0x28 padding to reach ddsCaps at +0x68 */
+            DWORD ddsCaps;          /* +0x68 — DDSCAPS2.dwCaps */
+            uint8_t _pad_6C[0x10];  /* +0x6C trailing padding to 0x7C total */
         };
 
         DDSurfaceDesc ddsd;
 
-        /* Zero the full descriptor */
+        /* Zero the full descriptor (31 DWORDs = 0x7C bytes) */
         int32_t* pDesc = (int32_t*)&ddsd;
         for (int i = 0; i < 31; i++) {
             pDesc[i] = 0;
@@ -518,14 +618,12 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
         ddsd.dwFlags  = DDSD_CAPS_HEIGHT_WIDTH;            /* 7 = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH */
         ddsd.dwWidth  = nWidth;
         ddsd.dwHeight = nHeight;
-        ddsd.caps     = 0x840;                             /* DDSCAPS_OFFSCREENPLAIN */
+        ddsd.ddsCaps  = 0x840;                             /* DDSCAPS_OFFSCREENPLAIN (+0x68) */
 
         /* Call IDirectDraw4::CreateSurface (vtable[6]) */
         {
-            void** ddrawVtab = *(void***)g_ddraw;          /* 0x485440 */
-            int result = ((int (__stdcall*)(void*, DDSurfaceDesc*, void**, void*))
-                         (ddrawVtab[0x18/4]))
-                         (g_ddraw, &ddsd, &this->backbufferSurface, NULL);
+            int result = ((IDirectDraw4*)g_ddraw)->CreateSurface(       /* 0x485440 */
+                &ddsd, &this->backbufferSurface, NULL);
             if (result != 0) {
                 return 0;
             }
@@ -550,7 +648,7 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
         this->field_2C    = 0;                      /* +0x2C */
 
         /* Set surface pixel format and restore */
-        DDRAW_SetSurfaceFormat(this->backbufferSurface, (int)&ddsd);
+        DDRAW_SetSurfaceFormat(this->backbufferSurface, &ddsd);
         DDRAW_RestoreSurfaces(this->backbufferSurface, &ddsd);
 
         this->createdFlag = 1;                     /* +0xDB */
@@ -566,17 +664,30 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
     return 1;
 }
 /* ================================================================== */
-/* GameWindow::on_show — vtable[7] callback, fired after window shown  */
+/* GameWindow::update_anim — vtable[7] callback, fired after window shown */
 /* Address: 0x426130                                                    */
 /*                                                                      */
 /* In the base GameWindow class this is a no-op (RET 4 in the binary). */
 /* Subclasses override with real behavior:                              */
-/*   - AboutDialog::on_show (0x40F890): init dialog state & controls    */
-/*   - HelpWnd::on_show      (0x4528E0): update help window animations  */
+/*   - AboutDialog::update_anim (0x40F890): init dialog state & controls */
+/*   - HelpWnd::update_anim      (0x450450): update help window animations */
 /*                                                                      */
 /* @param param  Always 0 when called from GameWindow::show()           */
 /* ================================================================== */
-void GameWindow::on_show(int param)
+void GameWindow::update_anim(int param)
+{
+    /* Base implementation: no-op (binary stub at 0x426130: RET 4) */
+}
+
+/* ================================================================== */
+/* GameWindow::cleanup_sprites — vtable[4] callback                     */
+/* Address: 0x426130 (shared default stub with update_anim)             */
+/*                                                                     */
+/* In the base GameWindow class this is a no-op (RET 4 in the binary). */
+/* Overridden by HelpWnd::cleanup_sprites (0x451440) which destroys    */
+/* 9 ButtonSprite objects.                                            */
+/* ================================================================== */
+void GameWindow::cleanup_sprites()
 {
     /* Base implementation: no-op */
 }

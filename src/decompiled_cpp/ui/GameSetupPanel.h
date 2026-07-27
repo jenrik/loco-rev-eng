@@ -35,11 +35,13 @@
  *   [10]+0x28: virtual (default stub)      (inherited: 0x426140)
  *   [11]+0x2C: WindowProc                  (inherited: UI_DefWndProc, 0x422EA0)
  *
- * Extended vtable (0x4784CC) slots — game state machine methods:
- *   [12]+0x30: HandleMapClick              (0x40ABA0)
- *   [13]+0x34: SelectLayoutEntry           (0x40AAF0)
- *   [14]+0x38: SendScenarioSelect          (0x40AC50)
- *   [15]+0x3C: ConnectToNetworkGame        (0x40AA20)
+ * NOTE: Address 0x4784CC has zero cross-references in the binary — it is a
+ * Ghidra auto-label artifact, not a real vtable. The four functions below are
+ * called via direct (UNCONDITIONAL_CALL) dispatch, not through virtual dispatch:
+ *   HandleMapClick              (0x40ABA0, called from EditorState::HandleClick)
+ *   SelectLayoutEntry           (0x40AAF0, called from 4 sites)
+ *   SendScenarioSelect          (0x40AC50, called from 2 sites)
+ *   ConnectToNetworkGame        (0x40AA20, called from 3 sites incl. loadLayouts)
  *
  * Called by: UI_MainMenu_Create @ 0x4205D6 (alloc 0x260, ctor, createWindow)
  */
@@ -50,6 +52,7 @@
 
 #include "UI_WindowBase.h"
 #include "RenderSurface.h"
+#include "LayoutListNode.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* Forward declaration */
 class ButtonSprite;
@@ -68,11 +71,11 @@ public:
     uint8_t    field_E8;               // +0xE8  (unknown byte, init 0, cleared by cleanup)
 
     /* Linked list of scenario/layout titles */
-    void*      titleList;              // +0xEC  Linked list of title entries (scenario names)
+    LayoutListNode* titleList;         // +0xEC  Linked list of title entries (scenario names)
                                        //        Nodes: [0]=next, [2]=name_string
 
     /* Linked list of scenario/layout entries */
-    void*      layoutList;             // +0xF0  Linked list of layout entries (full data)
+    LayoutListNode* layoutList;        // +0xF0  Linked list of layout entries (full data)
 
     int32_t    selectedEntry;          // +0xF4  Index of selected/highlighted list entry
 
@@ -84,8 +87,8 @@ public:
 
     int32_t    displayedCount;         // +0x104  Number of entries drawn in layout list
 
-    void*      currentList;            // +0x108  Pointer to the list currently being displayed
-                                       //          (set by drawLayoutList to param_1)
+    LayoutListNode* currentList;       // +0x108  Pointer to the list currently being displayed
+                                       //          (set by drawLayoutList to its list parameter)
 
     uint8_t    field_10C;              // +0x10C  (unknown byte, init 0, cleared by cleanup)
     uint8_t    _pad_10D[3];            // +0x10D  padding
@@ -183,7 +186,7 @@ public:
      * Init — Initialize panel fields and create sprite objects.
      * Address: 0x408B20
      *
-     * Zeroes all subclass fields, sets zoomScale to 0x10 and maxPlayers
+     * Zeroes all subclass fields, sets lineHeight to 0x10 and textAlignMode
      * to 3, creates 5 main ButtonSprite objects (res 0x429..0x42F), then
      * creates 9 layout-slot ButtonSprite objects (res 0x43A..0x442) in
      * a loop.
@@ -238,7 +241,7 @@ public:
      * appropriate title text. If network mode is active, hides the title
      * sprite and uses the "network game" resource string. Otherwise,
      * selects between "select scenario" (0x6F) and "select layout" (0x70)
-     * based on the global display mode flag at g_netman+0x08. Always
+     * based on _g_netman->m_playerSlotCount (+0x08). Always
      * calls drawTitle() after updating the buffer.
      */
     void updateTitle();
@@ -255,7 +258,7 @@ public:
      *
      * @param list  The linked list to display (titleList or layoutList)
      */
-    void drawLayoutList(void* list);
+    void drawLayoutList(LayoutListNode* list);
 
     /**
      * drawTitle — Draw the title text at the title area.
@@ -273,7 +276,7 @@ public:
      * drawGrid — Draw the player/scenario selection grid.
      * Address: 0x409980
      *
-     * Iterates g_netman->currentPlayer rows x playerCount columns of
+     * Iterates _g_netman fields (m_playerCols rows x m_playerRows columns) of
      * 0xA5x0x7B cells. Each cell: empty slot uses layout sprite state 1
      * (empty), occupied slot uses state 2 (filled) and renders the
      * player name, overflow (beyond maxPlayers) uses state 0 (hidden).
@@ -310,43 +313,45 @@ public:
     void loadLayouts(bool connectToNetwork);
 
     /* ================================================================ */
-    /* Extended vtable methods (vtable 0x4784CC, slots [12]-[15])       */
+    /* Direct-call game-state methods (NOT virtual — called via direct    */
+    /* UNCONDITIONAL_CALL in the binary, not through any vtable)         */
     /* ================================================================ */
 
     /**
      * HandleMapClick — Handle click on the scenario selection grid (3x3 grid).
      * Address: 0x40ABA0
-     * Vtable slot: [12]
+     * Called from: GAMESTATE_HandleClick @ 0x40AA0E (direct call)
      *
      * @param clickX  mouse X in grid-local coordinates
      * @param clickY  mouse Y in grid-local coordinates
      */
-    virtual void HandleMapClick(int32_t clickX, int32_t clickY);
+    void HandleMapClick(int32_t clickX, int32_t clickY);
 
     /**
      * SelectLayoutEntry — Select a single-player layout by index from the linked list.
      * Address: 0x40AAF0
-     * Vtable slot: [13]
+     * Called from: GAMESTATE_SelectLayout, GAMESTATE_StartGameTimer,
+     *              GAMESTATE_HandleClick (direct calls)
      *
      * @param index  zero-based index into layout linked list
      */
-    virtual void SelectLayoutEntry(int32_t index);
+    void SelectLayoutEntry(int32_t index);
 
     /**
      * SendScenarioSelect — Send the selected scenario/layout choice to peers or local game.
      * Address: 0x40AC50
-     * Vtable slot: [14]
+     * Called from: GAMESTATE_HandleNetworkGame, GAMESTATE_HandleMapClick (direct calls)
      *
      * @param scenarioIndex  scenario index or context flag
      */
-    virtual void SendScenarioSelect(int32_t scenarioIndex);
+    void SendScenarioSelect(int32_t scenarioIndex);
 
     /**
      * ConnectToNetworkGame — Select a network session and join it.
      * Address: 0x40AA20
-     * Vtable slot: [15]
+     * Called from: GameSetupPanel::loadLayouts, GAMESTATE_HandleClick (direct calls)
      *
      * @param index  session index to join
      */
-    virtual void ConnectToNetworkGame(int32_t index);
+    void ConnectToNetworkGame(int32_t index);
 };

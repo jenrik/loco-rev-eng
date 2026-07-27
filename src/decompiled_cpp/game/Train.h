@@ -1,11 +1,11 @@
+// Status: TRANSCRIBED
 /**
- * Train.h — Train game object, TrainSubsystem (network manager), and
- *           TrainStationWindow (sprite rendering) classes
+ * Train.h — Train game object and TrainSubsystem (network manager)
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * There are THREE distinct data structures with "Train" in their names:
+ * Two classes in this header:
  *
  * 1. TrainEntity — extends Building, represents a train car/entity on the map.
  *    Vtable: 0x4780B8. Binary size: 0xF0 bytes; unlike a full Building,
@@ -17,17 +17,18 @@
  *    train car linked lists. Stored in the _g_train global (0x004FD3A4).
  *    Constructor at 0x438BC0. NOT related to Building.
  *
- * 3. TrainStationWindow — UI panel window showing train car sprite animation.
- *    Vtable: 0x478130. Size: ~0x1D4 bytes (+0x1D4 highest known offset = 468).
- *    Represents the popup window that displays when clicking a train station,
- *    with animated train car sprite rendering, text overlays, and multiple
- *    animation states (idle, moving, doors opening/closing).
- *    Class hierarchy: GameWindow -> TrainStationWindow
+ * TrainStationWindow lives in ui/TrainStationWindow.h (vtable 0x478130,
+ * inherits GameWindow). Free functions Train_StartMultiplayer and
+ * Train_StopMultiplayer are declared below for TrainSubsystem use.
  */
 
 #pragma once
 
 #include "Building.h"
+
+/* Forward declarations for network-linked-list node types              */
+struct InboundTrainNode;
+struct PlayerConnectionNode;
 
 /* ================================================================== */
 /* TrainEntity — Building-derived train entity                         */
@@ -90,7 +91,7 @@ public:
      * Constructor — calls Building::BaseCtor, sets TrainEntity vtable (0x4780B8).
      * Address: 0x4533D0 (the BaseCtor call is at 0x4533D8)
      * Size: 32 bytes
-     * Calling convention: __thiscall (ECX = this, 1 stack arg), RET 0x4
+     * RET 0x4 (1 stack arg).
      *
      * Called by: BuildingMgr_CreateFromResource (0x434A85) when resource type == 8
      *
@@ -102,7 +103,7 @@ public:
      * Base destructor body — real cleanup logic.
      * Address: 0x4533F0
      * Size: 95 bytes (25 instructions)
-     * Calling convention: __thiscall (ECX = this, no stack args), RET
+     * No stack args.
      *
      * Restores TrainEntity vtable (0x4780B8), deselects this object if it
      * is currently selected (g_selected_building == this), then calls
@@ -119,7 +120,7 @@ public:
      * Scalar deleting destructor (vtable[0]).
      * Address: 0x4363E0
      * Size: 30 bytes
-     * Calling convention: __thiscall (ECX = this, 1 byte-stack arg), RET 0x4
+     * RET 0x4 (1 byte-stack arg).
      *
      * Calls BaseDtor() for cleanup, then conditionally frees memory
      * via GLOBAL_free if (flags & 1).
@@ -140,7 +141,7 @@ public:
      * Update — per-frame update tick (overrides Building::Update, vtable[15]).
      * Address: 0x453450
      * Size: 281 bytes (97 instructions)
-     * Calling convention: __thiscall (ECX = this, 1 stack arg), RET 0x4
+     * RET 0x4 (1 stack arg).
      *
      * Simplified update compared to Building::Update:
      *   1. Skips if disabled (+0x89 != 0).
@@ -148,7 +149,7 @@ public:
      *   3. If movement active (field_dc != 0):
      *      a. Calls vtable[22] (IsMovementActive) — if still moving, skip.
      *      b. If arrived: checks if position matches target_x/target_y.
-     *         - At target: calls Building::HandleAction(this, last_action).
+     *         - At target: calls this->HandleAction(last_action).
      *         - Not at target: calls vtable[18] (MoveToTarget) to continue.
      *   4. If not moving and action timer expired + not selected:
      *      a. Finds random object at ID (rand() % 0x29 + 0x3400) via InputMgr.
@@ -235,6 +236,40 @@ void TrainEntity_DeserializeFactory(GameObject* prototype,
  *   +0x34  request_count    — count of pending/requested asset downloads
  *   Total: 0x38
  */
+
+/**
+ * PlayerConnectionNode — linked-list node for file attachment transfers.
+ *
+ * Used by handle_list_1 (sender queue) and handle_list_2 (receiver queue)
+ * in TrainSubsystem.  Nodes are allocated via operator_new and linked
+ * through the next pointer at +0x18.
+ *
+ *   +0x00: player_id       — DirectPlay player ID
+ *   +0x04: sub_type        — subtype selector
+ *   +0x06: extra_info      — extra info field
+ *   +0x08: transfer_state  — 0=FIRST, 1=INTERIM, 2=FINAL
+ *   +0x09: _pad_09
+ *   +0x0A: notify_id       — receiver-side completion ID
+ *   +0x0C: file_handle     — HANDLE to the file being transferred
+ *   +0x10: throttle        — throttle control
+ *   +0x12: sequence_num    — sequence counter
+ *   +0x14: _pad_14[4]
+ *   +0x18: next            — linked-list next pointer
+ */
+struct PlayerConnectionNode {
+    int32_t   player_id;       /* +0x00 */
+    uint16_t  sub_type;        /* +0x04 */
+    uint16_t  extra_info;      /* +0x06 */
+    uint8_t   transfer_state;  /* +0x08 (0=FIRST, 1=INTERIM, 2=FINAL) */
+    uint8_t   _pad_09;         /* +0x09 */
+    uint16_t  notify_id;       /* +0x0A receiver-side completion ID */
+    int32_t   file_handle;     /* +0x0C */
+    int16_t   throttle;        /* +0x10 */
+    uint16_t  sequence_num;    /* +0x12 */
+    uint8_t   _pad_14[4];      /* +0x14 */
+    void*     next;            /* +0x18 */
+};
+
 class TrainSubsystem {
 public:
     /* ================================================================ */
@@ -247,13 +282,13 @@ public:
     uint8_t    byte_flags;          // +0x0C  packed byte flags
     uint8_t    byte_flag_2;         // +0x0D  additional byte flag (1=disconnect pending)
     int32_t    player_peer_id;      // +0x10  DirectPlay player ID for network sends
-    void*      sprite_list_1;       // +0x14  active train controller list (next at +0x70)
-    void*      sprite_list_2;       // +0x18  dead/orphaned train car list (next at +0x70)
-    void*      sprite_list_3;       // +0x1C  multiplayer persistent train list (next at +0x70)
-    void*      field_20;            // +0x20  pointer/flag
-    int32_t    some_limit;          // +0x24  initialized to 20 (0x14)
-    void*      handle_list_1;       // +0x28  sender attachment transfer queue (PlayerConnectionNode)
-    void*      handle_list_2;       // +0x2C  receiver attachment transfer queue (PlayerConnectionNode)
+    InboundTrainNode*  sprite_list_1;   // +0x14  active train controller list (next at +0x70)
+    InboundTrainNode*  sprite_list_2;   // +0x18  dead/orphaned train car list (next at +0x70)
+    InboundTrainNode*  sprite_list_3;   // +0x1C  multiplayer persistent train list (next at +0x70)
+    void*              field_20;        // +0x20  pointer/flag
+    int32_t            some_limit;      // +0x24  initialized to 20 (0x14)
+    PlayerConnectionNode* handle_list_1; // +0x28  sender attachment transfer queue
+    PlayerConnectionNode* handle_list_2; // +0x2C  receiver attachment transfer queue
     uint8_t    field_30;            // +0x30  byte flag; ctor leaves it untouched
     uint8_t    _pad_31[3];          // +0x31  padding
     int32_t    request_count;       // +0x34  count of requested asset downloads
@@ -325,7 +360,7 @@ public:
      *
      * In multiplayer (g_game_mode==10): messages are handled immediately
      * or freed. In single-player/offline: appends to g_network_queue linked
-     * list under critical section (RESDATA_Lock). Throttles type-6
+     * list under critical section (EnterCriticalSection wrapper). Throttles type-6
      * (SendNetworkData) messages when queue depth >= 6.
      *
      * Called by: Train_FlushMessages, Train_UpdateTrainMovement, many others.
@@ -604,229 +639,6 @@ public:
     void RemoveAllCars();
 };
 
-/* ================================================================== */
-/* TrainStationWindow — UI popup for train car sprite animation        */
-/* ================================================================== */
-
-/**
- * TrainStationWindow — UI panel displaying animated train car sprites.
- *
- * Lego Loco (loco.exe, 1998, MSVC x86)
- * Reverse engineered via Ghidra decompilation.
- *
- * NOT a C++ class — this is a C struct used by free functions that render
- * the train station popup window. Shows an animated train car (selected by
- * train_type at +0x124) with sprite sheet animation, destination markers,
- * and text overlays (e.g., "PLEASE WAIT" for delivery trains).
- *
- * Class hierarchy: GameWindow (base, sets +0x00..+0x10 fields via
- *   GameWindow_Ctor) -> TrainStationWindow (sets vtable to 0x478130).
- *
- * Fields documented from offset accesses in Train_LoadSprites (0x437670),
- * Train_BlitSprite (0x437900), Train_DrawTextOverlay (0x437CF0),
- * Train_SetAnimState (0x438280), Train_UpdateAnim (0x438590),
- * Train_Hide (0x438890), Train_SendMessage (0x4370F0),
- * Train_HandleClick (0x438AD0), TrainStationWindow_Ctor (0x436B20),
- * TrainStationWindow_BaseDtor (0x436BB0), TrainStationWindow_Create (0x436C50),
- * TrainStationWindow_UpdateTooltip (0x436D60), TrainStationWindow_Show (0x436EC0),
- * and TrainStationWindow_Hide (0x436F70).
- *
- * Size: ~0x1D4 bytes (highest known offset: +0x1D4 = +0x1C4 tooltip_saved_rect + 16).
- * Vtable: 0x478130 (VTBL_TRAIN_STATION_WINDOW)
- *
- * Vtable layout (partial):
- *   [0] +0x00: scalar deleting destructor (TrainStationWindow_Dtor, 0x436B90)
- *   [1] +0x04: Hide / InvalidateRect-style method (parent window invalidation)
- *   [2] +0x08: Show / display method (inherited from GameWindow)
- *   [3] +0x0C: sound play method (called from Train_HandleClick)
- *   [6] +0x18: update_client_rect / on_show (inherited from GameWindow)
- */
-struct TrainStationWindow {
-    /* vtable at +0x00 is compiler-managed via virtual methods */
-    void*    hInstance;             /* +0x04  — application instance handle (LoadIconA) */
-    void*    hwnd;                  /* +0x08  — Win32 window handle */
-    /* +0x0C..+0x37: (gap — 44 bytes, likely more UI state) */
-    void*    palette;               /* +0x38  — palette/CLUT pointer used by UIPANEL_Blit */
-    /* +0x3C..+0x63: (gap — 40 bytes) */
-    void*    hdc_cache;             /* +0x64  — cached HDC from Cursor_WaitForBlit */
-    /* +0x68..+0x8F: (gap — 40 bytes) */
-
-    /* Sound resource parameters for vtable[3] click audio dispatch */
-    int32_t  sound_param_1;         /* +0x90  — first sound param (default click region) */
-    /* +0x94: (gap — 4 bytes) */
-    int32_t  sound_param_2;         /* +0x98  — second sound param (default click region) */
-    int32_t  sound_param_3;         /* +0x9C  — first sound param (rect 1/2 click regions) */
-    /* +0xA0: (gap — 4 bytes) */
-    int32_t  sound_param_4;         /* +0xA4  — second sound param (rect 1/2 click regions) */
-
-    /* +0xA8..+0x117: (gap — 112 bytes) */
-    char     hide_state;            /* +0x118 — hide notification flag for WM_USER+1 PostMessage */
-    /* +0x119: (3 bytes padding) */
-    int32_t  hide_param;            /* +0x11C — lParam value for WM_USER+1 hide notification */
-    char     visible;               /* +0x120 — visibility flag (0=hidden, 1=visible) */
-    /* +0x121..+0x123: (3 bytes padding) */
-    int32_t  train_type;            /* +0x124 — train car type index (0-13) */
-    void*    icon;                  /* +0x128 — HICON handle (loaded from resource 0x65) */
-
-    /* Clickable region RECTs for hit-testing mouse clicks (PtInRect).        */
-    /* RECT 1 (+0x12C) / RECT 2 (+0x13C) are the train car animation area;    */
-    /* hits trigger sound_param_3/sound_param_4 audio and anim_state 1/2.     */
-    /* RECT 3 (+0x15C) is a dismissal region; hits skip anim state changes.  */
-    RECT     click_rect_1;          /* +0x12C — first clickable region (16 bytes) */
-    RECT     click_rect_2;          /* +0x13C — second clickable region (16 bytes) */
-
-    /* Destination rectangle — used as source RECT for sprite blitting */
-    int32_t  dst_left;              /* +0x14C */
-    int32_t  dst_top;               /* +0x150 */
-    int32_t  dst_right;             /* +0x154 */
-    int32_t  dst_bottom;            /* +0x158 */
-
-    RECT     click_rect_3;          /* +0x15C — third clickable region (dismissal, 16 bytes) */
-
-    char     sprites_loaded;        /* +0x16C — 1 after sprites loaded, 0 before */
-    char     sound_played;          /* +0x16D — 1 after station-open sound played */
-
-    /* Sprite resource pointers */
-    void*    car_sprite_res;        /* +0x170 — train car sprite resource object (vtable) */
-    void*    car_surface;           /* +0x174 — locked surface for car sprite */
-    void*    bg_sprite_res;         /* +0x178 — background sprite resource object */
-    void*    bg_surface;            /* +0x17C — locked surface for background */
-    void*    frame_data_res;        /* +0x180 — frame data/animation descriptor resource */
-    void*    frame_surface;         /* +0x184 — locked surface for frame data */
-    void*    dest_data_res;         /* +0x188 — sprite destinations resource (for window sizing) */
-    void*    dest_surface;          /* +0x18C — locked surface for destinations */
-
-    /* Animation state */
-    int32_t  frame_index;           /* +0x190 — current animation sub-frame index */
-    int32_t  state_counter;         /* +0x194 — animation state counter/offset into table */
-    int32_t  cur_state;             /* +0x198 — current state, initialized to 0 */
-    void*    timer;                 /* +0x19C — UINT_PTR timer ID from SetTimer */
-
-    /* Frame range */
-    int16_t  anim_state;            /* +0x1A0 — animation state (0=idle, 1=fwd, 2=bkwd, etc.) */
-    int16_t  anim_state_pad;        /* +0x1A2 — padding */
-    /* +0x1A4: (gap — 4 bytes) */
-    int32_t  end_frame;             /* +0x1A8 — max frame index to animate */
-    int32_t  cur_start_frame;       /* +0x1AC — current start frame (copied from start_frame) */
-    int32_t  start_frame;           /* +0x1B0 — first frame index (always 0) */
-    int32_t  wrap_frame;            /* +0x1B4 — wrap-around frame index */
-    int32_t  anim_tick_counter;     /* +0x1B8 — animation tick counter */
-    char     tooltip_visible;       /* +0x1BC — tooltip visibility flag */
-    void*    tooltip_ptr;           /* +0x1C0 — tooltip object pointer (or NULL) */
-    RECT     tooltip_saved_rect;    /* +0x1C4 — saved tooltip rect for invalidation tracking (16 bytes) */
-};
-
-/* ================================================================== */
-/* Train sprite rendering and window functions (C free functions)      */
-/* ================================================================== */
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/**
- * TrainStationWindow_Ctor — Constructor.
- * Address: 0x436B20
- */
-void* __thiscall
-TrainStationWindow_Ctor(TrainStationWindow* window, int32_t param1, int32_t param2);
-
-/**
- * TrainStationWindow_Dtor — Scalar deleting destructor (vtable[0]).
- * Address: 0x436B90
- */
-void* __thiscall
-TrainStationWindow_Dtor(TrainStationWindow* window, byte flags);
-
-/**
- * TrainStationWindow_BaseDtor — Base destructor body.
- * Address: 0x436BB0
- */
-void __thiscall
-TrainStationWindow_BaseDtor(TrainStationWindow* window);
-
-/**
- * TrainStationWindow_Create — Create the Win32 window.
- * Address: 0x436C50
- */
-int32_t __thiscall
-TrainStationWindow_Create(TrainStationWindow* window, void* parent_hwnd);
-
-/**
- * TrainStationWindow_UpdateTooltip — Update tooltip position.
- * Address: 0x436D60
- */
-void __thiscall
-TrainStationWindow_UpdateTooltip(TrainStationWindow* window);
-
-/**
- * TrainStationWindow_Show — Show the window with animation.
- * Address: 0x436EC0
- */
-void __thiscall
-TrainStationWindow_Show(TrainStationWindow* window, int32_t train_type, int32_t hide_param);
-
-/**
- * TrainStationWindow_Hide — Hide the window and clean up.
- * Address: 0x436F70
- */
-void __thiscall
-TrainStationWindow_Hide(TrainStationWindow* window);
-
-/**
- * Train_LoadSprites — Load all train station sprite resources.
- * Address: 0x437670
- */
-void __fastcall Train_LoadSprites(TrainStationWindow* window);
-
-/**
- * Train_BlitSprite — Blit a single train animation frame.
- * Address: 0x437900
- */
-void __thiscall
-Train_BlitSprite(TrainStationWindow* window, uint32_t* src_rect,
-                 int32_t frame_idx, int32_t unused, void* surface);
-
-/**
- * Train_DrawTextOverlay — Draw "PLEASE WAIT" shadow text.
- * Address: 0x437CF0
- */
-void __fastcall Train_DrawTextOverlay(TrainStationWindow* window);
-
-/**
- * Train_SetAnimState — Set the animation to a new state.
- * Address: 0x438280
- */
-void __thiscall Train_SetAnimState(TrainStationWindow* window, uint16_t new_state);
-
-/**
- * Train_UpdateAnim — Advance animation by one frame.
- * Address: 0x438590
- */
-void __thiscall Train_UpdateAnim(TrainStationWindow* window, int32_t unused);
-
-/**
- * Train_Hide — Hide window with sound and WM_USER+1 notify.
- * Address: 0x438890
- */
-int32_t __thiscall
-Train_Hide(TrainStationWindow* window, int32_t unused1, int32_t unused2,
-           int32_t unused3, int32_t unused4);
-
-/**
- * Train_SendMessage — Post WM_USER+1 hide notification.
- * Address: 0x4370F0
- */
-void __fastcall Train_SendMessage(TrainStationWindow* window);
-
-/**
- * Train_HandleClick — Process mouse clicks.
- * Address: 0x438AD0
- */
-int32_t __thiscall
-Train_HandleClick(TrainStationWindow* window, uint32_t lParam,
-                  int32_t arg2, int32_t arg3, int32_t arg4);
-
 /**
  * Train_StartMultiplayer — Build session address, start multiplayer.
  * Address: 0x43A760
@@ -844,7 +656,3 @@ void __cdecl Train_StopMultiplayer(void);
  * Address: 0x43B220
  */
 int __fastcall Train_HandleLobbyInfo(int buf);
-
-#ifdef __cplusplus
-}
-#endif

@@ -261,13 +261,13 @@
 /* ================================================================== */
 #define VTBL_GAMEWINDOW                0x00477898  /* GameWindow vtable
     [0]  +0x00: scalar deleting destructor (0x413B50)
-    [1]  +0x04: Hide                   (0x413C10)
-    [2]  +0x08: Show                   (0x413D10)
+    [1]  +0x04: hide                   (0x413C10)
+    [2]  +0x08: show                   (0x413D10)
     [3]  +0x0C: set_mode               (0x414340)
-    [4]  +0x10: method_4               (0x426130)
-    [5]  +0x14: Create                 (0x413DE0)
-    [6]  +0x18: update_client_rect     (0x4140A0)
-    [7]  +0x1C: on_show                (0x426130)              */
+    [4]  +0x10: cleanup_sprites        (0x426130)
+    [5]  +0x14: create                 (0x413DE0)
+    [6]  +0x18: init                   (0x4140A0)
+    [7]  +0x1C: update_anim            (0x426130)              */
 
 /* ================================================================== */
 /* AboutDialog — About/Credits dialog and idle screensaver             */

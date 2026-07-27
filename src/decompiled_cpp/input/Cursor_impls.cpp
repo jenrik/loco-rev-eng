@@ -10,6 +10,14 @@
 #include "Cursor.h"
 #include "Cursor_internal.h"
 
+#ifndef _WIN32
+/* Non-Windows stubs for Win32 functions used by set_capture() */
+/* (declared in stubs/windows.h but sdl3_window.h does not yet provide them) */
+static inline HWND GetCapture(void) { return NULL; }
+static inline HWND SetCapture(HWND hWnd) { (void)hWnd; return NULL; }
+static inline BOOL ReleaseCapture(void) { return 0; }
+static inline int ShowCursor(int show) { (void)show; return -1; }
+#endif
 
 /* ================================================================== */
 /* Cursor::set_mode — Set cursor animation state (vtable[3])           */
@@ -56,7 +64,7 @@ void Cursor::set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t 
 
     /* Update animation data and reset rect cache */
     if (resdata != nullptr) {
-        this->anim_resdata() = resdata;          /* +0x44 */
+        this->anim_resdata() = (RESDATA*)resdata;          /* +0x44 */
     }
 
     if (resetPos != 0) {

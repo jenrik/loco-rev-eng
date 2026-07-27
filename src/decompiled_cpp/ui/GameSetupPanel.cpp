@@ -16,8 +16,11 @@
 #include "ButtonSprite.h"
 #include "../network/Netman.h"
 #include "../resources/ResourceManager.h"
-/* AssetMgr forward-declared (not including AssetMgr.h to avoid OutputDebugStringA
-   conflict with Netman.h); AssetMgr_LoadFile declared as extern inline below */
+#include "WndProcStream.h"
+
+/* AssetMgr forward-declared (struct matches AssetMgr.h layout);
+   AssetMgr_LoadFile declared in Netman.h */
+/* TODO: include AssetMgr.h directly once OutputDebugStringA conflict is resolved */
 struct AssetMgr;
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
@@ -31,143 +34,90 @@ extern void  __cdecl GLOBAL_free(void* ptr);         /* 0x465CD0 */
 
 extern "C" {
     /* Win32 APIs (imported through IAT) */
-    extern BOOL   __stdcall GetDesktopWindow(void);             /* 0x477364 */
-    extern BOOL   __stdcall GetClientRect(HWND, void* lpRect);  /* 0x477368 */
+    extern HWND   __stdcall GetDesktopWindow(void);             /* 0x477364 */
+    extern BOOL   __stdcall GetClientRect(HWND, RECT* lpRect);  /* 0x477368 */
     extern HICON  __stdcall LoadIconA(HINSTANCE, LPCSTR);       /* 0x47736C */
     extern BOOL   __stdcall DeleteObject(HGDIOBJ);              /* 0x477048 */
     extern void*  __stdcall GetStockObject(int fnObject);       /* 0x477050 */
-    extern int    __stdcall SetBkMode(void* hdc, int mode);     /* 0x477064 */
-    extern int    __stdcall SetBkColor(void* hdc, int color);   /* 0x47706C */
-    extern int    __stdcall SetTextColor(void* hdc, int color); /* 0x477060 */
-    extern void*  __stdcall SelectObject(void* hdc, void* obj); /* 0x47703C */
-    extern int    __stdcall DrawTextA(void* hdc, const char* str,
-                                      int len, void* rect, int format); /* 0x477348 */
+    extern int    __stdcall SetBkMode(HDC hdc, int mode);       /* 0x477064 */
+    extern int    __stdcall SetBkColor(HDC hdc, int color);     /* 0x47706C */
+    extern int    __stdcall SetTextColor(HDC hdc, int color);   /* 0x477060 */
+    extern HGDIOBJ __stdcall SelectObject(HDC hdc, HGDIOBJ obj); /* 0x47703C */
+    extern int    __stdcall DrawTextA(HDC hdc, const char* str,
+                                      int len, RECT* rect, int format); /* 0x477348 */
     /* CopyRect, OffsetRect already declared in Netman.h with typed RECT params */
     extern BOOL   __stdcall KillTimer(HWND hWnd, UINT_PTR id);  /* 0x4772F0 */
     extern int    __stdcall wsprintfA(char* buf, const char* fmt, ...); /* 0x477370 */
 }
 
-    /* CRT helpers */
-    extern int    __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D60 */
-    extern void   __cdecl CRT_exit(const char** msg, const char** fileLine); /* 0x466CE0 */
-    extern void   __cdecl CRT_free(void* ptr);                              /* 0x466C70 */
+/* CRT helpers */
+extern int    __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D60 */
+extern void   __cdecl CRT_exit(const char** msg, const char** fileLine); /* 0x466CE0 */
+extern void   __cdecl CRT_free(void* ptr);                              /* 0x466C70 */
 
-    /* Resource manager — now use g_resmgr.GetById() / g_resmgr.FormatResourceString() */
-    /* (declared in ResourceManager.h, included above) */
-    extern void   ReleaseSoundResource(int handle);          /* 0x448EE0 — non-member helper */
+/* Resource manager — use g_resmgr.GetById() / g_resmgr.FormatResourceString() */
+/* ReleaseSoundResource declared in ResourceManager.h (included above) */
 
-    /* Stream / WNDPROC helpers — TODO: decompile WndProcStream class (0x464490, 0x463810, etc.) */
-    extern void*  WIN32_StreamOpen(void* stream, const char* path, int mode, void* extra, int flag);
-    extern void   WIN32_StreamRead(void* stream, void* buf, int sz);        /* 0x463810 */
-    extern void   WIN32_StreamDestroy(void* stream);                        /* 0x463A80 */
-    extern int*   WNDPROC_StreamFromMemory(void* stream, const char* data,
-                                            int size, int mode);             /* 0x464490 */
-    extern void   WNDPROC_StreamCleanup(void* stream);                      /* 0x464620 */
+/* Stream / WNDPROC helpers — TODO: decompile WndProcStream class (0x464490, 0x463810, etc.) */
+extern void*  WIN32_StreamOpen(void* stream, const char* path, int mode, void* extra, int flag);
+extern void   WIN32_StreamRead(void* stream, void* buf, int sz);        /* 0x463810 */
+extern int*   WNDPROC_StreamFromMemory(void* stream, const char* data,
+                                        int size, int mode);             /* 0x464490 */
 
-    /* Asset manager (forward-declared; AssetMgr.h omitted to avoid OutputDebugStringA
-       conflict with Netman.h) */
-    extern uint8_t* AssetMgr_LoadFile(struct AssetMgr* self, uint8_t* filename,
-                                       int32_t* out_size);                   /* 0x45CD00 */
+/* UI_CreateFullWindow — use UI_WindowBase::create_full_window (static method) */
+/* (declared in UI_WindowBase.h, included above) */
 
-    /* UI_CreateFullWindow — use UI_WindowBase::create_full_window (static method) */
-    /* (declared in UI_WindowBase.h, included above) */
+/* UIPANEL functions — TODO: decompile RenderSurface/UIPANEL render helpers */
+extern void   UIPANEL_Blit(void* sprite, int dstX, int dstY,
+                           int dstW, int dstH, void* surface,
+                           int srcX, int srcY, int srcW,
+                           int srcH, int mode);            /* 0x42B050 */
+extern void*  UIPANEL_BeginPaint(void* self);              /* 0x426B00 */
+extern void   UIPANEL_EndPaintEx(void* self, HWND hWnd,
+                                  void* hdc, byte flags,
+                                  void* rect);              /* 0x426B90 */
 
-    /* UIPANEL functions — TODO: decompile RenderSurface/UIPANEL render helpers */
-    extern void   UIPANEL_Blit(void* sprite, int dstX, int dstY,
-                               int dstW, int dstH, void* surface,
-                               int srcX, int srcY, int srcW,
-                               int srcH, int mode);            /* 0x42B050 */
-    extern void*  UIPANEL_BeginPaint(void* self);              /* 0x426B00 */
-    extern void   UIPANEL_EndPaintEx(void* self, HWND hWnd,
-                                      void* hdc, byte flags,
-                                      void* rect);              /* 0x426B90 */
-
-    /* UI_CenterWindow */
-    extern void   UI_CenterWindow(void* param1, void* param2); /* 0x425A50 */
+/* UI_CenterWindow — TODO: decompile 0x425A50 */
+extern void   UI_CenterWindow(void* param1, void* param2); /* 0x425A50 */
 
 
 /* ================================================================== */
 /* Global variables                                                    */
 /* ================================================================== */
 
-extern void* _g_primary_surface;      /* 0x4FD3C4 — primary DirectDraw surface */
-extern Netman* g_netman;              /* 0x4FD3AC — network manager singleton */
-                                       /* NOTE: Netman.h declares _g_netman at same address;
-                                                canonicalize to g_netman across codebase */
+/* _g_primary_surface now declared in shared/types.h */
+/* Netman.h declares extern void* _g_netman at 0x4FD3AC.
+   Re-declare with correct type here to enable typed field access.
+   With -fpermissive, the last extern declaration in the TU wins.
+   NOTE: Netman.h also declares _g_dplay_config at 0x4FD3AC (same address
+   as _g_netman) — this is a known error in Netman.h. xref analysis confirms
+   0x4FD3AC is the Netman singleton (written by GameLoop_Setup @ 0x406C9D).
+   _g_dplay is at 0x4FD3A8 (written by GameLoop_Setup @ 0x406C6C). */
+extern Netman* _g_netman;              /* 0x4FD3AC — network manager singleton */
 /* g_resmgr now declared in ResourceManager.h (included above) */
-/* g_asset_mgr declared as void* in Netman.h; cast to AssetMgr* when calling AssetMgr_LoadFile */
+/* g_asset_mgr declared as AssetMgr* in Netman.h; typed access available */
 extern void* g_font_normal;           /* 0x4855F0 — normal UI font handle */
 extern void* g_font_small;            /* 0x4855F4 — small UI font handle */
 extern void* g_title_font;            /* 0x4855FC — title display font handle */
 extern char  g_install_path[];        /* 0x4A99C8 — install directory path */
 extern int   g_stream_open_mode;      /* 0x479190 — stream open mode flags for WIN32_StreamOpen */
 
-/* Named constant for font measurement string at 0x47E2C8 */
-/* Binary uses this dummy string via DrawTextA to measure font height */
-static const char* const g_font_measure_string = (const char*)0x47E2C8;
+/* The binary uses an empty string at fixed address 0x47E2C8 for
+   DrawTextA DT_CALCRECT font measurement. The string content is
+   the empty string — the address, not the content, matters to the
+   binary. We use "" for standalone builds. */
+static const char* const g_font_measure_string = "";
 
-/* (void*)-1 sentinel: Binary uses (void*)-1 to mean "use cached currentList".
-   Equivalent on x86 (32-bit) but non-portable on other architectures. */
-#define LIST_SENTINEL_CACHED  ((void*)-1)
-
-/* ================================================================== */
-/* Minimal WndProcStream class — TODO: full decompilation with Ghidra */
-/* ================================================================== */
-/* LayoutListNode — linked list node for scenario/layout entries      */
-/* 0x0C bytes per node: [0]=next, [4]=padding, [8]=name string       */
-/* ================================================================== */
-struct LayoutListNode {
-    LayoutListNode* next;    // +0x00  next node pointer
-    int32_t         _pad_04; // +0x04  padding/unused
-    char*           name;    // +0x08  heap-allocated name string
-};
-
-/* ================================================================== */
-/**
- * WndProcStreamMetadata — header/metadata block for WNDPROC stream objects.
- * The first field of a WndProcStream points to an instance of this struct.
- * Index 4 (offset 0x10) stores a byte offset used to locate the stream's
- * validity flags field within the stream object.
- *
- * TODO: Verify layout in Ghidra and move to a proper header.
- */
-struct WndProcStreamMetadata {
-    int32_t field_00;        // +0x00
-    int32_t field_04;        // +0x04
-    int32_t field_08;        // +0x08
-    int32_t field_0C;        // +0x0C
-    int32_t flagsOffset;     // +0x10  byte offset to flags within WndProcStream
-};
-
-/**
- * WndProcStream — vtable-based stream object used for file I/O.
- * Vtable: [0] scalar deleting destructor, [4] returns flags offset info.
- *
- * TODO: Full decompilation — this is a minimal wrapper for GameSetupPanel.
- *       Move to a proper header once the complete class is decompiled in Ghidra.
- */
-class WndProcStream {
-public:
-    virtual ~WndProcStream() {}      // [0] scalar deleting destructor
-    // slots [1]-[3]: unknown
-    // slot [4]: unknown (returns metadata about flags)
-
-    WndProcStreamMetadata* metadata; // +0x00  pointer to metadata block
-    int32_t  field_04;               // +0x04
-    int32_t  streamLength;           // +0x08  total stream length in bytes
-
-    /** Check if the stream is valid (flags & 5 == 0). */
-    bool IsValid() const {
-        int32_t offset = this->metadata->flagsOffset;
-        int32_t* flagsPtr = (int32_t*)((uint8_t*)this + offset + 8);
-        int32_t flags = *flagsPtr;
-        return (flags & 5) == 0;
-    }
-};
+/* Sentinel value: (LayoutListNode*)-1 means "use cached currentList".
+   The binary uses the -1 pointer sentinel pattern; preserved here
+   with a typed constant to avoid void* comparison UB. */
+static LayoutListNode* const CACHED_SENTINEL = (LayoutListNode*)-1;
 
 /* ================================================================== */
 /* GameSetupPanel Constructor                                          */
-/* Address: 0x408AA0                                                   */
+/* Address: 0x408AA0 (verified: Ghidra shows CGWND_GameSetup_Ctor      */
+/*   0x408AA0-0x408AF7. EditWindow.cpp annotation 0x408A70 is inside   */
+/*   CGWND_ReadRegistryString — no thunk at that address.)              */
 /* ================================================================== */
 GameSetupPanel::GameSetupPanel(HINSTANCE hInstance, UINT resId)
     : UI_WindowBase(hInstance, resId)
@@ -212,6 +162,12 @@ void GameSetupPanel::init()
     this->titleDrawnFlag = 0;         /* +0x114 */
     this->field_234 = NULL;           /* +0x234 */
     this->textAlignMode = 3;          /* +0x1B0 */
+    this->backgroundSprite = NULL;    /* +0x238 — init to NULL; pixel data set by external caller */
+
+    /* NOTE: spritesCreated (+0x21C) remains 0 after init(). It is set to 1 by
+       external code (likely the OnCreate callback or EditWindow caller) after
+       all sprite pixel data has been loaded. All blocks guarded by
+       'if (this->spritesCreated != 0)' are dead code until that write occurs. */
 
     /* Create 5 main ButtonSprites */
     this->titleSprite = new ButtonSprite(0x42A);     /* +0x220 */
@@ -221,10 +177,10 @@ void GameSetupPanel::init()
     this->field_230   = new ButtonSprite(0x42F);     /* +0x230 */
 
     /* field at +0x120 (byte, set to 0) */
+    /* NOTE: Binary only zeroes titleText[0] — remaining 127 bytes are
+   uninitialized. updateTitle() always writes a full null-terminated string
+   via FormatResourceString before drawTitle() reads the buffer. */
     this->titleText[0] = '\0';        /* +0x120 (byte) */
-
-    /* NOTE: backgroundSprite (+0x238) is NOT initialized here.
-       It is set by other code (likely create_window or render init) before use. */
 
     /* Create 9 layout slot ButtonSprites (res 0x43A..0x442) */
     for (int i = 0; i < 9; i++) {
@@ -242,7 +198,7 @@ void GameSetupPanel::base_destructor()
 
     /* Free title list linked list (+0xEC) */
     {
-        LayoutListNode* node = (LayoutListNode*)this->titleList;
+        LayoutListNode* node = this->titleList;
         while (node != NULL) {
             LayoutListNode* next = node->next;                /* node[0] = next pointer */
             if (node->name != NULL) {                          /* node[2] = name string */
@@ -256,7 +212,7 @@ void GameSetupPanel::base_destructor()
 
     /* Free layout list linked list (+0xF0) — same structure */
     {
-        LayoutListNode* node = (LayoutListNode*)this->layoutList;
+        LayoutListNode* node = this->layoutList;
         while (node != NULL) {
             LayoutListNode* next = node->next;
             if (node->name != NULL) {
@@ -303,7 +259,9 @@ void GameSetupPanel::base_destructor()
     {
         int sndHandle = g_resmgr.GetById(0x5015);
         if (sndHandle != 0) {
-            ReleaseSoundResource(sndHandle);
+            /* NOTE: GetById returns int32_t; ReleaseSoundResource expects ResourceEntry*.
+               On 32-bit x86 these are the same width — safe cast. */
+            ReleaseSoundResource((ResourceEntry*)sndHandle);
         }
     }
 
@@ -404,8 +362,8 @@ void GameSetupPanel::render(int unused)
     this->field_22C->setState(0, NULL);   /* +0x22C */
 
     /* Step 4: Choose active list based on m_playerSlotCount flag */
-    void* activeList;
-    if (g_netman->m_playerSlotCount == 0) {
+    LayoutListNode* activeList;
+    if (_g_netman->m_playerSlotCount == 0) {
         activeList = this->layoutList;    /* +0xF0 */
     } else {
         activeList = this->titleList;     /* +0xEC */
@@ -421,7 +379,7 @@ void GameSetupPanel::render(int unused)
     this->renderFlag = 1;                 /* +0x1B8 */
 
     /* Step 8: End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, NULL);
+    UIPANEL_EndPaintEx(this, this->hWnd, NULL, 0, NULL);
 }
 
 /* ================================================================== */
@@ -438,9 +396,9 @@ void GameSetupPanel::render(int unused)
 void GameSetupPanel::updateTitle()
 {
     /* Check if network mode is active */
-    /* g_netman->m_bFlag1 (+0x7C8) = network session active flag */
-    /* g_netman->m_bInit  (+0x04)  = network mode flag */
-    if (g_netman->m_bFlag1 != 0 && g_netman->m_bInit != 0) {
+    /* _g_netman->m_bFlag1 (+0x7C8) = network session active flag */
+    /* _g_netman->m_bInit  (+0x04)  = network mode flag */
+    if (_g_netman->m_bFlag1 != 0 && _g_netman->m_bInit != 0) {
         /* Network mode: hide the title sprite and use resource 0x71 */
         this->titleSprite->setState(0, NULL);
         g_resmgr.FormatResourceString(0x71, this->titleText, 0x80);
@@ -472,7 +430,7 @@ void GameSetupPanel::updateTitle()
 
         /* Select resource string based on m_playerSlotCount flag */
         UINT resId;
-        if (g_netman->m_playerSlotCount == 0) {
+        if (_g_netman->m_playerSlotCount == 0) {
             resId = 0x6F;  /* "Select Scenario" */
         } else {
             resId = 0x70;  /* "Select Layout" */
@@ -497,7 +455,7 @@ void GameSetupPanel::updateTitle()
 /* Entries before selectedEntry are drawn in highlight color.           */
 /* Empty list shows fallback text from resource 0x7F.                  */
 /* ================================================================== */
-void GameSetupPanel::drawLayoutList(void* list)
+void GameSetupPanel::drawLayoutList(LayoutListNode* list)
 {
     /* Store the list pointer */
     this->currentList = list;                    /* +0x108 */
@@ -558,9 +516,9 @@ void GameSetupPanel::drawLayoutList(void* list)
     int drawnCount = 0;
 
     /* Enumerate the linked list */
-    if (list != LIST_SENTINEL_CACHED && list != NULL) {
+    if (list != CACHED_SENTINEL && list != NULL) {
         int lineStep = lineHeight + 4;
-        LayoutListNode* node = (LayoutListNode*)list;
+        LayoutListNode* node = list;
         int idx = 0;
 
         do {
@@ -712,12 +670,14 @@ void GameSetupPanel::drawTitle()
 /*   state 1 = empty slot                                              */
 /*   state 2 = occupied slot (+ player name text)                      */
 /*                                                                      */
-/* Player data is read from g_netman structure:                         */
-/*   g_netman+0x08 = maxPlayers                                       */
-/*   g_netman+0x0C = playerCount (columns)                             */
-/*   g_netman+0x10 = currentPlayer (rows)                              */
-/*   g_netman + row*0x4C + 0x518 = playerId (0 = empty)                */
-/*   g_netman + row*0x4C + 0x51D = player name string                  */
+/* Player data is read from _g_netman structure:                       */
+/*   _g_netman+0x08 = maxPlayers (m_playerSlotCount)                  */
+/*   _g_netman+0x0C = playerCount / numCols (m_playerRows)            */
+/*   _g_netman+0x10 = currentPlayer / numRows (m_playerCols)          */
+/*   _g_netman + row*0x4C + 0x530 = dpId (m_slots[row].dpId,          */
+/*                                  PlayerSlot+0x18)                   */
+/*   _g_netman + row*0x4C + 0x52A = layout_name (m_slots[row].        */
+/*                                  layout_name, PlayerSlot+0x12)     */
 /* ================================================================== */
 void GameSetupPanel::drawGrid()
 {
@@ -756,11 +716,14 @@ void GameSetupPanel::drawGrid()
     /* NOTE: Binary transposes grid axes — numRows comes from m_playerCols,
              numCols from m_playerRows. The grid draws numRows rows of
              numCols columns per row. */
-    int numRows = g_netman->m_playerCols;    /* column count = rows to draw */
-    int numCols = g_netman->m_playerRows;     /* row count = columns to draw */
-    int maxPlayers = g_netman->m_playerSlotCount;
+    int numRows = _g_netman->m_playerCols;    /* column count = rows to draw */
+    int numCols = _g_netman->m_playerRows;     /* row count = columns to draw */
+    int maxPlayers = _g_netman->m_playerSlotCount;
 
-    int insertedCount = 0;  /* total players inserted across all rows */
+    /* NOTE: insertedCount is incremented but never read after the loop.
+   The binary also computes this value without using it — dead code preserved
+   for behavioral fidelity. */
+    int insertedCount = 0;  /* total players inserted across all rows (unused) */
 
     /* Calculate first cell rect OUTSIDE the row loop so that the
        per-row OffsetRect(0, 0x7C) at the end of each iteration
@@ -785,7 +748,7 @@ void GameSetupPanel::drawGrid()
 
             if (row < maxPlayers) {
                 /* Check if this slot has a player */
-                int playerId = g_netman->m_slots[row].dpId;
+                int playerId = _g_netman->m_slots[row].dpId;
 
                 if (playerId == 0) {
                     /* Empty slot: show empty state */
@@ -801,7 +764,7 @@ void GameSetupPanel::drawGrid()
                     void* oldFont = SelectObject(hdc, g_font_small);
 
                     /* Player name from the layout_name field (Netman::PlayerSlot +0x12) */
-                    const char* playerName = g_netman->m_slots[row].layout_name;
+                    const char* playerName = _g_netman->m_slots[row].layout_name;
                     DrawTextA(hdc, playerName, -1, &cellRect, 0x25);
 
                     /* Restore GDI state */
@@ -888,7 +851,7 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 {
     /* Step 1: Free any existing titleList */
     {
-        LayoutListNode* node = (LayoutListNode*)this->titleList;
+        LayoutListNode* node = this->titleList;
         while (node != NULL) {
             LayoutListNode* next = node->next;
             if (node->name != NULL) {
@@ -905,23 +868,25 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
     wsprintfA(filePath, "%s\\Layouts\\index.lay", g_install_path);
 
     char* streamObj = NULL;   /* local_18 / stream object */
-    int* pData = NULL;        /* local_2c / loaded asset data */
+    uint8_t* pData = NULL;     /* local_2c / loaded asset data */
     int dataSize = 0;         /* local_28 */
     int* streamResult = NULL; /* local_1c / stream result pointer */
-    int loadedData = 0;       /* local_280 / data bytes */
 
     /* Step 3: Try AssetMgr first */
     if (g_asset_mgr != NULL) {
-        pData = (int*)AssetMgr_LoadFile((AssetMgr*)g_asset_mgr, (uint8_t*)filePath, &dataSize);
+        pData = AssetMgr_LoadFile(g_asset_mgr, (uint8_t*)filePath, &dataSize);
         if (pData != NULL) {
             streamObj = (char*)operator_new(0x5C);
             if (streamObj != NULL) {
-                streamResult = (int*)WNDPROC_StreamFromMemory(streamObj, (const char*)pData, dataSize, 1);
+                streamResult = (int*)WNDPROC_StreamFromMemory(streamObj, (const char*)pData, dataSize, 1); /* pData is uint8_t*, cast to const char* for StreamFromMemory */
             }
         }
     }
 
-    /* Step 4: Fall back to direct file open if AssetMgr failed */
+    /* Step 4: Fall back to direct file open if AssetMgr failed.
+       NOTE: If the AssetMgr path allocated streamObj but WNDPROC_StreamFromMemory
+       returned NULL, streamObj is overwritten here without freeing the first
+       allocation. The binary has this leak — preserved for behavioral fidelity. */
     if (streamResult == NULL) {
         streamObj = (char*)operator_new(0x5C);
         if (streamObj != NULL) {
@@ -983,8 +948,9 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 
             /* Allocate a new list node (0xC bytes) */
             LayoutListNode* newNode = (LayoutListNode*)operator_new(0x0C);
-            newNode->next = (LayoutListNode*)this->titleList;   /* node[0] = next pointer */
-            this->titleList = (void*)newNode;
+            newNode->next = this->titleList;                    /* node[0] = next pointer */
+            newNode->_pad_04 = 0;                                /* +0x04 padding, zero-initialized */
+            this->titleList = newNode;
 
             /* Allocate name buffer (0x100 bytes) and copy line content */
             char* nameBuf = (char*)operator_new(0x100);

@@ -17,7 +17,7 @@
  *
  * Size: 0x740 bytes (1856 bytes)
  * Allocated via: operator_new(0x740)
- * Vtable: 0x477930 (set during Cursor_Ctor)
+ * Vtable: 0x477930 (set during Cursor::Cursor())
  *
  * NOTE: Cursor overlays UI_WindowBase fields in +0x00..+0xE7 with
  * Cursor-specific reinterpretations. Field access uses inline accessor
@@ -27,11 +27,11 @@
  *
  * Vtable layout:
  *   [0] +0x00: scalar deleting destructor (0x4159E0)
- *   [1] +0x04: Hide (UI_WindowBase_Hide, 0x425990)
+ *   [1] +0x04: Hide (UI_WindowBase::hide, 0x425990)
  *   [2] +0x08: Show (UI_WindowBase_Show, 0x4259C0)
- *   [3] +0x0C: Cursor_SetMode (0x414340) — shared with other cursor vtables
+ *   [3] +0x0C: Cursor::set_mode (0x414340) — shared with other cursor vtables
  *   [4] +0x10: virtual (stub, 0x426130)
- *   [5] +0x14: Create (GameWindow_Create, 0x413DE0)
+ *   [5] +0x14: Create (GameWindow::create, 0x413DE0)
  *   [6] +0x18: update_client_rect (0x4140A0)
  *   [7] +0x1C: on_show (stub, 0x426130)
  *   [8] +0x20: render_editor (0x418210)
@@ -43,6 +43,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include "../shared/types.h"
 #include "../ui/UI_WindowBase.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
@@ -50,6 +51,7 @@
 /* Forward declarations                                                */
 /* ================================================================== */
 class ButtonSprite;   /* ui/ButtonSprite.h — UI button sprite, 0x24 bytes */
+class UIPANEL;          /* ui/UIPANEL.h — UI panel surface, 0x20 bytes */
 
 struct CursorEditorRecord {
     uint8_t  _pad_00[0x3A];            // +0x00
@@ -104,8 +106,8 @@ public:
     /* +0x40: sprite_height aliases field_40 */
     int32_t&    sprite_height()  { return this->field_40; }
 
-    /* +0x44: anim_resdata (void*) overlays activeFlag + _pad_45 (4 bytes) */
-    void*&      anim_resdata()   { return *(void**)&this->activeFlag; }
+    /* +0x44: anim_resdata (RESDATA*) overlays activeFlag + _pad_45 (4 bytes) */
+    RESDATA*&   anim_resdata()   { return *(RESDATA**)&this->activeFlag; }
 
     /* +0x48: anim_frame aliases cursorRefCount */
     int32_t&    anim_frame()     { return this->cursorRefCount; }
@@ -136,6 +138,19 @@ public:
 
     /* +0x88: viewport_render_enabled (inside title buffer at +0x10) */
     uint8_t&    viewport_render_enabled() { return *(uint8_t*)(this->title + 0x10); }
+
+    /* +0x90: primary_surface_fmt (inside title buffer at +0x18) */
+    int32_t&    primary_surface_fmt()  { return *(int32_t*)(this->title + 0x18); }
+    /* +0x94: primary_surface_obj (inside title buffer at +0x1C) */
+    void*&      primary_surface_obj()  { return *(void**)(this->title + 0x1C); }
+    /* +0x98: primary_resdata (RESDATA*, inside title buffer at +0x20) */
+    RESDATA*&   primary_resdata()      { return *(RESDATA**)(this->title + 0x20); }
+    /* +0x9C: overlay_surface_fmt (inside title buffer at +0x24) */
+    int32_t&    overlay_surface_fmt()  { return *(int32_t*)(this->title + 0x24); }
+    /* +0xA0: overlay_surface_obj (inside title buffer at +0x28) */
+    void*&      overlay_surface_obj()  { return *(void**)(this->title + 0x28); }
+    /* +0xA4: overlay_resdata (RESDATA*, inside title buffer at +0x2C) */
+    RESDATA*&   overlay_resdata()      { return *(RESDATA**)(this->title + 0x2C); }
 
     /* +0xDB: wndproc_flag (inside workRect at +0x7) */
     uint8_t&    wndproc_flag()   { return *((uint8_t*)&this->workRect + 7); }
@@ -170,11 +185,13 @@ public:
 
     int32_t    field_114;              // +0x114  (unknown)
     int32_t    field_118;              // +0x118  (unknown)
+    uint8_t    _pad_11C[12];           // +0x11C  undocumented gap (verified by binary offset map)
 
-    /* --- Editor scroll/list fields (+0x120..+0x180) --- */
+    /* --- Editor scroll/list fields (+0x128..+0x184) --- */
+    RECT       scroll_bg_rect;         // +0x128  scrollable list background rect
+    uint8_t    _pad_138[16];           // +0x138  undocumented gap (verified by binary offset map)
     ButtonSprite*  sprite_148;         // +0x148 (compat)
     ButtonSprite*  sprite_14C;         // +0x14C (compat)
-    RECT       scroll_bg_rect;         // +0x128  scrollable list background rect
     RECT       scroll_border_rect;     // +0x150  scrollable list border rect
     RECT       scroll_header_rect;     // +0x160  scrollable list header text rect
     int32_t    scroll_top_idx;         // +0x170  first visible player index
@@ -182,9 +199,12 @@ public:
     int32_t    scroll_line_height;     // +0x178  player name line height (pixels)
     int32_t    scroll_visible_count;   // +0x17C  number of visible lines
     int32_t    scroll_end_flag;        // +0x180  byte: 1 = end-of-list reached
-    int32_t    field_184;              // +0x184  object ptr (aliased as obj_184 below)
 
-    CursorEditorRecord* obj_184;       // +0x184  editor/player record
+    /* +0x184: union — int32_t and CursorEditorRecord* share the same storage */
+    union {
+        int32_t              field_184;  // +0x184  integer alias
+        CursorEditorRecord*  obj_184;    // +0x184  editor/player record
+    };
     uint8_t    field_188;              // +0x188  byte flag (init to 1)
     uint8_t    _pad_189[3];            // +0x189  padding
     uint32_t   timer_id_18C;           // +0x18C  timer ID for periodic update
@@ -217,14 +237,14 @@ public:
     int32_t    editor_blit_w;          // +0x1E0  source width for editor background blit
     int32_t    editor_blit_h;          // +0x1E4  source height for editor background blit
 
-    void*      background_surface;     // +0x1E8  UIPANEL* background surface (or stream ptr)
+    UIPANEL*   background_surface;     // +0x1E8  background panel surface
     void*      editor_surface;         // +0x1EC  locked editor sprite-sheet surface (IDirectDrawSurface*)
     RESDATA*   editor_resdata;         // +0x1F0  RESDATA* for editor sprite-sheet (resource 0x3CB9)
 
     ButtonSprite*  editor_sprites[10];     // +0x1F4  editor palette sprite array (10 entries)
 
     uint8_t    edit_colors[30];        // +0x22C  editor colour table (10 rows x 3 bytes RGB)
-    uint8_t    _pad_22C_pad[2];        // +0x22C trail (30 bytes used, 2 padding)
+    uint8_t    _pad_24A[2];            // +0x24A  padding before counter_24C at +0x24C
 
     int32_t    counter_24C;            // +0x24C  integer counter (init to 0, used for color-adjust timer)
 
@@ -326,21 +346,20 @@ public:
     int32_t    toolbar_res_ids[17];    // +0x6F8  toolbar resource ID table (17 entries,
                                        //         0x526C..0x5289, skipping 0x5271-0x527D gap)
 
-    LONG_PTR   prev_wndproc;           // +0x73C  saved original WindowProc for subclassed
+    uintptr_t  prev_wndproc;           // +0x73C  saved original WindowProc for subclassed
                                        //         edit control (SetWindowLongA GWL_WNDPROC).
                                        //         init to 0; populated by create() @ 0x4169E0.
 
     /* Total size: 0x740 bytes */
 
     /* ================================================================ */
-    /* Iterator macros for cursor_rect / prev_cursor_rect               */
+    /* Inline accessors for cursor_rect / prev_cursor_rect fields       */
     /* ================================================================ */
-    /* These provide backward compatibility for code using the old
-     * cursor_rect_left, cursor_rect_top, etc. defines. */
-    #define cursor_rect_left   cursor_rect().left
-    #define cursor_rect_top    cursor_rect().top
-    #define cursor_rect_right  cursor_rect().right
-    #define cursor_rect_bottom cursor_rect().bottom
+    /* Replaces preprocessor macros that would pollute global namespace. */
+    LONG cursor_rect_left()   const { return cursor_rect().left; }
+    LONG cursor_rect_top()    const { return cursor_rect().top; }
+    LONG cursor_rect_right()  const { return cursor_rect().right; }
+    LONG cursor_rect_bottom() const { return cursor_rect().bottom; }
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */
@@ -351,10 +370,10 @@ public:
      * Address: 0x415980
      *
      * Chains to UI_WindowBase_Ctor with resource ID 0x1FA (506),
-     * sets vtable to VTBL_CURSOR (0x477930), then calls Cursor_Init()
+     * sets vtable to VTBL_CURSOR (0x477930), then calls Cursor::init()
      * to bulk-create all sprite objects and initialize fields.
      *
-     * Called by: CGWND_InitAllSubsystems @ 0x4073C2 (via
+     * Called by: CGWND::InitAllSubsystems @ 0x4073C2 (via
      *            g_cursor = new (0x740) Cursor(hInstance, 0x1FA))
      *
      * @param hInstance     HINSTANCE - application instance handle
@@ -381,11 +400,11 @@ public:
      * Address: 0x4166B0
      *
      * Releases every UISprite, editor surface, GDI brush, and child
-     * object owned by the Cursor, then chains to UI_WindowBase_BaseDtor
+     * object owned by the Cursor, then chains to UI_WindowBase::base_destructor
      * which decrements the shared backbuffer refcount and cleans up
      * base class children.
      *
-     * Called by: Cursor_Dtor @ 0x4159E3
+     * Called by: Cursor::~Cursor() @ 0x4159E3
      */
     void base_destructor();
 
@@ -414,12 +433,12 @@ public:
      * a child edit control for toolbar text input. The edit control is
      * subclassed with a custom WindowProc (0x416B00).
      *
-     * Called by: CGWND_InitAllSubsystems @ 0x407444
+     * Called by: CGWND::InitAllSubsystems @ 0x407444
      *
      * @param hParent  HWND - parent window handle
      * @return         int32_t - 1 on success, 0 on failure
      */
-    int32_t create(HWND hParent);
+    virtual int32_t create(HWND hParent);
 
     /**
      * Initialize cursor sprites from resource registry.
@@ -431,7 +450,7 @@ public:
      * RESDATA pointers, pixel formats, and sprite dimensions in Cursor
      * fields. Increments the global cursor backbuffer reference count.
      *
-     * Called by: GameWindow_Create @ 0x413F71
+     * Called by: GameWindow::create @ 0x413F71
      */
     void init_sprites();
 
@@ -466,7 +485,7 @@ public:
      *
      * Called by: (vtable dispatch from UI_WindowBase and GameWindow)
      */
-    void update_client_rect();
+    virtual void update_client_rect();
 
     /**
      * Refresh network player names from NetMan + DPLAY sources.
@@ -483,7 +502,7 @@ public:
      *
      * Player count is stored at +0x6F4 (player_count).
      *
-     * Called by: Cursor::show() @ 0x416DD5, Cursor_InitNetworkPlayer @ 0x41AE3E
+     * Called by: Cursor::show() @ 0x416DD5, Cursor::init_network_player() @ 0x41AE3E
      */
     void update_network_names();
 
@@ -588,7 +607,7 @@ public:
      *
      * Called by: vtable slot [8] from editor render loop
      */
-    void render_editor();
+    virtual void render_editor();
 
     /**
      * Handle click on a preset color swatch.
@@ -703,7 +722,7 @@ public:
      * Calls handle_tab_change() then iterates 16 bonus_sprites[] for
      * tab-matching highlight states.
      *
-     * Called by: Cursor_RenderEditor, INPUT_SwitchToLocomotiveTab
+     * Called by: Cursor::render_editor(), INPUT_SwitchToLocomotiveTab
      */
     void draw_network_status();
 
@@ -717,7 +736,7 @@ public:
      * Highlights the selected entry matching toolbar_sentinel (+0x6F0).
      * Tracks visible range via scroll_top_idx/scroll_bottom_idx.
      *
-     * Called by: Cursor_RenderEditor, INPUT_HandleLocomotiveListClick
+     * Called by: Cursor::render_editor(), INPUT_HandleLocomotiveListClick
      */
     void update_scroll_buttons();
 
@@ -730,7 +749,7 @@ public:
      * (invisible). If visible: sets all tab sprites to state 0 (default),
      * then highlights the active tab with state 1.
      *
-     * Called by: Cursor_DrawNetworkStatus
+     * Called by: Cursor::draw_network_status()
      */
     void handle_tab_change();
 
@@ -763,7 +782,7 @@ public:
      * size (max 1MB), uploads via NET_UploadAsset, and optionally previews
      * non-WAV files as audio. Resets to editor mode 1 on completion.
      *
-     * Called by: Cursor_ToolbarWndProc (WM_USER+0x5F5 handler)
+     * Called by: Cursor::toolbar_wndproc() (WM_USER+0x5F5 handler)
      */
     void upload_custom_content();
 
@@ -778,7 +797,7 @@ public:
      * Shows the cursor editor toolbar overlay. Guards on `visible` (+0xE4):
      * if already visible, returns immediately. Otherwise:
      *
-     *   1. Calls Cursor_InitEditorSprites to initialize sprite objects
+     *   1. Calls Cursor::init_editor_sprites() to initialize sprite objects
      *   2. Calls vtable[7] - virtual pre-show hook
      *   3. Sets field_180 = 0
      *   4. Shows main hWnd (SW_SHOWMAXIMIZED), hides hEditWnd (SW_HIDE)
@@ -795,7 +814,7 @@ public:
      *   11. Calls update_network_names()
      *   12. Starts timer 0x53 (83) at 50ms interval stored at +0x19C
      *
-     * Called by: CGWND_SetMode (mode 7) @ 0x40824C, other game mode handlers
+     * Called by: CGWND::SetMode (mode 7) @ 0x40824C, other game mode handlers
      *
      * @param playerData  Pointer to network player data, or 0 for local/offline
      */
@@ -806,8 +825,8 @@ public:
      * Address: 0x416F70
      *
      * Guards on visible flag (+0xE4). If visible:
-     *   1. Calls UI_WindowBase_Hide to hide the window
-     *   2. Calls Cursor_CleanupEditorSprites to release editor sprites
+     *   1. Calls UI_WindowBase::hide() to hide the window
+     *   2. Calls Cursor::cleanup_editor_sprites() to release editor sprites
      *   3. Kills timers at +0x18C and +0x19C
      *   4. Releases two DDraw surfaces at +0x590 and +0x598 via vtable[2]
      *   5. Releases all 64 toolbar sprites at +0x48C via vtable[0](1)
@@ -877,7 +896,7 @@ public:
      *     2. Composite cursor sprite onto backbuffer
      *     3. Composite backbuffer to scene backbuffer
      *
-     * Called by: Cursor_SetCapture, Cursor_SetMode, Cursor_HandleWindowPaint,
+     * Called by: Cursor::set_capture(), Cursor::set_mode(), Cursor::handle_window_paint(),
      *            and other cursor state change handlers
      *
      * @param param  byte - if non-zero, perform full recomposite
@@ -907,7 +926,7 @@ public:
      *   8. Two paths: accelerated (<256px, uses union rect as single
      *      destination) vs. normal (clipped cursor dimensions)
      *
-     * Called by: Cursor_SetCapture, Cursor_SetMode, Cursor_HandleWindowPaint,
+     * Called by: Cursor::set_capture(), Cursor::set_mode(), Cursor::handle_window_paint(),
      *            and internal cursor motion handlers
      *
      * @param param  byte - if non-zero, enable accelerated blit path
@@ -937,7 +956,7 @@ public:
      *     2. Calls SetCapture(hWnd) to re-acquire Windows capture
      *     3. Hides OS cursor via ShowCursor(FALSE) loop until < 0
      *
-     * Called by: GameWindow_Show/Hide, HelpWnd_Hide, CGWND_Screensaver_Hide
+     * Called by: GameWindow::show/hide, HelpWnd::hide, CGWND_Screensaver_Hide
      *
      * @param releaseFlag  byte - 0 = release (hide OS cursor, capture window),
      *                      non-zero = acquire (show game cursor, release windows capture)
@@ -989,9 +1008,9 @@ public:
      * Window procedure handler for paint messages. If the incoming HWND
      * matches this->hWnd (+0x08), performs:
      *   1. DDRAW_UnlockPrimary(hWnd)
-     *   2. Cursor_UpdateDirtyRect(this, true)
+     *   2. Cursor::update_dirty_rect(true)
      *   3. Cursor_UnlockAllSurfaces()
-     *   4. Optionally Cursor_RenderWithViewport(this, true)
+     *   4. Optionally Cursor::render_with_viewport(true)
      *
      * Returns 0 always (standard WndProc return for handled message).
      *

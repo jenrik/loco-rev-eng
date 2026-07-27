@@ -165,8 +165,6 @@ void Train_RemoveAllTracks(void*,int32_t){}
 void Train_SendPlayerInfo(void*,int32_t){}
 void Train_StartMultiplayer(void*,int32_t){}
 void Train_StopMultiplayer(void*,void*){}
-void TileMap_GetObjectAt(void*,int16_t,int16_t,int16_t){}
-void TileMap_GetTileOrigin(void*,void*){}
 void TrackPiece_SetZoom(void*,int16_t){}
 void WIN32_FatalError(const char*){fprintf(stderr,"FATAL\n");exit(1);}
 void WIN32_GetSystemMetrics(void*,int32_t*){}

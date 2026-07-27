@@ -130,6 +130,8 @@ GOOD_SRCS := \
 	audio/GameAudio.cpp \
 	ui/UIPANEL.cpp \
 	ui/HelpWnd.cpp \
+	ui/HelpWnd_stubs.cpp \
+	ui/HelpPageNode.cpp \
 	ui/EditWindow.cpp \
 	ui/PostcardAlbum.cpp \
 	resources/ResourceManager.cpp \

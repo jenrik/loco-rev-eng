@@ -801,7 +801,7 @@ void RESMGR_OpenResourceFile(ResourceEntry* resEntry);
 int32_t RESMGR_LoadSoundResource(ResourceEntry* entry);
 
 /**
- * RESMGR_ReleaseSoundResource — Release refcounted sound resource.
+ * ReleaseSoundResource — Release refcounted sound resource.
  * Address: 0x448EE0
  *
  * Decrements refcount at +0x120. When refcount reaches 0 and a
@@ -810,7 +810,7 @@ int32_t RESMGR_LoadSoundResource(ResourceEntry* entry);
  *
  * @return  always 1
  */
-int32_t RESMGR_ReleaseSoundResource(ResourceEntry* entry);
+int32_t ReleaseSoundResource(ResourceEntry* entry);
 
 /* ================================================================== */
 /* SoundObject — TrackPiece subclass with text label                   */

@@ -4,8 +4,11 @@
 
 #include "Cursor.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
-/* Win32 API declarations — only needed on real Windows.
- * On non-Windows, sdl3_window.h provides equivalent declarations. */
+/* Win32 API declarations.
+ * NOTE: Most of these are also in stubs/windows.h. The _WIN32 block
+ * remains as a self-contained fallback. TODO [PROGRESS.md]: Consolidate
+ * all Win32 declarations into stubs/windows.h; remove per-file duplicates.
+ * Non-Windows builds use sdl3_window.h. */
 #ifdef _WIN32
 extern "C" {
 HBRUSH CreateSolidBrush(uint32_t);
@@ -78,23 +81,32 @@ int CRT_rand(void);
 void CRT_free(void*);
 
 /* ================================================================ */
-/* C-linkage: Win32 API, DirectX/DirectDraw/DirectPlay/CRT helpers  */
-/*   These are genuine C-linkage symbols from the binary.            */
+/* C-linkage: DirectDraw/DirectX platform helpers (COM ABI)          */
+/*   These are genuine C-linkage symbols from the binary.             */
 /* ================================================================ */
 extern "C" {
 size_t strlen(const char*);
 void* memcpy(void*, const void*, size_t);
-void* ResourceManager_GetById(void*, int);
-void Sprite_Init(void*);
-void Sprite_Destroy(void*);
-void Sprite_SetState(void*, int, int*);
-int UI_CreateFullWindow(void*, int, HWND, int, int, int, int, HMENU, HICON, UINT);
 void DDRAW_UnlockPrimary(HWND);
 int DDRAW_SetSurfaceFormat(void*, int);
 int DDRAW_RestoreSurfaces(void*, void*);
 void DDRAW_GetSurfaceWidthHeight(void*);
-void UIPANEL_Blit(void* surf, int32_t sx, int32_t sy, int32_t sw, int32_t sh,
-                   int32_t dx, int32_t dy, int32_t extra, int32_t dw, int32_t dh, int32_t flags);
+void* CRT_wcsstr(const uint8_t*, const uint16_t*);
+void Sprite_Destroy(void*);  /* declared extern "C" in ButtonSprite.h */
+}
+
+/* ================================================================ */
+/* C++-linkage: game engine helpers                                  */
+/*   These are C++ ABI symbols from the binary — use C++ linkage.    */
+/*   NOTE: These are transitional bridge declarations. The eventual  */
+/*   intent is to replace them with direct C++ method calls.         */
+/* ================================================================ */
+void* ResourceManager_GetById(void*, int);
+void Sprite_Init(void*);
+void Sprite_SetState(void*, int, int*);
+int UI_CreateFullWindow(void*, int, HWND, int, int, int, int, HMENU, HICON, UINT);
+void UIPANEL_Blit(void* srcSurf, int32_t sx, int32_t sy, int32_t sw, int32_t sh,
+                   void* dstSurf, int32_t dx, int32_t dy, int32_t dw, int32_t dh, int32_t flags);
 HDC UIPANEL_BeginPaint(void*);
 void UIPANEL_EndPaint(void*);
 void UIPANEL_EndPaintEx(void*, HWND, int, uint8_t, RECT*);
@@ -107,7 +119,6 @@ void DPLAY_LeaveSession(void*);
 void* NET_GetOrCreateSurface(void*, uint8_t, uint8_t, uint8_t, uint8_t);
 int NET_FindPlayer(int, int);
 uint16_t NET_UploadAsset(int, char*);
-void* CRT_wcsstr(const uint8_t*, const uint16_t*);
 void WIN32_FatalError(void);
 void WIN32_PostQuit(void);
 void PlaySound(int);
@@ -122,18 +133,15 @@ void Game_SetScreenMode(void*, uint8_t, uint8_t, uint8_t);
 void CGWND_PumpMessages(void*);
 int DPLAY_CreatePlayer(void* record);
 void DPLAY_RenderPlayer(void* dplay, int hdcVal, void* player,
-                         void* surface, int x, int y, int w, int* h);
+                         void* surface, int x, int y, int w, RECT* rect);
 void* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
-}
 
 /* ================================================================ */
 /* C++ linkage — game helpers originally compiled as C++ symbols     */
-/*   NOTE: These are transitional bridge declarations. The eventual  */
-/*   intent is to replace them with direct C++ method calls.         */
+/*   NOTE: UI_WindowBase_* bridge declarations removed — Cursor      */
+/*   code now uses direct C++ method calls (UI_WindowBase::hide(),   */
+/*   UI_WindowBase::show(), UI_WindowBase::base_destructor()).       */
 /* ================================================================ */
-void UI_WindowBase_BaseDtor(void*);
-void UI_WindowBase_Hide(void*);
-void UI_WindowBase_Show(void*);
 
 /* Globals — typed where types are known */
 extern Cursor* g_cursor;
@@ -176,6 +184,17 @@ typedef int (__stdcall *SurfacePollBlit_t)(void*, void*);
 
 /* ================================================================== */
 /* RESDATA vtable helpers                                              */
+/*                                                                     */
+/* NOTE: The RESDATA_ prefix on GetSurface/ReleaseSurface comes from  */
+/* the RESDATA struct name (defined in shared/types.h), NOT from       */
+/* Ghidra auto-label conventions. These are transitional bridge        */
+/* helpers for Cursor's use of the RESDATA vtable.                     */
+/*                                                                     */
+/* TODO [PROGRESS.md]: Refactor RESDATA from POD struct with manual   */
+/* vtable into a C++ class with virtual methods GetSurface() and       */
+/* ReleaseSurface(). The literal vtable dispatch here (vtbl[1]/[2])    */
+/* is an AGENTS.md §4 anti-pattern; acceptable as a transitional       */
+/* bridge until RESDATA is refactored across all consumers.            */
 /*                                                                     */
 /* RESDATA is defined in shared/types.h as a POD struct with a vtable  */
 /* pointer at +0x00. These helpers provide typed access to RESDATA's   */

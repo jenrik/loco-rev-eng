@@ -22,21 +22,34 @@
  *     └─ HelpWnd (vtable 0x478428)  ← this class
  *
  * Vtable layout (inherits 8 slots from GameWindow):
- *   [0] +0x00: scalar deleting destructor  (0x44F4F0)
- *   [1] +0x04: Hide                        (0x450AE0)
- *   [2] +0x08: Show                        (0x450240)
- *   [3] +0x0C: set_mode (Cursor dispatch)  (inherited, 0x414340)
- *   [4] +0x10: cleanup_sprites             (0x451440)
- *   [5] +0x14: Create                      (0x450CA0)
- *   [6] +0x18: init                        (0x451180)
- *   [7] +0x1C: on_show / update_anim       (0x450450)
+ *   [0] +0x00: ~HelpWnd (scalar deleting dtor) (0x44F4F0)
+ *   [1] +0x04: hide                       (0x450AE0) — overrides GameWindow::hide
+ *   [2] +0x08: show                       (0x450240) — signature mismatch, see NOTE
+ *   [3] +0x0C: set_mode                   (inherited, 0x414340)
+ *   [4] +0x10: cleanup_sprites            (0x451440) — overrides GameWindow::cleanup_sprites
+ *   [5] +0x14: create                     (0x450CA0) — signature mismatch, see NOTE
+ *   [6] +0x18: init                       (0x451180) — overrides GameWindow::init
+ *   [7] +0x1C: update_anim                (0x450450) — overrides GameWindow::update_anim
+ *
+ * NOTE: Binary vtable signature mismatches (verified via Ghidra):
+ *   - GameWindow::show (0x413D10): void __fastcall(void* this) — no params.
+ *     HelpWnd::show (0x450240): void __thiscall(void* this, int pageTarget).
+ *     The binary overwrites vtable[2] with a function of different arity.
+ *     In C++, HelpWnd::show(int) hides GameWindow::show(); callers dispatch
+ *     through the vtable and always pass the pageTarget argument.
+ *     HelpWnd internally chains to GameWindow::show() via qualified call.
+ *   - GameWindow::create (0x413DE0): 12 params; HelpWnd::create (0x450CA0):
+ *     1 param (HWND). Same pattern at vtable[5]. C++ name-hiding approximates
+ *     the binary's behavior. These mismatches are inherent to MSVC's vtable
+ *     model and cannot be perfectly expressed in standard C++.
+ *
+ * NOTE: HelpPageNode methods (find_page, etc.) have been extracted to
+ * ui/HelpPageNode.h / ui/HelpPageNode.cpp. See those files.
  *
  * Called by: CGWND_AudioCreate @ 0x40FC0B (via CGWND::AudioCreate)
- *
- * NOTE: find_page, find_page_scalar_dtor, find_page_base_dtor are
- * actually HelpPageNode methods (vtable 0x4783D8), temporarily placed
- * in HelpWnd. TODO: move to separate HelpPageNode class.
  */
+
+// Status: TRANSCRIBED
 
 #pragma once
 
@@ -53,6 +66,9 @@ class TileMap;
 class ResourceManager;
 class GameAudio;
 class AssetMgr;
+class Game;          /* Game singleton type */
+/* NetMan forward declaration — not yet decompiled as a full class */
+class NetMan;
 
 /* ================================================================== */
 /* HelpPageData — Per-page help data (0x3C bytes)                      */
@@ -70,6 +86,14 @@ struct HelpPageData {
     RECT      overlayRect;         // +0x2C  Overlay/indicator region
 };
 #pragma pack(pop)
+
+/* ================================================================== */
+/* HelpPageNode — Page-list node (0x128 bytes, vtable 0x4783D8)        */
+/*                                                                      */
+/* Extracted to ui/HelpPageNode.h. See that file for the complete      */
+/* class definition with proper C++ inheritance from RESDATA_GameVehicle.*/
+/* ================================================================== */
+#include "HelpPageNode.h"
 
 /* ================================================================== */
 /* HelpWnd class                                                        */
@@ -135,6 +159,10 @@ public:
     /* Page data array — 200 pages of 0x3C bytes each */
     HelpPageData  pages[200];           // +0x15C  Help page entries (200 * 0x3C = 0x1E00)
 
+    /* Work buffer — 0x10E0 bytes of scratch space between pages array
+     * end (+0x1F5C) and helpDataLoaded (+0x303C). Zeroed by init(). */
+    uint8_t       workBuffer[0x10E0];    // +0x1F5C
+
     /* Help window state fields at end of pages array */
     uint8_t       helpDataLoaded;        // +0x303C  Byte: 1 = help data pages loaded
     uint8_t       _pad_303D[3];          // +0x303D  Padding
@@ -187,36 +215,71 @@ public:
 
     /**
      * init — creates 9 ButtonSprite objects, zeros page array, sets state.
-     * vtable[6]. 0x451180.
+     * vtable[6] override. 0x451180.
+     * Overrides GameWindow::update_client_rect.
      */
-    void init();
+    void init() override;
 
     /**
      * create — register WNDCLASS, create HWND, center on desktop.
-     * vtable[5]. 0x450CA0.
+     * vtable[5] override.
+     * Address: 0x450CA0.
+     *
+     * NOTE: Binary signature differs from GameWindow::create(12 params).
+     * In C++ this hides the base; the binary vtable replaces the slot
+     * with a fully different function. Chains to GameWindow::create
+     * internally via a direct qualified call.
      */
-    bool create(HWND hWndParent);
+    int create(HWND hWndParent);
 
     /**
-     * show — display help window. vtable[2]. 0x450240.
+     * show — display help window. vtable[2] override.
+     * Address: 0x450240.
+     *
+     * NOTE: Binary signature differs from GameWindow::show() (no params).
+     * In C++ this hides the base. The binary replaces the vtable slot;
+     * internally chains to GameWindow::show() via qualified call.
      */
     void show(int pageTarget);
 
     /**
-     * hide — hide help window. vtable[1]. 0x450AE0.
+     * hide — hide help window. vtable[1] override.
+     * Address: 0x450AE0.
      */
-    void hide();
+    void hide() override;
 
     /**
      * wnd_proc — Windows message handler. 0x4518B0.
+     *
+     * NOTE: In the binary, the actual WNDPROC registered with Windows
+     * is the shared GameWindow::Create WndProc at 0x415900, which
+     * extracts 'this' from GWLP_USERDATA and dispatches. This method
+     * models the HelpWnd-specific message handling logic that runs
+     * within that dispatch chain. It is declared non-static because
+     * the real dispatch provides 'this' in ECX.
      */
     LRESULT wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     /**
-     * set_mode — cursor dispatch helper. vtable[3]. 0x414340.
+     * set_mode — cursor dispatch helper. vtable[3].
      * Inherited from GameWindow; calls Cursor_SetMode internally.
+     * Address: 0x414340.
      */
-    virtual void set_mode(void* countPtr, void* dataPtr, int modeA, int modeB);
+    void set_mode(void* countPtr, void* dataPtr, int modeA, int modeB) override;
+
+    /**
+     * cleanup_sprites — Destroy all 9 ButtonSprite objects. vtable[4] override.
+     * Address: 0x451440.
+     * Overrides GameWindow::method_4.
+     */
+    void cleanup_sprites() override;
+
+    /**
+     * update_anim — Update animation frame tick. vtable[7] override.
+     * Address: 0x450450.
+     * Overrides GameWindow::on_show.
+     */
+    void update_anim(int param) override;
 
     /* ================================================================ */
     /* Page management                                                   */
@@ -225,6 +288,9 @@ public:
     /**
      * load_help_data — Parse help page data from script-file stream.
      * 0x44FC80.
+     *
+     * @param stream  Stream object pointer (WNDPROC stream, not yet
+     *                decompiled as a class; typed as void*.)
      */
     int load_help_data(void* stream);
 
@@ -259,34 +325,6 @@ public:
     void update_scroll();
 
     /**
-     * find_page — Init a page-list node for given resource ID.
-     * 0x44F210.
-     * TODO: This is actually the HelpPageNode constructor (vtable 0x4783D8).
-     * Move to HelpPageNode class once class hierarchy is decompiled.
-     */
-    HelpPageData* find_page(int resourceId);
-
-    /**
-     * find_page_scalar_dtor — Scalar deleting destructor for HelpPageNode (vtable[0]).
-     * 0x44F2A0.
-     * TODO: Move to HelpPageNode class.
-     */
-    void* find_page_scalar_dtor(byte flags);
-
-    /**
-     * find_page_base_dtor — Base destructor for HelpPageNode (vtable[1]).
-     * 0x44F2C0.
-     * TODO: Move to HelpPageNode class.
-     */
-    void find_page_base_dtor();
-
-    /**
-     * set_page — Process page linkage event (load game object, set state).
-     * 0x44F340.
-     */
-    void set_page();
-
-    /**
      * play_narration — Play narration audio for current help page.
      * 0x44F560.
      */
@@ -307,21 +345,24 @@ public:
     void go_prev_page();
 
     /* ================================================================ */
-    /* Rendering                                                        */
+    /* Rendering (stubs — see stubs/HelpWnd_stubs.cpp)                     */
     /* ================================================================ */
 
     /**
      * render_page — Render current page text content. 0x452230.
+     * TODO: decompile 0x452230
      */
     void render_page(int* hdc_p);
 
     /**
      * render_scroll_up — Render scroll-up indicator. 0x452570.
+     * TODO: decompile 0x452570
      */
     void render_scroll_up(int* hdc_p);
 
     /**
      * render_scroll_down — Render scroll-down indicator. 0x4526B0.
+     * TODO: decompile 0x4526B0
      */
     void render_scroll_down(int* hdc_p);
 
@@ -337,18 +378,15 @@ public:
 
     /**
      * draw_scroll_indicator — Blit the scroll indicator to surface. 0x452B00.
+     * TODO: decompile 0x452B00
      */
     void draw_scroll_indicator();
 
     /**
      * update_anim_sprite — Render animation sprite at frame offset. 0x452C00.
+     * TODO: decompile 0x452C00
      */
     void update_anim_sprite(int frameOffset);
-
-    /**
-     * update_anim — Update animation frame tick. vtable[7] callback. 0x450450.
-     */
-    void update_anim();
 
     /**
      * draw_text — Draw one line of help text for scroll position. 0x450850.
@@ -363,11 +401,6 @@ public:
     /* ================================================================ */
     /* Event handling                                                   */
     /* ================================================================ */
-
-    /**
-     * cleanup_sprites — Destroy all 9 ButtonSprite objects. vtable[4]. 0x451440.
-     */
-    void cleanup_sprites();
 
     /**
      * handle_click — Process a mouse click. 0x451540.
@@ -393,15 +426,9 @@ public:
     /* Internal helpers                                                  */
     /* ================================================================ */
 
-    /**
-     * play_page_audio_common — Internal helper to play narration for current page.
-     * Releases existing audio channel then plays new sound resource.
-     */
-    void play_page_audio_common();
+    /* NOTE: play_page_audio_common and refresh_all_buttons logic is inlined
+     * in go_next_page (0x451920) and go_prev_page (0x451C60). These are NOT
+     * separate functions in the binary — the audio release/play and
+     * button-refresh sequences are repeated inline at each call site. */
 
-    /**
-     * refresh_all_buttons — Refresh all button states and reset animation timer.
-     * Calls update_button_states for all 9 buttons.
-     */
-    void refresh_all_buttons();
 };

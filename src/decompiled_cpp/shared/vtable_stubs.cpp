@@ -38,21 +38,8 @@ void VehicleEditor::CheckEditBounds2(void*) {}
 void VehicleEditor::CheckVehicleAttach(void*) {}
 
 /* =========================================================== */
-/* GameSetupPanel methods                                       */
-/* =========================================================== */
-class GameSetupPanel {
-public:
-    void HandleMapClick(int, int);
-    void SelectLayoutEntry(int);
-    void SendScenarioSelect(int);
-    void ConnectToNetworkGame(int);
-};
-
-void GameSetupPanel::HandleMapClick(int, int) {}
-void GameSetupPanel::SelectLayoutEntry(int) {}
-void GameSetupPanel::SendScenarioSelect(int) {}
-void GameSetupPanel::ConnectToNetworkGame(int) {}
-
+/* GameSetupPanel stubs moved to                               */
+/* stubs/gamesetuppanel_network_stubs.cpp                       */
 /* =========================================================== */
 /* HelpWnd stubs removed — now defined in ui/HelpWnd.cpp       */
 /* with TODO: decompile annotations and address tracking.      */

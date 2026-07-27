@@ -7,12 +7,6 @@
 #include "../ui/ButtonSprite.h"
 
 
-static inline int SurfaceBlt(void* surface, RECT* dstRect, void* srcSurface,
-                             RECT* srcRect, uint32_t flags) {
-    void** vtbl = *(void***)surface;
-    return ((SurfaceBlt_t)vtbl[5])(surface, dstRect, srcSurface, srcRect, flags, 0);
-}
-
 /* Forward declarations for internal functions called within this file */
 /* declared in Cursor_internal.h */
 
@@ -110,7 +104,7 @@ void Cursor::base_destructor()
     /* Release background surface (UIPANEL object).
      * Uses scalar deleting destructor (vtable[0]) in the binary. */
     if (this->background_surface != nullptr) {                  /* +0x1E8 */
-        delete (UIPANEL*)this->background_surface;
+        delete this->background_surface;
         this->background_surface = nullptr;
     }
 
@@ -436,30 +430,30 @@ skip_palette_load:
 void Cursor::init_sprites()
 {
     /* Resource 0x1400 — primary cursor sprite */
-    int* resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x1400);
-    this->primary_resdata = resdata;                             /* +0x98 */
+    RESDATA* resdata = (RESDATA*)ResourceManager_GetById(&g_resmgr, 0x1400);
+    this->primary_resdata() = resdata;                          /* +0x98 */
 
     if (resdata != nullptr) {
         /* Get surface via RESDATA vtable[1] */
         void* surface = RESDATA_GetSurface(resdata, 0, 0);
-        this->primary_surface_obj = surface;                     /* +0x94 */
+        this->primary_surface_obj() = surface;                  /* +0x94 */
         UIPANEL_UnlockSurface(surface);
 
         /* Read pixel format from surface (+0x1C), dimensions from RESDATA (+0x14/+0x16) */
-        this->primary_surface_fmt = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x90 */
+        this->primary_surface_fmt() = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x90 */
         this->sprite_width() = *(uint16_t*)((intptr_t)resdata + 0x14);        /* +0x3C */
         this->sprite_height() = *(uint16_t*)((intptr_t)resdata + 0x16);       /* +0x40 */
     }
 
     /* Resource 0x1403 — cursor overlay sprite */
-    resdata = (int*)ResourceManager_GetById(&g_resmgr, 0x1403);
-    this->overlay_resdata = resdata;                             /* +0xA4 */
+    resdata = (RESDATA*)ResourceManager_GetById(&g_resmgr, 0x1403);
+    this->overlay_resdata() = resdata;                           /* +0xA4 */
 
     if (resdata != nullptr) {
         void* surface = RESDATA_GetSurface(resdata, 0, 0);
-        this->overlay_surface_obj = surface;                     /* +0xA0 */
+        this->overlay_surface_obj() = surface;                   /* +0xA0 */
         UIPANEL_UnlockSurface(surface);
-        this->overlay_surface_fmt = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x9C */
+        this->overlay_surface_fmt() = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x9C */
     }
 
     /* Create shared 256x256 cursor backbuffer if not yet created */
@@ -508,7 +502,7 @@ void Cursor::init_background()
     } else {
         surface = nullptr;
     }
-    this->background_surface = surface;                          /* +0x1E8 */
+    this->background_surface = (UIPANEL*)surface;                /* +0x1E8 */
 
     UIPANEL_InitSurface(surface, 0x500, 0x400, 1, 0, 0);
 
