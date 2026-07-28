@@ -6,6 +6,7 @@
  */
 
 #include "UI_WindowBase.h"
+#include "../graphics/LOCOBITMAP.h"
 #ifndef _WIN32
 #include "sdl3_ddraw.h"
 #endif
@@ -258,6 +259,113 @@ void UI_WindowBase::show()
     ShowWindow(this->hWnd, SW_SHOW);        /* SW_SHOW = 5 */
 
     this->visible = 1;                      /* +0xE4 */
+}
+
+/* ================================================================== */
+/* UI_WindowBase::set_mode (vtable[3])                                */
+/* Address: 0x425FD0                                                   */
+/* ================================================================== */
+void UI_WindowBase::set_mode(int32_t surface_address, void* animation_metadata,
+                             uint8_t reset_position, uint8_t force_redraw)
+{
+#ifndef _WIN32
+    // The SDL host uses EditWindow::hostRenderFrame rather than the x86
+    // UIPANEL renderer. Its widened object layout cannot safely interpret
+    // the binary-only surface/metadata overlay at +0x60/+0x64.
+    (void)surface_address;
+    (void)animation_metadata;
+    (void)reset_position;
+    (void)force_redraw;
+    return;
+#else
+    const auto* const metadata = static_cast<const UIAnimationMetadata*>(animation_metadata);
+    const UIAnimationOrigin origin = {metadata->hotspot_x, metadata->hotspot_y};
+
+    // The original x86 value at +0x60 is an address when this base
+    // implementation is selected. Cursor's override interprets the same
+    // argument as an animation state instead.
+    const auto* const surface = reinterpret_cast<UIPANEL_Surface*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(surface_address)));
+    this->set_render_surface(surface, metadata->frame_count, &origin,
+                             reset_position, force_redraw);
+#endif
+}
+
+/* ================================================================== */
+/* UI_WindowBase::set_render_surface (vtable[4])                      */
+/* Address: 0x426020                                                   */
+/* ================================================================== */
+void UI_WindowBase::set_render_surface(UIPANEL_Surface* surface, uint32_t frame_divisor,
+                                       const UIAnimationOrigin* origin,
+                                       uint8_t reset_dirty_rect, uint8_t force_redraw)
+{
+#ifndef _WIN32
+    // UIPANEL_Render (0x426EB0) follows the packed x86 UIPANEL layout and
+    // is replaced on the host by EditWindow::hostRenderFrame. Retaining
+    // this native-only callback would dereference incompatible host fields.
+    (void)surface;
+    (void)frame_divisor;
+    (void)origin;
+    (void)reset_dirty_rect;
+    (void)force_redraw;
+    return;
+#else
+    const int32_t surface_address = static_cast<int32_t>(reinterpret_cast<uintptr_t>(surface));
+    if (this->field_14 == surface_address) {
+        if (surface == nullptr) return;
+    } else {
+        this->field_14 = surface_address;
+        this->field_20 = static_cast<int32_t>(frame_divisor);
+        this->field_24 = 0;
+        if (origin == nullptr) {
+            this->field_2C = 0;
+            this->field_30 = 0;
+        } else {
+            this->field_2C = origin->x;
+            this->field_30 = origin->y;
+        }
+
+        if (surface == nullptr) {
+            this->field_18 = 0;
+            this->field_1C = 0;
+        } else if (frame_divisor == 0) {
+            this->field_18 = surface->width;
+            this->field_1C = surface->height;
+        } else {
+            // 0x426079 uses DIV (unsigned), so retain unsigned division.
+            this->field_18 = static_cast<int32_t>(
+                static_cast<uint32_t>(surface->width) / frame_divisor);
+            this->field_1C = surface->height;
+        }
+    }
+
+    if (reset_dirty_rect != 0) {
+        this->field_50 = 0;
+        this->field_54 = 0;
+        this->field_58 = 0;
+        this->field_5C = 0;
+    }
+    if (force_redraw != 0 && this->captureFlag == 0) {
+        DDRAW_UnlockPrimary(this->hWnd);
+        UIPANEL_Render(this, reset_dirty_rect == 0);
+        DDRAW_UnlockPrimary(this->hWnd);
+    }
+
+    if (this->field_14 != 0) {
+        KillTimer(this->hWnd, this->timerId);
+        const UINT interval = this->field_14 == this->childCount2 ? 0x32 : 0x78;
+        this->timerId = reinterpret_cast<UINT_PTR>(SetTimer(this->hWnd, 0x43, interval, NULL));
+    }
+#endif
+}
+
+/* ================================================================== */
+/* UI_WindowBase::on_async_task_failure (vtable[5])                   */
+/* Address: 0x426130                                                   */
+/* ================================================================== */
+void UI_WindowBase::on_async_task_failure(int32_t /* reason */)
+{
+    // The original is a three-byte RET 4 no-op callback.
 }
 
 /* ================================================================== */

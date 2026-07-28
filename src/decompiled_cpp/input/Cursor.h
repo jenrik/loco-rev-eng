@@ -990,7 +990,7 @@ public:
      * @param resetPos    uint8_t - if non-zero, reset cursor rect cache
      * @param forceRedraw uint8_t - if non-zero, force immediate redraw
      */
-    virtual void set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw);
+    void set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw) override;
 
     /**
      * Pre-show virtual hook (vtable[7]).

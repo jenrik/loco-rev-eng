@@ -23,9 +23,9 @@
  *   [0]  +0x00: scalar deleting destructor     (0x4203A0)
  *   [1]  +0x04: Hide                           (0x420860)
  *   [2]  +0x08: Show                           (0x4206B0)
- *   [3]  +0x0C: SetSprite/Highlight            (0x425FD0, inherited stub)
- *   [4]  +0x10: DispatchVirtual                (0x426020, inherited stub)
- *   [5]  +0x14: CleanupCallback                (0x426130, inherited stub)
+ *   [3]  +0x0C: SetMode                        (0x425FD0, inherited)
+ *   [4]  +0x10: SetRenderSurface               (0x426020, inherited)
+ *   [5]  +0x14: OnAsyncTaskFailure             (0x426130, inherited no-op)
  *   [6]  +0x18: CreateFullWindow               (inherited: UI_CreateFullWindow)
  *   [7]  +0x1C: OnCreate/HandleClick           (0x421200, overridden)
  *   [8]  +0x20: Render/Update                  (0x422AA0, overridden)
@@ -96,11 +96,11 @@ public:
     /* NOTE: Fields +0x14, +0x60, +0x64, +0x68, +0x6C from UI_WindowBase
        are REUSED by EditWindow for sprite selection IDs:
        +0x14: pInitGuard -- guard pointer used by netPanelWndProc
-       +0x60: spriteNormalId   (reuses childCount0)
-       +0x64: spriteNormalParam (reuses childObj0)
-       +0x68: spriteHighId     (reuses childCount1)
-       +0x6C: spriteHighParam  (reuses childObj1)
-       These are set by vtable[3] (SetHighlight) and read by netPanelWndProc. */
+       +0x60: normalSurfaceAddress (reuses childCount0)
+       +0x64: normalAnimationMetadata (reuses childObj0)
+       +0x68: highlightedSurfaceAddress (reuses childCount1)
+       +0x6C: highlightedAnimationMetadata (reuses childObj1)
+       These are passed to UI_WindowBase::set_mode() by netPanelWndProc. */
 
     /* --- EditWindow-specific fields (+0xE8..~0x224) --- */
 
@@ -213,7 +213,8 @@ private:
     void render();                                       /* 0x4216F0 */
     void drawButtons();                                  /* 0x422010 */
     void drawText(RECT* rect, int charIndex,             /* 0x422440 */
-                  void* pFontRes, void* pFontBitmap);
+                  loco::assets::SpriteResource* fontResource,
+                  loco::assets::SpriteBitmap* fontBitmap);
     void updateButton(RECT* rect);                       /* 0x422570 */
 };
 

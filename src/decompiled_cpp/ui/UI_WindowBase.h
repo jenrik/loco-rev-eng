@@ -36,9 +36,9 @@
  *   [0] +0x00: scalar deleting destructor  (UI_WindowBase_Dtor,      0x4258F0)
  *   [1] +0x04: Hide                        (UI_WindowBase_Hide,      0x425990)
  *   [2] +0x08: Show                        (UI_WindowBase_Show,      0x4259C0)
- *   [3] +0x0C: virtual method (unknown)    (default impl at 0x425FD0)
- *   [4] +0x10: virtual method (unknown)    (default impl at 0x426020)
- *   [5] +0x14: virtual method (unknown)    (default impl at 0x426130)
+ *   [3] +0x0C: SetMode                     (UI_WindowBase_SetMode, 0x425FD0)
+ *   [4] +0x10: SetRenderSurface            (UI_WindowBase_SetRenderSurface, 0x426020)
+ *   [5] +0x14: OnAsyncTaskFailure           (UI_WindowBase_OnAsyncTaskFailure, 0x426130)
  *   [6] +0x18: CreateFullWindow            (UI_CreateFullWindow,     0x425B70)
  *   [7] +0x1C: OnCreate                    (UI_WindowBase_OnCreate,  0x425D30)
  *   [8] +0x20: virtual method (unknown)    (default impl at 0x426130, same as [5])
@@ -60,6 +60,32 @@
 /* ================================================================== */
 /* Forward declarations                                                */
 /* ================================================================== */
+
+/* ================================================================== */
+/* Typed UI animation metadata used by UI_WindowBase::set_mode          */
+/* ================================================================== */
+
+/**
+ * The default slot-3 implementation at 0x425FD0 reads only these three
+ * fields from a resource descriptor.  This narrow view is intentionally
+ * separate from the broader, multi-purpose RESDATA layout.
+ */
+struct UIAnimationMetadata {
+    uint8_t _pad_00[0x32];
+    int16_t hotspot_x;       // +0x32
+    int16_t hotspot_y;       // +0x34
+    uint8_t _pad_36[0x12A];
+    uint16_t frame_count;    // +0x160
+};
+static_assert(offsetof(UIAnimationMetadata, hotspot_x) == 0x32);
+static_assert(offsetof(UIAnimationMetadata, frame_count) == 0x160);
+
+struct UIAnimationOrigin {
+    int32_t x;
+    int32_t y;
+};
+
+struct UIPANEL_Surface;
 
 /* ================================================================== */
 /* UI_WindowBase class                                                  */
@@ -199,7 +225,7 @@ public:
      * disables the window (EnableWindow(FALSE)), and calls
      * ShowWindow(SW_SHOW). Sets visible flag.
      */
-    void show();
+    virtual void show();
 
     /**
      * Hide the window.
@@ -208,7 +234,32 @@ public:
      * Calls ShowWindow(SW_HIDE), kills the window timer,
      * clears visible and active flags.
      */
-    void hide();
+    virtual void hide();
+
+    /**
+     * Set the active UI animation mode (vtable[3]).
+     * Address: 0x425FD0
+     *
+     * The base implementation adapts the resource hotspot/frame count into
+     * the five-argument render-surface hook below. Cursor overrides this
+     * slot with its own animation-state implementation.
+     */
+    virtual void set_mode(int32_t surface_address, void* animation_metadata,
+                          uint8_t reset_position, uint8_t force_redraw);
+
+    /**
+     * Configure the active render surface (vtable[4]).
+     * Address: 0x426020
+     */
+    virtual void set_render_surface(UIPANEL_Surface* surface, uint32_t frame_divisor,
+                                    const UIAnimationOrigin* origin,
+                                    uint8_t reset_dirty_rect, uint8_t force_redraw);
+
+    /**
+     * Base asynchronous-task failure hook (vtable[5]).
+     * Address: 0x426130 — a three-byte `ret 4` no-op in the original.
+     */
+    virtual void on_async_task_failure(int32_t reason);
 
     /**
      * Client rect update callback (vtable[7]).

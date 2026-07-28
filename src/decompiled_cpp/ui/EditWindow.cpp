@@ -10,7 +10,10 @@
 #include "UI_Utils.h"
 #include "NameEntryPanel.h"
 #include "GameSetupPanel.h"
+#include "../core/CGWND.h"
+#include "../game/PlayerConfig.h"
 #include "../game/Train.h"
+#include "../graphics/LOCOBITMAP.h"
 #include "resource_manager_sdl3.h"
 #include "sdl3_ddraw.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -97,7 +100,6 @@ static inline void  ReleaseCapture(void) {}
 // preserves the caller's loop termination on the SDL host.
 static inline int   ShowCursor(BOOL show) { return show ? 0 : -1; }
 static inline void* SetCapture(void*) { return NULL; }
-static inline void* SetFocus(void*) { return NULL; }
 static inline int   GetWindowTextA(void*, char* buf, int max) {
     if (buf && max > 0) buf[0] = 0;
     return 0;
@@ -126,21 +128,11 @@ void  CGWND_SetMode(int mode);                                  /* 0x408130 */
 void  __fastcall DDRAW_InitAudio(void);                         /* 0x4014C2 */
 int   __thiscall Config_ReadInt(void* ini, const char* section,
                                 const char* key, const char* def);  /* 0x448D50 */
-void  __thiscall PlayerConfig_SetName(void* cfg, const char* name); /* 0x44E340 */
-void  __thiscall PlayerConfig_Save(void* cfg);                      /* 0x44E4A0 */
 void  __thiscall TileMap_Init(void** tilemap, byte flag);           /* 0x458380 */
 int   __thiscall ResourceManager_GetStringById(void** mgr, int id); /* 0x460AA0 */
 void  __thiscall RESMGR_ReleaseSoundResource(int res);              /* 0x44BB90 */
 void  __thiscall RESMGR_LoadSoundResource(int res);                 /* 0x44B8E0 */
-void  __fastcall UI_WindowBase_Show(void* self);                   /* 0x4259C0 */
-void  __fastcall UI_WindowBase_Hide(void* self);                   /* 0x425990 */
-void  __fastcall UI_SetWindowVisible(void* self, byte visible);    /* 0x425D30 */
-void  __thiscall UI_WindowBase_OnCreate(void* self);               /* 0x425D30 */
-void  __fastcall EditWindow_cleanupSprites(void* self);            /* 0x421AE0 */
-void  __fastcall EditWindow_render(void* self);                    /* 0x4216F0 */
-void  __thiscall EditWindow_drawText(void* self, RECT* rect, int ci,
-                                      void* fontRes, void* fontBmp); /* 0x422440 */
-void  __thiscall EditWindow_updateButton(void* self, RECT* rect);   /* 0x422570 */
+void  __fastcall UI_SetWindowVisible(void* self, byte visible);    /* 0x425F20 */
 void  __stdcall RESDATA_FreeWindow(PopupWindow* window);           /* 0x460B70 */
 
 void    __fastcall Town_BlitElement(void* src, int sx, int sy,
@@ -159,8 +151,7 @@ void*   UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* 0x42
 
 extern void*   g_primary_surface;       /* 0x4FD3C4 */
 extern void*   g_scripted_object;       /* 0x4AA5B8 */
-extern void*   g_main_window;           /* 0x4AA4A0 */
-extern void*   g_player_config;         /* 0x485160 */
+extern PlayerConfig* g_player_config;   /* 0x485160 */
 extern void*   g_config_ini;            /* 0x485484 */
 extern void*   g_resmgr;                /* 0x4855E8 */
 extern void**  g_tilemap;               /* 0x4855D0 */
@@ -252,7 +243,7 @@ void EditWindow::base_destructor()
 
     /* Cleanup sprites if loaded */
     if (this->spritesLoaded) {
-        EditWindow_cleanupSprites(this);
+        this->cleanupSprites();
     }
 
     destroy_popup_window(this->pPopupWindow, this->savedPopupWndProc);
@@ -397,7 +388,7 @@ void EditWindow::show()
     // its canvas EDIT replacement and select it logically by focusing it.
     this->hostEditText[0] = '\0';
     if (g_player_config != nullptr) {
-        const char* source = static_cast<const char*>(g_player_config) + 6;
+        const char* source = g_player_config->name;
         size_t length = 0;
         while (length < 11 && source[length] != '\0') {
             this->hostEditText[length] = source[length];
@@ -408,7 +399,7 @@ void EditWindow::show()
     this->hostEditFocused = true;
 #else
     SetFocus(this->hwndEdit);
-    SetWindowTextA(this->hwndEdit, (const char*)((int)g_player_config + 6));
+    SetWindowTextA(this->hwndEdit, g_player_config->name);
     /* Send EM_SETSEL (0xB1) -- select end of text (start=0, end=-1) */
     SendMessageA(this->hwndEdit, 0xB1, 0, (void*)-1);
 #endif
@@ -425,14 +416,8 @@ void EditWindow::show()
 
     /* Transition based on previousState */
     if (this->previousState == 0) {
-        /*
-         * UI_WindowBase vtable[4], 0x426020, is invoked here with
-         * (tile_map=nullptr, divisor=0, origin=nullptr, clear=false,
-         * redraw=true). Its first branch compares tile_map with +0x14;
-         * both are null after UI_WindowBase_Ctor (0x425870), so it returns
-         * immediately at 0x42611D. Preserve that proven no-op directly
-         * instead of manually indexing a compiler-owned vtable.
-         */
+        /* 0x42073E: inherited vtable[4] with a null surface. */
+        this->set_render_surface(nullptr, 0, nullptr, 0, 1);
         ShowWindow(this->hwndEdit, SW_HIDE);
     } else {
         /* Return from game: go to state 7 */
@@ -459,7 +444,7 @@ void EditWindow::show()
 void EditWindow::hide()
 {
     /* Call base class Hide */
-    UI_WindowBase_Hide(this);
+    this->UI_WindowBase::hide();
 
     /* Clear popup flag */
     this->hasPopup = 0;                              /* +0xF4 */
@@ -470,12 +455,12 @@ void EditWindow::hide()
     this->setState(1);
 
     /* Cleanup sprites */
-    EditWindow_cleanupSprites(this);
+    this->cleanupSprites();
 
     /* Restore focus to main CGWND window */
-    // g_main_window+8 is the hWnd field (first field after vtable pointer).
-    // (int) truncates on 64-bit; uintptr_t preserves the full address.
-    void* mainHwnd = *(void**)((uintptr_t)g_main_window + 8);
+    // `g_main_window` is declared as an opaque HWND in types.h, but the
+    // binary stores a CGWND object pointer at 0x4AA4A0.
+    HWND mainHwnd = static_cast<CGWND*>(g_main_window)->hWnd;  /* +0x08 */
     SetFocus(mainHwnd);
     InvalidateRect(mainHwnd, NULL, FALSE);
 }
@@ -546,7 +531,7 @@ void EditWindow::setState(int32_t state)
 void EditWindow::HandleClick()
 {
     /* Update client rect */
-    UI_WindowBase_OnCreate(this);
+    this->UI_WindowBase::on_create();
 
     /* Only proceed if sprites are loaded */
     if (!this->spritesLoaded) {
@@ -555,8 +540,8 @@ void EditWindow::HandleClick()
 
     /* Compute centering offsets from surface vs screen size */
     if (this->pMainSurface != NULL) {
-        int surfW = *(int*)((int)this->pMainSurface + 8);   /* surface width */
-        int surfH = *(int*)((int)this->pMainSurface + 0x0C); /* surface height */
+        const int32_t surfW = this->pMainSurface->width;    /* +0x08 */
+        const int32_t surfH = this->pMainSurface->height;   /* +0x0C */
 
         this->centerOffsetX = (surfW - g_screen_width) / 2;
         this->centerOffsetY = (surfH - g_screen_height) / 2;
@@ -647,8 +632,11 @@ int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 {
     /* If not yet initialized, delegate to UIPANEL_WindowProc */
     if (this->field_14 == NULL) {  /* pInitGuard at +0x14 */
-        extern LRESULT __stdcall UIPANEL_WindowProc(HWND, UINT, WPARAM, LPARAM);
-        return (int)UIPANEL_WindowProc(hwnd, msg, wParam, lParam);
+        // 0x422D9D passes the EditWindow instance in ECX before the four
+        // WndProc stack arguments.  The prior four-argument declaration
+        // dropped that required receiver.
+        extern LRESULT __thiscall UIPANEL_WindowProc(void*, HWND, UINT, WPARAM, LPARAM);
+        return static_cast<int>(UIPANEL_WindowProc(this, hwnd, msg, wParam, lParam));
     }
 
     /* Extract mouse coordinates from lParam */
@@ -657,60 +645,35 @@ int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
     POINT32 pt = { mouseX, mouseY };
 
-    /* Hit-test 6 button RECTs in order */
-
-    /* Option Button 2 (+0x14C) */
+    /* Original hit-test order and state gates (0x422DC6..0x422E4B). */
+    if (PtInRect(&this->btnOption1Rect, &pt))
+        goto highlight_btn;
     if (PtInRect(&this->btnOption2Rect, &pt))
         goto highlight_btn;
 
-    /* Option Button 1 (+0x13C) */
-    if (PtInRect(&this->btnOption1Rect, &pt))
+    /* Play is active only for single-player. */
+    if (PtInRect(&this->btnPlayRect, &pt) && _g_netman_state[7] == 0)
         goto highlight_btn;
 
-    /* Play Button (+0xFC) */
-    if (PtInRect(&this->btnPlayRect, &pt))
+    /* Scenario is active only for multiplayer when scenario data exists. */
+    if (PtInRect(&this->btnScenarioRect, &pt) &&
+        *reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0 &&
+        _g_netman_state[7] != 0)
         goto highlight_btn;
 
-    /* Scenario Button (+0x10C) */
-    if (PtInRect(&this->btnScenarioRect, &pt)) {
-        if (*(int*)(_g_netman_state + 0x10) != 0 ||
-            *(char*)(_g_netman_state + 7) == 0)
-            goto highlight_btn;
-    }
+    /* The two lower controls are mutually exclusive by alternate-menu state. */
+    if (PtInRect(&this->btnExitRect, &pt) && _g_netman_state[8] == 0)
+        goto highlight_btn;
+    if (PtInRect(&this->btnTextRect, &pt) && _g_netman_state[8] != 0)
+        goto highlight_btn;
 
-    /* Exit Button (+0x11C) */
-    if (PtInRect(&this->btnExitRect, &pt)) {
-        if (*(char*)(_g_netman_state + 8) == 0)
-            goto highlight_btn;
-    }
-
-    /* Text Button (+0x12C) */
-    if (PtInRect(&this->btnTextRect, &pt)) {
-        if (*(char*)(_g_netman_state + 8) == 0)
-            goto highlight_btn;
-    }
-
-    /* No button hit -- show normal (non-highlighted) sprite */
-    {
-        void** vtbl = (void**)*(void***)this  /* [VTBL] manual vtable access */;
-        typedef void (__thiscall* SetSpriteFn)(void*, int, int, int, int);
-        SetSpriteFn setNorm = (SetSpriteFn)vtbl[3];
-        setNorm(this, *(int*)((int)this + 0x60),  /* spriteNormalId */
-                       *(int*)((int)this + 0x64),  /* spriteNormalParam */
-                       0, 1);
-    }
+    /* No button hit -- restore the normal animation through vtable[3]. */
+    this->set_mode(this->childCount0, this->childObj0, 0, 1);
     return 0;
 
 highlight_btn:
-    /* Button highlighted -- show highlight sprite */
-    {
-        void** vtbl = (void**)*(void***)this  /* [VTBL] manual vtable access */;
-        typedef void (__thiscall* SetSpriteFn)(void*, int, int, int, int);
-        SetSpriteFn setHigh = (SetSpriteFn)vtbl[3];
-        setHigh(this, *(int*)((int)this + 0x68),  /* spriteHighId */
-                      *(int*)((int)this + 0x6C),  /* spriteHighParam */
-                      0, 1);
-    }
+    /* Button highlighted -- select the highlighted animation. */
+    this->set_mode(this->childCount1, this->childObj1, 0, 1);
     return 0;
 }
 
@@ -722,13 +685,8 @@ void EditWindow::onPlayerNameChanged()
 {
     char nameBuf[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
-    /* Call vtable[4] virtual dispatch */
-    {
-        void** vtbl = (void**)*(void***)this  /* [VTBL] manual vtable access */;
-        typedef void (__thiscall* Virtual4Fn)(void*, int, int);
-        Virtual4Fn v4 = (Virtual4Fn)vtbl[4];
-        v4(this, 0, 0);
-    }
+    /* 0x422667..0x422675 pushes (nullptr, 0, nullptr, false, true). */
+    this->set_render_surface(nullptr, 0, nullptr, 0, 1);
 
     /* Read the edited name from the edit control (max 12 chars + null = 13) */
 #ifdef _WIN32
@@ -759,18 +717,18 @@ void EditWindow::onPlayerNameChanged()
     }
 
     /* Save name to PlayerConfig */
-    PlayerConfig_SetName(g_player_config, nameBuf);
-    PlayerConfig_Save(g_player_config);
+    g_player_config->SetName(nameBuf);
+    g_player_config->Save();
 
     /* Read screen mode setting (discard result, normalizes formatting) */
     Config_ReadInt(g_config_ini, "Control", "ScreenMode", nameBuf);
 
     /* Restore the name from config (normalizes formatting) */
-    SetWindowTextA(this->hwndEdit, (const char*)((int)g_player_config + 6));
+    SetWindowTextA(this->hwndEdit, g_player_config->name);
 #ifndef _WIN32
     // Mirror the canonical config name back into the host edit buffer so
     // subsequent hostRenderFrame frames draw the normalized text.
-    std::memcpy(this->hostEditText, (const char*)((int)g_player_config + 6),
+    std::memcpy(this->hostEditText, g_player_config->name,
                 sizeof(this->hostEditText));
     this->hostEditText[sizeof(this->hostEditText) - 1] = '\0';
 #endif
@@ -786,10 +744,9 @@ void EditWindow::onPlayerNameChanged()
         if (*(char*)(_g_netman_state + 8) == 0) {
             /* Standard single-player or scenario */
             if (*(char*)(_g_netman_state + 0x24) != 0) {
-                int gameMode = *(int*)(_g_netman_state + 0x28);
-                char* panelB = (char*)this->pPanelB;
-                if ((gameMode == 4 && panelB[0x1E0] != 0) ||
-                    (gameMode == 2 && panelB[0x1E1] != 0)) {
+                const int gameMode = *(int*)(_g_netman_state + 0x28);
+                if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
+                    (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
                     this->setState(4);     /* Single-player */
                     return;
                 }
@@ -797,10 +754,9 @@ void EditWindow::onPlayerNameChanged()
         } else {
             /* Scenario select screen */
             if (*(char*)(_g_netman_state + 0x18) != 0) {
-                int gameMode = *(int*)(_g_netman_state + 0x1C);
-                char* panelB = (char*)this->pPanelB;
-                if ((gameMode == 4 && panelB[0x1E0] != 0) ||
-                    (gameMode == 2 && panelB[0x1E1] != 0)) {
+                const int gameMode = *(int*)(_g_netman_state + 0x1C);
+                if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
+                    (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
                     this->setState(5);     /* Multiplayer */
                     return;
                 }
@@ -879,11 +835,8 @@ void EditWindow::netPanelInit()
                                        (void*)&Train_ProcessMessages,
                                        _g_train);
     if (result != 1) {
-        /* Failure: call cleanup via vtable[5] */
-        void** vtbl = (void**)*(void***)this  /* [VTBL] manual vtable access */;
-        typedef void (__thiscall* CleanupFn)(void*, int);
-        CleanupFn cleanup = (CleanupFn)vtbl[5];
-        cleanup(this, 0);
+        /* 0x4228ED dispatches the base no-op failure hook (vtable[5]). */
+        this->on_async_task_failure(0);
         return;
     }
 
@@ -1098,13 +1051,16 @@ void EditWindow::hostRenderFrame()
     // States 3 (check-config), 4 (single-player), 5 (network) all show
     // the GameSetupPanel (pPanelB).  UI_MainMenu_SetState (0x4208F0) for
     // these states calls pPanelB->show() (vtable[2]) after hiding the edit
-    // control and, for state 3, hiding PanelA.  The panel occupies the
-    // full 1280×1024 canvas; the main-menu backdrop is fully covered.
+    // control and, for state 3, hiding PanelA.
+    //
+    // Host rendering clears the primary canvas to a distinct teal
+    // background so the state transition is visually unambiguous.
+    // Full GameSetupPanel composition (title, layout list, grid) is in
+    // GameSetupPanel::hostRenderFrame once the object-layout issues on
+    // 64-bit are resolved.
     if (this->dialogState == 3 || this->dialogState == 4 ||
         this->dialogState == 5) {
-        if (this->pPanelB != nullptr) {
-            this->pPanelB->hostRenderFrame();
-        }
+        SDL3_ClearPrimarySurface(0x003050);
         return;
     }
 
@@ -1221,7 +1177,7 @@ bool EditWindow::hostHandleKey(int32_t key_code)
         }
 
         // Host path (0x420D57): copy the validated name to PlayerConfig
-        // at +0x06 (the same offset used by PlayerConfig_SetName), then
+        // at +0x06 (the same offset used by PlayerConfig::SetName), then
         // transition the state machine via setState(3).  setState(3)
         // (0x4208F0 case 3) hides PanelA, checks _g_netman_state[0x18],
         // and routes to state 4 (single-player lobby) or state 5 (multiplayer
@@ -1230,8 +1186,9 @@ bool EditWindow::hostHandleKey(int32_t key_code)
         // We deliberately avoid CGWND_SetMode(1) (the 0x4227E6 branch) on
         // the host — that path enters the full mode-1 game bootstrap which
         // cascades through dozens of unported 32-bit x86 code paths.
-        if (legal && has_alpha && g_player_config != nullptr) {
-            std::memcpy(static_cast<char*>(g_player_config) + 6, this->hostEditText,
+        if (legal && has_alpha && g_player_config != nullptr &&
+            _g_netman_state != nullptr) {
+            std::memcpy(g_player_config->name, this->hostEditText,
                         sizeof(this->hostEditText));
             this->setState(3);
         }
@@ -1270,118 +1227,45 @@ void EditWindow::hostHandleTextInput(const char* utf8_text)
 /* ================================================================== */
 void EditWindow::drawButtons()
 {
-    if (*(char*)(_g_netman_state + 7) == 0) {
-        /* === Single-player mode === */
+    // 0x422010 selects exactly these resources from the DPlay state bytes.
+    const auto blit_button = [this](const MenuSpriteSlot& sprite, RECT& destination) {
+        this->updateButton(&destination);
+        if (sprite.bitmap == nullptr) return;
 
-        /* Draw Play button using sprite_407 */
-        {
-            this->updateButton(&this->btnPlayRect);
+        const int width = static_cast<int>(loco::assets::sprite_width(sprite.resource));
+        const int height = static_cast<int>(loco::assets::sprite_height(sprite.resource));
+        Town_BlitElement(sprite.bitmap,
+                         destination.left, destination.top,
+                         destination.right, destination.bottom,
+                         g_primary_surface, 0, 0, width, height, 0);
+    };
 
-            RECT srcR;
-            srcR.left = 0; srcR.top = 0;
-            srcR.right  = loco::assets::sprite_width(this->sprite_407.resource);
-            srcR.bottom = loco::assets::sprite_height(this->sprite_407.resource);
-
-            if (this->sprite_407.bitmap != 0) {
-                Town_BlitElement(this->sprite_407.bitmap,
-                    this->btnPlayRect.left, this->btnPlayRect.top,
-                    this->btnPlayRect.right, this->btnPlayRect.bottom,
-                    g_primary_surface,
-                    0, 0, srcR.right, srcR.bottom, 0);
-            }
+    if (_g_netman_state[7] == 0) {
+        blit_button(this->sprite_407, this->btnPlayRect);
+        if (*reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0) {
+            blit_button(this->sprite_40A, this->btnScenarioRect);
         }
 
-        /* Draw Scenario button if scenario data exists */
-        if (*(int*)(_g_netman_state + 0x10) != 0) {
-            this->updateButton(&this->btnScenarioRect);
-
-            RECT srcR;
-            srcR.left = 0; srcR.top = 0;
-            srcR.right  = loco::assets::sprite_width(this->sprite_40A.resource);
-            srcR.bottom = loco::assets::sprite_height(this->sprite_40A.resource);
-
-            if (this->sprite_40A.bitmap != 0) {
-                Town_BlitElement(this->sprite_40A.bitmap,
-                    this->btnScenarioRect.left, this->btnScenarioRect.top,
-                    this->btnScenarioRect.right, this->btnScenarioRect.bottom,
-                    g_primary_surface,
-                    0, 0, srcR.right, srcR.bottom, 0);
-            }
+        if (_g_netman_state[8] == 0) {
+            blit_button(this->sprite_40B, this->btnExitRect);
+            this->drawText(&this->btnTextRect, 0,
+                           this->sprite_40F.resource, this->sprite_40F.bitmap);
+            return;
         }
 
-        /* Draw Exit and text buttons */
-        if (*(char*)(_g_netman_state + 8) == 0) {
-            /* Standard SP: draw Exit button */
-            {
-                this->updateButton(&this->btnExitRect);
-
-                RECT srcR;
-                srcR.left = 0; srcR.top = 0;
-                srcR.right  = loco::assets::sprite_width(this->sprite_40C.resource);
-                srcR.bottom = loco::assets::sprite_height(this->sprite_40C.resource);
-
-                if (this->sprite_40C.bitmap != 0) {
-                    Town_BlitElement(this->sprite_40C.bitmap,
-                        this->btnExitRect.left, this->btnExitRect.top,
-                        this->btnExitRect.right, this->btnExitRect.bottom,
-                        g_primary_surface,
-                        0, 0, srcR.right, srcR.bottom, 0);
-                }
-            }
-        }
-    } else {
-        /* === Multiplayer mode === */
-
-        /* Draw Play button using sprite_408 */
-        {
-            this->updateButton(&this->btnPlayRect);
-
-            RECT srcR;
-            srcR.left = 0; srcR.top = 0;
-            srcR.right  = loco::assets::sprite_width(this->sprite_408.resource);
-            srcR.bottom = loco::assets::sprite_height(this->sprite_408.resource);
-
-            if (this->sprite_408.bitmap != 0) {
-                Town_BlitElement(this->sprite_408.bitmap,
-                    this->btnPlayRect.left, this->btnPlayRect.top,
-                    this->btnPlayRect.right, this->btnPlayRect.bottom,
-                    g_primary_surface,
-                    0, 0, srcR.right, srcR.bottom, 0);
-            }
-        }
-
-        /* Draw Scenario button using sprite_409 */
-        if (*(int*)(_g_netman_state + 0x10) != 0) {
-            this->updateButton(&this->btnScenarioRect);
-
-            RECT srcR;
-            srcR.left = 0; srcR.top = 0;
-            srcR.right  = loco::assets::sprite_width(this->sprite_409.resource);
-            srcR.bottom = loco::assets::sprite_height(this->sprite_409.resource);
-
-            if (this->sprite_409.bitmap != 0) {
-                Town_BlitElement(this->sprite_409.bitmap,
-                    this->btnScenarioRect.left, this->btnScenarioRect.top,
-                    this->btnScenarioRect.right, this->btnScenarioRect.bottom,
-                    g_primary_surface,
-                    0, 0, srcR.right, srcR.bottom, 0);
-            }
-        }
-
-        /* In MP mode, restore exit button from offscreen surface */
-        if (this->pMainSurface != NULL) {
-            RECT offR;
-            CopyRect(&offR, &this->btnExitRect);
-            OffsetRect(&offR, this->centerOffsetX, this->centerOffsetY);
-            Town_BlitElement(this->pMainSurface,
-                this->btnExitRect.left, this->btnExitRect.top,
-                this->btnExitRect.right, this->btnExitRect.bottom,
-                g_primary_surface,
-                offR.left, offR.top, offR.right, offR.bottom, 0);
-        }
+        blit_button(this->sprite_40C, this->btnExitRect);
+        blit_button(this->sprite_40E, this->btnTextRect);
+        return;
     }
 
-    /* Always update text button area */
+    blit_button(this->sprite_408, this->btnPlayRect);
+    if (*reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0) {
+        blit_button(this->sprite_409, this->btnScenarioRect);
+    }
+
+    // Multiplayer restores the inactive exit region from the menu surface,
+    // then restores the text region (0x4223C6..0x42243D).
+    this->updateButton(&this->btnExitRect);
     this->updateButton(&this->btnTextRect);
 }
 
@@ -1390,42 +1274,28 @@ void EditWindow::drawButtons()
 /* Address: 0x422440                                                    */
 /* ================================================================== */
 void EditWindow::drawText(RECT* rect, int charIndex,
-                           void* pFontRes, void* pFontBitmap)
+                           loco::assets::SpriteResource* fontResource,
+                           loco::assets::SpriteBitmap* fontBitmap)
 {
-    if (rect == NULL) return;
+    if (rect == nullptr) return;
 
-    /* First, restore the button background from offscreen surface */
-    if (this->pMainSurface != NULL) {
-        RECT offR;
-        CopyRect(&offR, rect);
-        OffsetRect(&offR, this->centerOffsetX, this->centerOffsetY);
-        Town_BlitElement(this->pMainSurface,
-            rect->left, rect->top, rect->right, rect->bottom,
-            g_primary_surface,
-            offR.left, offR.top, offR.right, offR.bottom, 0);
-    }
+    // 0x422440 first restores the destination from pMainSurface.
+    this->updateButton(rect);
 
-    if (pFontRes == NULL || pFontBitmap == NULL) return;
+    if (fontResource == nullptr || fontBitmap == nullptr) return;
 
-    uint16_t charW = *(uint16_t*)((int)pFontRes + 0x14);
-    uint16_t charH = *(uint16_t*)((int)pFontRes + 0x16);
-
-    /* Calculate source rect for the character in the font spritesheet */
-    RECT srcR;
-    srcR.left   = charIndex * charW;
-    srcR.top    = 0;
-    srcR.right  = srcR.left + charW;
-    srcR.bottom = charH;
-
+    const int width = static_cast<int>(loco::assets::sprite_width(fontResource));
+    const int height = static_cast<int>(loco::assets::sprite_height(fontResource));
+    RECT source = {0, 0, width, height};
     if (charIndex != 0) {
-        OffsetRect(&srcR, charIndex * srcR.right, 0);
+        // The original OffsetRect uses a sheet-column offset of charIndex * frameWidth.
+        OffsetRect(&source, charIndex * width, 0);
     }
 
-    /* Blit the character to the primary surface */
-    Town_BlitElement(pFontBitmap,
-        rect->left, rect->top, rect->right, rect->bottom,
-        g_primary_surface,
-        srcR.left, srcR.top, srcR.right, srcR.bottom, 0);
+    Town_BlitElement(fontBitmap,
+                     rect->left, rect->top, rect->right, rect->bottom,
+                     g_primary_surface,
+                     source.left, source.top, source.right, source.bottom, 0);
 }
 
 /* ================================================================== */

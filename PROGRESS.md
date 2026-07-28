@@ -200,6 +200,10 @@ main()
 - [x] **Autonomous task-graph driving** — evidence agents atomically persist bounded acyclic follow-on DAGs, initial triage cannot complete with only a prose plan, ready-task claims are race-safe, terminal transitions dispatch the next serial successor, queued graphs resume on startup, and dashboard snapshots render durable edges
 - [x] **Settled dependency advancement** — `requires` edges now gate only active prerequisites; blocked/deferred/failed roots release ready successors, expose their outcomes to successor agents, and keep the root job queued while executable work remains
 
+### EditWindow inherited virtual slots (2026-07-28)
+
+- [x] **EditWindow inherited virtual dispatch** — Ghidra-defined and decompiled `UI_WindowBase::set_mode` (0x425FD0), `set_render_surface` (0x426020), and `on_async_task_failure` (0x426130); replaced all EditWindow self-vtable calls with typed virtual methods.
+
 ## Remaining work
 
 ### Autonomous reverse-engineering daemon
@@ -248,7 +252,6 @@ main()
 - [ ] **Palette cycling support** — Currently palettes are baked at load time; palette animations (water, sky) need runtime palette swaps
 - [ ] **GDI DC shim** — `GetDC`/`ReleaseDC` currently stubbed; needed for some UI rendering paths
 - [ ] **Complete ResourceManager consumers** — connect cached WAV data to `GameAudio`, parse BUT descriptors and ANI frames for their actual UI/cursor call sites, and map tile DAT semantics into the decompiled world objects; lookup, DAT animation metadata, color keys, and generic archive blobs are now live.
-- [ ] **Continue EditWindow raw-access cleanup** — panel and popup ownership are typed; reverse engineer inherited slots 0x425FD0/0x426020/0x426130 before replacing the five remaining self-vtable dispatches.
 - [ ] **DDRAW sprite data** — `DDRAW_SpriteData` loading/management (native .c files)
 
 ### Priority 4: Audio completeness
@@ -346,6 +349,8 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 ---
 
 ## Session log
+
+| 2026-07-28 (editwindow-ghidra-validation) | Cross-validated EditWindow menu methods against Ghidra: corrected 0x422D80 hit-test gates and 0x422010/0x422440 resource branches/character source rect; replaced verified raw field access and all self-vtable dispatches with typed UI_WindowBase calls after recovering 0x425FD0/0x426020/0x426130; corrected the canonical opaque `g_main_window` global use after checking `UI_MainMenu_Hide` (0x420860); gated the recovered packed-x86 `UIPANEL_Render` slot paths under `_WIN32` after a mode-2 core proved they are incompatible with the SDL host layout; added generated Makefile header dependencies after a stale NameEntryPanel vtable crashed the Enter/state-3 transition, then clean-rebuilt and GDB-exercised that transition; `make build`, `make check` (74/74), and `make test-mode2-menu-backdrop` pass. |
 
 | 2026-07-28 (mode2-multiplayer-transition) | Wired Enter-key to onPlayerNameChanged flow with hostEditText bridge; added GameSetupPanel::hostRenderFrame (SDL3 primary-canvas composition with title/list/grid placeholders); extended hostRenderFrame dispatch to states 3/4/5 (GameSetupPanel visible); all 120 objects compile and link clean. |
 
