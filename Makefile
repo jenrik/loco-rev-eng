@@ -5,7 +5,8 @@
 # Single command:  make
 #
 # Targets:
-#   make              Build the lego_loco binary
+#   make              Build the lego_loco binary (default)
+#   make build        Build the lego_loco binary (alias)
 #   make run          Build and run
 #   make clean        Remove all build artifacts
 #   make check        Show per-file compilation status
@@ -59,46 +60,40 @@ NATIVE_OBJS := $(patsubst $(DCP_DIR)/native/%.c, $(BUILD_DIR)/native/%.o, $(NATI
 SHIM_OBJS   := $(patsubst $(SHIMS_DIR)/%.cpp, $(BUILD_DIR)/shims/%.o, $(filter %.cpp, $(SHIM_SRCS)))
 SHIM_OBJS   += $(patsubst $(SHIMS_DIR)/%.c, $(BUILD_DIR)/shims/%.o, $(filter %.c, $(SHIM_SRCS)))
 ALL_OBJS    := $(DCP_OBJS) $(NATIVE_OBJS) $(SHIM_OBJS)
+DEPFILES    := $(ALL_OBJS:.o=.d)
 BINARY      := $(BUILD_DIR)/lego_loco
 
 # ============================================================================
 # Targets
 # ============================================================================
 
-.PHONY: all run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
-all: dirs $(BINARY)
-	@echo ""
-	@echo "============================================"
-	@echo "  Build complete: $(BINARY)"
-	@echo "  Run with: make run"
-	@echo "============================================"
+all: build
+
+build: $(BINARY)
 
 # Link
-$(BINARY): $(ALL_OBJS)
-	@echo "=== Linking $@ ==="
-	@$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@ 2>$(BUILD_DIR)/link.err; ret=$$?; if [ $$ret -ne 0 ]; then echo "=== LINK FAILED ==="; undef=$$(grep -c "undefined reference" $(BUILD_DIR)/link.err 2>/dev/null || echo 0); mult=$$(grep -c "multiple definition" $(BUILD_DIR)/link.err 2>/dev/null || echo 0); echo "  Undefined: $$undef  Multiple-def: $$mult"; echo ""; head -30 $(BUILD_DIR)/link.err; rm -f $@; exit 1; else rm -f $(BUILD_DIR)/link.err; echo "  Linked: $$(ls -lh $@ | awk '{print $$5}')"; fi
+$(BINARY): $(ALL_OBJS) | dirs
+	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 
 # Compilation rules
-$(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp
-	@mkdir -p $(dir $@)
-	@echo "  [CXX] $(notdir $<)"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@ 2>$@.err; ret=$$?; if [ $$ret -ne 0 ]; then echo "    FAILED -- see $@.err"; head -3 $@.err; rm -f $@; else rm -f $@.err; fi
+$(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp | dirs
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-$(BUILD_DIR)/native/%.o: $(DCP_DIR)/native/%.c
-	@mkdir -p $(dir $@)
-	@echo "  [NAT] $*.c"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@ 2>$@.err; ret=$$?; if [ $$ret -ne 0 ]; then echo "    FAILED -- see $@.err"; head -3 $@.err; rm -f $@; else rm -f $@.err; fi
+$(BUILD_DIR)/native/%.o: $(DCP_DIR)/native/%.c | dirs
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-$(BUILD_DIR)/shims/%.o: $(SHIMS_DIR)/%.cpp
-	@mkdir -p $(dir $@)
-	@echo "  [SHM] $*.cpp"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@ 2>$@.err; ret=$$?; if [ $$ret -ne 0 ]; then echo "    FAILED -- see $@.err"; head -3 $@.err; rm -f $@; else rm -f $@.err; fi
+$(BUILD_DIR)/shims/%.o: $(SHIMS_DIR)/%.cpp | dirs
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
 
-$(BUILD_DIR)/shims/%.o: $(SHIMS_DIR)/%.c
-	@mkdir -p $(dir $@)
-	@echo "  [SHM] $*.c"
-	@$(CXX) $(CXXFLAGS) -c $< -o $@ 2>$@.err; ret=$$?; if [ $$ret -ne 0 ]; then echo "    FAILED -- see $@.err"; head -3 $@.err; rm -f $@; else rm -f $@.err; fi
+$(BUILD_DIR)/shims/%.o: $(SHIMS_DIR)/%.c | dirs
+	$(CXX) $(CXXFLAGS) -MMD -MP -MF $(@:.o=.d) -c $< -o $@
+
+# Rebuild all objects if build rules change; otherwise generated .d files
+# rebuild every consumer of a changed header (critical for C++ vtables).
+$(ALL_OBJS): Makefile
+-include $(DEPFILES)
 
 # Dirs
 dirs:
