@@ -354,4 +354,16 @@ public:
      * @param index  session index to join
      */
     void ConnectToNetworkGame(int32_t index);
+
+#ifndef _WIN32
+    /**
+     * Host SDL frame composition for the game-setup lobby.
+     *
+     * Assembly basis: GameSetupPanel::render (0x409280) blits a background
+     * sprite, updates title text, draws the layout list, and draws the
+     * player grid.  The host composes equivalent operations onto the SDL
+     * primary canvas.  This method is excluded from the original Win32 build.
+     */
+    void hostRenderFrame();
+#endif
 };

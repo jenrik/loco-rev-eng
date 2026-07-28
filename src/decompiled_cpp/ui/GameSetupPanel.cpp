@@ -993,3 +993,112 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
         this->ConnectToNetworkGame(0);
     }
 }
+
+#ifndef _WIN32
+/* ================================================================== */
+/* GameSetupPanel::hostRenderFrame — SDL3 host composition              */
+/*                                                                      */
+/* Assembly basis: GameSetupPanel::render (0x409280)                    */
+/*   1. Blit background sprite via UIPANEL_Blit                         */
+/*   2. updateTitle → titleText buffer filled from resource strings     */
+/*   3. Reset 3 main ButtonSprites to state 0                           */
+/*   4. Choose active list (titleList or layoutList)                    */
+/*   5. drawLayoutList(activeList)                                      */
+/*   6. drawGrid()                                                       */
+/*                                                                      */
+/* The host composes equivalent operations onto the SDL primary canvas  */
+/* without the Win32 GDI/UIPANEL surface stack.                         */
+/* ================================================================== */
+
+#include <SDL3/SDL.h>
+#include "../../sdl3_shims/sdl3_ddraw.h"
+
+// Forward declarations from sdl3_window.h (cannot include that header
+// here because it conflicts with the unconditional extern "C" Win32 API
+// declarations at the top of this file).
+extern SDL_Renderer* SDL3_GetRenderer(void);
+
+void GameSetupPanel::hostRenderFrame()
+{
+    SDL_Renderer* const renderer = SDL3_GetRenderer();
+    if (!renderer) return;
+
+    // Bind the primary canvas texture so that all host rendering targets
+    // the same fixed 1280×1024 surface presented by the pump loop.
+    IDirectDrawSurface4* const primarySurface = SDL3_GetPrimarySurface();
+    if (!primarySurface || !primarySurface->texture) return;
+    SDL_SetRenderTarget(renderer, primarySurface->texture);
+
+    // 0x409280 step 1: Blit background → clear to a distinct menu-background
+    // colour so the transition is visually unambiguous.  Once the
+    // background-sprite resource ID is identified, this will switch to
+    // SDL3_BlitSurfaceToPrimary() with the decoded asset.
+    SDL_SetRenderDrawColor(renderer, 0x00, 0x30, 0x50, 0xff);
+    SDL_RenderClear(renderer);
+
+    // Step 2: updateTitle sets this->titleText.  For the host, the original
+    // updateTitle path calls g_resmgr.FormatResourceString which needs a
+    // live PE resource translation on non-Windows.  Render whatever is in
+    // the buffer; the default is the empty string from init(), and the
+    // Win32 path will have filled it after a prior setState cycle.
+    if (this->titleText[0] != '\0') {
+        SDL_SetRenderScale(renderer, 2.0f, 2.0f);
+        SDL_SetRenderDrawColor(renderer, 0xff, 0xbd, 0x00, 0xff);
+        SDL_RenderDebugText(renderer, 80.0f, 20.0f, this->titleText);
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+    }
+
+    // Steps 4–5: drawLayoutList — enumerate the active linked list and
+    // render entry names.  The original uses GDI DrawTextA with font
+    // metrics; the host renders entries with the 8×8 debug font at 2× scale.
+    {
+        const LayoutListNode* node = this->currentList != nullptr
+            ? this->currentList
+            : (this->layoutList != nullptr ? this->layoutList : this->titleList);
+        SDL_SetRenderScale(renderer, 2.0f, 2.0f);
+        int y = 80;
+        const int lineHeight = 20;
+        int entryIndex = 0;
+        while (node != nullptr && y < 500) {
+            const uint8_t r = (entryIndex == this->selectedEntry) ? 0x25 : 0xff;
+            const uint8_t g = (entryIndex == this->selectedEntry) ? 0x25 : 0x5c;
+            const uint8_t b = (entryIndex == this->selectedEntry) ? 0xdc : 0x00;
+            SDL_SetRenderDrawColor(renderer, r, g, b, 0xff);
+            SDL_RenderDebugText(renderer, 60.0f, static_cast<float>(y),
+                                node->name != nullptr ? node->name : "");
+            node = node->next;
+            y += lineHeight;
+            ++entryIndex;
+        }
+        // Fallback for empty list (resource 0x7F = "No layouts available")
+        if (entryIndex == 0) {
+            SDL_SetRenderDrawColor(renderer, 0xc0, 0xc0, 0xc0, 0xff);
+            SDL_RenderDebugText(renderer, 60.0f, 80.0f, "(no layouts loaded)");
+        }
+        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+    }
+
+    // Step 6: drawGrid — render a placeholder 3×3 grid of 0xA5×0x7B cells.
+    // The original positions sprites and draws player names via GDI.
+    {
+        const float gridLeft = 700.0f;
+        const float gridTop = 100.0f;
+        const float cellW = 165.0f;
+        const float cellH = 123.0f;
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                const SDL_FRect cell = {
+                    gridLeft + col * cellW, gridTop + row * cellH,
+                    cellW - 1, cellH - 1
+                };
+                SDL_SetRenderDrawColor(renderer, 0x60, 0x60, 0x60, 0xff);
+                SDL_RenderFillRect(renderer, &cell);
+            }
+        }
+    }
+
+    // Unbind so the pump loop's PresentPrimarySurface can operate on the
+    // default window backbuffer.
+    SDL_SetRenderTarget(renderer, nullptr);
+}
+#endif  // !_WIN32

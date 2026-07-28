@@ -729,7 +729,14 @@ void EditWindow::onPlayerNameChanged()
     }
 
     /* Read the edited name from the edit control (max 12 chars + null = 13) */
+#ifdef _WIN32
     GetWindowTextA(this->hwndEdit, nameBuf, 13);
+#else
+    // Host path: read from the SDL-backed text buffer (same 11-char limit as
+    // the native EDIT control's EM_LIMITTEXT at 0x420A56).
+    std::memcpy(nameBuf, this->hostEditText, sizeof(this->hostEditText));
+    nameBuf[sizeof(this->hostEditText) - 1] = '\0';
+#endif
 
     /* Check for empty name (strlen-like countdown from -1) */
     int len = -1;
@@ -758,6 +765,13 @@ void EditWindow::onPlayerNameChanged()
 
     /* Restore the name from config (normalizes formatting) */
     SetWindowTextA(this->hwndEdit, (const char*)((int)g_player_config + 6));
+#ifndef _WIN32
+    // Mirror the canonical config name back into the host edit buffer so
+    // subsequent hostRenderFrame frames draw the normalized text.
+    std::memcpy(this->hostEditText, (const char*)((int)g_player_config + 6),
+                sizeof(this->hostEditText));
+    this->hostEditText[sizeof(this->hostEditText) - 1] = '\0';
+#endif
 
     /* Send network packet */
     NETMAN_SendPacket(_g_netman_state);
@@ -1077,8 +1091,23 @@ HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
  */
 void EditWindow::hostRenderFrame()
 {
-    if (!this->visible || !this->spritesLoaded ||
-        (this->dialogState != 0 && this->dialogState != 7)) return;
+    if (!this->visible || !this->spritesLoaded) return;
+
+    // States 3 (check-config), 4 (single-player), 5 (network) all show
+    // the GameSetupPanel (pPanelB).  UI_MainMenu_SetState (0x4208F0) for
+    // these states calls pPanelB->show() (vtable[2]) after hiding the edit
+    // control and, for state 3, hiding PanelA.  The panel occupies the
+    // full 1280×1024 canvas; the main-menu backdrop is fully covered.
+    if (this->dialogState == 3 || this->dialogState == 4 ||
+        this->dialogState == 5) {
+        if (this->pPanelB != nullptr) {
+            this->pPanelB->hostRenderFrame();
+        }
+        return;
+    }
+
+    // States 0 (initial) and 7 (return-from-game) compose the main menu.
+    if (this->dialogState != 0 && this->dialogState != 7) return;
 
     host_set_menu_rects(*this);
     this->render();
@@ -1187,12 +1216,16 @@ bool EditWindow::hostHandleKey(int32_t key_code)
             if ((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z')) has_alpha = true;
         }
 
-        // This mirrors the validated PlayerConfig name copy at +0x06 in
-        // EditWindow_OnPlayerNameChanged (0x422660). The host's unsupported
-        // network/player-list cascade is deliberately left on its Win32 path.
+        // Copy the validated name to PlayerConfig and invoke the full
+        // EditWindow_OnPlayerNameChanged (0x422660) flow. The host reads the
+        // edit text from hostEditText (see the #ifndef _WIN32 block in
+        // onPlayerNameChanged), so the canonical flow validates the name,
+        // saves PlayerConfig, sends the network packet, and transitions the
+        // state machine (→ setState(5) for multiplayer, setState(4) for SP).
         if (legal && has_alpha && g_player_config != nullptr) {
             std::memcpy(static_cast<char*>(g_player_config) + 6, this->hostEditText,
                         sizeof(this->hostEditText));
+            this->onPlayerNameChanged();
         }
         return true;
     }

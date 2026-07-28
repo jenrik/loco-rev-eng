@@ -347,6 +347,8 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-07-28 (mode2-multiplayer-transition) | Wired Enter-key to onPlayerNameChanged flow with hostEditText bridge; added GameSetupPanel::hostRenderFrame (SDL3 primary-canvas composition with title/list/grid placeholders); extended hostRenderFrame dispatch to states 3/4/5 (GameSetupPanel visible); all 120 objects compile and link clean. |
+
 | Date | Summary |
 | 2026-07-28 (mode2-host-audio) | Added guarded SDL3 playback for the original mode-2 `0x5015` preload and mode-10 `0x5026` exit sound; archive/audio/menu regressions and the Nix-shell build pass. |
 |------|---------|
