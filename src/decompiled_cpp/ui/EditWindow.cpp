@@ -1216,16 +1216,25 @@ bool EditWindow::hostHandleKey(int32_t key_code)
             if ((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z')) has_alpha = true;
         }
 
-        // Copy the validated name to PlayerConfig and invoke the full
-        // EditWindow_OnPlayerNameChanged (0x422660) flow. The host reads the
-        // edit text from hostEditText (see the #ifndef _WIN32 block in
-        // onPlayerNameChanged), so the canonical flow validates the name,
-        // saves PlayerConfig, sends the network packet, and transitions the
-        // state machine (→ setState(5) for multiplayer, setState(4) for SP).
+        // Host path (0x420D57): copy the validated name to PlayerConfig
+        // at +0x06 (the same offset used by PlayerConfig_SetName), then
+        // transition the state machine directly — staying clear of the
+        // onPlayerNameChanged body (0x422660) which does raw x86 vtable
+        // dispatch, NETMAN_SendPacket, PlayerConfig_Save disk I/O, and
+        // Config_ReadInt — all of which touch uninitialised or unsupported
+        // subsystems on the SDL host.
         if (legal && has_alpha && g_player_config != nullptr) {
             std::memcpy(static_cast<char*>(g_player_config) + 6, this->hostEditText,
                         sizeof(this->hostEditText));
-            this->onPlayerNameChanged();
+            // Single-player → enter the lobby (setState 3 checks config and
+            // transitions to 4/5, showing the GameSetupPanel).  Multiplayer →
+            // start the game directly (CGWND_SetMode(1)), matching the
+            // _g_netman_state[7] != 0 branch at 0x4227E6.
+            if (_g_netman_state != nullptr && _g_netman_state[7] != 0) {
+                CGWND_SetMode(1);
+            } else {
+                this->setState(3);
+            }
         }
         return true;
     }
