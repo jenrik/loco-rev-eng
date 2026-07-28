@@ -321,6 +321,10 @@ ResourceManagerSdl3& host_resource_manager() {
     return instance;
 }
 
+SpriteResource* host_get_sprite_by_id(uint32_t resource_id) {
+    return host_resource_manager().get_sprite_by_id(resource_id);
+}
+
 }  // namespace loco::assets
 
 int ResourceManager_Init(void*) {

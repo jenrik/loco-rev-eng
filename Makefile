@@ -67,7 +67,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -147,6 +147,20 @@ $(MODE2_MENU_BACKDROP_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/reso
 
 test-mode2-menu-backdrop: $(MODE2_MENU_BACKDROP_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MODE2_MENU_BACKDROP_TEST)
+
+# Mode-2 multiplayer GameSetupPanel host-composition regression.
+MODE2_MULTIPLAYER_MENU_TEST := $(BUILD_DIR)/mode2_multiplayer_menu_test
+
+$(MODE2_MULTIPLAYER_MENU_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h tests/mode2_multiplayer_menu_test.cpp | dirs
+	@echo "=== Testing mode 2 multiplayer menu composition ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp tests/mode2_multiplayer_menu_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-mode2-multiplayer-menu: $(MODE2_MULTIPLAYER_MENU_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MODE2_MULTIPLAYER_MENU_TEST)
+
+# Regression for the C-linkage renderer lookup used after main-menu Enter.
+test-host-menu-renderer-linkage: $(BINARY) tests/host_menu_renderer_linkage_test.sh
+	@tests/host_menu_renderer_linkage_test.sh $(BINARY)
 
 # Host sound regression: mode 2 preloads 0x5015; mode 10 plays 0x5026.
 SDL3_GAME_AUDIO_TEST := $(BUILD_DIR)/sdl3_game_audio_test

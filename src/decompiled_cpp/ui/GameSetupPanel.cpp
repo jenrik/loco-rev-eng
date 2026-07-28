@@ -997,104 +997,125 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 #ifndef _WIN32
 /* ================================================================== */
 /* GameSetupPanel::hostRenderFrame — SDL3 host composition              */
-/*                                                                      */
-/* Assembly basis: GameSetupPanel::render (0x409280)                    */
-/*   1. Blit background sprite via UIPANEL_Blit                         */
-/*   2. updateTitle → titleText buffer filled from resource strings     */
-/*   3. Reset 3 main ButtonSprites to state 0                           */
-/*   4. Choose active list (titleList or layoutList)                    */
-/*   5. drawLayoutList(activeList)                                      */
-/*   6. drawGrid()                                                       */
-/*                                                                      */
-/* The host composes equivalent operations onto the SDL primary canvas  */
-/* without the Win32 GDI/UIPANEL surface stack.                         */
+/* Assembly basis: GameSetupPanel::render (0x409280), drawGrid          */
+/* (0x409980), and Sprite_SetState (0x454C30).                          */
 /* ================================================================== */
 
 #include <SDL3/SDL.h>
 #include "../../sdl3_shims/sdl3_ddraw.h"
 
-// Forward declarations from sdl3_window.h (cannot include that header
-// here because it conflicts with the unconditional extern "C" Win32 API
-// declarations at the top of this file).
-extern SDL_Renderer* SDL3_GetRenderer(void);
+// Deliberately avoid including resource_manager_sdl3.h here: this translated
+// file retains an incompatible legacy ResourceManager_Init declaration.
+namespace loco::assets {
+class SpriteResource;
+class SpriteBitmap;
+SpriteResource* host_get_sprite_by_id(uint32_t resource_id);
+SpriteBitmap* sprite_bitmap(SpriteResource* resource);
+SDL_Surface* bitmap_surface(const SpriteBitmap* bitmap);
+void release_sprite(SpriteResource* resource);
+}
+
+// sdl3_window.h cannot be included here because this translation unit retains
+// the original unconditional Win32 declarations above.
+// SDL3_GetRenderer is exported with C linkage by sdl3_window.cpp. Without
+// this linkage, the permissive host linker leaves a mangled call unresolved,
+// which lands in the __stack_chk_fail PLT slot after the player grid renders.
+extern "C" SDL_Renderer* SDL3_GetRenderer(void);
+
+namespace {
+constexpr uint32_t kLobbyBackdropResource = 0x439;  // startup\apback.bmp
+constexpr uint32_t kExitResource = 0x42C;             // startup\apExit.bmp
+constexpr uint32_t kSearchResource = 0x429;           // startup\apsearch.bmp
+constexpr uint32_t kOptionsResource = 0x42B;          // startup\apoption.bmp
+constexpr uint32_t kFirstPlayerResource = 0x43A;      // startup\aplayer0.bmp
+constexpr int kGridColumns = 3;
+constexpr int kGridRows = 3;
+constexpr int kGridCellWidth = 0xA4;
+constexpr int kGridCellHeight = 0x7B;
+constexpr int kGridStrideX = 0xA5;
+constexpr int kGridStrideY = 0x7C;
+
+// GameSetupPanel::show at 0x408F9C centers an 800x600 working area, then
+// assigns gridRect = workingArea + {0x1B, 0x27, 0x209, 0x19A}.  The fixed SDL
+// primary is 1280x1024, so retain that original coordinate calculation.
+constexpr int kWorkingAreaWidth = 800;
+constexpr int kWorkingAreaHeight = 600;
+constexpr int kWorkingLeft = (SDL3_PRIMARY_CANVAS_WIDTH - kWorkingAreaWidth) / 2;
+constexpr int kWorkingTop = (SDL3_PRIMARY_CANVAS_HEIGHT - kWorkingAreaHeight) / 2;
+constexpr int kGridLeft = kWorkingLeft + 0x1B;
+constexpr int kGridTop = kWorkingTop + 0x27;
+
+// 0x4090FB..0x4091EB derives these button rectangles from gridRect and the
+// decoded frame dimensions.  They are the state-0 Exit and Options controls
+// issued by GameSetupPanel::render at 0x4092C4 and 0x4092E9.
+constexpr int kExitLeft = kWorkingLeft + kWorkingAreaWidth - 208;
+constexpr int kExitTop = kGridTop + 0x1C0;
+constexpr int kOptionsLeft = kGridLeft + 0x20C;
+constexpr int kOptionsTop = kGridTop + 0x162;
+
+bool host_blit_resource(uint32_t resource_id, int x, int y) {
+    auto* resource = loco::assets::host_get_sprite_by_id(resource_id);
+    auto* bitmap = loco::assets::sprite_bitmap(resource);
+    SDL_Surface* surface = loco::assets::bitmap_surface(bitmap);
+    const bool rendered = surface && SDL3_BlitSurfaceToPrimary(surface, x, y);
+    loco::assets::release_sprite(resource);
+    return rendered;
+}
+
+bool host_blit_frame(uint32_t resource_id, int frame, int frame_width, int frame_height,
+                     int x, int y) {
+    auto* resource = loco::assets::host_get_sprite_by_id(resource_id);
+    auto* bitmap = loco::assets::sprite_bitmap(resource);
+    SDL_Surface* surface = loco::assets::bitmap_surface(bitmap);
+    // Sprite_SetState (0x454C30) obtains frame N by offsetting source.left by
+    // N * resource-frame-width; retain that source-rectangle convention.
+    const SDL_Rect source = {frame * frame_width, 0, frame_width, frame_height};
+    const bool rendered = surface && SDL3_BlitSurfaceRectToPrimary(surface, source, x, y);
+    loco::assets::release_sprite(resource);
+    return rendered;
+}
+}  // namespace
 
 void GameSetupPanel::hostRenderFrame()
 {
-    // Guard: the SDL renderer is created by main() before the pump loop
-    // starts.  If it is unavailable the host has nothing to present.
-    SDL_Renderer* const renderer = SDL3_GetRenderer();
-    if (!renderer) return;
+    // 0x409280 starts with a full background blit.  Resource 0x439 is the
+    // exact background asset (startup\apback.bmp) used by this panel family.
+    if (!host_blit_resource(kLobbyBackdropResource, 0, 0)) {
+        SDL3_ClearPrimarySurface(0x003050);
+    }
 
-    // The primary canvas texture must exist (SDL3_EnsurePrimarySurface is
-    // called by the pump loop before any frame is composed).
-    IDirectDrawSurface4* const primarySurface = SDL3_GetPrimarySurface();
-    if (!primarySurface || !primarySurface->texture) return;
+    // render (0x409280) resets Exit, Search, and Options to state 0 after
+    // the backdrop.  Each source BMP is two horizontal frames, exactly as
+    // Sprite_SetState (0x454C30) expects.  Go (0x42A) is not drawn here: the
+    // original only exposes it after network/session selection updates it.
+    host_blit_frame(kExitResource, 0, 144, 112, kExitLeft, kExitTop);
+    host_blit_frame(kSearchResource, 0, 72, 72, kOptionsLeft + 79, kOptionsTop);
+    host_blit_frame(kOptionsResource, 0, 72, 72, kOptionsLeft, kOptionsTop);
 
-    SDL_SetRenderTarget(renderer, primarySurface->texture);
+    // drawGrid (0x409980) advances x by 0xA5 and y by 0x7C and selects
+    // state 1 for an empty slot. DirectPlay is host-stubbed, so all nine
+    // default 3x3 slots use that original empty frame.
+    for (int row = 0; row < kGridRows; ++row) {
+        for (int column = 0; column < kGridColumns; ++column) {
+            const int slot = row * kGridColumns + column;
+            host_blit_frame(kFirstPlayerResource + slot, 1, kGridCellWidth, kGridCellHeight,
+                            kGridLeft + column * kGridStrideX,
+                            kGridTop + row * kGridStrideY);
+        }
+    }
 
-    // 0x409280 step 1: clear to a distinct teal background so the
-    // transition from the main-menu navy is visually unambiguous.
-    SDL_SetRenderDrawColor(renderer, 0x00, 0x30, 0x50, 0xff);
-    SDL_RenderClear(renderer);
-
-    // Step 2: titleText lives in a fixed 128-byte field inside the
-    // GameSetupPanel object.  init() writes a single NUL at offset 0;
-    // updateTitle() (Win32 GDI path) fills it later.  On the host the
-    // buffer is empty, so skip the title until the resource-string bridge
-    // is live.
-    if (this->titleText[0] != '\0') {
+    // updateTitle (0x409360) selects resource 0x71 while network mode is
+    // active; drawLayoutList (0x4094B0) falls back to resource 0x7F when
+    // the DirectPlay session list is empty.  SDL's built-in bitmap font is a
+    // host-only text boundary until the GDI text renderer is translated.
+    if (SDL_Renderer* renderer = SDL3_GetRenderer()) {
+        SDL_SetRenderTarget(renderer, SDL3_GetPrimarySurface()->texture);
         SDL_SetRenderScale(renderer, 2.0f, 2.0f);
-        SDL_SetRenderDrawColor(renderer, 0xff, 0xbd, 0x00, 0xff);
-        SDL_RenderDebugText(renderer, 80.0f, 20.0f, this->titleText);
+        SDL_SetRenderDrawColor(renderer, 0xff, 0x5c, 0x00, 0xff);
+        SDL_RenderDebugText(renderer, 40.0f, 42.0f, "NETWORK GAME");
+        SDL_RenderDebugText(renderer, 40.0f, 64.0f, "NO LAYOUTS AVAILABLE");
         SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+        SDL_SetRenderTarget(renderer, nullptr);
     }
-
-    // Steps 4-5: layout list — iterate the linked list owned by the
-    // object.  On the host the lists are NULL (loadLayouts is the Win32
-    // file-I/O path), so this renders a single fallback line.
-    {
-        const LayoutListNode* node = this->currentList != nullptr
-            ? this->currentList
-            : (this->layoutList != nullptr ? this->layoutList : this->titleList);
-        SDL_SetRenderScale(renderer, 2.0f, 2.0f);
-        int entryIndex = 0;
-        int y = 80;
-        while (node != nullptr && y < 500 && entryIndex < 128) {
-            SDL_SetRenderDrawColor(renderer,
-                (entryIndex == this->selectedEntry) ? 0x25 : 0xff,
-                (entryIndex == this->selectedEntry) ? 0x25 : 0x5c,
-                (entryIndex == this->selectedEntry) ? 0xdc : 0x00, 0xff);
-            SDL_RenderDebugText(renderer, 60.0f, static_cast<float>(y),
-                                node->name != nullptr ? node->name : "");
-            node = node->next;
-            y += 20;
-            ++entryIndex;
-        }
-        if (entryIndex == 0) {
-            SDL_SetRenderDrawColor(renderer, 0xc0, 0xc0, 0xc0, 0xff);
-            SDL_RenderDebugText(renderer, 60.0f, 80.0f, "(no layouts loaded)");
-        }
-        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
-    }
-
-    // Step 6: player grid — 3×3 placeholders at ~original cell size.
-    {
-        const float gridLeft = 700.0f;
-        const float gridTop  = 100.0f;
-        const float cellW    = 165.0f;
-        const float cellH    = 123.0f;
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 3; ++col) {
-                const SDL_FRect cell = {
-                    gridLeft + col * cellW, gridTop + row * cellH,
-                    cellW - 1.0f, cellH - 1.0f
-                };
-                SDL_SetRenderDrawColor(renderer, 0x60, 0x60, 0x60, 0xff);
-                SDL_RenderFillRect(renderer, &cell);
-            }
-        }
-    }
-
-    SDL_SetRenderTarget(renderer, nullptr);
 }
 #endif  // !_WIN32

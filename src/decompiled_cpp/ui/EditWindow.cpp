@@ -683,7 +683,16 @@ highlight_btn:
 /* ================================================================== */
 void EditWindow::onPlayerNameChanged()
 {
-    char nameBuf[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+#ifdef _WIN32
+    // Preserve the original x86 stack layout; its 0x10-byte local allocation
+    // supplies the 13th byte accepted by GetWindowTextA at 0x422680.
+    char nameBuf[12] = {};
+#else
+    // The SDL host has no adjacent x86 spill slot. Match GetWindowTextA's
+    // cchMax=13 contract with a real 13-byte local buffer, preventing a
+    // terminating NUL from corrupting the host frame.
+    char nameBuf[13] = {};
+#endif
 
     /* 0x422667..0x422675 pushes (nullptr, 0, nullptr, false, true). */
     this->set_render_surface(nullptr, 0, nullptr, 0, 1);
@@ -1048,20 +1057,19 @@ void EditWindow::hostRenderFrame()
 {
     if (!this->visible || !this->spritesLoaded) return;
 
-    // States 3 (check-config), 4 (single-player), 5 (network) all show
-    // the GameSetupPanel (pPanelB).  UI_MainMenu_SetState (0x4208F0) for
-    // these states calls pPanelB->show() (vtable[2]) after hiding the edit
-    // control and, for state 3, hiding PanelA.
-    //
-    // Host rendering clears the primary canvas to a distinct teal
-    // background so the state transition is visually unambiguous.
-    // Full GameSetupPanel composition (title, layout list, grid) is in
-    // GameSetupPanel::hostRenderFrame once the object-layout issues on
-    // 64-bit are resolved.
+    // States 3 (check-config), 4 (single-player), and 5 (network) show
+    // GameSetupPanel after UI_MainMenu_SetState (0x4208F0) hides the edit
+    // control. The SDL composition is intentionally isolated from the
+    // original Win32 executable path.
     if (this->dialogState == 3 || this->dialogState == 4 ||
         this->dialogState == 5) {
-        SDL3_ClearPrimarySurface(0x003050);
+#ifdef _WIN32
+        // The original executable continues through the UIPANEL/GDI path.
         return;
+#else
+        if (this->pPanelB != nullptr) this->pPanelB->hostRenderFrame();
+        return;
+#endif
     }
 
     // States 0 (initial) and 7 (return-from-game) compose the main menu.

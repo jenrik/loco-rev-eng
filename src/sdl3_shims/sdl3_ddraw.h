@@ -122,6 +122,10 @@ bool SDL3_ClearPrimarySurface(uint32_t xrgb);
 /** Composite a decoded resource bitmap at native pixel coordinates. */
 bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y);
 
+/** Composite a source rectangle from a decoded bitmap at native pixel coordinates. */
+bool SDL3_BlitSurfaceRectToPrimary(SDL_Surface* source, const SDL_Rect& source_rect,
+                                   int x, int y);
+
 /** Draw the host replacement for the original native EDIT control directly
  * onto the fixed primary canvas. Coordinates are logical canvas pixels. */
 bool SDL3_DrawPrimaryTextInput(int left, int top, int right, int bottom,

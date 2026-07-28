@@ -95,6 +95,10 @@ private:
 
 ResourceManagerSdl3& host_resource_manager();
 
+// Narrow host-compositor bridge. These free functions let translated UI files
+// use archive-backed sprites without importing the binary-facing C wrappers.
+SpriteResource* host_get_sprite_by_id(uint32_t resource_id);
+
 }  // namespace loco::assets
 
 // C++ linkage is intentional: existing translated callers use overloads.

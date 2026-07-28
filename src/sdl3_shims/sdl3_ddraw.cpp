@@ -451,6 +451,31 @@ bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y)
     return rendered;
 }
 
+bool SDL3_BlitSurfaceRectToPrimary(SDL_Surface* source, const SDL_Rect& source_rect,
+                                   int x, int y)
+{
+    if (!source || source_rect.x < 0 || source_rect.y < 0 || source_rect.w <= 0 ||
+        source_rect.h <= 0 || source_rect.x + source_rect.w > source->w ||
+        source_rect.y + source_rect.h > source->h || !SDL3_EnsurePrimarySurface()) {
+        return false;
+    }
+
+    SDL_Renderer* renderer = g_sdl_ddraw->renderer;
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, source);
+    if (!texture) return false;
+
+    const SDL_FRect source_rect_f = {static_cast<float>(source_rect.x), static_cast<float>(source_rect.y),
+                                      static_cast<float>(source_rect.w), static_cast<float>(source_rect.h)};
+    const SDL_FRect destination = {static_cast<float>(x), static_cast<float>(y),
+                                   static_cast<float>(source_rect.w),
+                                   static_cast<float>(source_rect.h)};
+    SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
+    const bool rendered = SDL_RenderTexture(renderer, texture, &source_rect_f, &destination);
+    SDL_SetRenderTarget(renderer, nullptr);
+    SDL_DestroyTexture(texture);
+    return rendered;
+}
+
 bool SDL3_DrawPrimaryTextInput(int left, int top, int right, int bottom,
                                const char* text, bool focused)
 {
