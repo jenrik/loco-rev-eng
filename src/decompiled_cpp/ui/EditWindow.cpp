@@ -473,7 +473,9 @@ void EditWindow::hide()
     EditWindow_cleanupSprites(this);
 
     /* Restore focus to main CGWND window */
-    void* mainHwnd = *(void**)((int)g_main_window + 8);
+    // g_main_window+8 is the hWnd field (first field after vtable pointer).
+    // (int) truncates on 64-bit; uintptr_t preserves the full address.
+    void* mainHwnd = *(void**)((uintptr_t)g_main_window + 8);
     SetFocus(mainHwnd);
     InvalidateRect(mainHwnd, NULL, FALSE);
 }
@@ -1182,10 +1184,12 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
     switch (button) {
     case kHostPlay:
         _g_netman_state[7] = 1;
+        _g_netman_state[0x18] = 1;  // route setState(3) → state 5 (MP lobby)
         NETMAN_SetGameMode(g_netman, 3);
         break;
     case kHostScenario:
         _g_netman_state[7] = 0;
+        _g_netman_state[0x18] = 0;  // route setState(3) → state 4 (SP lobby)
         NETMAN_SetGameMode(g_netman, 0);
         break;
     case kHostExit:
@@ -1218,23 +1222,18 @@ bool EditWindow::hostHandleKey(int32_t key_code)
 
         // Host path (0x420D57): copy the validated name to PlayerConfig
         // at +0x06 (the same offset used by PlayerConfig_SetName), then
-        // transition the state machine directly — staying clear of the
-        // onPlayerNameChanged body (0x422660) which does raw x86 vtable
-        // dispatch, NETMAN_SendPacket, PlayerConfig_Save disk I/O, and
-        // Config_ReadInt — all of which touch uninitialised or unsupported
-        // subsystems on the SDL host.
+        // transition the state machine via setState(3).  setState(3)
+        // (0x4208F0 case 3) hides PanelA, checks _g_netman_state[0x18],
+        // and routes to state 4 (single-player lobby) or state 5 (multiplayer
+        // lobby), both of which show the GameSetupPanel.
+        //
+        // We deliberately avoid CGWND_SetMode(1) (the 0x4227E6 branch) on
+        // the host — that path enters the full mode-1 game bootstrap which
+        // cascades through dozens of unported 32-bit x86 code paths.
         if (legal && has_alpha && g_player_config != nullptr) {
             std::memcpy(static_cast<char*>(g_player_config) + 6, this->hostEditText,
                         sizeof(this->hostEditText));
-            // Single-player → enter the lobby (setState 3 checks config and
-            // transitions to 4/5, showing the GameSetupPanel).  Multiplayer →
-            // start the game directly (CGWND_SetMode(1)), matching the
-            // _g_netman_state[7] != 0 branch at 0x4227E6.
-            if (_g_netman_state != nullptr && _g_netman_state[7] != 0) {
-                CGWND_SetMode(1);
-            } else {
-                this->setState(3);
-            }
+            this->setState(3);
         }
         return true;
     }
