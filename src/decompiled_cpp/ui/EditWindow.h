@@ -207,6 +207,11 @@ public:
 #endif
 
 private:
+#ifndef _WIN32
+    // Host equivalent of the direct onPlayerNameChanged call at 0x422AB2.
+    // Shared by Enter and the resource-0x403 accept control.
+    void hostCommitPlayerName();
+#endif
     void netPanelInit();                                 /* 0x422820 */
     void initSprites();                                  /* 0x421500 */
     void cleanupSprites();                               /* 0x421AE0 */

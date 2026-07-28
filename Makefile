@@ -67,7 +67,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -161,6 +161,17 @@ test-mode2-multiplayer-menu: $(MODE2_MULTIPLAYER_MENU_TEST)
 # Regression for the C-linkage renderer lookup used after main-menu Enter.
 test-host-menu-renderer-linkage: $(BINARY) tests/host_menu_renderer_linkage_test.sh
 	@tests/host_menu_renderer_linkage_test.sh $(BINARY)
+
+# Regression for host-only routing of SDL clicks into GameSetupPanel's
+# GAMESTATE_HandleClick-derived control adapter.
+# Regression for the resource-0x403 accept click, which directly calls
+# EditWindow_OnPlayerNameChanged at original address 0x422AB2.
+test-host-main-menu-accept: tests/host_main_menu_accept_test.sh
+	@tests/host_main_menu_accept_test.sh
+
+# Regression for host-only routing of SDL clicks into GameSetupPanel control adapter.
+test-host-multiplayer-menu-input: tests/host_multiplayer_menu_input_test.sh
+	@tests/host_multiplayer_menu_input_test.sh
 
 # Host sound regression: mode 2 preloads 0x5015; mode 10 plays 0x5026.
 SDL3_GAME_AUDIO_TEST := $(BUILD_DIR)/sdl3_game_audio_test

@@ -146,6 +146,12 @@ public:
     /* Layout slot ButtonSprites (9 entries, res 0x43A..0x442) */
     ButtonSprite* layoutSprite[9];      // +0x23C..+0x25C
 
+#ifndef _WIN32
+    // SDL DirectPlay has no session provider. This records completion of the
+    // original Search control's empty-session scan without changing x86 ABI.
+    bool hostSearchCompleted = false;
+#endif
+
     /* Total: 0x260 bytes */
 
     /* ================================================================ */
@@ -365,5 +371,12 @@ public:
      * primary canvas.  This method is excluded from the original Win32 build.
      */
     void hostRenderFrame();
+
+    /**
+     * Host SDL pointer adapter for GAMESTATE_HandleClick (0x40A4E0).
+     * It maps display coordinates through the primary-canvas projection and
+     * dispatches the controls currently rendered by hostRenderFrame().
+     */
+    void hostHandlePointer(float display_x, float display_y, bool pressed);
 #endif
 };

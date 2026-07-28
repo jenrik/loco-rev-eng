@@ -1118,6 +1118,17 @@ void EditWindow::hostRenderFrame()
  */
 void EditWindow::hostHandlePointer(float display_x, float display_y, bool pressed)
 {
+    // GAMESTATE_HandleClick (0x40A4E0) owns mouse input while states 3/4/5
+    // show GameSetupPanel.  Do not send those events through the dormant
+    // main-menu hit-test rectangles.
+    if (this->dialogState == 3 || this->dialogState == 4 ||
+        this->dialogState == 5) {
+        if (this->pPanelB != nullptr) {
+            this->pPanelB->hostHandlePointer(display_x, display_y, pressed);
+        }
+        return;
+    }
+
     float canvas_x = 0.0f;
     float canvas_y = 0.0f;
     const HostMenuButton button = SDL3_DisplayToPrimaryCanvas(display_x, display_y,
@@ -1141,6 +1152,16 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
         CGWND_SetMode(10);
         return;
     }
+
+    // The resource-0x403 accept rectangle reaches 0x422AB2 after its pressed
+    // animation, where the original directly calls OnPlayerNameChanged
+    // (0x422660).  Reuse the same host-safe acceptance path as Enter rather
+    // than trying to invoke the Win32 EDIT implementation.
+    if (button == kHostOptionOne) {
+        this->hostCommitPlayerName();
+        return;
+    }
+
     if (!_g_netman_state) return;
 
     // Exact state transitions from the remaining original click branches.
@@ -1167,6 +1188,28 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
     }
 }
 
+void EditWindow::hostCommitPlayerName()
+{
+    const char* const illegal = ",. /\\[]{}|!@#$%^&*()_+-=~`'\"<>?;:";
+    bool has_alpha = false;
+    bool legal = this->hostEditText[0] != '\0';
+    for (const char* ch = this->hostEditText; legal && *ch; ++ch) {
+        if (std::strchr(illegal, *ch) != nullptr) legal = false;
+        if ((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z')) has_alpha = true;
+    }
+
+    // The original click branch calls OnPlayerNameChanged at 0x422AB2; the
+    // edit-subclass Enter branch reaches the same commit flow at 0x420D57.
+    // Preserve the recovered validation and state-3 handoff while avoiding
+    // the unported 32-bit mode-1 bootstrap used by the native handler.
+    if (legal && has_alpha && g_player_config != nullptr &&
+        _g_netman_state != nullptr) {
+        std::memcpy(g_player_config->name, this->hostEditText,
+                    sizeof(this->hostEditText));
+        this->setState(3);
+    }
+}
+
 bool EditWindow::hostHandleKey(int32_t key_code)
 {
     if (!this->hostEditFocused) return false;
@@ -1176,30 +1219,7 @@ bool EditWindow::hostHandleKey(int32_t key_code)
     // 0x420D57 commits the name for Enter; 0x420C19 takes the quit path
     // for Escape. Backspace is handled by the native EDIT default proc.
     if (key_code == 13) {
-        const char* const illegal = ",. /\\[]{}|!@#$%^&*()_+-=~`'\"<>?;:";
-        bool has_alpha = false;
-        bool legal = this->hostEditText[0] != '\0';
-        for (const char* ch = this->hostEditText; legal && *ch; ++ch) {
-            if (std::strchr(illegal, *ch) != nullptr) legal = false;
-            if ((*ch >= 'a' && *ch <= 'z') || (*ch >= 'A' && *ch <= 'Z')) has_alpha = true;
-        }
-
-        // Host path (0x420D57): copy the validated name to PlayerConfig
-        // at +0x06 (the same offset used by PlayerConfig::SetName), then
-        // transition the state machine via setState(3).  setState(3)
-        // (0x4208F0 case 3) hides PanelA, checks _g_netman_state[0x18],
-        // and routes to state 4 (single-player lobby) or state 5 (multiplayer
-        // lobby), both of which show the GameSetupPanel.
-        //
-        // We deliberately avoid CGWND_SetMode(1) (the 0x4227E6 branch) on
-        // the host — that path enters the full mode-1 game bootstrap which
-        // cascades through dozens of unported 32-bit x86 code paths.
-        if (legal && has_alpha && g_player_config != nullptr &&
-            _g_netman_state != nullptr) {
-            std::memcpy(g_player_config->name, this->hostEditText,
-                        sizeof(this->hostEditText));
-            this->setState(3);
-        }
+        this->hostCommitPlayerName();
         return true;
     }
     if (key_code == 27) {

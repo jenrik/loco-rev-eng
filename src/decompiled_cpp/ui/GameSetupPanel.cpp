@@ -995,6 +995,8 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 }
 
 #ifndef _WIN32
+#include "EditWindow.h"
+
 /* ================================================================== */
 /* GameSetupPanel::hostRenderFrame — SDL3 host composition              */
 /* Assembly basis: GameSetupPanel::render (0x409280), drawGrid          */
@@ -1076,6 +1078,42 @@ bool host_blit_frame(uint32_t resource_id, int frame, int frame_width, int frame
 }
 }  // namespace
 
+enum class HostLobbyControl {
+    None,
+    Exit,
+    Search,
+    Options,
+};
+
+bool host_lobby_contains(int left, int top, int width, int height,
+                         float x, float y)
+{
+    // PtInRect in GAMESTATE_HandleClick (0x40A4E0) includes left/top and
+    // excludes right/bottom edges.
+    return x >= left && x < left + width && y >= top && y < top + height;
+}
+
+HostLobbyControl host_lobby_control_at(float canvas_x, float canvas_y)
+{
+    // The first three PtInRect checks in 0x40A4E0 use ButtonSprite rects
+    // for Go (0x42A), Exit (0x42C), and Search (0x429).  Go is only drawn
+    // after a DirectPlay session is available; the SDL DirectPlay boundary
+    // currently reports no sessions, so only the three controls composed in
+    // hostRenderFrame() are candidates here.
+    if (host_lobby_contains(kExitLeft, kExitTop, 144, 112, canvas_x, canvas_y)) {
+        return HostLobbyControl::Exit;
+    }
+    if (host_lobby_contains(kOptionsLeft + 79, kOptionsTop, 72, 72,
+                            canvas_x, canvas_y)) {
+        return HostLobbyControl::Search;
+    }
+    if (host_lobby_contains(kOptionsLeft, kOptionsTop, 72, 72,
+                            canvas_x, canvas_y)) {
+        return HostLobbyControl::Options;
+    }
+    return HostLobbyControl::None;
+}
+
 void GameSetupPanel::hostRenderFrame()
 {
     // 0x409280 starts with a full background blit.  Resource 0x439 is the
@@ -1113,9 +1151,68 @@ void GameSetupPanel::hostRenderFrame()
         SDL_SetRenderScale(renderer, 2.0f, 2.0f);
         SDL_SetRenderDrawColor(renderer, 0xff, 0x5c, 0x00, 0xff);
         SDL_RenderDebugText(renderer, 40.0f, 42.0f, "NETWORK GAME");
-        SDL_RenderDebugText(renderer, 40.0f, 64.0f, "NO LAYOUTS AVAILABLE");
+        SDL_RenderDebugText(renderer, 40.0f, 64.0f,
+                            this->hostSearchCompleted
+                                ? "NO NETWORK GAMES FOUND"
+                                : "NO LAYOUTS AVAILABLE");
         SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         SDL_SetRenderTarget(renderer, nullptr);
+    }
+}
+
+/**
+ * GameSetupPanel host SDL pointer adapter.
+ *
+ * Assembly basis: GAMESTATE_HandleClick (0x40A4E0).  It checks the Go,
+ * Exit, Search, and Options ButtonSprite rectangles in that order.  Go and
+ * grid selection are unreachable on this host until DirectPlay reports a
+ * session (the SDL DirectPlay boundary deliberately reports none); the three
+ * controls rendered above retain their original click ordering/actions.
+ */
+void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pressed)
+{
+    float canvas_x = 0.0f;
+    float canvas_y = 0.0f;
+    if (!pressed || !SDL3_DisplayToPrimaryCanvas(display_x, display_y,
+                                                  &canvas_x, &canvas_y)) {
+        return;
+    }
+
+    switch (host_lobby_control_at(canvas_x, canvas_y)) {
+    case HostLobbyControl::Exit:
+        // 0x40A75C..0x40A7B9: ResetNetman, set game mode 3, then
+        // UI_MainMenu_SetState(g_ui_main, 7).  The SDL network boundary has
+        // no live session to reset; the recovered UI-state transition is the
+        // observable menu action and remains entirely host-only.
+        if (g_editwindow_ptr != nullptr) {
+            g_editwindow_ptr->setState(7);
+            this->titleDrawnFlag = 0;
+        }
+        return;
+
+    case HostLobbyControl::Search:
+        // 0x40A7BE..0x40A895 starts a DirectPlay search and loads its results.
+        // SDL's DirectPlay adapter reports an empty session list by design;
+        // record that completed empty scan rather than invoking untranslated
+        // x86 queue code or pretending a session was found.
+        this->hostSearchCompleted = true;
+        return;
+
+    case HostLobbyControl::Options:
+        // 0x40A8D1..0x40A928 resets the network state and returns to the
+        // parent NameEntryPanel via UI_MainMenu_SetState(g_ui_main, 2).
+        if (g_editwindow_ptr != nullptr) {
+            g_editwindow_ptr->setState(2);
+            // NameEntryPanel has no SDL compositor yet. Project the completed
+            // state-2 return through the existing state-7 main-menu host
+            // composition so the control has a visible, usable result instead
+            // of leaving the last lobby framebuffer onscreen.
+            g_editwindow_ptr->setState(7);
+        }
+        return;
+
+    case HostLobbyControl::None:
+        return;
     }
 }
 #endif  // !_WIN32
