@@ -90,7 +90,7 @@ int SDL3_WindowInit(const char* title, int width, int height)
 {
     if (g_sdl_initialized) return 0;
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         fprintf(stderr, "SDL3_WindowInit: SDL_Init failed: %s\n", SDL_GetError());
         return -1;
     }

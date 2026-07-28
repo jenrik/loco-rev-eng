@@ -42,6 +42,8 @@
               # ---- SDL2 (for the Linux port in CMakeLists.txt) ----
               SDL2
               SDL2_mixer
+              sdl3                    # SDL3 host audio/video shims
+              pkg-config              # SDL3 Makefile fallback discovery
               SDL2_image
               SDL2_ttf
 

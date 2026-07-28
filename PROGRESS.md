@@ -99,6 +99,7 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **Mode-2 menu controls** — Host-only `#ifndef _WIN32` composition now follows the state-0/state-7 draw sequence at `0x421C31`/`0x422010`, renders default menu controls and recovered option-selected frames, and maps SDL pointer events through the exact canvas projection before applying recovered `0x422C60..0x422D2E` state transitions.
 - [x] **Mode-2 quit control** — Ghidra confirms the `+0x14C` control’s click path (`0x422AC3..0x422C5D`) calls `CGWND_SetMode(10)`. The host routes that scaled hit to the real reconstructed mode-10 transition and terminates the SDL pump, matching the original WM_CLOSE handoff.
 - [x] **Mode-2 player-name input** — Recovered native EDIT creation (`0x4204D0`), its unlabelled subclass (`0x420B20`), and Enter/Escape parent paths (`0x420D57`/`0x420C19`). SDL now renders the exact `+0x15C` logical rectangle, receives text/backspace/Enter/Escape through host-only code, preserves the 11-byte limit and original validation, and copies accepted names to PlayerConfig `+0x06`.
+- [x] **Mode-2/10 host sound boundary** — Preserved the documented `EditWindow::show` preload at `0x420780` (resource `0x5015`) and `CGWND_SetMode(10)` exit sound at `0x40824C` (resource `0x5026`) behind `_WIN32` guards. The SDL bridge resolves the same PE string-table/RFH WAVs (`sounds\toybox\clstray1`, `sounds\toybox\sweep1`), retains the exit stream until drained, and has an archive-backed regression.
 
 ### Phase 6: Native C compilation (2026-07-24)
 
@@ -347,6 +348,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 ## Session log
 
 | Date | Summary |
+| 2026-07-28 (mode2-host-audio) | Added guarded SDL3 playback for the original mode-2 `0x5015` preload and mode-10 `0x5026` exit sound; archive/audio/menu regressions and the Nix-shell build pass. |
 |------|---------|
 | 2026-07-27 (settled-dependency-scheduling) | Fixed autonomous scheduling so terminal blocked/deferred/failed prerequisites release ready successors; root jobs remain queued while executable descendants exist, with prerequisite context, store/RPC regressions, and live-state-copy verification. |
 | 2026-07-27 (html-input-dialog) | Replaced dashboard `window.prompt` input with a reusable native `<dialog>` form across job, task, dependency, recovery, agent-control, and write-scope workflows; rebuilt static assets and passed frontend/web tests. |

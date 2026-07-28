@@ -81,6 +81,7 @@ BOOL  __stdcall PlaySoundA(const char* pszSound, void* hmod, DWORD fdwSound);
  * plus inline stubs for functions not yet covered */
 #include <SDL3/SDL.h>
 #include "sdl3_window.h"
+#include "sdl3_game_audio.h"
 
 /* sdl3_window.h covers: GetDesktopWindow, GetClientRect, LoadIconA,
  *   CreateSolidBrush, DeleteObject, ShowWindow, EnableWindow,
@@ -438,11 +439,17 @@ void EditWindow::show()
         this->setState(7);
     }
 
-    /* Start loading music resource 0x5015 */
+    /* 0x420780 loads resource 0x5015 (sounds\toybox\clstray1) on menu entry. */
+#ifdef _WIN32
     int musicRes = ResourceManager_GetStringById((void**)&g_resmgr, 0x5015);
     if (musicRes != 0) {
         RESMGR_LoadSoundResource(musicRes);
     }
+#else
+    // Host-only typed equivalent; it preserves the original preload without
+    // routing through the 32-bit DirectSound resource-object ABI.
+    SDL3_GameAudioPreloadResource(0x5015);
+#endif
 }
 
 /* ================================================================== */

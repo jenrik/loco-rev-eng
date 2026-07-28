@@ -7,6 +7,7 @@
 #include "../ui/EditWindow.h"
 #include "../../sdl3_shims/sdl3_ddraw.h"
 #include "../../sdl3_shims/sdl3_window.h"
+#include "../../sdl3_shims/sdl3_game_audio.h"
 #include <SDL3/SDL.h>
 #include <cstdio>
 
@@ -90,16 +91,21 @@ static void PumpMessages_SDL3(uint8_t filter)
             break;
         }
 
-        /* Game logic tick */
-        GameLoop_FrameUpdate();
-
-        // CGWND_SetMode(10) posts WM_CLOSE in the original Win32 pump.
-        // This SDL pump consumes native events directly, so mode 10 is the
-        // equivalent terminal condition after the recovered exit-button path.
+        // The Win32 path at 0x40824C posts its terminal message only after
+        // requesting sound 0x5026.  The host has no Win32 message queue, so
+        // retain its SDL stream until the one-shot drains before exiting.
         if (g_game_mode == 10) {
+            if (SDL3_GameAudioPump()) {
+                SDL_Delay(1);
+                continue;
+            }
             stop_text_input();
             return;
         }
+
+        /* Game logic tick */
+        GameLoop_FrameUpdate();
+        SDL3_GameAudioPump();
 
         // Host-only replacement for the x86 UIPANEL/offscreen-surface path:
         // compose original EditWindow resources in logical canvas coordinates.

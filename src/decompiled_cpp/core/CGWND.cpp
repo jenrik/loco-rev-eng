@@ -25,6 +25,7 @@
 #ifndef _WIN32
 #include <SDL3/SDL.h>
 #include "sdl3_window.h"
+#include "../../sdl3_shims/sdl3_game_audio.h"
 extern "C" { SDL_Window* SDL3_GetWindow(void); }
 #endif
 
@@ -664,6 +665,9 @@ void CGWND_SetMode(int new_mode)
 
     case 10:
         {
+#ifdef _WIN32
+            // Original 0x40824C..0x4082C8: play 0x5026 through GameAudio,
+            // restore DirectDraw, then post the terminal Win32 message.
             if (g_audio != nullptr) {
                 extern int GameAudio_PlayResourceEx(void* a, int id, uint32_t* out);
                 uint32_t ch = 0;
@@ -671,10 +675,7 @@ void CGWND_SetMode(int new_mode)
 
                 if (ch != 0) {
                     extern int CGWND_AudioChannel_IsActive(uint32_t ch);
-                    /* 0x408276: wait until the channel enters an active state. */
-                    while (!CGWND_AudioChannel_IsActive(ch)) {
-                        /* busy-wait */
-                    }
+                    while (!CGWND_AudioChannel_IsActive(ch)) {}
                     extern void CGWND_AudioChannel_Release(void* ch);
                     CGWND_AudioChannel_Release((void*)ch);
                 }
@@ -685,8 +686,12 @@ void CGWND_SetMode(int new_mode)
                 ((void(__thiscall*)(HWND,int))dd_vt[0x50 / 4])(
                     *(HWND*)((uint8_t*)g_main_window + 0x08), 8);
             }
-
-            PostMessageA(*(HWND*)((uint8_t*)g_main_window + 0x08), 0x10, 0, 0);  /* WM_QUIT */
+            PostMessageA(*(HWND*)((uint8_t*)g_main_window + 0x08), 0x10, 0, 0);
+#else
+            // Host-only equivalent of the original 0x5026 exit-sound request.
+            // The SDL pump keeps the process alive until this queued WAV drains.
+            SDL3_GameAudioPlayResource(0x5026);
+#endif
         }
         return;
 

@@ -3,6 +3,7 @@
  */
 
 #include "sdl3_window.h"
+#include "sdl3_game_audio.h"
 #include "../decompiled_cpp/core/CGWND.h"
 #include <cstdint>
 #include <cstdio>
@@ -77,6 +78,7 @@ int main(int argc, char* argv[])
     cgwnd->~CGWND();
     GLOBAL_free(cgwnd);
     CoUninitialize();
+    SDL3_GameAudioStopAll();
     SDL3_WindowQuit();
     TRACE("Clean exit");
     return 0;

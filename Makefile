@@ -51,7 +51,7 @@ NATIVE_ALL := $(wildcard $(DCP_DIR)/native/*.c)
 NATIVE_BROKEN := $(DCP_DIR)/native/buildingpanel_wndproc.c $(DCP_DIR)/native/config_ini.c $(DCP_DIR)/native/DDRAW_BlitHBITMAPToSurface.c $(DCP_DIR)/native/ddraw_building_sprites.c $(DCP_DIR)/native/ddraw_helpers.c $(DCP_DIR)/native/DDRAW_LoadBmpToSurface.c $(DCP_DIR)/native/game_loop_setup.c $(DCP_DIR)/native/gamestate_handlers.c $(DCP_DIR)/native/helpwnd_support.c $(DCP_DIR)/native/input_place.c $(DCP_DIR)/native/input_world.c $(DCP_DIR)/native/ui_childwindow.c $(DCP_DIR)/native/UI_DefWndProc.c $(DCP_DIR)/native/ui_manager.c $(DCP_DIR)/native/ui_position.c $(DCP_DIR)/native/UI_ProcessObjectTimers.c $(DCP_DIR)/native/ui_window_class.c $(DCP_DIR)/native/win32_network.c $(DCP_DIR)/native/win32_stream.c $(DCP_DIR)/native/winmain.c $(DCP_DIR)/native/world_enumerate_assets.c $(DCP_DIR)/native/ui_scroll_list.c $(DCP_DIR)/native/sprite_tilemap.c $(DCP_DIR)/native/math_huf_helpers.c $(DCP_DIR)/native/huf_decode.c $(DCP_DIR)/native/math_helpers.c $(DCP_DIR)/native/DDRAW_PresentRect.c $(DCP_DIR)/native/cgwnd_present.c $(DCP_DIR)/native/ui_window_update.c $(DCP_DIR)/native/win32_postquit.c $(DCP_DIR)/native/win32_thread.c
 NATIVE_SRCS := $(filter-out $(NATIVE_BROKEN), $(NATIVE_ALL))
 
-SHIM_SRCS := $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
+SHIM_SRCS := $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
 
 # Derived objects
 DCP_OBJS    := $(patsubst $(DCP_DIR)/%.cpp, $(BUILD_DIR)/dcp/%.o, $(DCP_CPP_SRCS))
@@ -65,7 +65,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all run clean distclean check help dirs test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: dirs $(BINARY)
 	@echo ""
@@ -152,6 +152,16 @@ $(MODE2_MENU_BACKDROP_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/reso
 
 test-mode2-menu-backdrop: $(MODE2_MENU_BACKDROP_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MODE2_MENU_BACKDROP_TEST)
+
+# Host sound regression: mode 2 preloads 0x5015; mode 10 plays 0x5026.
+SDL3_GAME_AUDIO_TEST := $(BUILD_DIR)/sdl3_game_audio_test
+
+$(SDL3_GAME_AUDIO_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h tests/sdl3_game_audio_test.cpp | dirs
+	@echo "=== Testing host game audio ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp tests/sdl3_game_audio_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-sdl3-game-audio: $(SDL3_GAME_AUDIO_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_AUDIODRIVER=dummy $(SDL3_GAME_AUDIO_TEST)
 
 # Startup menu sprite diagnostic: real PE IDs → RFH paths → RFD BMPs → SDL textures.
 MENU_SPRITE_VIEWER := $(BUILD_DIR)/menu_sprite_viewer
