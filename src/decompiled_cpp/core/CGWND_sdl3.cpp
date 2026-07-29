@@ -92,14 +92,11 @@ static void PumpMessages_SDL3(uint8_t filter)
             break;
         }
 
-        // The Win32 path at 0x40824C posts its terminal message only after
-        // requesting sound 0x5026.  The host has no Win32 message queue, so
-        // retain its SDL stream until the one-shot drains before exiting.
+        // CGWND_SetMode(10) at 0x40824C only waits for AudioChannel_IsActive
+        // (playback started), NOT for playback to finish.  It then posts
+        // WM_CLOSE immediately.  The host queues the one-shot in SetMode and
+        // exits without draining — matching the original terminal behavior.
         if (g_game_mode == 10) {
-            if (SDL3_GameAudioPump()) {
-                SDL_Delay(1);
-                continue;
-            }
             stop_text_input();
             return;
         }
