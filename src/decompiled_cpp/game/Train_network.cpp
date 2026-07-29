@@ -214,7 +214,7 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
 
         void* reversed = NULL;
         for (uint32_t* item = (uint32_t*)DirectPlay_EnumConnections(g_dplay_peer);
-             item != NULL; item = (uint32_t*)item[0]) {
+             item != NULL; item = (uint32_t*)(uintptr_t)item[0]) {
             uint32_t* copy = (uint32_t*)operator_new(8);
             copy[0] = (uint32_t)reversed;
             copy[1] = item[1];
@@ -288,7 +288,7 @@ void TrainSubsystem::BaseDtor()
         while (*handles[i] != NULL) {
             PlayerConnectionNode* node = *handles[i];
             if (node->file_handle != 0) {
-                CloseHandle((void*)node->file_handle);
+                CloseHandle((void*)(uintptr_t)node->file_handle);
                 node->file_handle = 0;
             }
             *handles[i] = (PlayerConnectionNode*)node->next;
@@ -642,7 +642,7 @@ void TrainSubsystem::ProcessMessages()
                             qmsg->data = this->sprite_list_1;
                         }
                         *(uint8_t*)(car + 0x88) = 0;
-                        this->sprite_list_1 = *(void**)(car + 0x70);
+                        this->sprite_list_1 = *(void**)((uint8_t*)car + 0x70);
                         if (qmsg && qmsg->data) {
                             *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
                         }
@@ -665,7 +665,7 @@ void TrainSubsystem::ProcessMessages()
                     uint8_t* car = (uint8_t*)this->sprite_list_1;
                     while (car != 0) {
                         *(uint16_t*)(car + 0x74) = 32000;
-                        car = *(int*)(car + 0x70);
+                        car = *(uint8_t**)(car + 0x70);
                     }
                 }
 
@@ -706,7 +706,7 @@ void TrainSubsystem::ProcessMessages()
             int32_t config_val = *(int32_t*)(p + 2);
 
             uint8_t* car = (uint8_t*)this->sprite_list_1;
-            while (car) { *(uint16_t*)(car + 0x74) = 32000; car = *(int*)(car + 0x70); }
+            while (car) { *(uint16_t*)(car + 0x74) = 32000; car = *(uint8_t**)(car + 0x70); }
 
             if (info_flag) this->field_30 = 1;
             *(int32_t*)((uint8_t*)g_player_config + 0x14) = config_val;
@@ -729,7 +729,7 @@ void TrainSubsystem::ProcessMessages()
             uint32_t bytes_written;
 
             NET_GetAssetPath(*(uint8_t*)((uint8_t*)p + 5), (uint8_t)p[2], path_buf);
-            void* hFile = (void*)CreateFileA(path_buf, 0x40000000, 0, NULL, 1, 0x80, NULL);
+            void* hFile = (void*)(uintptr_t)CreateFileA(path_buf, 0x40000000, 0, NULL, 1, 0x80, NULL);
             if (hFile != (void*)0xFFFFFFFF) {
                 WriteFile(hFile, p + 6, *(uint32_t*)(p + 4), &bytes_written, NULL);
                 CloseHandle(hFile);
@@ -834,7 +834,7 @@ void TrainSubsystem::ProcessMessages()
                 qmsg->data = NULL; qmsg->next = NULL;
                 qmsg->type = 0x1A;
                 qmsg->size = 0;
-                qmsg->data = (void*)(uint32_t)((uint8_t)p[2]);
+                qmsg->data = (void*)(uintptr_t)(uint32_t)((uint8_t)p[2]);
                 qmsg->to_player = player_id;
             }
             NETMAN_QueueMessage(qmsg);
@@ -913,7 +913,7 @@ void TrainSubsystem::HandlePlayerJoin(void* data, int player_id)
         char att_path[0x144];
         att_path[0] = 0;
         NET_GetAttFilePath(node->sub_type, 4, att_path);
-        void* hFile = (void*)CreateFileA(att_path, 0x80000000, 1, NULL,
+        void* hFile = (void*)(uintptr_t)CreateFileA(att_path, 0x80000000, 1, NULL,
                                           4, 0x8000000, NULL);
         node->file_handle = (int32_t)hFile;
     }
@@ -958,10 +958,10 @@ void TrainSubsystem::UploadPendingAttachments()
             uint16_t* buf = (uint16_t*)operator_new(0x7FEC);
             uint32_t bytes_read = 0;
 
-            if (!ReadFile((void*)node->file_handle,
+            if (!ReadFile((void*)(uintptr_t)node->file_handle,
                            (void*)((uint8_t*)buf + 0x0D),
                            0x7FDC, &bytes_read, NULL)) {
-                CloseHandle((void*)node->file_handle);
+                CloseHandle((void*)(uintptr_t)node->file_handle);
                 node->file_handle = 0;
                 GLOBAL_free(buf);
                 goto remove_node;
@@ -984,10 +984,10 @@ void TrainSubsystem::UploadPendingAttachments()
             uint16_t* buf = (uint16_t*)operator_new(0x7FEC);
             uint32_t bytes_read = 0;
 
-            if (!ReadFile((void*)node->file_handle,
+            if (!ReadFile((void*)(uintptr_t)node->file_handle,
                            (void*)((uint8_t*)buf + 0x0D),
                            0x7FDC, &bytes_read, NULL)) {
-                CloseHandle((void*)node->file_handle);
+                CloseHandle((void*)(uintptr_t)node->file_handle);
                 node->file_handle = 0;
                 GLOBAL_free(buf);
                 goto remove_node;
@@ -1008,7 +1008,7 @@ void TrainSubsystem::UploadPendingAttachments()
 
             /* Zero bytes -> move to FINAL */
             node->transfer_state = 2;
-            CloseHandle((void*)node->file_handle);
+            CloseHandle((void*)(uintptr_t)node->file_handle);
             node->file_handle = 0;
             GLOBAL_free(buf);
             prev = node;
@@ -1023,7 +1023,7 @@ void TrainSubsystem::UploadPendingAttachments()
             uint32_t bytes_read = 0;
 
             NET_GetFilePath(node->sub_type, 4, att_path);
-            void* hFile = (void*)CreateFileA(att_path, 0x80000000, 1, NULL,
+            void* hFile = (void*)(uintptr_t)CreateFileA(att_path, 0x80000000, 1, NULL,
                                               4, 0x8000000, NULL);
             node->file_handle = (int32_t)hFile;
 
@@ -1094,7 +1094,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
 
         if (node->sequence_num == 0) {
             NET_GetAttFilePath(train_type, 5, path_buf);
-            void* hFile = (void*)CreateFileA(path_buf, 0x40000000, 1, NULL,
+            void* hFile = (void*)(uintptr_t)CreateFileA(path_buf, 0x40000000, 1, NULL,
                                               1, 0x8000000, NULL);
             node->file_handle = (int32_t)hFile;
 
@@ -1128,7 +1128,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
 
         if (node->sequence_num != expected) {
             g_OutputDebugStringA("Attachment Interim Block out of sequence");
-            CloseHandle((void*)node->file_handle);
+            CloseHandle((void*)(uintptr_t)node->file_handle);
             node->file_handle = 0;
 
             NetworkMsg* msg = (NetworkMsg*)operator_new(0x1c);
@@ -1140,11 +1140,11 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
             goto unlink_node;
         }
 
-        if (!WriteFile((void*)node->file_handle,
+        if (!WriteFile((void*)(uintptr_t)node->file_handle,
                         (void*)((uint8_t*)data + 0x0D),
                         *(uint32_t*)((uint8_t*)data + 4),
                         &bytes_written, NULL)) {
-            CloseHandle((void*)node->file_handle);
+            CloseHandle((void*)(uintptr_t)node->file_handle);
             node->file_handle = 0;
         } else {
             return; /* success */
@@ -1157,7 +1157,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
         char path_buf[0x144] = {0};
 
         if (node->file_handle) {
-            CloseHandle((void*)node->file_handle);
+            CloseHandle((void*)(uintptr_t)node->file_handle);
             node->file_handle = 0;
         }
 
@@ -1166,7 +1166,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
 
         if (node->sequence_num == expected) {
             NET_GetFilePath(train_type, 5, path_buf);
-            void* hFile = (void*)CreateFileA(path_buf, 0x40000000, 1, NULL,
+            void* hFile = (void*)(uintptr_t)CreateFileA(path_buf, 0x40000000, 1, NULL,
                                               1, 0x8000000, NULL);
             node->file_handle = (int32_t)hFile;
             if (hFile != (void*)0xFFFFFFFF) {
@@ -1223,14 +1223,14 @@ void TrainSubsystem::HandleTrainPosUpdate(void* data, int player_index)
         uint8_t* car = (uint8_t*)this->sprite_list_1;
         while (car != 0) {
             if (*(uint16_t*)(car + 0x7A) == resource_id) break;
-            car = *(int*)(car + 0x70);
+            car = *(uint8_t**)(car + 0x70);
         }
         if (car == 0) return;
 
         /* Take local control: unlink from sprite_list_1, reverse direction */
-        this->sprite_list_1 = *(void**)(car + 0x70);
+        this->sprite_list_1 = *(void**)((uint8_t*)car + 0x70);
         uint16_t dir = *(uint16_t*)(car + 0x74);
-        *(void**)(car + 0x70) = NULL;
+        *(void**)((uint8_t*)car + 0x70) = NULL;
 
         /* Mirror direction (180-degree flip) */
         if (dir < 0x5B) {
@@ -1287,7 +1287,7 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
                 node->next = NULL;
 
                 if (node->file_handle != 0 && node->file_handle != -1) {
-                    CloseHandle((void*)node->file_handle);
+                    CloseHandle((void*)(uintptr_t)node->file_handle);
                     node->file_handle = 0;
                 }
 
@@ -1410,7 +1410,7 @@ void TrainSubsystem::ShutdownNetwork()
             }
         } else {
             /* Non-scenario: use UI address */
-            char* addr = *(char**)(*(int*)((uint8_t*)g_ui_main + 0x220) + 0xF8);
+            char* addr = *(char**)(*(uintptr_t*)((uint8_t*)g_ui_main + 0x220) + 0xF8);
             DirectPlay_ConnectToSession(g_dplay_peer,
                                          (char*)((uint8_t*)g_player_config + 6),
                                          addr, NULL);
@@ -1419,7 +1419,7 @@ void TrainSubsystem::ShutdownNetwork()
         /* Client player: format name pair */
         char name_buf[256];
         wsprintfA(name_buf, "%s %s",
-                  *(char**)(*(int*)((uint8_t*)g_ui_main + 0x220) + 0xFC),
+                  *(char**)(*(uintptr_t*)((uint8_t*)g_ui_main + 0x220) + 0xFC),
                   (char*)((uint8_t*)g_player_config + 6));
         DirectPlay_ConnectToSession(g_dplay_peer,
                                      (char*)((uint8_t*)g_player_config + 6),
@@ -1580,13 +1580,13 @@ forward_train:
     {
         if (this->sprite_list_2 != NULL) {
             uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(int*)(tail + 0x70) != 0) {
-                tail = *(int*)(tail + 0x70);
+            while (*(uint8_t**)(tail + 0x70) != 0) {
+                tail = *(uint8_t**)(tail + 0x70);
             }
-            *(void**)(car + 0x70) = NULL;
+            *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
         } else {
-            *(void**)(car + 0x70) = NULL;
+            *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         }
         Train_RemoveAllTracks(this);
@@ -1637,7 +1637,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                 int match = -1;
                 for (int j = 0; j < player_count; j++) {
                     /* Compare player name from track_entry */
-                    uint8_t* pn = (uint8_t*)((int)g_netman + 0x51D + j * 0x4C);
+                    uint8_t* pn = (uint8_t*)((uint8_t*)g_netman + 0x51D + j * 0x4C);
                     uint8_t* tn = player_name;
                     int k = 0;
                     while (tn[k] == pn[k] && tn[k] != 0) { k++; }
@@ -1655,12 +1655,12 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                         /* Find player by name match */
                         int* target_player = NULL;
                         for (int j = 0; j < player_count; j++) {
-                            uint8_t* pn = (uint8_t*)((int)g_netman + 0x51D + j * 0x4C);
+                            uint8_t* pn = (uint8_t*)((uint8_t*)g_netman + 0x51D + j * 0x4C);
                             uint8_t* tn = (uint8_t*)track_entry + 6; /* 2+ byte per char */
                             int k = 0;
                             while (tn[k*2] == pn[k] && tn[k*2] != 0) { k++; }
                             if (tn[k*2] == pn[k]) {
-                                target_player = (int*)((int)g_netman + 0x518 + j * 0x4C);
+                                target_player = (int*)((uint8_t*)g_netman + 0x518 + j * 0x4C);
                                 break;
                             }
                         }
@@ -1695,7 +1695,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                 }
 
                 /* Set DPLAY data for this track element */
-                VehicleEditor_SetDPlayData((void*)*(uint32_t*)((uint8_t*)controller + 0x14 + i * 4),
+                VehicleEditor_SetDPlayData((void*)(uintptr_t)*(uint32_t*)((uint8_t*)controller + 0x14 + i * 4),
                                             (int)&track_entry[-7]);
             }
             track_entry += 0x75; /* advance by 0xEA bytes / 4 = 0x75 dwords */
@@ -1704,7 +1704,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 
     /* Call vtable[13] on the controller's 5th field (4 = +0x10 ptr) */
     {
-        void** vt = *(void***)(*(int*)((uint8_t*)controller + 0x10));
+        void** vt = *(void***)(*(uintptr_t*)((uint8_t*)controller + 0x10));
         ((void (__thiscall*)(void*, void*))vt[13])(*(void**)((uint8_t*)controller + 0x10),
                                                      (void*)((uint8_t*)p + 0xB10));
     }
@@ -1784,7 +1784,7 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
                 *(uint8_t*)(car + 0x7C) = owner;
                 break;
             }
-            car = *(int*)(car + 0x70);
+            car = *(uint8_t**)(car + 0x70);
         }
     }
 
@@ -1818,7 +1818,7 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
         player_index = NETMAN_FindPlayerIndex(g_netman, player_id);
     }
 
-    if ((uint8_t*)player_index < 0) return;
+    if ((int)player_index < 0) return;
 
     /* Walk sprite_list_1 and remove matching cars */
     {
@@ -1974,8 +1974,8 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
         this->sprite_list_2 = car;
     } else {
         uint8_t* tail = (uint8_t*)this->sprite_list_2;
-        while (*(int*)(tail + 0x70) != 0) {
-            tail = *(int*)(tail + 0x70);
+        while (*(uint8_t**)(tail + 0x70) != 0) {
+            tail = *(uint8_t**)(tail + 0x70);
         }
         *(void**)((uint8_t*)car + 0x70) = NULL;
         *(void**)(tail + 0x70) = car;
@@ -2026,7 +2026,7 @@ void TrainSubsystem::UpdateTrainMovement()
                 this->sprite_list_2 = node;
             } else {
                 uint8_t* tail = (uint8_t*)this->sprite_list_2;
-                while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
+                while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
                 *(void**)(tail + 0x70) = node;
             }
 
@@ -2039,7 +2039,7 @@ void TrainSubsystem::UpdateTrainMovement()
                            msg->data = this->sprite_list_2; }
                 ((Building*)this->sprite_list_2)->occupation_level = 0;
 
-                int cur = (uint8_t*)this->sprite_list_2;
+                uint8_t* cur = (uint8_t*)this->sprite_list_2;
                 *(uint8_t*)(cur + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
                 *(void**)(cur + 0x70) = NULL;
                 *(uint8_t*)(cur + 0x88) = 0;
@@ -2073,7 +2073,7 @@ void TrainSubsystem::UpdateTrainMovement()
         int new_x = pos_x;
         int new_y = pos_y;
         int tile_row_size = map_width;
-        int tile_data_base = player_slot[0x11];
+        uint8_t* tile_data_base = (uint8_t*)(uintptr_t)player_slot[0x11];
 
         if (move_dir == 0x5A) {
             /* Moving right */
@@ -2389,7 +2389,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             this->sprite_list_2 = car;
         } else {
             uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
+            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
         }
@@ -2428,12 +2428,12 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
         for (int i = 0; i < *(uint16_t*)((uint8_t*)car + 0x0C); i++) {
             if (carriage_ptr[i] == 0) continue;
 
-            int res_id = VehicleEditor_GetResourceId((void*)carriage_ptr[i]);
+            int res_id = VehicleEditor_GetResourceId((void*)(uintptr_t)carriage_ptr[i]);
             *(int32_t*)(buf + 6 + carriage_count * 0xEA) = res_id;
             *(int32_t*)(buf + 6 + carriage_count * 0xEA + 4) =
-                *(int32_t*)((uint8_t*)carriage_ptr[i] + 0x42C);
+                *(int32_t*)((uint8_t*)(uintptr_t)carriage_ptr[i] + 0x42C);
 
-            void* dplay_data = VehicleEditor_GetDPlayData((void*)carriage_ptr[i]);
+            void* dplay_data = VehicleEditor_GetDPlayData((void*)(uintptr_t)carriage_ptr[i]);
             if (dplay_data) {
                 *(uint8_t*)(buf + 6 + carriage_count * 0xEA + 8) = 1;
                 memcpy(buf + 6 + carriage_count * 0xEA + 9, dplay_data, 0x39C);
@@ -2470,14 +2470,14 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             this->sprite_list_2 = car;
         } else {
             uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
+            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
         }
 
         /* Notify UI for all cars in sprite_list_2 */
         {
-            int c = (uint8_t*)this->sprite_list_2;
+            uint8_t* c = (uint8_t*)this->sprite_list_2;
             while (c != 0) {
                 NetworkMsg* msg = (NetworkMsg*)operator_new(0x1c);
                 if (msg) { msg->data = NULL; msg->next = NULL;
@@ -2485,7 +2485,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
                            msg->data = this->sprite_list_2; }
                 ((Building*)this->sprite_list_2)->occupation_level = 0;
 
-                int cur = (uint8_t*)this->sprite_list_2;
+                uint8_t* cur = (uint8_t*)this->sprite_list_2;
                 *(uint8_t*)(cur + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
                 *(void**)(cur + 0x70) = NULL;
                 *(uint8_t*)(cur + 0x88) = 0;
@@ -2522,7 +2522,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             this->sprite_list_2 = car;
         } else {
             uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
+            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
         }
@@ -2563,15 +2563,15 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_1 = car;
         } else {
-            int tail = (uint8_t*)this->sprite_list_1;
-            while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
+            uint8_t* tail = (uint8_t*)this->sprite_list_1;
+            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
         }
 
         if (g_demo_mode == 1) {
             /* Demo mode: remove all existing cars from sprite_list_1 */
-            int c = (uint8_t*)this->sprite_list_1;
+            uint8_t* c = (uint8_t*)this->sprite_list_1;
             while (c != 0) {
                 NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
                 if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
@@ -2599,7 +2599,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     if (g_demo_mode == 1 || this->byte_flags != 0) {
         /* Demo mode or flag set — remove all cars */
-        int c = (uint8_t*)this->sprite_list_1;
+        uint8_t* c = (uint8_t*)this->sprite_list_1;
         while (c != 0) {
             NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
@@ -2708,7 +2708,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     /* Remove all existing cars from sprite_list_1 to join fresh */
     {
-        int c = (uint8_t*)this->sprite_list_1;
+        uint8_t* c = (uint8_t*)this->sprite_list_1;
         while (c != 0) {
             NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
