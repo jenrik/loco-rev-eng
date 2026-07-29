@@ -334,14 +334,14 @@ void Vehicle::FindPath(int32_t* target, uint8_t is_remote)
     this->target_tile_x = (int16_t)target[0x22];  /* target's tile X at +0x88 */
 
     /* If another vehicle already assigned, add to destination queue */
-    if (target[0x48] != 0 && (void*)target[0x48] != this) {
+    if (target[0x48] != 0 && (void*)(uintptr_t)target[0x48] != this) {
         GameVehicle_AddDestination(target, this);
         return;
     }
 
     /* Register as occupant */
     *(uint8_t*)(target + 0x4A) = 1;              /* occupant flag */
-    target[0x48] = (int32_t)this;                /* tracked vehicle */
+    target[0x48] = (int32_t)(uintptr_t)this;     /* tracked vehicle */
     this->occupancy = 5;                         /* ARRIVING */
     this->UpdatePosition(1);
 
@@ -350,8 +350,8 @@ void Vehicle::FindPath(int32_t* target, uint8_t is_remote)
         int32_t* editor = (int32_t*)this->editors[i];
         if (editor != 0) {
             editor[0x444 / 4] = 5;                           /* editor state */
-            *(int32_t*)(editor[0x430 / 4] + 0x1C) = 5;       /* front wheel state */
-            *(int32_t*)(editor[0x434 / 4] + 0x1C) = 5;       /* rear wheel state */
+            *(int32_t*)((uintptr_t)editor[0x430 / 4] + 0x1C) = 5;  /* front wheel state */
+            *(int32_t*)((uintptr_t)editor[0x434 / 4] + 0x1C) = 5;  /* rear wheel state */
         }
     }
 
@@ -385,7 +385,7 @@ uint32_t Vehicle::InitRoute(int32_t param_1, int32_t param_2, uint8_t param_3)
         this->editors[this->editor_count] = editor;
 
         result = 1;
-        void** new_slot = this->editors[this->editor_count];
+        void* new_slot = this->editors[this->editor_count];
         if (new_slot != 0) {
             uint8_t* editor_bytes = (uint8_t*)new_slot;
             if (editor_bytes[0x18] == 1) {           /* active flag */
@@ -501,9 +501,9 @@ void Vehicle::ClearRoute()
         int32_t obj_at = TileMap_GetObjectAt(&g_tilemap,
             this->target_tile_x, this->target_tile_y + 1, 0);
         if (obj_at != 0) {
-            *(int32_t*)(obj_at + 0x11C) = 0;    /* clear arrival queue ptr */
-            *(uint8_t*)(obj_at + 0x128) = 0;    /* clear tracked_vehicle_flag */
-            *(int32_t*)(obj_at + 0x120) = 0;    /* clear tracked_vehicle */
+            *(int32_t*)((uintptr_t)obj_at + 0x11C) = 0;   /* clear arrival queue ptr */
+            *(uint8_t*)((uintptr_t)obj_at + 0x128) = 0;   /* clear tracked_vehicle_flag */
+            *(int32_t*)((uintptr_t)obj_at + 0x120) = 0;   /* clear tracked_vehicle */
         }
 
         this->target_tile_x = -1;
@@ -649,8 +649,8 @@ uint8_t Vehicle::UpdateEngineSound()
         }
 
         /* If front or rear wheel has state 1 (ACTIVE), set exclusion to 1 */
-        if (*(int32_t*)(*(int32_t*)(editor + 0x430) + 0x18) == 1 ||
-            *(int32_t*)(*(int32_t*)(editor + 0x434) + 0x18) == 1) {
+        if (*(int32_t*)((uintptr_t)*(int32_t*)(editor + 0x430) + 0x18) == 1 ||
+            *(int32_t*)((uintptr_t)*(int32_t*)(editor + 0x434) + 0x18) == 1) {
             *(int32_t*)(editor + 0x440) = 1;
         }
 
@@ -666,14 +666,14 @@ uint8_t Vehicle::UpdateEngineSound()
             break;
         case 4:
             *(int32_t*)(editor + 0x444) = 1;
-            VehicleEditor_CheckEditBounds1((void*)*editor, this);
+            VehicleEditor_CheckEditBounds1(editor, this);
             break;
         case 5:
-            if (*(int32_t*)(*(int32_t*)(editor + 0x430) + 0x1C) == 1 ||
-                *(int32_t*)(*(int32_t*)(editor + 0x434) + 0x1C) == 1) {
+            if (*(int32_t*)((uintptr_t)*(int32_t*)(editor + 0x430) + 0x1C) == 1 ||
+                *(int32_t*)((uintptr_t)*(int32_t*)(editor + 0x434) + 0x1C) == 1) {
                 /* Detached — goto case 4 logic */
                 *(int32_t*)(editor + 0x444) = 1;
-                VehicleEditor_CheckEditBounds1((void*)*editor, this);
+                VehicleEditor_CheckEditBounds1(editor, this);
             } else {
                 *(int32_t*)(editor + 0x444) = 2;
                 *(uint8_t*)(editor + 0x24) = 0;    /* clear visible */
@@ -725,8 +725,8 @@ uint8_t Vehicle::UpdateEngineSound()
         ((EditorState*)this->editor_state)->move_state = 4;
     }
 
-    VehicleEditor_CheckBounds((int32_t)this->editor_state);
-    VehicleEditor_CheckBounds2((int32_t)this->editor_state);
+    VehicleEditor_CheckBounds(this->editor_state);
+    VehicleEditor_CheckBounds2(this->editor_state);
 
     /* --- Handle editor state result (+0x1C) --- */
     switch (((EditorState*)this->editor_state)->edit_state) {
@@ -742,13 +742,13 @@ uint8_t Vehicle::UpdateEngineSound()
             }
 
             /* Clear target building's tracked vehicle */
-            int32_t* target_building = (int32_t*)TileMap_GetObjectAt(
+            int32_t* target_building = (int32_t*)(uintptr_t)TileMap_GetObjectAt(
                 &g_tilemap, this->target_tile_x, this->target_tile_y + 1, 0);
             if (target_building != 0 &&
-                (void*)target_building[0x48] == this) {
+                (void*)(uintptr_t)target_building[0x48] == this) {
                 target_building[0x47] = 0;              /* clear occupant count */
                 *(uint8_t*)(target_building + 0x4A) = 0; /* clear occupant flag */
-                (*(void (__thiscall**)(int32_t*, int32_t))*target_building)(
+                (*(void (__thiscall**)(int32_t*, int32_t))(uintptr_t)*target_building)(
                     target_building, 0);                /* vtable[7] callback */
                 target_building[0x48] = 0;              /* clear tracked vehicle */
             }
@@ -803,14 +803,14 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
         this->tile_x = (int16_t)target[0x22];    /* store target tile X */
     } else if (RESDATA_IsBuildingTile(resource_id)) {
         tile_category = 1;                       /* BUILDING */
-        (*(void (__thiscall**)(int32_t*, int32_t))*target)(target, 1);  /* vtable[7] activate */
+        (*(void (__thiscall**)(int32_t*, int32_t))(uintptr_t)*target)(target, 1);  /* vtable[7] activate */
     }
 
     /* --- Configure sound positions for each editor --- */
     for (int32_t i = 0; i <= (int32_t)(uint32_t)this->editor_count; i++) {
         uint8_t* editor = (uint8_t*)(VehicleEditor*)this->editors[i];
-        int32_t front_wheel = *(int32_t*)(editor + 0x430);
-        int32_t rear_wheel  = *(int32_t*)(editor + 0x434);
+        uintptr_t front_wheel = (uintptr_t)*(int32_t*)(editor + 0x430);
+        uintptr_t rear_wheel  = (uintptr_t)*(int32_t*)(editor + 0x434);
 
         /* Set target building reference on both wheels */
         *(int32_t**)(front_wheel + 0x14) = target;
@@ -826,7 +826,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
         }
 
         /* Set sound pitch offsets based on tile type at RESDATA+0x63A */
-        uint8_t tile_type = *(uint8_t*)(resource_id + 0x63A);
+        uint8_t tile_type = *(uint8_t*)((uintptr_t)resource_id + 0x63A);
 
         if (tile_type == 1 || tile_type == 7) {
             /* North-facing */
@@ -881,7 +881,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
     *(int32_t**)(editor_state + 0x14) = target;
 
     /* Copy position from front wheel of first editor to editor state */
-    int32_t first_front_wheel = ((VehicleEditor*)this->editors[0])->end_a;
+    uintptr_t first_front_wheel = (uintptr_t)((VehicleEditor*)this->editors[0])->end_a;
     *(int32_t*)(editor_state + 4) = *(int32_t*)(first_front_wheel + 4);   /* copy pos X */
     *(int32_t*)(editor_state + 8) = *(int32_t*)(first_front_wheel + 8);   /* copy pos Y */
 
@@ -924,16 +924,16 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 if (max_idx == (uint32_t)this->editor_count) {
                     offset = *(int32_t*)(editor_state + 0x0C) - 0x0C;
                 } else {
-                    int32_t prev_rear = *(int32_t*)((VehicleEditor*)this->editors[
+                    uintptr_t prev_rear = (uintptr_t)*(int32_t*)((VehicleEditor*)this->editors[
                         (uint32_t)this->editor_count] + 0x434);
                     offset = *(int32_t*)(prev_rear + 0x0C) - offset;
                 }
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x0C) = offset;
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x10) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x0C) = offset;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x10) =
                     *(int32_t*)(editor_state + 0x10);
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x0C) =
-                    *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x0C) - 0x16;
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x10) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x0C) =
+                    *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x0C) - 0x16;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x10) =
                     *(int32_t*)(editor_state + 0x10);
                 break;
             case 2:
@@ -942,16 +942,16 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 if (max_idx == (uint32_t)this->editor_count) {
                     offset = *(int32_t*)(editor_state + 0x0C) + 0x0C;
                 } else {
-                    int32_t prev_rear = *(int32_t*)((VehicleEditor*)this->editors[
+                    uintptr_t prev_rear = (uintptr_t)*(int32_t*)((VehicleEditor*)this->editors[
                         (uint32_t)this->editor_count] + 0x434);
                     offset = *(int32_t*)(prev_rear + 0x0C) + offset;
                 }
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x0C) = offset;
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x10) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x0C) = offset;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x10) =
                     *(int32_t*)(editor_state + 0x10);
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x0C) =
-                    *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x0C) + 0x16;
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x10) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x0C) =
+                    *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x0C) + 0x16;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x10) =
                     *(int32_t*)(editor_state + 0x10);
                 break;
             case 3:
@@ -960,17 +960,17 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 if (max_idx == (uint32_t)this->editor_count) {
                     offset = *(int32_t*)(editor_state + 0x10) - 0x0C;
                 } else {
-                    int32_t prev_rear = *(int32_t*)((VehicleEditor*)this->editors[
+                    uintptr_t prev_rear = (uintptr_t)*(int32_t*)((VehicleEditor*)this->editors[
                         (uint32_t)this->editor_count] + 0x434);
                     offset = *(int32_t*)(prev_rear + 0x10) - offset;
                 }
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x10) = offset;
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x0C) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x10) = offset;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x0C) =
                     *(int32_t*)(editor_state + 0x0C);
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x0C) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x0C) =
                     *(int32_t*)(editor_state + 0x0C);
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x10) =
-                    *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x10) - 0x16;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x10) =
+                    *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x10) - 0x16;
                 break;
             case 4:
             case 10:
@@ -978,17 +978,17 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 if (max_idx == (uint32_t)this->editor_count) {
                     offset = *(int32_t*)(editor_state + 0x10) + 0x0C;
                 } else {
-                    int32_t prev_rear = *(int32_t*)((VehicleEditor*)this->editors[
+                    uintptr_t prev_rear = (uintptr_t)*(int32_t*)((VehicleEditor*)this->editors[
                         (uint32_t)this->editor_count] + 0x434);
                     offset = *(int32_t*)(prev_rear + 0x10) + offset;
                 }
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x10) = offset;
-                *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x0C) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x10) = offset;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x0C) =
                     *(int32_t*)(editor_state + 0x0C);
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x0C) =
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x0C) =
                     *(int32_t*)(editor_state + 0x0C);
-                *(int32_t*)(*(int32_t*)(ed + 0x430) + 0x10) =
-                    *(int32_t*)(*(int32_t*)(ed + 0x434) + 0x10) + 0x16;
+                *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x430) + 0x10) =
+                    *(int32_t*)((uintptr_t)*(int32_t*)(ed + 0x434) + 0x10) + 0x16;
                 break;
             }
 

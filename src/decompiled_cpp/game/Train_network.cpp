@@ -611,7 +611,7 @@ void TrainSubsystem::ProcessMessages()
 
         /* lpMem layout: +0x00 = player_id (int), +0x04 = payload (void*) */
         int32_t  player_id = *(int32_t*)lpMem;
-        void*    payload   = *(void**)((int)lpMem + 4);
+        void*    payload   = *(void**)((uint8_t*)lpMem + 4);
         uint16_t msg_type  = *(uint16_t*)payload;
 
         /* === Low message types (0-20) === */
@@ -633,7 +633,7 @@ void TrainSubsystem::ProcessMessages()
 
                 /* If scenario mode, unlink all cars from sprite_list_1 */
                 if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 1) {
-                    int car = (int)this->sprite_list_1;
+                    int car = (uint8_t*)this->sprite_list_1;
                     while (car != 0) {
                         NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
                         if (qmsg) {
@@ -644,10 +644,10 @@ void TrainSubsystem::ProcessMessages()
                         *(uint8_t*)(car + 0x88) = 0;
                         this->sprite_list_1 = *(void**)(car + 0x70);
                         if (qmsg && qmsg->data) {
-                            *(void**)((int)qmsg->data + 0x70) = NULL;
+                            *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
                         }
                         NETMAN_QueueMessage(qmsg);
-                        car = (int)this->sprite_list_1;
+                        car = (uint8_t*)this->sprite_list_1;
                     }
                 }
                 goto free_msg;
@@ -662,7 +662,7 @@ void TrainSubsystem::ProcessMessages()
 
                 /* Reset timeout on all controller cars */
                 {
-                    int car = (int)this->sprite_list_1;
+                    int car = (uint8_t*)this->sprite_list_1;
                     while (car != 0) {
                         *(uint16_t*)(car + 0x74) = 32000;
                         car = *(int*)(car + 0x70);
@@ -705,7 +705,7 @@ void TrainSubsystem::ProcessMessages()
             uint8_t info_flag = (uint8_t)p[4];
             int32_t config_val = *(int32_t*)(p + 2);
 
-            int car = (int)this->sprite_list_1;
+            int car = (uint8_t*)this->sprite_list_1;
             while (car) { *(uint16_t*)(car + 0x74) = 32000; car = *(int*)(car + 0x70); }
 
             if (info_flag) this->field_30 = 1;
@@ -716,11 +716,11 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 1: /* 0x3EB — ConnectToServer */
-            Train_ConnectToServer(this, (int)payload);
+            Train_ConnectToServer(this, (uint8_t*)payload);
             break;
 
         case 2: /* 0x3EC — HandleTrackBuild */
-            Train_HandleTrackBuild(this, (int)payload);
+            Train_HandleTrackBuild(this, (uint8_t*)payload);
             break;
 
         case 4: { /* 0x3EE — FileData (incoming asset) */
@@ -728,7 +728,7 @@ void TrainSubsystem::ProcessMessages()
             char path_buf[1284];
             uint32_t bytes_written;
 
-            NET_GetAssetPath(*(uint8_t*)((int)p + 5), (uint8_t)p[2], path_buf);
+            NET_GetAssetPath(*(uint8_t*)((uint8_t*)p + 5), (uint8_t)p[2], path_buf);
             void* hFile = (void*)CreateFileA(path_buf, 0x40000000, 0, NULL, 1, 0x80, NULL);
             if (hFile != (void*)0xFFFFFFFF) {
                 WriteFile(hFile, p + 6, *(uint32_t*)(p + 4), &bytes_written, NULL);
@@ -769,15 +769,15 @@ void TrainSubsystem::ProcessMessages()
                 qmsg->data = NULL; qmsg->next = NULL;
                 qmsg->type = 9;
                 qmsg->flags = *(int32_t*)(p + 2);
-                *(uint8_t*)((int)qmsg + 0x14) = (uint8_t)p[4];
-                *(uint8_t*)((int)qmsg + 0x15) = *(uint8_t*)((int)p + 9);
+                *(uint8_t*)((uint8_t*)qmsg + 0x14) = (uint8_t)p[4];
+                *(uint8_t*)((uint8_t*)qmsg + 0x15) = *(uint8_t*)((uint8_t*)p + 9);
 
                 void* data = operator_new(0x2AC);
                 qmsg->data = data;
                 if (data) {
                     for (int i = 0; i < 0x2AC; i += 0x4C) {
                         int source_index = i / 0x4C;
-                        DPLAY_CopyPlayerData((void*)((int)data + i),
+                        DPLAY_CopyPlayerData((void*)((uint8_t*)data + i),
                             (uint8_t*)payload + 0x0C + source_index * 0x3C);
                     }
                 }
@@ -877,7 +877,7 @@ free_msg:
             void* hHeap = GetProcessHeap();
             if (msg_type < 0x3F6 ||
                 (msg_type > 0x3F7 && msg_type != 0x3F9)) {
-                void* heap_payload = *(void**)((int)lpMem + 4);
+                void* heap_payload = *(void**)((uint8_t*)lpMem + 4);
                 if (heap_payload != NULL) HeapFree(hHeap, 0, heap_payload);
             }
             HeapFree(hHeap, 0, lpMem);
@@ -1114,7 +1114,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
             if (msg) { msg->data = NULL; msg->next = NULL;
                        msg->type = 0x18;
                        msg->to_player = node->notify_id;
-                       *(uint8_t*)((int)msg + 0x14) = node->transfer_state; }
+                       *(uint8_t*)((uint8_t*)msg + 0x14) = node->transfer_state; }
             NETMAN_QueueMessage(msg);
         }
         goto unlink_node;
@@ -1135,7 +1135,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
             if (msg) { msg->data = NULL; msg->next = NULL;
                        msg->type = 0x18;
                        msg->to_player = node->notify_id;
-                       *(uint8_t*)((int)msg + 0x14) = node->transfer_state; }
+                       *(uint8_t*)((uint8_t*)msg + 0x14) = node->transfer_state; }
             NETMAN_QueueMessage(msg);
             goto unlink_node;
         }
@@ -1183,7 +1183,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
             if (msg) { msg->data = NULL; msg->next = NULL;
                        msg->type = 0x18;
                        msg->to_player = node->notify_id;
-                       *(uint8_t*)((int)msg + 0x14) = node->transfer_state; }
+                       *(uint8_t*)((uint8_t*)msg + 0x14) = node->transfer_state; }
             NETMAN_QueueMessage(msg);
         }
         goto unlink_node;
@@ -1220,7 +1220,7 @@ void TrainSubsystem::HandleTrainPosUpdate(void* data, int player_index)
     if (owner == *(uint32_t*)((uint8_t*)g_netman + 0x7D0)) {
         /* Find matching car in sprite_list_1 by resource ID */
         int resource_id = *(int*)((uint8_t*)data + 4);
-        int car = (int)this->sprite_list_1;
+        int car = (uint8_t*)this->sprite_list_1;
         while (car != 0) {
             if (*(uint16_t*)(car + 0x7A) == resource_id) break;
             car = *(int*)(car + 0x70);
@@ -1297,7 +1297,7 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
                     msg->type = 0x18;
                     msg->next = NULL;
                     msg->to_player = node->notify_id;
-                    *(uint8_t*)((int)msg + 0x14) = node->transfer_state;
+                    *(uint8_t*)((uint8_t*)msg + 0x14) = node->transfer_state;
                 }
                 NETMAN_QueueMessage(msg);
                 GLOBAL_free(node);
@@ -1579,7 +1579,7 @@ forward_train:
     /* Forward train to another player at the target */
     {
         if (this->sprite_list_2 != NULL) {
-            int tail = (int)this->sprite_list_2;
+            int tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) {
                 tail = *(int*)(tail + 0x70);
             }
@@ -1614,17 +1614,17 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
     /* Set direction and town info */
     *(uint16_t*)((uint8_t*)controller + 0x74) = p[2];    /* direction */
     *(uint16_t*)((uint8_t*)controller + 0x7A) = p[3];    /* resource ID */
-    *(uint8_t*)((uint8_t*)controller + 0x78) = *(uint8_t*)((int)p + 10);  /* type */
-    Vehicle_CalcSpeed(controller, *(short*)((int)p + 8));
+    *(uint8_t*)((uint8_t*)controller + 0x78) = *(uint8_t*)((uint8_t*)p + 10);  /* type */
+    Vehicle_CalcSpeed(controller, *(short*)((uint8_t*)p + 8));
 
     /* Set parent/controller reference */
     *(int32_t*)((uint8_t*)controller + 8) = *(int32_t*)(p + 6);
 
     /* Process up to 3 track elements */
-    if (*(uint8_t*)((int)p + 0x14) != 0) {
+    if (*(uint8_t*)((uint8_t*)p + 0x14) != 0) {
         uint32_t* track_entry = (uint32_t*)(p + 0x16);
 
-        for (int i = 0; i < *(uint8_t*)((int)p + 0x14); i++) {
+        for (int i = 0; i < *(uint8_t*)((uint8_t*)p + 0x14); i++) {
             Vehicle_InitRoute(controller, track_entry[-5], track_entry[-4], 1);
 
             if (*(uint8_t*)(track_entry + -3) != 0) {
@@ -1706,7 +1706,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
     {
         void** vt = *(void***)(*(int*)((uint8_t*)controller + 0x10));
         ((void (__thiscall*)(void*, void*))vt[13])(*(void**)((uint8_t*)controller + 0x10),
-                                                     (void*)((int)p + 0xB10));
+                                                     (void*)((uint8_t*)p + 0xB10));
     }
 
     /* If this train belongs to the local player, remove from sprite_list_1 */
@@ -1737,8 +1737,8 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
         if (ctrl_init) {
             ctrl_init[0] = 0x3F3;
             ctrl_init[2] = *(uint16_t*)((uint8_t*)controller + 0x7A);
-            *(uint8_t*)((int)ctrl_init + 6) = *(uint8_t*)((uint8_t*)controller + 0x78);
-            *(uint8_t*)((int)ctrl_init + 7) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
+            *(uint8_t*)((uint8_t*)ctrl_init + 6) = *(uint8_t*)((uint8_t*)controller + 0x78);
+            *(uint8_t*)((uint8_t*)ctrl_init + 7) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
             ctrl_init[4] = *(uint16_t*)((uint8_t*)controller + 0x74);
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
             GLOBAL_free(ctrl_init);
@@ -1770,13 +1770,13 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
 {
     uint16_t* p = (uint16_t*)data;
     uint16_t  train_id = p[2];
-    uint8_t   color    = *(uint8_t*)((int)p + 6);
-    uint8_t   owner    = *(uint8_t*)((int)p + 7);
+    uint8_t   color    = *(uint8_t*)((uint8_t*)p + 6);
+    uint8_t   owner    = *(uint8_t*)((uint8_t*)p + 7);
     uint16_t  dir      = p[4];
 
     /* Find matching car in sprite_list_1 */
     {
-        int car = (int)this->sprite_list_1;
+        int car = (uint8_t*)this->sprite_list_1;
         while (car != 0) {
             if (*(uint16_t*)(car + 0x7A) == train_id &&
                 *(uint8_t*)(car + 0x78) == color) {
@@ -1795,8 +1795,8 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
         msg->type = 0x12;
         msg->data = NULL;
         msg->flags = train_id;
-        *(uint8_t*)((int)msg + 0x14) = color;
-        *(uint8_t*)((int)msg + 0x15) = owner;
+        *(uint8_t*)((uint8_t*)msg + 0x14) = color;
+        *(uint8_t*)((uint8_t*)msg + 0x15) = owner;
         msg->size = dir;
     }
     NETMAN_QueueMessage(msg);
@@ -1818,7 +1818,7 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
         player_index = NETMAN_FindPlayerIndex(g_netman, player_id);
     }
 
-    if ((int)player_index < 0) return;
+    if ((uint8_t*)player_index < 0) return;
 
     /* Walk sprite_list_1 and remove matching cars */
     {
@@ -1927,8 +1927,8 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
         if (ctrl_init) {
             ctrl_init[0] = 0x3F3;
             ctrl_init[2] = *(uint16_t*)((uint8_t*)car + 0x7A);
-            *(uint8_t*)((int)ctrl_init + 6) = *(uint8_t*)((uint8_t*)car + 0x78);
-            *(uint8_t*)((int)ctrl_init + 7) = *(uint8_t*)((uint8_t*)car + 0x7C);
+            *(uint8_t*)((uint8_t*)ctrl_init + 6) = *(uint8_t*)((uint8_t*)car + 0x78);
+            *(uint8_t*)((uint8_t*)ctrl_init + 7) = *(uint8_t*)((uint8_t*)car + 0x7C);
             ctrl_init[4] = (uint16_t)direction;
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
 
@@ -1973,7 +1973,7 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
         *(void**)((uint8_t*)car + 0x70) = NULL;
         this->sprite_list_2 = car;
     } else {
-        int tail = (int)this->sprite_list_2;
+        int tail = (uint8_t*)this->sprite_list_2;
         while (*(int*)(tail + 0x70) != 0) {
             tail = *(int*)(tail + 0x70);
         }
@@ -2025,13 +2025,13 @@ void TrainSubsystem::UpdateTrainMovement()
             if (this->sprite_list_2 == NULL) {
                 this->sprite_list_2 = node;
             } else {
-                int tail = (int)this->sprite_list_2;
+                int tail = (uint8_t*)this->sprite_list_2;
                 while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
                 *(void**)(tail + 0x70) = node;
             }
 
             /* Re-notify all cars in sprite_list_2 */
-            int car = (int)this->sprite_list_2;
+            int car = (uint8_t*)this->sprite_list_2;
             while (car != 0) {
                 NetworkMsg* msg = (NetworkMsg*)operator_new(0x1c);
                 if (msg) { msg->data = NULL; msg->next = NULL;
@@ -2039,14 +2039,14 @@ void TrainSubsystem::UpdateTrainMovement()
                            msg->data = this->sprite_list_2; }
                 ((Building*)this->sprite_list_2)->occupation_level = 0;
 
-                int cur = (int)this->sprite_list_2;
+                int cur = (uint8_t*)this->sprite_list_2;
                 *(uint8_t*)(cur + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
                 *(void**)(cur + 0x70) = NULL;
                 *(uint8_t*)(cur + 0x88) = 0;
                 this->sprite_list_2 = *(void**)(cur + 0x70);
 
                 NETMAN_QueueMessage(msg);
-                car = (int)this->sprite_list_2;
+                car = (uint8_t*)this->sprite_list_2;
             }
 
             node = this->sprite_list_3;
@@ -2197,13 +2197,13 @@ void TrainSubsystem::UpdateTrainMovement()
                 if (buf) {
                     buf[0] = 0x3F6;
                     *(uint8_t*)(buf + 1) = *(uint8_t*)((uint8_t*)node + 0x7C);
-                    *(uint8_t*)((int)buf + 4) = 0;
-                    *(uint16_t*)((int)buf + 6) = 1;
+                    *(uint8_t*)((uint8_t*)buf + 4) = 0;
+                    *(uint16_t*)((uint8_t*)buf + 6) = 1;
                     uint8_t c1 = *(uint8_t*)((uint8_t*)node + 0x78);
                     uint8_t c2 = *(uint8_t*)((uint8_t*)node + 0x7C);
-                    *(uint32_t*)((int)buf + 9) =
+                    *(uint32_t*)((uint8_t*)buf + 9) =
                         ((uint32_t)new_x << 16) | *(uint16_t*)((uint8_t*)node + 0x7A);
-                    *(uint32_t*)((int)buf + 0x0D) =
+                    *(uint32_t*)((uint8_t*)buf + 0x0D) =
                         (c2 << 24) | (c1 << 16) | (uint16_t)new_y;
 
                     /* Clone into heap allocation for queuing */
@@ -2388,7 +2388,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         } else {
-            int tail = (int)this->sprite_list_2;
+            int tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
@@ -2469,7 +2469,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         } else {
-            int tail = (int)this->sprite_list_2;
+            int tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
@@ -2477,7 +2477,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
 
         /* Notify UI for all cars in sprite_list_2 */
         {
-            int c = (int)this->sprite_list_2;
+            int c = (uint8_t*)this->sprite_list_2;
             while (c != 0) {
                 NetworkMsg* msg = (NetworkMsg*)operator_new(0x1c);
                 if (msg) { msg->data = NULL; msg->next = NULL;
@@ -2485,14 +2485,14 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
                            msg->data = this->sprite_list_2; }
                 ((Building*)this->sprite_list_2)->occupation_level = 0;
 
-                int cur = (int)this->sprite_list_2;
+                int cur = (uint8_t*)this->sprite_list_2;
                 *(uint8_t*)(cur + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
                 *(void**)(cur + 0x70) = NULL;
                 *(uint8_t*)(cur + 0x88) = 0;
                 this->sprite_list_2 = *(void**)(cur + 0x70);
 
                 NETMAN_QueueMessage(msg);
-                c = (int)this->sprite_list_2;
+                c = (uint8_t*)this->sprite_list_2;
             }
         }
     } else {
@@ -2521,7 +2521,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         } else {
-            int tail = (int)this->sprite_list_2;
+            int tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
@@ -2563,7 +2563,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_1 = car;
         } else {
-            int tail = (int)this->sprite_list_1;
+            int tail = (uint8_t*)this->sprite_list_1;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
@@ -2571,19 +2571,19 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
         if (g_demo_mode == 1) {
             /* Demo mode: remove all existing cars from sprite_list_1 */
-            int c = (int)this->sprite_list_1;
+            int c = (uint8_t*)this->sprite_list_1;
             while (c != 0) {
                 NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
                 if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                            qmsg->type = 0x0F;
                            qmsg->data = this->sprite_list_1; }
-                *(uint8_t*)((int)this->sprite_list_1 + 0x88) = 0;
-                this->sprite_list_1 = *(void**)((int)this->sprite_list_1 + 0x70);
+                *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
+                this->sprite_list_1 = *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
                 if (qmsg && qmsg->data) {
-                    *(void**)((int)qmsg->data + 0x70) = NULL;
+                    *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
                 }
                 NETMAN_QueueMessage(qmsg);
-                c = (int)this->sprite_list_1;
+                c = (uint8_t*)this->sprite_list_1;
             }
         }
         return;
@@ -2599,19 +2599,19 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     if (g_demo_mode == 1 || this->byte_flags != 0) {
         /* Demo mode or flag set — remove all cars */
-        int c = (int)this->sprite_list_1;
+        int c = (uint8_t*)this->sprite_list_1;
         while (c != 0) {
             NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                        qmsg->type = 0x0F;
                        qmsg->data = this->sprite_list_1; }
-            *(uint8_t*)((int)this->sprite_list_1 + 0x88) = 0;
-            this->sprite_list_1 = *(void**)((int)this->sprite_list_1 + 0x70);
+            *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
+            this->sprite_list_1 = *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
             if (qmsg && qmsg->data) {
-                *(void**)((int)qmsg->data + 0x70) = NULL;
+                *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
             }
             NETMAN_QueueMessage(qmsg);
-            c = (int)this->sprite_list_1;
+            c = (uint8_t*)this->sprite_list_1;
         }
         return;
     }
@@ -2708,19 +2708,19 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     /* Remove all existing cars from sprite_list_1 to join fresh */
     {
-        int c = (int)this->sprite_list_1;
+        int c = (uint8_t*)this->sprite_list_1;
         while (c != 0) {
             NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                        qmsg->type = 0x0F;
                        qmsg->data = this->sprite_list_1; }
-            *(uint8_t*)((int)this->sprite_list_1 + 0x88) = 0;
-            this->sprite_list_1 = *(void**)((int)this->sprite_list_1 + 0x70);
+            *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
+            this->sprite_list_1 = *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
             if (qmsg && qmsg->data) {
-                *(void**)((int)qmsg->data + 0x70) = NULL;
+                *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
             }
             NETMAN_QueueMessage(qmsg);
-            c = (int)this->sprite_list_1;
+            c = (uint8_t*)this->sprite_list_1;
         }
     }
 }
