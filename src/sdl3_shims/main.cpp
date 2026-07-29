@@ -91,6 +91,21 @@ int main(int argc, char* argv[])
     CGWND_PumpMessages(cgwnd, 0);
     TRACE("PumpMessages returned — shutting down");
 
+    // CGWND_SetMode(10) queues the exit sweep 0x5026 then returns.
+    // The original posts WM_CLOSE immediately and DirectSound hardware
+    // buffers outlive the process.  On SDL3 we must drain the stream
+    // before SDL_Quit tears down the audio device.
+    extern int g_game_mode;
+    if (g_game_mode == 10) {
+        TRACE("Mode 10 exit: hiding window, draining audio...");
+        SDL_HideWindow(SDL3_GetWindow());
+        for (int n = 0; n < 300 && SDL3_GameAudioPump(); n++) {
+            SDL_Delay(10);
+        }
+        SDL_Delay(150);
+        TRACE("Exit audio drained");
+    }
+
     cgwnd->~CGWND();
     GLOBAL_free(cgwnd);
     CoUninitialize();
