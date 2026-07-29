@@ -1373,7 +1373,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
     }
 
     /* Process each dirty rect: blit cursor surface to primary surface */
-    for (RECT* r = head_rect; r != NULL; r = (RECT*)r[1].left) {
+    for (RECT* r = head_rect; r != NULL; r = (RECT*)(uintptr_t)r[1].left) {
         if (g_cursor_surface != NULL && g_primary_surface != NULL) {
             UIPANEL_Blit(g_cursor_surface, r->left, r->top,
                          r->right - r->left, r->bottom - r->top,
@@ -1389,13 +1389,13 @@ void TileMap::InvalidateDirtyRects(char force_all)
     TileMap_FreeDirtyRects(head_rect);
 
     /* Present each rect */
-    for (RECT* r = head_rect; r != NULL; r = (RECT*)r[1].left) {
+    for (RECT* r = head_rect; r != NULL; r = (RECT*)(uintptr_t)r[1].left) {
         DDRAW_PresentRect(r, g_main_window, &viewport_x, 0);
     }
 
     /* Free rect list */
     while (head_rect != NULL) {
-        RECT* next = (RECT*)head_rect[1].left;
+        RECT* next = (RECT*)(uintptr_t)head_rect[1].left;
         GLOBAL_free(head_rect);
         head_rect = next;
     }
@@ -1494,7 +1494,7 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
             /* Check bounds */
             if (idx >= *(uint*)((uint8_t*)res + 0x560) || valid != 1) break;
 
-            int expected_id = *(int*)(*(int*)((uint8_t*)res + 0x564) + idx * 4);
+            int expected_id = *(int*)((uint8_t*)(uintptr_t)*(int*)((uint8_t*)res + 0x564) + idx * 4);
             if (expected_id != -1) {
                 if ((short)world_x < 0 || g_player_id <= (short)world_x ||
                     tile_y < 0 || g_player_color <= tile_y) {
@@ -1506,7 +1506,7 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
                         if (expected_id != 0) {
                             valid = 0;
                         }
-                    } else if (expected_id != *(int*)(*(int*)(tile_val + 0x40) + 4)) {
+                    } else if (expected_id != *(int*)((uint8_t*)(uintptr_t)*(int*)((uint8_t*)(uintptr_t)tile_val + 0x40) + 4)) {
                         valid = 0;
                     }
                 }
@@ -1590,7 +1590,7 @@ int* TileMap::FindObject(int target_resource_id, short tile_x, short tile_y,
                    (ushort)(adjusted_y + (short)offset), mode) != 0) {
         if (ScrollRect(1, (TileMapObject*)res_data, tile_x,
                        (ushort)(offset + (int)adjusted_y), mode) != 0) {
-            result = (int*)INPUT_PlaceObject((void**)&g_input_mgr, (uint)target_resource_id);
+            result = (int*)(uintptr_t)INPUT_PlaceObject((void**)&g_input_mgr, (uint)target_resource_id);
             if (result != NULL) {
                 /* Fill tile grid with new object pointer */
                 short gy = 0;
@@ -1683,8 +1683,8 @@ uint TileMap::Scroll(int delta_x, int delta_y, int drag_start_x, int drag_start_
 char TileMap_ProcessDirtyRects(RECT* rect_list)
 {
     char merged = 0;
-    for (RECT* r = rect_list; r != NULL; r = (RECT*)r[1].left) {
-        RECT* next = (RECT*)r[1].left;
+    for (RECT* r = rect_list; r != NULL; r = (RECT*)(uintptr_t)r[1].left) {
+        RECT* next = (RECT*)(uintptr_t)r[1].left;
         RECT* prev = r;
         while (next != NULL) {
             RECT tmp;
@@ -1704,7 +1704,7 @@ char TileMap_ProcessDirtyRects(RECT* rect_list)
                 InflateRect(next, -1, -1);
             }
             prev = next;
-            next = (RECT*)next[1].left;
+            next = (RECT*)(uintptr_t)next[1].left;
         }
     }
     return merged;
@@ -1741,7 +1741,7 @@ void* TileMap_FindNearestObject(TileMap* tilemap, ushort type_filter,
     short center_y = (target_y < 0) ? -1 : (short)(target_y >> 4);
 
     for (short ring = 0; ring <= radius_tiles; ring++) {
-        if (best_obj != 0) return (void*)best_obj;
+        if (best_obj != 0) return (void*)(uintptr_t)best_obj;
 
         int r = (int)ring;
         int x_start = (int)center_x - r;
@@ -1757,12 +1757,12 @@ void* TileMap_FindNearestObject(TileMap* tilemap, ushort type_filter,
             for (int y = y_start; y <= y_end && y < tilemap->tile_count_y; y++) {
                 int tile_val = tilemap->ReadTileValue((x * 0x41 + y) * 0x40);
                 if (tile_val != 0) {
-                    int resource_ptr = *(int*)(tile_val + 0x40);
+                    int resource_ptr = *(int*)((uint8_t*)(uintptr_t)tile_val + 0x40);
                     if (resource_ptr != 0) {
-                        uint8_t obj_type = *(uint8_t*)(resource_ptr + 8);
+                        uint8_t obj_type = *(uint8_t*)((uint8_t*)(uintptr_t)resource_ptr + 8);
                         if (obj_type == (uint8_t)type_filter) {
-                            int obj_wx = *(int*)(tile_val + 0x4C);
-                            int obj_wy = *(int*)(tile_val + 0x50);
+                            int obj_wx = *(int*)((uint8_t*)(uintptr_t)tile_val + 0x4C);
+                            int obj_wy = *(int*)((uint8_t*)(uintptr_t)tile_val + 0x50);
                             int dist_sq = Math_DistSquared(target_x, target_y,
                                                            obj_wx, obj_wy);
                             if (dist_sq < best_dist_sq) {
@@ -1775,7 +1775,7 @@ void* TileMap_FindNearestObject(TileMap* tilemap, ushort type_filter,
             }
         }
     }
-    return (void*)best_obj;
+    return (void*)(uintptr_t)best_obj;
 }
 
 /* ================================================================== */
