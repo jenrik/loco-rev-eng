@@ -58,6 +58,8 @@
               ghidra                 # NSA's software reverse engineering suite
               binwalk                # firmware / binary analysis
               python3                # scripts in tools/ directory
+              python3Packages.pytest  # component/integration test runner
+              sway                    # swaymsg geometry for isolated GUI input
               python3Packages.fastapi # local autonomous RE dashboard API
               python3Packages.uvicorn # ASGI server for the dashboard daemon
               python3Packages.websockets # Uvicorn WebSocket implementation for live dashboard events

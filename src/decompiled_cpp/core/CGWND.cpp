@@ -26,6 +26,7 @@
 #include <SDL3/SDL.h>
 #include "sdl3_window.h"
 #include "../../sdl3_shims/sdl3_game_audio.h"
+#include "../../sdl3_shims/host_test_events.h"
 extern "C" { SDL_Window* SDL3_GetWindow(void); }
 #endif
 
@@ -585,6 +586,9 @@ void CGWND_SetMode(int new_mode)
     if (g_game_mode == new_mode) return;
 
     g_game_mode = new_mode;
+#ifndef _WIN32
+    loco::host_test::emit_mode_changed(old_mode, new_mode);
+#endif
 
     switch (new_mode) {
     case 1:

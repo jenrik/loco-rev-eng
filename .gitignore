@@ -6,6 +6,8 @@ tools/ghidra-mcp/*.zip
 tools/ghidra-mcp/GhidraMCP-release-*/
 .claude/
 *.pyc
+__pycache__/
+.pytest_cache/
 .direnv/
 .pi/
 

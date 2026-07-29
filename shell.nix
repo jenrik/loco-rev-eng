@@ -18,5 +18,7 @@ pkgs.mkShell {
     mesa         # software rendering (llvmpipe)
     ghidra
     python3
+    python3Packages.pytest
+    sway  # swaymsg geometry for isolated GUI input
   ];
 }

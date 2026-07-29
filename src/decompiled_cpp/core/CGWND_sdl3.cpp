@@ -8,6 +8,7 @@
 #include "../../sdl3_shims/sdl3_ddraw.h"
 #include "../../sdl3_shims/sdl3_window.h"
 #include "../../sdl3_shims/sdl3_game_audio.h"
+#include "../../sdl3_shims/host_test_events.h"
 #include <SDL3/SDL.h>
 #include <cstdio>
 
@@ -109,16 +110,30 @@ static void PumpMessages_SDL3(uint8_t filter)
 
         // Host-only replacement for the x86 UIPANEL/offscreen-surface path:
         // compose original EditWindow resources in logical canvas coordinates.
-        if (EditWindow* menu = active_host_menu()) {
-            menu->hostRenderFrame();
-        }
+        EditWindow* const menu = active_host_menu();
+        if (menu != nullptr) menu->hostRenderFrame();
 
         // The primary DirectDraw target is now the sole frame source. The
         // fallback preserves the launch screen until any target exists.
-        if (!SDL3_PresentPrimarySurface() && g_renderer) {
+        bool presented = SDL3_PresentPrimarySurface();
+        if (!presented && g_renderer) {
             SDL_SetRenderDrawColor(g_renderer, 0, 40, 80, 255);
             SDL_RenderClear(g_renderer);
             SDL_RenderPresent(g_renderer);
+            presented = true;
+        }
+
+        // Emit readiness only after SDL has presented the corresponding frame.
+        // This is passive test observability and cannot drive the state machine.
+        if (presented && menu != nullptr) {
+            if (menu->dialogState == 0 || menu->dialogState == 7) {
+                loco::host_test::emit_screen_presented("main_menu", menu->dialogState);
+            } else if (menu->dialogState == 3 || menu->dialogState == 4 ||
+                       menu->dialogState == 5) {
+                loco::host_test::emit_screen_presented(
+                    menu->dialogState == 5 ? "multiplayer_lobby" : "game_setup",
+                    menu->dialogState);
+            }
         }
     }
 }

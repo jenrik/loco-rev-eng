@@ -4,6 +4,7 @@
 
 #include "sdl3_window.h"
 #include "sdl3_game_audio.h"
+#include "host_test_events.h"
 #include "../decompiled_cpp/core/CGWND.h"
 #include <cstdint>
 #include <cstdio>
@@ -25,6 +26,7 @@ int main(int argc, char* argv[])
     (void)argv;
 
     setvbuf(stderr, NULL, _IONBF, 0);
+    loco::host_test::emit_process_started();
     TRACE("main() entered");
     TRACE("Lego Loco — SDL3 Native Port");
 
@@ -80,6 +82,7 @@ int main(int argc, char* argv[])
     CoUninitialize();
     SDL3_GameAudioStopAll();
     SDL3_WindowQuit();
+    loco::host_test::emit_clean_shutdown();
     TRACE("Clean exit");
     return 0;
 }

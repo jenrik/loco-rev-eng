@@ -996,6 +996,7 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 
 #ifndef _WIN32
 #include "EditWindow.h"
+#include "../../sdl3_shims/host_test_events.h"
 
 /* ================================================================== */
 /* GameSetupPanel::hostRenderFrame — SDL3 host composition              */
@@ -1196,6 +1197,7 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
         // record that completed empty scan rather than invoking untranslated
         // x86 queue code or pretending a session was found.
         this->hostSearchCompleted = true;
+        loco::host_test::emit_search_completed(0);
         return;
 
     case HostLobbyControl::Options:
