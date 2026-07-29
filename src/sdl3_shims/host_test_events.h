@@ -13,6 +13,8 @@ void emit_process_started();
 void emit_mode_changed(int old_mode, int new_mode);
 void emit_screen_presented(const char* screen, int dialog_state);
 void emit_search_completed(int sessions);
+// Passive record of a host-only layout choice projected into Netman.
+void emit_layout_selected(int columns, int rows, int slots);
 // Emitted only after SDL accepted the original resource WAVE into a stream.
 void emit_audio_queued(uint32_t resource_id);
 // Passive record of the resolved PlayerConfig name accepted by Go.

@@ -133,6 +133,30 @@ def test_multiplayer_host_game_go_back_back_exits_cleanly(game):
     game.wait_for_clean_exit()
 
 
+@pytest.mark.parametrize(
+    "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
+)
+def test_multiplayer_layout_choices_update_grid_geometry(game):
+    """Host-only provider projects choices into the original 0x43FC50 inputs."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    select_multiplayer(game)
+    game.click_logical(925, 700, "main-menu go")
+    game.wait_for_event("screen_presented", screen="multiplayer_lobby", dialog_state=5)
+    game.screenshot("multiplayer-layout-3x3-default")
+
+    # drawLayoutList (0x4094B0) uses 12px padding and a measured-font-height
+    # plus four pixel row step. The host uses its recovered 18px line step.
+    for index, columns, rows in ((1, 2, 2), (2, 2, 1), (3, 3, 1), (4, 3, 2)):
+        before = latest_sequence(game)
+        game.click_logical(100, 125 + index * 18, f"select {columns}x{rows}")
+        selected = game.wait_for_event(
+            "layout_selected", after_sequence=before,
+            columns=columns, rows=rows, slots=columns * rows,
+        )
+        assert selected["slots"] == columns * rows
+        game.screenshot(f"multiplayer-layout-{columns}x{rows}")
+
+
 def test_main_menu_escape_exits_cleanly(game):
     """Keep coverage for the focused EDIT Escape branch at 0x420C19."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)

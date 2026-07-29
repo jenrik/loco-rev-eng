@@ -1032,8 +1032,8 @@ constexpr uint32_t kExitResource = 0x42C;             // startup\apExit.bmp
 constexpr uint32_t kSearchResource = 0x429;           // startup\apsearch.bmp
 constexpr uint32_t kOptionsResource = 0x42B;          // startup\apoption.bmp
 constexpr uint32_t kFirstPlayerResource = 0x43A;      // startup\aplayer0.bmp
-constexpr int kGridColumns = 3;
-constexpr int kGridRows = 3;
+constexpr int kMaximumGridColumns = 3;
+constexpr int kMaximumGridRows = 3;
 constexpr int kGridCellWidth = 0xA4;
 constexpr int kGridCellHeight = 0x7B;
 constexpr int kGridStrideX = 0xA5;
@@ -1056,6 +1056,115 @@ constexpr int kExitLeft = kWorkingLeft + kWorkingAreaWidth - 208;
 constexpr int kExitTop = kGridTop + 0x1C0;
 constexpr int kOptionsLeft = kGridLeft + 0x20C;
 constexpr int kOptionsTop = kGridTop + 0x162;
+
+// NETMAN_SyncGameState (0x43FC50) reads max players at packet+0x10 and
+// dimensions at +0x14/+0x15. drawGrid (0x409980) then uses m_playerRows for
+// its inner/X loop and m_playerCols for its outer/Y loop. SDL has no DirectPlay
+// provider, so this host-only chooser supplies those exact Netman inputs.
+struct HostGridLayout {
+    const char* label;
+    int32_t display_columns;
+    int32_t display_rows;
+};
+
+constexpr HostGridLayout kHostGridLayouts[] = {
+    {"3x3", 3, 3},
+    {"2x2", 2, 2},
+    {"2x1", 2, 1},
+    {"3x1", 3, 1},
+    {"3x2", 3, 2},
+};
+constexpr int kHostGridLayoutCount = static_cast<int>(sizeof(kHostGridLayouts) / sizeof(kHostGridLayouts[0]));
+// drawLayoutList (0x4094B0) sets these COLORREF values before each
+// DrawTextA call. COLORREF is 0x00BBGGRR, hence this SDL RGB order.
+constexpr SDL_Color kOriginalListTextColor = {0x00, 0x5c, 0xff, 0xff};
+constexpr SDL_Color kOriginalSelectedListTextColor = {0xdc, 0x25, 0x25, 0xff};
+constexpr int kHostPrimaryTextScale = 2;
+
+struct HostGlyph {
+    char character;
+    uint8_t rows[7];
+};
+
+// ResourceManager::Initialize (0x445F00) creates the native 14px/700-weight
+// Arial list font. SDL_RenderDebugText does not compose into the primary
+// render target, so this guarded 14px bitmap fallback is used only by SDL.
+constexpr HostGlyph kHostGlyphs[] = {
+    {' ', {0,0,0,0,0,0,0}}, {'0', {14,17,19,21,25,17,14}},
+    {'1', {4,12,4,4,4,4,14}}, {'2', {14,17,1,2,4,8,31}},
+    {'3', {30,1,2,6,1,17,14}}, {'4', {2,6,10,18,31,2,2}},
+    {'5', {31,16,30,1,1,17,14}}, {'6', {6,8,16,30,17,17,14}},
+    {'7', {31,1,2,4,8,8,8}}, {'8', {14,17,17,14,17,17,14}},
+    {'9', {14,17,17,15,1,2,12}}, {'A', {14,17,17,31,17,17,17}},
+    {'C', {15,16,16,16,16,16,15}}, {'D', {30,17,17,17,17,17,30}},
+    {'E', {31,16,16,30,16,16,31}}, {'F', {31,16,16,30,16,16,16}},
+    {'G', {15,16,16,23,17,17,15}}, {'I', {14,4,4,4,4,4,14}},
+    {'K', {17,18,20,24,20,18,17}}, {'L', {16,16,16,16,16,16,31}},
+    {'M', {17,27,21,21,17,17,17}}, {'N', {17,25,21,19,17,17,17}},
+    {'O', {14,17,17,17,17,17,14}}, {'R', {30,17,17,30,20,18,17}},
+    {'S', {15,16,16,14,1,1,30}}, {'T', {31,4,4,4,4,4,4}},
+    {'U', {17,17,17,17,17,17,14}}, {'W', {17,17,17,21,21,21,10}},
+    {'X', {17,17,10,4,10,17,17}}, {'Y', {17,17,10,4,4,4,4}},
+};
+
+bool host_draw_text(SDL_Renderer* renderer, int x, int y, const char* text,
+                    const SDL_Color& color)
+{
+    if (renderer == nullptr || text == nullptr) return false;
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    bool rendered = true;
+    for (const char* current = text; *current != '\0'; ++current) {
+        char character = *current == 'x' ? 'X' : *current;
+        const HostGlyph* glyph = nullptr;
+        for (const HostGlyph& candidate : kHostGlyphs) {
+            if (candidate.character == character) { glyph = &candidate; break; }
+        }
+        if (glyph != nullptr) {
+            for (int row = 0; row < 7; ++row) for (int column = 0; column < 5; ++column) {
+                if ((glyph->rows[row] & (1u << (4 - column))) == 0) continue;
+                const SDL_FRect pixel = {static_cast<float>(x + column * kHostPrimaryTextScale),
+                    static_cast<float>(y + row * kHostPrimaryTextScale),
+                    static_cast<float>(kHostPrimaryTextScale), static_cast<float>(kHostPrimaryTextScale)};
+                rendered = SDL_RenderFillRect(renderer, &pixel) && rendered;
+            }
+        }
+        x += 6 * kHostPrimaryTextScale;
+    }
+    return rendered;
+}
+
+void host_apply_layout(GameSetupPanel& panel, int index)
+{
+    if (index < 0 || index >= kHostGridLayoutCount) return;
+
+    const HostGridLayout& layout = kHostGridLayouts[index];
+    panel.hostLayoutIndex = static_cast<uint8_t>(index);
+    // The host bootstrap may not construct Netman while DirectPlay is absent.
+    // When it does exist, preserve the original field update; otherwise the
+    // selected profile is the provider value consumed below.
+    if (_g_netman != nullptr) {
+        _g_netman->m_playerRows = layout.display_columns;
+        _g_netman->m_playerCols = layout.display_rows;
+        _g_netman->m_playerSlotCount = layout.display_columns * layout.display_rows;
+    }
+    loco::host_test::emit_layout_selected(layout.display_columns, layout.display_rows,
+                                          layout.display_columns * layout.display_rows);
+}
+
+int host_layout_at(float canvas_x, float canvas_y)
+{
+    // drawLayoutList (0x4094B0) applies 12px inner padding then advances
+    // each row by measured-font-height + 4. The 14px host glyphs use its
+    // recovered 18px line step; PtInRect-style right/bottom exclusion keeps
+    // adjacent rows unambiguous.
+    const float left = 80.0f;
+    const float top = 120.0f;
+    const float width = 120.0f;
+    const float line_height = 18.0f;
+    if (canvas_x < left || canvas_x >= left + width || canvas_y < top) return -1;
+    const int index = static_cast<int>((canvas_y - top) / line_height);
+    return index >= 0 && index < kHostGridLayoutCount ? index : -1;
+}
 
 bool host_blit_resource(uint32_t resource_id, int x, int y) {
     auto* resource = loco::assets::host_get_sprite_by_id(resource_id);
@@ -1178,12 +1287,22 @@ void GameSetupPanel::hostRenderFrame()
     host_blit_frame(kOptionsResource, pressed_control == HostLobbyControl::Options ? 1 : 0,
                     72, 72, kOptionsLeft, kOptionsTop);
 
-    // drawGrid (0x409980) advances x by 0xA5 and y by 0x7C and selects
-    // state 1 for an empty slot. DirectPlay is host-stubbed, so all nine
-    // default 3x3 slots use that original empty frame.
-    for (int row = 0; row < kGridRows; ++row) {
-        for (int column = 0; column < kGridColumns; ++column) {
-            const int slot = row * kGridColumns + column;
+    // drawGrid (0x409980) advances x by 0xA5 and y by 0x7C. Keep its
+    // dimensions authoritative: SyncGameState normally fills these Netman
+    // fields from the host packet; host_apply_layout fills them locally while
+    // SDL DirectPlay has no provider.
+    const HostGridLayout& host_layout = kHostGridLayouts[
+        this->hostLayoutIndex < kHostGridLayoutCount ? this->hostLayoutIndex : 0];
+    const int grid_columns = _g_netman != nullptr
+        ? _g_netman->m_playerRows : host_layout.display_columns;
+    const int grid_rows = _g_netman != nullptr
+        ? _g_netman->m_playerCols : host_layout.display_rows;
+    const int visible_columns = SDL_clamp(grid_columns, 1, kMaximumGridColumns);
+    const int visible_rows = SDL_clamp(grid_rows, 1, kMaximumGridRows);
+    for (int row = 0; row < visible_rows; ++row) {
+        for (int column = 0; column < visible_columns; ++column) {
+            // The original sprite table is three entries per outer/Y row.
+            const int slot = row * kMaximumGridColumns + column;
             host_blit_frame(kFirstPlayerResource + slot, 1, kGridCellWidth, kGridCellHeight,
                             kGridLeft + column * kGridStrideX,
                             kGridTop + row * kGridStrideY);
@@ -1192,21 +1311,30 @@ void GameSetupPanel::hostRenderFrame()
 
     // updateTitle (0x409360) selects resource 0x71 while network mode is
     // active; drawLayoutList (0x4094B0) falls back to resource 0x7F when
-    // the DirectPlay session list is empty.  SDL's built-in bitmap font is a
-    // host-only text boundary until the GDI text renderer is translated.
+    // the DirectPlay session list is empty. The guarded primary glyph path
+    // below follows drawLayoutList's recovered list colours and row cadence.
     if (SDL_Renderer* renderer = SDL3_GetRenderer()) {
         SDL_SetRenderTarget(renderer, SDL3_GetPrimarySurface()->texture);
-        SDL_SetRenderScale(renderer, 2.0f, 2.0f);
-        SDL_SetRenderDrawColor(renderer, 0xff, 0x5c, 0x00, 0xff);
         const bool network_lobby = g_editwindow_ptr != nullptr &&
                                    g_editwindow_ptr->dialogState == 5;
-        SDL_RenderDebugText(renderer, 40.0f, 42.0f,
-                            network_lobby ? "NETWORK GAME" : "SELECT SCENARIO");
-        SDL_RenderDebugText(renderer, 40.0f, 64.0f,
-                            network_lobby && this->hostSearchCompleted
-                                ? "NO NETWORK GAMES FOUND"
-                                : "NO LAYOUTS AVAILABLE");
-        SDL_SetRenderScale(renderer, 1.0f, 1.0f);
+        host_draw_text(renderer, 80, 84,
+                       network_lobby ? "NETWORK GAME" : "SELECT SCENARIO",
+                       kOriginalListTextColor);
+        if (network_lobby) {
+            for (int index = 0; index < kHostGridLayoutCount; ++index) {
+                const HostGridLayout& layout = kHostGridLayouts[index];
+                const SDL_Color& color = index == this->hostLayoutIndex
+                    ? kOriginalSelectedListTextColor : kOriginalListTextColor;
+                host_draw_text(renderer, 80, 120 + index * 18, layout.label, color);
+            }
+            if (this->hostSearchCompleted) {
+                host_draw_text(renderer, 80, 120 + kHostGridLayoutCount * 18,
+                               "NO NETWORK GAMES FOUND", kOriginalListTextColor);
+            }
+        } else {
+            host_draw_text(renderer, 80, 120, "NO LAYOUTS AVAILABLE",
+                           kOriginalListTextColor);
+        }
         SDL_SetRenderTarget(renderer, nullptr);
     }
 
@@ -1237,6 +1365,21 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
     if (!pressed || !SDL3_DisplayToPrimaryCanvas(display_x, display_y,
                                                   &canvas_x, &canvas_y)) {
         return;
+    }
+
+    // The original receives these dimensions through NETMAN_SyncGameState
+    // (0x43FC50). This is the explicit host-provider substitute: select a
+    // layout-list row, update the same Netman fields, and let drawGrid's
+    // original dimensions control the next frame.
+    if (g_editwindow_ptr != nullptr && g_editwindow_ptr->dialogState == 5) {
+        const int layout_index = host_layout_at(canvas_x, canvas_y);
+        if (layout_index >= 0) {
+            if (layout_index != this->hostLayoutIndex) {
+                SDL3_GameAudioPlayResource(0x5015);
+                host_apply_layout(*this, layout_index);
+            }
+            return;
+        }
     }
 
     const HostLobbyControl control = host_lobby_control_at(canvas_x, canvas_y);

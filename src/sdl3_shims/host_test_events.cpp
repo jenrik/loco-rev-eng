@@ -54,6 +54,10 @@ public:
     }
 
     void search_completed(int sessions) { write("search_completed", ",\"sessions\":%d", sessions); }
+    void layout_selected(int columns, int rows, int slots) {
+        write("layout_selected", ",\"columns\":%d,\"rows\":%d,\"slots\":%d",
+              columns, rows, slots);
+    }
     void audio_queued(uint32_t resource_id) { write("audio_queued", ",\"resource_id\":%u", resource_id); }
 
     void player_name_committed(const char* name)
@@ -141,6 +145,9 @@ void emit_process_started() { sink().event("process_started"); }
 void emit_mode_changed(int old_mode, int new_mode) { sink().mode_changed(old_mode, new_mode); }
 void emit_screen_presented(const char* screen, int dialog_state) { sink().screen_presented(screen, dialog_state); }
 void emit_search_completed(int sessions) { sink().search_completed(sessions); }
+void emit_layout_selected(int columns, int rows, int slots) {
+    sink().layout_selected(columns, rows, slots);
+}
 void emit_audio_queued(uint32_t resource_id) { sink().audio_queued(resource_id); }
 void emit_player_name_committed(const char* name) { sink().player_name_committed(name); }
 void emit_intro_video_started(int index, const char* path) { sink().intro_video_started(index, path); }

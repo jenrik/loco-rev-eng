@@ -155,6 +155,9 @@ public:
     // for 150 ms before completing each main lobby-control action.
     uint8_t hostPressedControl = 0;
     uint64_t hostPressedUntilMs = 0;
+    // Index into the host-only layouts below. The original receives the same
+    // slot count and dimensions in NETMAN_SyncGameState (0x43FC50).
+    uint8_t hostLayoutIndex = 0;
 #endif
 
     /* Total: 0x260 bytes */
