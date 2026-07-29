@@ -692,8 +692,10 @@ void CGWND_SetMode(int new_mode)
             }
             PostMessageA(*(HWND*)((uint8_t*)g_main_window + 0x08), 0x10, 0, 0);
 #else
-            // Host-only equivalent of the original 0x5026 exit-sound request.
-            // The SDL pump keeps the process alive until this queued WAV drains.
+            // Host-only equivalent of the original 0x5026 exit-sound
+            // request.  Stop looping background music first so only the
+            // exit sweep is audible during the drain window.
+            SDL3_GameAudioStopAll();
             SDL3_GameAudioPlayResource(0x5026);
 #endif
         }
