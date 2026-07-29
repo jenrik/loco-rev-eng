@@ -412,7 +412,7 @@ void DirectPlay_CreateAddress(void* self, uint32_t hInstance, uint32_t hWnd)
 /* ================================================================== */
 void DirectPlay_DestroyPeer(int32_t session)
 {
-    uint8_t* s = (uint8_t*)session;
+    uint8_t* s = (uint8_t*)(uintptr_t)session;
 
     /* Close session */
     DirectPlay_Close(session);
@@ -433,9 +433,9 @@ void DirectPlay_DestroyPeer(int32_t session)
     /* Free session list (2 linked fields per entry: next_ptr + data_ptr) */
     int32_t* list_item = *(int32_t**)(s + 0xD60);
     while (list_item != NULL) {
-        int32_t* next = (int32_t*)*list_item;
-        if ((void*)list_item[2] != NULL) {
-            GLOBAL_free((void*)list_item[2]);
+        int32_t* next = (int32_t*)(uintptr_t)*list_item;
+        if ((void*)(uintptr_t)list_item[2] != NULL) {
+            GLOBAL_free((void*)(uintptr_t)list_item[2]);
         }
         GLOBAL_free(list_item);
         *(int32_t**)(s + 0xD60) = next;
@@ -445,14 +445,14 @@ void DirectPlay_DestroyPeer(int32_t session)
     /* Free player list (linked list with next + data + hGlobal mem) */
     list_item = *(int32_t**)(s + 0xD64);
     while (list_item != NULL) {
-        int32_t* next = (int32_t*)*list_item;
-        if ((void*)list_item[2] != NULL) {
-            GLOBAL_free((void*)list_item[2]);
+        int32_t* next = (int32_t*)(uintptr_t)*list_item;
+        if ((void*)(uintptr_t)list_item[2] != NULL) {
+            GLOBAL_free((void*)(uintptr_t)list_item[2]);
         }
-        if ((void*)list_item[1] != NULL) {
-            void* hglb = GlobalHandle((void*)list_item[1]);
+        if ((void*)(uintptr_t)list_item[1] != NULL) {
+            void* hglb = GlobalHandle((void*)(uintptr_t)list_item[1]);
             GlobalUnlock(hglb);
-            hglb = GlobalHandle((void*)list_item[1]);
+            hglb = GlobalHandle((void*)(uintptr_t)list_item[1]);
             GlobalFree(hglb);
             list_item[1] = 0;
         }
@@ -464,9 +464,9 @@ void DirectPlay_DestroyPeer(int32_t session)
     /* Free group list */
     list_item = *(int32_t**)(s + 0xD68);
     while (list_item != NULL) {
-        int32_t* next = (int32_t*)*list_item;
-        if ((void*)list_item[2] != NULL) {
-            GLOBAL_free((void*)list_item[2]);
+        int32_t* next = (int32_t*)(uintptr_t)*list_item;
+        if ((void*)(uintptr_t)list_item[2] != NULL) {
+            GLOBAL_free((void*)(uintptr_t)list_item[2]);
         }
         GLOBAL_free(list_item);
         *(int32_t**)(s + 0xD68) = next;
@@ -476,7 +476,7 @@ void DirectPlay_DestroyPeer(int32_t session)
     /* Free message list */
     list_item = *(int32_t**)(s + 0xD6C);
     while (list_item != NULL) {
-        int32_t* next = (int32_t*)*list_item;
+        int32_t* next = (int32_t*)(uintptr_t)*list_item;
         GLOBAL_free(list_item);
         *(int32_t**)(s + 0xD6C) = next;
         list_item = next;
@@ -692,7 +692,7 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
 /* ================================================================== */
 int32_t DirectPlay_EnumConnections(int32_t session)
 {
-    uint8_t* s = (uint8_t*)session;
+    uint8_t* s = (uint8_t*)(uintptr_t)session;
 
     /* Return existing list if already enumerated */
     if (*(int32_t*)(s + 0xD6C) != 0) {
@@ -826,7 +826,7 @@ uint32_t DirectPlay_GetConnectionCaps(uint8_t* devicePath)
     if (hFile == -1) {
         return 0xFFFFFF00;
     }
-    CloseHandle((void*)hFile);
+    CloseHandle((void*)(uintptr_t)hFile);
     return 0x0100FF00;  /* success with type byte */
 }
 
@@ -838,7 +838,7 @@ uint32_t DirectPlay_GetConnectionCaps(uint8_t* devicePath)
 /* ================================================================== */
 bool DirectPlay_GetSessionDesc(int32_t session)
 {
-    uint8_t* s = (uint8_t*)session;
+    uint8_t* s = (uint8_t*)(uintptr_t)session;
 
     if (*(void**)(s + 0x1588) != NULL) {
         return false;  /* already connected */
@@ -947,14 +947,14 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password)
     if (s[1] == 0) {
         int32_t* player = *(int32_t**)(s + 0xD64);
         while (player != NULL) {
-            int32_t* next = (int32_t*)*player;
-            if ((void*)player[2] != NULL) {
-                GLOBAL_free((void*)player[2]);
+            int32_t* next = (int32_t*)(uintptr_t)*player;
+            if ((void*)(uintptr_t)player[2] != NULL) {
+                GLOBAL_free((void*)(uintptr_t)player[2]);
             }
-            if ((void*)player[1] != NULL) {
-                void* hglb = GlobalHandle((void*)player[1]);
+            if ((void*)(uintptr_t)player[1] != NULL) {
+                void* hglb = GlobalHandle((void*)(uintptr_t)player[1]);
                 GlobalUnlock(hglb);
-                hglb = GlobalHandle((void*)player[1]);
+                hglb = GlobalHandle((void*)(uintptr_t)player[1]);
                 GlobalFree(hglb);
                 player[1] = 0;
             }
@@ -997,7 +997,7 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password)
             return *(uint32_t*)(s + 0xD64);
         }
         if (*(void**)(s + 0xD4C) != NULL) {
-            ((void (*)(void))(*(uint32_t*)(s + 0xD4C)))();  /* idle callback */
+            ((void (*)(void))(uintptr_t)(*(uint32_t*)(s + 0xD4C)))();  /* idle callback */
         }
         Sleep(1);
 
@@ -1089,7 +1089,7 @@ uint32_t DirectPlay_CreatePlayer(const char* playerName, uint32_t flags,
 /* ================================================================== */
 void DirectPlay_Close(int32_t session)
 {
-    uint8_t* s = (uint8_t*)session;
+    uint8_t* s = (uint8_t*)(uintptr_t)session;
 
     /* Free session desc memory if allocated */
     if (*(void**)(s + 0x92C) != NULL && s[0x930] == 0) {
@@ -1121,14 +1121,14 @@ void DirectPlay_Close(int32_t session)
     /* Free player list */
     int32_t* player = *(int32_t**)(s + 0xD64);
     while (player != NULL) {
-        int32_t* next = (int32_t*)*player;
-        if ((void*)player[2] != NULL) {
-            GLOBAL_free((void*)player[2]);
+        int32_t* next = (int32_t*)(uintptr_t)*player;
+        if ((void*)(uintptr_t)player[2] != NULL) {
+            GLOBAL_free((void*)(uintptr_t)player[2]);
         }
-        if ((void*)player[1] != NULL) {
-            void* hglb = GlobalHandle((void*)player[1]);
+        if ((void*)(uintptr_t)player[1] != NULL) {
+            void* hglb = GlobalHandle((void*)(uintptr_t)player[1]);
             GlobalUnlock(hglb);
-            hglb = GlobalHandle((void*)player[1]);
+            hglb = GlobalHandle((void*)(uintptr_t)player[1]);
             GlobalFree(hglb);
             player[1] = 0;
         }
@@ -1140,9 +1140,9 @@ void DirectPlay_Close(int32_t session)
     /* Free group list */
     player = *(int32_t**)(s + 0xD68);
     while (player != NULL) {
-        int32_t* next = (int32_t*)*player;
-        if ((void*)player[2] != NULL) {
-            GLOBAL_free((void*)player[2]);
+        int32_t* next = (int32_t*)(uintptr_t)*player;
+        if ((void*)(uintptr_t)player[2] != NULL) {
+            GLOBAL_free((void*)(uintptr_t)player[2]);
         }
         GLOBAL_free(player);
         *(int32_t**)(s + 0xD68) = next;

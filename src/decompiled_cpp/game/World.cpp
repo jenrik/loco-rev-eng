@@ -194,7 +194,7 @@ void World::Init(void)
         occupant = (int*)((uint8_t*)vehicle + VEHICLE_OFF_OCCUPANTS);
         for (i = 8; i != 0; i--) {
             if (*occupant != 0) {
-                Building_RemoveOccupant((int*)*occupant);
+                Building_RemoveOccupant((int*)(uintptr_t)*occupant);
                 *occupant = 0;
             }
             occupant++;
@@ -211,11 +211,11 @@ void World::Init(void)
     /* Release global objects at 0x485268 and 0x48526c */
     /* These are called via vtable index 2 (+0x08) which is a release/destroy method */
     if (DAT_00485268 != NULL) {
-        (*(void (**)(void*))(*(int*)DAT_00485268 + 8))(DAT_00485268);
+        (*(void (**)(void*))((uintptr_t)*(int*)DAT_00485268 + 8))(DAT_00485268);
         DAT_00485268 = NULL;
     }
     if (DAT_0048526c != NULL) {
-        (*(void (**)(void*))(*(int*)DAT_0048526c + 8))(DAT_0048526c);
+        (*(void (**)(void*))((uintptr_t)*(int*)DAT_0048526c + 8))(DAT_0048526c);
         DAT_0048526c = NULL;
     }
 }
@@ -302,7 +302,7 @@ uint World::SaveToFile(uint resource_id, char player_id, char mp_flag)
 
     if (slot > 3) {
         /* Not found — return 0 with high byte cleared/sign-extended */
-        return (uint)vehicle & 0xFFFFFF00;
+        return (uint)(uintptr_t)vehicle & 0xFFFFFF00;
     }
 
     vehicle = this->vehicles[slot];
@@ -326,7 +326,7 @@ uint World::SaveToFile(uint resource_id, char player_id, char mp_flag)
 
         if (vehicle != NULL) {
             /* Call scalar-deleting destructor vtable[0] */
-            result = (*(uint (**)(void*, int))(*(int*)vehicle))(vehicle, 1);
+            result = (*(uint (**)(void*, int))(uintptr_t)(*(int*)vehicle))(vehicle, 1);
             *vehicle_slot = NULL;
             this->vehicle_count--;
             return (result & 0xFFFFFF00) | 1;
@@ -344,7 +344,7 @@ uint World::SaveToFile(uint resource_id, char player_id, char mp_flag)
 
         if (vehicle != NULL) {
             /* Call scalar-deleting destructor vtable[0] */
-            result = (*(uint (**)(void*, int))(*(int*)vehicle))(vehicle, 1);
+            result = (*(uint (**)(void*, int))(uintptr_t)(*(int*)vehicle))(vehicle, 1);
         }
     }
 
@@ -382,7 +382,7 @@ void World::SerializeObject(char player_id)
         occupant = (int*)((uint8_t*)vehicle + VEHICLE_OFF_OCCUPANTS);  /* +0x38 */
         for (j = 8; j != 0; j--) {
             if (*occupant != 0) {
-                Building_RemoveOccupant((int*)*occupant);
+                Building_RemoveOccupant((int*)(uintptr_t)*occupant);
                 *occupant = 0;
             }
             occupant++;
@@ -455,7 +455,7 @@ void World::DeserializeMap(void* building)
             occupant = (int*)((uint8_t*)vehicle + VEHICLE_OFF_OCCUPANTS);  /* +0x38 */
             for (j = 8; j != 0; j--) {
                 if (*occupant != 0) {
-                    Building_RemoveOccupant((int*)*occupant);
+                    Building_RemoveOccupant((int*)(uintptr_t)*occupant);
                     *occupant = 0;
                 }
                 occupant++;
@@ -576,7 +576,7 @@ void* World::LoadFromFile(int* route_data, int* vehicle_init)
                 do_register = true;
             } else {
                 /* Resource not loaded — destroy vehicle */
-                (*(void (**)(void*, int))(*(int*)vehicle))(vehicle, 1);
+                (*(void (**)(void*, int))(uintptr_t)(*(int*)vehicle))(vehicle, 1);
                 this->vehicles[slot] = NULL;
             }
         }
@@ -595,7 +595,7 @@ void* World::LoadFromFile(int* route_data, int* vehicle_init)
             void* res_data = *(void**)((uint8_t*)vehicle + VEHICLE_OFF_RESOURCE_DATA);  /* +0x10 */
             if (res_data == NULL || *(char*)((uint8_t*)res_data + 0x18) != 1) {
                 /* Resource not loaded — destroy */
-                (*(void (**)(void*, int))(*(int*)vehicle))(vehicle, 1);
+                (*(void (**)(void*, int))(uintptr_t)(*(int*)vehicle))(vehicle, 1);
                 this->vehicles[slot] = NULL;
             } else {
                 /* Assign name */
