@@ -1421,8 +1421,8 @@ void __stdcall World_RenderAll(void* vehicle)
 
     /* Detach editor state from main sub-object parent */
     if (*(void**)((uint8_t*)vehicle + VEHICLE_OFF_SUB_OBJ_MAIN) != NULL) {
-        void* main_editor = *(void**)(*(int*)((uint8_t*)vehicle + VEHICLE_OFF_SUB_OBJ_MAIN) + 0x14);
-        GAMESTATE_EditorState_Detach((int)main_editor);
+        void* main_editor = *(void**)((uintptr_t)*(int*)((uint8_t*)vehicle + VEHICLE_OFF_SUB_OBJ_MAIN) + 0x14);
+        GAMESTATE_EditorState_Detach((int)(uintptr_t)main_editor);
     }
 }
 
@@ -1442,7 +1442,7 @@ void __stdcall World_GetObjectAt(void* obj)
     occupant = (int*)((uint8_t*)obj + VEHICLE_OFF_OCCUPANTS);  /* +0x38 */
     for (i = 8; i != 0; i--) {
         if (*occupant != 0) {
-            Building_RemoveOccupant((int*)*occupant);
+            Building_RemoveOccupant((int*)(uintptr_t)*occupant);
             *occupant = 0;
         }
         occupant++;
