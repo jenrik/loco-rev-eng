@@ -627,7 +627,7 @@ byte Town::select_building(void* building)
     this->selection_active = 0;                                  /* +0x88 */
     this->selected_building_type = 0;                            /* +0x16C */
 
-    g_active_panel = (void*)(~(uint32_t)(g_ddraw_active != 1) & 0x4A9EF0);
+    g_active_panel = (void*)(uintptr_t)(~(uint32_t)(g_ddraw_active != 1) & 0x4A9EF0);
 
     ((void (*)(void*))(*(void***)this)[1])(this);
 
@@ -680,7 +680,7 @@ void Town::deselect_building()
         0);
 
     uint32_t panel_flags = 0;
-    if (*(char*)(*(int*)((intptr_t)this->panel_graphics + 0x20) + 0x16 +
+    if (*(char*)(uintptr_t)(*(int*)((intptr_t)this->panel_graphics + 0x20) + 0x16 +
                  this->selected_building_type * 0x18) == 1) {
         panel_flags = 0x20;
     }
@@ -783,7 +783,7 @@ uint8_t Town::check_occupied(int x1, int y1, int x2, int y2)
     }
 
     int stride = *(int*)((intptr_t)this + 8);
-    uint8_t* buf = (uint8_t*)(*(int*)((intptr_t)this + 0x18));
+    uint8_t* buf = (uint8_t*)(uintptr_t)(*(int*)((intptr_t)this + 0x18));
     int width = x2 - x1;
     int height = y2 - y1;
 
@@ -832,7 +832,7 @@ uint8_t Town::check_occupied_ex(int x1, int y1, int x2, int y2)
     uint32_t height = (y2 - y1) & 0xFFFF;
     uint32_t width = (x2 - x1) & 0xFFFF;
 
-    uint16_t* pixels = (uint16_t*)(DAT_004fd1c0 + (pitch * y1 + x1) * 2);
+    uint16_t* pixels = (uint16_t*)(uintptr_t)(DAT_004fd1c0 + (pitch * y1 + x1) * 2);
 
     for (uint32_t row = 0; row < height; row++) {
         if (width != 0) {
@@ -901,7 +901,7 @@ uint32_t Town::blit_viewport(int x1, int y1, int x2, int y2, int x, int y)
     }
 
     uint32_t pitch = ddsd_buf[4];
-    uint32_t* pixel_base = (uint32_t*)ddsd_buf[12];
+    uint32_t* pixel_base = (uint32_t*)(uintptr_t)ddsd_buf[12];
     uint16_t pixel = *(uint16_t*)((uint8_t*)pixel_base + pitch * y + x * 2);
 
     uint32_t channel1 = (DAT_00485288 & (uint32_t)pixel) >> ((uint8_t)DAT_00485278 & 0x1f);
@@ -1090,10 +1090,10 @@ void Town::postcard_update_ui(int action_id)
             int sprite = (intptr_t)this->sprite_inbox;
             UIPANEL_Blit(
                 this->overlay_surface,        /* +0x648 */
-                *(uint32_t*)(sprite + 4),
-                *(uint32_t*)(sprite + 8),
-                *(int32_t*)(sprite + 0xC),
-                *(uint32_t*)(sprite + 0x10),
+                *(uint32_t*)(uintptr_t)(sprite + 4),
+                *(uint32_t*)(uintptr_t)(sprite + 8),
+                *(int32_t*)(uintptr_t)(sprite + 0xC),
+                *(uint32_t*)(uintptr_t)(sprite + 0x10),
                 g_primary_surface,
                 src_rect.left, src_rect.top,
                 src_rect.right, src_rect.bottom,
@@ -1202,15 +1202,15 @@ void Town::postcard_dlg_proc(int action_id)
             int sprite = (intptr_t)this->sprite_inbox;
             UIPANEL_Blit(
                 this->overlay_surface,
-                *(uint32_t*)(sprite + 4),
-                *(uint32_t*)(sprite + 8),
-                *(int32_t*)(sprite + 0xC),
-                *(uint32_t*)(sprite + 0x10),
+                *(uint32_t*)(uintptr_t)(sprite + 4),
+                *(uint32_t*)(uintptr_t)(sprite + 8),
+                *(int32_t*)(uintptr_t)(sprite + 0xC),
+                *(uint32_t*)(uintptr_t)(sprite + 0x10),
                 g_primary_surface,
-                *(uint32_t*)(sprite + 4) + this->postcard_origin_x,
-                *(uint32_t*)(sprite + 8) + this->postcard_origin_y,
-                *(int32_t*)(sprite + 0xC) + this->postcard_origin_x,
-                *(uint32_t*)(sprite + 0x10) + this->postcard_origin_y,
+                *(uint32_t*)(uintptr_t)(sprite + 4) + this->postcard_origin_x,
+                *(uint32_t*)(uintptr_t)(sprite + 8) + this->postcard_origin_y,
+                *(int32_t*)(uintptr_t)(sprite + 0xC) + this->postcard_origin_x,
+                *(uint32_t*)(uintptr_t)(sprite + 0x10) + this->postcard_origin_y,
                 1);
             Sprite_SetState(this->sprite_inbox, 1, 0);
         }
@@ -1387,27 +1387,27 @@ int Town::postcard_command_handler(void* control, uint32_t wParam, uint32_t lPar
         return 0;
     }
 
-    int res_id = *(int*)(*(int*)((intptr_t)control + 0x44) + 4);
+    int res_id = *(int*)(uintptr_t)(*(int*)((uint8_t*)control + 0x44) + 4);
     short timer_val;
 
     if (res_id == 0x3806) {
-        timer_val = *(short*)((intptr_t)control + 0x48);
+        timer_val = *(short*)((uint8_t*)control + 0x48);
         if (timer_val == 1) {
             CGWND_TrackPiece_SetZoom(control, 2);
-            *(short*)((intptr_t)control + 0x54) = 6;
+            *(short*)((uint8_t*)control + 0x54) = 6;
         }
     } else if (res_id == 0x3807) {
-        if (*(short*)((intptr_t)control + 0x48) == 1) {
+        if (*(short*)((uint8_t*)control + 0x48) == 1) {
             DDRAW_SelectBuilding(&g_ddraw_building, this->selected_building);
             return 1;
         }
         DDRAW_SelectBuilding(&g_ddraw_building, 0);
         return 1;
     } else if (res_id == 0x3808) {
-        timer_val = *(short*)((intptr_t)control + 0x48);
+        timer_val = *(short*)((uint8_t*)control + 0x48);
         if (timer_val == 1) {
             CGWND_TrackPiece_SetZoom(control, 2);
-            *(short*)((intptr_t)control + 0x54) = 6;
+            *(short*)((uint8_t*)control + 0x54) = 6;
         }
     }
 
@@ -1428,11 +1428,11 @@ byte Town::send_postcard(void* track_piece)
         (*(short*)((intptr_t)track_piece + 0x54))--;
     }
 
-    int res_id = *(int*)(*(int*)((intptr_t)track_piece + 0x44) + 4);
+    int res_id = *(int*)(uintptr_t)(*(int*)((uint8_t*)track_piece + 0x44) + 4);
 
     if (res_id == 0x3806) {
-        if (*(short*)((intptr_t)track_piece + 0x54) == 0 &&
-            *(short*)((intptr_t)track_piece + 0x48) == 2) {
+        if (*(short*)((uint8_t*)track_piece + 0x54) == 0 &&
+            *(short*)((uint8_t*)track_piece + 0x48) == 2) {
             CGWND_TrackPiece_SetZoom(track_piece, 1);
 
             void* world = *(void**)((intptr_t)this->selected_building + 0x44C);

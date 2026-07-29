@@ -534,7 +534,7 @@ void ResourceManager::FreeAllResources()
         }
         if (*slotPtr != 0) {
             /* Call vtable[0] destructor with free-flag = 1 */
-            void* resource = (void*)*slotPtr;
+            void* resource = (void*)(uintptr_t)*slotPtr;
             void** vtable = (void**)resource;
             void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
             dtor(resource, 1);
@@ -558,7 +558,7 @@ void ResourceManager::FreeAllResources()
         }
         if (*slotPtr != 0) {
             /* Call vtable[0] destructor with free-flag = 1 */
-            void* resource = (void*)*slotPtr;
+            void* resource = (void*)(uintptr_t)*slotPtr;
             void** vtable = (void**)resource;
             void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
             dtor(resource, 1);
@@ -1112,7 +1112,7 @@ void ResourceManager::AnimateClock(int32_t timestamp)
     }
 
     /* Check if background resource has surface data (flag at +0x10) */
-    int32_t* bgData = (int32_t*)bgResource;
+    int32_t* bgData = (int32_t*)(uintptr_t)bgResource;
     if (bgData[4] == 0) {  /* +0x10 */
         return;
     }
@@ -1188,7 +1188,7 @@ void ResourceManager::AnimateClock(int32_t timestamp)
     /* Get hour hand background frame sprite (0x3DAE) */
     int32_t hourBgResource = this->GetById(CLOCK_HOUR_BG);
     if (hourBgResource != 0) {
-        void* hourBgRes = (void*)hourBgResource;
+        void* hourBgRes = (void*)(uintptr_t)hourBgResource;
         void** hourBgVtbl = *(void***)hourBgRes;
 
         /* Lock surface (vtable[1]) */
@@ -1209,8 +1209,8 @@ void ResourceManager::AnimateClock(int32_t timestamp)
         Town_CopyTiles8bpp_Transparent(
             hourBgSurface,
             dstRect.left, dstRect.top, dstRect.right, dstRect.bottom,
-            *(uint32_t*)(bgData[4] + 0x18),
-            *(int32_t*)(bgData[4] + 0x8),
+            *(uint32_t*)(uintptr_t)(bgData[4] + 0x18),
+            *(int32_t*)(uintptr_t)(bgData[4] + 0x8),
             srcRect.left, srcRect.top, srcRect.right, srcRect.bottom
         );
 
@@ -1220,7 +1220,7 @@ void ResourceManager::AnimateClock(int32_t timestamp)
         /* Get hour hand sprite (0x3DAD) */
         int32_t hourHandResource = this->GetById(CLOCK_HOUR_HAND);
         if (hourHandResource != 0) {
-            void* hourHandRes = (void*)hourHandResource;
+            void* hourHandRes = (void*)(uintptr_t)hourHandResource;
             void** hourHandVtbl = *(void***)hourHandRes;
 
             void* hourHandSurface = (void*)((void* (*)(void*, int32_t, int32_t))hourHandVtbl[1])(hourHandRes, 0, 0);
@@ -1240,8 +1240,8 @@ void ResourceManager::AnimateClock(int32_t timestamp)
             Town_CopyTiles8bpp_Transparent(
                 hourHandSurface,
                 dstRect2.left, dstRect2.top, dstRect2.right, dstRect2.bottom,
-                *(uint32_t*)(bgData[4] + 0x18),
-                *(int32_t*)(bgData[4] + 0x8),
+                *(uint32_t*)(uintptr_t)(bgData[4] + 0x18),
+                *(int32_t*)(uintptr_t)(bgData[4] + 0x8),
                 srcRect2.left, srcRect2.top, srcRect2.right, srcRect2.bottom
             );
 
@@ -1254,11 +1254,11 @@ void ResourceManager::AnimateClock(int32_t timestamp)
     /* ================================================================ */
 
     int32_t minuteResource = this->GetById(CLOCK_RES_MINUTE);  /* 0x843 */
-    if (minuteResource != 0 && *(int32_t*)(minuteResource + 0x10) != 0) {
+    if (minuteResource != 0 && *(int32_t*)((uintptr_t)minuteResource + 0x10) != 0) {
         /* Get minute hand background sprite (0x3DB1) */
         int32_t minBgResource = this->GetById(CLOCK_MINUTE_BG);
         if (minBgResource != 0) {
-            void* minBgRes = (void*)minBgResource;
+            void* minBgRes = (void*)(uintptr_t)minBgResource;
             void** minBgVtbl = *(void***)minBgRes;
 
             void* minBgSurface = (void*)((void* (*)(void*, int32_t, int32_t))minBgVtbl[1])(minBgRes, 0, 0);
@@ -1275,13 +1275,13 @@ void ResourceManager::AnimateClock(int32_t timestamp)
             OffsetRect(&minSrcRect1, minutes * minBgWidth, 0);
             OffsetRect(&minDstRect1, CLOCK_MINUTE_OFFSET_X, CLOCK_MINUTE_OFFSET_Y);
 
-            int32_t* minResourceData = (int32_t*)minuteResource;
+            int32_t* minResourceData = (int32_t*)(uintptr_t)minuteResource;
             Town_CopyTiles8bpp_Transparent(
                 minBgSurface,
                 minDstRect1.left, minDstRect1.top,
                 minDstRect1.right, minDstRect1.bottom,
-                *(uint32_t*)(minResourceData[4] + 0x18),
-                *(int32_t*)(minResourceData[4] + 0x8),
+                *(uint32_t*)(uintptr_t)(minResourceData[4] + 0x18),
+                *(int32_t*)(uintptr_t)(minResourceData[4] + 0x8),
                 minSrcRect1.left, minSrcRect1.top,
                 minSrcRect1.right, minSrcRect1.bottom
             );
@@ -1291,7 +1291,7 @@ void ResourceManager::AnimateClock(int32_t timestamp)
             /* Get minute hand sprite (0x3DB0) */
             int32_t minHandResource = this->GetById(CLOCK_MINUTE_HAND);
             if (minHandResource != 0) {
-                void* minHandRes = (void*)minHandResource;
+                void* minHandRes = (void*)(uintptr_t)minHandResource;
                 void** minHandVtbl = *(void***)minHandRes;
 
                 void* minHandSurface = (void*)((void* (*)(void*, int32_t, int32_t))minHandVtbl[1])(minHandRes, 0, 0);
@@ -1312,8 +1312,8 @@ void ResourceManager::AnimateClock(int32_t timestamp)
                     minHandSurface,
                     minDstRect2.left, minDstRect2.top,
                     minDstRect2.right, minDstRect2.bottom,
-                    *(uint32_t*)(minResourceData[4] + 0x18),
-                    *(int32_t*)(minResourceData[4] + 0x8),
+                    *(uint32_t*)(uintptr_t)(minResourceData[4] + 0x18),
+                    *(int32_t*)(uintptr_t)(minResourceData[4] + 0x8),
                     minSrcRect2.left, minSrcRect2.top,
                     minSrcRect2.right, minSrcRect2.bottom
                 );
