@@ -1052,11 +1052,13 @@ constexpr int kGridLeft = kWorkingLeft + 0x1B;
 // CGWND_GameSetup_Show at 0x408F70 is not yet a Ghidra function, but its
 // instruction stream is recovered in the raw binary.  0x40902E..0x4090F5
 // derives these rectangles from the centered 800x600 working area:
-// grid = {work + 0x1B, work + 0x1B, +0x1EE, +0x173};
-// list = {grid.right + 0x11, grid.top, work.right - 0x18,
-//         grid.bottom - 0x1E}.  drawLayoutList at 0x409635..0x409642 then
-// applies its 12px inner padding before every DrawTextA call.
-constexpr int kGridTop = kWorkingTop + 0x1B;
+// 0x40902E derives grid.left = work.left + 0x1B.  Separately, the
+// 0x409034/0x409046 pair derives grid.top = work.top + 0x27; do not use
+// the horizontal 0x1B offset for Y.  0x409040/0x40905E then form
+// grid.right = grid.left + 0x1EE and grid.bottom = grid.top + 0x173.
+// 0x4090C2..0x4090F5 derives the list from that grid; drawLayoutList at
+// 0x409635..0x409642 applies its 12px inner padding before DrawTextA.
+constexpr int kGridTop = kWorkingTop + 0x27;
 constexpr int kLayoutListLeft = kGridLeft + 0x1EE + 0x11;
 constexpr int kLayoutListTop = kGridTop;
 constexpr int kLayoutListRight = kWorkingLeft + kWorkingAreaWidth - 0x18;

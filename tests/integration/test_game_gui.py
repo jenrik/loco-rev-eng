@@ -149,7 +149,9 @@ def test_multiplayer_layout_choices_update_grid_geometry(game):
     # measured 14px normal-font height plus a four-pixel row step.
     for index, columns, rows in ((1, 2, 2), (2, 2, 1), (3, 3, 1), (4, 3, 2)):
         before = latest_sequence(game)
-        game.click_logical(800, 256 + index * 18, f"select {columns}x{rows}")
+        # text.top = work.top + 0x27 + 0x0C (0x409046/0x40963F);
+        # click five pixels inside each measured 18px row.
+        game.click_logical(800, 268 + index * 18, f"select {columns}x{rows}")
         selected = game.wait_for_event(
             "layout_selected", after_sequence=before,
             columns=columns, rows=rows, slots=columns * rows,
