@@ -673,7 +673,7 @@ LRESULT HelpWnd::handle_click(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case 7: /* Content sprite click */
         {
-            int contentResId = *(int*)(*(int*)(this->btnContent->pixelData) + 4);
+            int contentResId = *(int*)((uintptr_t)(*(int*)(this->btnContent->pixelData)) + 4);
             if (contentResId == 0x3D01 || contentResId == 0x3D06) {
                 /* Close/exit or continue — hide and restore mode */
                 this->hide();
@@ -1073,7 +1073,7 @@ int HelpWnd::load_help_data(void* stream)
 
     if (pageData != NULL) {
         /* Process pages while stream has data */
-        while ((*(byte*)(*(int*)stream + 8 + (int)stream) & 1) == 0) {
+        while ((*(byte*)((uintptr_t)(*(int*)stream + 8 + (uintptr_t)stream)) & 1) == 0) {
             /* Read page ID */
             pageIdx = CRT_atoi(buf);
             WNDPROC_CriticalSectionLock((int*)stream, buf);
@@ -1367,8 +1367,8 @@ void HelpWnd::load_page(int pageIdx)
     } else {
         RECT cr;
         SetRect(&cr, 0, 0,
-            *(unsigned short*)(*(int*)((uintptr_t)cpd + 0x14) + 0x14),
-            *(unsigned short*)(*(int*)((uintptr_t)cpd + 0x14) + 0x16));
+            *(unsigned short*)((uintptr_t)(*(int*)((uintptr_t)cpd + 0x14)) + 0x14),
+            *(unsigned short*)((uintptr_t)(*(int*)((uintptr_t)cpd + 0x14)) + 0x16));
         OffsetRect(&cr, 0xE8, 0);
         OffsetRect(&cr, 0x96, 0xB2);
         void* sd = *(void**)((uintptr_t)cpd + 0x14);
@@ -1621,19 +1621,19 @@ int HelpWnd::draw_text(int lineIdx, int* hdc_p)
 int HelpWnd::measure_text_height()
 {
     int hdc = Cursor_WaitForBlit((Cursor*)this);
-    int oldColor = SetTextColor((void*)hdc, 0xFF5C00);
-    int oldMode = SetBkMode((void*)hdc, 1);
-    void* oldFont = SelectObject((void*)hdc, g_font_small);
+    int oldColor = SetTextColor((void*)(uintptr_t)hdc, 0xFF5C00);
+    int oldMode = SetBkMode((void*)(uintptr_t)hdc, 1);
+    void* oldFont = SelectObject((void*)(uintptr_t)hdc, g_font_small);
 
     RECT mr;
     SetRect(&mr, 0, 0, 0xD9, 0x96);
     OffsetRect(&mr, 0x2A, 0x23);
 
-    int result = DrawTextA((void*)hdc, s_measure_test_char, 1, &mr, 0x18C10);
+    int result = DrawTextA((void*)(uintptr_t)hdc, s_measure_test_char, 1, &mr, 0x18C10);
 
-    SelectObject((void*)hdc, oldFont);
-    SetBkMode((void*)hdc, oldMode);
-    SetTextColor((void*)hdc, oldColor);
+    SelectObject((void*)(uintptr_t)hdc, oldFont);
+    SetBkMode((void*)(uintptr_t)hdc, oldMode);
+    SetTextColor((void*)(uintptr_t)hdc, oldColor);
     Cursor_Render((Cursor*)this, (uintptr_t)this->hWnd, hdc, 1);
     return result;
 }
