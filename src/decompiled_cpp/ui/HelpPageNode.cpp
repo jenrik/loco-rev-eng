@@ -77,8 +77,8 @@ HelpPageNode::~HelpPageNode()
      * Each node is { Vehicle* vehicle; DestNode* next; }. */
     int next = this->dest_list_head;
     while (next != 0) {
-        int tmp = *(int*)(next + 4);    /* next->next */
-        GLOBAL_free((void*)next);
+        int tmp = *(int*)((uintptr_t)next + 4);    /* next->next */
+        GLOBAL_free((void*)(uintptr_t)next);
         next = tmp;
     }
 
@@ -101,9 +101,9 @@ void HelpPageNode::Update()
         this->update_flag = 1;
 
         /* Pop first node from list */
-        void* vehicle = *(void**)pageData;           /* node->vehicle */
-        this->dest_list_head = *(int*)(pageData + 4); /* node->next */
-        GLOBAL_free((void*)pageData);
+        void* vehicle = *(void**)(uintptr_t)pageData;           /* node->vehicle */
+        this->dest_list_head = *(int*)((uintptr_t)pageData + 4); /* node->next */
+        GLOBAL_free((void*)(uintptr_t)pageData);
 
         /* Load sounds and set vehicle state */
         Vehicle_LoadSounds(vehicle, (int*)this, 0);
