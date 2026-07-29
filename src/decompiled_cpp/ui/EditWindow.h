@@ -31,9 +31,20 @@
  *   [8]  +0x20: Render/Update                  (0x422AA0, overridden)
  *   [9]  +0x24: MouseWheel                     (0x422950, overridden)
  *   [10] +0x28: virtual method                 (0x426140, inherited stub)
- *   [11] +0x2C: WindowProc                     (0x422600, overridden)
+ *   [11] +0x2C: WindowProc                     (EditWindow_DispatchClick, 0x422940, overridden)
+ *          Note: The vtable slot points to 0x422600 but this is inside
+ *          EditWindow_updateButton. The actual WindowProc entry is at
+ *          0x422940 (gap between InitNetworkPanel and netPanelWndProc).
+ *          This ~1110-byte function handles all main-menu button clicks
+ *          including accept (plays 0x5015) and quit (no click sound).
  *   [12]+[19]: EditWindow-specific virtuals
  *   [20] +0x50: netPanelWndProc                (0x422D80)
+ *
+ * Button sound behavior (verified against assembly at 0x422900-0x422D80):
+ *   Accept/Play (+0x13C):  PlaySound(0x5015) → Sleep(0x96) → commit name
+ *   Quit/Exit  (+0x14C):   NO click sound → Sleep(0x96) → CGWND_SetMode(10) → 0x5026
+ *   Selection toggles:     PlaySound(0x5015) for each toggle (no Sleep)
+ *   Preload at show():     RESMGR_LoadSoundResource(0x5015) — warms cache only
  *
  * Dialog states:
  *   0 = initial (hidden)
