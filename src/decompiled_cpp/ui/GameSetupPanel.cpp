@@ -1006,6 +1006,9 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 /* ================================================================== */
 
 #include <SDL3/SDL.h>
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_SYNTHESIS_H
 #include "../../sdl3_shims/sdl3_ddraw.h"
 
 // Deliberately avoid including resource_manager_sdl3.h here: this translated
@@ -1039,15 +1042,29 @@ constexpr int kGridCellHeight = 0x7B;
 constexpr int kGridStrideX = 0xA5;
 constexpr int kGridStrideY = 0x7C;
 
-// GameSetupPanel::show at 0x408F9C centers an 800x600 working area, then
-// assigns gridRect = workingArea + {0x1B, 0x27, 0x209, 0x19A}.  The fixed SDL
-// primary is 1280x1024, so retain that original coordinate calculation.
+// CGWND_GameSetup_Show at 0x408F70 centers an 800x600 working area. The
+// fixed SDL primary is 1280x1024, so retain that original coordinate space.
 constexpr int kWorkingAreaWidth = 800;
 constexpr int kWorkingAreaHeight = 600;
 constexpr int kWorkingLeft = (SDL3_PRIMARY_CANVAS_WIDTH - kWorkingAreaWidth) / 2;
 constexpr int kWorkingTop = (SDL3_PRIMARY_CANVAS_HEIGHT - kWorkingAreaHeight) / 2;
 constexpr int kGridLeft = kWorkingLeft + 0x1B;
-constexpr int kGridTop = kWorkingTop + 0x27;
+// CGWND_GameSetup_Show at 0x408F70 is not yet a Ghidra function, but its
+// instruction stream is recovered in the raw binary.  0x40902E..0x4090F5
+// derives these rectangles from the centered 800x600 working area:
+// grid = {work + 0x1B, work + 0x1B, +0x1EE, +0x173};
+// list = {grid.right + 0x11, grid.top, work.right - 0x18,
+//         grid.bottom - 0x1E}.  drawLayoutList at 0x409635..0x409642 then
+// applies its 12px inner padding before every DrawTextA call.
+constexpr int kGridTop = kWorkingTop + 0x1B;
+constexpr int kLayoutListLeft = kGridLeft + 0x1EE + 0x11;
+constexpr int kLayoutListTop = kGridTop;
+constexpr int kLayoutListRight = kWorkingLeft + kWorkingAreaWidth - 0x18;
+constexpr int kLayoutListBottom = kGridTop + 0x173 - 0x1E;
+constexpr int kLayoutTextLeft = kLayoutListLeft + 0x0C;
+constexpr int kLayoutTextTop = kLayoutListTop + 0x0C;
+constexpr int kLayoutTextRight = kLayoutListRight - 0x0C;
+constexpr int kLayoutTextBottom = kLayoutListBottom - 0x0C;
 
 // 0x4090FB..0x4091EB derives these button rectangles from gridRect and the
 // decoded frame dimensions.  They are the state-0 Exit and Options controls
@@ -1057,10 +1074,6 @@ constexpr int kExitTop = kGridTop + 0x1C0;
 constexpr int kOptionsLeft = kGridLeft + 0x20C;
 constexpr int kOptionsTop = kGridTop + 0x162;
 
-// NETMAN_SyncGameState (0x43FC50) reads max players at packet+0x10 and
-// dimensions at +0x14/+0x15. drawGrid (0x409980) then uses m_playerRows for
-// its inner/X loop and m_playerCols for its outer/Y loop. SDL has no DirectPlay
-// provider, so this host-only chooser supplies those exact Netman inputs.
 struct HostGridLayout {
     const char* label;
     int32_t display_columns;
@@ -1068,67 +1081,81 @@ struct HostGridLayout {
 };
 
 constexpr HostGridLayout kHostGridLayouts[] = {
-    {"3x3", 3, 3},
-    {"2x2", 2, 2},
-    {"2x1", 2, 1},
-    {"3x1", 3, 1},
-    {"3x2", 3, 2},
+    {"3x3", 3, 3}, {"2x2", 2, 2}, {"2x1", 2, 1},
+    {"3x1", 3, 1}, {"3x2", 3, 2},
 };
 constexpr int kHostGridLayoutCount = static_cast<int>(sizeof(kHostGridLayouts) / sizeof(kHostGridLayouts[0]));
 // drawLayoutList (0x4094B0) sets these COLORREF values before each
 // DrawTextA call. COLORREF is 0x00BBGGRR, hence this SDL RGB order.
 constexpr SDL_Color kOriginalListTextColor = {0x00, 0x5c, 0xff, 0xff};
 constexpr SDL_Color kOriginalSelectedListTextColor = {0xdc, 0x25, 0x25, 0xff};
-constexpr int kHostPrimaryTextScale = 2;
+constexpr int kOriginalNormalFontHeight = 14;
+constexpr int kOriginalListLineStep = kOriginalNormalFontHeight + 4;
 
-struct HostGlyph {
-    char character;
-    uint8_t rows[7];
-};
+// ResourceManager_Init (0x44611A..0x44613A) assigns g_font_normal from
+// CreateFontA(14, 0, 0, 0, 700, ..., "Arial"). FreeType rasterizes the
+// Fontconfig-selected Arial-compatible face; emboldening retains weight 700
+// when the host only ships a regular fallback.
+struct HostNormalFont {
+    FT_Library library = nullptr;
+    FT_Face face = nullptr;
 
-// ResourceManager::Initialize (0x445F00) creates the native 14px/700-weight
-// Arial list font. SDL_RenderDebugText does not compose into the primary
-// render target, so this guarded 14px bitmap fallback is used only by SDL.
-constexpr HostGlyph kHostGlyphs[] = {
-    {' ', {0,0,0,0,0,0,0}}, {'0', {14,17,19,21,25,17,14}},
-    {'1', {4,12,4,4,4,4,14}}, {'2', {14,17,1,2,4,8,31}},
-    {'3', {30,1,2,6,1,17,14}}, {'4', {2,6,10,18,31,2,2}},
-    {'5', {31,16,30,1,1,17,14}}, {'6', {6,8,16,30,17,17,14}},
-    {'7', {31,1,2,4,8,8,8}}, {'8', {14,17,17,14,17,17,14}},
-    {'9', {14,17,17,15,1,2,12}}, {'A', {14,17,17,31,17,17,17}},
-    {'C', {15,16,16,16,16,16,15}}, {'D', {30,17,17,17,17,17,30}},
-    {'E', {31,16,16,30,16,16,31}}, {'F', {31,16,16,30,16,16,16}},
-    {'G', {15,16,16,23,17,17,15}}, {'I', {14,4,4,4,4,4,14}},
-    {'K', {17,18,20,24,20,18,17}}, {'L', {16,16,16,16,16,16,31}},
-    {'M', {17,27,21,21,17,17,17}}, {'N', {17,25,21,19,17,17,17}},
-    {'O', {14,17,17,17,17,17,14}}, {'R', {30,17,17,30,20,18,17}},
-    {'S', {15,16,16,14,1,1,30}}, {'T', {31,4,4,4,4,4,4}},
-    {'U', {17,17,17,17,17,17,14}}, {'W', {17,17,17,21,21,21,10}},
-    {'X', {17,17,10,4,10,17,17}}, {'Y', {17,17,10,4,4,4,4}},
+    HostNormalFont()
+    {
+        if (FT_Init_FreeType(&library) != 0 ||
+            FT_New_Face(library, LOCO_HOST_UI_FONT_FILE, 0, &face) != 0 ||
+            FT_Set_Pixel_Sizes(face, 0, kOriginalNormalFontHeight) != 0) {
+            if (face != nullptr) FT_Done_Face(face);
+            if (library != nullptr) FT_Done_FreeType(library);
+            face = nullptr;
+            library = nullptr;
+        }
+    }
+
+    ~HostNormalFont()
+    {
+        if (face != nullptr) FT_Done_Face(face);
+        if (library != nullptr) FT_Done_FreeType(library);
+    }
 };
 
 bool host_draw_text(SDL_Renderer* renderer, int x, int y, const char* text,
                     const SDL_Color& color)
 {
     if (renderer == nullptr || text == nullptr) return false;
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    static const HostNormalFont font;
+    if (font.face == nullptr) return false;
+
+    const int baseline = y + static_cast<int>(font.face->size->metrics.ascender >> 6);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     bool rendered = true;
-    for (const char* current = text; *current != '\0'; ++current) {
-        char character = *current == 'x' ? 'X' : *current;
-        const HostGlyph* glyph = nullptr;
-        for (const HostGlyph& candidate : kHostGlyphs) {
-            if (candidate.character == character) { glyph = &candidate; break; }
+    for (const unsigned char* character = reinterpret_cast<const unsigned char*>(text);
+         *character != '\0'; ++character) {
+        if (FT_Load_Char(font.face, *character, FT_LOAD_DEFAULT) != 0) {
+            rendered = false;
+            continue;
         }
-        if (glyph != nullptr) {
-            for (int row = 0; row < 7; ++row) for (int column = 0; column < 5; ++column) {
-                if ((glyph->rows[row] & (1u << (4 - column))) == 0) continue;
-                const SDL_FRect pixel = {static_cast<float>(x + column * kHostPrimaryTextScale),
-                    static_cast<float>(y + row * kHostPrimaryTextScale),
-                    static_cast<float>(kHostPrimaryTextScale), static_cast<float>(kHostPrimaryTextScale)};
+        FT_GlyphSlot_Embolden(font.face->glyph);
+        if (FT_Render_Glyph(font.face->glyph, FT_RENDER_MODE_NORMAL) != 0) {
+            rendered = false;
+            continue;
+        }
+
+        const FT_GlyphSlot glyph = font.face->glyph;
+        const FT_Bitmap& bitmap = glyph->bitmap;
+        for (unsigned int row = 0; row < bitmap.rows; ++row) {
+            const unsigned char* coverage = bitmap.buffer + row * bitmap.pitch;
+            for (unsigned int column = 0; column < bitmap.width; ++column) {
+                if (coverage[column] == 0) continue;
+                SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, coverage[column]);
+                const SDL_FRect pixel = {
+                    static_cast<float>(x + glyph->bitmap_left + static_cast<int>(column)),
+                    static_cast<float>(baseline - glyph->bitmap_top + static_cast<int>(row)),
+                    1.0f, 1.0f};
                 rendered = SDL_RenderFillRect(renderer, &pixel) && rendered;
             }
         }
-        x += 6 * kHostPrimaryTextScale;
+        x += static_cast<int>(glyph->advance.x >> 6);
     }
     return rendered;
 }
@@ -1153,16 +1180,15 @@ void host_apply_layout(GameSetupPanel& panel, int index)
 
 int host_layout_at(float canvas_x, float canvas_y)
 {
-    // drawLayoutList (0x4094B0) applies 12px inner padding then advances
-    // each row by measured-font-height + 4. The 14px host glyphs use its
-    // recovered 18px line step; PtInRect-style right/bottom exclusion keeps
-    // adjacent rows unambiguous.
-    const float left = 80.0f;
-    const float top = 120.0f;
-    const float width = 120.0f;
-    const float line_height = 18.0f;
-    if (canvas_x < left || canvas_x >= left + width || canvas_y < top) return -1;
-    const int index = static_cast<int>((canvas_y - top) / line_height);
+    // drawLayoutList (0x409635..0x409642) applies 12px inner padding then
+    // advances each row by the measured font height + 4. PtInRect-style
+    // right/bottom exclusion preserves the original list bounds.
+    const float left = static_cast<float>(kLayoutTextLeft);
+    const float top = static_cast<float>(kLayoutTextTop);
+    const float right = static_cast<float>(kLayoutTextRight);
+    const float bottom = static_cast<float>(kLayoutTextBottom);
+    if (canvas_x < left || canvas_x >= right || canvas_y < top || canvas_y >= bottom) return -1;
+    const int index = static_cast<int>((canvas_y - top) / kOriginalListLineStep);
     return index >= 0 && index < kHostGridLayoutCount ? index : -1;
 }
 
@@ -1317,22 +1343,22 @@ void GameSetupPanel::hostRenderFrame()
         SDL_SetRenderTarget(renderer, SDL3_GetPrimarySurface()->texture);
         const bool network_lobby = g_editwindow_ptr != nullptr &&
                                    g_editwindow_ptr->dialogState == 5;
-        host_draw_text(renderer, 80, 84,
-                       network_lobby ? "NETWORK GAME" : "SELECT SCENARIO",
-                       kOriginalListTextColor);
         if (network_lobby) {
             for (int index = 0; index < kHostGridLayoutCount; ++index) {
                 const HostGridLayout& layout = kHostGridLayouts[index];
                 const SDL_Color& color = index == this->hostLayoutIndex
                     ? kOriginalSelectedListTextColor : kOriginalListTextColor;
-                host_draw_text(renderer, 80, 120 + index * 18, layout.label, color);
+                host_draw_text(renderer, kLayoutTextLeft,
+                               kLayoutTextTop + index * kOriginalListLineStep,
+                               layout.label, color);
             }
             if (this->hostSearchCompleted) {
-                host_draw_text(renderer, 80, 120 + kHostGridLayoutCount * 18,
+                host_draw_text(renderer, kLayoutTextLeft,
+                               kLayoutTextTop + kHostGridLayoutCount * kOriginalListLineStep,
                                "NO NETWORK GAMES FOUND", kOriginalListTextColor);
             }
         } else {
-            host_draw_text(renderer, 80, 120, "NO LAYOUTS AVAILABLE",
+            host_draw_text(renderer, kLayoutTextLeft, kLayoutTextTop, "NO LAYOUTS AVAILABLE",
                            kOriginalListTextColor);
         }
         SDL_SetRenderTarget(renderer, nullptr);

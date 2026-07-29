@@ -42,8 +42,13 @@ SDL3_LIBS  := -lSDL3 -lm
 # frames into the SDL renderer. Its headers/libs are provided by flake.nix.
 GST_CFLAGS := $(shell pkg-config --cflags gstreamer-app-1.0 gstreamer-video-1.0)
 GST_LIBS   := $(shell pkg-config --libs gstreamer-app-1.0 gstreamer-video-1.0)
+# GameSetupPanel list text follows ResourceManager_Init (0x44611A): 14px Arial,
+# weight 700. Fontconfig supplies the host-compatible face; FreeType rasterizes it.
+FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
+FREETYPE_LIBS   := $(shell pkg-config --libs freetype2)
+HOST_UI_FONT_FILE := $(shell fc-match -f '%{file}' Arial 2>/dev/null | head -n 1)
 
-override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) $(INCLUDES) $(FORCE_INC) $(SDL3_CFLAGS) $(GST_CFLAGS)
+override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) $(INCLUDES) $(FORCE_INC) $(SDL3_CFLAGS) $(GST_CFLAGS) $(FREETYPE_CFLAGS) -DLOCO_HOST_UI_FONT_FILE=\"$(HOST_UI_FONT_FILE)\"
 
 # Source discovery
 DCP_CPP_ALL := $(filter-out $(DCP_DIR)/stubs/%, $(filter-out $(DCP_DIR)/native/%, $(wildcard $(DCP_DIR)/*/*.cpp $(DCP_DIR)/*/*/*.cpp)))
@@ -104,7 +109,7 @@ test-all: test test-integration
 
 # Link
 $(BINARY): $(ALL_OBJS) | dirs
-	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(GST_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
+	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 
 # Compilation rules
 $(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp | dirs

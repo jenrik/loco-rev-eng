@@ -144,11 +144,12 @@ def test_multiplayer_layout_choices_update_grid_geometry(game):
     game.wait_for_event("screen_presented", screen="multiplayer_lobby", dialog_state=5)
     game.screenshot("multiplayer-layout-3x3-default")
 
-    # drawLayoutList (0x4094B0) uses 12px padding and a measured-font-height
-    # plus four pixel row step. The host uses its recovered 18px line step.
+    # CGWND_GameSetup_Show (0x408F70) places the list to the right of the
+    # grid. drawLayoutList (0x4094B0) then applies 12px padding and the
+    # measured 14px normal-font height plus a four-pixel row step.
     for index, columns, rows in ((1, 2, 2), (2, 2, 1), (3, 3, 1), (4, 3, 2)):
         before = latest_sequence(game)
-        game.click_logical(100, 125 + index * 18, f"select {columns}x{rows}")
+        game.click_logical(800, 256 + index * 18, f"select {columns}x{rows}")
         selected = game.wait_for_event(
             "layout_selected", after_sequence=before,
             columns=columns, rows=rows, slots=columns * rows,

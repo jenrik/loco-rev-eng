@@ -41,6 +41,9 @@
 
               # ---- SDL3 host compatibility layer ----
               sdl3                    # host audio/video shims
+              freetype                # native 14px Arial-compatible list text
+              fontconfig              # resolves the host fallback face
+              dejavu_fonts            # deterministic Fontconfig fallback font
               pkg-config              # Makefile dependency discovery
 
               # ---- Networking (for Linux port) ----
