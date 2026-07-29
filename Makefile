@@ -20,7 +20,7 @@ SHIMS_DIR    := $(PROJECT_ROOT)src/sdl3_shims
 # Compiler
 CXX        := g++
 CFLAGS     := -std=c++17 -fpermissive -g -O0
-WARNFLAGS  := -Wno-error -Wno-unused -Wno-unknown-pragmas -Wno-attributes -Wno-write-strings -Wno-delete-non-virtual-dtor -Wno-narrowing -Wno-cpp
+WARNFLAGS  := -Wno-error -Wno-unused -Wno-unknown-pragmas -Wno-attributes -Wno-write-strings -Wno-delete-non-virtual-dtor -Wno-narrowing -Wno-cpp -Werror=int-to-pointer-cast -Werror=pointer-arith
 INCLUDES   := -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs -I$(DCP_DIR)/native -I$(SHIMS_DIR)
 FORCE_INC  := -include $(DCP_DIR)/stubs/compat.h
 

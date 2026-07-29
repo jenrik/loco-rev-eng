@@ -49,7 +49,7 @@ extern void*   __stdcall GetProcessHeap(void);
 extern int32_t __stdcall HeapFree(void* hHeap, uint32_t dwFlags, void* lpMem);
 extern int32_t __stdcall IsWindowVisible(void* hWnd);
 extern void    __stdcall Sleep(uint32_t dwMilliseconds);
-extern void*   __stdcall DefWindowProcA(void* hWnd, uint32_t Msg, uint32_t wParam, uint32_t lParam);
+extern LRESULT __stdcall DefWindowProcA(void* hWnd, uint32_t Msg, uint32_t wParam, uint32_t lParam);
 extern int32_t __stdcall GetWindowTextA(void* hWnd, char* lpString, int32_t nMaxCount);
 extern void    __stdcall ShowWindow(void* hWnd, int32_t nCmdShow);
 
@@ -78,7 +78,7 @@ extern void* g_resmgr;                  /* resource manager */
 /* NETMAN_FreePacket — 0x440D00                                        */
 /* MISNAMED: _this function LOADS network settings from NetSettings.dat.*/
 /* ================================================================== */
-void __fastcall NETMAN_FreePacket(int32_t packetPtr)
+void __fastcall NETMAN_FreePacket(uint8_t* packetPtr)
 {
     char filepath[0x504];
     uint32_t bytesRead;
@@ -111,7 +111,7 @@ void __fastcall NETMAN_FreePacket(int32_t packetPtr)
     }
 
     bytesRead = 0;
-    if (!ReadFile(hFile, (void*)(packetPtr + 4), 0xAC, &bytesRead, NULL)) {
+    if (!ReadFile(hFile, packetPtr + 4, 0xAC, &bytesRead, NULL)) {
         CloseHandle(hFile);
         *(void**)(packetPtr + 0x10) = savedList;
         return;
@@ -143,7 +143,7 @@ void __fastcall NETMAN_FreePacket(int32_t packetPtr)
             uint32_t bytesWritten;
             void* hOut = CreateFileA(filepath, 0x40000000, 1, NULL, 2, 0x8000000, NULL);
             if (hOut != (void*)-1) {
-                WriteFile(hOut, (void*)(packetPtr + 4), 0xAC, &bytesWritten, NULL);
+                WriteFile(hOut, packetPtr + 4, 0xAC, &bytesWritten, NULL);
                 CloseHandle(hOut);
             }
         }
@@ -156,7 +156,7 @@ void __fastcall NETMAN_FreePacket(int32_t packetPtr)
 /* NETMAN_SendPacket — 0x440EA0                                        */
 /* Save network settings to NetSettings.dat.                           */
 /* ================================================================== */
-void __fastcall NETMAN_SendPacket(int32_t packetPtr)
+void __fastcall NETMAN_SendPacket(uint8_t* packetPtr)
 {
     char filepath[0x504];
     uint32_t bytesWritten;
@@ -165,7 +165,7 @@ void __fastcall NETMAN_SendPacket(int32_t packetPtr)
 
     void* hFile = CreateFileA(filepath, 0x40000000, 1, NULL, 2, 0x8000000, NULL);
     if (hFile != (void*)-1) {
-        WriteFile(hFile, (void*)(packetPtr + 4), 0xAC, &bytesWritten, NULL);
+        WriteFile(hFile, packetPtr + 4, 0xAC, &bytesWritten, NULL);
         CloseHandle(hFile);
     }
 }
@@ -185,6 +185,7 @@ void* __thiscall NETMAN_AllocPacket(void* _this, uint8_t flags)
         GLOBAL_free(list);
         list = *(void**)((uint8_t*)_this + 0x10);
     }
+    return _this;
 }
 
 /* ================================================================== */
@@ -207,7 +208,7 @@ LRESULT __thiscall NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
         Sprite_SetState(*(void**)((uint8_t*)panel + 0x1B4), 1, NULL);
         UIPANEL_EndPaintEx(panel, *(void**)((uint8_t*)panel + 8), 0, 0, NULL);
         Sleep(0x96);
-        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))(* (void**)panel + 0x10))
+        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))((uint8_t*)*(void**)panel + 0x10))
             (0, 0, 0, 0, 1);
         UI_MainMenu_SetState(g_ui_main, 7);
         return 0;
@@ -218,7 +219,7 @@ LRESULT __thiscall NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
         Sprite_SetState(*(void**)((uint8_t*)panel + 0x1B0), 1, NULL);
         UIPANEL_EndPaintEx(panel, *(void**)((uint8_t*)panel + 8), 0, 0, NULL);
         Sleep(0x96);
-        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))(* (void**)panel + 0x10))
+        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))((uint8_t*)*(void**)panel + 0x10))
             (0, 0, 0, 0, 1);
 
         GetWindowTextA(*(void**)((uint8_t*)panel + 0x1D8),
@@ -228,7 +229,7 @@ LRESULT __thiscall NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
         } else {
             *(uint8_t*)((uint8_t*)_g_netman_data + 0x18) = 1;
         }
-        NETMAN_SendPacket((int32_t)_g_netman_data);
+        NETMAN_SendPacket((uint8_t*)_g_netman_data);
         UI_MainMenu_SetState(g_ui_main, 3);
         return 0;
     }
