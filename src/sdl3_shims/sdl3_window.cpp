@@ -68,8 +68,9 @@ static Uint32 sdl_timer_callback(void* userdata, SDL_TimerID timer_id, Uint32 in
     TimerInfo* ti = (TimerInfo*)userdata;
     if (ti && ti->callback) {
         ti->callback(ti->hwnd, WM_TIMER, ti->id, SDL_GetTicks());
+        return ti->elapse; /* re-trigger every elapse ms */
     }
-    return ti ? ti->elapse : 0; /* re-trigger every elapse ms */
+    return 0; /* callback was nulled (timer killed); stop re-triggering */
 }
 
 /* =========================================================================
@@ -123,6 +124,7 @@ void SDL3_WindowQuit(void)
     /* Kill all timers */
     for (auto& pair : g_timers) {
         SDL_RemoveTimer(pair.second.sdl_timer_id);
+        pair.second.callback = nullptr;  /* guard in-flight callbacks */
     }
     g_timers.clear();
 
@@ -666,14 +668,16 @@ void SetCursor(HCURSOR hCursor)
 
 uintptr_t SetTimer(HWND hWnd, uintptr_t nIDEvent, UINT uElapse, TIMERPROC lpTimerFunc)
 {
-    TimerInfo ti;
+    /* Populate the entry in the map first, so the pointer we pass to
+     * SDL_AddTimer points to valid data.  SDL's timer thread may fire
+     * the callback before SDL_AddTimer returns for very short intervals. */
+    TimerInfo& ti = g_timers[nIDEvent];
     ti.hwnd     = hWnd;
     ti.id       = nIDEvent;
     ti.elapse   = uElapse;
     ti.callback = lpTimerFunc;
-    ti.sdl_timer_id = SDL_AddTimer(uElapse, sdl_timer_callback, &g_timers[nIDEvent]);
+    ti.sdl_timer_id = SDL_AddTimer(uElapse, sdl_timer_callback, &ti);
 
-    g_timers[nIDEvent] = ti;
     return nIDEvent;
 }
 
@@ -683,7 +687,13 @@ BOOL KillTimer(HWND hWnd, uintptr_t uIDEvent)
     auto it = g_timers.find(uIDEvent);
     if (it != g_timers.end()) {
         SDL_RemoveTimer(it->second.sdl_timer_id);
-        g_timers.erase(it);
+        /* Null the callback but keep the entry in the map.
+         * SDL_RemoveTimer prevents future callbacks, but an in-flight
+         * callback may still hold a pointer to this TimerInfo.  If we
+         * erase, that callback reads freed memory.  Nulling callback
+         * ensures the in-flight callback returns 0 (no re-trigger)
+         * instead of calling through a dangling pointer. */
+        it->second.callback = nullptr;
     }
     return true;
 }
