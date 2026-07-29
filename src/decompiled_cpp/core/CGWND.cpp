@@ -1027,6 +1027,18 @@ int CGWND_InstallPathInit()
     mkdir_result = CRT_mkdir((const char*)g_install_path);
     lstrcatA((char*)g_install_path, "/");
 
+    // If the INI-derived path is a non-existent Windows path (e.g.
+    // d:\loco\art-res), fall back to LEGO_LOCO_DATA + /art-res.
+    if (path_len < 3 || (mkdir_result != 0 && path_len > 0)) {
+        const char* data_root = getenv("LEGO_LOCO_DATA");
+        if (!data_root || !*data_root) data_root = "lego-loco-unpacked";
+        lstrcpyA((char*)g_install_path, data_root);
+        lstrcatA((char*)g_install_path, "/art-res");
+        path_len = lstrlenA((const char*)g_install_path);
+        mkdir_result = CRT_mkdir((const char*)g_install_path);
+        lstrcatA((char*)g_install_path, "/");
+    }
+
     return (mkdir_result == 0 && path_len > 2) ? 1 : 0;
 
 #endif /* _WIN32 */

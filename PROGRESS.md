@@ -362,6 +362,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-07-30 (host-audio-background-music) | Implemented background music support: added `SDL3_GameAudioPlayFile` for disk WAV playback with optional looping, rewired `PlaySoundA` in `sdl3_window.cpp` to route through SDL3 audio (SND_ASYNC, SND_LOOP, SND_PURGE), added path-normalization for Windows→Linux slash conversion, and added a host fallback in `CGWND_InstallPathInit` that resolves `g_install_path` from `LEGO_LOCO_DATA` when the INI-derived path is non-existent (e.g. `d:\loco\art-res`). All 10 component tests pass. |
 | 2026-07-29 (sdl3-launch-intro) | Diagnosed that the obsolete GStreamer player was neither built nor invoked by the SDL3 host; added a guarded appsink renderer for all three shipped Cinepak AVIs, Nix decoder dependencies, skippable launch sequencing, and isolated-Wayland screenshot/event coverage. `make test-all` passes. |
 
 | 2026-07-29 (panel-b-selector-typography) | Validated the missing `CGWND_GameSetup_Show` block at `0x408F70` against its raw x86 instructions: `0x40902E..0x4090F5` places the list right of the grid and `0x409635..0x409642` applies its 12px padding. `ResourceManager_Init` (`0x44611A..0x44613A`) proves `g_font_normal` is 14px, weight-700 Arial. The guarded SDL renderer now uses a 14px emboldened FreeType fallback at those exact list coordinates; updated isolated-Wayland clicks and `make test`/`make test-integration` pass. |

@@ -10,6 +10,7 @@
 
 #include "sdl3_window.h"
 #include <SDL3/SDL.h>
+#include "sdl3_game_audio.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -789,8 +790,28 @@ BOOL VerQueryValueA(void* block, LPCSTR subBlock, void** buffer, UINT* len)
 
 BOOL PlaySoundA(LPCSTR pszSound, HMODULE hmod, DWORD fdwSound)
 {
-    (void)pszSound; (void)hmod; (void)fdwSound;
-    return true;
+    (void)hmod;
+
+    // SND_PURGE (0x40): stop all playback.
+    if (fdwSound & 0x40) {
+        SDL3_GameAudioStopAll();
+        return true;
+    }
+
+    // NULL sound with no purge → stop looping file only.
+    if (!pszSound) {
+        SDL3_GameAudioStopAll();
+        return true;
+    }
+
+    // SND_FILENAME is implied when a path is given and SND_RESOURCE
+    // (0x40004) is not set.  SND_ASYNC (1) and SND_LOOP (8) control
+    // playback mode.
+    const bool async = (fdwSound & 1) != 0;
+    const bool loop  = (fdwSound & 8) != 0;
+    (void)async;  // All host playback is async.
+
+    return SDL3_GameAudioPlayFile(pszSound, loop);
 }
 
 /* =========================================================================

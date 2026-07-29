@@ -20,6 +20,13 @@ bool SDL3_GameAudioPlayResource(uint32_t resource_id);
 // Reaps completed streams and reports whether one-shot audio is still queued.
 bool SDL3_GameAudioPump();
 
+// Plays a WAVE file from disk with optional looping.  Returns true on success.
+// When looping is true, the stream cycles until explicit stop or shutdown.
+bool SDL3_GameAudioPlayFile(const char* path, bool looping);
+
+// Returns true when a looping file stream is currently active.
+bool SDL3_GameAudioFilePlaying();
+
 // Stops and destroys every host-owned stream before SDL audio is shut down.
 void SDL3_GameAudioStopAll();
 #endif

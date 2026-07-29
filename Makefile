@@ -95,9 +95,9 @@ test: test-resource-archive test-resource-manager-sdl3 test-dplay-config \
 # SDL3 timer safety regression: rapid SetTimer/KillTimer cycles under thread contention.
 SDL3_TIMER_STRESS_TEST := $(BUILD_DIR)/sdl3_timer_stress_test
 
-$(SDL3_TIMER_STRESS_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h tests/sdl3_timer_stress_test.cpp | dirs
+$(SDL3_TIMER_STRESS_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/host_test_events.h tests/sdl3_timer_stress_test.cpp | dirs
 	@echo "=== Testing SDL3 timer safety (use-after-free regression) ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/sdl3_window.cpp tests/sdl3_timer_stress_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/host_test_events.cpp tests/sdl3_timer_stress_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
 
 test-sdl3-timer-stress: $(SDL3_TIMER_STRESS_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; SDL_VIDEODRIVER=dummy $(SDL3_TIMER_STRESS_TEST)
@@ -175,9 +175,9 @@ test-intro-video-sequence: $(INTRO_VIDEO_SEQUENCE_TEST)
 # SDL primary-target regression: validates the CGWND frame source reaches the window.
 SDL3_PRIMARY_PRESENT_TEST := $(BUILD_DIR)/sdl3_primary_present_test
 
-$(SDL3_PRIMARY_PRESENT_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h tests/sdl3_primary_present_test.cpp | dirs
+$(SDL3_PRIMARY_PRESENT_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/host_test_events.h tests/sdl3_primary_present_test.cpp | dirs
 	@echo "=== Testing SDL primary-surface presentation ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp tests/sdl3_primary_present_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/host_test_events.cpp tests/sdl3_primary_present_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
 
 test-sdl3-primary-present: $(SDL3_PRIMARY_PRESENT_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; SDL_VIDEODRIVER=dummy $(SDL3_PRIMARY_PRESENT_TEST)
@@ -185,9 +185,9 @@ test-sdl3-primary-present: $(SDL3_PRIMARY_PRESENT_TEST)
 # Mode-2 EditWindow::render regression: recovered backdrop resources reach the SDL primary target.
 MODE2_MENU_BACKDROP_TEST := $(BUILD_DIR)/mode2_menu_backdrop_test
 
-$(MODE2_MENU_BACKDROP_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h tests/mode2_menu_backdrop_test.cpp | dirs
+$(MODE2_MENU_BACKDROP_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/host_test_events.h tests/mode2_menu_backdrop_test.cpp | dirs
 	@echo "=== Testing mode 2 EditWindow backdrop composition ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp tests/mode2_menu_backdrop_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/host_test_events.cpp tests/mode2_menu_backdrop_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
 
 test-mode2-menu-backdrop: $(MODE2_MENU_BACKDROP_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MODE2_MENU_BACKDROP_TEST)
@@ -195,9 +195,9 @@ test-mode2-menu-backdrop: $(MODE2_MENU_BACKDROP_TEST)
 # Mode-2 multiplayer GameSetupPanel host-composition regression.
 MODE2_MULTIPLAYER_MENU_TEST := $(BUILD_DIR)/mode2_multiplayer_menu_test
 
-$(MODE2_MULTIPLAYER_MENU_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h tests/mode2_multiplayer_menu_test.cpp | dirs
+$(MODE2_MULTIPLAYER_MENU_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window.h $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_ddraw.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/host_test_events.h tests/mode2_multiplayer_menu_test.cpp | dirs
 	@echo "=== Testing mode 2 multiplayer menu composition ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp tests/mode2_multiplayer_menu_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(FORCE_INC) $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/host_test_events.cpp tests/mode2_multiplayer_menu_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
 
 test-mode2-multiplayer-menu: $(MODE2_MULTIPLAYER_MENU_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_VIDEODRIVER=dummy $(MODE2_MULTIPLAYER_MENU_TEST)
