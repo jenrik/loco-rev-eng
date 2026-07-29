@@ -122,33 +122,35 @@ extern void __fastcall NETMAN_UpdateSessionInfo(void* panel);
 /* ================================================================== */
 void __fastcall NETMAN_EnumerateSessions(int32_t panel)
 {
-    if (*(int32_t*)(panel + 0x1D8) != 0) return;  /* Already created */
+    uint8_t* p = (uint8_t*)(uintptr_t)panel;
+
+    if (*(int32_t*)(p + 0x1D8) != 0) return;  /* Already created */
 
     void* hWnd = CreateWindowExA(
         0x200,                          /* WS_EX_CLIENTEDGE */
-        (const char*)0x47E464,          /* "EDIT" window class */
-        g_empty_string,
+        (const char*)(uintptr_t)0x47E464, /* "EDIT" window class */
+        &g_empty_string,
         0x40000080,                     /* WS_CHILD | WS_VISIBLE */
-        *(int32_t*)(panel + 0x15C),    /* x */
-        *(int32_t*)(panel + 0x160),    /* y */
-        *(int32_t*)(panel + 0x164) - *(int32_t*)(panel + 0x15C),   /* width */
-        *(int32_t*)(panel + 0x168) - *(int32_t*)(panel + 0x160),   /* height */
-        *(void**)(panel + 8),           /* parent HWND */
-        (void*)0x41F,                   /* HMENU = ID */
-        *(void**)(panel + 4),           /* hInstance */
+        *(int32_t*)(p + 0x15C),    /* x */
+        *(int32_t*)(p + 0x160),    /* y */
+        *(int32_t*)(p + 0x164) - *(int32_t*)(p + 0x15C),   /* width */
+        *(int32_t*)(p + 0x168) - *(int32_t*)(p + 0x160),   /* height */
+        *(void**)(p + 8),           /* parent HWND */
+        (void*)0x41F,               /* HMENU = ID */
+        *(void**)(p + 4),           /* hInstance */
         NULL
     );
 
-    *(void**)(panel + 0x1D8) = hWnd;
+    *(void**)(p + 0x1D8) = hWnd;
 
     if (hWnd != NULL) {
-        PostMessageA(hWnd, 0x30, *(uint32_t*)0x4855F8, 1);  /* EM_SETLIMITTEXT */
-        PostMessageA(hWnd, 0xC5, 0x40, 0);                  /* EM_SETMARGINS */
+        PostMessageA(hWnd, 0x30, *(uint32_t*)(uintptr_t)0x4855F8, 1);  /* EM_SETLIMITTEXT */
+        PostMessageA(hWnd, 0xC5, 0x40, 0);                              /* EM_SETMARGINS */
         SetWindowTextA(hWnd, (const char*)((uint8_t*)_g_netman_data + 0x6C));
 
         /* Subclass the edit control */
-        void* oldWndProc = SetWindowLongA(hWnd, -4, (void*)0x4417E0);
-        *(void**)(panel + 0x1DC) = oldWndProc;
+        void* oldWndProc = SetWindowLongA(hWnd, -4, (void*)(uintptr_t)0x4417E0);
+        *(void**)(p + 0x1DC) = oldWndProc;
     }
 }
 
@@ -158,49 +160,52 @@ void __fastcall NETMAN_EnumerateSessions(int32_t panel)
 /* ================================================================== */
 void __fastcall NETMAN_JoinSession(void* panel)
 {
+    uint8_t* p = (uint8_t*)panel;
+
     /* Mark loaded flag as false initially */
-    *(uint8_t*)((uint8_t*)panel + 0x52) = 0;
+    *(uint8_t*)(p + 0x52) = 0;
 
-    if (*(uint8_t*)((uint8_t*)panel + 0x1AC) == 0) {
+    if (*(uint8_t*)(p + 0x1AC) == 0) {
         /* Allocate and initialize 7 sprites */
-        int32_t* res = (int32_t*)ResourceManager_GetById(&g_resmgr, 0x439);
-        *(int32_t*)((uint8_t*)panel + 0x1CC) = (int32_t)res;
-        *(int32_t*)((uint8_t*)panel + 0x1D0) = (**(int32_t(**)(int32_t, int32_t))(*res + 4))(0, 0);
+        int32_t* res = (int32_t*)(uintptr_t)ResourceManager_GetById(&g_resmgr, 0x439);
+        *(int32_t*)(p + 0x1CC) = (int32_t)(uintptr_t)res;
+        *(int32_t*)(p + 0x1D0) = (**(int32_t(**)(int32_t, int32_t))((uint8_t*)res + 4))(0, 0);
 
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1B0));
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1B4));
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1B8));
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1BC));
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1C0));
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1C4));
-        Sprite_Init(*(void**)((uint8_t*)panel + 0x1C8));
+        Sprite_Init(*(void**)(p + 0x1B0));
+        Sprite_Init(*(void**)(p + 0x1B4));
+        Sprite_Init(*(void**)(p + 0x1B8));
+        Sprite_Init(*(void**)(p + 0x1BC));
+        Sprite_Init(*(void**)(p + 0x1C0));
+        Sprite_Init(*(void**)(p + 0x1C4));
+        Sprite_Init(*(void**)(p + 0x1C8));
 
-        *(uint8_t*)((uint8_t*)panel + 0x1AC) = 1;  /* loaded flag */
+        *(uint8_t*)(p + 0x1AC) = 1;  /* loaded flag */
     }
 
     /* Call vtable[7]: OnCreate */
-    (**(void(**)(void*))(* (void**)panel + 0x1C))(panel);
+    (**(void(**)(void*))((uint8_t*)*(void**)panel + 0x1C))(panel);
 
     /* Check network mode from _g_netman_data+0x10 (provider list) */
     {
-        void* provider = *(void**)((uint8_t*)_g_netman_data + 0x10);
+        uint8_t* nd = (uint8_t*)_g_netman_data;
+        void* provider = *(void**)(nd + 0x10);
         while (provider != NULL) {
             if (*(int32_t*)((uint8_t*)provider + 4) == 2) {
-                *(uint8_t*)((uint8_t*)panel + 0x1E1) = 1;  /* 4-player mode */
+                *(uint8_t*)(p + 0x1E1) = 1;  /* 4-player mode */
             } else if (*(int32_t*)((uint8_t*)provider + 4) == 4) {
-                *(uint8_t*)((uint8_t*)panel + 0x1E0) = 1;  /* 2-player mode */
+                *(uint8_t*)(p + 0x1E0) = 1;  /* 2-player mode */
             }
             provider = *(void**)provider;
         }
     }
 
     UI_WindowBase_Show(panel);
-    SetFocus(*(void**)((uint8_t*)panel + 8));  /* parent HWND */
+    SetFocus(*(void**)(p + 8));  /* parent HWND */
 
     /* Set scroll offsets via vtable[3] */
-    (**(void(**)(int32_t, int32_t, int32_t, int32_t))(* (void**)panel + 0x0C))(
-        *(int32_t*)((uint8_t*)panel + 0x18),
-        *(int32_t*)((uint8_t*)panel + 0x19),
+    (**(void(**)(int32_t, int32_t, int32_t, int32_t))((uint8_t*)*(void**)panel + 0x0C))(
+        *(int32_t*)(p + 0x18),
+        *(int32_t*)(p + 0x19),
         0, 1);
 
     /* Load and play sound resource */
@@ -212,11 +217,11 @@ void __fastcall NETMAN_JoinSession(void* panel)
     }
 
     /* Start animation timer (50ms interval) */
-    uint32_t timerId = SetTimer(*(void**)((uint8_t*)panel + 8), 0x50, 0x32, NULL);
-    *(uint32_t*)((uint8_t*)panel + 0xEC) = timerId;
-    *(int32_t*)((uint8_t*)panel + 0x50) = 2;  /* mode state */
+    uint32_t timerId = (uint32_t)(uintptr_t)SetTimer(*(void**)(p + 8), 0x50, 0x32, NULL);
+    *(uint32_t*)(p + 0xEC) = timerId;
+    *(int32_t*)(p + 0x50) = 2;  /* mode state */
 
-    FormatResourceString(&g_resmgr, 0x79, (char*)((uint8_t*)panel + 0x3C), 0x40);
+    FormatResourceString(&g_resmgr, 0x79, (char*)(p + 0x3C), 0x40);
     DPlayManager_RenderConnectionPanel(panel);
 }
 
@@ -226,12 +231,15 @@ void __fastcall NETMAN_JoinSession(void* panel)
 /* ================================================================== */
 void __fastcall NETMAN_CreateSession(int32_t panel)
 {
-    void* provider = *(void**)((uint8_t*)_g_netman_data + 0x10);
+    uint8_t* p = (uint8_t*)(uintptr_t)panel;
+    uint8_t* nd = (uint8_t*)_g_netman_data;
+
+    void* provider = *(void**)(nd + 0x10);
     while (provider != NULL) {
         if (*(int32_t*)((uint8_t*)provider + 4) == 2) {
-            *(uint8_t*)(panel + 0x1E1) = 1;  /* 4-player mode */
+            *(uint8_t*)(p + 0x1E1) = 1;  /* 4-player mode */
         } else if (*(int32_t*)((uint8_t*)provider + 4) == 4) {
-            *(uint8_t*)(panel + 0x1E0) = 1;  /* 2-player mode */
+            *(uint8_t*)(p + 0x1E0) = 1;  /* 2-player mode */
         }
         provider = *(void**)provider;
     }
@@ -243,23 +251,26 @@ void __fastcall NETMAN_CreateSession(int32_t panel)
 /* ================================================================== */
 void __fastcall NETMAN_LeaveSession(int32_t panel)
 {
-    KillTimer(*(void**)(panel + 8), *(uint32_t*)(panel + 0xEC));
+    uint8_t* p = (uint8_t*)(uintptr_t)panel;
 
-    if (*(char*)(panel + 0x1AC) != '\0') {
+    KillTimer(*(void**)(p + 8), *(uint32_t*)(p + 0xEC));
+
+    if (*(char*)(p + 0x1AC) != '\0') {
         /* Destroy child surface via vtable */
-        (**(void(**)(void))(* *(int32_t**)(panel + 0x1CC) + 8))();
+        int32_t* res = *(int32_t**)(p + 0x1CC);
+        (**(void(**)(void))((uint8_t*)res + 8))();
 
-        Sprite_Destroy(*(void**)(panel + 0x1B0));
-        Sprite_Destroy(*(void**)(panel + 0x1B4));
-        Sprite_Destroy(*(void**)(panel + 0x1B8));
-        Sprite_Destroy(*(void**)(panel + 0x1BC));
-        Sprite_Destroy(*(void**)(panel + 0x1C0));
-        Sprite_Destroy(*(void**)(panel + 0x1C4));
-        Sprite_Destroy(*(void**)(panel + 0x1C8));
-        *(uint8_t*)(panel + 0x1AC) = 0;  /* clear loaded flag */
+        Sprite_Destroy(*(void**)(p + 0x1B0));
+        Sprite_Destroy(*(void**)(p + 0x1B4));
+        Sprite_Destroy(*(void**)(p + 0x1B8));
+        Sprite_Destroy(*(void**)(p + 0x1BC));
+        Sprite_Destroy(*(void**)(p + 0x1C0));
+        Sprite_Destroy(*(void**)(p + 0x1C4));
+        Sprite_Destroy(*(void**)(p + 0x1C8));
+        *(uint8_t*)(p + 0x1AC) = 0;  /* clear loaded flag */
     }
 
-    UI_WindowBase_Hide((void*)panel);
+    UI_WindowBase_Hide((void*)(uintptr_t)panel);
 }
 
 /* ================================================================== */
@@ -268,28 +279,30 @@ void __fastcall NETMAN_LeaveSession(int32_t panel)
 /* ================================================================== */
 void __fastcall NETMAN_UpdateSessionInfo(void* panel)
 {
+    uint8_t* p = (uint8_t*)panel;
+
     UIPANEL_Blit(
-        *(void**)((uint8_t*)panel + 0x1D0),        /* child surface */
-        *(uint32_t*)((uint8_t*)panel + 0xD4),       /* srcX */
-        *(uint32_t*)((uint8_t*)panel + 0xD8),       /* srcY */
-        *(int32_t*)((uint8_t*)panel + 0xDC),        /* srcW */
-        *(uint32_t*)((uint8_t*)panel + 0xE0),       /* srcH */
+        *(void**)(p + 0x1D0),        /* child surface */
+        *(uint32_t*)(p + 0xD4),       /* srcX */
+        *(uint32_t*)(p + 0xD8),       /* srcY */
+        *(int32_t*)(p + 0xDC),        /* srcW */
+        *(uint32_t*)(p + 0xE0),       /* srcH */
         _g_primary_surface,
-        *(uint32_t*)((uint8_t*)panel + 0x14C),      /* dstX */
-        *(uint32_t*)((uint8_t*)panel + 0x150),      /* dstY */
-        *(int32_t*)((uint8_t*)panel + 0x154),       /* dstW */
-        *(uint32_t*)((uint8_t*)panel + 0x158),       /* dstH */
+        *(uint32_t*)(p + 0x14C),      /* dstX */
+        *(uint32_t*)(p + 0x150),      /* dstY */
+        *(int32_t*)(p + 0x154),       /* dstW */
+        *(uint32_t*)(p + 0x158),       /* dstH */
         1
     );
 
-    Sprite_SetState(*(void**)((uint8_t*)panel + 0x1C8), 0, NULL);
-    Sprite_SetState(*(void**)((uint8_t*)panel + 0x1B0), 0, NULL);
-    Sprite_SetState(*(void**)((uint8_t*)panel + 0x1B4), 0, NULL);
+    Sprite_SetState(*(void**)(p + 0x1C8), 0, NULL);
+    Sprite_SetState(*(void**)(p + 0x1B0), 0, NULL);
+    Sprite_SetState(*(void**)(p + 0x1B4), 0, NULL);
 
-    NETMAN_GetSessionInfo((int32_t)panel);
+    NETMAN_GetSessionInfo((int32_t)(uintptr_t)panel);
 
-    UIPANEL_EndPaintEx(panel, *(void**)((uint8_t*)panel + 8), 0, 0, NULL);
-    *(uint8_t*)((uint8_t*)panel + 0x148) = 1;  /* update flag */
+    UIPANEL_EndPaintEx(panel, *(void**)(p + 8), 0, 0, NULL);
+    *(uint8_t*)(p + 0x148) = 1;  /* update flag */
 }
 
 /* ================================================================== */
@@ -298,44 +311,47 @@ void __fastcall NETMAN_UpdateSessionInfo(void* panel)
 /* ================================================================== */
 void __fastcall NETMAN_GetSessionInfo(int32_t panel)
 {
-    Sprite_SetState(*(void**)(panel + 0x1C8), 0, NULL);
+    uint8_t* p = (uint8_t*)(uintptr_t)panel;
+    uint8_t* nd = (uint8_t*)_g_netman_data;
 
-    if (*(char*)((uint8_t*)_g_netman_data + 8) == '\0') {
+    Sprite_SetState(*(void**)(p + 0x1C8), 0, NULL);
+
+    if (*(char*)(nd + 8) == '\0') {
         /* Host mode */
-        if (*(char*)(panel + 0x1E0) != '\0') {
+        if (*(char*)(p + 0x1E0) != '\0') {
             /* 2-player mode */
-            if (*(int32_t*)((uint8_t*)_g_netman_data + 0x28) == 4) {
-                Sprite_SetState(*(void**)(panel + 0x1B8), 1, NULL);
-                ShowWindow(*(void**)(panel + 0x1D8), 0);
+            if (*(int32_t*)(nd + 0x28) == 4) {
+                Sprite_SetState(*(void**)(p + 0x1B8), 1, NULL);
+                ShowWindow(*(void**)(p + 0x1D8), 0);
             } else {
-                Sprite_SetState(*(void**)(panel + 0x1B8), 0, NULL);
+                Sprite_SetState(*(void**)(p + 0x1B8), 0, NULL);
             }
         }
-        if (*(char*)(panel + 0x1E1) == '\0') return;
+        if (*(char*)(p + 0x1E1) == '\0') return;
 
         /* 4-player mode */
-        if (*(int32_t*)((uint8_t*)_g_netman_data + 0x28) == 2) {
-            Sprite_SetState(*(void**)(panel + 0x1C0), 0, NULL);
-            Sprite_SetState(*(void**)(panel + 0x1BC), 1, NULL);
-            ShowWindow(*(void**)(panel + 0x1D8), 5);  /* SW_SHOW */
-            SetFocus(*(void**)(panel + 0x1D8));
+        if (*(int32_t*)(nd + 0x28) == 2) {
+            Sprite_SetState(*(void**)(p + 0x1C0), 0, NULL);
+            Sprite_SetState(*(void**)(p + 0x1BC), 1, NULL);
+            ShowWindow(*(void**)(p + 0x1D8), 5);  /* SW_SHOW */
+            SetFocus(*(void**)(p + 0x1D8));
             return;
         }
-        ShowWindow(*(void**)(panel + 0x1D8), 0);
+        ShowWindow(*(void**)(p + 0x1D8), 0);
     } else {
         /* Client mode */
-        ShowWindow(*(void**)(panel + 0x1D8), 0);
-        if (*(char*)(panel + 0x1E0) != '\0') {
-            Sprite_SetState(*(void**)(panel + 0x1B8),
-                            (uint32_t)(*(int32_t*)((uint8_t*)_g_netman_data + 0x1C) == 4), NULL);
+        ShowWindow(*(void**)(p + 0x1D8), 0);
+        if (*(char*)(p + 0x1E0) != '\0') {
+            Sprite_SetState(*(void**)(p + 0x1B8),
+                            (uint32_t)(*(int32_t*)(nd + 0x1C) == 4), NULL);
         }
-        if (*(char*)(panel + 0x1E1) == '\0') return;
-        if (*(int32_t*)((uint8_t*)_g_netman_data + 0x1C) == 2) {
-            Sprite_SetState(*(void**)(panel + 0x1BC), 1, NULL);
+        if (*(char*)(p + 0x1E1) == '\0') return;
+        if (*(int32_t*)(nd + 0x1C) == 2) {
+            Sprite_SetState(*(void**)(p + 0x1BC), 1, NULL);
             return;
         }
     }
-    Sprite_SetState(*(void**)(panel + 0x1BC), 0, NULL);
+    Sprite_SetState(*(void**)(p + 0x1BC), 0, NULL);
 }
 
 /* ================================================================== */
@@ -345,80 +361,83 @@ void __fastcall NETMAN_GetSessionInfo(int32_t panel)
 /* ================================================================== */
 uint32_t __thiscall NETMAN_SetSessionInfo(void* panel)
 {
+    uint8_t* p = (uint8_t*)panel;
+    uint8_t* nd = (uint8_t*)_g_netman_data;
+
     /* Extract click coordinates from caller */
     uint32_t clickX, clickY;  /* passed in via register magic — approximated */
     /* NOTE: In the original code, these come from the caller's stack frame */
     uint32_t x = 0, y = 0; /* parameter-passing trick: in_stack_00000010 >> 16 = y, low = x */
 
-    if (*(uint8_t*)((uint8_t*)panel + 0x148) == 0) return 0;
+    if (*(uint8_t*)(p + 0x148) == 0) return 0;
 
     POINT pt;
     pt.x = x;
     pt.y = y;
 
     /* Hit-test sprite 0 (btn_back/cancel) */
-    if (PtInRect((RECT*)(*(int32_t*)((uint8_t*)panel + 0x1B0) + 4), pt)) {
-        Sprite_SetState(*(void**)((uint8_t*)panel + 0x1B0), 1, NULL);
+    if (PtInRect((RECT*)((uint8_t*)(uintptr_t)*(int32_t*)(p + 0x1B0) + 4), pt)) {
+        Sprite_SetState(*(void**)(p + 0x1B0), 1, NULL);
         PlaySound(0x5015);
         UIPANEL_EndPaint(panel);
         Sleep(0x96);
-        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))(* (void**)panel + 0x10))
+        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))((uint8_t*)*(void**)panel + 0x10))
             (0, 0, 0, 0, 1);
 
-        GetWindowTextA(*(void**)((uint8_t*)panel + 0x1D8),
-                       (char*)((uint8_t*)_g_netman_data + 0x6C), 0x40);
-        if (*(char*)((uint8_t*)_g_netman_data + 8) == '\0') {
-            *(uint8_t*)((uint8_t*)_g_netman_data + 0x24) = 1;
+        GetWindowTextA(*(void**)(p + 0x1D8),
+                       (char*)(nd + 0x6C), 0x40);
+        if (*(char*)(nd + 8) == '\0') {
+            *(uint8_t*)(nd + 0x24) = 1;
         } else {
-            *(uint8_t*)((uint8_t*)_g_netman_data + 0x18) = 1;
+            *(uint8_t*)(nd + 0x18) = 1;
         }
-        NETMAN_SendPacket((int32_t)_g_netman_data);
+        NETMAN_SendPacket((int32_t)(uintptr_t)_g_netman_data);
         UI_MainMenu_SetState(g_ui_main, 3);
         return 0;
     }
 
     /* Hit-test sprite 1 (btn_join/ok) */
-    if (PtInRect((RECT*)(*(int32_t*)((uint8_t*)panel + 0x1B4) + 4), pt)) {
-        Sprite_SetState(*(void**)((uint8_t*)panel + 0x1B4), 1, NULL);
+    if (PtInRect((RECT*)((uint8_t*)(uintptr_t)*(int32_t*)(p + 0x1B4) + 4), pt)) {
+        Sprite_SetState(*(void**)(p + 0x1B4), 1, NULL);
         PlaySound(0x5015);
         UIPANEL_EndPaint(panel);
         Sleep(0x96);
-        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))(* (void**)panel + 0x10))
+        (**(void(**)(int32_t, int32_t, int32_t, int32_t, int32_t))((uint8_t*)*(void**)panel + 0x10))
             (0, 0, 0, 0, 1);
         UI_MainMenu_SetState(g_ui_main, 7);
         return 0;
     }
 
     /* Hit-test sprite 2 (2-player button) */
-    if (PtInRect((RECT*)(*(int32_t*)((uint8_t*)panel + 0x1B8) + 4), pt) &&
-        *(char*)((uint8_t*)panel + 0x1E0) != '\0') {
-        if (*(char*)((uint8_t*)_g_netman_data + 8) == '\0') {
-            *(int32_t*)((uint8_t*)_g_netman_data + 0x28) = 4;
+    if (PtInRect((RECT*)((uint8_t*)(uintptr_t)*(int32_t*)(p + 0x1B8) + 4), pt) &&
+        *(char*)(p + 0x1E0) != '\0') {
+        if (*(char*)(nd + 8) == '\0') {
+            *(int32_t*)(nd + 0x28) = 4;
         } else {
-            *(int32_t*)((uint8_t*)_g_netman_data + 0x1C) = 4;
+            *(int32_t*)(nd + 0x1C) = 4;
         }
-        NETMAN_GetSessionInfo((int32_t)panel);
+        NETMAN_GetSessionInfo((int32_t)(uintptr_t)panel);
         PlaySound(0x5015);
-        UIPANEL_EndPaintEx(panel, *(void**)((uint8_t*)panel + 8), 0, 0, NULL);
+        UIPANEL_EndPaintEx(panel, *(void**)(p + 8), 0, 0, NULL);
         return 0;
     }
 
     /* Hit-test sprite 3 (4-player button) */
-    if (PtInRect((RECT*)(*(int32_t*)((uint8_t*)panel + 0x1BC) + 4), pt) &&
-        *(char*)((uint8_t*)panel + 0x1E1) != '\0') {
-        if (*(char*)((uint8_t*)_g_netman_data + 8) == '\0') {
-            *(int32_t*)((uint8_t*)_g_netman_data + 0x28) = 2;
+    if (PtInRect((RECT*)((uint8_t*)(uintptr_t)*(int32_t*)(p + 0x1BC) + 4), pt) &&
+        *(char*)(p + 0x1E1) != '\0') {
+        if (*(char*)(nd + 8) == '\0') {
+            *(int32_t*)(nd + 0x28) = 2;
         } else {
-            *(int32_t*)((uint8_t*)_g_netman_data + 0x1C) = 2;
+            *(int32_t*)(nd + 0x1C) = 2;
         }
-        NETMAN_GetSessionInfo((int32_t)panel);
+        NETMAN_GetSessionInfo((int32_t)(uintptr_t)panel);
         PlaySound(0x5015);
-        UIPANEL_EndPaintEx(panel, *(void**)((uint8_t*)panel + 8), 0, 0, NULL);
+        UIPANEL_EndPaintEx(panel, *(void**)(p + 8), 0, 0, NULL);
         return 0;
     }
 
     /* Hit-test panel RECT (+0x19C) for random sound */
-    if (PtInRect((RECT*)((uint8_t*)panel + 0x19C), pt)) {
+    if (PtInRect((RECT*)(p + 0x19C), pt)) {
         int32_t rnd = CRT_rand();
         PlaySoundAt(rnd / 0x1FFF + 0x500F, x, y, 4);
     }

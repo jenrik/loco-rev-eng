@@ -764,7 +764,7 @@ void World::UpdateTick(void)
             occupant = (int*)((uint8_t*)vehicle + VEHICLE_OFF_OCCUPANTS);  /* +0x38 */
             for (j = 8; j != 0; j--) {
                 if (*occupant != 0) {
-                    Building_RemoveOccupant((int*)*occupant);
+                    Building_RemoveOccupant((int*)(uintptr_t)*occupant);
                     *occupant = 0;
                 }
                 occupant++;
@@ -793,7 +793,7 @@ void World::UpdateTick(void)
                 occupant = (int*)((uint8_t*)vehicle + VEHICLE_OFF_OCCUPANTS);  /* +0x38 */
                 for (j = 8; j != 0; j--) {
                     if (*occupant != 0) {
-                        Building_RemoveOccupant((int*)*occupant);
+                        Building_RemoveOccupant((int*)(uintptr_t)*occupant);
                         *occupant = 0;
                     }
                     occupant++;
@@ -916,12 +916,12 @@ uint World::ProcessEvents(void* current_vehicle)
                 int* other_sub = (int*)other_sub_obj;
 
                 viewport_result = Town_BlitViewport(
-                    *(void**)(other_sub[0x10] + 0x10),     /* +0x40 resource -> +0x10 */
+                    *(void**)(uintptr_t)(other_sub[0x10] + 0x10),     /* +0x40 resource -> +0x10 */
                     other_sub[0x0C],                       /* +0x30 */
                     other_sub[0x0D],                       /* +0x34 */
                     other_sub[0x0E],                       /* +0x38 */
                     other_sub[0x0F],                       /* +0x3C */
-                    ((uint)*(uint16_t*)(other_sub[0x10] + 0x14) *
+                    ((uint)*(uint16_t*)(uintptr_t)(other_sub[0x10] + 0x14) *
                      (uint)*(uint16_t*)(other_sub + 0x10E) -  /* +0x438 */
                      other_sub[2]) + cur_top,               /* adjusted X */
                     cur_bottom - other_sub[3]);             /* height diff */
@@ -994,10 +994,10 @@ char World::ProcessAudio(int audio_x, int audio_y)
             /* Check if sub-object is active/visible */
             if (*(char*)((uint8_t*)sub_obj + SUB_OBJ_OFF_ACTIVE_FLAG) == 1) {  /* +0x24 */
                 /* Call vtable[2] = HitTest or PtInRect */
-                char hit = (*(char (**)(int, int))(*(int*)sub_obj + 8))(audio_x, audio_y);
+                char hit = (*(char (**)(int, int))((uintptr_t)*(int*)sub_obj + 8))(audio_x, audio_y);
                 if (hit != 0) {
                     Town_SelectBuilding(g_town_view,
-                        (int)*(void**)((uint8_t*)vehicle + VEHICLE_OFF_SUB_OBJ_ARRAY + j * 4));
+                        (int)(uintptr_t)*(void**)((uint8_t*)vehicle + VEHICLE_OFF_SUB_OBJ_ARRAY + j * 4));
                     result = 1;
                     break;
                 }
@@ -1128,8 +1128,8 @@ void World::Lock(void)
                 break;
             }
 
-            int depth_a = *(int*)(*(int*)((uint8_t*)obj_a + SUB_OBJ_OFF_EDITOR_STATE_1) + 0x10);  /* +0x430 -> +0x10 */
-            int depth_b = *(int*)(*(int*)((uint8_t*)obj_b + SUB_OBJ_OFF_EDITOR_STATE_1) + 0x10);
+            int depth_a = *(int*)((uintptr_t)*(int*)((uint8_t*)obj_a + SUB_OBJ_OFF_EDITOR_STATE_1) + 0x10);  /* +0x430 -> +0x10 */
+            int depth_b = *(int*)((uintptr_t)*(int*)((uint8_t*)obj_b + SUB_OBJ_OFF_EDITOR_STATE_1) + 0x10);
 
             if (depth_b < depth_a) {
                 /* Swap */
@@ -1250,7 +1250,7 @@ bool __stdcall World_SerializeMap(int* building, int* route_data)
 
     /* Check occupancy flag and tracked vehicle */
     if (building[0x47] == 1 &&                                   /* +0x11C */
-        (vehicle = (void*)building[0x48], vehicle != NULL)) {    /* +0x120 */
+        (vehicle = (void*)(uintptr_t)building[0x48], vehicle != NULL)) {    /* +0x120 */
 
         initial_resource = *route_data;
         current_resource = VehicleEditor_GetResourceId(*(int*)((uint8_t*)vehicle + 0x10));
@@ -1259,7 +1259,7 @@ bool __stdcall World_SerializeMap(int* building, int* route_data)
 
         if (result) {
             /* Set new resource on sub-object via vtable[15] (+0x3C) */
-            (*(void (**)(int, int))(**(int**)((uint8_t*)vehicle + 0x10) + 0x3C))
+            (*(void (**)(int, int))((uintptr_t)*(int*)*(void**)((uint8_t*)vehicle + 0x10) + 0x3C))
                 (*(int*)((uint8_t*)vehicle + 0x10), initial_resource);
         }
 
@@ -1367,10 +1367,10 @@ void __stdcall World_RenderAll(void* vehicle)
             }
 
             /* Clear tracked vehicle on destination building */
-            if ((void*)*(int*)((uint8_t*)dest_building + BUILDING_OFF_TRACKED_VEH) == vehicle) {
+            if ((void*)(uintptr_t)*(int*)((uint8_t*)dest_building + BUILDING_OFF_TRACKED_VEH) == vehicle) {
                 *(int*)((uint8_t*)dest_building + BUILDING_OFF_TRACKED_VEH) = 0;   /* +0x120 */
                 *(char*)((uint8_t*)dest_building + BUILDING_OFF_TRACKED_FLAG) = 0; /* +0x128 */
-                (*(void (**)(int))(*(int*)dest_building + 0x1C))(0);               /* SetAnimState(0) */
+                (*(void (**)(int))((uintptr_t)*(int*)dest_building + 0x1C))(0);               /* SetAnimState(0) */
                 *(int*)((uint8_t*)dest_building + BUILDING_OFF_OCCUPANCY) = 0;     /* +0x11C */
             }
         }
@@ -1387,7 +1387,7 @@ void __stdcall World_RenderAll(void* vehicle)
     if (main_sub != NULL) {
         sub_obj_parent = *(void**)((uint8_t*)main_sub + 0x14);
         if (sub_obj_parent != NULL && *(int*)((uint8_t*)sub_obj_parent + 0x10C) == 7) {
-            (*(void (**)(int))(*(int*)sub_obj_parent + 0x1C))(1);  /* SetAnimState(1) */
+            (*(void (**)(int))((uintptr_t)*(int*)sub_obj_parent + 0x1C))(1);  /* SetAnimState(1) */
         }
     }
 
@@ -1398,15 +1398,15 @@ void __stdcall World_RenderAll(void* vehicle)
         if (sub_obj == NULL) continue;
 
         /* Detach editor state 1 */
-        void* editor_1 = *(void**)(*(int*)((uint8_t*)sub_obj + SUB_OBJ_OFF_EDITOR_STATE_1) + 0x14);
+        void* editor_1 = *(void**)((uintptr_t)*(int*)((uint8_t*)sub_obj + SUB_OBJ_OFF_EDITOR_STATE_1) + 0x14);
         if (editor_1 != NULL && *(int*)((uint8_t*)editor_1 + 0x10C) == 7) {
-            (*(void (**)(int))(*(int*)editor_1 + 0x1C))(1);
+            (*(void (**)(int))((uintptr_t)*(int*)editor_1 + 0x1C))(1);
         }
 
         /* Detach editor state 2 */
-        void* editor_2 = *(void**)(*(int*)((uint8_t*)sub_obj + SUB_OBJ_OFF_EDITOR_STATE_2) + 0x14);
+        void* editor_2 = *(void**)((uintptr_t)*(int*)((uint8_t*)sub_obj + SUB_OBJ_OFF_EDITOR_STATE_2) + 0x14);
         if (editor_2 != NULL && *(int*)((uint8_t*)editor_2 + 0x10C) == 7) {
-            (*(void (**)(int))(*(int*)editor_2 + 0x1C))(1);
+            (*(void (**)(int))((uintptr_t)*(int*)editor_2 + 0x1C))(1);
         }
     }
 
