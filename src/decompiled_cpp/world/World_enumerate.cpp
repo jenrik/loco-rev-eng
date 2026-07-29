@@ -9,7 +9,7 @@
  * loading sequence.
  */
 
-#include "world.h"
+#include "../game/World.h"
 #include "../shared/types.h"
 
 /* ================================================================== */

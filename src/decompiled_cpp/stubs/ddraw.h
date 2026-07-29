@@ -20,14 +20,8 @@
 /* the actual definitions.  When not LOCO_SDL3, provide stub methods. */
 /* ================================================================== */
 
-#ifdef LOCO_SDL3
-  /* SDL3 mode: types are provided by port/sdl3_ddraw_bridge.h.
-   * We forward-declare so that code using IDirectDraw4* still compiles. */
-  #include "../port/sdl3_compat.h"
-  /* sdl3_ddraw_bridge.h typedefs IDirectDraw4 → LocoDD,
-   * IDirectDrawSurface4 → LocoSurface */
-#else
-  /* Stub mode (MinGW or native): empty inline methods */
+  /* Stub mode: empty inline methods. The SDL3 host provides real
+   * implementations via src/sdl3_shims/sdl3_ddraw.h. */
   typedef struct IDirectDraw4 {
       void* vtable;
       int Release() { return 0; }
@@ -59,7 +53,5 @@
       DWORD dwSize;
       DWORD dwDDFX;
   } DDBLTFX;
-
-#endif /* LOCO_SDL3 */
 
 #endif /* STUBS_DDRAW_H */

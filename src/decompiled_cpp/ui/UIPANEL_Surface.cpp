@@ -48,18 +48,15 @@
 /*   [0] scalar deleting destructor (UIPANEL_DestroySurface)          */
 /* ================================================================== */
 
-/* DDraw types — when LOCO_SDL3, use SDL3 bridge; otherwise stubs */
-#ifdef LOCO_SDL3
-#include "../port/sdl3_compat.h"
-#else
-/* Forward-declare DDraw types — stubs/ddraw.h conflicts with types.h */
+/* DDraw stub types for host build (the real SDL3 bridge is in
+ * src/sdl3_shims/sdl3_ddraw.h; files that need the full bridge
+ * include it directly.) */
 struct DDSCAPS2 { DWORD dwCaps; DWORD dwCaps2; DWORD dwCaps3; DWORD dwCaps4; };
 struct DDSURFACEDESC { DWORD dwSize; DWORD dwFlags; DWORD dwHeight; DWORD dwWidth; LONG lPitch; void* lpSurface; DWORD dwBackBufferCount; DWORD dwMipMapCount; DWORD dwAlphaBitDepth; DWORD dwReserved; DDSCAPS2 ddsCaps; };
 struct IDirectDrawSurface4;
 struct IDirectDraw4 { void* vtable; int Release() { return 0; } int CreateSurface(void*, IDirectDrawSurface4**, void*) { return 0; } };
 struct IDirectDrawSurface4 { void* vtable; int Release() { return 0; } int Blt(void*, void*, void*, int, void*) { return 0; } int Lock(void*, void*, int, int) { return 0; } int Unlock(void*) { return 0; } };
 struct DDBLTFX { DWORD dwSize; DWORD dwFillColor; DWORD dwDDFX; };
-#endif /* LOCO_SDL3 */
 
 /* UIPANEL_Surface is defined in graphics/LOCOBITMAP.h (pulled in transitively
  * via UIPANEL.h above). Its `ddraw_surf` member is a raw void* there, so this
