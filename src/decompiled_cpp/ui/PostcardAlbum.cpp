@@ -143,6 +143,7 @@ PostcardAlbum* PostcardAlbum::Create(HINSTANCE hInstance, UINT resId)
 void* PostcardAlbum::Destroy(uint8_t flags)
 {
     this->FreeAllSprites();
+    return this;
 }
 
 /* ================================================================== */
@@ -515,7 +516,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
         if (this->row_enabled_4 == 1) {
             /* Page-up: decrement tile_index */
-            this->tile_index = --this->tile_index;
+            --this->tile_index;
             this->scroll_wheel_pos = this->tile_index;
 
             /* Recalculate scroll_pixel_offset */
@@ -954,7 +955,7 @@ uint8_t PostcardAlbum::RenderTileName(int row_index)
         void* icon_sprite = this->row_icon[row_index];
         if (icon_sprite) {
             DPLAY_RenderPlayer(g_dplay,
-                (HDC)(uint32_t)(*(int*)((uint8_t*)icon_sprite + 0xC) >> 8),
+                (HDC)(uintptr_t)(*(int*)((uint8_t*)icon_sprite + 0xC) >> 8),
                 (int)tile_entry,
                 g_primary_surface,
                 *(int*)((uint8_t*)icon_sprite + 4),
@@ -966,7 +967,7 @@ uint8_t PostcardAlbum::RenderTileName(int row_index)
 
     /* Copy player name string into tile name buffer */
     {
-        const char* name_src = (const char*)(tile_entry + 0x25);
+        const char* name_src = (const char*)(uintptr_t)(tile_entry + 0x25);
         char* name_dst = this->tile_names[row_index];  /* +0x1DA + row*0x14 */
         int i = 0;
         while (i < 19 && *name_src) {
@@ -977,8 +978,8 @@ uint8_t PostcardAlbum::RenderTileName(int row_index)
     }
 
     /* Free tile entry (vtable[0] scalar dtor) */
-    ((void (*)(void*, int))(*(void***)tile_entry)[0])(
-        (void*)tile_entry, 1);
+    ((void (*)(void*, int))(*(void***)(uintptr_t)tile_entry)[0])(
+        (void*)(uintptr_t)tile_entry, 1);
 
     /* Set row's tile sprite state to normal */
     Sprite_SetState(this->row_tile[row_index], 0, 0);
@@ -1029,7 +1030,7 @@ void PostcardAlbum::RenderAllTiles()
     }
 
     /* Phase 2: Begin paint and draw text labels */
-    HDC hdc = (HDC)UIPANEL_BeginPaint((int)this);
+    HDC hdc = (HDC)UIPANEL_BeginPaint(this);
 
     if (this->tiles_per_page != 0) {
         for (uint32_t i = 0; i < (uint32_t)this->tiles_per_page; i++) {
@@ -1071,7 +1072,7 @@ void PostcardAlbum::RenderAllTiles()
     }
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)hdc, 1, 0);
+    UIPANEL_EndPaintEx(this, this->hWnd, (int)(uintptr_t)hdc, 1, 0);
 
     /* Phase 3: Update navigation flags */
     if (this->scroll_pixel_offset == 0) {

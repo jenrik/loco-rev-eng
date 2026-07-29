@@ -537,7 +537,7 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
     }
 
     /* Determine palette background sprite height */
-    uint palSpriteH = (uint)*(uint16_t*)(*(int*)((intptr_t)this->sprite_37C + 0x14) + 0x16);
+    uint palSpriteH = (uint)*(uint16_t*)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x14) + 0x16);
 
     if (mode == 0) {
         /* Normal mode: blit palette background from source */
@@ -583,7 +583,7 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
         int palW = this->field_1B8 - this->field_1B0;
 
         UIPANEL_Blit(
-            *(void**)(*(int*)((intptr_t)this->sprite_37C + 0x18)),  /* sprite surface */
+            *(void**)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x18)),  /* sprite surface */
             0,
             (uint)this->field_1BC - this->field_1B4 - palSpriteH,
             palW,
@@ -710,7 +710,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     PlaySound(0x5274);
 
     /* Determine palette background sprite height */
-    uint palSpriteH = (uint)*(uint16_t*)(*(int*)((intptr_t)this->sprite_37C + 0x14) + 0x16);
+    uint palSpriteH = (uint)*(uint16_t*)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x14) + 0x16);
 
     int* surfA;  /* +0x590 editor_surf_a */
     int* surfB;  /* +0x598 editor_surf_b */
@@ -744,7 +744,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
         int palHeight = this->field_1BC - this->field_1B4;
         int palWidth  = this->field_1B8 - this->field_1B0;
 
-        void* spritePanel = *(void**)(*(int*)((intptr_t)this->sprite_37C + 0x18)); /* sprite surface */
+        void* spritePanel = *(void**)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x18)); /* sprite surface */
 
         UIPANEL_Blit(
             spritePanel,
@@ -831,7 +831,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     }
 
     /* Finalize: unlock, redraw palette normally, clean up */
-    HWND mainWnd = *(HWND*)(*(int*)(intptr_t)g_main_window + 8);
+    HWND mainWnd = *(HWND*)((uint8_t*)*(uintptr_t*)((uint8_t*)g_main_window + 8));
     DDRAW_UnlockPrimary(mainWnd);
 
     this->draw_color_palette(nullptr, 0);
