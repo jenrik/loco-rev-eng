@@ -41,56 +41,59 @@ extern void* g_clipper_surf; /* 0x004FF110 — clipper surface/UIPANEL surface *
 /* ================================================================== */
 void __cdecl DDRAW_ReleaseClippers(void)
 {
-    void** ptr;
-    int32_t (*release)(void*);
-    int32_t (*destroy)(uint32_t flags);
-
     /* Release clipper 0 */
     if (g_clipper_0 != NULL) {
-        release = *(int32_t (**)(void*))g_clipper_0;
-        release[2](g_clipper_0);   /* vtable[2] = Release() */
+        uint8_t* vtbl = *(uint8_t**)g_clipper_0;
+        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        release_fn(g_clipper_0);   /* vtable[2] = Release() */
         g_clipper_0 = NULL;
     }
 
     /* Release clipper 1 */
     if (g_clipper_1 != NULL) {
-        release = *(int32_t (**)(void*))g_clipper_1;
-        release[2](g_clipper_1);
+        uint8_t* vtbl = *(uint8_t**)g_clipper_1;
+        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        release_fn(g_clipper_1);
         g_clipper_1 = NULL;
     }
 
     /* Release clipper 2 */
     if (g_clipper_2 != NULL) {
-        release = *(int32_t (**)(void*))g_clipper_2;
-        release[2](g_clipper_2);
+        uint8_t* vtbl = *(uint8_t**)g_clipper_2;
+        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        release_fn(g_clipper_2);
         g_clipper_2 = NULL;
     }
 
     /* Release clipper 3 */
     if (g_clipper_3 != NULL) {
-        release = *(int32_t (**)(void*))g_clipper_3;
-        release[2](g_clipper_3);
+        uint8_t* vtbl = *(uint8_t**)g_clipper_3;
+        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        release_fn(g_clipper_3);
         g_clipper_3 = NULL;
     }
 
     /* Release clipper 4 */
     if (g_clipper_4 != NULL) {
-        release = *(int32_t (**)(void*))g_clipper_4;
-        release[2](g_clipper_4);
+        uint8_t* vtbl = *(uint8_t**)g_clipper_4;
+        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        release_fn(g_clipper_4);
         g_clipper_4 = NULL;
     }
 
     /* Release clipper 5 */
     if (g_clipper_5 != NULL) {
-        release = *(int32_t (**)(void*))g_clipper_5;
-        release[2](g_clipper_5);
+        uint8_t* vtbl = *(uint8_t**)g_clipper_5;
+        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        release_fn(g_clipper_5);
         g_clipper_5 = NULL;
     }
 
     /* Destroy UIPANEL surface */
     if (g_clipper_surf != NULL) {
-        destroy = *(int32_t (**)(uint32_t))g_clipper_surf;
-        destroy(1);   /* vtable[0] = scalar destructor with delete */
+        uint8_t* vtbl = *(uint8_t**)g_clipper_surf;
+        int32_t (*destroy_fn)(uint32_t) = *(int32_t (**)(uint32_t))(vtbl + 0 * sizeof(void*));
+        destroy_fn(1);   /* vtable[0] = scalar destructor with delete */
         g_clipper_surf = NULL;
     }
 }
