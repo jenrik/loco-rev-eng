@@ -30,13 +30,37 @@ def test_main_menu_mode_10_terminal_inputs_drain_exit_audio_and_shut_down(
     game.wait_for_clean_exit(timeout=5)
 
 
+def test_singleplayer_go_does_not_open_multiplayer_lobby(game):
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+
+    # 0x407 is startup\\singleup. Its click sets DPlayConfig+7, which takes
+    # the non-network branch of EditWindow_OnPlayerNameChanged (0x422722).
+    game.click_logical(600, 550, "select single player")
+    game.screenshot("main-menu-singleplayer-selected")
+    game.click_logical(600, 720, "player-name field")
+    game.clear_text()
+    game.type_text("Agent")
+    game.click_logical(925, 700, "main-menu accept")
+
+    game.wait_for_event("screen_presented", screen="game_setup", dialog_state=4)
+    assert not any(
+        item.get("event") == "screen_presented"
+        and item.get("screen") == "multiplayer_lobby"
+        and item.get("dialog_state") == 5
+        for item in game.events()
+    )
+
+
 def test_game_setup_lobby_search_and_exit(game):
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.screenshot("main-menu-before-accept")
 
-    # 0x422C60 toggles DPlayConfig+7 through the left 0x407 control; its
-    # pushed state renders 0x408 and enables right-hand 0x409.
-    game.click_logical(600, 550, "select multiplayer")
+    # 0x422C60 first selects single-player through 0x407 → 0x408. Its
+    # enabled 0x409 multipleup control then clears DPlayConfig+7 and renders
+    # 0x40A multipledown, which is the original multiplayer selection.
+    game.click_logical(600, 550, "select single player")
+    game.screenshot("main-menu-singleplayer-selected")
+    game.click_logical(780, 550, "select multiplayer")
     game.screenshot("main-menu-multiplayer-selected")
 
     game.click_logical(600, 720, "player-name field")

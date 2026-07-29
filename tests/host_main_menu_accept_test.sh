@@ -24,7 +24,7 @@ require 'SDL3_GameAudioPlayResource(0x5015);' "$source"
 require 'if (pressed_button == kHostOptionOne) {' "$source"
 require 'this->hostCommitPlayerName();' "$source"
 require 'void EditWindow::hostCommitPlayerName()' "$source"
-require 'this->setState(_g_netman_state[7] != 0 ? 5 : 4);' "$source"
+require 'this->setState(_g_netman_state[7] != 0 ? 4 : 5);' "$source"
 require 'void hostCommitPlayerName();' "$header"
 
 # Both controls must converge on this helper. It appears once in the accept

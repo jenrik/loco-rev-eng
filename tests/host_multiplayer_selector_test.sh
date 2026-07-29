@@ -14,18 +14,18 @@ require() {
     }
 }
 
-require 'kHostPlay,'
-require 'kHostScenario,'
-require 'if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostPlay;'
-require 'if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostScenario;'
+require 'kHostSinglePlayer,'
+require 'kHostMultiplayer,'
+require 'if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostSinglePlayer;'
+require 'if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostMultiplayer;'
 require 'if (has_scenario) host_blit_menu_sprite(this->sprite_409, this->btnScenarioRect);'
-require 'case kHostPlay:'
+require 'case kHostSinglePlayer:'
 require '_g_netman_state[7] = 1;'
 require 'NETMAN_SetGameMode(g_netman, 3);'
-require 'case kHostScenario:'
+require 'case kHostMultiplayer:'
 require '_g_netman_state[7] = 0;'
 require 'NETMAN_SetGameMode(g_netman, 0);'
 require 'SDL3_GameAudioPlayResource(0x5015);'
-require 'this->setState(_g_netman_state[7] != 0 ? 5 : 4);'
+require 'this->setState(_g_netman_state[7] != 0 ? 4 : 5);'
 
-echo 'PASS: host main menu preserves the recovered multiplayer push-state toggle and click sound'
+echo 'PASS: host main menu preserves recovered single/multiplayer selection and click sound'

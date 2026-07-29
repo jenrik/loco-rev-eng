@@ -983,8 +983,8 @@ enum HostMenuButton {
     kHostNoButton = -1,
     kHostOptionOne,
     kHostQuit,
-    kHostPlay,
-    kHostScenario,
+    kHostSinglePlayer,
+    kHostMultiplayer,
     kHostExit,
     kHostText,
 };
@@ -1038,8 +1038,8 @@ HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
 
     if (host_point_in_rect(menu.btnOption1Rect, x, y)) return kHostOptionOne;
     if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
-    if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostPlay;
-    if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostScenario;
+    if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostSinglePlayer;
+    if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostMultiplayer;
     if (!multiplayer && !alternate_menu && host_point_in_rect(menu.btnExitRect, x, y)) return kHostExit;
     if (!multiplayer && alternate_menu && host_point_in_rect(menu.btnTextRect, x, y)) return kHostText;
     return kHostNoButton;
@@ -1178,20 +1178,19 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
         return;
     }
 
-    // 0x422C60..0x422D66 is a toggle handler, not a direct game-start
-    // action. It changes the DPlay configuration byte, redraws the button
-    // pair, invokes the window redraw callback, then plays 0x5015. In
-    // particular, clicking the left control pushes it from 0x407 to 0x408
-    // and enables the right-hand 0x409 control; clicking 0x409 restores the
-    // 0x407/0x40A pair.
+    // 0x422C60..0x422D66 is a mode selector, not a direct game-start
+    // action. Resource strings identify 0x407/0x408 as singleup/singledown
+    // and 0x409/0x40A as multipleup/multipledown. The byte at DPlayConfig+7
+    // is therefore the selected-single-player flag: 1 after the left click,
+    // 0 after the enabled right click.
     bool changed = false;
     switch (button) {
-    case kHostPlay:
+    case kHostSinglePlayer:
         _g_netman_state[7] = 1;
         NETMAN_SetGameMode(g_netman, 3);
         changed = true;
         break;
-    case kHostScenario:
+    case kHostMultiplayer:
         _g_netman_state[7] = 0;
         NETMAN_SetGameMode(g_netman, 0);
         changed = true;
@@ -1231,10 +1230,14 @@ void EditWindow::hostCommitPlayerName()
     if (legal && has_alpha && g_player_config != nullptr) {
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
-        // The original UI branches from the persisted DPlay configuration.
-        // The SDL host follows the same selection byte after the recovered
-        // 0x422C60 toggle handler has updated it.
-        this->setState(_g_netman_state[7] != 0 ? 5 : 4);
+        // 0x422722 branches on DPlayConfig+7. With the selected-single flag
+        // set, the original takes the local startup path at 0x4227DA and
+        // never enters the multiplayer panel. The SDL host cannot yet run
+        // that full game-start path, so its guarded presentation fallback is
+        // the existing single-player setup (state 4). The cleared flag is
+        // the multiplayer selection and maps to the host network lobby
+        // (state 5).
+        this->setState(_g_netman_state[7] != 0 ? 4 : 5);
     }
 }
 
