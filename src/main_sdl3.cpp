@@ -25,9 +25,17 @@
 #include "core/CGWND.h"
 #include "shared/types.h"
 
+#ifndef _WIN32
+#include "sdl3_shims/sdl3_game_audio.h"
+extern "C" { SDL_Window* SDL3_GetWindow(void); }
+#endif
+
 /* Forward declarations from bridge */
 void SDL3_DDraw_Init(void);
 void SDL3_DDraw_Shutdown(void);
+
+/* Global game mode — set to 10 on quit */
+extern int g_game_mode;
 
 /* =========================================================================
  * Win32 API stubs needed by the original game code
@@ -131,6 +139,27 @@ int main(int argc, char *argv[])
     /* The game loop is inside InitAllSubsystems / InitMode1 */
     /* It uses DirectDraw for rendering, DirectSound for audio */
     /* All of which are now backed by SDL3! */
+
+    /* ---- Mode 10 headless audio drain ---- */
+    /* CGWND_SetMode(10) has queued the exit sweep 0x5026 and stopped
+       background music.  The original posts WM_CLOSE immediately and
+       lets DirectSound hardware buffers outlive the window.  On SDL3
+       the audio stream is process-owned: hide the window immediately,
+       then pump audio headlessly until the sweep drains, before
+       SDL_Quit tears down the audio device. */
+    if (g_game_mode == 10) {
+        printf("Draining exit audio...\n");
+        // Hide the window so the user sees an instant close.
+        if (SDL_Window* w = SDL3_GetWindow()) SDL_HideWindow(w);
+        const Uint64 deadline = SDL_GetTicks() + 3000;
+        while (SDL3_GameAudioPump() && SDL_GetTicks() < deadline) {
+            SDL_Delay(10);
+        }
+        if (SDL_GetTicks() < deadline) {
+            SDL_Delay(150);
+        }
+        printf("Exit audio drained.\n");
+    }
 
     /* ---- Cleanup ---- */
     printf("Game exited. Shutting down...\n");

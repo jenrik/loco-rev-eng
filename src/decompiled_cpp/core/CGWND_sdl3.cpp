@@ -115,23 +115,12 @@ static void PumpMessages_SDL3(uint8_t filter)
             break;
         }
 
-        // CGWND_SetMode(10) plays the exit sweep 0x5026. The original
-        // posts WM_CLOSE immediately because DirectSound secondary buffers
-        // are hardware-owned and play to completion independently.  SDL3
-        // streams are process-owned, so we must drain them before exit.
+        // CGWND_SetMode(10) has queued the exit sweep 0x5026 and
+        // stopped background music.  Return immediately so the caller can
+        // tear down the window, then drain audio headlessly — the original
+        // posts WM_CLOSE right after starting playback and lets DirectSound
+        // hardware buffers outlive the window.
         if (g_game_mode == 10) {
-            // Drain the SDL audio stream.  When GetAudioStreamQueued
-            // reaches 0 the device has consumed all PCM data, but the
-            // hardware output buffer may still hold a period worth of
-            // samples.  A short post-drain delay lets them reach the
-            // speakers before the process tears down the audio subsystem.
-            const Uint64 deadline = SDL_GetTicks() + 3000;  // 3s timeout
-            while (SDL3_GameAudioPump() && SDL_GetTicks() < deadline) {
-                SDL_Delay(10);
-            }
-            if (SDL_GetTicks() < deadline) {
-                SDL_Delay(150);  // post-drain: let device buffer play out
-            }
             stop_text_input();
             return;
         }
