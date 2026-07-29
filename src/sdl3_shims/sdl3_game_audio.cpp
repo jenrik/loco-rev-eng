@@ -222,4 +222,8 @@ bool SDL3_GameAudioFilePlaying() {
     return g_loop_stream != nullptr;
 }
 
+void SDL3_GameAudioStopLooping() {
+    g_loop_stream.reset();
+}
+
 #endif  // !_WIN32

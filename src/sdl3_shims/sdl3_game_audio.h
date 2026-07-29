@@ -27,6 +27,10 @@ bool SDL3_GameAudioPlayFile(const char* path, bool looping);
 // Returns true when a looping file stream is currently active.
 bool SDL3_GameAudioFilePlaying();
 
+// Stops only the looping background-music stream, leaving one-shot
+// streams (e.g. the exit sweep) intact for the drain loop.
+void SDL3_GameAudioStopLooping();
+
 // Stops and destroys every host-owned stream before SDL audio is shut down.
 void SDL3_GameAudioStopAll();
 #endif
