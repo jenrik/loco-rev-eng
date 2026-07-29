@@ -10,7 +10,7 @@ import signal
 import struct
 import subprocess
 import time
-from typing import Any
+from typing import Any, Mapping
 
 
 CANVAS_WIDTH = 1280
@@ -20,10 +20,14 @@ CANVAS_HEIGHT = 1024
 class GameSession:
     """Own one game process and one throwaway gui-sandbox compositor."""
 
-    def __init__(self, root: Path, artifact_dir: Path, timeout: float = 20.0):
+    def __init__(
+        self, root: Path, artifact_dir: Path, timeout: float = 20.0,
+        environment: Mapping[str, str] | None = None,
+    ):
         self.root = root
         self.artifact_dir = artifact_dir
         self.timeout = timeout
+        self.environment = dict(environment or {})
         self.events_path = artifact_dir / "events.jsonl"
         self.stdout_path = artifact_dir / "stdout.log"
         self.stderr_path = artifact_dir / "stderr.log"
@@ -50,11 +54,19 @@ class GameSession:
         )
         self.tag = self._parse_assignment(started.stdout, "TAG")
 
+        for key, value in self.environment.items():
+            if not key.isidentifier() or not isinstance(value, str):
+                raise AssertionError(f"invalid game environment override: {key!r}")
+
         script = "\n".join(
             [
                 "#!/bin/sh",
                 "set -eu",
                 f"cd {shlex.quote(str(self.root))}",
+                *[
+                    f"export {key}={shlex.quote(value)}"
+                    for key, value in self.environment.items()
+                ],
                 f"export LEGO_LOCO_DATA={shlex.quote(str(self.root / 'lego-loco-unpacked'))}",
                 f"export LEGO_LOCO_TEST_EVENTS={shlex.quote(str(self.events_path))}",
                 f"exec {shlex.quote(str(binary))} >>{shlex.quote(str(self.stdout_path))} 2>>{shlex.quote(str(self.stderr_path))}",
@@ -188,6 +200,11 @@ class GameSession:
         self._record("type", byte_count=len(text.encode("utf-8")))
         self._run(["gui-sandbox", "type", self.tag, text])
         self.assert_alive("text input")
+
+    def press_key(self, key: str) -> None:
+        assert self.tag is not None
+        self._record("key", key=key)
+        self._run(["gui-sandbox", "key", self.tag, key])
 
     def clear_text(self, count: int = 12) -> None:
         assert self.tag is not None

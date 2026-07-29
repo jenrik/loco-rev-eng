@@ -43,7 +43,8 @@ def gui_artifacts_root(request: pytest.FixtureRequest) -> Path:
 @pytest.fixture
 def game(request: pytest.FixtureRequest, gui_artifacts_root: Path):
     artifact_dir = gui_artifacts_root / request.node.name
-    session = GameSession(ROOT, artifact_dir)
+    environment = getattr(request, "param", None)
+    session = GameSession(ROOT, artifact_dir, environment=environment)
     try:
         session.start()
         yield session

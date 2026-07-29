@@ -6,14 +6,28 @@ import pytest
 pytestmark = [pytest.mark.integration, pytest.mark.gui]
 
 
-def test_launches_main_menu_and_quits_cleanly(game):
+@pytest.mark.parametrize(
+    "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
+)
+@pytest.mark.parametrize("terminal_input", ["exit-control", "escape-focused"])
+def test_main_menu_mode_10_terminal_inputs_drain_exit_audio_and_shut_down(
+    game, terminal_input,
+):
+    """Mode-2 terminal inputs must not spin forever while the mode-10 WAV is queued."""
     game.wait_for_event("process_started")
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
-    game.screenshot("main-menu")
+    game.screenshot(f"main-menu-before-{terminal_input}")
 
-    game.click_logical(430, 700, "main-menu quit")
-    game.wait_for_event("mode_changed", new_mode=10)
-    game.wait_for_clean_exit()
+    if terminal_input == "exit-control":
+        # Original +0x14C / resource-0x405 control → CGWND_SetMode(10).
+        game.click_logical(430, 700, "main-menu exit")
+    else:
+        # The focused native EDIT Escape branch also reaches CGWND_SetMode(10).
+        game.click_logical(600, 720, "player-name field")
+        game.press_key("Escape")
+
+    game.wait_for_event("mode_changed", timeout=5, new_mode=10)
+    game.wait_for_clean_exit(timeout=5)
 
 
 def test_game_setup_lobby_search_and_exit(game):

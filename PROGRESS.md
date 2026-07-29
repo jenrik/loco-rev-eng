@@ -356,6 +356,8 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-07-29 (main-menu-exit-tdd) | Replaced the false-positive main-menu Exit check with an isolated-Wayland regression that launches with SDL dummy audio, drives both original +0x14C/resource-0x405 Exit and focused-Escape mode-10 paths, and fails after 5 seconds awaiting clean shutdown; this deterministically reproduces the queued-audio exit stall. |
+
 | 2026-07-29 (pytest-gui-integration) | Introduced the Nix-managed pytest test layer and `make test{,-integration,-all}` gates; added guarded host JSONL observability, crash/timeout detection, Sway-decoration-aware logical input, and persistent screenshot/log artifacts; deterministic regressions pass and the two headless GUI flows passed twice consecutively. |
 
 | 2026-07-28 (editwindow-ghidra-validation) | Cross-validated EditWindow menu methods against Ghidra: corrected 0x422D80 hit-test gates and 0x422010/0x422440 resource branches/character source rect; replaced verified raw field access and all self-vtable dispatches with typed UI_WindowBase calls after recovering 0x425FD0/0x426020/0x426130; corrected the canonical opaque `g_main_window` global use after checking `UI_MainMenu_Hide` (0x420860); gated the recovered packed-x86 `UIPANEL_Render` slot paths under `_WIN32` after a mode-2 core proved they are incompatible with the SDL host layout; added generated Makefile header dependencies after a stale NameEntryPanel vtable crashed the Enter/state-3 transition, then clean-rebuilt and GDB-exercised that transition; `make build`, `make check` (74/74), and `make test-mode2-menu-backdrop` pass. |
