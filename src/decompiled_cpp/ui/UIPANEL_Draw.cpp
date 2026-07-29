@@ -140,8 +140,8 @@ void __thiscall UIPANEL_DrawBorder(void* self, int resource_ptr)
             *(int*)((intptr_t)self + 0x498) = resource_ptr + 0x50;
 
             UIPANEL_InitSurface((void*)((intptr_t)self + 0x478),
-                                *(uint16_t*)(resource_ptr + 0x102),
-                                *(uint16_t*)(resource_ptr + 0x104),
+                                *(uint16_t*)(uintptr_t)(resource_ptr + 0x102),
+                                *(uint16_t*)(uintptr_t)(resource_ptr + 0x104),
                                 0, 0, 8);
 
             void* save_header = *(uintptr_t**)((intptr_t)self + 0x498);
@@ -177,13 +177,13 @@ void __fastcall UIPANEL_DrawButton(int param_1)
     SetRect(&btn_rect, 0x0F, 0x1A, 0x8E, 0x79);
 
     /* Source rect from surface dimensions */
-    int surf_w = *(int*)(param_1 + 0x480);  /* surface width at +0x480 */
-    int surf_h = *(int*)(param_1 + 0x484);
+    int surf_w = *(int*)(uintptr_t)(param_1 + 0x480);  /* surface width at +0x480 */
+    int surf_h = *(int*)(uintptr_t)(param_1 + 0x484);
     SetRect(&src_rect, 0, 0, surf_w, surf_h);
 
     /* Determine scaling based on width */
     uint32_t flags;
-    int element_surf = *(int*)(*(int*)(param_1 + 0x40) + 0x10);
+    int element_surf = *(int*)(uintptr_t)(*(int*)(uintptr_t)(param_1 + 0x40) + 0x10);
 
     switch (surf_w) {
     case 0x32:  /* 50px */
@@ -203,23 +203,23 @@ void __fastcall UIPANEL_DrawButton(int param_1)
     default:
         /* Unknown size, just invalidate */
         TileMap_InvalidateRect(g_tilemap,
-            *(int*)(param_1 + 8), *(int*)(param_1 + 0xC),
-            *(int*)(param_1 + 0x10), *(int*)(param_1 + 0x14));
+            *(int*)(uintptr_t)(param_1 + 8), *(int*)(uintptr_t)(param_1 + 0xC),
+            *(int*)(uintptr_t)(param_1 + 0x10), *(int*)(uintptr_t)(param_1 + 0x14));
         return;
     }
 
-    Town_BlitElement((void*)(param_1 + 0x478),
+    Town_BlitElement((void*)(uintptr_t)(param_1 + 0x478),
                      dest_rect.left, dest_rect.top,
                      dest_rect.right, dest_rect.bottom,
-                     (void*)element_surf,
+                     (void*)(uintptr_t)element_surf,
                      src_rect.left, src_rect.top,
                      src_rect.right, src_rect.bottom,
                      flags);
 
     /* Invalidate the panel rect */
     TileMap_InvalidateRect(g_tilemap,
-        *(int*)(param_1 + 8), *(int*)(param_1 + 0xC),
-        *(int*)(param_1 + 0x10), *(int*)(param_1 + 0x14));
+        *(int*)(uintptr_t)(param_1 + 8), *(int*)(uintptr_t)(param_1 + 0xC),
+        *(int*)(uintptr_t)(param_1 + 0x10), *(int*)(uintptr_t)(param_1 + 0x14));
 }
 
 /* ================================================================== */
@@ -269,7 +269,7 @@ uint32_t __thiscall UIPANEL_SetButtonState(void* self, void* entity,
         return 0;
     }
 
-    uint32_t res_type = *(int*)(*(int*)((intptr_t)entity + 0x44) + 4);
+    uint32_t res_type = *(int*)(uintptr_t)(*(int*)(uintptr_t)((intptr_t)entity + 0x44) + 4);
     uint16_t panel_mode = *(uint16_t*)((intptr_t)self + 0x49C);
 
     switch (res_type) {
@@ -385,7 +385,7 @@ uint8_t __thiscall UIPANEL_DrawCheckbox(void* self, void* entity,
         return 0;
     }
 
-    uint32_t res_id = *(uint32_t*)(*(int*)((intptr_t)entity + 0x44) + 4);
+    uint32_t res_id = *(uint32_t*)(uintptr_t)(*(int*)(uintptr_t)((intptr_t)entity + 0x44) + 4);
 
     uint32_t dispatch_val;
     switch (res_id) {

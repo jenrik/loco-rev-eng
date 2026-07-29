@@ -28,7 +28,11 @@
 #pragma once
 
 #include "../shared/types.h"
+#include <cstddef>
 #include <new>
+
+typedef unsigned int   uint;
+typedef unsigned short ushort;
 
 /* ================================================================== */
 /* Global address                                                      */
