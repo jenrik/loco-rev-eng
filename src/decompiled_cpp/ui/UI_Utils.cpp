@@ -227,24 +227,24 @@ void* UI_Manager::createMessageBox(int resourceId, short param2,
         return NULL;
     }
 
-    uint16_t frameCount = *(uint16_t*)(res + 0x158);
-    uint32_t maxFrames  = *(uint32_t*)(res + 0x15C);
+    uint16_t frameCount = *(uint16_t*)((uintptr_t)res + 0x158);
+    uint32_t maxFrames  = *(uint32_t*)((uintptr_t)res + 0x15C);
     if (frameCount >= maxFrames) {
         return NULL;
     }
 
     /* Check associated resource (at +0x40) */
-    int childResId = *(int*)(res + 0x40);
+    int childResId = *(int*)((uintptr_t)res + 0x40);
     if (childResId != -1) {
         int childRes = ResourceManager_GetById((void**)&g_resmgr, childResId);
-        if (childRes == 0 || *(short*)(childRes + 0x158) == 0) {
+        if (childRes == 0 || *(short*)((uintptr_t)childRes + 0x158) == 0) {
             return NULL;
         }
     }
 
     /* Check resource at +0x44 */
-    int res2 = ResourceManager_GetById((void**)&g_resmgr, *(int*)(res + 0x44));
-    if (res2 != 0 && *(short*)(res2 + 0x158) != 0) {
+    int res2 = ResourceManager_GetById((void**)&g_resmgr, *(int*)((uintptr_t)res + 0x44));
+    if (res2 != 0 && *(short*)((uintptr_t)res2 + 0x158) != 0) {
         return NULL;
     }
 
