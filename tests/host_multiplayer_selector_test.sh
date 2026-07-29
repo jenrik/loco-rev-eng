@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Guards the host-only main-menu choice pair resolved from loco.exe's PE
-# string table: 0x407/0x408 = singleup/singledown and
-# 0x409/0x40A = multipleup/multipledown.
+# Guards the recovered menu branches that show the original right-hand
+# multiplayer control (0x409) in the known-good state-7/provider-list path.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,15 +14,14 @@ require() {
     }
 }
 
-require 'kHostSinglePlayer,'
-require 'kHostMultiplayer,'
-require 'if (host_point_in_rect(menu.btnPlayRect, x, y)) return kHostSinglePlayer;'
-require 'if (host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostMultiplayer;'
-require '? this->sprite_408 : this->sprite_407,'
-require '? this->sprite_40A : this->sprite_409,'
-require 'case kHostSinglePlayer:'
+require 'kHostPlay,'
+require 'kHostScenario,'
+require 'if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostPlay;'
+require 'if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostScenario;'
+require 'if (has_scenario) host_blit_menu_sprite(this->sprite_409, this->btnScenarioRect);'
+require 'case kHostPlay:'
 require 'this->hostMultiplayerSelected = false;'
-require 'case kHostMultiplayer:'
+require 'case kHostScenario:'
 require 'this->hostMultiplayerSelected = true;'
 
-echo 'PASS: host main menu renders and routes both single-player and multiplayer controls'
+echo 'PASS: host main menu preserves the recovered right-hand multiplayer control and state-5 selection'

@@ -51,6 +51,7 @@
 #pragma once
 
 #include "UI_WindowBase.h"
+#include <cstdint>
 #include "RenderSurface.h"
 #include "LayoutListNode.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
@@ -150,6 +151,10 @@ public:
     // SDL DirectPlay has no session provider. This records completion of the
     // original Search control's empty-session scan without changing x86 ABI.
     bool hostSearchCompleted = false;
+    // GAMESTATE_HandleClick (0x40A548 et seq.) displays frame 1 and blocks
+    // for 150 ms before completing each main lobby-control action.
+    uint8_t hostPressedControl = 0;
+    uint64_t hostPressedUntilMs = 0;
 #endif
 
     /* Total: 0x260 bytes */

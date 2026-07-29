@@ -997,6 +997,7 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 #ifndef _WIN32
 #include "EditWindow.h"
 #include "../../sdl3_shims/host_test_events.h"
+#include "../../sdl3_shims/sdl3_game_audio.h"
 
 /* ================================================================== */
 /* GameSetupPanel::hostRenderFrame — SDL3 host composition              */
@@ -1079,12 +1080,54 @@ bool host_blit_frame(uint32_t resource_id, int frame, int frame_width, int frame
 }
 }  // namespace
 
-enum class HostLobbyControl {
+enum class HostLobbyControl : uint8_t {
     None,
     Exit,
     Search,
     Options,
 };
+
+constexpr uint64_t kLobbyPressDurationMs = 150;  // Sleep(0x96) at 0x40A591 etc.
+
+HostLobbyControl host_pressed_control(const GameSetupPanel& panel)
+{
+    return static_cast<HostLobbyControl>(panel.hostPressedControl);
+}
+
+void host_complete_lobby_control(GameSetupPanel& panel, HostLobbyControl control)
+{
+    switch (control) {
+    case HostLobbyControl::Exit:
+        // 0x40A65C..0x40A709: reset session state, then state 7.
+        if (g_editwindow_ptr != nullptr) {
+            g_editwindow_ptr->setState(7);
+            panel.titleDrawnFlag = 0;
+        }
+        return;
+
+    case HostLobbyControl::Search:
+        // 0x40A70C..0x40A82A starts a client search. The SDL DirectPlay
+        // boundary is deliberately empty, so retain the completed empty scan.
+        if (g_editwindow_ptr != nullptr && g_editwindow_ptr->dialogState == 5) {
+            panel.hostSearchCompleted = true;
+            loco::host_test::emit_search_completed(0);
+        }
+        return;
+
+    case HostLobbyControl::Options:
+        // 0x40A873..0x40A908 returns through state 2. NameEntryPanel has no
+        // SDL compositor, so state 7 remains the explicit host presentation
+        // fallback after preserving the recovered state-2 transition.
+        if (g_editwindow_ptr != nullptr) {
+            g_editwindow_ptr->setState(2);
+            g_editwindow_ptr->setState(7);
+        }
+        return;
+
+    case HostLobbyControl::None:
+        return;
+    }
+}
 
 bool host_lobby_contains(int left, int top, int width, int height,
                          float x, float y)
@@ -1127,9 +1170,13 @@ void GameSetupPanel::hostRenderFrame()
     // the backdrop.  Each source BMP is two horizontal frames, exactly as
     // Sprite_SetState (0x454C30) expects.  Go (0x42A) is not drawn here: the
     // original only exposes it after network/session selection updates it.
-    host_blit_frame(kExitResource, 0, 144, 112, kExitLeft, kExitTop);
-    host_blit_frame(kSearchResource, 0, 72, 72, kOptionsLeft + 79, kOptionsTop);
-    host_blit_frame(kOptionsResource, 0, 72, 72, kOptionsLeft, kOptionsTop);
+    const HostLobbyControl pressed_control = host_pressed_control(*this);
+    host_blit_frame(kExitResource, pressed_control == HostLobbyControl::Exit ? 1 : 0,
+                    144, 112, kExitLeft, kExitTop);
+    host_blit_frame(kSearchResource, pressed_control == HostLobbyControl::Search ? 1 : 0,
+                    72, 72, kOptionsLeft + 79, kOptionsTop);
+    host_blit_frame(kOptionsResource, pressed_control == HostLobbyControl::Options ? 1 : 0,
+                    72, 72, kOptionsLeft, kOptionsTop);
 
     // drawGrid (0x409980) advances x by 0xA5 and y by 0x7C and selects
     // state 1 for an empty slot. DirectPlay is host-stubbed, so all nine
@@ -1162,6 +1209,16 @@ void GameSetupPanel::hostRenderFrame()
         SDL_SetRenderScale(renderer, 1.0f, 1.0f);
         SDL_SetRenderTarget(renderer, nullptr);
     }
+
+    // The original handler plays 0x5015, draws source frame 1, then sleeps
+    // 0x96 ms before its state transition. Render frame 1 until that exact
+    // interval has elapsed; this preserves feedback without blocking SDL.
+    if (pressed_control != HostLobbyControl::None &&
+        SDL_GetTicks() >= this->hostPressedUntilMs) {
+        this->hostPressedControl = static_cast<uint8_t>(HostLobbyControl::None);
+        this->hostPressedUntilMs = 0;
+        host_complete_lobby_control(*this, pressed_control);
+    }
 }
 
 /**
@@ -1182,47 +1239,18 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
         return;
     }
 
-    switch (host_lobby_control_at(canvas_x, canvas_y)) {
-    case HostLobbyControl::Exit:
-        // 0x40A75C..0x40A7B9: ResetNetman, set game mode 3, then
-        // UI_MainMenu_SetState(g_ui_main, 7).  The SDL network boundary has
-        // no live session to reset; the recovered UI-state transition is the
-        // observable menu action and remains entirely host-only.
-        if (g_editwindow_ptr != nullptr) {
-            g_editwindow_ptr->setState(7);
-            this->titleDrawnFlag = 0;
-        }
-        return;
-
-    case HostLobbyControl::Search:
-        // 0x40A7BE..0x40A895 starts a DirectPlay search and loads its results.
-        // It is a network-lobby action, not the single-player setup action
-        // that shares this control rectangle.
-        if (g_editwindow_ptr == nullptr || g_editwindow_ptr->dialogState != 5) {
-            return;
-        }
-        // SDL's DirectPlay adapter reports an empty session list by design;
-        // record that completed empty scan rather than invoking untranslated
-        // x86 queue code or pretending a session was found.
-        this->hostSearchCompleted = true;
-        loco::host_test::emit_search_completed(0);
-        return;
-
-    case HostLobbyControl::Options:
-        // 0x40A8D1..0x40A928 resets the network state and returns to the
-        // parent NameEntryPanel via UI_MainMenu_SetState(g_ui_main, 2).
-        if (g_editwindow_ptr != nullptr) {
-            g_editwindow_ptr->setState(2);
-            // NameEntryPanel has no SDL compositor yet. Project the completed
-            // state-2 return through the existing state-7 main-menu host
-            // composition so the control has a visible, usable result instead
-            // of leaving the last lobby framebuffer onscreen.
-            g_editwindow_ptr->setState(7);
-        }
-        return;
-
-    case HostLobbyControl::None:
+    const HostLobbyControl control = host_lobby_control_at(canvas_x, canvas_y);
+    if (control == HostLobbyControl::None ||
+        this->hostPressedControl != static_cast<uint8_t>(HostLobbyControl::None)) {
         return;
     }
+
+    // Every actionable control and valid grid/list selection in
+    // GAMESTATE_HandleClick calls PlaySound(0x5015), sets Sprite_SetState(1),
+    // and blocks for Sleep(0x96). The host uses the archive-backed sound and
+    // defers the recovered action until hostRenderFrame has shown frame 1.
+    SDL3_GameAudioPlayResource(0x5015);
+    this->hostPressedControl = static_cast<uint8_t>(control);
+    this->hostPressedUntilMs = SDL_GetTicks() + kLobbyPressDurationMs;
 }
 #endif  // !_WIN32

@@ -982,8 +982,8 @@ enum HostMenuButton {
     kHostNoButton = -1,
     kHostOptionOne,
     kHostQuit,
-    kHostSinglePlayer,
-    kHostMultiplayer,
+    kHostPlay,
+    kHostScenario,
     kHostExit,
     kHostText,
 };
@@ -1027,19 +1027,18 @@ void host_set_menu_rects(EditWindow& menu)
 
 HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
 {
-    // Preserve 0x422D80 hit-test ordering. The host selection is deliberately
-    // separate from the persisted DirectPlay configuration: its x86 flags do
-    // not represent a live SDL transport.
-    const bool multiplayer = menu.hostMultiplayerSelected;
-    const bool alternate_menu = false;
+    // Exact enabled-control ordering from EditWindow_netPanelWndProc
+    // (0x422D80). Keep menu composition and availability tied to the same
+    // recovered configuration fields as the known-good host revision.
+    const char* const state = _g_netman_state;
+    const bool multiplayer = state && state[7] != 0;
+    const bool alternate_menu = state && state[8] != 0;
+    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
 
     if (host_point_in_rect(menu.btnOption1Rect, x, y)) return kHostOptionOne;
     if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
-    // 0x407/0x408 are singleup/singledown; 0x409/0x40A are
-    // multipleup/multipledown. Present both recovered choices in the SDL
-    // host, which has no provider list to drive the original state gate.
-    if (host_point_in_rect(menu.btnPlayRect, x, y)) return kHostSinglePlayer;
-    if (host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostMultiplayer;
+    if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostPlay;
+    if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostScenario;
     if (!multiplayer && !alternate_menu && host_point_in_rect(menu.btnExitRect, x, y)) return kHostExit;
     if (!multiplayer && alternate_menu && host_point_in_rect(menu.btnTextRect, x, y)) return kHostText;
     return kHostNoButton;
@@ -1080,24 +1079,25 @@ void EditWindow::hostRenderFrame()
     host_set_menu_rects(*this);
     this->render();
 
-    // SDL has no DirectPlay provider, so model the selected presentation
-    // mode explicitly rather than treating persisted x86 configuration bytes
-    // as live network state.
-    const bool alternate_menu = false;
+    const char* const state = _g_netman_state;
+    const bool multiplayer = state && state[7] != 0;
+    const bool alternate_menu = state && state[8] != 0;
+    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
 
-    // PE RT_STRING verifies 0x407/0x408 as singleup/singledown and
-    // 0x409/0x40A as multipleup/multipledown. The host must render both
-    // choices: its DirectPlay provider list is intentionally always empty.
-    host_blit_menu_sprite(this->hostHoveredButton == kHostSinglePlayer
-                              ? this->sprite_408 : this->sprite_407,
-                          this->btnPlayRect);
-    host_blit_menu_sprite(this->hostHoveredButton == kHostMultiplayer
-                              ? this->sprite_40A : this->sprite_409,
-                          this->btnScenarioRect);
-    host_blit_menu_sprite(alternate_menu ? this->sprite_40C : this->sprite_40B,
-                          this->btnExitRect);
-    host_blit_menu_sprite(alternate_menu ? this->sprite_40E : this->sprite_40F,
-                          this->btnTextRect);
+    // Original 0x421C9B -> 0x422010 selection and visibility branches.
+    // In particular, retain the known-good right-hand 0x409 path rather than
+    // replacing it with a synthetic always-visible menu.
+    if (multiplayer) {
+        host_blit_menu_sprite(this->sprite_408, this->btnPlayRect);
+        if (has_scenario) host_blit_menu_sprite(this->sprite_409, this->btnScenarioRect);
+    } else {
+        host_blit_menu_sprite(this->sprite_407, this->btnPlayRect);
+        if (has_scenario) host_blit_menu_sprite(this->sprite_40A, this->btnScenarioRect);
+        host_blit_menu_sprite(alternate_menu ? this->sprite_40C : this->sprite_40B,
+                              this->btnExitRect);
+        host_blit_menu_sprite(alternate_menu ? this->sprite_40E : this->sprite_40F,
+                              this->btnTextRect);
+    }
 
     // 0x421C9B draws 0x403 and 0x405. The click feedback paths at
     // 0x42298A and 0x422AC3 use 0x404 and 0x406 for their selected frames.
@@ -1164,15 +1164,13 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
         return;
     }
 
-    // Host-only menu selection. DirectPlay is intentionally absent, so do
-    // not mutate recovered configuration or queue a fictitious transport
-    // transition. The recovered 0x407 and 0x409 controls select state 4/5
-    // when hostCommitPlayerName() accepts the player name.
+    // Preserve the original hit-testing and artwork, but record only the
+    // host-only destination: the DirectPlay transport itself is unavailable.
     switch (button) {
-    case kHostSinglePlayer:
+    case kHostPlay:
         this->hostMultiplayerSelected = false;
         break;
-    case kHostMultiplayer:
+    case kHostScenario:
         this->hostMultiplayerSelected = true;
         break;
     case kHostExit:
@@ -1203,8 +1201,8 @@ void EditWindow::hostCommitPlayerName()
     if (legal && has_alpha && g_player_config != nullptr) {
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
-        // In the original UI the DirectPlay settings decide this branch.
-        // The SDL host has no provider, so use its explicit selection instead.
+        // The original UI uses the DirectPlay settings here. The host records
+        // the selected recovered control instead because no transport exists.
         this->setState(this->hostMultiplayerSelected ? 5 : 4);
     }
 }
