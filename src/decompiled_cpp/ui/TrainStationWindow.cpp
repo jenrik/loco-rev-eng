@@ -223,7 +223,7 @@ void TrainStationWindow::show(int train_type, int context)
         strRes = ResourceManager_GetStringById(&g_resmgr, 0x50F8);
         loadResult = RESMGR_LoadSoundResource(strRes);
         if ((uint8_t)loadResult != 0) {
-            *(uint8_t*)(strRes + 8) = 1;   /* mark as active */
+            *(uint8_t*)((uintptr_t)strRes + 8) = 1;   /* mark as active */
             this->sound_loaded = 1;
         }
     }
@@ -311,7 +311,7 @@ void TrainStationWindow::hide()
     /* Release sound resource if loaded */
     if (g_audio != nullptr && this->sound_loaded != 0) {
         strRes = ResourceManager_GetStringById(&g_resmgr, 0x50F8);
-        *(uint8_t*)(strRes + 8) = 0;   /* mark as inactive */
+        *(uint8_t*)((uintptr_t)strRes + 8) = 0;   /* mark as inactive */
         RESMGR_ReleaseSoundResource(strRes);
         this->sound_loaded = 0;
     }

@@ -182,7 +182,7 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
     Sprite_SetState(this->main_sprite, state, nullptr);
 
     /* Step 3: Begin GDI painting */
-    HDC hdc = (HDC)UIPANEL_BeginPaint((int)this);
+    HDC hdc = (HDC)(uintptr_t)UIPANEL_BeginPaint((int)(uintptr_t)this);
 
     /* Step 4: Set text color to black, background to transparent */
     COLORREF old_color = SetTextColor(hdc, 0);                   /* black */
@@ -405,7 +405,7 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
     int cell_h = (int)(short)player_entry[0x0D];  /* +0x34 */
 
     /* Begin GDI painting */
-    HDC hdc = (HDC)UIPANEL_BeginPaint((int)this);
+    HDC hdc = (HDC)(uintptr_t)UIPANEL_BeginPaint((int)(uintptr_t)this);
 
     /* Create black pen for dot outlines */
     HPEN pen = CreatePen(0, 1, 0);                /* PS_SOLID, 1px, black */
@@ -421,7 +421,7 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
     int dot_spacing_y = sizes[0] - cell_rect[1];   /* y spacing */
 
     /* Iterate occupant linked list at player_entry+0x38 (0xE * 4 = index 14) */
-    void* occupant = (void*)player_entry[0x0E];     /* +0x38 — occupant list head */
+    void* occupant = (void*)(uintptr_t)player_entry[0x0E];     /* +0x38 — occupant list head */
     while (occupant != nullptr) {
         int occ_x = *(int*)((uint8_t*)occupant + 4);
         int occ_y = *(int*)((uint8_t*)occupant + 8);
@@ -658,7 +658,7 @@ void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
 
         /* Copy icon pixel data */
         uint32_t data_size = (uint32_t)player_entry[0x0F];     /* +0x3C */
-        uint8_t* src_data  = (uint8_t*)player_entry[0x11];     /* +0x44 */
+        uint8_t* src_data  = (uint8_t*)(uintptr_t)player_entry[0x11];     /* +0x44 */
         uint8_t* dst_data  = *(uint8_t**)((uint8_t*)tmp_surface + 0x18);  /* surface pixel ptr +0x18 */
 
         /* Memcpy whole dwords first, then remaining bytes */

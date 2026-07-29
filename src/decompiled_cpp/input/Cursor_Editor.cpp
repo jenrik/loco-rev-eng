@@ -195,7 +195,7 @@ void Cursor::show(void* playerData)
     desc[3] = surfWidth;  /* dwWidth */
 
     /* Create surface A at +0x590 */
-    int err = ((int (*)(void*, int*, void**, int))ddrawVtbl[6])(g_ddraw, desc, &this->editor_surf_a, 0);
+    int err = ((int (*)(void*, int*, void**, int))(uintptr_t)ddrawVtbl[6])(g_ddraw, desc, &this->editor_surf_a, 0);
     if (err != 0) {
         OutputDebugStringA("EDIT WINDOW : failed to create surface A");
     }
@@ -203,7 +203,7 @@ void Cursor::show(void* playerData)
     DDRAW_RestoreSurfaces((int*)this->editor_surf_a, &desc[0xFFFFFF74]);
 
     /* Create surface B at +0x598 */
-    err = ((int (*)(void*, int*, void**, int))ddrawVtbl[6])(g_ddraw, desc, &this->editor_surf_b, 0);
+    err = ((int (*)(void*, int*, void**, int))(uintptr_t)ddrawVtbl[6])(g_ddraw, desc, &this->editor_surf_b, 0);
     if (err != 0) {
         OutputDebugStringA("EDIT WINDOW : failed to create surface B");
     }

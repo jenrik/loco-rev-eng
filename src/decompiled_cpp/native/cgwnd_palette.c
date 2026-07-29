@@ -40,7 +40,7 @@ static void destroy_stream(void* stream)
     if (stream == NULL) return;
     /* The stream object has a complex indirection. Its vtable is at
        *(*((int*)stream + 1) + (int)stream). vtable[4] is the scalar dtor. */
-    int* inner = *(int**)(*(int*)(*(int*)stream + 4) + (int)stream);
+    int* inner = *(int**)(uintptr_t)(*(int*)((uintptr_t)(*(int*)stream + 4)) + (int)stream);
     if (inner != NULL) {
         typedef void (__thiscall* DtorFn)(void*, byte);
         DtorFn dtor = (DtorFn)(*(void***)inner)[4];  /* vtable[4] */
@@ -147,7 +147,7 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
            status_byte = *(base + vtable[4] + obj_offset + 8) & 6
            Non-zero = EOF or error */
         int* sv = *(int**)streamObj;
-        byte* status_ptr = (byte*)(*(int*)(sv[1] + (int)streamObj) + 8);
+        byte* status_ptr = (byte*)(uintptr_t)(*(int*)((uintptr_t)(sv[1] + (int)streamObj)) + 8);
 
         if (*status_ptr == 0) {
             dataPtr = (short*)((uint8_t*)obj + 0x16A);

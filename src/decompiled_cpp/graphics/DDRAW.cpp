@@ -43,11 +43,26 @@ typedef VtblRefresh Update;
 typedef VtblSetAnim SetAnim;
 
 /** Get a vtable slot from a sprite object pointer (void*). */
-static inline VtblRefresh  VTABLE_REFRESH(void* sprite)  { return (VtblRefresh)((*reinterpret_cast<int**>(sprite))[8]); }
-static inline VtblSetAnim  VTABLE_SETANIM(void* sprite)  { return (VtblSetAnim)((*reinterpret_cast<int**>(sprite))[7]); }
-static inline VtblSetPos   VTABLE_SETPOS(void* sprite)   { return (VtblSetPos) ((*reinterpret_cast<int**>(sprite))[3]); }
-static inline VtblLoadRes  VTABLE_LOADRES(void* sprite)  { return (VtblLoadRes)((*reinterpret_cast<int**>(sprite))[6]); }
-static inline VtblChildUpdate VTABLE_CHILD_UPDATE(void* sprite) { return (VtblChildUpdate)((*reinterpret_cast<int**>(sprite))[20]); }
+static inline VtblRefresh VTABLE_REFRESH(void* sprite) {
+    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
+    return reinterpret_cast<VtblRefresh>(vtable[8]);
+}
+static inline VtblSetAnim VTABLE_SETANIM(void* sprite) {
+    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
+    return reinterpret_cast<VtblSetAnim>(vtable[7]);
+}
+static inline VtblSetPos VTABLE_SETPOS(void* sprite) {
+    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
+    return reinterpret_cast<VtblSetPos>(vtable[3]);
+}
+static inline VtblLoadRes VTABLE_LOADRES(void* sprite) {
+    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
+    return reinterpret_cast<VtblLoadRes>(vtable[6]);
+}
+static inline VtblChildUpdate VTABLE_CHILD_UPDATE(void* sprite) {
+    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
+    return reinterpret_cast<VtblChildUpdate>(vtable[20]);
+}
 
 /* ================================================================== */
 /* External references                                                 */

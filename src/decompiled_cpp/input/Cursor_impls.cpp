@@ -489,7 +489,7 @@ void Cursor::init_network_player()
      * name from g_player_config into the record at +0x25. */
     void* record = nullptr;
     if (_g_dplay != nullptr) {
-        record = (void*)DPLAY_CreatePlayer(nullptr);
+        record = (void*)(uintptr_t)DPLAY_CreatePlayer(nullptr);
         if (record != nullptr) {
             /* Copy player name into record at offset +0x25 */
             memcpy((void*)((intptr_t)record + 0x25), playerName, nameLen + 1);

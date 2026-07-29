@@ -30,7 +30,7 @@ void __cdecl DDRAW_GetSurfaceWidthHeight(int* surface)
             surface, ddsd_buf);
 
         /* Write height (low word of ddsd_buf[3]) through return address */
-        *(unsigned short*)(__builtin_return_address(0) + 2) =
+        *(unsigned short*)((uint8_t*)__builtin_return_address(0) + 2) =
             (unsigned short)ddsd_buf[3];  /* dwHeight */
 
         /* Write width to the surface pointer's low word */

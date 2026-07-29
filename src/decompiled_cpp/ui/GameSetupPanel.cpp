@@ -261,7 +261,7 @@ void GameSetupPanel::base_destructor()
         if (sndHandle != 0) {
             /* NOTE: GetById returns int32_t; ReleaseSoundResource expects ResourceEntry*.
                On 32-bit x86 these are the same width — safe cast. */
-            ReleaseSoundResource((ResourceEntry*)sndHandle);
+            ReleaseSoundResource((ResourceEntry*)(uintptr_t)sndHandle);
         }
     }
 

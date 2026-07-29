@@ -48,7 +48,7 @@ int __cdecl DDRAW_DimSurfaceRect(int left, int top, int right, int bottom)
 
     /* Dim pixels in the specified rect */
     uint32_t pitch_half = (DAT_004fd1ac >> 1) & 0xFFFF;
-    uint16_t* pixels = (uint16_t*)(DAT_004fd1c0 +
+    uint16_t* pixels = (uint16_t*)(uintptr_t)(DAT_004fd1c0 +
         ((uint32_t)top * pitch_half + (uint32_t)left) * 2);
 
     uint32_t width = (uint32_t)(right - left) & 0xFFFF;

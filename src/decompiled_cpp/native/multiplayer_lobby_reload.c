@@ -45,13 +45,13 @@ extern void* g_network_thread;      /* 0x4FD398 — network thread handle */
 void __cdecl MultiplayerLobby_Reload(void)
 {
     /* Step 1: Re-enable UI network flag at g_net_host_info+0x07 */
-    *(char*)((int)g_net_host_info + 7) = 1;
+    *(char*)((uintptr_t)g_net_host_info + 7) = 1;
 
     /* Step 2: Re-initialize the network panel on the main menu UI */
     EditWindow_InitNetworkPanel(g_ui_main);
 
     /* Step 3: Set network polling to 50ms (0x32) */
-    *(int*)((int)g_net_host_info + 0x0C) = 0x32;
+    *(int*)((uintptr_t)g_net_host_info + 0x0C) = 0x32;
 
     /* Step 4: Set game mode to 1 (hosting/lobby mode) */
     NETMAN_SetGameMode(g_netman, 1);

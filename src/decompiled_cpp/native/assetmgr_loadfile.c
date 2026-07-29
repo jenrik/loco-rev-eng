@@ -78,11 +78,11 @@ uint8_t* __thiscall AssetMgr_LoadFile(void* _this,
     if (entry != NULL) {
         do {
             /* wcsstr: check if the wide entry name contains our filename */
-            uint32_t match = CRT_wcsstr((uint8_t*)entry[0], filename);
+            uint32_t match = CRT_wcsstr((uint8_t*)(uintptr_t)entry[0], filename);
             if (match == 0) break;
 
             /* Matched — add _this entry's size to offset */
-            entry = (uint32_t*)entry[3];  /* +0x0C = next ptr */
+            entry = (uint32_t*)(uintptr_t)entry[3];  /* +0x0C = next ptr */
             total_offset += *(int32_t*)((uint8_t*)entry - 4 + 8);  /* +0x08 = size */
         } while (entry != NULL);
 

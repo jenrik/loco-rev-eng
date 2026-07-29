@@ -337,7 +337,7 @@ extern "C" {
     /* Fallback to disk file if asset manager didn't provide it */
     if (stream == NULL) {
         WIN32_StreamOpenPath(stream_buf, file_path, 0xA0, 0x479190);
-        if (*(int*)(*(int*)((intptr_t)stream_buf + 4) + 0x4C) != -1) {
+        if (*(int*)((uintptr_t)(*(int*)((intptr_t)stream_buf + 4)) + 0x4C) != -1) {
             stream = stream_buf;
         }
         if (stream == NULL) {
@@ -448,7 +448,7 @@ cleanup:
         CRT_free(asset_data);
     }
 
-    if (*(int*)(*(int*)((intptr_t)stream_buf + 4) + 0x4C) != -1) {
+    if (*(int*)((uintptr_t)(*(int*)((intptr_t)stream_buf + 4)) + 0x4C) != -1) {
         WIN32_StreamDestroyImmediate(stream_buf);
     }
 

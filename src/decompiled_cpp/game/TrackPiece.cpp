@@ -121,8 +121,8 @@ void TrackPiece::_Dtor()
     /* Release sub-resource at +0x28 if non-null */
     if (this->sub_resource != 0) {
         /* Call scalar deleting destructor on sub-resource with flags=1 (free) */
-        void** vtbl = *(void***)(int32_t*)this->sub_resource;
-        ((void(*)(void*, byte))vtbl[0])((void*)this->sub_resource, 1);
+        void** vtbl = *(void***)(int32_t*)(uintptr_t)this->sub_resource;
+        ((void(*)(void*, byte))vtbl[0])((void*)(uintptr_t)this->sub_resource, 1);
         this->sub_resource = 0;
     }
 
@@ -435,7 +435,7 @@ void TrackPiece::Render()
         onscreen.top,
         onscreen.right + view_left,
         onscreen.bottom,
-        *(void**)(*(int*)((uint8_t*)town_view + 0x40) + 0x10),  /* blit surface */
+        *(void**)((uintptr_t)(*(int*)((uint8_t*)town_view + 0x40)) + 0x10),  /* blit surface */
         this->source_rect.left,
         this->source_rect.top,
         this->source_rect.right,

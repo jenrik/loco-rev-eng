@@ -204,7 +204,7 @@ uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
         uint32_t chunk_size;
         uint32_t chunk_id;
 
-        while ((*(uint8_t*)(fd->file_handle + 0xC) & 0x10) == 0) {
+        while ((*(uint8_t*)(uintptr_t)(fd->file_handle + 0xC) & 0x10) == 0) {
             /* Read chunk name (4 bytes) */
             uint32_t bytes_read = CRT_0x468610((char*)&chunk_size, 1, 4, fd->file_handle);
             if (bytes_read == 0) break;

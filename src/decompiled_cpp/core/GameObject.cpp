@@ -157,7 +157,7 @@ Entity::~Entity()
     }
 
     /* Release sound resource (+0x44) */
-    void* snd_res = (void*)this->sound_res_id;
+    void* snd_res = (void*)(uintptr_t)this->sound_res_id;
     if (snd_res != nullptr) {
         this->active_state = 0;
         RESMGR_ReleaseSoundResource(snd_res);
@@ -506,11 +506,11 @@ void Entity::PlayAnimation(int sound_id)
         this->next_sound_time = 0;  /* next_sound_time = 0 */
 
         /* Load sound resource via ResourceManager */
-        int snd_res = (int)ResourceManager_GetById(&g_resmgr, sound_id);
+        int snd_res = (int)(uintptr_t)ResourceManager_GetById(&g_resmgr, sound_id);
         this->sound_res_id = snd_res;
 
         /* Validate sound resource: if byte +0x09 != 1, not a valid sound */
-        if (snd_res != 0 && *(uint8_t*)(snd_res + 9) != 1) {
+        if (snd_res != 0 && *(uint8_t*)((uintptr_t)snd_res + 9) != 1) {
             this->sound_res_id = 0;
         }
     }

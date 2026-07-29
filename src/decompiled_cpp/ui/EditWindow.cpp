@@ -633,7 +633,7 @@ void EditWindow::HandleClick()
 int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     /* If not yet initialized, delegate to UIPANEL_WindowProc */
-    if (this->field_14 == NULL) {  /* pInitGuard at +0x14 */
+    if (this->field_14 == 0) {  /* pInitGuard at +0x14 */
         // 0x422D9D passes the EditWindow instance in ECX before the four
         // WndProc stack arguments.  The prior four-argument declaration
         // dropped that required receiver.

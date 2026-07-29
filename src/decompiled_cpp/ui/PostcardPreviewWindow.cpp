@@ -153,12 +153,12 @@ void PostcardPreviewWindow::init_background()
 
     /* Load background resource (res 0x3d8a) */
     int32_t res = g_resmgr.GetById(0x3d8a);
-    this->background_resource = (void*)res;                  /* +0x284 */
+    this->background_resource = (void*)(uintptr_t)res;                  /* +0x284 */
 
     /* Get surface via vtable[1] (ECX = res, stack args: 0, 0).
        NOTE: Binary dereferences EAX immediately — no null check.     */
     this->background_surface =                                /* +0x280 */
-        ((void* (*)(void*, int, int))(*(void***)res)[1])((void*)res, 0, 0);
+        ((void* (*)(void*, int, int))(*(void***)(uintptr_t)res)[1])((void*)(uintptr_t)res, 0, 0);
 }
 
 /* ================================================================== */

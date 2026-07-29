@@ -333,7 +333,7 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
 
                 if (parsed_stream != NULL) {
                     /* Check stream error flag at vtable[1] + offset 8 */
-                    int v4 = *(int*)(*(int*)parsed_stream + 4);
+                    int v4 = *(int*)((uintptr_t)(*(int*)parsed_stream) + 4);
                     if ((*(uint8_t*)((char*)parsed_stream + v4 + 8) & 4) == 0) {
                         char loaded;
 
@@ -531,7 +531,7 @@ void ScriptedObject::MoveTo(int x, int y)
                 int pt[2];
                 pt[0] = screen_x;
                 pt[1] = screen_y;
-                ClientToScreen(*(HWND*)(*(int*)g_main_window + 8), pt);
+                ClientToScreen(*(HWND*)((uintptr_t)(*(int*)g_main_window) + 8), pt);
                 SetCursorPos(pt[0], pt[1]);
             }
 
@@ -711,7 +711,7 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
 
             /* Reset all track piece zooms in the linked list */
             while (child != NULL) {
-                int child_type = *(int*)(*(int*)((char*)child + 0x44) + 4);
+                int child_type = *(int*)((uintptr_t)(*(int*)((char*)child + 0x44)) + 4);
                 switch (child_type) {
                 case 0x2403: case 0x2404: case 0x2405:
                 case 0x2406: case 0x2409: case 0x240A:

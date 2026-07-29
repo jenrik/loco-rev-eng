@@ -248,8 +248,8 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
         WIN32_StreamOpenPath(stream_handle, path_buffer, 0x20, 0x479190);
 
         /* Check if stream has data (offset +0x4C in stream object) */
-        int stream_data_available = *(int*)(
-            *(int*)((uint8_t*)stream_handle + stream_handle[1]) + 0x4C);
+        int stream_data_available = *(int*)((uintptr_t)(
+            *(int*)((uint8_t*)stream_handle + stream_handle[1])) + 0x4C);
         if (stream_data_available != -1) {
             uint8_t render_ok = (uint8_t)UI_ChildWindow_Render(
                 window, (void*)stream_handle);

@@ -308,7 +308,7 @@ Game::~Game()
     this->SetScreenMode(0, 1, 0);   /* capture=0, show=1, custom=0 */
 
     /* Release resources: vtable[6] = InitBase(0, -1, 0) = resource release call */
-    (*(void (__thiscall**)(void*, int, int, int))((int*)this)[6])(this, 0, -1, 0);
+    (*(void (__thiscall**)(void*, int, int, int))((uintptr_t*)this)[6])(this, 0, -1, 0);
 }
 
 /* ================================================================== */

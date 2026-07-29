@@ -901,7 +901,7 @@ void PostcardAlbum::FreeAllSprites()
     if (this->field_130 != 0) {
         void** vtbl = *(void***)&this->field_130;
         typedef void* (*ScalarDtor)(void*, uint8_t);
-        (*reinterpret_cast<ScalarDtor>(vtbl[0]))((void*)this->field_130, 1);
+        (*reinterpret_cast<ScalarDtor>(vtbl[0]))((void*)(uintptr_t)this->field_130, 1);
         this->field_130 = 0;
     }
 
@@ -1208,7 +1208,7 @@ void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags)
     /* Release DDraw surface via IDirectDrawSurface::Release */
     if (surface->ddraw_surf != nullptr) {
         typedef uint32_t (*ReleaseFn)(void*);
-        ReleaseFn release = *(ReleaseFn*)(*(void**)surface->ddraw_surf + 0x8);  /* vtable[2] */
+        ReleaseFn release = *(ReleaseFn*)(*(uint8_t**)surface->ddraw_surf + 0x8);  /* vtable[2] */
         release(surface->ddraw_surf);
         surface->ddraw_surf = nullptr;
     }

@@ -971,7 +971,7 @@ void __thiscall UIPANEL_EndPaintEx(void* self,
     if (unlock_param != 0) {
         using UnlockFunc = HRESULT (__thiscall*)(void* self, void* rect);
         UnlockFunc unlock = (UnlockFunc)(*(void***)g_primary_surface)[0x68 / 4];
-        unlock(g_primary_surface, (void*)unlock_param);
+        unlock(g_primary_surface, (void*)(uintptr_t)unlock_param);
     }
 
     /* Step 2: If unlock_flag is non-zero, just unlock and return */

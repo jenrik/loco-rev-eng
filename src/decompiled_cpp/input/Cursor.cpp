@@ -466,7 +466,7 @@ void Cursor::init_sprites()
         desc[3] = 0x100;      /* dwWidth = 256 */
 
         int* ddrawVtbl = *(int**)g_ddraw;
-        ((int (*)(void*, int*, void**, int))ddrawVtbl[6])(g_ddraw, desc, &_g_cursor_back, 0);
+        ((int (*)(void*, int*, void**, int))(uintptr_t)ddrawVtbl[6])(g_ddraw, desc, &_g_cursor_back, 0);
 
         DDRAW_GetSurfaceWidthHeight(_g_cursor_back);
         DDRAW_SetSurfaceFormat(_g_cursor_back, (int)(intptr_t)&desc[0xFFFFFF74]);

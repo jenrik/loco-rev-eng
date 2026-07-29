@@ -801,7 +801,7 @@ void CGWND_Cleanup()
     extern int* _g_cursor_surface;
     if (_g_cursor_surface != nullptr) {
         int*   surf    = _g_cursor_surface;
-        void** surf_vt = (void**)surf[0];
+        void** surf_vt = (void**)(uintptr_t)surf[0];
         ((void(__thiscall*)())surf_vt[0x08 / 4])();
         if (surf[1] == -1) {
             ((void(__thiscall*)(int))surf_vt[0])(1);
