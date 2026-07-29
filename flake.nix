@@ -39,13 +39,9 @@
                                      #   Provides: windows.h, ddraw.h, dsound.h, dplay.h
                                      #   Supports: __thiscall, __fastcall, __stdcall
 
-              # ---- SDL2 (for the Linux port in CMakeLists.txt) ----
-              SDL2
-              SDL2_mixer
-              sdl3                    # SDL3 host audio/video shims
-              pkg-config              # SDL3 Makefile fallback discovery
-              SDL2_image
-              SDL2_ttf
+              # ---- SDL3 host compatibility layer ----
+              sdl3                    # host audio/video shims
+              pkg-config              # Makefile dependency discovery
 
               # ---- Networking (for Linux port) ----
               enet                   # ENet — DirectPlay replacement
@@ -53,6 +49,8 @@
               # ---- GStreamer (for Linux port AVI playback) ----
               gst_all_1.gstreamer
               gst_all_1.gst-plugins-base
+              gst_all_1.gst-plugins-good  # AVI demuxer
+              gst_all_1.gst-libav         # Cinepak + DVI ADPCM decoders for launch videos
 
               # ---- Reverse engineering tools ----
               ghidra                 # NSA's software reverse engineering suite

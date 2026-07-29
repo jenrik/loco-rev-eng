@@ -5,6 +5,7 @@
 #include "sdl3_window.h"
 #include "sdl3_game_audio.h"
 #include "host_test_events.h"
+#include "sdl3_intro_video.h"
 #include "../decompiled_cpp/core/CGWND.h"
 #include <cstdint>
 #include <cstdio>
@@ -69,9 +70,22 @@ int main(int argc, char* argv[])
         std::fprintf(stderr, "WARNING: GameLoop_Setup failed with %d, continuing anyway\n", setup_result);
     }
 
+#ifndef _WIN32
+    // Host-only deviation: the original MCIWnd player (RESDATA_CtorBase,
+    // 0x454380) is Win32-specific. Decode the three shipped launch AVIs via
+    // the SDL/GStreamer adapter before exposing the reconstructed main menu.
+    if (loco::intro::startLaunchSequence()) {
+        TRACE("Playing launch intro sequence before mode 2");
+    } else {
+        TRACE("Transitioning to mode 2 (main-menu UI)...");
+        CGWND_SetMode(2);
+        TRACE("Mode 2 set");
+    }
+#else
     TRACE("Transitioning to mode 2 (main-menu UI)...");
     CGWND_SetMode(2);
     TRACE("Mode 2 set");
+#endif
 
     TRACE("Entering CGWND_PumpMessages (main loop)...");
     CGWND_PumpMessages(cgwnd, 0);
@@ -81,6 +95,9 @@ int main(int argc, char* argv[])
     GLOBAL_free(cgwnd);
     CoUninitialize();
     SDL3_GameAudioStopAll();
+#ifndef _WIN32
+    loco::intro::stop();
+#endif
     SDL3_WindowQuit();
     loco::host_test::emit_clean_shutdown();
     TRACE("Clean exit");

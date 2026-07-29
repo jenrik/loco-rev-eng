@@ -43,7 +43,11 @@ def gui_artifacts_root(request: pytest.FixtureRequest) -> Path:
 @pytest.fixture
 def game(request: pytest.FixtureRequest, gui_artifacts_root: Path):
     artifact_dir = gui_artifacts_root / request.node.name
-    environment = getattr(request, "param", None)
+    # Most menu regressions start at mode 2. The dedicated intro test opts
+    # out so the normal SDL host launch remains fully covered without making
+    # every menu scenario wait through three videos.
+    environment = {"LEGO_LOCO_SKIP_INTRO": "1"}
+    environment.update(getattr(request, "param", None) or {})
     session = GameSession(ROOT, artifact_dir, environment=environment)
     try:
         session.start()

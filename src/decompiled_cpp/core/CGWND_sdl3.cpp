@@ -8,6 +8,7 @@
 #include "../../sdl3_shims/sdl3_ddraw.h"
 #include "../../sdl3_shims/sdl3_window.h"
 #include "../../sdl3_shims/sdl3_game_audio.h"
+#include "../../sdl3_shims/sdl3_intro_video.h"
 #include "../../sdl3_shims/host_test_events.h"
 #include <SDL3/SDL.h>
 #include <cstdio>
@@ -42,6 +43,11 @@ static void PumpMessages_SDL3(uint8_t filter)
     
     /* Main render loop — runs until quit */
     while (true) {
+        // Preserve ownership across the event pass: an Escape click can end
+        // the final intro immediately, in which case mode 2 must still be
+        // entered before GameLoop_FrameUpdate sees startup mode 0.
+        const bool introWasActive = loco::intro::isActive();
+
         /* Process all pending events */
         while (SDL_PollEvent(&event)) {
         bool isMouseEvent = false;
@@ -50,6 +56,15 @@ static void PumpMessages_SDL3(uint8_t filter)
             stop_text_input();
             return;  /* window close button */
         case SDL_EVENT_KEY_DOWN:
+            if (loco::intro::isActive()) {
+                // The original MCI child window owns input while visible.
+                // Host Escape/Return/Space skip only its current clip.
+                if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_RETURN ||
+                    event.key.key == SDLK_SPACE) {
+                    loco::intro::skipCurrent();
+                }
+                break;
+            }
             if (EditWindow* menu = active_host_menu()) {
                 if (menu->hostHandleKey(static_cast<int32_t>(event.key.key))) break;
             }
@@ -70,6 +85,10 @@ static void PumpMessages_SDL3(uint8_t filter)
             if (filter != 0) { isMouseEvent = true; }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            if (loco::intro::isActive()) {
+                if (event.button.button == SDL_BUTTON_LEFT) loco::intro::skipCurrent();
+                break;
+            }
             if (event.button.button == SDL_BUTTON_LEFT) {
                 if (EditWindow* menu = active_host_menu()) {
                     menu->hostHandlePointer(event.button.x, event.button.y, true);
@@ -99,6 +118,18 @@ static void PumpMessages_SDL3(uint8_t filter)
         if (g_game_mode == 10) {
             stop_text_input();
             return;
+        }
+
+        // Host-only replacement for original MCIWnd playback. Do not present
+        // the primary menu canvas until all launch videos have ended/skipped.
+        if (introWasActive) {
+            if (loco::intro::isActive()) {
+                if (!loco::intro::pumpAndRender()) CGWND_SetMode(2);
+            } else {
+                CGWND_SetMode(2);
+            }
+            SDL_Delay(1);
+            continue;
         }
 
         /* Game logic tick */

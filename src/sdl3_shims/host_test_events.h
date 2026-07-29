@@ -17,6 +17,13 @@ void emit_search_completed(int sessions);
 void emit_audio_queued(uint32_t resource_id);
 // Passive record of the resolved PlayerConfig name accepted by Go.
 void emit_player_name_committed(const char* name);
+// Passive launch-video observability. It reports decoded presentation and
+// terminal states but never controls playback or input.
+void emit_intro_video_started(int index, const char* path);
+void emit_intro_video_frame(int index, int width, int height);
+void emit_intro_video_finished(int index, bool skipped);
+void emit_intro_video_failed(int index, const char* message);
+void emit_intro_sequence_complete();
 void emit_clean_shutdown();
 
 }  // namespace loco::host_test

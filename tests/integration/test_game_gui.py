@@ -1,11 +1,33 @@
 from __future__ import annotations
 
 import getpass
+import time
 
 import pytest
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.gui]
+
+
+@pytest.mark.parametrize(
+    "game", [{"SDL_AUDIODRIVER": "dummy", "LEGO_LOCO_SKIP_INTRO": "0"}], indirect=True,
+)
+def test_launch_intro_sequence_decodes_and_returns_to_main_menu(game):
+    """The three shipped Cinepak AVIs render before the normal mode-2 menu."""
+    game.wait_for_event("process_started")
+    for index in range(3):
+        game.wait_for_event("intro_video_started", index=index)
+        frame = game.wait_for_event("intro_video_frame", index=index, timeout=15)
+        assert (frame["width"], frame["height"]) == (640, 480)
+        # Avoid recording the black decoder preroll frame as visual evidence.
+        time.sleep(1)
+        game.screenshot(f"intro-video-{index}")
+        game.press_key("Escape")  # host-only skip; must not terminate the game
+        game.wait_for_event("intro_video_finished", index=index, skipped=True)
+
+    game.wait_for_event("intro_sequence_complete")
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+
 
 
 def latest_sequence(game) -> int:

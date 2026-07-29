@@ -38,8 +38,12 @@ else
   SDL3_LDFLAGS := $(shell pkg-config --libs-only-L sdl3 2>/dev/null)
 endif
 SDL3_LIBS  := -lSDL3 -lm
+# The SDL-hosted intro player uses GStreamer appsink to decode Cinepak AVI
+# frames into the SDL renderer. Its headers/libs are provided by flake.nix.
+GST_CFLAGS := $(shell pkg-config --cflags gstreamer-app-1.0 gstreamer-video-1.0)
+GST_LIBS   := $(shell pkg-config --libs gstreamer-app-1.0 gstreamer-video-1.0)
 
-override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) $(INCLUDES) $(FORCE_INC) $(SDL3_CFLAGS)
+override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) $(INCLUDES) $(FORCE_INC) $(SDL3_CFLAGS) $(GST_CFLAGS)
 
 # Source discovery
 DCP_CPP_ALL := $(filter-out $(DCP_DIR)/stubs/%, $(filter-out $(DCP_DIR)/native/%, $(wildcard $(DCP_DIR)/*/*.cpp $(DCP_DIR)/*/*/*.cpp)))
@@ -52,7 +56,7 @@ NATIVE_ALL := $(wildcard $(DCP_DIR)/native/*.c)
 NATIVE_BROKEN := $(DCP_DIR)/native/buildingpanel_wndproc.c $(DCP_DIR)/native/config_ini.c $(DCP_DIR)/native/DDRAW_BlitHBITMAPToSurface.c $(DCP_DIR)/native/ddraw_building_sprites.c $(DCP_DIR)/native/ddraw_helpers.c $(DCP_DIR)/native/DDRAW_LoadBmpToSurface.c $(DCP_DIR)/native/game_loop_setup.c $(DCP_DIR)/native/gamestate_handlers.c $(DCP_DIR)/native/helpwnd_support.c $(DCP_DIR)/native/input_place.c $(DCP_DIR)/native/input_world.c $(DCP_DIR)/native/ui_childwindow.c $(DCP_DIR)/native/UI_DefWndProc.c $(DCP_DIR)/native/ui_manager.c $(DCP_DIR)/native/ui_position.c $(DCP_DIR)/native/UI_ProcessObjectTimers.c $(DCP_DIR)/native/ui_window_class.c $(DCP_DIR)/native/win32_network.c $(DCP_DIR)/native/win32_stream.c $(DCP_DIR)/native/winmain.c $(DCP_DIR)/native/world_enumerate_assets.c $(DCP_DIR)/native/ui_scroll_list.c $(DCP_DIR)/native/sprite_tilemap.c $(DCP_DIR)/native/math_huf_helpers.c $(DCP_DIR)/native/huf_decode.c $(DCP_DIR)/native/math_helpers.c $(DCP_DIR)/native/DDRAW_PresentRect.c $(DCP_DIR)/native/cgwnd_present.c $(DCP_DIR)/native/ui_window_update.c $(DCP_DIR)/native/win32_postquit.c $(DCP_DIR)/native/win32_thread.c
 NATIVE_SRCS := $(filter-out $(NATIVE_BROKEN), $(NATIVE_ALL))
 
-SHIM_SRCS := $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
+SHIM_SRCS := $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_intro_video.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
 
 # Derived objects
 DCP_OBJS    := $(patsubst $(DCP_DIR)/%.cpp, $(BUILD_DIR)/dcp/%.o, $(DCP_CPP_SRCS))
@@ -88,7 +92,7 @@ test-all: test test-integration
 
 # Link
 $(BINARY): $(ALL_OBJS) | dirs
-	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
+	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(GST_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 
 # Compilation rules
 $(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp | dirs

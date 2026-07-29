@@ -62,7 +62,7 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **C++ symbols in `extern "C"` fixed** — 56 files cleaned, all `operator_new`/`GLOBAL_free`/`GameObject_*` moved to C++ linkage
 - [x] **SDL3 port artifacts removed** — `src/decompiled_cpp/port/` and `src/port/sdl3/` deleted
 - [x] **`.bak` files removed** — deleted stale backup files
-- [x] **Build system cleaned** — `CMakeLists.txt` restored, `flake.nix` simplified
+- [x] **Build system cleaned** — Root Makefile established; `flake.nix` simplified
 
 ### Phase 5: SDL3 compatibility shims (2026-07-24)
 
@@ -110,6 +110,8 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **Pytest GUI integration gate** — Added two crash-sensitive isolated-Wayland flows covering launch/main-menu/quit and name-entry/setup-lobby/Search/Exit/quit, with passive host-only JSONL events, Sway client-geometry input conversion, and persistent screenshots/logs under `build/test-artifacts/`.
 - [x] **Mode-2 requested interaction scenarios** — Expanded isolated-Wayland coverage to prove: Back/Exit queues original WAV `0x5015` and exits; single-player + `test` + Go queues `0x5015` and leaves the main menu; untouched multiplayer entry retains the `PlayerRecord_constructor` (`0x452E10`) POSIX-account fallback before entering panel B; and Multiple → Host (`0x40B`) → Go → panel-B Back → main-menu Back exits cleanly. A stale `void*` `PlayerRecord_constructor` declaration had selected a no-op overload; GameLoop now calls the typed constructor and the POSIX `GetUserNameA` compatibility boundary implements its recovered size contract. `make test-all` passes.
 - [x] **Mode-2/10 host sound boundary** — Preserved the documented `EditWindow::show` preload at `0x420780` (resource `0x5015`) and `CGWND_SetMode(10)` exit sound at `0x40824C` (resource `0x5026`) behind `_WIN32` guards. The SDL bridge resolves the same PE string-table/RFH WAVs (`sounds\toybox\clstray1`, `sounds\toybox\sweep1`), retains the exit stream until drained, and has an archive-backed regression.
+- [x] **SDL launch intro sequence** — Host-only MCIWnd replacement decodes and aspect-fits the three shipped 640×480 Cinepak AVIs (`art-res/video/IgSpin.avi`, `Video/locoIntr.avi`, `art-res/video/legospin.avi`) through GStreamer appsink into the SDL3 renderer before mode 2. The Nix shell supplies AVI demux/Cinepak/DVI-ADPCM plugins; Escape/Return/Space and left-click skip only the current clip. Isolated Wayland evidence covers every decoded clip and menu handoff; `make test-all` passes.
+- [x] **Legacy portable-port removal** — Deleted the unused alternate source tree, CMake configuration, and historical port guide. The root Makefile and `src/sdl3_shims/` are now the sole host runtime path.
 
 ### Phase 6: Native C compilation (2026-07-24)
 
@@ -360,6 +362,10 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-07-29 (sdl3-launch-intro) | Diagnosed that the obsolete GStreamer player was neither built nor invoked by the SDL3 host; added a guarded appsink renderer for all three shipped Cinepak AVIs, Nix decoder dependencies, skippable launch sequencing, and isolated-Wayland screenshot/event coverage. `make test-all` passes. |
+
+| 2026-07-29 (legacy-port-removal) | Removed the unused alternate portable-runtime tree, CMake configuration, stale dependencies, and port guide; the root Makefile/Sdl3 shim path is now canonical. |
+
 | 2026-07-29 (main-menu-exit-tdd) | Replaced the false-positive main-menu Exit check with an isolated-Wayland regression that launches with SDL dummy audio, drives both original +0x14C/resource-0x405 Exit and focused-Escape mode-10 paths, and fails after 5 seconds awaiting clean shutdown; this deterministically reproduces the queued-audio exit stall. |
 
 | 2026-07-29 (pytest-gui-integration) | Introduced the Nix-managed pytest test layer and `make test{,-integration,-all}` gates; added guarded host JSONL observability, crash/timeout detection, Sway-decoration-aware logical input, and persistent screenshot/log artifacts; deterministic regressions pass and the two headless GUI flows passed twice consecutively. |
@@ -431,7 +437,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 | 2026-07-24 (final link) | Removed duplicate inline stubs/globals from SDL3 `main.cpp`; final link attempted with 23 native objects, leaving 779 unique undefined symbols. |
 | 2026-07-24 (native compile) | Added `native_compat.h`, fixed native C type/keyword/declaration issues, and raised native compilation from 23/56 to 48/56. |
 | 2026-07-25 | Created link_stubs.cpp (479 lines, ~400 symbols). Identified fundamental shim limitation: 57 files with `extern "C"` declarations vs C++-linkage shim implementations. Pivoted to hybrid #ifdef + shim strategy. ~284 remain. |
-| 2026-07-25 | **Unified build system**: Created root Makefile. Single `make` command compiles 94 source files (64 C++, 25 native C, 5 SDL3 shims) and links into 2.0MB ELF binary. 16 C++ files skipped (known-broken), 31 native files skipped. Auto-detects SDL3 on NixOS. Removed stale CMakeLists.txt / SDL2 port artifacts. |
+| 2026-07-25 | **Unified build system**: Created root Makefile. Single `make` command compiles 94 source files (64 C++, 25 native C, 5 SDL3 shims) and links into 2.0MB ELF binary. 16 C++ files skipped (known-broken), 31 native files skipped. Auto-detects SDL3 on NixOS. Removed stale CMakeLists.txt / legacy portable-port artifacts. |
 | 2026-07-25 (late) | Replaced 275 defsym=0 entries with real stubs. Fixed CRT_strtok NULL-return crash. Binary runs full main() → PumpMessages → clean exit. Valgrind: 0 errors. Root cause of heap corruption: 32-bit allocation sizes used on 64-bit. |
 | 2026-07-25 (game stubs) | Building class completed: decompiled 7 vtable-gap functions (TeleportTo, StepToward, IsActionComplete, PartyModeUpdate, CheckPlacementCollision, PostMoveDispatch, FindNearestConnectionNode). Updated Building.h fields and virtual methods. Replaced 6 TODO stubs. Removed from sdl3 stubs. 70/70 compile. |
 | 2026-07-25 (decomp) | Decompiled GameObject_GetBoundingRect→Entity::GetBoundingRect (0x4583C0), BuildingMgr_CompactCollections (0x434870), Town_PostcardUpdateUI (0x42DE70). Fixed PtInRect scope in Building.cpp, blit_element→BlitElement in Town.h. |
