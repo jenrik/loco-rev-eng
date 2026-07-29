@@ -113,8 +113,8 @@ public:
     HICON       icon;               /* +0xF8  app icon handle              */
 
     /* Button hit-test RECTs (computed by HandleClick, consumed by netPanelWndProc) */
-    RECT        btnPlayRect;        /* +0xFC  Play/New Game button rect    */
-    RECT        btnScenarioRect;    /* +0x10C  Scenario/MP button rect     */
+    RECT        btnPlayRect;        /* +0xFC  single-player button rect    */
+    RECT        btnScenarioRect;    /* +0x10C  multiplayer button rect      */
     RECT        btnExitRect;        /* +0x11C  Exit button rect            */
     RECT        btnTextRect;        /* +0x12C  Text/action button rect     */
     RECT        btnOption1Rect;     /* +0x13C  Option button 1 rect        */

@@ -67,7 +67,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs test test-integration test-all test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs test test-integration test-all test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -78,8 +78,8 @@ build: $(BINARY)
 test: test-resource-archive test-resource-manager-sdl3 test-dplay-config \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
-      test-host-main-menu-accept test-host-multiplayer-menu-input \
-      test-sdl3-game-audio test-menu-sprite-viewer
+      test-host-main-menu-accept test-host-multiplayer-selector \
+      test-host-multiplayer-menu-input test-sdl3-game-audio test-menu-sprite-viewer
 
 test-integration: $(BINARY)
 	@python3 -m pytest -v -m "integration and gui" tests/integration
@@ -181,6 +181,10 @@ test-host-menu-renderer-linkage: $(BINARY) tests/host_menu_renderer_linkage_test
 # EditWindow_OnPlayerNameChanged at original address 0x422AB2.
 test-host-main-menu-accept: tests/host_main_menu_accept_test.sh
 	@tests/host_main_menu_accept_test.sh
+
+# Regression for both recovered startup menu choices: singleup and multipleup.
+test-host-multiplayer-selector: tests/host_multiplayer_selector_test.sh
+	@tests/host_multiplayer_selector_test.sh
 
 # Regression for host-only routing of SDL clicks into GameSetupPanel control adapter.
 test-host-multiplayer-menu-input: tests/host_multiplayer_menu_input_test.sh

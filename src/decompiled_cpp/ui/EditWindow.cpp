@@ -982,8 +982,8 @@ enum HostMenuButton {
     kHostNoButton = -1,
     kHostOptionOne,
     kHostQuit,
-    kHostPlay,
-    kHostScenario,
+    kHostSinglePlayer,
+    kHostMultiplayer,
     kHostExit,
     kHostText,
 };
@@ -1032,12 +1032,14 @@ HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
     // not represent a live SDL transport.
     const bool multiplayer = menu.hostMultiplayerSelected;
     const bool alternate_menu = false;
-    const bool has_scenario = false;
 
     if (host_point_in_rect(menu.btnOption1Rect, x, y)) return kHostOptionOne;
     if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
-    if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostPlay;
-    if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostScenario;
+    // 0x407/0x408 are singleup/singledown; 0x409/0x40A are
+    // multipleup/multipledown. Present both recovered choices in the SDL
+    // host, which has no provider list to drive the original state gate.
+    if (host_point_in_rect(menu.btnPlayRect, x, y)) return kHostSinglePlayer;
+    if (host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostMultiplayer;
     if (!multiplayer && !alternate_menu && host_point_in_rect(menu.btnExitRect, x, y)) return kHostExit;
     if (!multiplayer && alternate_menu && host_point_in_rect(menu.btnTextRect, x, y)) return kHostText;
     return kHostNoButton;
@@ -1081,23 +1083,21 @@ void EditWindow::hostRenderFrame()
     // SDL has no DirectPlay provider, so model the selected presentation
     // mode explicitly rather than treating persisted x86 configuration bytes
     // as live network state.
-    const bool multiplayer = this->hostMultiplayerSelected;
     const bool alternate_menu = false;
-    const bool has_scenario = false;
 
-    // 0x421C9B -> 0x422010: SP uses 0x407/0x40A/0x40B; MP uses
-    // 0x408/0x409. 0x422223 selects the alternate 0x40C/0x40E pair.
-    if (multiplayer) {
-        host_blit_menu_sprite(this->sprite_408, this->btnPlayRect);
-        if (has_scenario) host_blit_menu_sprite(this->sprite_409, this->btnScenarioRect);
-    } else {
-        host_blit_menu_sprite(this->sprite_407, this->btnPlayRect);
-        if (has_scenario) host_blit_menu_sprite(this->sprite_40A, this->btnScenarioRect);
-        host_blit_menu_sprite(alternate_menu ? this->sprite_40C : this->sprite_40B,
-                              this->btnExitRect);
-        host_blit_menu_sprite(alternate_menu ? this->sprite_40E : this->sprite_40F,
-                              this->btnTextRect);
-    }
+    // PE RT_STRING verifies 0x407/0x408 as singleup/singledown and
+    // 0x409/0x40A as multipleup/multipledown. The host must render both
+    // choices: its DirectPlay provider list is intentionally always empty.
+    host_blit_menu_sprite(this->hostHoveredButton == kHostSinglePlayer
+                              ? this->sprite_408 : this->sprite_407,
+                          this->btnPlayRect);
+    host_blit_menu_sprite(this->hostHoveredButton == kHostMultiplayer
+                              ? this->sprite_40A : this->sprite_409,
+                          this->btnScenarioRect);
+    host_blit_menu_sprite(alternate_menu ? this->sprite_40C : this->sprite_40B,
+                          this->btnExitRect);
+    host_blit_menu_sprite(alternate_menu ? this->sprite_40E : this->sprite_40F,
+                          this->btnTextRect);
 
     // 0x421C9B draws 0x403 and 0x405. The click feedback paths at
     // 0x42298A and 0x422AC3 use 0x404 and 0x406 for their selected frames.
@@ -1166,13 +1166,14 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
 
     // Host-only menu selection. DirectPlay is intentionally absent, so do
     // not mutate recovered configuration or queue a fictitious transport
-    // transition. hostCommitPlayerName() turns this selection into state 4/5.
+    // transition. The recovered 0x407 and 0x409 controls select state 4/5
+    // when hostCommitPlayerName() accepts the player name.
     switch (button) {
-    case kHostPlay:
-        this->hostMultiplayerSelected = true;
-        break;
-    case kHostScenario:
+    case kHostSinglePlayer:
         this->hostMultiplayerSelected = false;
+        break;
+    case kHostMultiplayer:
+        this->hostMultiplayerSelected = true;
         break;
     case kHostExit:
         _g_netman_state[8] = 1;

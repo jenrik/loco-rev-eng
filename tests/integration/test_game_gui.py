@@ -34,9 +34,8 @@ def test_game_setup_lobby_search_and_exit(game):
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.screenshot("main-menu-before-accept")
 
-    # Resource 0x407 is the recovered single-player/network selector.
-    # Choose multiplayer before accepting the player name.
-    game.click_logical(600, 550, "select multiplayer")
+    # Resource 0x409 (multipleup) is the right-hand multiplayer selector.
+    game.click_logical(780, 550, "select multiplayer")
     game.screenshot("main-menu-multiplayer-selected")
 
     game.click_logical(600, 720, "player-name field")
