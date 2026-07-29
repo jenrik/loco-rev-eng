@@ -697,7 +697,8 @@ void CGWND_SetMode(int new_mode)
             // still open (kept alive by the background-music stream),
             // then stop only the looping music so the drain loop only
             // needs to wait for the short exit sweep.
-            SDL3_GameAudioPlayResource(0x5026);
+            bool ok = SDL3_GameAudioPlayResource(0x5026);
+            fprintf(stderr, "[audio] CGWND_SetMode(10): PlayResource(0x5026) -> %s\n", ok ? "true" : "FALSE");
             SDL3_GameAudioStopLooping();
 #endif
         }

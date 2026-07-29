@@ -148,17 +148,22 @@ int main(int argc, char *argv[])
        then pump audio headlessly until the sweep drains, before
        SDL_Quit tears down the audio device. */
     if (g_game_mode == 10) {
-        printf("Draining exit audio...\n");
+        printf("[audio] main: g_game_mode==10, starting headless drain...\n");
         // Hide the window so the user sees an instant close.
         if (SDL_Window* w = SDL3_GetWindow()) SDL_HideWindow(w);
+        int pump_count = 0;
         const Uint64 deadline = SDL_GetTicks() + 3000;
         while (SDL3_GameAudioPump() && SDL_GetTicks() < deadline) {
+            pump_count++;
             SDL_Delay(10);
         }
+        printf("[audio] main: drain complete after %d pumps (deadline=%s)\n",
+               pump_count, SDL_GetTicks() >= deadline ? "hit" : "ok");
         if (SDL_GetTicks() < deadline) {
             SDL_Delay(150);
         }
-        printf("Exit audio drained.\n");
+    } else {
+        printf("[audio] main: g_game_mode=%d, skipping drain\n", g_game_mode);
     }
 
     /* ---- Cleanup ---- */
