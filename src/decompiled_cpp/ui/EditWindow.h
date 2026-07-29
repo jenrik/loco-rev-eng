@@ -174,6 +174,9 @@ public:
     // The original EDIT control uses EM_LIMITTEXT(11) at 0x420A56.
     char hostEditText[12] = {};
     bool hostEditFocused = true;
+    // The SDL host has no DirectPlay provider. Keep its menu selection separate
+    // from the persisted x86 network-config bytes until a real transport exists.
+    bool hostMultiplayerSelected = false;
 #endif
 
     /* ================================================================ */

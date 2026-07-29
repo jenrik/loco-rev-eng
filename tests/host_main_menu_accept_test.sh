@@ -20,11 +20,12 @@ require() {
 require 'if (button == kHostOptionOne) {' "$source"
 require 'this->hostCommitPlayerName();' "$source"
 require 'void EditWindow::hostCommitPlayerName()' "$source"
-require 'this->setState(3);' "$source"
+require 'this->setState(this->hostMultiplayerSelected ? 5 : 4);' "$source"
 require 'void hostCommitPlayerName();' "$header"
 
 # Both controls must converge on this helper. It appears once in the accept
-# branch and once in the Enter branch.
+# branch and once in the Enter branch; that helper selects state 4 or state 5
+# from the host-only multiplayer selection.
 count=$(grep -Fc 'this->hostCommitPlayerName();' "$source")
 [[ "$count" -eq 2 ]] || {
     echo "FAIL: expected accept and Enter to share two host commit calls, got $count" >&2

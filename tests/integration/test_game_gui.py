@@ -34,12 +34,17 @@ def test_game_setup_lobby_search_and_exit(game):
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.screenshot("main-menu-before-accept")
 
+    # Resource 0x407 is the recovered single-player/network selector.
+    # Choose multiplayer before accepting the player name.
+    game.click_logical(600, 550, "select multiplayer")
+    game.screenshot("main-menu-multiplayer-selected")
+
     game.click_logical(600, 720, "player-name field")
     game.clear_text()
     game.type_text("Agent")
     game.click_logical(925, 700, "main-menu accept")
 
-    game.wait_for_event("screen_presented", screen="game_setup", dialog_state=4)
+    game.wait_for_event("screen_presented", screen="multiplayer_lobby", dialog_state=5)
     game.screenshot("game-setup-lobby")
 
     game.click_logical(900, 620, "lobby search")

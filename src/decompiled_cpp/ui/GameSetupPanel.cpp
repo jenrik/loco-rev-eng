@@ -1151,9 +1151,12 @@ void GameSetupPanel::hostRenderFrame()
         SDL_SetRenderTarget(renderer, SDL3_GetPrimarySurface()->texture);
         SDL_SetRenderScale(renderer, 2.0f, 2.0f);
         SDL_SetRenderDrawColor(renderer, 0xff, 0x5c, 0x00, 0xff);
-        SDL_RenderDebugText(renderer, 40.0f, 42.0f, "NETWORK GAME");
+        const bool network_lobby = g_editwindow_ptr != nullptr &&
+                                   g_editwindow_ptr->dialogState == 5;
+        SDL_RenderDebugText(renderer, 40.0f, 42.0f,
+                            network_lobby ? "NETWORK GAME" : "SELECT SCENARIO");
         SDL_RenderDebugText(renderer, 40.0f, 64.0f,
-                            this->hostSearchCompleted
+                            network_lobby && this->hostSearchCompleted
                                 ? "NO NETWORK GAMES FOUND"
                                 : "NO LAYOUTS AVAILABLE");
         SDL_SetRenderScale(renderer, 1.0f, 1.0f);
@@ -1193,6 +1196,11 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
 
     case HostLobbyControl::Search:
         // 0x40A7BE..0x40A895 starts a DirectPlay search and loads its results.
+        // It is a network-lobby action, not the single-player setup action
+        // that shares this control rectangle.
+        if (g_editwindow_ptr == nullptr || g_editwindow_ptr->dialogState != 5) {
+            return;
+        }
         // SDL's DirectPlay adapter reports an empty session list by design;
         // record that completed empty scan rather than invoking untranslated
         // x86 queue code or pretending a session was found.

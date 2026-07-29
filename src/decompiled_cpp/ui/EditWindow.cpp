@@ -1027,12 +1027,12 @@ void host_set_menu_rects(EditWindow& menu)
 
 HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
 {
-    // This is the enabled-button ordering in EditWindow_netPanelWndProc
-    // (0x422D80). The original state fields select which controls are live.
-    const char* const state = _g_netman_state;
-    const bool multiplayer = state && state[7] != 0;
-    const bool alternate_menu = state && state[8] != 0;
-    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
+    // Preserve 0x422D80 hit-test ordering. The host selection is deliberately
+    // separate from the persisted DirectPlay configuration: its x86 flags do
+    // not represent a live SDL transport.
+    const bool multiplayer = menu.hostMultiplayerSelected;
+    const bool alternate_menu = false;
+    const bool has_scenario = false;
 
     if (host_point_in_rect(menu.btnOption1Rect, x, y)) return kHostOptionOne;
     if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
@@ -1078,10 +1078,12 @@ void EditWindow::hostRenderFrame()
     host_set_menu_rects(*this);
     this->render();
 
-    const char* const state = _g_netman_state;
-    const bool multiplayer = state && state[7] != 0;
-    const bool alternate_menu = state && state[8] != 0;
-    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
+    // SDL has no DirectPlay provider, so model the selected presentation
+    // mode explicitly rather than treating persisted x86 configuration bytes
+    // as live network state.
+    const bool multiplayer = this->hostMultiplayerSelected;
+    const bool alternate_menu = false;
+    const bool has_scenario = false;
 
     // 0x421C9B -> 0x422010: SP uses 0x407/0x40A/0x40B; MP uses
     // 0x408/0x409. 0x422223 selects the alternate 0x40C/0x40E pair.
@@ -1162,20 +1164,15 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
         return;
     }
 
-    if (!_g_netman_state) return;
-
-    // Exact state transitions from the remaining original click branches.
-    // The next SDL frame selects the same drawButtons resource branch.
+    // Host-only menu selection. DirectPlay is intentionally absent, so do
+    // not mutate recovered configuration or queue a fictitious transport
+    // transition. hostCommitPlayerName() turns this selection into state 4/5.
     switch (button) {
     case kHostPlay:
-        _g_netman_state[7] = 1;
-        _g_netman_state[0x18] = 1;  // route setState(3) → state 5 (MP lobby)
-        NETMAN_SetGameMode(g_netman, 3);
+        this->hostMultiplayerSelected = true;
         break;
     case kHostScenario:
-        _g_netman_state[7] = 0;
-        _g_netman_state[0x18] = 0;  // route setState(3) → state 4 (SP lobby)
-        NETMAN_SetGameMode(g_netman, 0);
+        this->hostMultiplayerSelected = false;
         break;
     case kHostExit:
         _g_netman_state[8] = 1;
@@ -1200,13 +1197,14 @@ void EditWindow::hostCommitPlayerName()
 
     // The original click branch calls OnPlayerNameChanged at 0x422AB2; the
     // edit-subclass Enter branch reaches the same commit flow at 0x420D57.
-    // Preserve the recovered validation and state-3 handoff while avoiding
-    // the unported 32-bit mode-1 bootstrap used by the native handler.
-    if (legal && has_alpha && g_player_config != nullptr &&
-        _g_netman_state != nullptr) {
+    // Preserve the recovered validation while avoiding the unported 32-bit
+    // mode-1 bootstrap used by the native handler.
+    if (legal && has_alpha && g_player_config != nullptr) {
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
-        this->setState(3);
+        // In the original UI the DirectPlay settings decide this branch.
+        // The SDL host has no provider, so use its explicit selection instead.
+        this->setState(this->hostMultiplayerSelected ? 5 : 4);
     }
 }
 
