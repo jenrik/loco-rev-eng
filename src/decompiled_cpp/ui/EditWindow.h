@@ -171,12 +171,13 @@ public:
     // Host-only state for the SDL composition/input adapter; excluded from
     // the original Windows object layout.
     int hostHoveredButton = -1;
+    // Option controls at 0x42298A/0x422AC3 retain their pushed artwork for
+    // Sleep(0x96) before accepting the name or exiting.
+    int hostPressedButton = -1;
+    uint64_t hostPressedUntilMs = 0;
     // The original EDIT control uses EM_LIMITTEXT(11) at 0x420A56.
     char hostEditText[12] = {};
     bool hostEditFocused = true;
-    // The SDL host has no DirectPlay provider. Keep its menu selection separate
-    // from the persisted x86 network-config bytes until a real transport exists.
-    bool hostMultiplayerSelected = false;
 #endif
 
     /* ================================================================ */

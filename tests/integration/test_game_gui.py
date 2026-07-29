@@ -34,8 +34,9 @@ def test_game_setup_lobby_search_and_exit(game):
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.screenshot("main-menu-before-accept")
 
-    # Resource 0x409 (multipleup) is the right-hand multiplayer selector.
-    game.click_logical(780, 550, "select multiplayer")
+    # 0x422C60 toggles DPlayConfig+7 through the left 0x407 control; its
+    # pushed state renders 0x408 and enables right-hand 0x409.
+    game.click_logical(600, 550, "select multiplayer")
     game.screenshot("main-menu-multiplayer-selected")
 
     game.click_logical(600, 720, "player-name field")

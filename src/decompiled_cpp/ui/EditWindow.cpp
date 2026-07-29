@@ -18,6 +18,7 @@
 #include "sdl3_ddraw.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
+#include <cstdint>
 #include <cstring>
 
 /* ================================================================== */
@@ -1099,11 +1100,14 @@ void EditWindow::hostRenderFrame()
                               this->btnTextRect);
     }
 
-    // 0x421C9B draws 0x403 and 0x405. The click feedback paths at
-    // 0x42298A and 0x422AC3 use 0x404 and 0x406 for their selected frames.
-    host_blit_menu_sprite(this->hostHoveredButton == kHostOptionOne ? this->sprite_404 : this->sprite_403,
+    // 0x42298A and 0x422AC3 use 0x404 and 0x406 while the corresponding
+    // action is pressed. Unlike selection toggles, these actions call
+    // Sleep(0x96), so retain their artwork until host completion below.
+    const int active_button = this->hostPressedButton != kHostNoButton
+        ? this->hostPressedButton : this->hostHoveredButton;
+    host_blit_menu_sprite(active_button == kHostOptionOne ? this->sprite_404 : this->sprite_403,
                           this->btnOption1Rect);
-    host_blit_menu_sprite(this->hostHoveredButton == kHostQuit ? this->sprite_406 : this->sprite_405,
+    host_blit_menu_sprite(active_button == kHostQuit ? this->sprite_406 : this->sprite_405,
                           this->btnOption2Rect);
 
     // UI_MainMenu_Create (0x4204D0) owns a native EDIT child at this RECT.
@@ -1111,6 +1115,22 @@ void EditWindow::hostRenderFrame()
     SDL3_DrawPrimaryTextInput(this->editBoxRect.left, this->editBoxRect.top,
                               this->editBoxRect.right, this->editBoxRect.bottom,
                               this->hostEditText, this->hostEditFocused);
+
+    // 0x422A72..0x422AB2 and 0x422BCD..0x422C4C play click resource
+    // 0x5015, expose their pressed artwork, then Sleep(0x96). Complete the
+    // same action after the SDL frame has presented that artwork.
+    const int pressed_button = this->hostPressedButton;
+    if (pressed_button != kHostNoButton &&
+        SDL_GetTicks() >= this->hostPressedUntilMs) {
+        this->hostPressedButton = kHostNoButton;
+        this->hostPressedUntilMs = 0;
+        this->hostHoveredButton = kHostNoButton;
+        if (pressed_button == kHostOptionOne) {
+            this->hostCommitPlayerName();
+        } else if (pressed_button == kHostQuit) {
+            CGWND_SetMode(10);
+        }
+    }
 }
 
 /**
@@ -1146,42 +1166,52 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
     }
     this->hostEditFocused = false;
 
-    // 0x422AC3..0x422C5D handles option two before the menu state toggles.
-    // Its terminal operation is CGWND_SetMode(10) at 0x422C4C. Mode 10 is
-    // the quit case in CGWND_SetMode (0x4082A1): it plays 0x5026, restores
-    // the display, and posts WM_CLOSE. Preserve that original transition.
-    if (button == kHostQuit) {
-        CGWND_SetMode(10);
+    // The option controls are the two delayed button paths. 0x42298A and
+    // 0x422AC3 restore their background, draw 0x404/0x406, play 0x5015,
+    // repaint, and Sleep(0x96) before accepting or invoking mode 10.
+    if (button == kHostOptionOne || button == kHostQuit) {
+        if (this->hostPressedButton == kHostNoButton) {
+            SDL3_GameAudioPlayResource(0x5015);
+            this->hostPressedButton = button;
+            this->hostPressedUntilMs = SDL_GetTicks() + 150;
+        }
         return;
     }
 
-    // The resource-0x403 accept rectangle reaches 0x422AB2 after its pressed
-    // animation, where the original directly calls OnPlayerNameChanged
-    // (0x422660).  Reuse the same host-safe acceptance path as Enter rather
-    // than trying to invoke the Win32 EDIT implementation.
-    if (button == kHostOptionOne) {
-        this->hostCommitPlayerName();
-        return;
-    }
-
-    // Preserve the original hit-testing and artwork, but record only the
-    // host-only destination: the DirectPlay transport itself is unavailable.
+    // 0x422C60..0x422D66 is a toggle handler, not a direct game-start
+    // action. It changes the DPlay configuration byte, redraws the button
+    // pair, invokes the window redraw callback, then plays 0x5015. In
+    // particular, clicking the left control pushes it from 0x407 to 0x408
+    // and enables the right-hand 0x409 control; clicking 0x409 restores the
+    // 0x407/0x40A pair.
+    bool changed = false;
     switch (button) {
     case kHostPlay:
-        this->hostMultiplayerSelected = false;
+        _g_netman_state[7] = 1;
+        NETMAN_SetGameMode(g_netman, 3);
+        changed = true;
         break;
     case kHostScenario:
-        this->hostMultiplayerSelected = true;
+        _g_netman_state[7] = 0;
+        NETMAN_SetGameMode(g_netman, 0);
+        changed = true;
         break;
     case kHostExit:
         _g_netman_state[8] = 1;
+        changed = true;
         break;
     case kHostText:
         _g_netman_state[8] = 0;
+        changed = true;
         break;
     default:
         break;  // Popup-producing option handlers remain on the Win32 path.
     }
+
+    // The original handler has no Sleep on this path. Draw the changed sprite
+    // selection on the next SDL frame and play the same click resource at
+    // 0x422D57.
+    if (changed) SDL3_GameAudioPlayResource(0x5015);
 }
 
 void EditWindow::hostCommitPlayerName()
@@ -1201,9 +1231,10 @@ void EditWindow::hostCommitPlayerName()
     if (legal && has_alpha && g_player_config != nullptr) {
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
-        // The original UI uses the DirectPlay settings here. The host records
-        // the selected recovered control instead because no transport exists.
-        this->setState(this->hostMultiplayerSelected ? 5 : 4);
+        // The original UI branches from the persisted DPlay configuration.
+        // The SDL host follows the same selection byte after the recovered
+        // 0x422C60 toggle handler has updated it.
+        this->setState(_g_netman_state[7] != 0 ? 5 : 4);
     }
 }
 
