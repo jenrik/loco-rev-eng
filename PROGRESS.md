@@ -454,5 +454,6 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 | 2026-07-25 (decomp) | Decompiled GameObject_GetBoundingRect→Entity::GetBoundingRect (0x4583C0), BuildingMgr_CompactCollections (0x434870), Town_PostcardUpdateUI (0x42DE70). Fixed PtInRect scope in Building.cpp, blit_element→BlitElement in Town.h. |
 | 2026-07-25 (decomp2) | Decompiled Game_CheckTimeInRange (0x412710), BuildingMgr_CompactCollections (0x434870), Entity::GetBoundingRect (0x4583C0). Unblocked 11 files from broken list (Train, ScriptedObject, Panel, TrackPiece, UIPANEL, UIPANEL_Surface, EditWindow, UI_WindowBase, Netman, Netman_ReceiveSignalChange, Cursor_new_impls). 77→66 C++ files compile. |
 | 2026-07-25 | Fixed binutils 2.46 incompatibility: old --defsym used demangled names with parentheses (rejected by new ld). Switched to mangled names from nm -u. Generated 926-entry defsym.args. Binary links clean. |
+| 2026-07-30 (64bit-cast-cleanup) | Fixed all -Werror=int-to-pointer-cast and -Werror=pointer-arith errors across 25 files (17 C++, 8 C). Used (uintptr_t) intermediates for int↔pointer casts and (uint8_t*) for void* arithmetic. 0 errors, all component tests pass. |
 
 [Showing lines 1-447 of 466 (50.0KB limit). Use offset=448 to continue.]
