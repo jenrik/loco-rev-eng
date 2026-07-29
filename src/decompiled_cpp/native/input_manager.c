@@ -88,7 +88,7 @@ void* __fastcall INPUT_Init(void* self)
     /* Allocate 40-byte timer buffer (10 uint32 slots) */
     uint32_t* timerBuf = (uint32_t*)operator_new(40);
 
-    selfInt[2] = (int)timerBuf;         /* +0x08 store buffer */
+    selfInt[2] = (int)(uintptr_t)timerBuf;         /* +0x08 store buffer */
 
     /* Zero the timer buffer (10 dwords) */
     for (int i = 0; i < 10; i++) {
@@ -166,7 +166,7 @@ void __fastcall INPUT_BaseDtor(void* self)
 
     /* Free timer buffer */
     if (selfInt[2] != 0) {               /* +0x08 items ptr */
-        GLOBAL_free((void*)selfInt[2]);
+        GLOBAL_free((void*)(uintptr_t)selfInt[2]);
     }
     selfInt[2] = 0;                      /* +0x08 = NULL */
 }
@@ -206,25 +206,25 @@ void __fastcall INPUT_Shutdown(void* self)
     void* node;
 
     /* Free the 'free' list (each node: next pointer at offset +0x30) */
-    node = (void*)selfInt[2];   /* +0x08 free_list head */
+    node = (void*)(uintptr_t)selfInt[2];   /* +0x08 free_list head */
     while (node != NULL) {
         selfInt[2] = *(int*)((char*)node + 0x30);  /* node->next */
         if (node != NULL) {
             INPUT_FreeEditControl(node);
             GLOBAL_free(node);
         }
-        node = (void*)selfInt[2];
+        node = (void*)(uintptr_t)selfInt[2];
     }
 
     /* Free the 'alloc' list (each node: next pointer at offset +0x44) */
-    node = (void*)selfInt[3];   /* +0x0C alloc_list head */
+    node = (void*)(uintptr_t)selfInt[3];   /* +0x0C alloc_list head */
     while (node != NULL) {
         selfInt[3] = *(int*)((char*)node + 0x44);  /* node->next */
         if (node != NULL) {
             INPUT_AllocEditControl(node);
             GLOBAL_free(node);
         }
-        node = (void*)selfInt[3];
+        node = (void*)(uintptr_t)selfInt[3];
     }
 }
 
@@ -242,18 +242,18 @@ void __fastcall INPUT_GetSaveFileName(void* self)
     int* collection = (int*)((char*)self + 4);   /* +0x04 entity collection */
 
     uint32_t idx = 0;
-    int count = (**(int (__thiscall**)(int*))(collection[0] + 0x2C))(collection);
+    int count = (**(int (__thiscall**)(int*))((uintptr_t)collection[0] + 0x2C))(collection);
 
     if (count != 0) {
         do {
-            int* entity = (int*)(**(int (__thiscall**)(int*, uint32_t))
-                                    (collection[0] + 0x20))(collection, idx);
+            int* entity = (int*)(uintptr_t)(**(int (__thiscall**)(int*, uint32_t))
+                                    ((uintptr_t)collection[0] + 0x20))(collection, idx);
             if (entity != NULL) {
                 /* Call vtable[0x28] — PrepareSave */
-                (**(void (__thiscall**)(int*))(entity[0] + 0x28))(entity);
+                (**(void (__thiscall**)(int*))((uintptr_t)entity[0] + 0x28))(entity);
             }
             idx++;
-            count = (**(int (__thiscall**)(int*))(collection[0] + 0x2C))(collection);
+            count = (**(int (__thiscall**)(int*))((uintptr_t)collection[0] + 0x2C))(collection);
         } while (idx < (uint32_t)count);
     }
 }
