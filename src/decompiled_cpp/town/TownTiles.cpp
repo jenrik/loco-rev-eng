@@ -169,7 +169,7 @@ bool TownTileRenderer::DrawTile(
     }
 
     /* Destination: 16-bit pointer at (src_x, src_y) within the locked surface */
-    uint16_t* dest = (uint16_t*)(dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
 
     /* Source: 8-bit pointer at (clip_left, clip_top) in tile cache */
     uint8_t* src = pixels + clip_top * this->stride + clip_left;   /* +0x08 */
@@ -217,7 +217,7 @@ bool TownTileRenderer::FlushTileCache(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer for 16-bit 2x2 blocks */
-    uint16_t* dest = (uint16_t*)(dest_surface +
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
                                   (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
 
     int32_t clip_area_width = (clip_left + tile_width) & 0xFFFF;
@@ -284,7 +284,7 @@ bool TownTileRenderer::DrawCachedTile(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer for 16-bit 2x2 blocks */
-    uint16_t* dest = (uint16_t*)(dest_surface +
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
                                   (half_pitch * src_y + (int)src_x) * 2);
 
     int32_t clip_area_width = (clip_left + tile_width) & 0xFFFF;
@@ -351,7 +351,7 @@ bool TownTileRenderer::DrawTileEx(
     int32_t clip_area_width = ((int)clip_left + tile_width) & 0xFFFF;
 
     /* Destination pointer: each output pixel is 3 wide on dest */
-    uint16_t* dest = (uint16_t*)(dest_surface +
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
                                   (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
 
     /* Height = (clip_bottom & 0xFFFF) -- clipped to 16 bits */
@@ -433,7 +433,7 @@ bool TownTileRenderer::DrawTileLine(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination 16-bit buffer pointer */
-    uint16_t* dest = (uint16_t*)(dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
 
     /* Source position in tile cache */
     int src_pos = clip_top * this->stride + clip_left;          /* +0x08 */
@@ -518,7 +518,7 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer */
-    uint16_t* dest = (uint16_t*)(dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
     int32_t tile_width  = (clip_right - clip_left) & 0xFFFF;
     int32_t tile_height = (clip_bottom - clip_top) & 0xFFFF;
 
@@ -581,7 +581,7 @@ bool TownTileRenderer::DrawTiles16bpp_Reversed(
     int32_t tile_height = (clip_bottom - clip_top) & 0xFFFF;
 
     /* Destination pointer */
-    uint16_t* dest = (uint16_t*)(dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
 
     /* Source: starts at RIGHT edge of clip rect and goes left */
     uint8_t* src = this->pixels + clip_top * this->stride + clip_right;  /* +0x18, +0x08 */
@@ -655,7 +655,7 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
     int32_t tile_height = (clip_bottom - (int)clip_top) & 0xFFFF;
 
     /* Destination pointer */
-    uint16_t* dest = (uint16_t*)(dest_surface +
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
                                   (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
     int src_pos = (int)clip_top * this->stride + clip_left;         /* +0x08 */
 
@@ -726,7 +726,7 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
     uint32_t tile_height = (uint32_t)(clip_bottom - (int)clip_top) & 0xFFFF;
 
     /* Destination 16-bit pointer at (src_x, src_y) */
-    uint16_t* dest = (uint16_t*)(dest_surface +
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
                                  (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
 
     /* Source position in 8-bit tile cache */
@@ -902,7 +902,7 @@ bool TownTileRenderer::BlitTileSurface(
     uint32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer: 16-bit at (src_x, src_y) on surface       */
-    uint16_t* dest = (uint16_t*)(dest_surface +
+    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
                                   (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
 
     /* Source position: RIGHT EDGE of clip rect, read right-to-left   */
