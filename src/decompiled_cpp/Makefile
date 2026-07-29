@@ -53,7 +53,7 @@ else
 endif
 
 CXXFLAGS  := -c -std=c++17 -fpermissive
-WARNFLAGS := -Wno-error -Wno-unused -Wno-unknown-pragmas
+WARNFLAGS := -Wno-error -Wno-unused -Wno-unknown-pragmas -Wno-attributes
 INCLUDES  := -I$(SRCDIR) -I$(SRCDIR)/shared -I$(SRCDIR)/../sdl3_shims $(WIN_INC)
 
 # Force-include compat.h for standard headers + MSVC calling convention shims
