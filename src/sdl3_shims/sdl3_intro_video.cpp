@@ -249,7 +249,7 @@ bool pumpAndRender()
     consumeLatestSample();
     while (g_player.bus) {
         GstMessage* const message = gst_bus_pop_filtered(
-            g_player.bus, static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+            g_player.bus, static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR | GST_MESSAGE_WARNING));
         if (!message) break;
         const GstMessageType type = GST_MESSAGE_TYPE(message);
         if (type == GST_MESSAGE_ERROR) {
@@ -264,9 +264,23 @@ bool pumpAndRender()
                                                      error ? error->message : "unknown GStreamer error");
             if (error) g_error_free(error);
             if (debug) g_free(debug);
+            gst_message_unref(message);
+            return advanceClip(false);
+        }
+        if (type == GST_MESSAGE_WARNING) {
+            GError* error = nullptr;
+            gchar* debug = nullptr;
+            gst_message_parse_warning(message, &error, &debug);
+            std::fprintf(stderr, "[INTRO] %s warning: %s%s%s\n",
+                         kOriginalLaunchVideoPaths[g_player.clipIndex].data(),
+                         error ? error->message : "unknown warning",
+                         debug ? " (" : "", debug ? debug : "");
+            if (error) g_error_free(error);
+            if (debug) g_free(debug);
         }
         gst_message_unref(message);
-        return advanceClip(false);
+        // Only advance on EOS; warnings are non-fatal (e.g. missing codec).
+        if (type == GST_MESSAGE_EOS) return advanceClip(false);
     }
 
     renderFrame();

@@ -53,7 +53,8 @@
               gst_all_1.gstreamer
               gst_all_1.gst-plugins-base
               gst_all_1.gst-plugins-good  # AVI demuxer
-              gst_all_1.gst-libav         # Cinepak + DVI ADPCM decoders for launch videos
+              gst_all_1.gst-libav         # Cinepak decoder for launch videos
+              gst_all_1.gst-plugins-bad  # DVI ADPCM decoder for launch videos (legospin.avi)
 
               # ---- Reverse engineering tools ----
               ghidra                 # NSA's software reverse engineering suite
