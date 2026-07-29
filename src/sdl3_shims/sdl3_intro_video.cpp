@@ -151,14 +151,22 @@ void renderFrame()
     if (!SDL_GetRenderOutputSize(renderer, &outputWidth, &outputHeight) ||
         outputWidth <= 0 || outputHeight <= 0) return;
 
-    const float scaleX = static_cast<float>(outputWidth) / g_player.textureWidth;
-    const float scaleY = static_cast<float>(outputHeight) / g_player.textureHeight;
-    const float scale = scaleX < scaleY ? scaleX : scaleY;
+    // Largest integer scale factor that fits the display.
+    // Falls back to 1× (native 640×480) when the display is smaller
+    // than the video, preserving the original centred behaviour.
+    const int scaleW = outputWidth / g_player.textureWidth;
+    const int scaleH = outputHeight / g_player.textureHeight;
+    const int scale = (scaleW < scaleH ? scaleW : scaleH) > 0
+                          ? (scaleW < scaleH ? scaleW : scaleH)
+                          : 1;
+
+    const int destW = g_player.textureWidth * scale;
+    const int destH = g_player.textureHeight * scale;
     const SDL_FRect destination = {
-        (outputWidth - g_player.textureWidth * scale) * 0.5f,
-        (outputHeight - g_player.textureHeight * scale) * 0.5f,
-        g_player.textureWidth * scale,
-        g_player.textureHeight * scale,
+        static_cast<float>((outputWidth - destW) / 2),
+        static_cast<float>((outputHeight - destH) / 2),
+        static_cast<float>(destW),
+        static_cast<float>(destH),
     };
 
     SDL_SetRenderTarget(renderer, nullptr);
@@ -199,6 +207,7 @@ void consumeLatestSample()
         g_player.textureHeight = height;
         if (g_player.texture) {
             SDL_SetTextureBlendMode(g_player.texture, SDL_BLENDMODE_NONE);
+            SDL_SetTextureScaleMode(g_player.texture, SDL_SCALEMODE_NEAREST);
             loco::host_test::emit_intro_video_frame(static_cast<int>(g_player.clipIndex), width, height);
         }
     }
