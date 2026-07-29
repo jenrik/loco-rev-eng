@@ -55,6 +55,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include "../shared/types.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* ================================================================== */

@@ -53,7 +53,7 @@ override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) $(INCLUDES) $(FORCE_INC) $(SDL3_CFLA
 # Source discovery
 DCP_CPP_ALL := $(filter-out $(DCP_DIR)/stubs/%, $(filter-out $(DCP_DIR)/native/%, $(wildcard $(DCP_DIR)/*/*.cpp $(DCP_DIR)/*/*/*.cpp)))
 
-BROKEN_SRCS := $(DCP_DIR)/game/Building.cpp $(DCP_DIR)/town/Town.cpp $(DCP_DIR)/stubs/sdl3_undecompiled_stubs.cpp
+BROKEN_SRCS :=
 
 DCP_CPP_SRCS := $(filter-out $(BROKEN_SRCS), $(DCP_CPP_ALL))
 
