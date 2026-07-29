@@ -6,6 +6,10 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdint>
+#ifndef _WIN32
+#include <pwd.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 void AudioChannel_Pause() {}
@@ -18,7 +22,30 @@ void DDRAW_SetSurfaceFormat() {}
 void DDRAW_UnlockPrimary() {}
 void DPlayManager_RenderConnectionPanel() {}
 void FormatResourceString() {}
-const char* GetUserNameA(char*, uint32_t*) { return ""; }
+// PlayerRecord_constructor (0x452E10) calls GetUserNameA only after its
+// Configuration/PlayerName lookup is empty. Preserve the Win32 size contract
+// for the POSIX host instead of silently forcing its "LEGO LOCO" fallback.
+uint32_t GetUserNameA(char* buffer, uint32_t* size)
+{
+#ifndef _WIN32
+    if (buffer == nullptr || size == nullptr || *size == 0) return 0;
+    const passwd* const account = getpwuid(getuid());
+    const char* const name = account != nullptr ? account->pw_name : nullptr;
+    if (name == nullptr || *name == '\0') return 0;
+    const size_t required = std::strlen(name) + 1;
+    if (required > *size) {
+        *size = static_cast<uint32_t>(required);
+        return 0;
+    }
+    std::memcpy(buffer, name, required);
+    *size = static_cast<uint32_t>(required);
+    return 1;
+#else
+    (void)buffer;
+    (void)size;
+    return 0;
+#endif
+}
 void NETMAN_SendPacket() {}
 void PlaySound() {}
 void PlaySoundAt() {}
@@ -331,7 +358,6 @@ void CGWND_AboutDialog_Create(void*, void*) {}
 void CGWND_RegisterWindowClass(void*) {}
 void NETMAN_constructor(void*) {}
 void DirectPlay_constructor(void*) {}
-void PlayerRecord_constructor(void*) {}
 void PixelDataCache_Ctor(void*) {}
 void TileMap_Init(void*, unsigned char) {}
 void GameAudio_StopFinished(void*) {}

@@ -13,6 +13,7 @@
 
 #include "CGWND.h"
 #include "Game.h"
+#include "../game/PlayerConfig.h"
 #include "../shared/types.h"
 #include <cstdio>
 
@@ -31,7 +32,7 @@ void* ScriptEngine_constructor(void* mem);       /* 0x4493A0 */
 void* GameConfig_constructor(void* mem);         /* 0x440C60 */
 void* NETMAN_constructor(void* mem);             /* 0x43D0A0 */
 void* NetworkPlayerList_ctor(void* mem);         /* 0x443000 */
-void* PlayerRecord_constructor(void* mem);       /* 0x452E10 */
+PlayerConfig* PlayerRecord_constructor(PlayerConfig* config); /* 0x452E10 */
 void* PixelDataCache_Ctor(void* mem);            /* 0x401620 */
 
 /* Subsystem init/update (C++ linkage) */
@@ -74,7 +75,7 @@ extern void*    g_train_resources;   /* 0x4FD394 */
 extern void*    g_game_config;       /* 0x4FD3A8 */
 extern void*    g_netman;            /* 0x4FD3AC */
 extern void*    g_dplay;             /* 0x4FD3B0 */
-extern void*    g_player_config;     /* 0x4AA4A8 */
+extern PlayerConfig* g_player_config; /* 0x4AA4A8 */
 extern void*    g_dplay_config;      /* 0x4FD3B4 */
 extern void*    g_resmgr;            /* 0x4855E8 */
 extern void*    g_tilemap;           /* 0x4AAD08 */
@@ -181,7 +182,8 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     /* Allocate PlayerRecord (0x124 bytes) */
     trace_setup_stage("step 3e: PlayerRecord");
     mem = operator_new(0x124);
-    g_player_config = mem ? PlayerRecord_constructor(mem) : nullptr;
+    g_player_config = mem ? PlayerRecord_constructor(static_cast<PlayerConfig*>(mem))
+                          : nullptr;
 
     /* Allocate PixelDataCache (0x18 bytes) */
     trace_setup_stage("step 3f: PixelDataCache");

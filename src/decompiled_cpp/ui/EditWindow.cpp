@@ -86,6 +86,7 @@ BOOL  __stdcall PlaySoundA(const char* pszSound, void* hmod, DWORD fdwSound);
 #include <SDL3/SDL.h>
 #include "sdl3_window.h"
 #include "sdl3_game_audio.h"
+#include "host_test_events.h"
 
 /* sdl3_window.h covers: GetDesktopWindow, GetClientRect, LoadIconA,
  *   CreateSolidBrush, DeleteObject, ShowWindow, EnableWindow,
@@ -985,8 +986,8 @@ enum HostMenuButton {
     kHostQuit,
     kHostSinglePlayer,
     kHostMultiplayer,
-    kHostExit,
-    kHostText,
+    kHostGame,
+    kHostJoinGame,
 };
 
 bool host_point_in_rect(const RECT& rect, float x, float y)
@@ -1040,8 +1041,8 @@ HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
     if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
     if (!multiplayer && host_point_in_rect(menu.btnPlayRect, x, y)) return kHostSinglePlayer;
     if (multiplayer && has_scenario && host_point_in_rect(menu.btnScenarioRect, x, y)) return kHostMultiplayer;
-    if (!multiplayer && !alternate_menu && host_point_in_rect(menu.btnExitRect, x, y)) return kHostExit;
-    if (!multiplayer && alternate_menu && host_point_in_rect(menu.btnTextRect, x, y)) return kHostText;
+    if (!multiplayer && !alternate_menu && host_point_in_rect(menu.btnExitRect, x, y)) return kHostGame;
+    if (!multiplayer && alternate_menu && host_point_in_rect(menu.btnTextRect, x, y)) return kHostJoinGame;
     return kHostNoButton;
 }
 }  // namespace
@@ -1195,11 +1196,14 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
         NETMAN_SetGameMode(g_netman, 0);
         changed = true;
         break;
-    case kHostExit:
+    case kHostGame:
+        // 0x40B/0x40C are hostup/hostdown; DPlayConfig+8 is the
+        // selected-host-game flag used by the subsequent Go action.
         _g_netman_state[8] = 1;
         changed = true;
         break;
-    case kHostText:
+    case kHostJoinGame:
+        // 0x40E/0x40F are joinup/joindown and clear the host selection.
         _g_netman_state[8] = 0;
         changed = true;
         break;
@@ -1230,6 +1234,7 @@ void EditWindow::hostCommitPlayerName()
     if (legal && has_alpha && g_player_config != nullptr) {
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
+        loco::host_test::emit_player_name_committed(g_player_config->name);
         // 0x422722 branches on DPlayConfig+7. With the selected-single flag
         // set, the original takes the local startup path at 0x4227DA and
         // never enters the multiplayer panel. The SDL host cannot yet run

@@ -134,14 +134,21 @@ class GameSession:
         return parsed
 
     def wait_for_event(
-        self, event: str, timeout: float | None = None, **fields: Any
+        self, event: str, timeout: float | None = None, *,
+        after_sequence: int | None = None, **fields: Any
     ) -> dict[str, Any]:
+        """Wait for an event, optionally requiring a strictly later sequence.
+
+        Button tests use this to distinguish the Go/Back WAV from an earlier
+        selector click that happens to queue the same original resource.
+        """
         deadline = time.monotonic() + (timeout or self.timeout)
         while time.monotonic() < deadline:
             for item in self.events():
-                if item.get("event") == event and all(
-                    item.get(key) == value for key, value in fields.items()
-                ):
+                if (item.get("event") == event
+                    and (after_sequence is None
+                         or int(item.get("sequence", -1)) > after_sequence)
+                    and all(item.get(key) == value for key, value in fields.items())):
                     self._record("event_observed", event=event, fields=fields)
                     return item
             if not self.is_alive():

@@ -193,9 +193,9 @@ test-host-multiplayer-menu-input: tests/host_multiplayer_menu_input_test.sh
 # Host sound regression: mode 2 preloads 0x5015; mode 10 plays 0x5026.
 SDL3_GAME_AUDIO_TEST := $(BUILD_DIR)/sdl3_game_audio_test
 
-$(SDL3_GAME_AUDIO_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h tests/sdl3_game_audio_test.cpp | dirs
+$(SDL3_GAME_AUDIO_TEST): $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/resource_archive.h $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/pe_string_table.h $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/resource_manager_sdl3.h $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_game_audio.h $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/host_test_events.h tests/sdl3_game_audio_test.cpp | dirs
 	@echo "=== Testing host game audio ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp tests/sdl3_game_audio_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror $(SDL3_CFLAGS) $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp tests/sdl3_game_audio_test.cpp $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
 
 test-sdl3-game-audio: $(SDL3_GAME_AUDIO_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; cd $(PROJECT_ROOT) && SDL_AUDIODRIVER=dummy $(SDL3_GAME_AUDIO_TEST)

@@ -77,6 +77,30 @@ public:
         std::fflush(file_);
     }
 
+    void audio_queued(uint32_t resource_id)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (file_ == nullptr) return;
+        prefix("audio_queued");
+        std::fprintf(file_, ",\"resource_id\":%u}\n", resource_id);
+        std::fflush(file_);
+    }
+
+    void player_name_committed(const char* name)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (file_ == nullptr || name == nullptr) return;
+        prefix("player_name_committed");
+        std::fputs(",\"name\":\"", file_);
+        for (const unsigned char* ch = reinterpret_cast<const unsigned char*>(name);
+             *ch != 0; ++ch) {
+            if (*ch == '\\' || *ch == '\"') std::fputc('\\', file_);
+            if (*ch >= 0x20) std::fputc(*ch, file_);
+        }
+        std::fputs("\"}\n", file_);
+        std::fflush(file_);
+    }
+
 private:
     void prefix(const char* event)
     {
@@ -122,6 +146,16 @@ void emit_screen_presented(const char* screen, int dialog_state)
 void emit_search_completed(int sessions)
 {
     sink().search_completed(sessions);
+}
+
+void emit_audio_queued(uint32_t resource_id)
+{
+    sink().audio_queued(resource_id);
+}
+
+void emit_player_name_committed(const char* name)
+{
+    sink().player_name_committed(name);
 }
 
 void emit_clean_shutdown()

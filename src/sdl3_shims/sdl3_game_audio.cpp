@@ -10,6 +10,7 @@
 #include "sdl3_game_audio.h"
 
 #include "resource_manager_sdl3.h"
+#include "host_test_events.h"
 
 #include <SDL3/SDL.h>
 
@@ -107,6 +108,7 @@ bool SDL3_GameAudioPlayResource(uint32_t resource_id) {
     }
     if (!SDL_ResumeAudioStreamDevice(stream)) return false;
     g_active_streams.push_back(std::move(owned_stream));
+    loco::host_test::emit_audio_queued(resource_id);
     return true;
 }
 
