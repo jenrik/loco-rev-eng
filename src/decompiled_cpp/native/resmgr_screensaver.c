@@ -93,7 +93,7 @@ char* __fastcall RESMGR_EnumScreenSavers(char param_1)
             *p++ = 0;
         }
         *(short*)p = 0;
-        *(char*)((int)p + 2) = 0;
+        *(char*)((intptr_t)p + 2) = 0;
     }
 
     /* Build the search path: "%s\\SaveGame\\*.sav" or "%s\\ScrSaver\\*.sav" */
@@ -172,7 +172,7 @@ void __fastcall RESMGR_SelectScreensaver(char* outBuf)
             *p++ = 0;
         }
         *(short*)p = 0;
-        *(char*)((int)p + 2) = 0;
+        *(char*)((intptr_t)p + 2) = 0;
     }
 
     /* Check if Random screensaver is enabled */
