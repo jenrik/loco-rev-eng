@@ -1167,12 +1167,17 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
     }
     this->hostEditFocused = false;
 
-    // The option controls are the two delayed button paths. 0x42298A and
-    // 0x422AC3 restore their background, draw 0x404/0x406, play 0x5015,
+    // The two delayed button paths. 0x42298A (accept) and
+    // 0x422AC3 (quit) restore their background, draw 0x404/0x406,
     // repaint, and Sleep(0x96) before accepting or invoking mode 10.
+    // Only the accept button plays the click sound 0x5015 (0x422A72);
+    // the quit button goes straight to CGWND_SetMode(10) which plays
+    // the exit sweep 0x5026.
     if (button == kHostOptionOne || button == kHostQuit) {
         if (this->hostPressedButton == kHostNoButton) {
-            SDL3_GameAudioPlayResource(0x5015);
+            if (button == kHostOptionOne) {
+                SDL3_GameAudioPlayResource(0x5015);
+            }
             this->hostPressedButton = button;
             this->hostPressedUntilMs = SDL_GetTicks() + 150;
         }
