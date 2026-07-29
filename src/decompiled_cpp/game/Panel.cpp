@@ -186,8 +186,8 @@ byte Panel::Init(int resource_id, int anim_index, byte force_reload)
     byte cResult = (byte)result;
 
     if (cResult != 0 && resource_id != 0x2401) {
-        void* surface = *(void**)(*(int*)((char*)this + 0x40) + 0x10);
-        int surface_locked = *(int*)((char*)surface + 4);
+        void* surface = *(void**)(uintptr_t)(*(uintptr_t*)((uint8_t*)this + 0x40) + 0x10);
+        int surface_locked = *(int*)((uint8_t*)surface + 4);
 
         if (surface_locked == 0) {
             UIPANEL_UnlockSurface(surface);
@@ -283,8 +283,8 @@ void* Panel::CreateChildSprite(int res_handle, ushort z_order, int sound_res)
         }
         /* The new child's vtable[?] is stored at DAT_00485270[10] and
            DAT_00485270 is updated to the new child pointer */
-        *(void**)((int)DAT_00485270 + 0x28) = new_child;  /* link old child as next */
-        return *(void**)((int)DAT_00485270 + 0x28);        /* return new child */
+        *(void**)((uint8_t*)DAT_00485270 + 0x28) = new_child;  /* link old child as next */
+        return *(void**)((uint8_t*)DAT_00485270 + 0x28);        /* return new child */
     }
 
     /* No existing child — create first child */
@@ -453,19 +453,19 @@ char Panel::HitTestChildren(int x, int y)
 
     /* Iterate child linked list (next pointer at +0x28) */
     /* NOTE: +0x9C is a "selected child" pointer that is SKIPPED during hit-testing */
-    for (int child = (int)this->child_surface; child != 0;
-         child = *(int*)(child + 0x28)) {
+    for (uintptr_t child = (uintptr_t)this->child_surface; child != 0;
+         child = *(uintptr_t*)(child + 0x28)) {
 
-        if (child == this->field_9C) {
+        if ((void*)child == this->field_9C) {
             /* Skip the currently selected child */
             continue;
         }
 
         /* Call vtable[0x11] (slot 17 at +0x44) for hit-test on child */
         typedef char (__thiscall* ChildHitTestFunc)(void* self, int x, int y);
-        void* child_vtab = *(void**)child;
+        void* child_vtab = *(void**)(uintptr_t)child;
         ChildHitTestFunc childTest = (ChildHitTestFunc)((void**)child_vtab)[0x11];
-        char hit = childTest((void*)child, rel_x, rel_y);
+        char hit = childTest((void*)(uintptr_t)child, rel_x, rel_y);
 
         if (hit) {
             hit_any = 1;
@@ -504,7 +504,7 @@ uint Panel::HandleKey(int key_code)
         void* child = this->child_ptr;
         if (child != NULL && *(short*)((uint8_t*)child + 0x48) == 1) {
             CGWND_TrackPiece_SetZoom(child, 2);
-            int result = this->child_ptr;
+            uintptr_t result = (uintptr_t)this->child_ptr;
             *(short*)(result + 0x54) = 6;
             return 1;
         }
