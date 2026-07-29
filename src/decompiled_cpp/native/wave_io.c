@@ -79,7 +79,7 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
 
             /* Check if stream is at end (flag & 1) */
             void* vt = *(void**)stream;
-            int flags_at = *(int*)((uint8_t*)stream + *(int*)(vt + 4) + 8);
+            int flags_at = *(int*)((uint8_t*)stream + *(int*)((uint8_t*)vt + 4) + 8);
             if (flags_at & 1) break;
 
             /* Lock critical section if active */
@@ -154,7 +154,7 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     extern void* __cdecl operator_new(size_t size);
     extern void  __cdecl CRT_free(void* ptr);
     extern void  __cdecl CRT_exit(void* stack, const char* msg);
-    extern void* __thiscall AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
+    extern int* __thiscall AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
     extern WNDPROC_Stream* __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
     extern WNDPROC_Stream* __thiscall WIN32_StreamOpen(void* stream, int mode);
     extern int   __thiscall WIN32_StreamOpenPath(void* stream, const char* path, int flags, const char* mode);
@@ -195,7 +195,7 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 
             /* Check if stream opened successfully (flag test) */
             void* vt = *(void**)stream_file;
-            int flags = *(int*)((uint8_t*)stream_file + *(int*)(vt + 4) + 0x4C);
+            int flags = *(int*)((uint8_t*)stream_file + *(int*)((uint8_t*)vt + 4) + 0x4C);
             if (flags != -1) {
                 stream = stream_file;
             }
