@@ -633,7 +633,7 @@ void TrainSubsystem::ProcessMessages()
 
                 /* If scenario mode, unlink all cars from sprite_list_1 */
                 if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 1) {
-                    int car = (uint8_t*)this->sprite_list_1;
+                    uint8_t* car = (uint8_t*)this->sprite_list_1;
                     while (car != 0) {
                         NetworkMsg* qmsg = (NetworkMsg*)operator_new(0x1c);
                         if (qmsg) {
@@ -662,7 +662,7 @@ void TrainSubsystem::ProcessMessages()
 
                 /* Reset timeout on all controller cars */
                 {
-                    int car = (uint8_t*)this->sprite_list_1;
+                    uint8_t* car = (uint8_t*)this->sprite_list_1;
                     while (car != 0) {
                         *(uint16_t*)(car + 0x74) = 32000;
                         car = *(int*)(car + 0x70);
@@ -705,7 +705,7 @@ void TrainSubsystem::ProcessMessages()
             uint8_t info_flag = (uint8_t)p[4];
             int32_t config_val = *(int32_t*)(p + 2);
 
-            int car = (uint8_t*)this->sprite_list_1;
+            uint8_t* car = (uint8_t*)this->sprite_list_1;
             while (car) { *(uint16_t*)(car + 0x74) = 32000; car = *(int*)(car + 0x70); }
 
             if (info_flag) this->field_30 = 1;
@@ -1220,7 +1220,7 @@ void TrainSubsystem::HandleTrainPosUpdate(void* data, int player_index)
     if (owner == *(uint32_t*)((uint8_t*)g_netman + 0x7D0)) {
         /* Find matching car in sprite_list_1 by resource ID */
         int resource_id = *(int*)((uint8_t*)data + 4);
-        int car = (uint8_t*)this->sprite_list_1;
+        uint8_t* car = (uint8_t*)this->sprite_list_1;
         while (car != 0) {
             if (*(uint16_t*)(car + 0x7A) == resource_id) break;
             car = *(int*)(car + 0x70);
@@ -1579,7 +1579,7 @@ forward_train:
     /* Forward train to another player at the target */
     {
         if (this->sprite_list_2 != NULL) {
-            int tail = (uint8_t*)this->sprite_list_2;
+            uint8_t* tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) {
                 tail = *(int*)(tail + 0x70);
             }
@@ -1776,7 +1776,7 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
 
     /* Find matching car in sprite_list_1 */
     {
-        int car = (uint8_t*)this->sprite_list_1;
+        uint8_t* car = (uint8_t*)this->sprite_list_1;
         while (car != 0) {
             if (*(uint16_t*)(car + 0x7A) == train_id &&
                 *(uint8_t*)(car + 0x78) == color) {
@@ -1973,7 +1973,7 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
         *(void**)((uint8_t*)car + 0x70) = NULL;
         this->sprite_list_2 = car;
     } else {
-        int tail = (uint8_t*)this->sprite_list_2;
+        uint8_t* tail = (uint8_t*)this->sprite_list_2;
         while (*(int*)(tail + 0x70) != 0) {
             tail = *(int*)(tail + 0x70);
         }
@@ -2025,13 +2025,13 @@ void TrainSubsystem::UpdateTrainMovement()
             if (this->sprite_list_2 == NULL) {
                 this->sprite_list_2 = node;
             } else {
-                int tail = (uint8_t*)this->sprite_list_2;
+                uint8_t* tail = (uint8_t*)this->sprite_list_2;
                 while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
                 *(void**)(tail + 0x70) = node;
             }
 
             /* Re-notify all cars in sprite_list_2 */
-            int car = (uint8_t*)this->sprite_list_2;
+            uint8_t* car = (uint8_t*)this->sprite_list_2;
             while (car != 0) {
                 NetworkMsg* msg = (NetworkMsg*)operator_new(0x1c);
                 if (msg) { msg->data = NULL; msg->next = NULL;
@@ -2388,7 +2388,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         } else {
-            int tail = (uint8_t*)this->sprite_list_2;
+            uint8_t* tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
@@ -2469,7 +2469,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         } else {
-            int tail = (uint8_t*)this->sprite_list_2;
+            uint8_t* tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;
@@ -2521,7 +2521,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             *(void**)((uint8_t*)car + 0x70) = NULL;
             this->sprite_list_2 = car;
         } else {
-            int tail = (uint8_t*)this->sprite_list_2;
+            uint8_t* tail = (uint8_t*)this->sprite_list_2;
             while (*(int*)(tail + 0x70) != 0) tail = *(int*)(tail + 0x70);
             *(void**)((uint8_t*)car + 0x70) = NULL;
             *(void**)(tail + 0x70) = car;

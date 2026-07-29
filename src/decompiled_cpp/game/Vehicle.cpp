@@ -185,10 +185,10 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
             *(void**)(editor_bytes + 0x44C) = this;
 
             /* Read speed parameters from editor config */
-            int32_t* editor_param = ((VehicleEditor*)this->editors[0])->resource;
-            int16_t fwd_speed = *(int16_t*)((uint8_t*)editor_param + 0x7A8);  /* forward speed */
+            uint8_t* editor_param = (uint8_t*)((VehicleEditor*)this->editors[0])->resource;
+            int16_t fwd_speed = *(int16_t*)(editor_param + 0x7A8);  /* forward speed */
             this->max_speed = fwd_speed;        /* +0x24 */
-            this->reverse_speed = *(int16_t*)((uint8_t*)editor_param + 0x7AA);  /* +0x26 */
+            this->reverse_speed = *(int16_t*)(editor_param + 0x7AA);  /* +0x26 */
             this->max_steps = fwd_speed;        /* +0x58 = forward speed */
             this->active_editor = 0;            /* +0x08 = 0 (forward) */
 
@@ -385,16 +385,15 @@ uint32_t Vehicle::InitRoute(int32_t param_1, int32_t param_2, uint8_t param_3)
         this->editors[this->editor_count] = editor;
 
         result = 1;
-        void* new_slot = this->editors[this->editor_count];
+        uint8_t* new_slot = (uint8_t*)this->editors[this->editor_count];
         if (new_slot != 0) {
-            uint8_t* editor_bytes = (uint8_t*)new_slot;
-            if (editor_bytes[0x18] == 1) {           /* active flag */
-                *(void**)(editor_bytes + 0x44C) = this;  /* backref */
+            if (new_slot[0x18] == 1) {           /* active flag */
+                *(void**)(new_slot + 0x44C) = this;  /* backref */
                 /* ---- SEH teardown ---- */
                 return result;
             }
             /* Editor inactive — destroy it */
-            (*(void (__thiscall**)(void*, uint8_t))*new_slot)(new_slot, 1);
+            (*(void (__thiscall**)(void*, uint8_t))*(void**)new_slot)(new_slot, 1);
             this->editors[this->editor_count] = 0;
         }
         this->editor_count = (int16_t)(this->editor_count - 1);
@@ -835,9 +834,9 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                     (this->active_editor == 0) ? 0x40 : 0;
             }
             *(int32_t*)(front_wheel + 4) = 0;
-            *(int32_t*)(front_wheel + 8) = *(uint16_t*)(resource_id + 0x636) - 1;
+            *(int32_t*)(front_wheel + 8) = *(uint16_t*)((uintptr_t)resource_id + 0x636) - 1;
             *(int32_t*)(rear_wheel + 4) = 0;
-            *(int32_t*)(rear_wheel + 8) = *(uint16_t*)(resource_id + 0x636) - 1;
+            *(int32_t*)(rear_wheel + 8) = *(uint16_t*)((uintptr_t)resource_id + 0x636) - 1;
         } else if (tile_type == 2 || tile_type == 8) {
             /* South-facing */
             if (param_2 == 0) {
@@ -865,9 +864,9 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                     (this->active_editor == 0) ? 0x60 : 0x20;
             }
             *(int32_t*)(front_wheel + 4) = 0;
-            *(int32_t*)(front_wheel + 8) = *(uint16_t*)(resource_id + 0x636) - 1;
+            *(int32_t*)(front_wheel + 8) = *(uint16_t*)((uintptr_t)resource_id + 0x636) - 1;
             *(int32_t*)(rear_wheel + 4) = 0;
-            *(int32_t*)(rear_wheel + 8) = *(uint16_t*)(resource_id + 0x636) - 1;
+            *(int32_t*)(rear_wheel + 8) = *(uint16_t*)((uintptr_t)resource_id + 0x636) - 1;
         }
         /* else: no special handling for other tile types */
 
@@ -915,7 +914,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
 
         do {
             uint8_t* ed = (uint8_t*)(VehicleEditor*)this->editors[ed_idx];
-            int tile_type = *(uint8_t*)(resource_id + 0x63A);
+            int tile_type = *(uint8_t*)((uintptr_t)resource_id + 0x63A);
 
             switch (tile_type) {
             case 1:
@@ -1002,17 +1001,17 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
              i++) {
 
             uint8_t* editor = (uint8_t*)(VehicleEditor*)this->editors[i];
-            int32_t front_wheel_ed = *(int32_t*)(editor + 0x430);
-            int32_t rear_wheel_ed  = *(int32_t*)(editor + 0x434);
+            uintptr_t front_wheel_ed = (uintptr_t)*(int32_t*)(editor + 0x430);
+            uintptr_t rear_wheel_ed  = (uintptr_t)*(int32_t*)(editor + 0x434);
             int32_t offset = i * 0x26;
 
-            int tile_type = *(uint8_t*)(resource_id + 0x63A);
+            int tile_type = *(uint8_t*)((uintptr_t)resource_id + 0x63A);
 
             if (tile_type == 1 || tile_type == 7) {
                 /* North: front wheel above, rear wheel below */
                 int32_t front_pos = (i == 0)
                     ? *(int32_t*)(editor_state + 0x0C) - 0x0C
-                    : *(int32_t*)(((VehicleEditor*)this->editors[0])->end_a + 0x0C)
+                    : *(int32_t*)((uintptr_t)((VehicleEditor*)this->editors[0])->end_a + 0x0C)
                         + offset * -1;
                 *(int32_t*)(front_wheel_ed + 0x0C) = front_pos;
                 *(int32_t*)(front_wheel_ed + 0x10) = *(int32_t*)(editor_state + 0x10);
@@ -1023,7 +1022,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 /* South: front wheel below, rear wheel above */
                 int32_t front_pos = (i == 0)
                     ? *(int32_t*)(editor_state + 0x0C) + 0x0C
-                    : *(int32_t*)(((VehicleEditor*)this->editors[0])->end_a + 0x0C)
+                    : *(int32_t*)((uintptr_t)((VehicleEditor*)this->editors[0])->end_a + 0x0C)
                         + offset;
                 *(int32_t*)(front_wheel_ed + 0x0C) = front_pos;
                 *(int32_t*)(front_wheel_ed + 0x10) = *(int32_t*)(editor_state + 0x10);
@@ -1034,7 +1033,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 /* West: front wheel left, rear wheel right */
                 int32_t front_pos = (i == 0)
                     ? *(int32_t*)(editor_state + 0x10) - 0x0C
-                    : *(int32_t*)(((VehicleEditor*)this->editors[0])->end_a + 0x10)
+                    : *(int32_t*)((uintptr_t)((VehicleEditor*)this->editors[0])->end_a + 0x10)
                         + offset * -1;
                 *(int32_t*)(front_wheel_ed + 0x10) = front_pos;
                 *(int32_t*)(front_wheel_ed + 0x0C) = *(int32_t*)(editor_state + 0x0C);
@@ -1045,7 +1044,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                 /* East: front wheel right, rear wheel left */
                 int32_t front_pos = (i == 0)
                     ? *(int32_t*)(editor_state + 0x10) + 0x0C
-                    : *(int32_t*)(((VehicleEditor*)this->editors[0])->end_a + 0x10)
+                    : *(int32_t*)((uintptr_t)((VehicleEditor*)this->editors[0])->end_a + 0x10)
                         + offset;
                 *(int32_t*)(front_wheel_ed + 0x10) = front_pos;
                 *(int32_t*)(front_wheel_ed + 0x0C) = *(int32_t*)(editor_state + 0x0C);
@@ -1080,25 +1079,25 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
 /* ================================================================== */
 int32_t Vehicle::GetNearestTrack()
 {
-    int32_t wheel;
+    uintptr_t wheel;
 
     if (this->active_editor == 0) {
         /* Forward: use last editor's rear wheel */
         int32_t* last_editor = (int32_t*)this->editors[this->editor_count];
-        wheel = *(int32_t*)((uint8_t*)last_editor + 0x434);
+        wheel = (uintptr_t)*(int32_t*)((uint8_t*)last_editor + 0x434);
     } else {
         /* Reverse: use first editor's front wheel */
         int32_t* first_editor = (int32_t*)this->editors[0];
-        wheel = *(int32_t*)((uint8_t*)first_editor + 0x430);
+        wheel = (uintptr_t)*(int32_t*)((uint8_t*)first_editor + 0x430);
     }
 
     /* Get wheel's target building pointer */
-    int32_t* target = *(int32_t**)((uint8_t*)wheel + 0x14);
+    int32_t* target = *(int32_t**)(wheel + 0x14);
 
     /* Return target only if state == 7, otherwise 0 */
     /* Original asm: target & ((target->state != 7) - 1) */
     if (target != 0 && *(int32_t*)((uint8_t*)target + 0x10C) == 7) {
-        return (int32_t)target;
+        return (int32_t)(uintptr_t)target;
     }
     return 0;
 }
@@ -1222,15 +1221,15 @@ uint8_t Vehicle::IsMoving()
     }
 
     /* Get relevant wheel based on active_editor direction */
-    int32_t wheel;
+    uintptr_t wheel;
     if (this->active_editor == 0) {
         /* Forward: use last editor's rear wheel */
         int32_t* last_editor = (int32_t*)this->editors[this->editor_count];
-        wheel = *(int32_t*)((uint8_t*)last_editor + 0x434);   /* rear wheel */
+        wheel = (uintptr_t)*(int32_t*)((uint8_t*)last_editor + 0x434);   /* rear wheel */
     } else {
         /* Reverse: use first editor's front wheel */
         int32_t* first_editor = (int32_t*)this->editors[0];
-        wheel = *(int32_t*)((uint8_t*)first_editor + 0x430);  /* front wheel */
+        wheel = (uintptr_t)*(int32_t*)((uint8_t*)first_editor + 0x430);  /* front wheel */
     }
 
     /* Check if target building exists and is a road/building tile */
@@ -1245,7 +1244,7 @@ uint8_t Vehicle::IsMoving()
     }
 
     /* Check wheel's current target for continuity */
-    int32_t* wheel_target = *(int32_t**)((uint8_t*)wheel + 0x14);
+    int32_t* wheel_target = *(int32_t**)(wheel + 0x14);
     if (wheel_target != 0) {
         int32_t wheel_res = *(int32_t*)((uint8_t*)wheel_target + 0x40);
         if (RESDATA_IsRoadTile(wheel_res) || RESDATA_IsBuildingTile(wheel_res)) {
@@ -1281,21 +1280,21 @@ int16_t Vehicle::CalcSpeed(int16_t speed)
         this->max_steps = speed;
         int32_t* ed = (int32_t*)editor;
         int32_t anim_data = ed[0x15];                          /* +0x54 = anim frame data */
-        int32_t ed_vtbl = *ed;                                 /* vtable pointer */
+        uintptr_t ed_vtbl = (uintptr_t)*ed;                    /* vtable pointer */
         /* vtable[7] (SetAnimState at +0x1C) arg=0 means forward */
-        (*(void (__thiscall**)(int32_t))((void*)ed_vtbl + 0x1C))(0);
+        (*(void (__thiscall**)(int32_t))((void*)(ed_vtbl + 0x1C)))(0);
         /* vtable[8] (SetFrame at +0x20) with (anim_data, 0) */
-        (*(void (__thiscall**)(int32_t, int32_t))((void*)ed_vtbl + 0x20))(anim_data, 0);
+        (*(void (__thiscall**)(int32_t, int32_t))((void*)(ed_vtbl + 0x20)))(anim_data, 0);
     } else if (speed == this->reverse_speed) {
         /* Reverse speed: set max_steps = speed, play reverse animation */
         int32_t* ed = (int32_t*)editor;
         int32_t anim_data = ed[0x15];                          /* +0x54 = anim frame data */
-        int32_t ed_vtbl = *ed;                                 /* vtable pointer */
+        uintptr_t ed_vtbl = (uintptr_t)*ed;                    /* vtable pointer */
         this->max_steps = speed;
         /* vtable[7] (SetAnimState at +0x1C) arg=1 means reverse */
-        (*(void (__thiscall**)(int32_t))((void*)ed_vtbl + 0x1C))(1);
+        (*(void (__thiscall**)(int32_t))((void*)(ed_vtbl + 0x1C)))(1);
         /* vtable[8] (SetFrame at +0x20) with (anim_data, 0) */
-        (*(void (__thiscall**)(int32_t, int32_t))((void*)ed_vtbl + 0x20))(anim_data, 0);
+        (*(void (__thiscall**)(int32_t, int32_t))((void*)(ed_vtbl + 0x20)))(anim_data, 0);
     }
 
     return this->max_steps;
