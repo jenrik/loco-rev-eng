@@ -658,14 +658,14 @@ uint32_t Netman::ReceivePlayerName()
             int32_t dd = VehicleEditor_GetDPlayData(*ch);
             if (!dd) continue;
             uint16_t* s1 = (uint16_t*)((uint8_t*)g_player_config + 6);
-            uint16_t* s2 = (uint16_t*)(dd + 0x10);
+            uint16_t* s2 = (uint16_t*)((uint8_t*)(uintptr_t)dd + 0x10);
             while (*s1 && *s1 == *s2) { s1++; s2++; }
             int32_t cmp = (*s1 < *s2) ? -1 : (*s1 > *s2) ? 1 : 0;
-            if (cmp == 0 && *(int32_t*)(dd + 0x3C) == 0 && *(uint16_t*)(dd + 0x3A)) {
+            if (cmp == 0 && *(int32_t*)((uint8_t*)(uintptr_t)dd + 0x3C) == 0 && *(uint16_t*)((uint8_t*)(uintptr_t)dd + 0x3A)) {
                 char fp[0x504];
                 fp[0] = g_empty_string;
                 for (int32_t i = 0; i < 0x140; i++) ((uint32_t*)&fp[1])[i] = 0;
-                NET_GetAttFilePath(*(uint16_t*)(dd + 0x3A), 5, fp);
+                NET_GetAttFilePath(*(uint16_t*)((uint8_t*)(uintptr_t)dd + 0x3A), 5, fp);
                 return (uint32_t)PlaySoundFile(fp, g_listener_x, g_listener_y, 4);
             }
         }
@@ -770,7 +770,7 @@ void Netman::SendGameStart(TrainMessage* msg)
         if (!ch) continue;
         CarObject* car = (CarObject*)ch;
         int32_t rid = VehicleEditor_GetResourceId(*ch);
-        int32_t val = ((int32_t*)*ch)[0x15];
+        int32_t val = ((int32_t*)(uintptr_t)*ch)[0x15];
         if (has_dd && rid == 0x1870) {
             car->SetResourceId(0x1871, -1);
             car->SetParam(val, 1);
@@ -1499,14 +1499,14 @@ uint8_t Netman::SendSignalChange(InboundTrainNode* node)
     uint16_t carCount = *(uint16_t*)((uint8_t*)node + 0x0C);
     for (int32_t ci = 0; ci < (int32_t)carCount; ci++) {
         int32_t* carHandle = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-        void* dd = (void*)VehicleEditor_GetDPlayData(*carHandle);
+        void* dd = (void*)(uintptr_t)VehicleEditor_GetDPlayData(*carHandle);
 
         if (dd != NULL) {
             if (*((uint8_t*)dd + 0x24) == 0) {
                 hasStaleTrack = 1;
                 dplayData[ci] = NULL;
             } else {
-                VehicleEditor_SetDPlayData((void*)*carHandle, 0);
+                VehicleEditor_SetDPlayData((void*)(uintptr_t)*carHandle, 0);
                 dplayData[ci] = NETMAN_ReceiveSignalChange(dd);
                 if (dplayData[ci] != NULL) {
                     hasValidData = 1;
