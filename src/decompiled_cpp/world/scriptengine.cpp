@@ -263,7 +263,7 @@ int CDECL ScriptEngine_Run(void* engine, int param_2, int param_3)
     }
 
     /* Dispatch vtable[2] */
-    result = (*(int (**)(int, int))(*(void**)engine + 2))(param_2, param_3);
+    result = (*(int (**)(int, int))((uint8_t*)(*(void**)engine) + 2))(param_2, param_3);
 
     if ((char)result != 0) {
         /* Success — check type at +0x48 */
@@ -366,17 +366,17 @@ void __fastcall RESDATA_ScriptedObject::InitSubObjects()
 {
     /* The compiler preserves the class's virtual dispatch table. */
     /* Stop child GameObject via vtable dispatch */
-    (*(void (**)(void*, int32_t, int32_t))(*(void**)this->gameobject + 6))(
+    (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->gameobject) + 6))(
         *(void**)this->gameobject, 0, -1);                           /* +0xE0 */
 
     /* Stop own base via vtable[6] */
-    (*(void (**)(int32_t, int32_t, int32_t))(*(void**)this + 6))(0, -1, 0);
+    (*(void (**)(int32_t, int32_t, int32_t))((uint8_t*)(*(void**)this) + 6))(0, -1, 0);
 
     /* Call ScriptEngine shutdown via vtable[15] (slot 0x3C/4) */
-    (*(void (**)(void))(*(void**)this->scriptengine + 15))();        /* +0x178 */
+    (*(void (**)(void))((uint8_t*)(*(void**)this->scriptengine) + 15))();        /* +0x178 */
 
     /* Call ScrollPanel shutdown via vtable[15] */
-    (*(void (**)(void))(*(void**)this->scrollpanel + 15))();         /* +0x260 */
+    (*(void (**)(void))((uint8_t*)(*(void**)this->scrollpanel) + 15))();         /* +0x260 */
 
     /* Destroy RESDATA base */
     RESDATA_DtorBase(this);
@@ -404,17 +404,17 @@ void __fastcall RESDATA_ScriptedObject::InitSubObjects()
 void __fastcall RESDATA_ScriptedObject::Shutdown()
 {
     /* Stop child GameObject */
-    (*(void (**)(void*, int32_t, int32_t))(*(void**)this->gameobject + 6))(
+    (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->gameobject) + 6))(
         *(void**)this->gameobject, 0, -1);                           /* +0xE0 */
 
     /* Stop own base via vtable[6] */
-    (*(void (**)(int32_t, int32_t, int32_t))(*(void**)this + 6))(0, -1, 0);
+    (*(void (**)(int32_t, int32_t, int32_t))((uint8_t*)(*(void**)this) + 6))(0, -1, 0);
 
     /* Shutdown ScriptEngine via vtable[15] */
-    (*(void (**)(void))(*(void**)this->scriptengine + 15))();        /* +0x178 */
+    (*(void (**)(void))((uint8_t*)(*(void**)this->scriptengine) + 15))();        /* +0x178 */
 
     /* Shutdown ScrollPanel via vtable[15] */
-    (*(void (**)(void))(*(void**)this->scrollpanel + 15))();         /* +0x260 */
+    (*(void (**)(void))((uint8_t*)(*(void**)this->scrollpanel) + 15))();         /* +0x260 */
 
     /* Destroy RESDATA base */
     RESDATA_DtorBase(this);
@@ -431,7 +431,7 @@ void __fastcall RESDATA_ScriptedObject::Shutdown()
 uint32_t __fastcall RESDATA_ScriptedObject::Start()
 {
     /* Load resources 0x2400-0x2413 */
-    int32_t* initResult = (int32_t*)(*(int32_t* (**)(void*, int32_t, int32_t))(*(void**)this + 6))(
+    int32_t* initResult = (int32_t*)(*(int32_t* (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 6))(
         this, 0x2400, -1);
 
     /* Set sub-object mapping flag */
@@ -441,10 +441,10 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
 
     if ((char)initResult != 0) {
         /* Init child GameObject */
-        initResult = (int32_t*)(*(int32_t* (**)(void*, int32_t, int32_t))(*(void**)this->gameobject + 6))(
+        initResult = (int32_t*)(*(int32_t* (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->gameobject) + 6))(
             *(void**)this->gameobject, 0x2402, -1);                  /* +0xE0 */
         if ((char)initResult != 0) {
-            uint32_t panelResult = (*(uint32_t (**)(void*))(*(void**)this->scrollpanel + 6))(
+            uint32_t panelResult = (*(uint32_t (**)(void*))((uint8_t*)(*(void**)this->scrollpanel) + 6))(
                 this->scrollpanel);                                  /* +0x260 */
             if ((char)panelResult == 0) {
                 return panelResult;
@@ -455,7 +455,7 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
                 int32_t resource = ResourceManager_GetById(&g_resmgr, resId);
                 if (resource != 0) {
                     if (UI_IsBitmapReady(resource) != 0) {
-                        int32_t resType = *(int32_t*)(resource + 4);
+                        int32_t resType = *(int32_t*)((uint8_t*)(uintptr_t)resource + 4);
                         if (resType == 0x2406) {
                             RESDATA_CreateChildSprite(this, resource, 0, 0);
                             this->child_sprite1 = nullptr;  /* sprite handle stored internally */            /* +0x744 */
@@ -470,7 +470,7 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
             }
 
             /* Load game mode resource */
-            char modeResult = (char)(intptr_t)(*(int32_t* (**)(void*, int32_t, int32_t))(*(void**)this + 6))(
+            char modeResult = (char)(intptr_t)(*(int32_t* (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 6))(
                 this, 0x2401, -1);
 
             if (g_demo_mode == 1) {
@@ -508,10 +508,10 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
                 g_active_panel = 0;
 
                 /* Set animation state 0 */
-                (*(void (**)(void*, int32_t))(*(void**)this + 7))(this, 0);
+                (*(void (**)(void*, int32_t))((uint8_t*)(*(void**)this) + 7))(this, 0);
 
                 /* Move to position (50, 10) */
-                (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, 0x32, 10);
+                (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, 0x32, 10);
                 return 1;
             }
         }
@@ -549,18 +549,18 @@ void __fastcall RESDATA_ScriptedObject::Update()
 
         /* Clamp to world bounds */
         if (x < 0) {
-            (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, x - 1, y);
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, x - 1, y);
         }
         if (g_world_width < objPtr[4]) {
-            (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, 
                 objPtr[4] - 1 + x, y);
         }
         if (y < 0) {
-            (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, 
                 x, y - 1);
         }
         if (g_world_height - objPtr[15] < y) {
-            (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, 
                 x, y + objPtr[15] - 1);
         }
     }
@@ -570,10 +570,10 @@ void __fastcall RESDATA_ScriptedObject::Update()
         GameObject_Update(this);
 
         if (this->tooltip_id != NULL) {                             /* +0xA0 */
-            (*(void (**)(void))(*(void**)this->tooltip_id + 10))();
+            (*(void (**)(void))((uint8_t*)(*(void**)this->tooltip_id) + 10))();
         }
 
-        (*(void (**)(void))(*(void**)this + 1))();
+        (*(void (**)(void))((uint8_t*)(*(void**)this) + 1))();
 
         /* Check animation frame completion for state transitions */
         int32_t animIndex = this->anim_index;                        /* +0x54 */
@@ -583,8 +583,8 @@ void __fastcall RESDATA_ScriptedObject::Update()
 
         if (animIndex == (uint32_t)startFrame) {
             /* Animation reached start — return to idle */
-            (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 6))(this, 0x2401, -1);
-            (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 6))(this, 0x2401, -1);
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, 
                 x + 0x31, y + 0x2F);
             this->dispatch_state = 0;                                /* +0x740 */
 
@@ -617,7 +617,7 @@ void __fastcall RESDATA_ScriptedObject::Update()
             if (animIndex == (uint32_t)endFrame) {
                 /* Animation reached end — switch to placed state */
                 this->field_88 = 1;                                     /* +0x88 */
-                (*(void (**)(void))(*(void**)this + 1))();
+                (*(void (**)(void))((uint8_t*)(*(void**)this) + 1))();
                 this->dispatch_state = 3;                            /* +0x740 */
 
                 g_active_panel = this;
@@ -635,7 +635,7 @@ void __fastcall RESDATA_ScriptedObject::Update()
                 for (void* child = this->child_list_head;            /* +0xD0 */
                      child != NULL;
                      child = *(void**)((uint8_t*)child + 0x28)) {
-                    (*(void (**)(void))(*(void**)child + 8))();
+                    (*(void (**)(void))((uint8_t*)(*(void**)child) + 8))();
                 }
 
                 /* Play narration if not scenario 2 */
@@ -648,7 +648,7 @@ void __fastcall RESDATA_ScriptedObject::Update()
 
     /* State 2 (dragging): follow cursor */
     if (this->drag_flag == 1) {                                    /* +0x24 */
-        (*(void (**)(void*, int32_t, int32_t))(*(void**)this + 3))(this, 
+        (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 3))(this, 
             g_cursor_world_x - this->drag_offset_x,
             g_cursor_world_y - this->drag_offset_y);
         return;
@@ -656,34 +656,34 @@ void __fastcall RESDATA_ScriptedObject::Update()
 
     /* State 0 (idle): hover detection */
     if (dispatchState == 0) {
-        char hitResult = (char)(*(char (**)(void*, int32_t, int32_t))(*(void**)this + 0x15))(this, 
+        char hitResult = (char)(*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 0x15))(this, 
             g_cursor_world_x, g_cursor_world_y);
         if (hitResult == 0 && this->drag_flag != 1) {              /* +0x24 */
             if (this->tooltip_state == 1) {
-                (*(void (**)(void*, int32_t))(*(void**)this + 7))(this, 0);
+                (*(void (**)(void*, int32_t))((uint8_t*)(*(void**)this) + 7))(this, 0);
             } else {
                 GameObject_Update(this);
             }
         } else if (this->tooltip_state != 1) {
-            (*(void (**)(void*, int32_t))(*(void**)this + 7))(this, 1);
+            (*(void (**)(void*, int32_t))((uint8_t*)(*(void**)this) + 7))(this, 1);
         }
     }
 
     /* State 3 (placed): dispatch to sub-objects */
     if (dispatchState != 3) return;
 
-    char hoverResult = (char)(*(char (**)(void*, int32_t, int32_t))(*(void**)this + 0x15))(this, 
+    char hoverResult = (char)(*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 0x15))(this, 
         g_cursor_world_x, g_cursor_world_y);
     if ((hoverResult == 0 && this->drag_flag == 0)) {              /* +0x24 */
         if (((Entity*)this->gameobject)->anim_index == 0) {
             goto update_children;
         }
-        (*(void (**)(void*, int32_t))((*(void**)this->gameobject) + 7))(this, 0);
+        (*(void (**)(void*, int32_t))((uint8_t*)(*(void**)this->gameobject) + 7))(this, 0);
     } else {
         if (((Entity*)this->gameobject)->anim_index == 1) {
             goto update_children;
         }
-        (*(void (**)(void*, int32_t))((*(void**)this->gameobject) + 7))(this, 1);
+        (*(void (**)(void*, int32_t))((uint8_t*)(*(void**)this->gameobject) + 7))(this, 1);
     }
     TileMap_InvalidateRect(g_tilemap,
         this->drag_handle.left,
@@ -695,18 +695,18 @@ update_children:
     /* Dispatch to children via linked list */
     for (int32_t child = (int32_t)this->child_list_head;          /* +0xD0 */
          child != 0;
-         child = *(int32_t*)(child + 0x28)) {
-        (*(void (**)(void*, int32_t))(*(void**)this + 0x14))(this, child);
+         child = *(int32_t*)((uint8_t*)(uintptr_t)child + 0x28)) {
+        (*(void (**)(void*, int32_t))((uint8_t*)(*(void**)this) + 0x14))(this, child);
     }
 
     /* Update ScriptEngine if active */
     if (this->scriptengine_visible != 0) {                /* inside scriptengine sub-object */
-        (*(void (**)(void))(*(void**)this->scriptengine + 10))();  /* +0x178 */
+        (*(void (**)(void))((uint8_t*)(*(void**)this->scriptengine) + 10))();  /* +0x178 */
     }
 
     /* Update ScrollPanel if active */
     if (this->scrollpanel_visible != 0) {                          /* +0x2E8 */
-        (*(void (**)(void))(*(void**)this->scrollpanel + 10))();   /* +0x260 */
+        (*(void (**)(void))((uint8_t*)(*(void**)this->scrollpanel) + 10))();   /* +0x260 */
     }
 }
 
@@ -723,15 +723,15 @@ void __thiscall RESDATA_ScriptedObject::Dispatch()
 
     if (this->dispatch_state == 3) {                               /* +0x740 */
         /* Draw child GameObject via its vtable[11] */
-        (*(void (**)(void))((*(void**)this->gameobject) + 11))();
+        (*(void (**)(void))((uint8_t*)(*(void**)this->gameobject) + 11))();
     }
     if (this->scriptengine_visible == 1) {
         /* Draw ScriptEngine via vtable[11] */
-        (*(void (**)(void))((*(void**)this->scriptengine) + 11))();
+        (*(void (**)(void))((uint8_t*)(*(void**)this->scriptengine) + 11))();
     }
     if (this->scrollpanel_visible == 1) {
         /* Draw ScrollPanel via vtable[11] */
-        (*(void (**)(void))((*(void**)this->scrollpanel) + 11))();
+        (*(void (**)(void))((uint8_t*)(*(void**)this->scrollpanel) + 11))();
     }
 }
 
@@ -759,14 +759,14 @@ bool __thiscall RESDATA_ScriptedObject::CheckClick(int32_t x, int32_t y)
     bool hit = false;
 
     /* Try own PtInRect (vtable[2]) */
-    char result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this + 2))(this, x, y);
+    char result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 2))(this, x, y);
     if (result == 0) {
         /* Try secondary hit-test (vtable[0x15] = slot 21) */
-        result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this + 0x15))(this, x, y);
+        result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 0x15))(this, x, y);
         if (result == 0) {
             /* Try ScriptEngine (vtable[8]) if visible */
             if (this->scriptengine_visible != 0) {
-                result = (*(char (**)(void*, int32_t, int32_t))((*(void**)this->scriptengine) + 2))(this, x, y);
+                result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 2))(this, x, y);
                 hit = (result != 0);
             }
         } else {
@@ -778,7 +778,7 @@ bool __thiscall RESDATA_ScriptedObject::CheckClick(int32_t x, int32_t y)
 
     /* Try ScrollPanel if not hit yet */
     if (!hit && this->scrollpanel_visible != 0) {
-        result = (*(char (**)(void*, int32_t, int32_t))((*(void**)this->scrollpanel) + 2))(this, x, y);
+        result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scrollpanel) + 2))(this, x, y);
         hit = (result != 0);
     }
 
@@ -860,7 +860,7 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
     RESDATA_SetPosition(this, x, y);
 
     /* Update child GameObject position with offsets */
-    (*(void (**)(void*, int32_t, int32_t))((*(void**)this->gameobject) + 3))(this, 
+    (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->gameobject) + 3))(this, 
         ((RESDATA*)((Entity*)this->gameobject)->resource)->offset_x + x,
         ((RESDATA*)((Entity*)this->gameobject)->resource)->offset_y + y);
 
@@ -868,23 +868,23 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
     if (this->direction == 0) {
         /* Left direction */
         if (this->scriptengine_visible != 0) {
-            (*(void (**)(void*, int32_t, int32_t))((*(void**)this->scriptengine) + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 3))(this, 
                 x - ((ScriptEngine*)this->scriptengine)->field_38, y + 14);
         }
         if (this->scrollpanel_visible != 0) {
-            (*(void (**)(void*, int32_t, int32_t))((*(void**)this->scrollpanel) + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scrollpanel) + 3))(this, 
                 x - *(int32_t*)(this->scrollpanel + 0x38), y + 14);
         }
     } else {
         /* Right direction */
         if (this->scriptengine_visible != 0) {
             uint16_t frameWidth = ((RESDATA*)this->resource)->frame_width;
-            (*(void (**)(void*, int32_t, int32_t))((*(void**)this->scriptengine) + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 3))(this, 
                 (uint32_t)frameWidth + x, y + 14);
         }
         if (this->scrollpanel_visible != 0) {
             uint16_t frameWidth = ((RESDATA*)this->resource)->frame_width;
-            (*(void (**)(void*, int32_t, int32_t))((*(void**)this->scrollpanel) + 3))(this, 
+            (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scrollpanel) + 3))(this, 
                 (uint32_t)frameWidth + x, y + 14);
         }
     }
@@ -926,7 +926,7 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
 
     /* Update tooltip position */
     if (this->tooltip_id != NULL) {
-        (*(void (**)(void*, int32_t, int32_t))(*(void**)(this->tooltip_id) + 3))(this, 
+        (*(void (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)(this->tooltip_id)) + 3))(this, 
             this->x + 0x32,
             this->y + 0x32);
     }
@@ -957,7 +957,7 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
     }
 
     /* Try secondary hit-test (vtable[0x15]) */
-    char result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this + 0x15))(this, x, y);
+    char result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 0x15))(this, x, y);
     if (result != 0 && (state == 0 || state == 3)) {
         /* Initiate drag — store cursor offset */
         this->drag_offset_x = g_drag_start_x - this->x;               /* +0x94, +0x08 */
@@ -970,9 +970,9 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
     if (state != 0) {
         /* Try ScriptEngine child */
         if (this->scriptengine_visible != 0) {            /* inside scriptengine */
-            result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this->scriptengine + 2))(this, x, y);  /* +0x178 */
+            result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 2))(this, x, y);  /* +0x178 */
             if (result != 0) {
-                result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this->scriptengine + 4))(this, x, y);
+                result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 4))(this, x, y);
                 if (this->scriptengine_visible != 0) return (uint8_t)result;
                 this->direction = 1;                               /* +0xAD */
                 return (uint8_t)result;
@@ -981,9 +981,9 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
 
         /* Try ScrollPanel child */
         if (this->scrollpanel_visible != 0) {                      /* +0x2E8 */
-            result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this->scrollpanel + 2))(this, x, y);  /* +0x260 */
+            result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scrollpanel) + 2))(this, x, y);  /* +0x260 */
             if (result != 0) {
-                result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this->scrollpanel + 4))(this, x, y);
+                result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this->scrollpanel) + 4))(this, x, y);
                 if (this->scrollpanel_visible != 0) return (uint8_t)result;
                 this->direction = 1;                               /* +0xAD */
                 return (uint8_t)result;
@@ -996,7 +996,7 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
 
     /* Idle state: try own hit-test -> enter build mode */
     if (g_disable_input == 0) {
-        result = (*(char (**)(void*, int32_t, int32_t))(*(void**)this + 2))(this, x, y);
+        result = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)this) + 2))(this, x, y);
         if (result != 0) {
             RESDATA_ScriptedObject::EnterBuildMode(1);
             return 1;
@@ -1022,10 +1022,10 @@ uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(void* toolObj, int32
     if (*(uint8_t*)((uint8_t*)toolObj + 0x56) == 0) return 0;
 
     /* Check PtInRect on tool */
-    char hitResult = (*(char (**)(void*, int32_t, int32_t))(*(void**)toolObj + 2))(this, x, y);
+    char hitResult = (*(char (**)(void*, int32_t, int32_t))((uint8_t*)(*(void**)toolObj) + 2))(this, x, y);
     if (hitResult == 0) return 0;
 
-    int32_t toolType = *(int32_t*)(*(int32_t*)((uint8_t*)toolObj + 0x44) + 4);
+    int32_t toolType = *(int32_t*)((uint8_t*)(uintptr_t)(*(int32_t*)((uint8_t*)toolObj + 0x44)) + 4);
     int32_t toolIndex = toolType - 0x2403;
 
     switch (toolIndex) {
@@ -1034,7 +1034,7 @@ uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(void* toolObj, int32
         if (*(int16_t*)((uint8_t*)toolObj + 0x48) != 1) {
             CGWND_TrackPiece_SetZoom(toolObj, 1);
             this->direction = 0;                                   /* +0xAD */
-            return (*(uint32_t (**)(void*, void*, int32_t))(*(void**)this->scriptengine + 0x15))(this, 
+            return (*(uint32_t (**)(void*, void*, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 0x15))(this, 
                 toolObj, 0) | 1;                                   /* +0x178 */
         }
         /* Fall through to common tool activation */
@@ -1044,7 +1044,7 @@ uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(void* toolObj, int32
         if (*(int16_t*)((uint8_t*)toolObj + 0x48) != 1) {
             CGWND_TrackPiece_SetZoom(toolObj, 1);
             this->direction = 0;                                   /* +0xAD */
-            return (*(uint32_t (**)(void*, void*, int32_t))(*(void**)this->scriptengine + 0x15))(this, 
+            return (*(uint32_t (**)(void*, void*, int32_t))((uint8_t*)(*(void**)this->scriptengine) + 0x15))(this, 
                 toolObj, 0) | 1;                                   /* +0x178 */
         }
         goto common_tool_activate;
