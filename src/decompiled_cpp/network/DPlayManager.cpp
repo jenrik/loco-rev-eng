@@ -132,16 +132,16 @@ void __fastcall DPlayManager::RenderConnectionPanel()
     int32_t alignment;
 
     /* Mark panel as needing text refresh */
-    *(uint8_t*)((int)this + 0xE8) = 1;  /* +0xE8: text_dirty flag */
+    *(uint8_t*)((uintptr_t)this + 0xE8) = 1;  /* +0xE8: text_dirty flag */
 
     /* Copy panel bounds (+0x18C..+0x19C, 16-byte RECT) */
-    panel_rect.left   = *(int32_t*)((int)this + 0x18C);
-    panel_rect.top    = *(int32_t*)((int)this + 0x190);
-    panel_rect.right  = *(int32_t*)((int)this + 0x194);
-    panel_rect.bottom = *(int32_t*)((int)this + 0x198);
+    panel_rect.left   = *(int32_t*)((uintptr_t)this + 0x18C);
+    panel_rect.top    = *(int32_t*)((uintptr_t)this + 0x190);
+    panel_rect.right  = *(int32_t*)((uintptr_t)this + 0x194);
+    panel_rect.bottom = *(int32_t*)((uintptr_t)this + 0x198);
 
     /* Blit child surface to primary if visible flag set */
-    if (*(uint8_t*)((int)this + 0x1AC) != 0) {
+    if (*(uint8_t*)((uintptr_t)this + 0x1AC) != 0) {
         RECT src_rect;
         RECT dst_rect;
 
@@ -150,16 +150,16 @@ void __fastcall DPlayManager::RenderConnectionPanel()
 
         /* Offset source by scroll offset pair 1 */
         OffsetRect(&src_rect,
-                   *(int32_t*)((int)this + 0xD4),   /* +0xD4: scroll_x1 */
-                   *(int32_t*)((int)this + 0xD8));  /* +0xD8: scroll_y1 */
+                   *(int32_t*)((uintptr_t)this + 0xD4),   /* +0xD4: scroll_x1 */
+                   *(int32_t*)((uintptr_t)this + 0xD8));  /* +0xD8: scroll_y1 */
 
         /* Offset destination by scroll offset pair 2 */
         OffsetRect(&dst_rect,
-                   *(int32_t*)((int)this + 0x14C),  /* +0x14C: scroll_x2 */
-                   *(int32_t*)((int)this + 0x150)); /* +0x150: scroll_y2 */
+                   *(int32_t*)((uintptr_t)this + 0x14C),  /* +0x14C: scroll_x2 */
+                   *(int32_t*)((uintptr_t)this + 0x150)); /* +0x150: scroll_y2 */
 
         UIPANEL_Blit(
-            *(void**)((int)this + 0x1D0),            /* +0x1D0: child surface */
+            *(void**)((uintptr_t)this + 0x1D0),            /* +0x1D0: child surface */
             src_rect.left, src_rect.top,
             src_rect.right, src_rect.bottom,
             g_primary_surface,                        /* global primary surface */
@@ -169,23 +169,23 @@ void __fastcall DPlayManager::RenderConnectionPanel()
     }
 
     /* Begin painting */
-    void* hdc = (void*)UIPANEL_BeginPaint((int)this);
+    void* hdc = (void*)UIPANEL_BeginPaint((uintptr_t)this);
 
     /* Select the stock font (DAT_004855fc) */
     void* hFont = *(void**)0x4855FC;
     void* oldFont = SelectObject(hdc, hFont);
 
     /* Set up text drawing rect at +0x130 */
-    RECT* draw_rect = (RECT*)((int)this + 0x130);
-    draw_rect->left   = *(int32_t*)((int)this + 0x18C);
-    *(int32_t*)((int)this + 0x134) = *(int32_t*)((int)this + 0x190);
-    *(int32_t*)((int)this + 0x138) = *(int32_t*)((int)this + 0x194);
-    *(int32_t*)((int)this + 0x13C) = *(int32_t*)((int)this + 0x198);
+    RECT* draw_rect = (RECT*)((uintptr_t)this + 0x130);
+    draw_rect->left   = *(int32_t*)((uintptr_t)this + 0x18C);
+    *(int32_t*)((uintptr_t)this + 0x134) = *(int32_t*)((uintptr_t)this + 0x190);
+    *(int32_t*)((uintptr_t)this + 0x138) = *(int32_t*)((uintptr_t)this + 0x194);
+    *(int32_t*)((uintptr_t)this + 0x13C) = *(int32_t*)((uintptr_t)this + 0x198);
 
     /* Draw text from buffer at +0xF0 */
     text_bottom = DrawTextA(
         hdc,
-        (const char*)((int)this + 0xF0),  /* +0xF0: text buffer (64 chars) */
+        (const char*)((uintptr_t)this + 0xF0),  /* +0xF0: text buffer (64 chars) */
         -1,                                 /* null-terminated */
         draw_rect,
         0x420                               /* DT_CENTER | DT_WORDBREAK */
@@ -196,38 +196,38 @@ void __fastcall DPlayManager::RenderConnectionPanel()
 
     UIPANEL_EndPaintEx(
         this,
-        *(void**)((int)this + 8),    /* +0x08: panel handle/HWND */
-        (int)hdc,
+        *(void**)((uintptr_t)this + 8),    /* +0x08: panel handle/HWND */
+        (uintptr_t)hdc,
         1,                              /* repaint flag */
         NULL
     );
 
     /* Update bottom of text rect */
-    *(int32_t*)((int)this + 0x13C) = text_bottom - 4 + *(int32_t*)((int)this + 0x134);
+    *(int32_t*)((uintptr_t)this + 0x13C) = text_bottom - 4 + *(int32_t*)((uintptr_t)this + 0x134);
 
     /* Center text rect within panel */
-    UI_CenterWindow((RECT*)((int)this + 0x18C), draw_rect);
+    UI_CenterWindow((RECT*)((uintptr_t)this + 0x18C), draw_rect);
 
     /* Apply alignment mode at +0x140 */
-    alignment = *(int32_t*)((int)this + 0x140);
+    alignment = *(int32_t*)((uintptr_t)this + 0x140);
     if (alignment == 0) {
         /* Mode 0: Right-align — offset to panel right edge */
         OffsetRect(draw_rect,
-                   *(int32_t*)((int)this + 0x194) - draw_rect->left,
+                   *(int32_t*)((uintptr_t)this + 0x194) - draw_rect->left,
                    0);
     } else if (alignment == 1) {
         /* Mode 1: Left-align — offset to panel left edge */
         OffsetRect(draw_rect,
-                   *(int32_t*)((int)this + 0x18C) - *(int32_t*)((int)this + 0x138),
+                   *(int32_t*)((uintptr_t)this + 0x18C) - *(int32_t*)((uintptr_t)this + 0x138),
                    0);
     } else if (alignment == 2) {
         /* Mode 2: Bottom-align — offset to panel bottom edge */
         OffsetRect(draw_rect, 0,
-                   *(int32_t*)((int)this + 0x198) - *(int32_t*)((int)this + 0x134));
+                   *(int32_t*)((uintptr_t)this + 0x198) - *(int32_t*)((uintptr_t)this + 0x134));
     } else {
         /* Mode 3+: Top-align — offset to panel top edge */
         OffsetRect(draw_rect, 0,
-                   *(int32_t*)((int)this + 0x190) - *(int32_t*)((int)this + 0x13C));
+                   *(int32_t*)((uintptr_t)this + 0x190) - *(int32_t*)((uintptr_t)this + 0x13C));
     }
 }
 
@@ -266,7 +266,7 @@ void __fastcall DPlayManager::CreatePlayer()
     /* Copy player color ID from global config */
     {
         void* config = *(void**)0x4AA4A8;       /* g_player_config */
-        m_colorId = *(int32_t*)((int)config + 0x18);  /* +0x08 */
+        m_colorId = *(int32_t*)((uintptr_t)config + 0x18);  /* +0x08 */
     }
 
     m_playerType = 0;                           /* +0x94 */
@@ -350,12 +350,12 @@ void __thiscall DPlayManager::CopyPlayerData(const void* packet_ptr)
      */
 
     *(int32_t*)this = *(int32_t*)pkt;                          /* +0x00 */
-    *(uint8_t*)((int)this + 4) = *(uint8_t*)(pkt + 0x3A);     /* +0x04 */
+    *(uint8_t*)((uintptr_t)this + 4) = *(uint8_t*)(pkt + 0x3A);     /* +0x04 */
     inline_memcpy((uint8_t*)&m_magic + 1, pkt + 0x0C, 13);   /* +0x05: string1 up to +0x12 */
     inline_memcpy(&m_sessionBlk1[2], pkt + 0x19, 32);         /* +0x12: string2 (up to 32 bytes) */
-    *(int32_t*)((int)this + 0x32) = *(int32_t*)(pkt + 4);     /* +0x32 */
-    *(uint8_t*)((int)this + 0x36) = *(uint8_t*)(pkt + 0x39);  /* +0x36 */
-    *(int32_t*)((int)this + 0x48) = *(int32_t*)(pkt + 8);     /* +0x48 */
+    *(int32_t*)((uintptr_t)this + 0x32) = *(int32_t*)(pkt + 4);     /* +0x32 */
+    *(uint8_t*)((uintptr_t)this + 0x36) = *(uint8_t*)(pkt + 0x39);  /* +0x36 */
+    *(int32_t*)((uintptr_t)this + 0x48) = *(int32_t*)(pkt + 8);     /* +0x48 */
 }
 
 /* ================================================================== */
@@ -368,14 +368,14 @@ void __thiscall DPlayManager::InitPlayerSlot(const DPlayManager* source)
     /* Same-layout copy of all relevant fields */
 
     *(int32_t*)this = *(int32_t*)source;                            /* +0x00: vtable/ID */
-    *(uint8_t*)((int)this + 4) = *(uint8_t*)((int)source + 4);     /* +0x04: flag */
+    *(uint8_t*)((uintptr_t)this + 4) = *(uint8_t*)((uintptr_t)source + 4);     /* +0x04: flag */
 
     inline_memcpy((uint8_t*)&m_magic + 1, (const uint8_t*)&source->m_magic + 1, 13); /* +0x05: string1 */
     inline_memcpy(&m_sessionBlk1[2], &source->m_sessionBlk1[2], 32);                 /* +0x12: string2 */
 
-    *(int32_t*)((int)this + 0x32) = *(int32_t*)((int)source + 0x32);  /* +0x32 */
-    *(uint8_t*)((int)this + 0x36) = *(uint8_t*)((int)source + 0x36);  /* +0x36 */
-    *(int32_t*)((int)this + 0x48) = *(int32_t*)((int)source + 0x48);  /* +0x48 */
+    *(int32_t*)((uintptr_t)this + 0x32) = *(int32_t*)((uintptr_t)source + 0x32);  /* +0x32 */
+    *(uint8_t*)((uintptr_t)this + 0x36) = *(uint8_t*)((uintptr_t)source + 0x36);  /* +0x36 */
+    *(int32_t*)((uintptr_t)this + 0x48) = *(int32_t*)((uintptr_t)source + 0x48);  /* +0x48 */
 }
 
 /* ================================================================== */
@@ -398,12 +398,12 @@ void __thiscall DPlayManager::FreePlayerSlot(void* packet_ptr)
      */
 
     *(int32_t*)pkt = *(int32_t*)this;                             /* +0x00 */
-    *(uint8_t*)(pkt + 0x3A) = *(uint8_t*)((int)this + 4);        /* +0x04 -> +0x3A */
+    *(uint8_t*)(pkt + 0x3A) = *(uint8_t*)((uintptr_t)this + 4);        /* +0x04 -> +0x3A */
     inline_memcpy(pkt + 0x0C, (uint8_t*)&m_magic + 1, 13);      /* +0x05 -> +0x0C */
     inline_memcpy(pkt + 0x19, &m_sessionBlk1[2], 32);            /* +0x12 -> +0x19 */
-    *(int32_t*)(pkt + 4) = *(int32_t*)((int)this + 0x32);        /* +0x32 -> +0x04 */
-    *(uint8_t*)(pkt + 0x39) = *(uint8_t*)((int)this + 0x36);     /* +0x36 -> +0x39 */
-    *(int32_t*)(pkt + 8) = *(int32_t*)((int)this + 0x48);        /* +0x48 -> +0x08 */
+    *(int32_t*)(pkt + 4) = *(int32_t*)((uintptr_t)this + 0x32);        /* +0x32 -> +0x04 */
+    *(uint8_t*)(pkt + 0x39) = *(uint8_t*)((uintptr_t)this + 0x36);     /* +0x36 -> +0x39 */
+    *(int32_t*)(pkt + 8) = *(int32_t*)((uintptr_t)this + 0x48);        /* +0x48 -> +0x08 */
 }
 
 /* ================================================================== */
