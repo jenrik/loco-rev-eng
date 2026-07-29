@@ -20,7 +20,7 @@ nix develop . --command python3 -m tools.re_daemon \
   --ghidra-binary "$PWD/lego-loco-unpacked/Exe/loco.exe"
 ```
 
-The adapter opens a fresh daemon database ID, waits for analysis, and allows only decompile/disassemble/function/xref/structure/name/string queries. It records each result as a content-addressed evidence revision, reuses identical evidence captures within the same job by default, and replaces a failed MCP worker once before surfacing an error. The direct proxy operations are unprefixed (`open_database`, `decompile_function`, etc.); Pi's `mcp.ghidra.*` namespace is not sent to the proxy. Ghidra mutation tools are not exposed.
+The adapter opens the daemon database, waits for analysis, and allows only decompile/disassemble/function/xref/structure/name/string queries. It records each result as a content-addressed evidence revision, reuses identical evidence captures within the same job by default, and replaces a failed MCP worker once before surfacing an error. The direct proxy operations are unprefixed (`open_database`, `decompile_function`, etc.); Pi's `mcp.ghidra.*` namespace is not sent to the proxy. Ghidra mutation tools are not exposed.
 
 For repeatable local launch configuration, create the untracked, non-secret `.pi/re-daemon-ghidra.json`:
 

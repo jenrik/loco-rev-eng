@@ -2,7 +2,7 @@
 
 ## What is this?
 
-This is a complete reverse engineering of **Lego Loco** (1998, Intelligent Games), a train-themed city-building game. The binary `loco.exe` (~460 KB, x86 32-bit PE) has been fully decompiled and annotated in a Ghidra database. Every function in game code (0x401000–0x465000) now has a meaningful name and decompiler comment.
+This project reverse engineers **Lego Loco** (1998, Intelligent Games), a train-themed city-building game. The binary `loco.exe` (~460 KB, x86 32-bit PE) has extensive Ghidra annotations; reconstruction and integration remain in progress. See `PROGRESS.md` for current status.
 
 ## Opening the Ghidra Database
 
@@ -11,7 +11,7 @@ The Ghidra project lives at `./lego-loco-unpacked/Exe/ghidra_projects/`. The `.g
 ```
 open_database:
   file_path: "/home/user/projects/v43/jenrik/lego-loco-rev-eng/lego-loco-unpacked/Exe/loco.exe"
-  database_id: "loco2"   // use a fresh ID each session
+  database_id: "loco"
 ```
 
 Then wait for auto-analysis. Never use `force_new: true`.

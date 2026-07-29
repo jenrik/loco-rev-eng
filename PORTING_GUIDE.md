@@ -1,9 +1,15 @@
-# Lego Loco (1998) — Linux Port Guide
+# Lego Loco (1998) — Historical Linux Port Notes
+
+> **Superseded planning document.** This preserves early technical research, not
+> current engineering instructions. Its SDL2/CMake roadmap and permissive stub
+> suggestions must not be followed. `AGENTS.md`, the root `Makefile`, and the
+> SDL3 implementation define current policy. All host deviations require
+> `#ifndef _WIN32`; incomplete stubs must log and assert.
 
 Developer: Intelligent Games for LEGO Media
 Engine: Custom C++ (MSVC, Win32, DirectX 5)
 Binary: `loco.exe` — PE32, 1.1 MB, 1,763 functions
-Target: SDL2-based native Linux port
+Historical target: SDL2-based native Linux port
 
 ---
 
@@ -580,7 +586,7 @@ while (running) {
 - Repackaged as an XScreenSaver hack
 - Or triggered via `xscreensaver-command -activate`
 
-The `SCREENSAVER_Init` / `SCREENSAVER_Cleanup` / `SCREENSAVER_PostQuit` functions are isolated and can be stubbed out.
+The `SCREENSAVER_Init` / `SCREENSAVER_Cleanup` / `SCREENSAVER_PostQuit` functions are isolated host boundaries. If deferred, source stubs must log and assert rather than silently succeed.
 
 ### 5.8 Duplicate Instance Check
 
@@ -1000,7 +1006,7 @@ For the "International Train Server" LAN feature, use `enet_address_set_host(&ad
 
 ## 9. Step-by-Step Port Roadmap
 
-The port is structured as eight sequential milestones. Each milestone produces a runnable binary (stubs or full) so progress can be validated continuously.
+This historical roadmap used eight sequential milestones, each intended to produce a runnable binary for continuous validation.
 
 ### Milestone 1 — Skeleton Build (Week 1–2)
 
@@ -1009,10 +1015,10 @@ The port is structured as eight sequential milestones. Each milestone produces a
 Tasks:
 1. Set up CMake project with `LOCO_LINUX` define
 2. Write `src/main.c` with `main()` calling `SDL_Init` / `SDL_CreateWindow` / `SDL_Quit`
-3. Port `core.h` type stubs — compile all headers with `LOCO_LINUX`
+3. Add host compatibility type declarations for `core.h`
 4. Replace `WinMain` with `main(int argc, char **argv)` calling `CGWND_ParseCommandLine`
-5. Stub out `CGWND_LoadConfig` to search for `lego.ini` in local paths
-6. Stub all subsystem `Init` functions to return `1` (success)
+5. Add a guarded host `CGWND_LoadConfig` adapter for local `lego.ini` paths
+6. Implement subsystem `Init` functions; deferred source stubs must log and assert
 7. Implement the game loop: `SDL_AddTimer(28, ...)` + `SDL_PollEvent`
 
 Deliverable: Binary opens a black SDL2 window at 640×480 and enters the game loop.
@@ -1025,7 +1031,7 @@ Tasks:
 1. Integrate `inih` — implement `INI_GetString` / `INI_GetInt` wrappers
 2. Path mapper: convert Windows `d:\loco\...` paths to Linux equivalents
 3. Port `RFHMGR_Load` — already uses CRT `fopen`/`fread`, change path separator only
-4. Port `RESMGR_Init` — replace `CreateFontA` → `TTF_OpenFont`, `LoadStringA` → stub
+4. Port `RESMGR_Init` with guarded host font and string-resource adapters
 5. Extract EXE string table to `strings.en.txt` using `wrestool -x loco.exe -t 6 -o strings/`
 6. Implement `RESMGR_LoadLocalizedString` reading from the extracted file
 
@@ -1056,7 +1062,7 @@ Tasks:
 2. Port `SOUND_Load` → `Mix_LoadWAV` (from RFD blob via `SDL_RWFromMem`)
 3. Port `SOUND_Release` → `Mix_HaltChannel` + `Mix_FreeChunk`
 4. Port `RESMGR_PlayBgMusic` → `Mix_PlayChannel(-1, chunk, -1)`
-5. Implement `PlaySoundA` stub → `Mix_LoadMUS` + `Mix_PlayMusic` for `music.wav`
+5. Implement a guarded host `PlaySoundA` adapter for `music.wav`
 6. Port volume persistence via INI config
 7. Port `CAudioStateMachine_SetState` state transitions
 

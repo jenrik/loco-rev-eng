@@ -103,6 +103,8 @@ The Ghidra database is the single source of truth; all code derives from assembl
 - [x] **Mode-2 quit control** — Ghidra confirms the `+0x14C` control’s click path (`0x422AC3..0x422C5D`) calls `CGWND_SetMode(10)`. The host routes that scaled hit to the real reconstructed mode-10 transition and terminates the SDL pump, matching the original WM_CLOSE handoff.
 - [x] **Mode-2 player-name input** — Recovered native EDIT creation (`0x4204D0`), its unlabelled subclass (`0x420B20`), and Enter/Escape parent paths (`0x420D57`/`0x420C19`). SDL now renders the exact `+0x15C` logical rectangle, receives text/backspace/Enter/Escape through host-only code, preserves the 11-byte limit and original validation, and copies accepted names to PlayerConfig `+0x06`.
 - [x] **Mode-2 main-menu accept control** — Disassembly at `0x422AB2` confirms the pressed resource-`0x403` control directly calls `EditWindow::onPlayerNameChanged` (`0x422660`). Its guarded SDL handler now shares the Enter-equivalent validation and state-3 lobby handoff; `make test-host-main-menu-accept` protects the convergence.
+- [x] **SDL game-testing protocol** — Added agent skill `lego-loco-game-testing` defining isolated Wayland lifecycle, logical-canvas click conversion, main-menu/lobby flows, screenshot evidence, and renderer-gate reporting; the headless Pixman/swrast sandbox now maps the SDL host successfully.
+- [x] **Pytest GUI integration gate** — Added two crash-sensitive isolated-Wayland flows covering launch/main-menu/quit and name-entry/setup-lobby/Search/Exit/quit, with passive host-only JSONL events, Sway client-geometry input conversion, and persistent screenshots/logs under `build/test-artifacts/`.
 - [x] **Mode-2/10 host sound boundary** — Preserved the documented `EditWindow::show` preload at `0x420780` (resource `0x5015`) and `CGWND_SetMode(10)` exit sound at `0x40824C` (resource `0x5026`) behind `_WIN32` guards. The SDL bridge resolves the same PE string-table/RFH WAVs (`sounds\toybox\clstray1`, `sounds\toybox\sweep1`), retains the exit stream until drained, and has an archive-backed regression.
 
 ### Phase 6: Native C compilation (2026-07-24)
@@ -164,7 +166,7 @@ main()
   - 5 SDL3 shim files
   - Output: `build/lego_loco` (2.4M ELF)
   - Targets: `make`, `make run`, `make clean`, `make check`
-  - `build/defsym.args`: 926 --defsym entries for unresolved symbols
+  - Legacy defsym placeholders are historical; new unresolved internals require source stubs that log and assert
   - SDL3 auto-detection via `ls /nix/store/*sdl3-*-dev/include`
 
 ### Key files cleaned this session
@@ -354,6 +356,8 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-07-29 (pytest-gui-integration) | Introduced the Nix-managed pytest test layer and `make test{,-integration,-all}` gates; added guarded host JSONL observability, crash/timeout detection, Sway-decoration-aware logical input, and persistent screenshot/log artifacts; deterministic regressions pass and the two headless GUI flows passed twice consecutively. |
+
 | 2026-07-28 (editwindow-ghidra-validation) | Cross-validated EditWindow menu methods against Ghidra: corrected 0x422D80 hit-test gates and 0x422010/0x422440 resource branches/character source rect; replaced verified raw field access and all self-vtable dispatches with typed UI_WindowBase calls after recovering 0x425FD0/0x426020/0x426130; corrected the canonical opaque `g_main_window` global use after checking `UI_MainMenu_Hide` (0x420860); gated the recovered packed-x86 `UIPANEL_Render` slot paths under `_WIN32` after a mode-2 core proved they are incompatible with the SDL host layout; added generated Makefile header dependencies after a stale NameEntryPanel vtable crashed the Enter/state-3 transition, then clean-rebuilt and GDB-exercised that transition; `make build`, `make check` (74/74), and `make test-mode2-menu-backdrop` pass. |
 
 | 2026-07-28 (mode2-multiplayer-transition) | Wired Enter-key to onPlayerNameChanged flow with hostEditText bridge; added GameSetupPanel::hostRenderFrame (SDL3 primary-canvas composition with title/list/grid placeholders); extended hostRenderFrame dispatch to states 3/4/5 (GameSetupPanel visible); all 120 objects compile and link clean. |
@@ -363,6 +367,8 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 | 2026-07-28 (mode2-multiplayer-input) | Recovered GAMESTATE_HandleClick (0x40A4E0) and sent SDL mode-2 pointer events to a non-Windows GameSetupPanel adapter; Exit and Options use the original parent state transitions, while Search reports the intentionally empty DirectPlay boundary. Added the guarded routing regression; build, check, lobby artwork, and renderer-linkage tests pass. |
 
 | 2026-07-28 (mode2-main-menu-accept) | Verified the resource-0x403 pressed branch at 0x422AB2 calls EditWindow_OnPlayerNameChanged (0x422660); routed its SDL hit through the shared guarded Enter validation/state-3 handoff, with an accept-control regression plus build, check, lobby-artwork, and renderer-linkage tests passing. |
+
+| 2026-07-28 (game-test-protocol) | Added the project-specific isolated-Wayland testing skill and executed its build/static gates; documented that this headless Pixman sandbox has no compatible SDL window renderer, so interactive screenshot/input evidence awaits a Wayland-capable test host. |
 
 | 2026-07-28 (mode2-enter-crash) | Analyzed `lego_loco.core`: the post-Enter host render called the `__stack_chk_fail` PLT slot because `SDL3_GetRenderer` had C++ linkage while the shim exports C linkage. Corrected the guarded declaration, added an executable-linkage regression, and preserved the original `GetWindowTextA(..., 13)` contract with a safe 13-byte host buffer. |
 

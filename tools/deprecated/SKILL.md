@@ -31,7 +31,7 @@ superseded by the dependency-aware scheduler in `supervisor.ts`.
 
 ```text
 run-session.ts
-  ├─ opens raw loco.exe with a fresh Ghidra database ID
+  ├─ opens raw loco.exe in Ghidra
   └─ supervisor.run()
        ├─ creates persistent SUPERVISOR actor
        ├─ sends settled state snapshot
