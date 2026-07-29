@@ -71,7 +71,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs test test-integration test-all test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs test test-integration test-all test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-intro-video-sequence menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -83,7 +83,8 @@ test: test-resource-archive test-resource-manager-sdl3 test-dplay-config \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
-      test-host-multiplayer-menu-input test-sdl3-game-audio test-menu-sprite-viewer
+      test-host-multiplayer-menu-input test-sdl3-game-audio test-intro-video-sequence \
+      test-menu-sprite-viewer
 
 test-integration: $(BINARY)
 	@python3 -m pytest -v -m "integration and gui" tests/integration
@@ -144,6 +145,16 @@ $(DPLAY_CONFIG_TEST): $(DCP_DIR)/network/DPlayConfig.h tests/dplay_config_test.c
 
 test-dplay-config: $(DPLAY_CONFIG_TEST)
 	@$(DPLAY_CONFIG_TEST)
+
+# Original MCI launch order recovered from 0x421EB0 / 0x420F7F.
+INTRO_VIDEO_SEQUENCE_TEST := $(BUILD_DIR)/intro_video_sequence_test
+
+$(INTRO_VIDEO_SEQUENCE_TEST): $(SHIMS_DIR)/sdl3_intro_video.h tests/intro_video_sequence_test.cpp | dirs
+	@echo "=== Testing original intro-video order ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(SHIMS_DIR) tests/intro_video_sequence_test.cpp -o $@
+
+test-intro-video-sequence: $(INTRO_VIDEO_SEQUENCE_TEST)
+	@$(INTRO_VIDEO_SEQUENCE_TEST)
 
 # SDL primary-target regression: validates the CGWND frame source reaches the window.
 SDL3_PRIMARY_PRESENT_TEST := $(BUILD_DIR)/sdl3_primary_present_test

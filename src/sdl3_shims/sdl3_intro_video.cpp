@@ -19,12 +19,6 @@
 namespace loco::intro {
 namespace {
 
-constexpr std::array<const char*, 3> kLaunchVideos = {
-    "art-res/video/IgSpin.avi",
-    "Video/locoIntr.avi",
-    "art-res/video/legospin.avi",
-};
-
 struct Player {
     GstElement* pipeline = nullptr;
     GstElement* sink = nullptr;
@@ -48,7 +42,7 @@ std::filesystem::path assetRoot()
 
 std::string clipPath(std::size_t index)
 {
-    return (assetRoot() / kLaunchVideos.at(index)).string();
+    return (assetRoot() / std::string(kOriginalLaunchVideoPaths.at(index))).string();
 }
 
 void destroyPipeline()
@@ -117,7 +111,8 @@ bool startClip(std::size_t index)
     g_player.bus = gst_element_get_bus(pipeline);
     g_player.clipIndex = index;
     g_player.active = true;
-    loco::host_test::emit_intro_video_started(static_cast<int>(index), kLaunchVideos[index]);
+    loco::host_test::emit_intro_video_started(
+        static_cast<int>(index), kOriginalLaunchVideoPaths[index].data());
 
     if (gst_element_set_state(pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
         std::fprintf(stderr, "[INTRO] cannot start %s\n", path.c_str());
@@ -135,7 +130,8 @@ bool advanceClip(bool skipped)
     destroyPipeline();
     loco::host_test::emit_intro_video_finished(finished, skipped);
 
-    for (std::size_t next = static_cast<std::size_t>(finished + 1); next < kLaunchVideos.size(); ++next) {
+    for (std::size_t next = static_cast<std::size_t>(finished + 1);
+         next < kOriginalLaunchVideoPaths.size(); ++next) {
         if (startClip(next)) return true;
     }
 
@@ -234,7 +230,7 @@ bool startLaunchSequence()
     }
 
     stop();
-    for (std::size_t index = 0; index < kLaunchVideos.size(); ++index) {
+    for (std::size_t index = 0; index < kOriginalLaunchVideoPaths.size(); ++index) {
         if (startClip(index)) return true;
     }
     loco::host_test::emit_intro_sequence_complete();
@@ -261,7 +257,8 @@ bool pumpAndRender()
             gchar* debug = nullptr;
             gst_message_parse_error(message, &error, &debug);
             std::fprintf(stderr, "[INTRO] %s failed: %s%s%s\n",
-                         kLaunchVideos[g_player.clipIndex], error ? error->message : "unknown error",
+                         kOriginalLaunchVideoPaths[g_player.clipIndex].data(),
+                         error ? error->message : "unknown error",
                          debug ? " (" : "", debug ? debug : "");
             loco::host_test::emit_intro_video_failed(static_cast<int>(g_player.clipIndex),
                                                      error ? error->message : "unknown GStreamer error");
@@ -276,9 +273,15 @@ bool pumpAndRender()
     return g_player.active;
 }
 
-void skipCurrent()
+void skipAll()
 {
-    if (g_player.active) (void)advanceClip(true);
+    if (!g_player.active) return;
+
+    const int finished = static_cast<int>(g_player.clipIndex);
+    destroyPipeline();
+    g_player.active = false;
+    loco::host_test::emit_intro_video_finished(finished, true);
+    loco::host_test::emit_intro_sequence_complete();
 }
 
 void stop()

@@ -12,21 +12,31 @@ pytestmark = [pytest.mark.integration, pytest.mark.gui]
 @pytest.mark.parametrize(
     "game", [{"SDL_AUDIODRIVER": "dummy", "LEGO_LOCO_SKIP_INTRO": "0"}], indirect=True,
 )
-def test_launch_intro_sequence_decodes_and_returns_to_main_menu(game):
-    """The three shipped Cinepak AVIs render before the normal mode-2 menu."""
+def test_launch_intro_any_key_skips_remaining_videos_and_opens_main_menu(game):
+    """0x4207C0 posts 0x40A for every key: no later intro may begin."""
     game.wait_for_event("process_started")
-    for index in range(3):
-        game.wait_for_event("intro_video_started", index=index)
-        frame = game.wait_for_event("intro_video_frame", index=index, timeout=15)
-        assert (frame["width"], frame["height"]) == (640, 480)
-        # Avoid recording the black decoder preroll frame as visual evidence.
-        time.sleep(1)
-        game.screenshot(f"intro-video-{index}")
-        game.press_key("Escape")  # host-only skip; must not terminate the game
-        game.wait_for_event("intro_video_finished", index=index, skipped=True)
+    started = game.wait_for_event(
+        "intro_video_started", index=0, path="art-res/video/legospin.avi"
+    )
+    frame = game.wait_for_event("intro_video_frame", index=0, timeout=15)
+    assert (frame["width"], frame["height"]) == (640, 480)
+    # Avoid recording the black decoder preroll frame as visual evidence.
+    time.sleep(1)
+    game.screenshot("intro-legospin-before-any-key-skip")
 
+    # The original MCI child subclass handles every WM_KEYDOWN, rather than
+    # special-casing Escape. The parent immediately enters menu state 7.
+    game.press_key("A")
+    game.wait_for_event("intro_video_finished", after_sequence=started["sequence"],
+                        index=0, skipped=True)
     game.wait_for_event("intro_sequence_complete")
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+
+    started_indices = [
+        item["index"] for item in game.events()
+        if item.get("event") == "intro_video_started"
+    ]
+    assert started_indices == [0]
 
 
 

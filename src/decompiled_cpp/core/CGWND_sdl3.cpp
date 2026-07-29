@@ -57,12 +57,9 @@ static void PumpMessages_SDL3(uint8_t filter)
             return;  /* window close button */
         case SDL_EVENT_KEY_DOWN:
             if (loco::intro::isActive()) {
-                // The original MCI child window owns input while visible.
-                // Host Escape/Return/Space skip only its current clip.
-                if (event.key.key == SDLK_ESCAPE || event.key.key == SDLK_RETURN ||
-                    event.key.key == SDLK_SPACE) {
-                    loco::intro::skipCurrent();
-                }
+                // MCI child subclass 0x4207C0 accepts every WM_KEYDOWN and
+                // posts 0x40A; parent handler 0x420F6F enters state 7.
+                loco::intro::skipAll();
                 break;
             }
             if (EditWindow* menu = active_host_menu()) {
@@ -74,6 +71,11 @@ static void PumpMessages_SDL3(uint8_t filter)
             }
             break;
         case SDL_EVENT_TEXT_INPUT:
+            // 0x4207C0 also consumes WM_CHAR while the MCI child is active.
+            if (loco::intro::isActive()) {
+                loco::intro::skipAll();
+                break;
+            }
             if (EditWindow* menu = active_host_menu()) {
                 menu->hostHandleTextInput(event.text.text);
             }
@@ -86,7 +88,9 @@ static void PumpMessages_SDL3(uint8_t filter)
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (loco::intro::isActive()) {
-                if (event.button.button == SDL_BUTTON_LEFT) loco::intro::skipCurrent();
+                // 0x4207C0 maps the left/right/middle button-down messages
+                // to the same parent 0x40A immediate-menu transition.
+                loco::intro::skipAll();
                 break;
             }
             if (event.button.button == SDL_BUTTON_LEFT) {
