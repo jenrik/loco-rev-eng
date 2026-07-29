@@ -157,7 +157,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     char fullDatPath[264]; /* 0x108 bytes on stack */
 
     /* Build: "%s\\<name>.dat" */
-    CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path, (const char*)resourceId);
+    CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path, (const char*)(uintptr_t)resourceId);
     /* Wait — resourceId is an integer, not a string pointer. Let me re-read the Init code... */
 
     /* Actually, looking at the disassembly more carefully:
@@ -180,7 +180,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     /* So: sprintf(fullDatPath, "%s\\%s.dat", install_path, nameParam) */
     /*     sprintf(this->bmpPath, "%s\\%s.bmp", install_path, nameParam) */
     /* where nameParam is actually treated as a string pointer! */
-    const char* cursorName = (const char*)nameParam;
+    const char* cursorName = (const char*)(uintptr_t)nameParam;
     CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path, cursorName);
     CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, cursorName);
 
@@ -215,8 +215,8 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
                 /* Close/destroy the stream via vtable[0] with flags=1 */
                 void** streamVtab = *(void***)streamResult;
-                void* streamVtab4 = *(void**)((int)streamVtab + 4);
-                void* streamBase = (void*)((int)streamResult + (int)streamVtab4);
+                void* streamVtab4 = *(void**)((uint8_t*)streamVtab + 4);
+                void* streamBase = (void*)((uint8_t*)streamResult + (uintptr_t)streamVtab4);
                 void* streamDtorFn = *(void**)streamBase;
                 typedef void (__fastcall* DtorFn)(void*);
                 ((DtorFn)streamDtorFn)(streamResult);
@@ -233,8 +233,8 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
         /* Check if file is open by validating stream data */
         int* vt = *(int**)localStream;
-        int vt4 = *(int*)(vt[4]);
-        int offset_xx = *(int*)((int)localStream + vt4 + 0x4C);
+        int vt4 = vt[4];
+        int offset_xx = *(int*)((uint8_t*)localStream + vt4 + 0x4C);
         if (offset_xx != -1) {   /* valid file handle */
             /* Call loadCursorData to process data from the file stream */
             this->loaded = this->loadCursorData(localStream);
@@ -263,7 +263,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 /* ================================================================== */
 void CursorEditWindow::cleanup()
 {
-    void* stream = (void*)((int)this + 0x0C);
+    void* stream = (void*)((uint8_t*)this + 0x0C);
     WIN32_StreamDestroy(stream);
     WNDPROC_StreamCleanup(stream);
 }
