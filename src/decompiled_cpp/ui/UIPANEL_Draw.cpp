@@ -10,6 +10,8 @@
  */
 
 #include "UIPANEL.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -1030,3 +1032,5 @@ void __thiscall UIPANEL_Hide(void* self, const char* filename)
         *(int*)0x4FD0F0, *(int*)0x4FD0F4,
         *(int*)0x4FD0F8, *(int*)0x4FD0FC);
 }
+
+#pragma GCC diagnostic pop

@@ -58,9 +58,9 @@ WARNFLAGS  := -Werror=delete-non-virtual-dtor \
 # Tier 2 — STRICT=1: ban C-style casts and catch ignored calling-convention attrs
 ifdef STRICT
   ifeq ($(STRICT),1)
-    WARNFLAGS += -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Wattributes -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
   else ifeq ($(STRICT),2)
-    WARNFLAGS += -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Wattributes -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
     WARNFLAGS += -Weffc++ -Werror=missing-declarations
   endif
 endif

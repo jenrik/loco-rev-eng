@@ -13,6 +13,8 @@
 // Status: TRANSCRIBED
 
 #include "GameSetupPanel.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
 #include "../network/Netman.h"
 #include "../resources/ResourceManager.h"
@@ -1425,3 +1427,5 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
     this->hostPressedUntilMs = SDL_GetTicks() + kLobbyPressDurationMs;
 }
 #endif  // !_WIN32
+
+#pragma GCC diagnostic pop

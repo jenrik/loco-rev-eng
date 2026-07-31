@@ -10,6 +10,8 @@
  */
 
 #include "PostcardAlbum.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
 #include "../core/CGWND.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -1111,3 +1113,5 @@ void PostcardAlbum::RenderAllTiles()
         this->UpdateSprite(6);
     }
 }
+
+#pragma GCC diagnostic pop

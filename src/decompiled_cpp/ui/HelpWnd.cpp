@@ -30,6 +30,8 @@
 // Status: TRANSCRIBED
 
 #include "HelpWnd.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
 #include <cstdint>
 #include <new>
@@ -1656,3 +1658,5 @@ byte HelpWnd::hit_test(int x, int y)
     if (PtInRect((RECT*)((uintptr_t)this->btnScrollBar + 4), x, y)) return 8;
     return 0;
 }
+
+#pragma GCC diagnostic pop

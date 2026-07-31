@@ -24,6 +24,8 @@
  */
 
 #include "UIPANEL.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* UIPANEL_Surface struct — 0x20 bytes, grounded in Ghidra disassembly */
@@ -872,3 +874,5 @@ bool __thiscall UIPANEL_Blit(void* renderer,
 
     return true;
 }
+
+#pragma GCC diagnostic pop

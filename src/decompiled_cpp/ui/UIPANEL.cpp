@@ -10,6 +10,8 @@
  */
 
 #include "UIPANEL.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 // vtable_addrs.h removed — compiler manages vtables via virtual methods
 
 /* Windows API stubs — specific declarations to avoid conflicts with types.h */
@@ -1371,3 +1373,4 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
             DDBLT_WAIT, 0);
     }
 }
+#pragma GCC diagnostic pop
