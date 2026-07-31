@@ -25,6 +25,8 @@ void emit_legacy_service_applied(uint32_t packet_type, std::size_t byte_count);
 void emit_legacy_attachment_updated(
     uint32_t sender, uint16_t train_type, uint16_t sequence, uint8_t subtype,
     std::size_t attachment_bytes, std::size_t final_bytes, bool complete);
+void emit_legacy_asset_consumed(uint8_t mode, uint8_t type,
+                                std::size_t byte_count);
 void emit_legacy_asset_owned(uint8_t mode, uint8_t type, std::size_t byte_count,
                              bool replaced, std::size_t asset_count);
 void emit_legacy_track_sessions_materialized(

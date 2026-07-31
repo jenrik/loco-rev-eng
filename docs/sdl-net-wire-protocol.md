@@ -77,7 +77,7 @@ passing ownership to `TrainSubsystem`/`Netman`:
 | `0x3EB` | Obsolete central-server/URL control retained as host state | NUL-terminated target; no browser or DirectPlay side effect |
 | `0x3EC` | Track-build records decoded into typed `DPlayManager` routes, grouped under a native-safe `Vehicle`, then adopted through Netman type `0x0F` | exactly `0x14 + count * 0x390`, duplicate counts equal, count 0–3 |
 | `0x3ED` | Original receive jump-table hole; accepted/discarded | at least 6 bytes |
-| `0x3EE` | Asset data replaces host-owned `(mode,type)` bytes | exactly `0x0C + data_size` bytes |
+| `0x3EE` | Replaces host-owned `(mode,type)` bytes; `DownloadMissingAssets` consumes matching typed route keys before filesystem fallback | exactly `0x0C + data_size` bytes |
 | `0x3EF` | Reserved original jump-table hole | accepted/discarded |
 | `0x3F6` | Copied to type-`0x15`; Netman creates/moves/frees `PingEntry` nodes | exactly `10 + count * 8`; all slots 0–8 |
 | `0x3F9` | Copied to type-`0x16`; Netman replaces the sender slot pixel buffer | exactly `0x14 + data_size` and known virtual owner |

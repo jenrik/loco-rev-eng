@@ -44,6 +44,8 @@
 #include "Netman.h"
 #include "DPlayManager.h"
 #include "../game/Building.h"
+#include "../game/PlayerConfig.h"
+#include "../core/VehicleEditor.h"
 #ifndef _WIN32
 #include "../game/Train.h"
 #include "../../sdl3_shims/host_test_events.h"
@@ -123,6 +125,12 @@ static inline void net_delete(Vehicle* vehicle)
     if (vehicle == nullptr) return;
     vehicle->~Vehicle();
     GLOBAL_free(vehicle);
+}
+
+int32_t NETMAN_GetGameMode(const void* netman)
+{
+    return netman != nullptr
+        ? static_cast<const Netman*>(netman)->m_gameMode : -1;
 }
 
 /* ================================================================== */
@@ -805,29 +813,22 @@ uint32_t Netman::ReceivePlayerName()
         return 0;
     }
 
-    uint32_t res = 1;
-    {
-        /* car_count at +0x0C and car_handles at +0x14 are within vehicle_payload */
-        uint16_t* raw = (uint16_t*)((uint8_t*)node + 0x0C);
-        int32_t cc = *raw;
-        for (int32_t ci = 0; ci < cc; ci++) {
-            int32_t* ch = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-            int32_t dd = VehicleEditor_GetDPlayData(*ch);
-            if (!dd) continue;
-            uint16_t* s1 = (uint16_t*)((uint8_t*)g_player_config + 6);
-            uint16_t* s2 = (uint16_t*)((uint8_t*)(uintptr_t)dd + 0x10);
-            while (*s1 && *s1 == *s2) { s1++; s2++; }
-            int32_t cmp = (*s1 < *s2) ? -1 : (*s1 > *s2) ? 1 : 0;
-            if (cmp == 0 && *(int32_t*)((uint8_t*)(uintptr_t)dd + 0x3C) == 0 && *(uint16_t*)((uint8_t*)(uintptr_t)dd + 0x3A)) {
-                char fp[0x504];
-                fp[0] = g_empty_string;
-                for (int32_t i = 0; i < 0x140; i++) ((uint32_t*)&fp[1])[i] = 0;
-                NET_GetAttFilePath(*(uint16_t*)((uint8_t*)(uintptr_t)dd + 0x3A), 5, fp);
-                return (uint32_t)PlaySoundFile(fp, g_listener_x, g_listener_y, 4);
-            }
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        DPlayManager* dplay = editor->GetDPlayData();
+        if (dplay == nullptr || g_player_config == nullptr) continue;
+        if (std::strcmp(g_player_config->name,
+                        reinterpret_cast<const char*>(dplay->m_sessionBlk1)) == 0 &&
+            dplay->m_dwordValue == 0 && dplay->m_wordValue != 0) {
+            char path[0x504] = {};
+            NET_GetAttFilePath(dplay->m_wordValue, 5, path);
+            return static_cast<uint32_t>(
+                PlaySoundFile(path, g_listener_x, g_listener_y, 4));
         }
     }
-    return res;
+    return 1;
 }
 
 /* ================================================================== */
@@ -915,30 +916,33 @@ void Netman::SendGameStart(TrainMessage* msg)
 
     this->ReceivePing(node->network_id, node->slot_index, node->peer_index, off, dir);
 
-    /* car_count and car_handles are within the Vehicle payload area (+0x0C, +0x14) */
-    int32_t cc = *(uint16_t*)((uint8_t*)node + 0x0C);
-    bool has_dd = false;
-    /* NOTE: loop starts at 1 — car[0] is metadata. cc is car count, 1-based. */
-    for (int32_t ci = 1; ci <= cc; ci++) {
-        int32_t* ch = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-        if (!ch) continue;
-        if (VehicleEditor_GetDPlayData(*ch)) {
-            has_dd = true;
+    bool has_dplay_data = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor != nullptr && editor->GetDPlayData() != nullptr) {
+            has_dplay_data = true;
             break;
         }
     }
-    for (int32_t ci = 1; ci <= cc; ci++) {
-        int32_t* ch = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-        if (!ch) continue;
-        CarObject* car = (CarObject*)ch;
-        int32_t rid = VehicleEditor_GetResourceId(*ch);
-        int32_t val = ((int32_t*)(uintptr_t)*ch)[0x15];
-        if (has_dd && rid == 0x1870) {
-            car->SetResourceId(0x1871, -1);
-            car->SetParam(val, 1);
-        } else if (!has_dd && rid == 0x1871) {
-            car->SetResourceId(0x1870, -1);
-            car->SetParam(val, 1);
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        const int32_t resource_id = static_cast<int32_t>(editor->GetResourceId());
+        const int32_t replacement = has_dplay_data ? 0x1871 : 0x1870;
+        if ((has_dplay_data && resource_id == 0x1870) ||
+            (!has_dplay_data && resource_id == 0x1871)) {
+#ifndef _WIN32
+            // Host network editors intentionally have no original resource
+            // object; retain the evidenced state transition by ID.
+            editor->res_id = replacement;
+#else
+            CarObject* car = static_cast<CarObject*>(static_cast<void*>(editor));
+            const int32_t frame = editor->frame_index;
+            car->SetResourceId(replacement, -1);
+            car->SetParam(frame, 1);
+#endif
         }
     }
 }

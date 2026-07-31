@@ -22,6 +22,8 @@
 #include "Vehicle.h"
 #ifndef _WIN32
 #include "../../sdl3_shims/sdl3_net_runtime.h"
+#include "../../sdl3_shims/host_test_events.h"
+#include <algorithm>
 #include <vector>
 #endif
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -29,6 +31,8 @@
 /* C-linkage externals for network helpers                              */
 /* (These are in addition to those in Train.cpp)                        */
 /* ================================================================== */
+
+int32_t NETMAN_GetGameMode(const void* netman);
 
 extern "C" {
 
@@ -230,6 +234,15 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
 }
 
 #ifndef _WIN32
+const TrainSubsystem::HostReceivedAsset*
+TrainSubsystem::FindHostReceivedAsset(uint8_t mode, uint8_t type) const
+{
+    for (const HostReceivedAsset& asset : host_received_assets) {
+        if (asset.mode == mode && asset.type == type) return &asset;
+    }
+    return nullptr;
+}
+
 void TrainSubsystem::ClearHostTrackSessions()
 {
     for (Vehicle* vehicle : host_track_vehicles) {
@@ -321,8 +334,55 @@ void TrainSubsystem::BaseDtor()
  * TrainSubsystem::DownloadMissingAssets
  * Address: 0x438E40
  */
-void TrainSubsystem::DownloadMissingAssets(void* entity)
+void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
 {
+#ifndef _WIN32
+    if (session == nullptr || NETMAN_GetGameMode(g_netman) != 1) return;
+
+    std::vector<std::pair<uint8_t, uint8_t>> assets;
+    const auto add_unique = [&](uint8_t mode, uint8_t type) {
+        if (mode == 0) return;
+        const std::pair<uint8_t, uint8_t> key{mode, type};
+        if (std::find(assets.begin(), assets.end(), key) == assets.end())
+            assets.push_back(key);
+    };
+    for (uint16_t index = 0; index < 128; ++index) {
+        const uint8_t type = session->m_trackEntries[index * 6];
+        const uint8_t mode = session->m_trackEntries[index * 6 + 1];
+        if (mode == 0) break;
+        add_unique(mode, type);
+    }
+    if (session->m_playerType != 0) {
+        add_unique(session->m_playerType,
+                   NET_MapSpecialAsset(0x1E, session->m_playerTrack));
+    }
+    if (session->m_unknown93 != 0) {
+        add_unique(session->m_unknown93, NET_MapSpecialAsset(0x1F, 1));
+    }
+
+    for (const auto& key : assets) {
+        const uint8_t mode = key.first;
+        const uint8_t type = key.second;
+        if (const HostReceivedAsset* owned = FindHostReceivedAsset(mode, type)) {
+            loco::host_test::emit_legacy_asset_consumed(
+                mode, type, owned->bytes.size());
+            continue;
+        }
+        char path[0x504] = {};
+        NET_GetAssetPath(type, mode, path);
+        if (GetFileAttributesA(path) != 0xFFFFFFFFu) continue;
+        uint8_t* request = static_cast<uint8_t*>(operator_new(6));
+        if (request == nullptr) continue;
+        *reinterpret_cast<uint16_t*>(request) = 0x3ED;
+        request[4] = mode;
+        request[5] = type;
+        WIN32_SendNetworkData(g_dplay_peer, player_peer_id, request, 6, 1);
+        GLOBAL_free(request);
+        ++request_count;
+    }
+    return;
+#else
+    void* entity = session;
     if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) != 1) return;
 
     struct MissingAsset { uint8_t type, mode; uint8_t pad[2]; MissingAsset* next; };
@@ -400,6 +460,7 @@ void TrainSubsystem::DownloadMissingAssets(void* entity)
             ++request_count;
         }
     }
+#endif
 }
 
 /* ================================================================== */

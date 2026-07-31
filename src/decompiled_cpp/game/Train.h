@@ -368,6 +368,7 @@ public:
 #ifndef _WIN32
     // Host-only ownership boundary for decoded 0x3EC session records.
     void ClearHostTrackSessions();
+    const HostReceivedAsset* FindHostReceivedAsset(uint8_t mode, uint8_t type) const;
 #endif
 
     /* ================================================================ */
@@ -661,7 +662,7 @@ public:
      *
      * @param entity  The game entity whose assets to verify
      */
-    void DownloadMissingAssets(void* entity);
+    void DownloadMissingAssets(DPlayManager* session);
 
     /**
      * RemoveAllCars — Remove all cars from the active controller list.

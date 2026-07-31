@@ -168,7 +168,8 @@ int RunAdmissionClient(std::uint16_t port) {
                 track_sessions[6] = 0x34; track_sessions[7] = 0x12;
                 track_sessions[8] = 1; track_sessions[12] = 1;
                 track_sessions[0x14 + 0x8e] = 0x80;
-                track_sessions[0x14 + 0x91] = 0x2a;
+                track_sessions[0x14 + 0x90] = 7;
+                track_sessions[0x14 + 0x91] = 2;
                 game_packets.insert(game_packets.begin() + 3,
                                     std::move(track_sessions));
                 for (const auto& packet : game_packets) {

@@ -436,10 +436,14 @@ grows with producer load.
      adopted by Netman through recovered type `0x0F`. `InboundTrainNode` is a
      canonical alias rather than a second byte layout; original tail metadata
      is represented by named native-width fields.
-   - Remaining work: migrate the later mode-3 movement/serialization paths
-     from residual raw Vehicle offsets to typed editor/metadata access, expose
-     host-owned assets to each concrete consumer, and validate train transfer
-     plus backpressure in mode 3.
+   - `DownloadMissingAssets` now scans typed DPlayManager entries, consumes
+     matching host-owned `0x3EE` bytes, and requests only absent keys. Typed
+     inbound inspection and game-start editor indexing replace their original
+     +0x0C/+0x14 offset accesses; an isolated real-client Go flow proves the
+     adopted Vehicle survives the recovered loading handoff.
+   - Remaining work: migrate later mode-3 movement/serialization and PostBag
+     route resolution from residual raw offsets/filesystem assumptions, then
+     validate train transfer plus backpressure in mode 3.
 
 6. **Full subsystem and UI integration**
    - Exercise train transfer, map/building overlays, scenario selection,

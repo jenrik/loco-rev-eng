@@ -93,6 +93,12 @@ public:
               sender, train_type, sequence, subtype, attachment_bytes,
               final_bytes, complete ? "true" : "false");
     }
+    void legacy_asset_consumed(uint8_t mode, uint8_t type,
+                               std::size_t byte_count) {
+        write("legacy_asset_consumed",
+              ",\"mode\":%u,\"type\":%u,\"byte_count\":%zu",
+              mode, type, byte_count);
+    }
     void legacy_asset_owned(uint8_t mode, uint8_t type, std::size_t byte_count,
                             bool replaced, std::size_t asset_count) {
         write("legacy_asset_owned",
@@ -242,6 +248,10 @@ void emit_legacy_attachment_updated(
     sink().legacy_attachment_updated(
         sender, train_type, sequence, subtype, attachment_bytes, final_bytes,
         complete);
+}
+void emit_legacy_asset_consumed(uint8_t mode, uint8_t type,
+                                std::size_t byte_count) {
+    sink().legacy_asset_consumed(mode, type, byte_count);
 }
 void emit_legacy_asset_owned(uint8_t mode, uint8_t type, std::size_t byte_count,
                              bool replaced, std::size_t asset_count) {

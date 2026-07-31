@@ -156,9 +156,12 @@ def test_multiplayer_host_game_go_back_back_exits_cleanly(game):
         replaced=True, asset_count=1
     )
     game.wait_for_event(
+        "legacy_asset_consumed", mode=2, type=7, byte_count=3
+    )
+    game.wait_for_event(
         "legacy_track_sessions_materialized", session_count=1,
         vehicle_count=1, editor_count=2, config=0x12345678,
-        first_entry_count=128, first_signal_type=0x2A
+        first_entry_count=128, first_signal_type=2
     )
     game.wait_for_event("netman_message_processed", type=0x13, flags=1)
     game.wait_for_event("netman_message_processed", type=0x15)
@@ -175,6 +178,35 @@ def test_multiplayer_host_game_go_back_back_exits_cleanly(game):
     game.click_logical(430, 700, "main-menu back/exit")
     game.wait_for_event("mode_changed", new_mode=10)
     game.wait_for_clean_exit()
+
+
+def test_multiplayer_ready_go_enters_loading_with_adopted_vehicle(game):
+    """A real 0x3EC Vehicle remains valid across the recovered Go handoff."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    select_multiplayer(game)
+    game.click_logical(950, 500, "select host game")
+    game.click_logical(925, 700, "main-menu go")
+    game.wait_for_event("transport_listening", port=23000)
+    game.wait_for_event("netman_session_ready", player_id=1, hosting=True)
+
+    admitted = subprocess.run(
+        ["build/sdl3_net_transport_test", "--admit-client", "23000"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    assert "ADMITTED id=2" in admitted.stdout
+    game.wait_for_event(
+        "netman_vehicle_adopted", editor_count=2, network_id=0, list_depth=1
+    )
+    game.wait_for_event(
+        "legacy_asset_consumed", mode=2, type=7, byte_count=3
+    )
+
+    # Recovered 0x42A Go rectangle is [688,700,832,812).
+    game.click_logical(720, 720, "multiplayer ready go")
+    game.wait_for_event("mode_changed", new_mode=1)
+    time.sleep(0.5)
+    assert game.is_alive(), game._failure("game exited after adopted-Vehicle Go")
+    game.screenshot("multiplayer-adopted-vehicle-loading")
 
 
 def test_multiplayer_ready_go_is_exposed_after_session_projection(game):

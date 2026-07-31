@@ -699,8 +699,14 @@ uint32_t VehicleEditor::CheckEditBounds2(Vehicle* vehicle)
  */
 uint32_t VehicleEditor::GetResourceId()
 {
-    /* TODO: decompile 0x40E0D0 */
-    return 0;
+#ifndef _WIN32
+    // Host network editors intentionally omit the original resource object,
+    // but preserve its evidenced ID for gameplay state transitions.
+    return static_cast<uint32_t>(this->res_id);
+#else
+    return this->resource != nullptr
+        ? static_cast<uint32_t>(this->res_id) : 0xFFFFFFFFu;
+#endif
 }
 
 /**
