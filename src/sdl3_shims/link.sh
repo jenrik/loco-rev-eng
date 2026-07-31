@@ -70,7 +70,6 @@ g++ -std=c++17 -fpermissive -Wl,--allow-multiple-definition \\
   -Wl,--defsym=DirectPlay_constructor(void*)=0 \\\
   -Wl,--defsym=DPLAY_CleanupPlayer(void*)=0 \\\
   -Wl,--defsym=DPLAY_CreatePlayer(void*)=0 \\\
-  -Wl,--defsym=DPLAY_SendMessages()=0 \\\
   -Wl,--defsym=DPLAY_SetPlayerData(void*, char const*)=0 \\\
   -Wl,--defsym=FormatResourceString=0 \\\
   -Wl,--defsym=GameAudio_PlayResourceEx(void*, unsigned int, int*)=0 \\\
@@ -124,9 +123,7 @@ g++ -std=c++17 -fpermissive -Wl,--allow-multiple-definition \\
   -Wl,--defsym=NET_GetHostName(int, int)=0 \\\
   -Wl,--defsym=NETMAN_constructor(void*)=0 \\\
   -Wl,--defsym=NETMAN_FreePacket(int)=0 \\\
-  -Wl,--defsym=NETMAN_HandleTimeout(void*, void*)=0 \\\
   -Wl,--defsym=NETMAN_Init(void*, unsigned char)=0 \\\
-  -Wl,--defsym=NETMAN_ReceiveGameStart(void*, int, int, void*)=0 \\\
   -Wl,--defsym=NETMAN_ResetNetworkState(void*)=0 \\\
   -Wl,--defsym=NETMAN_SendAck(void*)=0 \\\
   -Wl,--defsym=NETMAN_SetGameMode(void*, int)=0 \\\

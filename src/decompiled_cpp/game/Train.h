@@ -25,6 +25,7 @@
 #pragma once
 
 #include "Building.h"
+#include "../network/TrainMessage.h"
 #ifndef _WIN32
 #include <string>
 #include <vector>
@@ -508,7 +509,8 @@ public:
      * @param data           Position update data buffer
      * @param player_index   Index of the player sending the update
      */
-    void HandleTrainPosUpdate(void* data, int player_index);
+    void HandleTrainPosUpdate(TrainPositionAckPacket* packet,
+                              int32_t player_index);
 
     /**
      * HandlePlayerLeave — Handle player disconnecting from multiplayer.

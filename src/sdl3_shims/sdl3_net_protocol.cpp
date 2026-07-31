@@ -230,6 +230,33 @@ bool DecodePlayerNotice(const std::vector<std::uint8_t>& payload,
     return true;
 }
 
+bool DecodeLegacyTrainPositionAck(
+    const std::vector<std::uint8_t>& payload,
+    LegacyTrainPositionAck* acknowledgment, std::string* error) {
+    if (acknowledgment == nullptr) {
+        SetError(error, "0x3F7 decoder requires an output record");
+        return false;
+    }
+    if (payload.size() != 0x0C) {
+        SetError(error, "0x3F7 transfer acknowledgment must be exactly 12 bytes");
+        return false;
+    }
+    if (Get16(payload.data()) != 0x3F7 ||
+        Get16(payload.data() + 2) != kLegacyProtocolVersion) {
+        SetError(error, "0x3F7 transfer acknowledgment has an invalid header");
+        return false;
+    }
+    if (payload[8] >= 9 || payload[9] >= 9) {
+        SetError(error, "0x3F7 transfer acknowledgment names an invalid slot");
+        return false;
+    }
+    acknowledgment->network_id = static_cast<std::int32_t>(Get32(payload.data() + 4));
+    acknowledgment->slot_index = payload[8];
+    acknowledgment->peer_index = payload[9];
+    acknowledgment->reserved = Get16(payload.data() + 10);
+    return true;
+}
+
 bool ValidateLegacyPayload(const std::vector<std::uint8_t>& payload,
                            std::string* error) {
     if (payload.size() < 4) {

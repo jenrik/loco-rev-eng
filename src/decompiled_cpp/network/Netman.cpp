@@ -48,8 +48,7 @@
 #include "../core/VehicleEditor.h"
 #include "../core/Entity.h"
 #include "../shared/Collection.h"
-#include "../core/Entity.h"
-#include "../shared/Collection.h"
+#include "../world/scriptengine.h"
 #ifndef _WIN32
 #include "../game/Train.h"
 #include "../../sdl3_shims/host_test_events.h"
@@ -380,6 +379,11 @@ void CopyTransportPlayerName(PlayerSlot& slot, const char* name)
 }
 }
 
+int32_t NETMAN_HostLocalSlotIndex()
+{
+    return _g_netman != nullptr ? _g_netman->m_mySlotIndex : -1;
+}
+
 void Netman::HostAddTransportPlayer(int32_t playerId, const char* playerName)
 {
     if (playerId < 1 || playerId > 9) return;
@@ -708,7 +712,7 @@ void Netman::LoadScenario(const char* layoutName)
 void Netman::Cleanup()
 {
     /* === Drain g_network_queue with lock and type-dispatch === */
-    ResourceManager_Lock(g_train_resources);
+    static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
 
     {
         TrainMessage* msg = (TrainMessage*)g_network_queue;
@@ -757,7 +761,7 @@ void Netman::Cleanup()
         }
     }
 
-    ResourceManager_Unlock(g_train_resources);
+    static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
 
     /* === Free building list (m_buildingList at +0x7DC) === */
     {
@@ -1079,47 +1083,47 @@ void Netman::SendGameStart(TrainMessage* msg)
 /* ================================================================== */
 /* 25. ReceiveGameStart - 0x43E560                                    */
 /* ================================================================== */
-void* Netman::ReceiveGameStart(void* worldOrObj, int param, InboundTrainNode* node)
+bool Netman::ReceiveGameStart(int32_t position_x, int32_t position_y,
+                              InboundTrainNode* node)
 {
-    World_GetObjectAt((int32_t)(intptr_t)node);
+    World_GetObjectAt(node);
     this->HandleTimeout(node);
 
-    /* field_04 at +0x04 within vehicle_payload */
-    if (*(uint32_t*)((uint8_t*)node + 4) == 1) {
+    if (node->owner_handle == 1) {
         net_delete(node);
-        return (void*)1;
+        return true;
     }
     if (this->SendSignalChange(node) && this->m_gameMode == 1) {
         node->next = this->m_vehicleList;
         this->m_vehicleList = node;
-        return (void*)1;
+        return true;
     }
     if (*(int32_t*)((uint8_t*)_g_netman_data + 0x10) == 0) {
         node->next = this->m_vehicleList;
         this->m_vehicleList = node;
-        return (void*)1;
+        return true;
     }
     if (this->m_gameMode == 1) {
         if (!NETMAN_SendTrainPosition(node)) {
             node->next = this->m_vehicleList;
             this->m_vehicleList = node;
         }
-        return (void*)1;
+        return true;
     }
     if (this->m_gameMode != 2) {
         node->next = this->m_vehicleList;
         this->m_vehicleList = node;
-        return (void*)1;
+        return true;
     }
     if (this->m_slots[node->slot_index].dpId == 0) {
         net_delete(node);
     } else {
-        if (!NETMAN_ReceiveTrainPosition(param, (int32_t)(intptr_t)worldOrObj, (int32_t)(intptr_t)node)) {
+        if (!NETMAN_ReceiveTrainPosition(position_x, position_y, node)) {
             node->next = this->m_vehicleList;
             this->m_vehicleList = node;
         }
     }
-    return (void*)1;
+    return true;
 }
 
 /* ================================================================== */
@@ -1131,14 +1135,14 @@ void Netman::Update()
 
     /* Drain network message queue under lock */
     while (g_network_queue != NULL) {
-        ResourceManager_Lock(g_train_resources);
+        static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
 
         TrainMessage* msg = (TrainMessage*)g_network_queue;
         if (msg != NULL) {
             g_network_queue = msg->next;
         }
 
-        ResourceManager_Unlock(g_train_resources);
+        static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
 
         if (msg != NULL) {
 #ifndef _WIN32
@@ -2036,9 +2040,10 @@ void Netman::SendFileTransfer(TrainMessage* msg)
         return;
     }
     if (msg->type == 0x17) {
-        auto* packet = static_cast<uint8_t*>(msg->data_ptr);
-        RemovePingEntry(*reinterpret_cast<int32_t*>(packet + 4), packet[8], packet[9]);
-        HeapFree(GetProcessHeap(), 0, msg->data_ptr);
+        auto* packet = static_cast<TrainPositionAckPacket*>(msg->data_ptr);
+        RemovePingEntry(packet->network_id, packet->slot_index,
+                        packet->peer_index);
+        HeapFree(GetProcessHeap(), 0, packet);
         msg->data_ptr = nullptr;
         return;
     }
@@ -2072,18 +2077,23 @@ void Netman::ReceiveAck(int32_t dpId, uint8_t slot_byte, uint32_t peerIndex)
 {
     if (m_gameMode != 2) return;
     if (m_mySlotIndex == static_cast<int32_t>(peerIndex & 0xff)) {
-        auto* packet = static_cast<uint8_t*>(operator_new(0x0c));
-        *reinterpret_cast<uint16_t*>(packet) = 0x3f7;
-        *reinterpret_cast<int32_t*>(packet + 4) = dpId;
-        packet[8] = slot_byte;
-        packet[9] = static_cast<uint8_t>(peerIndex);
+        void* storage = operator_new(sizeof(TrainPositionAckPacket));
+        auto* packet = storage == nullptr ? nullptr :
+            ::new (storage) TrainPositionAckPacket{};
+#ifndef _WIN32
+        if (packet == nullptr) return;
+#endif
+        packet->packet_type = 0x3F7;
+        packet->network_id = dpId;
+        packet->slot_index = slot_byte;
+        packet->peer_index = static_cast<uint8_t>(peerIndex);
         TrainMessage* message = allocate_train_message();
         if (message == nullptr) {
             GLOBAL_free(packet);
             return;
         }
         message->type = 6;
-        message->data_len = 0x0c;
+        message->data_len = sizeof(TrainPositionAckPacket);
         message->data_ptr = packet;
         message->flags = 1;
         Train_QueueMessage(_g_train, message);
@@ -2441,7 +2451,7 @@ void NETMAN_StartClientSession()
 }
 
 /* NETMAN_SendTrainPosition - 0x43EE80 */
-uint32_t NETMAN_SendTrainPosition(InboundTrainNode* vehicle)
+bool NETMAN_SendTrainPosition(InboundTrainNode* vehicle)
 {
     TrainMessage* m = allocate_train_message();
     if (m == nullptr) return 0;
@@ -2456,25 +2466,29 @@ uint32_t NETMAN_SendTrainPosition(InboundTrainNode* vehicle)
 }
 
 /* NETMAN_ReceiveTrainPosition - 0x43EEC0 */
-int32_t NETMAN_ReceiveTrainPosition(int p1, int p2, int p3)
+bool NETMAN_ReceiveTrainPosition(int32_t position_x, int32_t position_y,
+                                 InboundTrainNode* vehicle)
 {
     int32_t a;
-    if (p2 == 0) a = 0;
-    else if (p1 == 0) a = 0x10E;
-    else a = ((p1 <= p2) - 1 & 0xFFFFFFA6) + 0xB4;
+    if (position_y == 0) a = 0;
+    else if (position_x == 0) a = 0x10E;
+    else a = ((position_x <= position_y) - 1 & 0xFFFFFFA6) + 0xB4;
 
-    /* Use 32-bit zero test instead of truncation to uint8_t */
-    int32_t r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(a, -1);
-    if (r == 0) {
+    bool route_found = static_cast<uint8_t>(
+        static_cast<Netman*>(_g_netman)->CheckTrackConnection(a, -1)) != 0;
+    if (!route_found) {
         a = 0;
-        r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(0, -1);
-        if (r == 0) {
+        route_found = static_cast<uint8_t>(
+            static_cast<Netman*>(_g_netman)->CheckTrackConnection(0, -1)) != 0;
+        if (!route_found) {
             a = 0x10E;
-            r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(0x10E, -1);
-            if (r == 0) {
+            route_found = static_cast<uint8_t>(
+                static_cast<Netman*>(_g_netman)->CheckTrackConnection(0x10E, -1)) != 0;
+            if (!route_found) {
                 a = 0x5A;
-                r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(0x5A, -1);
-                if (r == 0) return r;
+                route_found = static_cast<uint8_t>(
+                    static_cast<Netman*>(_g_netman)->CheckTrackConnection(0x5A, -1)) != 0;
+                if (!route_found) return false;
             }
         }
     }
@@ -2484,14 +2498,12 @@ int32_t NETMAN_ReceiveTrainPosition(int p1, int p2, int p3)
     m->data_len = 0;
     m->flags = 0;
     m->type = 0x10;
-    m->data_ptr = reinterpret_cast<void*>(static_cast<intptr_t>(p3));
+    m->data_ptr = vehicle;
     m->target_dpId = a;
     m->next = nullptr;
 
-    InboundTrainNode* node = reinterpret_cast<InboundTrainNode*>(
-        static_cast<intptr_t>(p3));
-    node->tunnel_angle = static_cast<uint16_t>(a);
-    node->process_delay = 1;
+    vehicle->tunnel_angle = static_cast<uint16_t>(a);
+    vehicle->process_delay = 1;
     Train_QueueMessage(_g_train, m);
     return 1;
 }

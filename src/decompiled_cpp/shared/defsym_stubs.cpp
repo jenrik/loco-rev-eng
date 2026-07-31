@@ -242,7 +242,6 @@ void* GAMESTATE_SetDifficulty = nullptr;
 void* DPLAY_EnumeratePlayers = nullptr;
 void* NET_SendFile = nullptr;
 void Vehicle_SetState(void*, int) {}
-void NETMAN_HandleTimeout(void*, void*) {}
 void NETMAN_ReceiveLayoutSelect(int) {}
 void PlayerConfig_SaveToFile(void*) {}
 void ResourceManager_Shutdown(int) {}
@@ -278,7 +277,6 @@ void Town_BlitViewport(void*,int,int,int,int,int,int) {}
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) {}
 void* g_game_instance = nullptr;
 int32_t g_OutputDebugStringA = 0;
-void NETMAN_ReceiveGameStart(void*, int, int, void*) {}
 void ArrivalQueue_AddVehicle(void*, void*) {}
 void VehicleEditor_Update(void*) {}
 void VehicleEditor_IsInBounds(void*, short, short, short) {}

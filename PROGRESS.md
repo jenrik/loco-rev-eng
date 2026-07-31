@@ -295,14 +295,14 @@ main()
 
 ### Priority 5: Networking
 
-- [ ] **Complete gameplay object/file integration** — Object/file/session setup is integrated through grouped Vehicles, typed `0x3EE`, in-memory host route cloning, exact `0x3FC`, compact 0x3F1 slots, and 0x3F4/0x3F5 transfer-state packets; Netman has no remaining internal decompile stubs. Finish the distinct gameplay phase by migrating later train movement/position paths and the Windows-only PostBag deserializer, then validate live transfer plus sustained backpressure in mode 3.
+- [ ] **Complete gameplay object/file integration** — Object/file/session setup now includes grouped Vehicles, typed `0x3EE`, in-memory route cloning, exact `0x3FC`, compact 0x3F1, 0x3F4/0x3F5 state, and durably owned exact 0x3F7 acknowledgments. World reaches the real typed 0x43E560/0x43EEC0 path and PostBag cleanup 0x443470/0x443550 is integrated C++. Finish live end-to-end vehicle handoff/movement generation, the Windows route-card deserializer, and sustained game-level backpressure validation in mode 3.
 - [ ] **Linux discovery live integration** — Add a real-avahi-daemon cross-process publish/browse test. Embedded mDNS already proves two-process publication of a live SDL_net listener through browse, numeric A resolution, handshake, and payload exchange; publication now waits for listener readiness. Embedded hosting intentionally refuses a competing UDP-5353 owner (observed with systemd-resolved) instead of silently failing.
 - [ ] **Native discovery adapters** — Keep Bonjour, Windows DNS-SD, and Android `NsdManager` behind the same typed backend contract without platform handles crossing the boundary.
 - [ ] **PostBag protocol** — Complete and integrate `DPLAY_SendMessages`/`ReceiveMessage` file-message behavior after live session transport works.
 
 ### Priority 6: Polish
 
-- [ ] **Port remaining native `.c` files to C++** — 28 usable from 56 total in `native/` (25 already compile, 31 broken). 3 ported so far (game_loop_setup→GameLoop, config_ini→ConfigIni, world_enumerate→World_enumerate)
+- [ ] **Port remaining native `.c` files to C++** — 22 usable from 54 total in `native/` (22 compile, 32 broken). 5 source files ported so far, including `DPLAY_SendMessages`/`DPLAY_ReceiveMessage` → `network/PostBagCleanup.cpp`.
 - [ ] **Eliminate `-fpermissive`** — Fix remaining MSVC-isms so strict C++17 compiles
 - [ ] **MinGW cross-build** — Verify SDL3 shims work under `i686-w64-mingw32-g++`
 
@@ -385,6 +385,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-08-01 (sdl-net-movement-ack-postbag) | Integrated exact owned 0x3F7 acknowledgments through real Train→Netman linkage, removed World’s no-op ReceiveGameStart/HandleTimeout overloads, preserved signed/AL-width 0x43EEC0 routing without pointer truncation, fixed 0x43F140 linkage plus direct 0x449410/0x449420 queue locking, and ported validated PostBag cleanup 0x443470/0x443550 to tested C++; 133/133 check, full component suite, and all 11 GUI flows pass. |
 | 2026-08-01 (compiler-flags-tier3-cleanup) | Added portable three-tier warning enforcement and isolated forced-build census targets; cleaned all 134 default-enabled translation units to `make`/`make check` success, then Ghidra-remediated TrainMessage/NetworkPlayerList construction, fastcall factory ABI, and raw vtable/COM dispatch findings. Forced audit leaves Tier 2 at 11 failing units and Tier 3 at 50; `make test` is environment-blocked by absent `art-res/resource.RFH`. |
 | 2026-07-31 (sdl-net-netman-cleanup) | Removed temporary cast scripts and reverted their unrelated build-breaking output; recovered Netman 0x440070/0x440310/0x440390/0x440820, added exact compact-slot converters 0x4426D0/0x442750/0x4427D0, replaced widened 0x3F1 offset access with typed fields, and eliminated all remaining Netman decompile stubs; clean 134-object `make check`, `make test`, and all 11 isolated-Wayland flows pass. |
 | 2026-07-31 (sdl-net-in-memory-route-clone) | Removed the duplicate 0x43E900 resolver, replaced host PostBag `.crd` lookup with typed DPlayManager cloning, migrated SendSignalChange to native Vehicle ownership, preserved the session-tail marker, recovered 0x4408B0/0x440A50 and host 0x440A80 behavior, and proved a two-editor route clone enters loading as list depth 2; `make check`, `make test`, and all 11 isolated-Wayland flows pass. |

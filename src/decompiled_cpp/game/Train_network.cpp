@@ -20,6 +20,7 @@
 #include "../network/TrainMessage.h"
 #include "../network/DPlayManager.h"
 #include "Vehicle.h"
+#include "../world/scriptengine.h"
 #include <new>
 #ifndef _WIN32
 #include "../../sdl3_shims/sdl3_net_runtime.h"
@@ -34,6 +35,10 @@
 /* ================================================================== */
 
 int32_t NETMAN_GetGameMode(const void* netman);
+void NETMAN_QueueMessage(TrainMessage* message); /* 0x43F140 */
+#ifndef _WIN32
+int32_t NETMAN_HostLocalSlotIndex();
+#endif
 
 extern "C" {
 
@@ -69,7 +74,6 @@ uint32_t __stdcall GetFileAttributesA(const char* lpFileName);
 void*  __thiscall WIN32_PeekMessageLoop(void* dplay_peer);  /* 0x00460F10 */
 
 /* Network manager */
-void   __thiscall NETMAN_QueueMessage(void* msg);                    /* 0x00445970 */
 int    __thiscall NETMAN_FindPlayerIndex(void* netman, int player_id); /* 0x00446760 */
 int    __thiscall NETMAN_CheckTrackConnection(void* netman, int direction, uint8_t player_index); /* 0x00446830 */
 int    __thiscall NETMAN_GetPlayerCount(void* netman);                 /* 0x00446890 */
@@ -127,8 +131,6 @@ void*  __thiscall DirectPlay_EnumConnections(void* peer);                 /* 0x4
 int    __cdecl DirectPlay_QueryConnection(const char* index);             /* 0x45EE60 */
 
 /* Resource locking */
-void   __thiscall RESDATA_Lock(void* res);    /* train resource lock */
-void   __thiscall RESDATA_Unlock(void* res);  /* train resource unlock */
 
 /* Thread/network */
 void*  __thiscall WIN32_GetThreadResult(void* thread);   /* 0x460D10 */
@@ -313,7 +315,7 @@ void TrainSubsystem::BaseDtor()
         }
     }
 
-    RESDATA_Lock(g_train_resources);
+    static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
     while (g_network_queue != NULL) {
         NetworkMsg* msg = (NetworkMsg*)g_network_queue;
         g_network_queue = msg->next;
@@ -327,7 +329,7 @@ void TrainSubsystem::BaseDtor()
         }
         GLOBAL_free(msg);
     }
-    RESDATA_Unlock(g_train_resources);
+    static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
 
     PlayerConnectionNode** handles[] = {
         (PlayerConnectionNode**)&handle_list_1,
@@ -546,11 +548,11 @@ void TrainSubsystem::QueueMessage(void* msg)
 
     /* Enqueue onto g_network_queue under critical section */
     net_msg->next = NULL;
-    RESDATA_Lock(g_train_resources);
+    static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
 
     if (g_network_queue == NULL) {
         g_network_queue = (NetworkQueueNode*)net_msg;
-        RESDATA_Unlock(g_train_resources);
+        static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
         return;
     }
 
@@ -564,7 +566,7 @@ void TrainSubsystem::QueueMessage(void* msg)
 
     /* Throttle: if queue >= 6 and this is a 0-data SendNetworkData, drop it */
     if (depth >= 6 && net_msg->type == 6 && net_msg->flags == 0) {
-        RESDATA_Unlock(g_train_resources);
+        static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
         if (net_msg->data != NULL) {
             GLOBAL_free(net_msg->data);
         }
@@ -574,7 +576,7 @@ void TrainSubsystem::QueueMessage(void* msg)
     }
 
     cursor->next = net_msg;
-    RESDATA_Unlock(g_train_resources);
+    static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
 }
 
 
@@ -941,7 +943,8 @@ void TrainSubsystem::ProcessMessages()
         case 0x0D: /* 0x3F7 — HandleTrainPosUpdate */
         {
             int idx = NETMAN_FindPlayerIndex(g_netman, player_id);
-            if (idx >= 0) this->HandleTrainPosUpdate(payload, idx);
+            if (idx >= 0) this->HandleTrainPosUpdate(
+                static_cast<TrainPositionAckPacket*>(payload), idx);
             break;
         }
 
@@ -1321,57 +1324,62 @@ unlink_node:
 /* TrainSubsystem::HandleTrainPosUpdate                                */
 /* Address: 0x43A4B0                                                    */
 /* ================================================================== */
-void TrainSubsystem::HandleTrainPosUpdate(void* data, int player_index)
+void TrainSubsystem::HandleTrainPosUpdate(TrainPositionAckPacket* packet,
+                                           int32_t player_index)
 {
-    /* Forward to NETMAN as type-0x17 */
-    NetworkMsg* msg = AllocateNetworkMessage();
-    if (msg) {
-        msg->data = NULL; msg->next = NULL;
-        msg->type = 0x17;
-        msg->data = data;
-        msg->flags = player_index;
+    /* 0x43A4B0 forwards packet ownership to Netman as type 0x17. */
+    NetworkMsg* message = AllocateNetworkMessage();
+#ifndef _WIN32
+    if (message == nullptr) {
+        GLOBAL_free(packet);
+        return;
     }
-    NETMAN_QueueMessage(msg);
+#endif
+    message->type = 0x17;
+    message->data = packet;
+    message->flags = player_index;
+    NETMAN_QueueMessage(message);
 
-    /* Check if the transferred train belongs to the local player */
-    uint8_t owner = *(uint8_t*)((uint8_t*)data + 8);
-    if (owner == *(uint32_t*)((uint8_t*)g_netman + 0x7D0)) {
-        /* Find matching car in sprite_list_1 by resource ID */
-        int resource_id = *(int*)((uint8_t*)data + 4);
-        uint8_t* car = (uint8_t*)this->sprite_list_1;
-        while (car != 0) {
-            if (*(uint16_t*)(car + 0x7A) == resource_id) break;
-            car = *(uint8_t**)(car + 0x70);
-        }
-        if (car == 0) return;
+    int32_t local_slot_index;
+#ifdef _WIN32
+    local_slot_index = *reinterpret_cast<const int32_t*>(
+        static_cast<const uint8_t*>(g_netman) + 0x7D0);
+#else
+    local_slot_index = NETMAN_HostLocalSlotIndex();
+#endif
+    if (packet->slot_index != static_cast<uint8_t>(local_slot_index)) return;
 
-        /* Take local control: unlink from sprite_list_1, reverse direction */
-        this->sprite_list_1 = *(void**)((uint8_t*)car + 0x70);
-        uint16_t dir = *(uint16_t*)(car + 0x74);
-        *(void**)((uint8_t*)car + 0x70) = NULL;
-
-        /* Mirror direction (180-degree flip) */
-        if (dir < 0x5B) {
-            if (dir == 0x5A)      *(uint16_t*)(car + 0x74) = 0x10E;
-            else if (dir == 0)    *(uint16_t*)(car + 0x74) = 0xB4;
-        } else {
-            if (dir == 0xB4)      *(uint16_t*)(car + 0x74) = 0;
-            else if (dir == 0x10E) *(uint16_t*)(car + 0x74) = 0x5A;
-        }
-
-        /* Set owner to local player */
-        *(uint8_t*)(car + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
-
-        /* Send type-0x11 notification to UI */
-        NetworkMsg* notify = AllocateNetworkMessage();
-        if (notify) {
-            notify->data = NULL; notify->next = NULL;
-            notify->type = 0x11;
-            notify->data = (void*)car;
-        }
-        *(uint8_t*)(car + 0x88) = 0;
-        NETMAN_QueueMessage(notify);
+    Vehicle* vehicle = this->sprite_list_1;
+    while (vehicle != nullptr &&
+           static_cast<uint32_t>(vehicle->network_id) !=
+               static_cast<uint32_t>(packet->network_id)) {
+        vehicle = vehicle->next;
     }
+    if (vehicle == nullptr) return;
+
+    /* The binary replaces the list head with the matched node's successor,
+     * even when the match is not the original head. */
+    this->sprite_list_1 = vehicle->next;
+    vehicle->next = nullptr;
+    const uint16_t direction = vehicle->tunnel_angle;
+    if (direction < 0x5B) {
+        if (direction == 0x5A) vehicle->tunnel_angle = 0x10E;
+        else if (direction == 0) vehicle->tunnel_angle = 0xB4;
+    } else if (direction == 0xB4) {
+        vehicle->tunnel_angle = 0;
+    } else if (direction == 0x10E) {
+        vehicle->tunnel_angle = 0x5A;
+    }
+    vehicle->peer_index = static_cast<uint8_t>(local_slot_index);
+
+    vehicle->process_delay = 0;
+    NetworkMsg* notification = AllocateNetworkMessage();
+#ifndef _WIN32
+    if (notification == nullptr) return;
+#endif
+    notification->type = 0x11;
+    notification->data = vehicle;
+    NETMAN_QueueMessage(notification);
 }
 
 

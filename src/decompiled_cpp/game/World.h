@@ -27,6 +27,8 @@
 
 #include "../shared/types.h"
 
+class Vehicle;
+
 /* ================================================================== */
 /* Global address                                                      */
 /* ================================================================== */
@@ -57,7 +59,7 @@ public:
     int32_t     pad_00;             /* +0x00  unknown/unused               */
     int16_t     vehicle_count;      /* +0x04  active vehicle count (max 4) */
     int16_t     field_06;           /* +0x06  secondary counter (max 3)    */
-    void*       vehicles[4];        /* +0x08  active vehicle pointers      */
+    Vehicle*    vehicles[4];        /* +0x08  active vehicle pointers      */
     void*       sub_objects[16];    /* +0x18  depth-sorted sub-objects     */
     /* Total: 0x58 bytes */
 
@@ -157,7 +159,7 @@ public:
      * @param mp_flag      Multiplayer flag (1=save, used in scenario 2 dispatch)
      * @return             Packed result: low byte = 1 on success, high bytes preserved
      */
-    uint SaveToFile(uint resource_id, char player_id, char mp_flag);
+    bool SaveToFile(uint resource_id, char player_id, char mp_flag);
 
     /**
      * SerializeObject: Find and serialize vehicles matching player_id.
@@ -219,7 +221,7 @@ public:
      *        Clears all occupants, calls World_RenderAll, calls World_SaveToFile
      *   4. Else if net_sync_flag (+0x68) == 1:
      *        Sets flag to 2, clears occupants (if type != 0),
-     *        renders, calls NETMAN_ReceiveGameStart, removes from world
+     *        renders, calls Netman::ReceiveGameStart, removes from world
      *
      * Called by: GameLoop_FrameUpdate (0x45C462, 0x45C49C)
      */

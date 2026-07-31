@@ -452,9 +452,19 @@ grows with producer load.
      state packets 0x3F4/0x3F5 (0x440310/0x440390). The 0x4426D0/0x442750/
      0x4427D0 slot converters use named native fields and exact 0x3C wire
      records; host 0x3F1 adoption no longer reads widened TrainMessage offsets.
-   - Remaining work is the distinct gameplay phase: migrate later train
-     movement/position paths and the Windows-only PostBag deserializer, then
-     validate live train transfer plus sustained transport backpressure in mode 3.
+   - The 0x3F7 transfer/position acknowledgment is now exact-size decoded,
+     little-endian validated, durably owned across Train type `0x17`, and
+     consumed through typed Vehicle/Netman fields. World now calls the real
+     0x43E560 member instead of an unresolved free-function stub; signed x/y
+     route selection reaches 0x43EEC0 without pointer truncation, preserving
+     its SETLE and TEST-AL behavior. Train callbacks now resolve to the real
+     C++ `NETMAN_QueueMessage` (0x43F140), with direct 0x449410/0x449420
+     synchronization rather than unresolved aliases or incompatible host
+     virtual slots. PostBag cleanup 0x443470/0x443550 is an
+     integrated C++ implementation with a guarded native-filesystem adapter.
+   - Remaining work is live end-to-end vehicle handoff/movement generation,
+     the Windows route-card deserializer, and sustained game-level transport
+     backpressure validation in mode 3.
 
 6. **Full subsystem and UI integration**
    - Exercise train transfer, map/building overlays, scenario selection,

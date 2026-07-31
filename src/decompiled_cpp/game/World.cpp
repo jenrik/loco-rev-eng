@@ -16,6 +16,8 @@
 #include "World.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include "../shared/types.h"
+#include "../network/Netman.h"
+#include "../core/VehicleEditor.h"
 
 #include <cstdint>
 
@@ -23,11 +25,11 @@
 /* External function declarations                                      */
 /* ================================================================== */
 
-void*   __cdecl operator_new(size_t size);          /* @ 0x465CE0  operator new */
+void* __cdecl operator_new(size_t size);          /* @ 0x465CE0 */
+void GLOBAL_free(void* pointer);                   /* @ 0x465CD0 */
 
 extern "C" {
     /* CRT / memory management */
-    int     __cdecl CRT_rand(void);                      /* @ 0x466150  rand() */
     int     __cdecl CRT_sprintf(char* buf, int max_len,
                                 const char* fmt, ...);    /* @ 0x467FF0  sprintf wrapper */
 
@@ -40,9 +42,6 @@ extern void   __cdecl Building_RemoveOccupant(int* occupant);             /* @ 0
 extern void   __thiscall VehicleEditor_Update(void* vehicle);             /* @ 0x44C3A0 */
 extern void   __thiscall Vehicle_UpdatePosition(void* vehicle, char flag);/* @ 0x44D500 */
 extern void   __thiscall Vehicle_SetState(void* vehicle, int state);      /* @ 0x44CF90 */
-extern void   __thiscall NETMAN_HandleTimeout(void* netman, void* vehicle); /* @ 0x4408B0 */
-extern uint32_t __cdecl NETMAN_ReceiveGameStart(void* netman, int x,
-                                                       int y, void* vehicle);     /* @ 0x43E560 */
 extern void   __thiscall Town_SelectBuilding(void* town_view,
                                              int building);               /* @ 0x42C040 */
 extern void   __thiscall DDRAW_SelectBuilding(void* ddraw_building,
@@ -87,7 +86,7 @@ extern void __stdcall World_GetObjectAt(void* obj);      /* @ 0x44E800 */
 /* ================================================================== */
 
 extern int32_t    g_game_mode;                /* 0x004851F4 */
-extern void*      g_netman;                   /* 0x004FD3AC */
+extern Netman*    g_netman;                   /* 0x004FD3AC */
 extern void*      g_town_view;                /* 0x004852A0 */
 extern void*      g_ddraw_building;           /* 0x004A9EF0 */
 extern void*      g_input_mgr;                /* 0x004A9990 */
@@ -274,83 +273,46 @@ void World::Reset(char flag)
 /* notifies the network manager, then deletes the vehicle.              */
 /*                                                                      */
 /* On type==0, decrements field_06 first. In multiplayer scenario 2    */
-/* with mp_flag set, dispatches NETMAN_ReceiveGameStart instead.        */
+/* with mp_flag set, dispatches Netman::ReceiveGameStart instead.      */
 /*                                                                      */
 /* Returns packed result with success flag (1) in low byte.             */
 /* ================================================================== */
-uint World::SaveToFile(uint resource_id, char player_id, char mp_flag)
+bool World::SaveToFile(uint resource_id, char player_id, char mp_flag)
 {
-    uint slot;
-    void* vehicle;
-    void** vehicle_slot;
-    int type;
-    uint result;
-    void* resource_data;
-
-    /* Find matching vehicle by resource ID + player ID */
-    for (slot = 0; slot < 4; slot++) {
-        vehicle = this->vehicles[slot];
-        if (vehicle == NULL) {
-            continue;
-        }
-
-        if (*(uint16_t*)((uint8_t*)vehicle + VEHICLE_OFF_RESOURCE_ID) == (uint16_t)resource_id &&
-            *(char*)((uint8_t*)vehicle + VEHICLE_OFF_PLAYER_ID) == player_id) {
+    uint slot = 0;
+    for (; slot < 4; ++slot) {
+        Vehicle* candidate = this->vehicles[slot];
+        if (candidate != nullptr && candidate->network_id == resource_id &&
+            candidate->slot_index == static_cast<uint8_t>(player_id)) {
             break;
         }
     }
+    if (slot >= 4) return false;
 
-    if (slot > 3) {
-        /* Not found — return 0 with high byte cleared/sign-extended */
-        return (uint)(uintptr_t)vehicle & 0xFFFFFF00;
-    }
-
-    vehicle = this->vehicles[slot];
-    vehicle_slot = &this->vehicles[slot];
-    resource_data = *(void**)((uint8_t*)vehicle + VEHICLE_OFF_RESOURCE_DATA);  /* +0x10 */
-
-    /* Check if this vehicle is currently selected in town/DDRAW views */
-    if (resource_data != NULL &&
-        *(int*)((uint8_t*)resource_data + 0x14) == g_selected_building) {
+    Vehicle*& vehicle_slot = this->vehicles[slot];
+    Vehicle* vehicle = vehicle_slot;
+    VehicleEditor* primary_editor = vehicle->editors[0];
+    if (primary_editor != nullptr &&
+        primary_editor->screen_rect.bottom == g_selected_building) {
         Town_SelectBuilding(g_town_view, 0);
         DDRAW_SelectBuilding(g_ddraw_building, 0);
     }
 
-    /* Notify network manager */
-    NETMAN_HandleTimeout(g_netman, vehicle);
-
-    type = *(int*)((uint8_t*)vehicle + VEHICLE_OFF_TYPE);  /* +0x04 */
-    if (type == 0) {
-        /* Type 0 — decrement field_06, then delete */
-        this->field_06--;                                    /* +0x06 */
-
-        if (vehicle != NULL) {
-            /* Call scalar-deleting destructor vtable[0] */
-            result = (*(uint (**)(void*, int))(uintptr_t)(*(int*)vehicle))(vehicle, 1);
-            *vehicle_slot = NULL;
-            this->vehicle_count--;
-            return (result & 0xFFFFFF00) | 1;
-        }
+    g_netman->HandleTimeout(vehicle);
+    if (vehicle->owner_handle == 0) {
+        --this->field_06;
+        vehicle->~Vehicle();
+        GLOBAL_free(vehicle);
+    } else if (g_netman != nullptr && g_netman->m_gameMode == 2 && mp_flag != 0) {
+        g_netman->ReceiveGameStart(0, 0, vehicle);
     } else {
-        /* Check multiplayer scenario 2 with mp_flag */
-        if (g_netman != NULL &&
-            *(int*)((uint8_t*)g_netman + 0x7C4) == 2 &&    /* scenarioId field */
-            mp_flag != 0) {
-            result = NETMAN_ReceiveGameStart(g_netman, 0, 0, vehicle);
-            *vehicle_slot = NULL;
-            this->vehicle_count--;
-            return (result & 0xFFFFFF00) | 1;
-        }
-
-        if (vehicle != NULL) {
-            /* Call scalar-deleting destructor vtable[0] */
-            result = (*(uint (**)(void*, int))(uintptr_t)(*(int*)vehicle))(vehicle, 1);
-        }
+        vehicle->~Vehicle();
+        GLOBAL_free(vehicle);
     }
 
-    *vehicle_slot = NULL;
-    this->vehicle_count--;
-    return (result & 0xFFFFFF00) | 1;
+    vehicle_slot = nullptr;
+    --this->vehicle_count;
+    return true;
 }
 
 /* ================================================================== */
@@ -804,10 +766,10 @@ void World::UpdateTick(void)
             World_RenderAll(vehicle);
 
             /* Notify network manager with unpacked coords */
-            NETMAN_ReceiveGameStart(g_netman,
-                (int)(int16_t)(packed_coords & 0xFFFF),
-                (int)(int16_t)((packed_coords >> 16) & 0xFFFF),
-                vehicle);
+            g_netman->ReceiveGameStart(
+                static_cast<int16_t>(packed_coords & 0xFFFF),
+                static_cast<int16_t>((packed_coords >> 16) & 0xFFFF),
+                static_cast<Vehicle*>(vehicle));
 
             /* Remove vehicle from world */
             this->vehicles[i] = NULL;

@@ -2,6 +2,19 @@
 
 #include <cstdint>
 
+/** TrainPositionAckPacket — legacy 0x3F7 transfer acknowledgment.
+ *  Recovered producers/consumers: 0x440410 and 0x43A4B0. */
+struct TrainPositionAckPacket {
+    uint16_t packet_type;       // +0x00 = 0x3F7
+    uint16_t protocol_version;  // +0x02 = 300 on the wire
+    int32_t network_id;         // +0x04 vehicle/ping identifier
+    uint8_t slot_index;         // +0x08 originating town slot
+    uint8_t peer_index;         // +0x09 route peer slot
+    uint16_t reserved;          // +0x0A
+};
+static_assert(sizeof(TrainPositionAckPacket) == 0x0C,
+              "legacy 0x3F7 packet size");
+
 /** TrainMessage — queue node used by TrainSubsystem and Netman.
  *  Original x86 size: 0x1C bytes. */
 struct TrainMessage {

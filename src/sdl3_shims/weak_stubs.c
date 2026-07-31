@@ -54,7 +54,6 @@ void __attribute__((weak)) DDRAW_UnlockPrimary() {}
 void __attribute__((weak)) DirectPlay_constructor(void*)() {}
 void __attribute__((weak)) DPLAY_CleanupPlayer(void*)() {}
 void __attribute__((weak)) DPLAY_CreatePlayer(void*)() {}
-void __attribute__((weak)) DPLAY_SendMessages()() {}
 void __attribute__((weak)) DPLAY_SetPlayerData(void*, char const*)() {}
 void __attribute__((weak)) FormatResourceString() {}
 void __attribute__((weak)) GameAudio_PlayResourceEx(void*, unsigned int, int*)() {}
@@ -108,9 +107,7 @@ void __attribute__((weak)) NET_ComputeColor(unsigned char, unsigned char, unsign
 void __attribute__((weak)) NET_GetHostName(int, int)() {}
 void __attribute__((weak)) NETMAN_constructor(void*)() {}
 void __attribute__((weak)) NETMAN_FreePacket(int)() {}
-void __attribute__((weak)) NETMAN_HandleTimeout(void*, void*)() {}
 void __attribute__((weak)) NETMAN_Init(void*, unsigned char)() {}
-void __attribute__((weak)) NETMAN_ReceiveGameStart(void*, int, int, void*)() {}
 void __attribute__((weak)) NETMAN_ResetNetworkState(void*)() {}
 void __attribute__((weak)) NETMAN_SendAck(void*)() {}
 void __attribute__((weak)) NETMAN_SetGameMode(void*, int)() {}

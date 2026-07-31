@@ -347,9 +347,25 @@ bool QueueLegacyPayloadForGame(Netman* netman, TrainSubsystem* train,
         return QueueMessage(train, message, error);
     }
     case 0x3f7: {
-        const int index = netman->FindPlayerIndex(static_cast<std::int32_t>(sender));
-        if (index >= 0) train->HandleTrainPosUpdate(
-            const_cast<std::uint8_t*>(payload.data()), index);
+        LegacyTrainPositionAck decoded;
+        if (!DecodeLegacyTrainPositionAck(payload, &decoded, error)) return false;
+        const int index = netman->FindPlayerIndex(
+            static_cast<std::int32_t>(sender));
+        if (index < 0) return true;
+        void* storage = operator_new(sizeof(TrainPositionAckPacket));
+        if (storage == nullptr) {
+            if (error) *error = "could not allocate 0x3F7 transfer acknowledgment";
+            return false;
+        }
+        auto* packet = ::new (storage) TrainPositionAckPacket{};
+        packet->packet_type = 0x3F7;
+        packet->protocol_version = kLegacyProtocolVersion;
+        packet->network_id = decoded.network_id;
+        packet->slot_index = decoded.slot_index;
+        packet->peer_index = decoded.peer_index;
+        packet->reserved = decoded.reserved;
+        train->HandleTrainPosUpdate(packet, index);
+        loco::host_test::emit_legacy_service_applied(type, payload.size());
         return true;
     }
     case 0x3f8: {

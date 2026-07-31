@@ -142,7 +142,6 @@ void DDRAW_LoadFile(int32_t*,const char*){}
 void DDRAW_ReleaseSurfaces(void){}
 void DDRAW_GetSurfaceWidthHeight(void*,uint16_t*,uint16_t*){}
 void DDRAW_GetDdrawErrorString(void){}
-int32_t DPLAY_SendMessages(void){return 0;}
 void DPLAY_SetPlayerData(void*,const char*){}
 void DPLAY_CleanupPlayer(void*){}
 void*DPLAY_CreatePlayer(void*){return nullptr;}

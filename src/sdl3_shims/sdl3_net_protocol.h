@@ -61,6 +61,13 @@ struct PlayerNotice {
     std::string player_name;
 };
 
+struct LegacyTrainPositionAck {
+    std::int32_t network_id = 0;
+    std::uint8_t slot_index = 0;
+    std::uint8_t peer_index = 0;
+    std::uint16_t reserved = 0;
+};
+
 std::vector<std::uint8_t> EncodeTransportFrame(const TransportFrame& frame);
 bool DecodeClientHello(const std::vector<std::uint8_t>& payload, ClientHello* hello,
                        std::string* error);
@@ -72,6 +79,9 @@ bool DecodePlayerNotice(const std::vector<std::uint8_t>& payload, PlayerNotice* 
                         std::string* error);
 std::vector<std::uint8_t> EncodePlayerNotice(const PlayerNotice& notice);
 bool ValidateLegacyPayload(const std::vector<std::uint8_t>& payload, std::string* error);
+bool DecodeLegacyTrainPositionAck(const std::vector<std::uint8_t>& payload,
+                                  LegacyTrainPositionAck* acknowledgment,
+                                  std::string* error);
 
 /** Incremental stream decoder. It owns partial bytes and drains every complete
  * frame after each append; malformed input permanently fails the decoder. */

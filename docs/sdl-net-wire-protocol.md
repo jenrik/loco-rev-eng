@@ -80,6 +80,7 @@ passing ownership to `TrainSubsystem`/`Netman`:
 | `0x3EE` | Replaces host-owned `(mode,type)` bytes; `DownloadMissingAssets` consumes matching typed route keys before filesystem fallback | exactly `0x0C + data_size` bytes |
 | `0x3EF` | Reserved original jump-table hole | accepted/discarded |
 | `0x3F6` | Copied to type-`0x15`; Netman creates/moves/frees `PingEntry` nodes | exactly `10 + count * 8`; all slots 0–8 |
+| `0x3F7` | Decoded into an owned `TrainPositionAckPacket`, forwarded by Train type `0x17`, then consumed by Netman to remove the matching transfer ping; local ownership recovery uses typed Vehicle fields | exactly 12 bytes; both slot indices 0–8 |
 | `0x3F9` | Copied to type-`0x16`; Netman replaces the sender slot pixel buffer | exactly `0x14 + data_size` and known virtual owner |
 | `0x3FC` | FIRST/INTERIM/FINAL attachment blocks assembled in native ownership | exactly `0x10 + data_size`; monotonic sequence; `.att` and final `.dat` bytes remain separate |
 

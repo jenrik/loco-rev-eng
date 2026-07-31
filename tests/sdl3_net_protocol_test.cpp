@@ -118,6 +118,40 @@ void TestHandshakeCodecs() {
     assert(decoded_notice.player_id == 2 && decoded_notice.player_name == "Client");
 }
 
+void TestLegacyTrainPositionAck() {
+    const std::vector<std::uint8_t> good = {
+        0xf7, 0x03, 0x2c, 0x01, 0x78, 0x56, 0x34, 0x12,
+        8, 7, 0xaa, 0xbb,
+    };
+    LegacyTrainPositionAck acknowledgment;
+    std::string error;
+    assert(DecodeLegacyTrainPositionAck(good, &acknowledgment, &error));
+    assert(acknowledgment.network_id == 0x12345678);
+    assert(acknowledgment.slot_index == 8);
+    assert(acknowledgment.peer_index == 7);
+    assert(acknowledgment.reserved == 0xbbaa);
+
+    std::vector<std::uint8_t> malformed = good;
+    malformed.pop_back();
+    assert(!DecodeLegacyTrainPositionAck(malformed, &acknowledgment, &error));
+    malformed = good;
+    malformed.push_back(0);
+    assert(!DecodeLegacyTrainPositionAck(malformed, &acknowledgment, &error));
+    malformed = good;
+    malformed[0] = 0xf6;
+    assert(!DecodeLegacyTrainPositionAck(malformed, &acknowledgment, &error));
+    malformed = good;
+    malformed[2] = 0;
+    assert(!DecodeLegacyTrainPositionAck(malformed, &acknowledgment, &error));
+    malformed = good;
+    malformed[8] = 9;
+    assert(!DecodeLegacyTrainPositionAck(malformed, &acknowledgment, &error));
+    malformed = good;
+    malformed[9] = 9;
+    assert(!DecodeLegacyTrainPositionAck(malformed, &acknowledgment, &error));
+    assert(!DecodeLegacyTrainPositionAck(good, nullptr, &error));
+}
+
 void TestLegacyValidationAndLimits() {
     std::string error;
     assert(ValidateLegacyPayload(ExampleFrame().payload, &error));
@@ -141,6 +175,7 @@ int main() {
     TestMalformedHeaders();
     TestHandshakeCodecs();
     TestLegacyValidationAndLimits();
+    TestLegacyTrainPositionAck();
     std::cout << "PASS: transport framing, fragmentation, handshake, and bounds validation\n";
     return 0;
 }

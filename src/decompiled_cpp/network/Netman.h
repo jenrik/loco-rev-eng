@@ -507,7 +507,8 @@ public:
      * @param node        Inbound train node
      * @return            Node pointer (opaque success indicator)
      */
-    void* ReceiveGameStart(void* worldOrObj, int param, InboundTrainNode* node);
+    bool ReceiveGameStart(int32_t position_x, int32_t position_y,
+                          InboundTrainNode* node);
 
     /**
      * SendSignalChange — Process incoming signal change from remote player.
@@ -786,7 +787,7 @@ void NETMAN_SendAck(Netman* netman);
  * @param vehicle  Vehicle pointer
  * @return         1
  */
-uint32_t NETMAN_SendTrainPosition(InboundTrainNode* vehicle);
+bool NETMAN_SendTrainPosition(InboundTrainNode* vehicle);
 
 /**
  * NETMAN_ReceiveTrainPosition — Process received position, compute route.
@@ -795,7 +796,8 @@ uint32_t NETMAN_SendTrainPosition(InboundTrainNode* vehicle);
  * Computes track route from source/dest params, validates connectivity,
  * queues TRAIN_POSITION message (type 0x10).
  */
-int32_t NETMAN_ReceiveTrainPosition(int param1, int param2, int param3);
+bool NETMAN_ReceiveTrainPosition(int32_t position_x, int32_t position_y,
+                                 InboundTrainNode* vehicle);
 
 /**
  * NETMAN_ReceiveSignalChange — Resolve remote player address from PostBag files.
@@ -892,8 +894,6 @@ void  TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags);
 void    ResourceManager_Init(void* resdata);         /* was RESMGR_ResourceData_Init */
 uint8_t ResourceManager_LoadResource(void* resdata, const char* path); /* was RESMGR_LoadResource */
 void    ResourceManager_ReleaseResource(void* resdata); /* was RESMGR_ReleaseResource */
-void    ResourceManager_Lock(void* resdata);          /* was RESDATA_Lock, 0x449410 */
-void    ResourceManager_Unlock(void* resdata);        /* was RESDATA_Unlock, 0x449420 */
 void    ResourceManager_LoadSoundResource(int32_t resId); /* was RESMGR_LoadSoundResource */
 void*   ResourceManager_GetById(void* resmgr, uint32_t id); /* was ResourceManager_GetById */
 int32_t ResourceManager_GetStringById(void* resmgr, uint32_t id);
@@ -934,7 +934,7 @@ int32_t VehicleEditor_GetResourceId(int32_t trackPiece);
 
 /* -- World / Game functions -- */
 void    World_SerializeObject(void* world, int32_t param);
-void    World_GetObjectAt(int32_t param);
+void __stdcall World_GetObjectAt(void* object);
 uint8_t World_FinalizeLoad(void* world, InboundTrainNode* node, void* param, uint8_t dir);
 InboundTrainNode* Vehicle_Ctor(InboundTrainNode* vehicle, int32_t resourceId, int32_t param2,
                       uint8_t param3, uint8_t param4);
@@ -1003,7 +1003,7 @@ void* NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
 
 /* -- DirectPlay message/file management -- */
 void  DPLAY_SendMessages(void);
-void  DPLAY_ReceiveMessage(const char* path);
+void __stdcall DPLAY_ReceiveMessage(const char* path);
 
 /* -- Network settings persistence -- */
 void  NETMAN_FreePacket(int32_t packetPtr);

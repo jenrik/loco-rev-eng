@@ -78,8 +78,6 @@ BOOL (*g_OffsetRect)(RECT*, int, int) = nullptr;
 void Timer_Resize(void*, unsigned int) {}
 void Timer_Resize(void*, int) {}
 void Collection_Sort(void*) {}
-void RESDATA_Lock(void*) {}
-void RESDATA_Unlock(void*) {}
 void RESMGR_PlaySound(int) {}
 void ScriptEngine_constructor(void*) {}
 void RESDATA_ScriptEngine_Dtor(void*) {}

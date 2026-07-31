@@ -165,6 +165,8 @@ def test_multiplayer_host_game_go_back_back_exits_cleanly(game):
     )
     game.wait_for_event("netman_message_processed", type=0x13, flags=1)
     game.wait_for_event("netman_message_processed", type=0x15)
+    game.wait_for_event("legacy_service_applied", packet_type=0x3F7, byte_count=12)
+    game.wait_for_event("netman_message_processed", type=0x17, flags=1)
     game.wait_for_event("netman_message_processed", type=0x16, flags=1)
     game.wait_for_event(
         "netman_pixel_data_updated", slot=1, byte_count=4, width=2, height=2
