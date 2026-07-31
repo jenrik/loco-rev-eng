@@ -44,18 +44,29 @@
 #include "Netman.h"
 #include "DPlayManager.h"
 #include "../game/Building.h"
+#include "../game/PlayerConfig.h"
+#include "../core/VehicleEditor.h"
+#ifndef _WIN32
+#include "../game/Train.h"
+#include "../../sdl3_shims/host_test_events.h"
+#include "../../sdl3_shims/sdl3_net_runtime.h"
+#endif
+#include <algorithm>
+#include <cstring>
+#include <cstdio>
+#include <string>
+#include <vector>
 
 /* ================================================================== */
 /* Local externs (not in Netman.h to avoid circular includes)          */
 /* ================================================================== */
 
 extern void* _g_train;              /* 0x4FD3A4 */
-extern void* _g_network_queue;      /* 0x4FD3A0 */
-extern void* _g_train_resources;    /* 0x4FD394 */
+extern void* g_network_queue;       /* 0x4FD39C */
+extern void* g_train_resources;    /* 0x4FD394 */
 extern void* _g_netman_data;        /* 0x4FD3A8 */
 
 /* String constants */
-extern const char STR_Default[];    /* "Default" */
 extern const char STR_LEGO_LOCO[];  /* 0x47E1C0 — "LEGO LOCO" */
 extern const char STR_REMOVED[];    /* 0x47EB54 — "NETMAN: inbound train removed\n" */
 
@@ -106,9 +117,20 @@ static void inline_memcpy(void* dst, const void* src, int32_t len)
 /* ================================================================== */
 static inline void net_delete(void* obj)
 {
-    if (obj) {
-        delete static_cast<NetworkObject*>(obj);
-    }
+    if (obj) delete static_cast<NetworkObject*>(obj);
+}
+
+static inline void net_delete(Vehicle* vehicle)
+{
+    if (vehicle == nullptr) return;
+    vehicle->~Vehicle();
+    GLOBAL_free(vehicle);
+}
+
+int32_t NETMAN_GetGameMode(const void* netman)
+{
+    return netman != nullptr
+        ? static_cast<const Netman*>(netman)->m_gameMode : -1;
 }
 
 /* ================================================================== */
@@ -123,6 +145,9 @@ Netman::Netman()
     this->m_buildingList = NULL;
     this->m_vehicleList = NULL;
     this->m_field_7E4 = 0;
+#ifndef _WIN32
+    this->m_hostLastSerializedVehicle = nullptr;
+#endif
     this->m_field_7E8 = 0;
     this->m_tickCounter = 0;
     this->m_sendTimer = 0;
@@ -150,7 +175,7 @@ void Netman::Init(uint8_t is_init)
 
     /* Copy "Default" layout name */
     {
-        const char* s = STR_Default;
+        const char* s = "Default";
         char* d = this->m_layoutName;
         int32_t n;
         for (n = 0; s[n] != 0; n++) d[n] = s[n];
@@ -240,6 +265,89 @@ void Netman::SetGameMode(int32_t newMode)
         break;
     }
 }
+
+#ifndef _WIN32
+namespace {
+void CopyTransportPlayerName(PlayerSlot& slot, const char* name)
+{
+    const char* source = name ? name : "";
+    std::strncpy(slot.layout_name, source, sizeof(slot.layout_name) - 1);
+    slot.layout_name[sizeof(slot.layout_name) - 1] = '\0';
+}
+}
+
+void Netman::HostAddTransportPlayer(int32_t playerId, const char* playerName)
+{
+    if (playerId < 1 || playerId > 9) return;
+    PlayerSlot& slot = this->m_slots[playerId - 1];
+    slot.dpId = playerId;
+    slot.is_connected = 1;
+    slot.has_data = 0;
+    slot.flag_36 = 0;
+    slot.version = 0;
+    CopyTransportPlayerName(slot, playerName);
+    if (playerId == this->m_myDpId) {
+        this->m_mySlotIndex = playerId - 1;
+        this->m_currentSlot = &slot;
+    }
+}
+
+void Netman::HostBeginTransportSession(bool hosting, int32_t localPlayerId,
+                                       const char* localPlayerName)
+{
+    this->Init(0);
+    this->m_myDpId = localPlayerId;
+    this->m_field_7D8 = hosting ? localPlayerId : 1;
+    this->m_bInit = 1;
+    this->m_bFlag1 = 1;
+    this->m_gameMode = hosting ? 1 : 2;
+    this->m_timeout = hosting ? 500 : 20;
+    this->HostAddTransportPlayer(localPlayerId, localPlayerName);
+}
+
+void Netman::HostRemoveTransportPlayer(int32_t playerId)
+{
+    if (playerId < 1 || playerId > 9) return;
+    PlayerSlot& slot = this->m_slots[playerId - 1];
+    if (slot.dpId != playerId) return;
+    slot.dpId = 0;
+    slot.is_connected = 0;
+    slot.has_data = 0;
+    slot.flag_36 = 0;
+    slot.layout_name[0] = '\0';
+    slot.version = 0;
+    if (playerId == this->m_myDpId) this->HostEndTransportSession();
+}
+
+bool Netman::HostClonePendingRouteForLoading()
+{
+    Vehicle* source = this->m_vehicleList;
+    if (source == nullptr) return false;
+    uint32_t before = 0;
+    for (Vehicle* item = this->m_vehicleList; item != nullptr; item = item->next)
+        ++before;
+    this->SendSignalChange(source);
+    uint32_t after = 0;
+    for (Vehicle* item = this->m_vehicleList; item != nullptr; item = item->next)
+        ++after;
+    if (after > before) {
+        loco::host_test::emit_netman_route_cloned(
+            source->editor_count + 1, this->m_vehicleList->editor_count + 1,
+            after);
+        return true;
+    }
+    return false;
+}
+
+void Netman::HostEndTransportSession()
+{
+    this->Init(0);
+    this->m_bFlag1 = 0;
+    this->m_gameMode = 3;
+    this->m_myDpId = 0;
+    this->m_field_7D8 = 0;
+}
+#endif
 
 /* ================================================================== */
 /* 8. SendMapData - 0x43D350                                          */
@@ -407,8 +515,85 @@ void Netman::ProcessPlayerData(int32_t slotIndex)
 /* ================================================================== */
 void Netman::LoadScenario(const char* layoutName)
 {
-    (void)layoutName;
-    /* TODO: decompile 0x43D820 — LoadScenario body */
+    this->m_playerRows = 3;
+    this->m_playerCols = 3;
+    this->m_playerSlotCount = 9;
+    this->m_bInit = 0;
+    std::strcpy(this->m_layoutName, layoutName);
+
+    char path[0x52c] = {};
+    wsprintfA(path, "%sLayouts\\%s.lay", g_install_path, this->m_layoutName);
+    std::vector<uint8_t> contents;
+    int32_t asset_size = 0;
+    uint8_t* asset_data = nullptr;
+    if (g_asset_mgr != nullptr) {
+        const std::size_t prefix = std::strlen(g_install_path);
+        asset_data = AssetMgr_LoadFile(
+            g_asset_mgr, reinterpret_cast<uint8_t*>(path + prefix), &asset_size);
+        if (asset_data != nullptr && asset_size > 0)
+            contents.assign(asset_data, asset_data + asset_size);
+    }
+    if (asset_data != nullptr) GLOBAL_free(asset_data);
+
+    if (contents.empty()) {
+#ifndef _WIN32
+        // Host filesystems use native separators; the archive lookup above
+        // remains the first path just as it is in 0x43D820.
+        std::string native_path(path);
+        for (char& ch : native_path) if (ch == '\\') ch = '/';
+        std::FILE* file = std::fopen(native_path.c_str(), "rb");
+#else
+        std::FILE* file = std::fopen(path, "rb");
+#endif
+        if (file == nullptr) {
+            const char* message = ERR_NO_STREAM;
+            CRT_exit(&message, reinterpret_cast<const char**>(0x47a5e8));
+            return;
+        }
+        contents.resize(0x2000);
+        const std::size_t size = std::fread(contents.data(), 1, contents.size(), file);
+        std::fclose(file);
+        contents.resize(size);
+    }
+    contents.push_back(0);
+
+    std::size_t cursor = 0;
+    const auto next_digit = [&]() -> int32_t {
+        while (contents[cursor] < '0' || contents[cursor] > '9') ++cursor;
+        return contents[cursor++] - '0';
+    };
+    this->m_playerSlotCount = next_digit();
+    this->m_playerRows = next_digit();
+    this->m_playerCols = next_digit();
+    while (contents[cursor] != '\n' && contents[cursor] != 0) ++cursor;
+    if (contents[cursor] == '\n') ++cursor;
+
+    for (int32_t index = 0; index < this->m_playerSlotCount; ++index) {
+        const std::size_t begin = cursor;
+        while (contents[cursor] != '\r' && contents[cursor] != '\n' &&
+               contents[cursor] != 0) ++cursor;
+        const std::size_t length = std::min<std::size_t>(cursor - begin, 31);
+        std::memcpy(this->m_slots[index].layout_name, contents.data() + begin, length);
+        this->m_slots[index].layout_name[length] = '\0';
+        while (contents[cursor] == '\r' || contents[cursor] == '\n') ++cursor;
+    }
+
+    if (this->m_playerSlotCount > 9) this->m_playerSlotCount = 9;
+    if (this->m_playerRows > 3) this->m_playerRows = 3;
+    if (this->m_playerCols > 3) this->m_playerCols = 3;
+    const int32_t cells = this->m_playerRows * this->m_playerCols;
+    if ((cells != this->m_playerSlotCount && this->m_playerSlotCount <= cells) ||
+        !((this->m_playerSlotCount == 2 && this->m_playerRows == 2 && this->m_playerCols == 1) ||
+          (this->m_playerSlotCount == 3 && this->m_playerRows == 3 && this->m_playerCols == 1) ||
+          (this->m_playerSlotCount == 4 && this->m_playerRows == 2 && this->m_playerCols == 2) ||
+          (this->m_playerSlotCount == 6 && this->m_playerRows == 3 && this->m_playerCols == 2) ||
+          (this->m_playerSlotCount == 9 && this->m_playerRows == 3 && this->m_playerCols == 3))) {
+        this->m_playerSlotCount = 9;
+        this->m_playerRows = 3;
+        this->m_playerCols = 3;
+    }
+    for (int32_t index = 0; index < this->m_playerSlotCount; ++index)
+        if (this->m_slots[index].dpId == 0) this->ProcessPlayerData(index);
 }
 
 /* ================================================================== */
@@ -416,11 +601,11 @@ void Netman::LoadScenario(const char* layoutName)
 /* ================================================================== */
 void Netman::Cleanup()
 {
-    /* === Drain _g_network_queue with lock and type-dispatch === */
-    ResourceManager_Lock(_g_train_resources);
+    /* === Drain g_network_queue with lock and type-dispatch === */
+    ResourceManager_Lock(g_train_resources);
 
     {
-        TrainMessage* msg = (TrainMessage*)_g_network_queue;
+        TrainMessage* msg = (TrainMessage*)g_network_queue;
         while (msg != NULL) {
             void* data_ptr = msg->data_ptr;
             TrainMessage* next = (TrainMessage*)msg->next;
@@ -461,12 +646,12 @@ void Netman::Cleanup()
             }
 
             GLOBAL_free(msg);
-            _g_network_queue = next;
-            msg = (TrainMessage*)_g_network_queue;
+            g_network_queue = next;
+            msg = (TrainMessage*)g_network_queue;
         }
     }
 
-    ResourceManager_Unlock(_g_train_resources);
+    ResourceManager_Unlock(g_train_resources);
 
     /* === Free building list (m_buildingList at +0x7DC) === */
     {
@@ -573,21 +758,24 @@ int32_t Netman::SendPlayerName()
     *(uint8_t*)(packet + 2) = 1;
     *(uint16_t*)(packet + 3) = 0;
 
-    /* Pack msg_queue entries into 8-byte blocks */
+    /* Pack PingEntry nodes into the exact eight-byte wire records used at
+     * 0x43DF75..0x43DFBA: dpId16, x16, y16, peer8, slot8. */
     {
-        uint16_t entry_count = 1;
-        uint16_t* queue_ptr = (uint16_t*)msg_queue;
-
-        while (queue_ptr != NULL) {
-            entry_count++;
-            uint32_t lo32 = *(uint32_t*)queue_ptr;
-            uint32_t hi32 = *(uint32_t*)((uint8_t*)queue_ptr + 6);
-            *(uint32_t*)((uint8_t*)packet + entry_count * 8 + 1) = lo32;
-            *(uint32_t*)((uint8_t*)packet + entry_count * 8 + 5) = hi32;
-            queue_ptr = *(uint16_t**)((uint8_t*)queue_ptr + 8);
+        uint16_t entry_count = 0;
+        auto* entry = static_cast<PingEntry*>(msg_queue);
+        while (entry != NULL) {
+            ++entry_count;
+            uint8_t* output = reinterpret_cast<uint8_t*>(packet) +
+                              static_cast<std::size_t>(entry_count) * 8 + 1;
+            *reinterpret_cast<uint16_t*>(output) = static_cast<uint16_t>(entry->dpId);
+            *reinterpret_cast<uint16_t*>(output + 2) = static_cast<uint16_t>(entry->pos_x);
+            *reinterpret_cast<uint16_t*>(output + 4) = static_cast<uint16_t>(entry->pos_y);
+            output[6] = entry->peer_index;
+            output[7] = entry->slot_index;
+            entry = static_cast<PingEntry*>(entry->next);
         }
-
         packet[3] = entry_count;
+        reinterpret_cast<uint8_t*>(packet)[entry_count * 8 + 9] = 0;
     }
 
     /* Wrap in TrainMessage and queue */
@@ -648,29 +836,22 @@ uint32_t Netman::ReceivePlayerName()
         return 0;
     }
 
-    uint32_t res = 1;
-    {
-        /* car_count at +0x0C and car_handles at +0x14 are within vehicle_payload */
-        uint16_t* raw = (uint16_t*)((uint8_t*)node + 0x0C);
-        int32_t cc = *raw;
-        for (int32_t ci = 0; ci < cc; ci++) {
-            int32_t* ch = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-            int32_t dd = VehicleEditor_GetDPlayData(*ch);
-            if (!dd) continue;
-            uint16_t* s1 = (uint16_t*)((uint8_t*)g_player_config + 6);
-            uint16_t* s2 = (uint16_t*)((uint8_t*)(uintptr_t)dd + 0x10);
-            while (*s1 && *s1 == *s2) { s1++; s2++; }
-            int32_t cmp = (*s1 < *s2) ? -1 : (*s1 > *s2) ? 1 : 0;
-            if (cmp == 0 && *(int32_t*)((uint8_t*)(uintptr_t)dd + 0x3C) == 0 && *(uint16_t*)((uint8_t*)(uintptr_t)dd + 0x3A)) {
-                char fp[0x504];
-                fp[0] = g_empty_string;
-                for (int32_t i = 0; i < 0x140; i++) ((uint32_t*)&fp[1])[i] = 0;
-                NET_GetAttFilePath(*(uint16_t*)((uint8_t*)(uintptr_t)dd + 0x3A), 5, fp);
-                return (uint32_t)PlaySoundFile(fp, g_listener_x, g_listener_y, 4);
-            }
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        DPlayManager* dplay = editor->GetDPlayData();
+        if (dplay == nullptr || g_player_config == nullptr) continue;
+        if (std::strcmp(g_player_config->name,
+                        reinterpret_cast<const char*>(dplay->m_sessionBlk1)) == 0 &&
+            dplay->m_dwordValue == 0 && dplay->m_wordValue != 0) {
+            char path[0x504] = {};
+            NET_GetAttFilePath(dplay->m_wordValue, 5, path);
+            return static_cast<uint32_t>(
+                PlaySoundFile(path, g_listener_x, g_listener_y, 4));
         }
     }
-    return res;
+    return 1;
 }
 
 /* ================================================================== */
@@ -703,16 +884,21 @@ void Netman::ReceiveChatMessage(TrainMessage* msg)
         InboundTrainNode* tail = this->m_vehicleList;
         if (!tail) {
             this->m_vehicleList = node;
-            node->next = NULL;
-            node->process_delay = 0;
             this->m_tickCounter = this->m_timeout - 0x20;
-            return;
+        } else {
+            while (tail->next) tail = tail->next;
+            tail->next = node;
         }
-        while (tail->next)
-            tail = tail->next;
-        tail->next = node;
-        node->next = NULL;
+        node->next = nullptr;
         node->process_delay = 0;
+#ifndef _WIN32
+        uint32_t depth = 0;
+        for (Vehicle* item = this->m_vehicleList; item != nullptr;
+             item = item->next) ++depth;
+        loco::host_test::emit_netman_vehicle_adopted(
+            static_cast<uint32_t>(node->editor_count + 1),
+            node->network_id, depth);
+#endif
     } else {
         msg->data_ptr = NULL;
         net_delete(node);
@@ -753,30 +939,33 @@ void Netman::SendGameStart(TrainMessage* msg)
 
     this->ReceivePing(node->network_id, node->slot_index, node->peer_index, off, dir);
 
-    /* car_count and car_handles are within the Vehicle payload area (+0x0C, +0x14) */
-    int32_t cc = *(uint16_t*)((uint8_t*)node + 0x0C);
-    bool has_dd = false;
-    /* NOTE: loop starts at 1 — car[0] is metadata. cc is car count, 1-based. */
-    for (int32_t ci = 1; ci <= cc; ci++) {
-        int32_t* ch = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-        if (!ch) continue;
-        if (VehicleEditor_GetDPlayData(*ch)) {
-            has_dd = true;
+    bool has_dplay_data = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor != nullptr && editor->GetDPlayData() != nullptr) {
+            has_dplay_data = true;
             break;
         }
     }
-    for (int32_t ci = 1; ci <= cc; ci++) {
-        int32_t* ch = *(int32_t**)((uint8_t*)node + 0x14 + ci * 4);
-        if (!ch) continue;
-        CarObject* car = (CarObject*)ch;
-        int32_t rid = VehicleEditor_GetResourceId(*ch);
-        int32_t val = ((int32_t*)(uintptr_t)*ch)[0x15];
-        if (has_dd && rid == 0x1870) {
-            car->SetResourceId(0x1871, -1);
-            car->SetParam(val, 1);
-        } else if (!has_dd && rid == 0x1871) {
-            car->SetResourceId(0x1870, -1);
-            car->SetParam(val, 1);
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        const int32_t resource_id = static_cast<int32_t>(editor->GetResourceId());
+        const int32_t replacement = has_dplay_data ? 0x1871 : 0x1870;
+        if ((has_dplay_data && resource_id == 0x1870) ||
+            (!has_dplay_data && resource_id == 0x1871)) {
+#ifndef _WIN32
+            // Host network editors intentionally have no original resource
+            // object; retain the evidenced state transition by ID.
+            editor->res_id = replacement;
+#else
+            CarObject* car = static_cast<CarObject*>(static_cast<void*>(editor));
+            const int32_t frame = editor->frame_index;
+            car->SetResourceId(replacement, -1);
+            car->SetParam(frame, 1);
+#endif
         }
     }
 }
@@ -835,18 +1024,28 @@ void Netman::Update()
     this->m_tickCounter++;
 
     /* Drain network message queue under lock */
-    while (_g_network_queue != NULL) {
-        ResourceManager_Lock(_g_train_resources);
+    while (g_network_queue != NULL) {
+        ResourceManager_Lock(g_train_resources);
 
-        TrainMessage* msg = (TrainMessage*)_g_network_queue;
+        TrainMessage* msg = (TrainMessage*)g_network_queue;
         if (msg != NULL) {
-            _g_network_queue = msg->next;
+            g_network_queue = msg->next;
         }
 
-        ResourceManager_Unlock(_g_train_resources);
+        ResourceManager_Unlock(g_train_resources);
 
         if (msg != NULL) {
+#ifndef _WIN32
+            // Original 0x439240 gives outbound type-6 messages to the Train
+            // worker. The SDL host has no Win32 worker; retain queue ordering
+            // but dispatch transport sends before processing Netman messages.
+            if (msg->type == 6 && _g_train != nullptr)
+                static_cast<TrainSubsystem*>(_g_train)->DispatchMessage(msg);
+            else
+                this->ProcessMessage(msg);
+#else
             this->ProcessMessage(msg);
+#endif
             GLOBAL_free(msg);
         }
     }
@@ -865,6 +1064,9 @@ void Netman::Update()
 /* ================================================================== */
 void Netman::ProcessMessage(TrainMessage* msg)
 {
+#ifndef _WIN32
+    loco::host_test::emit_netman_message_processed(msg->type, msg->flags);
+#endif
     switch (msg->type) {
     case 2:  /* SYNC_GAME_STATE */
         if (this->m_gameMode == 0) {
@@ -914,7 +1116,7 @@ void Netman::ProcessMessage(TrainMessage* msg)
     case 4:  /* LAYOUT_SELECT */
     {
         if (*((uint8_t*)_g_netman_data + 8) != 0) {
-            uint32_t playerInfo = *(uint16_t*)((uint8_t*)msg + 0x14);
+            uint32_t playerInfo = msg->metadata16();
             this->SendLayoutSelect(
                 msg->target_dpId,
                 msg->flags,
@@ -1005,7 +1207,7 @@ void Netman::ProcessMessage(TrainMessage* msg)
         int32_t  ds  = *(int32_t*)(pkt + 0x10);
         int32_t  slotIdx = msg->flags;
 
-        if (slotIdx >= 0) {
+        if (slotIdx >= 0 && slotIdx < 9 && ds >= 0) {
             PlayerSlot* sl = &this->m_slots[slotIdx];
             if (sl->pixel_buffer != NULL) {
                 GLOBAL_free(sl->pixel_buffer);
@@ -1017,6 +1219,10 @@ void Netman::ProcessMessage(TrainMessage* msg)
             sl->pixel_height = h;
             sl->version = *(int32_t*)(pkt + 0x0C);
             sl->is_connected = 1;
+#ifndef _WIN32
+            loco::host_test::emit_netman_pixel_data_updated(
+                slotIdx, ds, w, h);
+#endif
         }
         HeapFree(GetProcessHeap(), 0, msg->data_ptr);
         return;
@@ -1026,7 +1232,7 @@ void Netman::ProcessMessage(TrainMessage* msg)
     {
         InboundTrainNode* vnode = this->m_vehicleList;
         while (vnode != NULL) {
-            if (*((uint8_t*)msg + 0x14) == vnode->slot_index &&
+            if (msg->metadata0() == vnode->slot_index &&
                 msg->flags == vnode->network_id) {
                 if (vnode->ack_counter != 0) {
                     vnode->ack_counter--;
@@ -1334,8 +1540,8 @@ void Netman::HandlePlayerLeave(TrainMessage* msg)
 void Netman::SyncGameState(TrainMessage* msg)
 {
     /* Update grid dimensions from packet header */
-    this->m_playerRows      = *((uint8_t*)msg + 0x14);
-    this->m_playerCols      = *((uint8_t*)msg + 0x15);
+    this->m_playerRows      = msg->metadata0();
+    this->m_playerCols      = msg->metadata1();
     this->m_playerSlotCount = *(int32_t*)((uint8_t*)msg + 0x10);
 
     int32_t newMySlotIdx = 0;
@@ -1348,9 +1554,15 @@ void Netman::SyncGameState(TrainMessage* msg)
         uint8_t oldFlag36 = sl->flag_36;
         int32_t oldVersion = sl->version;
 
-        void* srcData = (uint8_t*)msg->data_ptr + i * sizeof(PlayerSlot);
-        DPLAY_InitPlayerSlot(sl, srcData);
-
+        const PlayerSlot* srcData = static_cast<const PlayerSlot*>(msg->data_ptr) + i;
+        sl->dpId = srcData->dpId;
+        sl->is_connected = srcData->is_connected;
+        std::memcpy(reinterpret_cast<uint8_t*>(sl) + 5,
+                    reinterpret_cast<const uint8_t*>(srcData) + 5, 13);
+        std::memcpy(sl->layout_name, srcData->layout_name, sizeof(sl->layout_name));
+        sl->player_id = srcData->player_id;
+        sl->player_color = srcData->player_color;
+        sl->flag_36 = srcData->flag_36;
         sl->version = oldVersion;
 
         if (sl->dpId == this->m_myDpId) {
@@ -1361,7 +1573,7 @@ void Netman::SyncGameState(TrainMessage* msg)
             }
 
             if (this->m_mySlotIndex == i) {
-                int32_t packetVersion = *(int32_t*)((uint8_t*)srcData + 0x48);
+                int32_t packetVersion = srcData->version;
                 if (packetVersion != sl->version) {
                     versionChanged = true;
                 }
@@ -1375,7 +1587,7 @@ void Netman::SyncGameState(TrainMessage* msg)
                 this->ProcessPlayerData(i);
             }
         } else {
-            int32_t packetVersion = *(int32_t*)((uint8_t*)srcData + 0x48);
+            int32_t packetVersion = srcData->version;
             if (!wasEmpty && oldVersion != packetVersion) {
                 NETMAN_SendDisconnect(sl->dpId);
             }
@@ -1491,6 +1703,74 @@ void Netman::SendLayoutSelect(int32_t dpId, int32_t targetSlot,
 /* ================================================================== */
 uint8_t Netman::SendSignalChange(InboundTrainNode* node)
 {
+#ifndef _WIN32
+    DPlayManager* resolved_routes[3] = {nullptr, nullptr, nullptr};
+    bool has_valid_data = false;
+    bool has_stale_track = false;
+    const uint16_t route_count = node != nullptr && node->editor_count < 4
+        ? static_cast<uint16_t>(node->editor_count) : 0;
+    for (uint16_t index = 1; index <= route_count; ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        DPlayManager* source = editor->GetDPlayData();
+        if (source == nullptr) continue;
+        if (source->m_sessionBlk1[20] == 0) {
+            has_stale_track = true;
+            continue;
+        }
+        editor->SetDPlayData(nullptr);
+        resolved_routes[index - 1] = static_cast<DPlayManager*>(
+            NETMAN_ReceiveSignalChange(source));
+        has_valid_data = has_valid_data || resolved_routes[index - 1] != nullptr;
+    }
+
+    if (has_valid_data) {
+        void* storage = operator_new(sizeof(Vehicle));
+        Vehicle* vehicle = storage != nullptr
+            ? ::new (storage) Vehicle(HostNetworkVehicleTag{},
+                  (CRT_rand() % 3) * 2 + 0x1804)
+            : nullptr;
+        if (vehicle != nullptr && vehicle->editors[0] != nullptr) {
+            vehicle->network_id = static_cast<uint16_t>(++this->m_field_7E8);
+            vehicle->editors[0]->CopyName(STR_LEGO_LOCO);
+            vehicle->max_steps = node->max_steps;
+            vehicle->tunnel_angle = 0;
+            vehicle->field_76 = vehicle->field_7E = vehicle->field_80 = 0;
+            vehicle->field_82 = 0;
+            vehicle->field_84 = vehicle->field_86 = 0;
+            for (DPlayManager*& route : resolved_routes) {
+                if (route == nullptr) continue;
+                if (g_player_config != nullptr) {
+                    const std::size_t name_size = std::min(
+                        std::strlen(g_player_config->name) + 1,
+                        sizeof(route->m_sessionBlk1));
+                    std::memcpy(route->m_sessionBlk1, g_player_config->name,
+                                name_size);
+                }
+                route->m_wordValue = 0;
+                vehicle->AddHostNetworkRoute(*route);
+                route->~DPlayManager();
+                GLOBAL_free(route);
+                route = nullptr;
+            }
+            vehicle->direction = 2;
+            vehicle->state = 0;
+            vehicle->init_flag = 0;
+            vehicle->next = this->m_vehicleList;
+            this->m_vehicleList = vehicle;
+        } else if (vehicle != nullptr) {
+            vehicle->~Vehicle();
+            GLOBAL_free(vehicle);
+        }
+    }
+    for (DPlayManager* route : resolved_routes) {
+        if (route == nullptr) continue;
+        route->~DPlayManager();
+        GLOBAL_free(route);
+    }
+    this->HandleTimeout(node);
+    return (!has_stale_track && this->m_gameMode == 1) ? 1 : 0;
+#else
     void* dplayData[3] = { NULL, NULL, NULL };
     uint8_t hasValidData = 0;
     uint8_t hasStaleTrack = 0;
@@ -1575,6 +1855,7 @@ uint8_t Netman::SendSignalChange(InboundTrainNode* node)
     this->HandleTimeout(node);
 
     return (hasStaleTrack == 0 && this->m_gameMode == 1) ? 1 : 0;
+#endif
 }
 
 /* ================================================================== */
@@ -1582,13 +1863,21 @@ uint8_t Netman::SendSignalChange(InboundTrainNode* node)
 /* ================================================================== */
 void Netman::ResetNetworkState()
 {
-    /* TODO: decompile 0x43EFA0 — ResetNetworkState body
-     *
-     * From the reviewer's description:
-     * "Clear active flag, reinit, queue NET_RESET message."
-     * Used by ProcessMessage (type 5), Shutdown, HandlePlayerJoin.
-     */
-    this->m_bInit = 0;
+    this->m_bFlag1 = 0;
+    this->Init(0);
+#ifndef _WIN32
+    // The original queues type 5 to the Win32 Train worker. The host worker
+    // owns transport teardown directly; requeueing onto the main-thread
+    // Netman queue would feed the reset back into this same dispatcher.
+    lego_loco::network::HostTransportWorker().StopTransport();
+#else
+    TrainMessage* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
+    if (message != nullptr) {
+        std::memset(message, 0, sizeof(*message));
+        message->type = 5;
+    }
+    Train_QueueMessage(_g_train, message);
+#endif
 }
 
 /* ================================================================== */
@@ -1596,85 +1885,206 @@ void Netman::ResetNetworkState()
 /* ================================================================== */
 void Netman::StopSession()
 {
-    /* TODO: decompile 0x43F070 — StopSession body
-     *
-     * Queue STOP_SESSION type-0 TrainMessage.
-     */
+#ifndef _WIN32
+    lego_loco::network::HostTransportWorker().StopTransport();
+    this->HostEndTransportSession();
+#else
+    TrainMessage* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
+    if (message == nullptr) return;
+    std::memset(message, 0, sizeof(*message));
+    message->type = 0;
+    message->data_ptr = reinterpret_cast<void*>(
+        static_cast<uintptr_t>(*reinterpret_cast<uint8_t*>(_g_netman_data + 8) != 0));
+    message->flags = this->m_playerSlotCount;
+    Train_QueueMessage(_g_train, message);
+#endif
 }
 
 /* ================================================================== */
 /* 36. SendFileTransfer - 0x440150                                    */
-/* TODO: decompile 0x440150                                           */
 /* ================================================================== */
 void Netman::SendFileTransfer(TrainMessage* msg)
 {
-    /* TODO: decompile 0x440150 — SendFileTransfer body
-     *
-     * Handles type 0x12 (angle/direction->pixel pos),
-     * type 0x15 (player data with ping entries),
-     * type 0x17 (forward ping).
-     */
-    (void)msg;
+    if (msg->type == 0x15) {
+        auto* packet = static_cast<uint8_t*>(msg->data_ptr);
+        const uint8_t source_slot = packet[4];
+        if (source_slot >= 9) return;
+        if (packet[8] != 0) {
+            auto* entry = static_cast<PingEntry*>(m_slots[source_slot].msg_queue);
+            while (entry != nullptr) {
+                PingEntry* next = static_cast<PingEntry*>(entry->next);
+                GLOBAL_free(entry);
+                entry = next;
+            }
+            m_slots[source_slot].msg_queue = nullptr;
+        }
+        const uint16_t count = *reinterpret_cast<uint16_t*>(packet + 6);
+        const uint8_t* item = packet + 9;
+        for (uint16_t index = 0; index < count; ++index, item += 8) {
+            ReceivePing(*reinterpret_cast<const uint16_t*>(item), item[6], item[7],
+                        *reinterpret_cast<const uint16_t*>(item + 2),
+                        *reinterpret_cast<const uint16_t*>(item + 4));
+        }
+        HeapFree(GetProcessHeap(), 0, msg->data_ptr);
+        msg->data_ptr = nullptr;
+        return;
+    }
+    if (msg->type == 0x17) {
+        auto* packet = static_cast<uint8_t*>(msg->data_ptr);
+        RemovePingEntry(*reinterpret_cast<int32_t*>(packet + 4), packet[8], packet[9]);
+        HeapFree(GetProcessHeap(), 0, msg->data_ptr);
+        msg->data_ptr = nullptr;
+        return;
+    }
+    if (msg->type != 0x12) return;
+
+    uint32_t packed_offset = 0;
+    const int32_t angle = msg->data_len;
+    if (angle == 0x5A) {
+        packed_offset = INPUT_DirToOffset_Left(&packed_offset);
+        packed_offset += 0x10000;
+    } else if (angle == 0) {
+        packed_offset = INPUT_DirToOffset_Down(&packed_offset);
+        packed_offset += 1;
+    } else if (angle == 0xB4) {
+        packed_offset = INPUT_DirToOffset_Right(&packed_offset);
+        packed_offset += 1;
+    } else if (angle == 0x10E) {
+        packed_offset = INPUT_DirToOffset_Up(&packed_offset);
+        packed_offset += 0x10000;
+    }
+    ReceivePing(msg->flags, msg->metadata0(), msg->metadata1(),
+                static_cast<int16_t>(packed_offset),
+                static_cast<int16_t>(packed_offset >> 16));
 }
 
 /* ================================================================== */
 /* 37. ReceiveAck - 0x440410                                          */
-/* TODO: decompile 0x440410                                           */
 /* ================================================================== */
 void Netman::ReceiveAck(int32_t dpId, uint8_t slot_byte, uint32_t peerIndex)
 {
-    /* TODO: decompile 0x440410 — ReceiveAck body */
-    (void)dpId;
-    (void)slot_byte;
-    (void)peerIndex;
+    if (m_gameMode != 2) return;
+    if (m_mySlotIndex == static_cast<int32_t>(peerIndex & 0xff)) {
+        auto* packet = static_cast<uint8_t*>(operator_new(0x0c));
+        *reinterpret_cast<uint16_t*>(packet) = 0x3f7;
+        *reinterpret_cast<int32_t*>(packet + 4) = dpId;
+        packet[8] = slot_byte;
+        packet[9] = static_cast<uint8_t>(peerIndex);
+        TrainMessage* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
+        std::memset(message, 0, sizeof(*message));
+        message->type = 6;
+        message->data_len = 0x0c;
+        message->data_ptr = packet;
+        message->flags = 1;
+        Train_QueueMessage(_g_train, message);
+    }
+    RemovePingEntry(dpId, slot_byte, peerIndex);
 }
 
 /* ================================================================== */
 /* 38. RemovePingEntry - 0x4404C0                                     */
-/* TODO: decompile 0x4404C0                                           */
 /* ================================================================== */
 void Netman::RemovePingEntry(int32_t dpId, uint8_t slot_byte, uint32_t peerIndex)
 {
-    /* TODO: decompile 0x4404C0 — RemovePingEntry body
-     *
-     * Searches transfer_lists for PingEntry matching (dpId, slot),
-     * unlinks and frees it. Tries preferred slot then playerSlot.
-     */
-    (void)dpId;
-    (void)slot_byte;
-    (void)peerIndex;
+    const auto remove_from = [&](uint8_t index) -> bool {
+        if (index >= 9) return false;
+        auto** head = reinterpret_cast<PingEntry**>(&m_slots[index].msg_queue);
+        PingEntry* previous = nullptr;
+        for (PingEntry* entry = *head; entry != nullptr;
+             previous = entry, entry = static_cast<PingEntry*>(entry->next)) {
+            if (entry->dpId == dpId && entry->peer_index == slot_byte) {
+                if (previous == nullptr) *head = static_cast<PingEntry*>(entry->next);
+                else previous->next = entry->next;
+                GLOBAL_free(entry);
+                return true;
+            }
+        }
+        return false;
+    };
+    const uint8_t preferred = static_cast<uint8_t>(peerIndex);
+    if (remove_from(preferred) || remove_from(slot_byte)) return;
+    for (uint8_t index = 0; index < 9; ++index)
+        if (index != preferred && index != slot_byte && remove_from(index)) return;
 }
 
 /* ================================================================== */
 /* 39. ReceivePing - 0x440610                                         */
-/* TODO: decompile 0x440610                                           */
 /* ================================================================== */
 void Netman::ReceivePing(int32_t dpId, uint8_t slot_byte,
                           uint32_t peerIndex, int32_t posX, int32_t posY)
 {
-    /* TODO: decompile 0x440610 — ReceivePing body
-     *
-     * If PingEntry exists: update fields, move between slots if peer changed.
-     * If new: allocate 0x14-byte entry and prepend to transfer_list.
-     */
-    (void)dpId;
-    (void)slot_byte;
-    (void)peerIndex;
-    (void)posX;
-    (void)posY;
+    if (m_gameMode != 2) return;
+    const uint8_t destination = static_cast<uint8_t>(peerIndex);
+    if (destination >= 9) return;
+    PingEntry* entry = UpdateLatency(dpId, slot_byte, peerIndex);
+    if (entry == nullptr) {
+        entry = static_cast<PingEntry*>(operator_new(sizeof(PingEntry)));
+        std::memset(entry, 0, sizeof(*entry));
+        entry->dpId = dpId;
+        entry->pos_x = posX;
+        entry->pos_y = posY;
+        entry->peer_index = slot_byte;
+        entry->slot_index = destination;
+        entry->next = m_slots[destination].msg_queue;
+        m_slots[destination].msg_queue = entry;
+#ifndef _WIN32
+        loco::host_test::emit_netman_ping_updated(
+            dpId, slot_byte, destination, posX, posY);
+#endif
+        return;
+    }
+    entry->dpId = dpId;
+    entry->pos_x = posX;
+    entry->pos_y = posY;
+    if (entry->slot_index == destination) {
+#ifndef _WIN32
+        loco::host_test::emit_netman_ping_updated(
+            dpId, slot_byte, destination, posX, posY);
+#endif
+        return;
+    }
+
+    const uint8_t old_index = entry->slot_index;
+    if (old_index < 9) {
+        auto** head = reinterpret_cast<PingEntry**>(&m_slots[old_index].msg_queue);
+        PingEntry* previous = nullptr;
+        for (PingEntry* cursor = *head; cursor != nullptr;
+             previous = cursor, cursor = static_cast<PingEntry*>(cursor->next)) {
+            if (cursor == entry) {
+                if (previous == nullptr) *head = static_cast<PingEntry*>(entry->next);
+                else previous->next = entry->next;
+                break;
+            }
+        }
+    }
+    entry->slot_index = destination;
+    entry->next = m_slots[destination].msg_queue;
+    m_slots[destination].msg_queue = entry;
+#ifndef _WIN32
+    loco::host_test::emit_netman_ping_updated(
+        dpId, slot_byte, destination, posX, posY);
+#endif
 }
 
 /* ================================================================== */
 /* 40. UpdateLatency - 0x440750                                       */
-/* TODO: decompile 0x440750                                           */
 /* ================================================================== */
 PingEntry* Netman::UpdateLatency(int32_t dpId, uint8_t slot_byte, uint32_t peerIndex)
 {
-    /* TODO: decompile 0x440750 — UpdateLatency body */
-    (void)dpId;
-    (void)slot_byte;
-    (void)peerIndex;
-    return NULL;
+    const auto find_in = [&](uint8_t index) -> PingEntry* {
+        if (index >= 9) return nullptr;
+        for (auto* entry = static_cast<PingEntry*>(m_slots[index].msg_queue);
+             entry != nullptr; entry = static_cast<PingEntry*>(entry->next))
+            if (entry->dpId == dpId && entry->peer_index == slot_byte) return entry;
+        return nullptr;
+    };
+    const uint8_t preferred = static_cast<uint8_t>(peerIndex);
+    if (PingEntry* entry = find_in(preferred)) return entry;
+    if (PingEntry* entry = find_in(slot_byte)) return entry;
+    for (uint8_t index = 0; index < 9; ++index)
+        if (index != preferred && index != slot_byte)
+            if (PingEntry* entry = find_in(index)) return entry;
+    return nullptr;
 }
 
 /* ================================================================== */
@@ -1694,36 +2104,120 @@ void Netman::CheckTimeout(int32_t timeoutVal)
 
 /* ================================================================== */
 /* 42. HandleTimeout - 0x4408B0                                       */
-/* TODO: decompile 0x4408B0                                           */
 /* ================================================================== */
 void Netman::HandleTimeout(InboundTrainNode* node)
 {
-    /* TODO: decompile 0x4408B0 — HandleTimeout body
-     *
-     * Iterates cars in the train node, calls NET_RegisterPlayer,
-     * transitions car resource IDs between LEAVING/ENTERING states.
-     */
-    (void)node;
+    if (node == nullptr) return;
+    bool registered_local_route = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        DPlayManager* dplay = editor->GetDPlayData();
+        if (dplay == nullptr || g_player_config == nullptr) continue;
+        if (std::strcmp(reinterpret_cast<const char*>(dplay->m_sessionBlk1),
+                        g_player_config->name) == 0) {
+            NET_RegisterPlayer(_g_dplay, dplay, 1, 0);
+            editor->SetDPlayData(nullptr);
+            registered_local_route = true;
+        }
+    }
+
+    bool has_dplay_data = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor != nullptr && editor->GetDPlayData() != nullptr) {
+            has_dplay_data = true;
+            break;
+        }
+    }
+    const int32_t desired_resource = has_dplay_data ? 0x1871 : 0x1870;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        const int32_t resource_id = static_cast<int32_t>(editor->GetResourceId());
+        if ((has_dplay_data && resource_id == 0x1870) ||
+            (!has_dplay_data && resource_id == 0x1871)) {
+#ifndef _WIN32
+            editor->res_id = desired_resource;
+#else
+            CarObject* car = static_cast<CarObject*>(static_cast<void*>(editor));
+            car->SetResourceId(desired_resource, -1);
+            car->SetParam(editor->frame_index, 1);
+#endif
+        }
+    }
+    if (registered_local_route) {
+        if (this->m_timeoutState == 1) this->CheckTimeout(3);
+        else if (this->m_timeoutState == 0) this->CheckTimeout(2);
+    }
 }
 
 /* ================================================================== */
 /* 43. SerializePlayerData - 0x440A50                                 */
-/* TODO: decompile 0x440A50                                           */
 /* ================================================================== */
 void Netman::SerializePlayerData(InboundTrainNode* node)
 {
-    /* TODO: decompile 0x440A50 — SerializePlayerData body */
-    this->m_field_7E4 = (int32_t)(intptr_t)node;
+    this->HandleTimeout(node);
+    if (node != nullptr && node->owner_handle != 1)
+        this->DeserializePlayerData(node);
+#ifndef _WIN32
+    this->m_hostLastSerializedVehicle = node;
+#else
+    this->m_field_7E4 = static_cast<int32_t>(reinterpret_cast<intptr_t>(node));
+#endif
 }
 
 /* ================================================================== */
 /* 44. DeserializePlayerData - 0x440A80                               */
-/* TODO: decompile 0x440A80                                           */
 /* ================================================================== */
 void Netman::DeserializePlayerData(InboundTrainNode* node)
 {
-    /* TODO: decompile 0x440A80 — DeserializePlayerData body */
+#ifndef _WIN32
+    if (node == nullptr) return;
+    const DPlayManager* donor = nullptr;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor != nullptr && editor->GetDPlayData() != nullptr) {
+            donor = editor->GetDPlayData();
+            break;
+        }
+    }
+    if (donor == nullptr) return;
+
+    bool assigned = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr || editor->GetDPlayData() != nullptr) continue;
+        const int32_t resource_id = static_cast<int32_t>(editor->GetResourceId());
+        if (resource_id != 0x1870 && resource_id != 0x1871) continue;
+        void* storage = operator_new(sizeof(DPlayManager));
+        if (storage == nullptr) break;
+        auto* replacement = ::new (storage) DPlayManager;
+        replacement->CreatePlayer();
+        replacement->CopyLogicalStateFrom(*donor);
+        replacement->SetPlayerName(1, -1);
+        if (editor->SetDPlayData(replacement)) {
+            editor->res_id = 0x1871;
+            assigned = true;
+        }
+        replacement->~DPlayManager();
+        GLOBAL_free(replacement);
+    }
+    if (assigned) {
+        if (this->m_timeoutState == 3) this->CheckTimeout(2);
+        else this->CheckTimeout(0);
+    }
+#else
+    // Original 0x440A80 enumerates PostBag Sort_Out .crd records through
+    // NET_GetHostName/NET_ResolveAddress. The Windows reconstruction retains
+    // that filesystem behavior in its untranslated path.
     (void)node;
+#endif
 }
 
 /* ================================================================== */
@@ -1752,10 +2246,10 @@ void NETMAN_QueueMessage(TrainMessage* msg)
 {
     if (g_game_mode != 10) {
         msg->next = NULL;
-        if (!_g_network_queue) {
-            _g_network_queue = msg;
+        if (!g_network_queue) {
+            g_network_queue = msg;
         } else {
-            TrainMessage* n = (TrainMessage*)_g_network_queue;
+            TrainMessage* n = (TrainMessage*)g_network_queue;
             while (n->next) n = (TrainMessage*)n->next;
             n->next = msg;
         }
@@ -1877,223 +2371,6 @@ int32_t NETMAN_ReceiveTrainPosition(int p1, int p2, int p3)
     node->process_delay = 1;
     Train_QueueMessage(_g_train, m);
     return 1;
-}
-
-/* NETMAN_ReceiveSignalChange - 0x43E900 */
-void* NETMAN_ReceiveSignalChange(void* playerData)
-{
-    CRT_time();
-
-    uint32_t bytesRead = 0;
-    int32_t playerCount = 0;
-    bool foundMatch = false;
-    void* result = NULL;
-
-    char playerNumStr[8] = "";
-    char routePath[0x500];
-    char addressPath[0x500];
-    char fileBuf[0x8000];
-    char routeAddr[0x14] = "";
-    char playerAddr[0x14] = "";
-    char displayName[0x50] = "";
-
-    const char* targetName = (const char*)((uint8_t*)playerData + 0x10);
-
-    DPLAY_EnumeratePlayers((int32_t)(intptr_t)_g_dplay);
-
-    for (playerCount = 0; playerCount < 0x14; playerCount++) {
-        foundMatch = false;
-
-        for (int32_t nameIdx = 0; nameIdx < 0x10; nameIdx++) {
-            uint8_t* entry = (uint8_t*)_g_dplay + 0xB13 + nameIdx * 0x0D;
-            const uint8_t* pSrc = (const uint8_t*)targetName;
-
-            int32_t cmp;
-            while (1) {
-                uint8_t c1 = *pSrc;
-                uint8_t c2 = *entry;
-                if (c1 != c2) { cmp = (c1 < c2) ? -1 : 1; break; }
-                if (c1 == 0) { cmp = 0; break; }
-                c1 = *(pSrc + 1);
-                c2 = *(entry + 1);
-                if (c1 != c2) { cmp = (c1 < c2) ? -1 : 1; break; }
-                if (c1 == 0) { cmp = 0; break; }
-                pSrc += 2;
-                entry += 2;
-            }
-
-            if (cmp == 0) {
-                foundMatch = true;
-                CRT_itoa(nameIdx + 1, playerNumStr, 10);
-                break;
-            }
-        }
-
-        if (!foundMatch) continue;
-
-        NET_SendFile(playerNumStr, 1, routePath);
-        NET_SendFile(playerNumStr, 0, addressPath);
-
-        /* Read route file */
-        {
-            void* hFile = CreateFileA(routePath, 0x80000000, 1,
-                                      NULL, 3, 0x8000000, NULL);
-            if (hFile == (void*)-1) return NULL;
-            if (!ReadFile(hFile, fileBuf, 0x8000, &bytesRead, NULL)) {
-                CloseHandle(hFile);
-                return NULL;
-            }
-            CloseHandle(hFile);
-
-            int32_t entryCount = CRT_atoi(fileBuf);
-            int32_t rnd = CRT_rand();
-            int32_t targetLine = (int32_t)((uint64_t)rnd / (0x7FFF / (long long)entryCount));
-
-            uint32_t lineStart = 4;
-            while (targetLine > 0 && lineStart < bytesRead) {
-                if (fileBuf[lineStart] == '\n') targetLine--;
-                lineStart++;
-            }
-
-            for (uint32_t j = lineStart; j < bytesRead; j++) {
-                if (fileBuf[j] == '\r') { fileBuf[j] = '\0'; break; }
-            }
-
-            inline_memcpy(routeAddr, &fileBuf[lineStart], 0x14 - 1);
-            routeAddr[0x13] = '\0';
-        }
-
-        /* Read address file */
-        {
-            void* hFile = CreateFileA(addressPath, 0x80000000, 1,
-                                      NULL, 3, 0x8000000, NULL);
-            if (hFile == (void*)-1) return NULL;
-            if (!ReadFile(hFile, fileBuf, 0x8000, &bytesRead, NULL)) {
-                CloseHandle(hFile);
-                return NULL;
-            }
-            CloseHandle(hFile);
-
-            int32_t entryCount = CRT_atoi(fileBuf);
-            int32_t rnd = CRT_rand();
-            int32_t targetLine = (int32_t)((uint64_t)rnd / (0x7FFF / (long long)entryCount));
-
-            uint32_t lineStart = 4;
-            while (targetLine > 0 && lineStart < bytesRead) {
-                if (fileBuf[lineStart] == '\n') targetLine--;
-                lineStart++;
-            }
-
-            for (uint32_t j = lineStart; j < bytesRead; j++) {
-                if (fileBuf[j] == '\r') { fileBuf[j] = '\0'; break; }
-            }
-
-            inline_memcpy(playerAddr, &fileBuf[lineStart], 0x14 - 1);
-            playerAddr[0x13] = '\0';
-        }
-
-        /* Build combined address path */
-        {
-            int32_t rpLen = strlen(routePath);
-            int32_t raLen = strlen(routeAddr);
-            int32_t truncLen = rpLen - (raLen - 1);
-            if (truncLen < 0) truncLen = 0;
-            if (truncLen > (int32_t)sizeof(routePath) - 1) truncLen = sizeof(routePath) - 1;
-            routePath[truncLen] = '\0';
-
-            int32_t base = strlen(routePath);
-            int32_t i;
-            for (i = 0; routeAddr[i] != '\0' && (base + i) < (int32_t)sizeof(routePath) - 1; i++) {
-                routePath[base + i] = routeAddr[i];
-            }
-            routePath[base + i] = '\0';
-
-            base = strlen(routePath);
-            if (base < (int32_t)sizeof(routePath) - 1) {
-                routePath[base] = '/';
-                routePath[base + 1] = '\0';
-            }
-
-            base = strlen(routePath);
-            for (i = 0; playerAddr[i] != '\0' && (base + i) < (int32_t)sizeof(routePath) - 1; i++) {
-                routePath[base + i] = playerAddr[i];
-            }
-            routePath[base + i] = '\0';
-        }
-
-        result = NET_ResolveAddress(_g_dplay, routePath);
-        if (result == NULL) return NULL;
-
-        /* Copy player name into resolved DPlayData at +0x25 */
-        {
-            const uint8_t* src = (const uint8_t*)targetName;
-            uint8_t* dst = (uint8_t*)result + 0x25;
-            int32_t i;
-            for (i = 0; src[i] != 0; i++) dst[i] = src[i];
-            dst[i] = 0;
-        }
-
-        *(uint16_t*)((uint8_t*)result + 0x3A) = 0;
-        *(int32_t*)((uint8_t*)result + 0x3C) = 1;
-
-        /* Decode address path into display name */
-        {
-            const char* decodeSrc = routeAddr;
-            int32_t di = 0;
-            int32_t si = 0;
-
-            while (di < (int32_t)sizeof(displayName) - 1 && decodeSrc[si] != '\0') {
-                char c = decodeSrc[si];
-                if (c == '/') {
-                    char next = decodeSrc[si + 1];
-                    if (next == '/') {
-                        displayName[di++] = '/';
-                        si += 2;
-                    } else if (next == 'n') {
-                        displayName[di++] = '\r';
-                        if (di < (int32_t)sizeof(displayName) - 1) displayName[di++] = '\n';
-                        si += 2;
-                    } else if (next == '?') {
-                        const char* pn = (const char*)((uint8_t*)g_player_config + 6);
-                        while (*pn && di < (int32_t)sizeof(displayName) - 1) {
-                            displayName[di++] = *pn++;
-                        }
-                        if (di < (int32_t)sizeof(displayName) - 1) displayName[di++] = ' ';
-                        si += 2;
-                    } else {
-                        displayName[di++] = c;
-                        si++;
-                    }
-                } else {
-                    displayName[di++] = c;
-                    si++;
-                }
-            }
-            if (di < (int32_t)sizeof(displayName)) {
-                displayName[di] = '\0';
-            } else {
-                displayName[sizeof(displayName) - 1] = '\0';
-            }
-
-            int32_t dnLen = strlen(displayName);
-            if (dnLen < (int32_t)sizeof(displayName)) {
-                foundMatch = true;
-                inline_memcpy((uint8_t*)result + 0x43, displayName, dnLen + 1);
-            } else {
-                displayName[sizeof(displayName) - 1] = '\0';
-                foundMatch = true;
-                inline_memcpy((uint8_t*)result + 0x43, displayName, sizeof(displayName));
-            }
-        }
-
-        if (foundMatch) break;
-    }
-
-    if (result != NULL) {
-        DPLAY_SetPlayerName(result, 1, -1);
-    }
-
-    return result;
 }
 
 /* ================================================================== */

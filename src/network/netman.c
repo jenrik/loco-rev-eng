@@ -1126,13 +1126,13 @@ int CreateDirectPlay(NETMAN *self)
  *
  * Host path: calls IDP4->Open() at vtable+0x60 with DPSESSION_CREATE
  * (0x82) flag. DPSESSION descriptor built at this+0x158c (dwSize=0x50)
- * with application GUID 0xf9cd2546/0x11d2577f/0xa0002694/0x7ada4b24 at
+ * with application GUID raw dwords 0xf9cd2546/0x11d2577f/0xa0002694/0x7ada4b24 at
  * offsets 0x15a4-0x15b3 and max-players from this+0x920. Retries on
  * DPERR_CONNECTING (-0x7788fea2) if not async. On failure calls
  * FUN_0045ff30 to convert DPERR code and logs 'Failed to Open new
  * session - <errstr>'. Sets this+0xd50=1 on success.
  *
- * Application GUID: {F9CD2546-11D2-577F-A000-26947ADA4B24}
+ * Application GUID: {F9CD2546-577F-11D2-9426-00A0244BDA7A}
  *
  * WIN32 outline:
  *   DPSESSIONDESC2 desc = {0};

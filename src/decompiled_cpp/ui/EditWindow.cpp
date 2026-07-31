@@ -1170,14 +1170,12 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
     // The two delayed button paths. 0x42298A (accept) and
     // 0x422AC3 (quit) restore their background, draw 0x404/0x406,
     // repaint, and Sleep(0x96) before accepting or invoking mode 10.
-    // Only the accept button plays the click sound 0x5015 (0x422A72);
-    // the quit button goes straight to CGWND_SetMode(10) which plays
-    // the exit sweep 0x5026.
+    // Both paths queue click resource 0x5015 before the pressed-frame repaint:
+    // accept at 0x422A72 and quit at 0x422BE2. Quit subsequently enters mode
+    // 10, whose separate 0x5026 sweep remains unchanged.
     if (button == kHostOptionOne || button == kHostQuit) {
         if (this->hostPressedButton == kHostNoButton) {
-            if (button == kHostOptionOne) {
-                SDL3_GameAudioPlayResource(0x5015);
-            }
+            SDL3_GameAudioPlayResource(0x5015);
             this->hostPressedButton = button;
             this->hostPressedUntilMs = SDL_GetTicks() + 150;
         }
@@ -1194,11 +1192,13 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
     case kHostSinglePlayer:
         _g_netman_state[7] = 1;
         NETMAN_SetGameMode(g_netman, 3);
+        loco::host_test::emit_menu_mode_selected(false);
         changed = true;
         break;
     case kHostMultiplayer:
         _g_netman_state[7] = 0;
         NETMAN_SetGameMode(g_netman, 0);
+        loco::host_test::emit_menu_mode_selected(true);
         changed = true;
         break;
     case kHostGame:
@@ -1253,6 +1253,8 @@ void EditWindow::hostCommitPlayerName()
 
 bool EditWindow::hostHandleKey(int32_t key_code)
 {
+    if (this->dialogState == 5 && this->pPanelB != nullptr &&
+        this->pPanelB->hostHandleKey(key_code)) return true;
     if (!this->hostEditFocused) return false;
 
     // The unlabelled edit subclass at 0x420B20 forwards only Enter and
@@ -1277,6 +1279,10 @@ bool EditWindow::hostHandleKey(int32_t key_code)
 
 void EditWindow::hostHandleTextInput(const char* utf8_text)
 {
+    if (this->dialogState == 5 && this->pPanelB != nullptr) {
+        this->pPanelB->hostHandleTextInput(utf8_text);
+        return;
+    }
     if (!this->hostEditFocused || !utf8_text) return;
 
     size_t length = std::strlen(this->hostEditText);

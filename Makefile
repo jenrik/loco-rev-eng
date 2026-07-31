@@ -81,6 +81,20 @@ else
   SDL3_LDFLAGS := $(shell pkg-config --libs-only-L sdl3 2>/dev/null)
 endif
 SDL3_LIBS  := -lSDL3 -lm
+# SDL_net 3 provides the host-only TCP listener/client transport.
+SDL3_NET_DEV := $(shell ls -d /nix/store/*-sdl3-net-*-dev/include 2>/dev/null | head -1)
+SDL3_NET_LIB := $(shell ls -d /nix/store/*-sdl3-net-*-lib/lib 2>/dev/null | head -1)
+ifneq ($(SDL3_NET_DEV),)
+  SDL3_NET_CFLAGS := -I$(SDL3_NET_DEV)
+else
+  SDL3_NET_CFLAGS := $(shell pkg-config --cflags sdl3-net 2>/dev/null)
+endif
+ifneq ($(SDL3_NET_LIB),)
+  SDL3_NET_LDFLAGS := -L$(SDL3_NET_LIB)
+else
+  SDL3_NET_LDFLAGS := $(shell pkg-config --libs-only-L sdl3-net 2>/dev/null)
+endif
+SDL3_NET_LIBS := -lSDL3_net
 # The SDL-hosted intro player uses GStreamer appsink to decode Cinepak AVI
 # frames into the SDL renderer. Its headers/libs are provided by flake.nix.
 GST_CFLAGS := $(shell pkg-config --cflags gstreamer-app-1.0 gstreamer-video-1.0)
@@ -89,9 +103,12 @@ GST_LIBS   := $(shell pkg-config --libs gstreamer-app-1.0 gstreamer-video-1.0)
 # weight 700. Fontconfig supplies the host-compatible face; FreeType rasterizes it.
 FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
 FREETYPE_LIBS   := $(shell pkg-config --libs freetype2)
+# Desktop Linux discovers DNS-SD sessions through Avahi on the system D-Bus.
+DBUS_CFLAGS := $(shell pkg-config --cflags dbus-1 2>/dev/null)
+DBUS_LIBS   := $(shell pkg-config --libs dbus-1 2>/dev/null)
 HOST_UI_FONT_FILE := $(shell fc-match -f '%{file}' Arial 2>/dev/null | head -n 1)
 
-override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) $(INCLUDES) $(FORCE_INC) $(SDL3_CFLAGS) $(GST_CFLAGS) $(FREETYPE_CFLAGS) -DLOCO_HOST_UI_FONT_FILE=\"$(HOST_UI_FONT_FILE)\"
+override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) -pthread $(INCLUDES) $(FORCE_INC) $(SDL3_CFLAGS) $(SDL3_NET_CFLAGS) $(GST_CFLAGS) $(FREETYPE_CFLAGS) $(DBUS_CFLAGS) -DLOCO_HOST_UI_FONT_FILE=\"$(HOST_UI_FONT_FILE)\"
 
 # Source discovery
 DCP_CPP_ALL := $(filter-out $(DCP_DIR)/stubs/%, $(filter-out $(DCP_DIR)/native/%, $(wildcard $(DCP_DIR)/*/*.cpp $(DCP_DIR)/*/*/*.cpp)))
@@ -104,7 +121,7 @@ NATIVE_ALL := $(wildcard $(DCP_DIR)/native/*.c)
 NATIVE_BROKEN := $(DCP_DIR)/native/buildingpanel_wndproc.c $(DCP_DIR)/native/config_ini.c $(DCP_DIR)/native/DDRAW_BlitHBITMAPToSurface.c $(DCP_DIR)/native/ddraw_building_sprites.c $(DCP_DIR)/native/ddraw_helpers.c $(DCP_DIR)/native/DDRAW_LoadBmpToSurface.c $(DCP_DIR)/native/game_loop_setup.c $(DCP_DIR)/native/gamestate_handlers.c $(DCP_DIR)/native/helpwnd_support.c $(DCP_DIR)/native/input_place.c $(DCP_DIR)/native/input_world.c $(DCP_DIR)/native/ui_childwindow.c $(DCP_DIR)/native/UI_DefWndProc.c $(DCP_DIR)/native/ui_manager.c $(DCP_DIR)/native/ui_position.c $(DCP_DIR)/native/UI_ProcessObjectTimers.c $(DCP_DIR)/native/ui_window_class.c $(DCP_DIR)/native/win32_network.c $(DCP_DIR)/native/win32_stream.c $(DCP_DIR)/native/winmain.c $(DCP_DIR)/native/world_enumerate_assets.c $(DCP_DIR)/native/ui_scroll_list.c $(DCP_DIR)/native/sprite_tilemap.c $(DCP_DIR)/native/math_huf_helpers.c $(DCP_DIR)/native/huf_decode.c $(DCP_DIR)/native/math_helpers.c $(DCP_DIR)/native/DDRAW_PresentRect.c $(DCP_DIR)/native/cgwnd_present.c $(DCP_DIR)/native/ui_window_update.c $(DCP_DIR)/native/win32_postquit.c $(DCP_DIR)/native/win32_thread.c $(DCP_DIR)/native/stream_lock.c
 NATIVE_SRCS := $(filter-out $(NATIVE_BROKEN), $(NATIVE_ALL))
 
-SHIM_SRCS := $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_intro_video.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
+SHIM_SRCS := $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_transport.cpp $(SHIMS_DIR)/sdl3_net_runtime.cpp $(SHIMS_DIR)/sdl3_net_game_bridge.cpp $(SHIMS_DIR)/network_discovery.cpp $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/discovery_runtime.cpp $(SHIMS_DIR)/discovery_backends.cpp $(SHIMS_DIR)/avahi_dbus_discovery.cpp $(SHIMS_DIR)/embedded_mdns_discovery.cpp $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_intro_video.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_directplay_train_bridge.cpp $(SHIMS_DIR)/host_test_events.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c
 
 # Derived objects
 DCP_OBJS    := $(patsubst $(DCP_DIR)/%.cpp, $(BUILD_DIR)/dcp/%.o, $(DCP_CPP_SRCS))
@@ -119,7 +136,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs test test-integration test-all test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -127,7 +144,7 @@ build: $(BINARY)
 
 # Deterministic component and host-boundary suite. GUI interaction is kept in
 # test-integration so agents can run the fast layer independently when needed.
-test: test-resource-archive test-resource-manager-sdl3 test-dplay-config \
+test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
@@ -145,14 +162,108 @@ $(SDL3_TIMER_STRESS_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window
 test-sdl3-timer-stress: $(SDL3_TIMER_STRESS_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; SDL_VIDEODRIVER=dummy $(SDL3_TIMER_STRESS_TEST)
 
-test-integration: $(BINARY)
+test-integration: $(BINARY) $(BUILD_DIR)/sdl3_net_transport_test
 	@python3 -m pytest -v -m "integration and gui" tests/integration
 
 test-all: test test-integration
 
+# Transport codec and real two-process SDL_net loopback regressions.
+SDL3_NET_PROTOCOL_TEST := $(BUILD_DIR)/sdl3_net_protocol_test
+SDL3_NET_TRANSPORT_TEST := $(BUILD_DIR)/sdl3_net_transport_test
+
+$(SDL3_NET_PROTOCOL_TEST): $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_protocol.h tests/sdl3_net_protocol_test.cpp | dirs
+	@echo "=== Testing SDL_net transport protocol ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(SHIMS_DIR) $(SHIMS_DIR)/sdl3_net_protocol.cpp tests/sdl3_net_protocol_test.cpp -o $@
+
+test-sdl3-net-protocol: $(SDL3_NET_PROTOCOL_TEST)
+	@$(SDL3_NET_PROTOCOL_TEST)
+
+$(SDL3_NET_TRANSPORT_TEST): $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_protocol.h $(SHIMS_DIR)/sdl3_net_transport.cpp $(SHIMS_DIR)/sdl3_net_transport.h tests/sdl3_net_transport_test.cpp | dirs
+	@echo "=== Building SDL_net two-process loopback transport test ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -pthread -I$(SHIMS_DIR) $(SDL3_CFLAGS) $(SDL3_NET_CFLAGS) $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_transport.cpp tests/sdl3_net_transport_test.cpp $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-sdl3-net-transport: $(SDL3_NET_TRANSPORT_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; SDL3_NET_LIB="$(SDL3_NET_LIB)"; export LD_LIBRARY_PATH="$$SDL3_NET_LIB:$$SDL3_LIB:$$LD_LIBRARY_PATH"; tests/sdl3_net_transport_test.sh $(SDL3_NET_TRANSPORT_TEST)
+
+SDL3_NET_RUNTIME_TEST := $(BUILD_DIR)/sdl3_net_runtime_test
+
+$(SDL3_NET_RUNTIME_TEST): $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_transport.cpp $(SHIMS_DIR)/sdl3_net_runtime.cpp tests/sdl3_net_runtime_test.cpp | dirs
+	@echo "=== Testing dedicated SDL_net transport worker ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -pthread -I$(SHIMS_DIR) $(SDL3_CFLAGS) $(SDL3_NET_CFLAGS) $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_transport.cpp $(SHIMS_DIR)/sdl3_net_runtime.cpp tests/sdl3_net_runtime_test.cpp $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-sdl3-net-runtime: $(SDL3_NET_RUNTIME_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; SDL3_NET_LIB="$(SDL3_NET_LIB)"; export LD_LIBRARY_PATH="$$SDL3_NET_LIB:$$SDL3_LIB:$$LD_LIBRARY_PATH"; $(SDL3_NET_RUNTIME_TEST)
+
+# Discovery abstraction regression: platform-neutral backend selection and failover.
+NETWORK_DISCOVERY_TEST := $(BUILD_DIR)/network_discovery_test
+
+$(NETWORK_DISCOVERY_TEST): $(SHIMS_DIR)/network_discovery.cpp $(SHIMS_DIR)/network_discovery.h tests/network_discovery_test.cpp | dirs
+	@echo "=== Testing discovery backend abstraction ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(SHIMS_DIR) $(SHIMS_DIR)/network_discovery.cpp tests/network_discovery_test.cpp -o $@
+
+test-network-discovery: $(NETWORK_DISCOVERY_TEST)
+	@$(NETWORK_DISCOVERY_TEST)
+
+DISCOVERY_RUNTIME_TEST := $(BUILD_DIR)/discovery_runtime_test
+
+$(DISCOVERY_RUNTIME_TEST): $(SHIMS_DIR)/discovery_runtime.cpp $(SHIMS_DIR)/discovery_runtime.h $(SHIMS_DIR)/network_discovery.cpp $(SHIMS_DIR)/network_discovery.h tests/discovery_runtime_test.cpp | dirs
+	@echo "=== Testing discovery worker runtime ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -pthread -I$(SHIMS_DIR) $(SHIMS_DIR)/network_discovery.cpp $(SHIMS_DIR)/discovery_runtime.cpp tests/discovery_runtime_test.cpp -o $@
+
+test-discovery-runtime: $(DISCOVERY_RUNTIME_TEST)
+	@$(DISCOVERY_RUNTIME_TEST)
+
+# Avahi adapter regression runs against an isolated fake system service on a
+# private dbus-daemon; it never modifies or depends on the host Avahi daemon.
+AVAHI_DBUS_DISCOVERY_TEST := $(BUILD_DIR)/avahi_dbus_discovery_test
+
+$(AVAHI_DBUS_DISCOVERY_TEST): $(SHIMS_DIR)/avahi_dbus_discovery.cpp $(SHIMS_DIR)/avahi_dbus_discovery.h $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/network_discovery_protocol.h $(SHIMS_DIR)/network_discovery.h tests/avahi_dbus_discovery_test.cpp | dirs
+	@echo "=== Testing Avahi D-Bus discovery backend ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -pthread -I$(SHIMS_DIR) $(DBUS_CFLAGS) $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/avahi_dbus_discovery.cpp tests/avahi_dbus_discovery_test.cpp $(DBUS_LIBS) -o $@
+
+test-avahi-dbus-discovery: $(AVAHI_DBUS_DISCOVERY_TEST)
+	@set -eu; info="$$(dbus-daemon --session --fork --print-address=1 --print-pid=1)"; \
+	  address="$$(printf '%s\n' "$$info" | sed -n '1p')"; \
+	  pid="$$(printf '%s\n' "$$info" | sed -n '2p')"; \
+	  trap 'kill "$$pid" 2>/dev/null || true' EXIT; \
+	  DBUS_SYSTEM_BUS_ADDRESS="$$address" $(AVAHI_DBUS_DISCOVERY_TEST)
+
+# Run the embedded responder with sole control of UDP 5353 in a private
+# user/network namespace; host Avahi/systemd-resolved remains untouched.
+EMBEDDED_MDNS_DISCOVERY_TEST := $(BUILD_DIR)/embedded_mdns_discovery_test
+
+$(EMBEDDED_MDNS_DISCOVERY_TEST): $(SHIMS_DIR)/embedded_mdns_discovery.cpp $(SHIMS_DIR)/embedded_mdns_discovery.h $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/network_discovery_protocol.h $(SHIMS_DIR)/vendor/mjansson_mdns/mdns.h tests/embedded_mdns_discovery_test.cpp | dirs
+	@echo "=== Testing embedded mDNS fallback ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(SHIMS_DIR) $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/embedded_mdns_discovery.cpp tests/embedded_mdns_discovery_test.cpp -o $@
+
+test-embedded-mdns-discovery: $(EMBEDDED_MDNS_DISCOVERY_TEST)
+	@unshare --user --map-root-user --net sh -c 'set -eu; \
+	  ip link set lo up; \
+	  ip link add dummy0 type dummy; \
+	  ip link set dummy0 multicast on; \
+	  ip addr add 192.0.2.1/24 dev dummy0; \
+	  ip link set dummy0 up; \
+	  "$(EMBEDDED_MDNS_DISCOVERY_TEST)"'
+
+SDL3_NET_DISCOVERY_TRANSPORT_TEST := $(BUILD_DIR)/sdl3_net_discovery_transport_test
+
+$(SDL3_NET_DISCOVERY_TRANSPORT_TEST): $(SHIMS_DIR)/embedded_mdns_discovery.cpp $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_transport.cpp tests/sdl3_net_discovery_transport_test.cpp | dirs
+	@echo "=== Building DNS-SD to SDL_net cross-process integration ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -pthread -I$(SHIMS_DIR) $(SDL3_CFLAGS) $(SDL3_NET_CFLAGS) $(SHIMS_DIR)/network_discovery_protocol.cpp $(SHIMS_DIR)/embedded_mdns_discovery.cpp $(SHIMS_DIR)/sdl3_net_protocol.cpp $(SHIMS_DIR)/sdl3_net_transport.cpp tests/sdl3_net_discovery_transport_test.cpp $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(SDL3_LDFLAGS) $(SDL3_LIBS) -o $@
+
+test-sdl3-net-discovery-transport: $(SDL3_NET_DISCOVERY_TRANSPORT_TEST)
+	@SDL3_LIB="$(SDL3_LIB)"; SDL3_NET_LIB="$(SDL3_NET_LIB)"; export LD_LIBRARY_PATH="$$SDL3_NET_LIB:$$SDL3_LIB:$$LD_LIBRARY_PATH"; \
+	  unshare --user --map-root-user --net sh -c 'set -eu; \
+	  ip link set lo up; \
+	  ip link add dummy0 type dummy; \
+	  ip link set dummy0 multicast on; \
+	  ip addr add 192.0.2.1/24 dev dummy0; \
+	  ip link set dummy0 up; \
+	  tests/sdl3_net_discovery_transport_test.sh "$(SDL3_NET_DISCOVERY_TRANSPORT_TEST)"'
+
 # Link
 $(BINARY): $(ALL_OBJS) | dirs
-	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
+	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) $(DBUS_LIBS) -pthread -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 
 # Compilation rules
 $(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp | dirs

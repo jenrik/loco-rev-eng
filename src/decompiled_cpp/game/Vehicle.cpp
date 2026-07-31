@@ -22,7 +22,9 @@
 
 #include "Vehicle.h"
 #include "../world/EditorState.h"
-#include "core/VehicleEditor.h"
+#include "../core/VehicleEditor.h"
+#include "../network/DPlayManager.h"
+#include <new>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -140,7 +142,7 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     this->detach_flag = 0;          /* +0x2C */
     this->editor_state_2 = 0;       /* +0x8C */
     this->net_sync_flag = 0;        /* +0x68 */
-    this->_pad_70 = 0;              /* +0x70 */
+    this->network_next = nullptr;   /* +0x70 */
 
     /* Clear occupant/track slots (8 int32_t at +0x38) */
     for (int i = 0; i < 8; i++) {
@@ -224,7 +226,7 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
             /* Common initialization for both local and remote */
             this->flag_89 = 0;                  /* +0x89 */
             this->flag_8A = 0;                  /* +0x8A */
-            this->_pad_70 = 0;                  /* +0x70 (redundant, already set) */
+            this->network_next = nullptr;       /* +0x70 */
 
             if (param_3 == 0) {                 /* local vehicle */
                 this->occupancy = 2;            /* +0x64 = FULL */
@@ -246,6 +248,73 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     /* ---- SEH frame teardown ---- */
 }
 
+#ifndef _WIN32
+/** Host-only resource-independent counterpart of Vehicle::Vehicle (0x44BE50).
+ * It provides typed object/list/editor ownership for SDL_net without invoking
+ * the original pointer-based Entity resource ABI. */
+Vehicle::Vehicle(HostNetworkVehicleTag, int32_t resource_id)
+{
+    owner_handle = 1;
+    active_editor = 0;
+    editor_count = 0;
+    for (VehicleEditor*& editor : editors) editor = nullptr;
+    void* state_storage = operator_new(sizeof(EditorState));
+    editor_state = state_storage != nullptr
+        ? ::new (state_storage) EditorState(1) : nullptr;
+    max_speed = reverse_speed = max_steps = 0;
+    stop_timer = 0;
+    detach_flag = 0;
+    tile_x = tile_y = target_tile_x = target_tile_y = -1;
+    move_timer = 0;
+    for (int32_t& track : occupant_tracks) track = 0;
+    sound_guard = 0;
+    state = 0;
+    direction = 2;
+    occupancy = 0;
+    net_sync_flag = 0;
+    msg_box_count = 0;
+    network_next = nullptr;
+    tunnel_angle = field_76 = 0;
+    slot_index = 0;
+    _pad_79 = 0;
+    network_id = 0;
+    peer_index = 0;
+    _pad_7D = 0;
+    field_7E = field_80 = field_84 = field_86 = 0;
+    field_82 = _pad_83 = 0;
+    init_flag = 1;
+    flag_89 = flag_8A = _pad_8B = 0;
+    editor_state_2 = nullptr;
+    active_flag = 0;
+
+    void* storage = operator_new(sizeof(VehicleEditor));
+    if (storage != nullptr) {
+        editors[0] = ::new (storage)
+            VehicleEditor(HostNetworkEditorTag{}, resource_id, 2, 1);
+        editors[0]->target_building = this;
+    }
+}
+
+bool Vehicle::AddHostNetworkRoute(const DPlayManager& session)
+{
+    if (editors[0] == nullptr || editor_count >= 3 ||
+        editors[editor_count + 1] != nullptr) return false;
+    void* storage = operator_new(sizeof(VehicleEditor));
+    if (storage == nullptr) return false;
+    auto* editor = ::new (storage)
+        VehicleEditor(HostNetworkEditorTag{}, 0x1871, 4, 1);
+    editor->target_building = this;
+    if (!editor->SetDPlayData(&session)) {
+        editor->target_building = nullptr;
+        editor->~VehicleEditor();
+        GLOBAL_free(editor);
+        return false;
+    }
+    editors[++editor_count] = editor;
+    return true;
+}
+#endif
+
 /* ================================================================== */
 /* Vehicle::scalar deleting destructor (vtable[0])                     */
 /* Address: 0x44C0B0                                                   */
@@ -266,35 +335,32 @@ Vehicle::~Vehicle()
 /* Resets vtable, sends NETMAN ack if not initialized, destroys all     */
 /* VehicleEditor children, destroys editor state sub-object.            */
 /* ================================================================== */
-void __fastcall Vehicle::CleanupChildren(int32_t* param_1)
+void __fastcall Vehicle::CleanupChildren(int32_t* object)
 {
-    /* The destructor has already installed Vehicle's compiler-managed
-       vtable before entering this cleanup helper. */
-    uint8_t* bytes = (uint8_t*)param_1;
-
-    /* Send NETMAN ack if netman active and init flag not set */
-    if (g_netman != 0 && bytes[0x88] == 0) {             /* init_flag at +0x88 */
-        NETMAN_ReceiveAck(g_netman,
-                          (uint32_t)*(uint16_t*)(bytes + 0x7A),  /* player_id */
-                          bytes[0x78],                           /* color_r */
-                          bytes[0x7C]);                          /* color_g */
+    Vehicle* vehicle = reinterpret_cast<Vehicle*>(object);
+    if (g_netman != nullptr && vehicle->init_flag == 0) {
+        NETMAN_ReceiveAck(g_netman, vehicle->player_id,
+                          vehicle->color_r, vehicle->color_g);
     }
-
-    /* Destroy child objects in editors array at +0x10..+0x1C */
-    uint16_t count = *(uint16_t*)(bytes + 0x0C);         /* editor_count */
-    for (int32_t i = 0; i <= (int32_t)(uint32_t)count; i++) {
-        void* editor = *(void**)(bytes + 0x10 + i * 4);
-        if (editor != 0) {
-            (**(void (__thiscall***)(void*, uint8_t))editor)(editor, 1);
-            *(void**)(bytes + 0x10 + i * 4) = 0;
-        }
+    const uint16_t count = vehicle->editor_count < 4
+        ? static_cast<uint16_t>(vehicle->editor_count) : 3;
+    for (uint16_t index = 0; index <= count; ++index) {
+        VehicleEditor* editor = vehicle->editors[index];
+        if (editor == nullptr) continue;
+        // Network-only editors use target_building as their Vehicle backref;
+        // it is not a Building and must not enter Building teardown logic.
+#ifndef _WIN32
+        editor->target_building = nullptr;
+#endif
+        editor->~VehicleEditor();
+        GLOBAL_free(editor);
+        vehicle->editors[index] = nullptr;
     }
-
-    /* Destroy editor state at +0x20 */
-    if (*(void**)(bytes + 0x20) != 0) {
-        void* tail = *(void**)(bytes + 0x20);
-        (*(void (__thiscall**)(void*, uint8_t))*(void**)tail)(tail, 1);
-        *(void**)(bytes + 0x20) = 0;
+    vehicle->editor_count = 0;
+    if (vehicle->editor_state != nullptr) {
+        vehicle->editor_state->~EditorState();
+        GLOBAL_free(vehicle->editor_state);
+        vehicle->editor_state = nullptr;
     }
 }
 

@@ -25,10 +25,15 @@
 #pragma once
 
 #include "Building.h"
+#ifndef _WIN32
+#include <string>
+#include <vector>
+#endif
 
 /* Forward declarations for network-linked-list node types              */
-struct InboundTrainNode;
 struct PlayerConnectionNode;
+class DPlayManager;
+class Vehicle;
 
 /* ================================================================== */
 /* TrainEntity — Building-derived train entity                         */
@@ -284,9 +289,9 @@ public:
     uint8_t    byte_flags;          // +0x0C  packed byte flags
     uint8_t    byte_flag_2;         // +0x0D  additional byte flag (1=disconnect pending)
     int32_t    player_peer_id;      // +0x10  DirectPlay player ID for network sends
-    InboundTrainNode*  sprite_list_1;   // +0x14  active train controller list (next at +0x70)
-    InboundTrainNode*  sprite_list_2;   // +0x18  dead/orphaned train car list (next at +0x70)
-    InboundTrainNode*  sprite_list_3;   // +0x1C  multiplayer persistent train list (next at +0x70)
+    Vehicle*           sprite_list_1;   // +0x14  active train controller list (next at +0x70)
+    Vehicle*           sprite_list_2;   // +0x18  dead/orphaned train car list (next at +0x70)
+    Vehicle*           sprite_list_3;   // +0x1C  multiplayer persistent train list (next at +0x70)
     void*              field_20;        // +0x20  pointer/flag
     int32_t            some_limit;      // +0x24  initialized to 20 (0x14)
     PlayerConnectionNode* handle_list_1; // +0x28  sender attachment transfer queue
@@ -294,6 +299,31 @@ public:
     uint8_t    field_30;            // +0x30  byte flag; ctor leaves it untouched
     uint8_t    _pad_31[3];          // +0x31  padding
     int32_t    request_count;       // +0x34  count of requested asset downloads
+#ifndef _WIN32
+    struct HostReceivedAsset {
+        uint8_t mode = 0;
+        uint8_t type = 0;
+        std::vector<uint8_t> bytes;
+    };
+    struct HostAttachmentTransfer {
+        uint32_t sender = 0;
+        uint16_t train_type = 0;
+        uint16_t sequence = 0;
+        bool complete = false;
+        std::vector<uint8_t> attachment_bytes;
+        std::vector<uint8_t> final_bytes;
+    };
+    // Host-native ownership for payloads whose original endpoint was a file
+    // under PostBag/asset directories. Never imposed on the x86 layout.
+    std::vector<HostReceivedAsset> host_received_assets;
+    std::vector<HostAttachmentTransfer> host_attachment_transfers;
+    std::vector<uint8_t> host_track_build_packet;
+    std::vector<DPlayManager*> host_track_sessions;
+    std::vector<Vehicle*> host_track_vehicles;
+    int32_t host_remote_player_config = 0;
+    uint8_t host_connection_flags = 0;
+    std::string host_connection_target;
+#endif
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */
@@ -337,6 +367,11 @@ public:
      * @return       The object pointer (this).
      */
     virtual ~TrainSubsystem();
+#ifndef _WIN32
+    // Host-only ownership boundary for decoded 0x3EC session records.
+    void ClearHostTrackSessions();
+    const HostReceivedAsset* FindHostReceivedAsset(uint8_t mode, uint8_t type) const;
+#endif
 
     /* ================================================================ */
     /* Network initialization and messaging                              */
@@ -629,7 +664,7 @@ public:
      *
      * @param entity  The game entity whose assets to verify
      */
-    void DownloadMissingAssets(void* entity);
+    void DownloadMissingAssets(DPlayManager* session);
 
     /**
      * RemoveAllCars — Remove all cars from the active controller list.

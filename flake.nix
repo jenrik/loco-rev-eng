@@ -47,7 +47,8 @@
               pkg-config              # Makefile dependency discovery
 
               # ---- Networking (for Linux port) ----
-              enet                   # ENet — DirectPlay replacement
+              dbus                   # Avahi DNS-SD through the system D-Bus
+              sdl3-net               # TCP transport replacing DirectPlay
 
               # ---- GStreamer (for Linux port AVI playback) ----
               gst_all_1.gstreamer

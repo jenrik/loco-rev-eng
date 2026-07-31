@@ -116,7 +116,8 @@ class GameSession:
         stat = Path(f"/proc/{self.pid}/stat")
         try:
             fields = stat.read_text(encoding="utf-8").split()
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
+            # procfs may remove the PID after pathname lookup but before read(2).
             return False
         return len(fields) > 2 and fields[2] != "Z"
 

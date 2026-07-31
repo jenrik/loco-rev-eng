@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import getpass
+import subprocess
 import time
 
 import pytest
@@ -45,10 +46,19 @@ def latest_sequence(game) -> int:
 
 
 def select_multiplayer(game) -> None:
+    # The mapping gate can precede Sway adding its title bar by one frame; wait
+    # until client geometry has settled before converting logical coordinates.
+    time.sleep(0.2)
     # 0x407/0x408 are singleup/singledown. Only after the left click does
     # 0x422C60 enable 0x409 multipleup; that second click renders 0x40A.
-    game.click_logical(600, 550, "select single player")
+    game.click_logical(600, 550, "enable multiplayer selector")
+    # The persisted config can already have the left selector active, in which
+    # case that click is intentionally ignored. Only the final state matters.
+    time.sleep(0.1)
     game.click_logical(780, 550, "select multiplayer")
+    game.wait_for_event("menu_mode_selected", multiplayer=True)
+    # Present the resulting 0x40A frame before Accept consumes the state.
+    game.screenshot("main-menu-multiplayer-selected")
 
 
 @pytest.mark.parametrize(
@@ -122,12 +132,140 @@ def test_multiplayer_host_game_go_back_back_exits_cleanly(game):
     game.screenshot("main-menu-host-game-selected")
     game.click_logical(925, 700, "main-menu go")
     game.wait_for_event("screen_presented", screen="multiplayer_lobby", dialog_state=5)
-    game.screenshot("multiplayer-grid-host-game")
+    game.wait_for_event("transport_listening", port=23000)
+    game.wait_for_event("netman_session_ready", player_id=1, hosting=True)
+
+    admitted = subprocess.run(
+        ["build/sdl3_net_transport_test", "--admit-client", "23000"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    assert "ADMITTED id=2" in admitted.stdout
+    game.wait_for_event("netman_player_joined", player_id=2)
+    for packet_type in range(0x3EA, 0x3F0):
+        game.wait_for_event("legacy_service_applied", packet_type=packet_type)
+    game.wait_for_event(
+        "legacy_attachment_updated", sender=2, train_type=0x55, sequence=2,
+        subtype=2, attachment_bytes=4, final_bytes=3, complete=True
+    )
+    game.wait_for_event("netman_message_processed", type=0x0F)
+    game.wait_for_event(
+        "netman_vehicle_adopted", editor_count=2, network_id=0, list_depth=1
+    )
+    game.wait_for_event(
+        "legacy_asset_owned", mode=2, type=7, byte_count=3,
+        replaced=True, asset_count=1
+    )
+    game.wait_for_event(
+        "legacy_asset_consumed", mode=2, type=7, byte_count=3
+    )
+    game.wait_for_event(
+        "legacy_track_sessions_materialized", session_count=1,
+        vehicle_count=1, editor_count=2, config=0x12345678,
+        first_entry_count=128, first_signal_type=2
+    )
+    game.wait_for_event("netman_message_processed", type=0x13, flags=1)
+    game.wait_for_event("netman_message_processed", type=0x15)
+    game.wait_for_event("netman_message_processed", type=0x16, flags=1)
+    game.wait_for_event(
+        "netman_pixel_data_updated", slot=1, byte_count=4, width=2, height=2
+    )
+    game.screenshot("multiplayer-grid-host-game-ready")
 
     game.click_logical(850, 720, "multiplayer back")
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=7)
     game.screenshot("main-menu-after-grid-back")
 
+    game.click_logical(430, 700, "main-menu back/exit")
+    game.wait_for_event("mode_changed", new_mode=10)
+    game.wait_for_clean_exit()
+
+
+def test_multiplayer_ready_go_enters_loading_with_adopted_vehicle(game):
+    """A real 0x3EC Vehicle remains valid across the recovered Go handoff."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    select_multiplayer(game)
+    game.click_logical(950, 500, "select host game")
+    game.click_logical(925, 700, "main-menu go")
+    game.wait_for_event("transport_listening", port=23000)
+    game.wait_for_event("netman_session_ready", player_id=1, hosting=True)
+
+    admitted = subprocess.run(
+        ["build/sdl3_net_transport_test", "--admit-client", "23000"],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    assert "ADMITTED id=2" in admitted.stdout
+    game.wait_for_event(
+        "netman_vehicle_adopted", editor_count=2, network_id=0, list_depth=1
+    )
+    game.wait_for_event(
+        "legacy_asset_consumed", mode=2, type=7, byte_count=3
+    )
+
+    # Recovered 0x42A Go rectangle is [688,700,832,812).
+    game.click_logical(720, 720, "multiplayer ready go")
+    game.wait_for_event(
+        "netman_route_cloned", source_editors=2, clone_editors=2, list_depth=2
+    )
+    game.wait_for_event("mode_changed", new_mode=1)
+    time.sleep(0.5)
+    assert game.is_alive(), game._failure("game exited after adopted-Vehicle Go")
+    game.screenshot("multiplayer-adopted-vehicle-loading")
+
+
+def test_multiplayer_ready_go_is_exposed_after_session_projection(game):
+    """Listener projection exposes original 0x42A Go only after Netman readiness."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    select_multiplayer(game)
+    game.click_logical(950, 500, "select host game")
+    game.screenshot("main-menu-host-selected-ready-go")
+    time.sleep(0.2)  # GAMESTATE_HandleClick preserves Sleep(0x96) feedback.
+    game.click_logical(925, 700, "main-menu go")
+    game.wait_for_event("netman_session_ready", player_id=1, hosting=True)
+    game.screenshot("multiplayer-ready-go-visible")
+
+    game.click_logical(850, 720, "multiplayer back")
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=7)
+    game.click_logical(430, 700, "main-menu back/exit")
+    game.wait_for_event("mode_changed", new_mode=10)
+    game.wait_for_clean_exit()
+
+
+@pytest.mark.parametrize(
+    "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
+)
+def test_multiplayer_direct_connect_projects_host_into_netman(game):
+    """Direct endpoint text -> SDL_net admission -> recovered Netman ready fields."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    select_multiplayer(game)
+    game.click_logical(925, 700, "main-menu go")
+    game.wait_for_event("screen_presented", screen="multiplayer_lobby", dialog_state=5)
+
+    server = subprocess.Popen(
+        ["build/sdl3_net_transport_test", "--admit-server", "24000"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert server.stdout is not None
+        assert server.stdout.readline().strip() == "ADMISSION_READY 24000"
+        game.click_logical(850, 565, "focus direct connect endpoint")
+        game.type_text("127.0.0.1:24000")
+        game.press_key("Return")
+        game.wait_for_event("netman_session_ready", player_id=2, hosting=False)
+        game.wait_for_event("netman_player_joined", player_id=1)
+        game.wait_for_event("transport_connected", player_id=2)
+        game.wait_for_event("netman_message_processed", type=0x15)
+        game.wait_for_event(
+            "netman_ping_updated", dp_id=0x1234, slot=1, peer=1, x=7, y=8
+        )
+        game.screenshot("multiplayer-direct-connected-ready")
+        assert server.wait(timeout=5) == 0
+    finally:
+        if server.poll() is None:
+            server.terminate()
+            server.wait(timeout=5)
+
+    game.click_logical(850, 720, "multiplayer back")
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=7)
     game.click_logical(430, 700, "main-menu back/exit")
     game.wait_for_event("mode_changed", new_mode=10)
     game.wait_for_clean_exit()
@@ -170,7 +308,7 @@ def test_main_menu_escape_exits_cleanly(game):
 
 
 def test_game_setup_lobby_search_and_exit(game):
-    """Retain the empty DirectPlay search boundary regression."""
+    """Run asynchronous DNS-SD Search and retain the zero-session UI result."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     select_multiplayer(game)
     game.click_logical(600, 720, "player-name field")

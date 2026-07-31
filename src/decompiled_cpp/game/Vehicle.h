@@ -52,6 +52,13 @@
 
 #include "../shared/types.h"
 
+class VehicleEditor;
+class EditorState;
+class DPlayManager;
+#ifndef _WIN32
+struct HostNetworkVehicleTag {};
+#endif
+
 /* ================================================================ */
 /* Vehicle — 0x94-byte standalone class with VTBL_VEHICLE           */
 /* ================================================================ */
@@ -66,8 +73,8 @@ public:
     int32_t   active_editor;       // +0x08  0=forward, 1=reverse (direction toggle)
     int16_t   editor_count;        // +0x0C  number of active VehicleEditor refs (0-4)
     /* +0x0E: padding 2 bytes */
-    void*     editors[4];          // +0x10  VehicleEditor pointers (max 4)
-    void*     editor_state;        // +0x20  GAMESTATE_EditorState (0x20-byte sub-object)
+    VehicleEditor* editors[4];     // +0x10  VehicleEditor pointers (max 4)
+    EditorState* editor_state;      // +0x20  GAMESTATE_EditorState (0x20-byte sub-object)
     int16_t   max_speed;           // +0x24  forward speed limit
     int16_t   reverse_speed;       // +0x26  reverse speed limit
     int32_t   stop_timer;          // +0x28  stop state countdown
@@ -88,17 +95,27 @@ public:
     int32_t   net_sync_flag;       // +0x68  0=no sync, 1=needs sync, 2=synced
     int8_t    msg_box_count;       // +0x6C  message box counter
     /* +0x6D-0x6F: padding 3 bytes */
-    int32_t   _pad_70;             // +0x70  always 0 (unused)
-    /* +0x74-0x77: padding 4 bytes */
-    uint8_t   color_r;             // +0x78  player color R component
-    /* +0x79: padding 1 byte */
-    uint16_t  player_id;           // +0x7A  owning player ID
-    uint8_t   color_g;             // +0x7C  player color G component
-    /* +0x7D-0x87: padding 11 bytes */
-    uint8_t   init_flag;           // +0x88  initialization mode flag (from ctor param_4)
-    uint8_t   flag_89;             // +0x89  unknown flag
+    union {
+        Vehicle* network_next;
+        Vehicle* next;
+    };                              // +0x70  inbound-list link (x86 pointer)
+    uint16_t  tunnel_angle;        // +0x74  inbound tunnel direction/timeout
+    uint16_t  field_76;            // +0x76  inbound metadata
+    union { uint8_t color_r; uint8_t slot_index; }; // +0x78
+    uint8_t   _pad_79;             // +0x79
+    union { uint16_t player_id; uint16_t network_id; }; // +0x7A
+    union { uint8_t color_g; uint8_t peer_index; }; // +0x7C
+    uint8_t   _pad_7D;             // +0x7D
+    uint16_t  field_7E;            // +0x7E
+    uint16_t  field_80;            // +0x80
+    uint8_t   field_82;            // +0x82
+    uint8_t   _pad_83;             // +0x83
+    uint16_t  field_84;            // +0x84
+    uint16_t  field_86;            // +0x86
+    union { uint8_t init_flag; uint8_t process_delay; }; // +0x88
+    union { uint8_t flag_89; uint8_t ack_counter; }; // +0x89
     uint8_t   flag_8A;             // +0x8A  unknown flag
-    /* +0x8B: padding 1 byte */
+    uint8_t   _pad_8B;             // +0x8B
     void*     editor_state_2;      // +0x8C  secondary editor state pointer
     uint8_t   active_flag;         // +0x90  active/update flag
     /* Total: 0x94 bytes */
@@ -131,6 +148,11 @@ public:
      * @param param_4  uint8_t  — initialization mode
      */
     Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t param_4);
+#ifndef _WIN32
+    // Native-layout-safe remote vehicle used by the SDL_net 0x3EC path.
+    Vehicle(HostNetworkVehicleTag, int32_t resource_id);
+    bool AddHostNetworkRoute(const DPlayManager& session);
+#endif
 
     /**
      * Scalar deleting destructor (vtable[0]).
