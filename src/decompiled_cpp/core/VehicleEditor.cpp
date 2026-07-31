@@ -10,7 +10,9 @@
 #include "VehicleEditor.h"
 #include "../game/Building.h"
 #include "../game/Vehicle.h"
+#include "../network/DPlayManager.h"
 #include <cmath>
+#include <new>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -69,7 +71,15 @@ extern void    UIPANEL_Blit(void* panel, int dst_l, int dst_t, int dst_r, int ds
 /* ================================================================== */
 VehicleEditor::VehicleEditor(int res_id, int param_2, char flag) : Entity(res_id, -1, 0, 0)
 {
-    DPLAY_CreatePlayer(this->dplay_data);
+#ifdef _WIN32
+    auto* embedded_dplay = ::new (this->dplay_data) DPlayManager;
+    embedded_dplay->CreatePlayer();
+#else
+    void* dplay_storage = operator_new(sizeof(DPlayManager));
+    this->host_dplay_data = dplay_storage != nullptr
+        ? ::new (dplay_storage) DPlayManager : nullptr;
+    if (this->host_dplay_data != nullptr) this->host_dplay_data->CreatePlayer();
+#endif
     /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     this->end_a = nullptr;
@@ -109,6 +119,33 @@ VehicleEditor::VehicleEditor(int res_id, int param_2, char flag) : Entity(res_id
     this->visible = 0;
 }
 
+#ifndef _WIN32
+/** Host-only network editor: preserves 0x40D500 logical state without
+ * invoking Entity::InitBase on the original pointer-based resource ABI. */
+VehicleEditor::VehicleEditor(HostNetworkEditorTag, int resource_id,
+                             int secondary_resource_id, char flag)
+    : Entity(0, -1, 0, 0)
+{
+    void* dplay_storage = operator_new(sizeof(DPlayManager));
+    this->host_dplay_data = dplay_storage != nullptr
+        ? ::new (dplay_storage) DPlayManager : nullptr;
+    if (this->host_dplay_data != nullptr) this->host_dplay_data->CreatePlayer();
+    this->dplay_initialized = 0;
+    this->end_a = new EditorState(flag);
+    this->end_b = new EditorState(flag);
+    this->target_building = nullptr;
+    this->res_id = resource_id;
+    this->res_id_2 = secondary_resource_id;
+    this->angle_frame = 0;
+    this->second_angle = 0;
+    this->unknown_flag = 0;
+    this->edge_dir_a = flag == 0 ? 0 : 2;
+    this->edge_dir_b = flag == 0 ? 2 : 0;
+    this->bound_check_flag = 0;
+    SetRect(&this->screen_rect, 0, 0, 0, 0);
+    this->visible = 0;
+}
+#endif
 
 /* ================================================================== */
 /* VehicleEditor destructor (vtable[0] scalar deleting wrapper at      */
@@ -141,7 +178,15 @@ VehicleEditor::~VehicleEditor()
         this->target_building = nullptr;
     }
 
-    DPLAY_CleanupPlayer((uint32_t*)(this->dplay_data));
+#ifdef _WIN32
+    reinterpret_cast<DPlayManager*>(this->dplay_data)->~DPlayManager();
+#else
+    if (this->host_dplay_data != nullptr) {
+        this->host_dplay_data->~DPlayManager();
+        GLOBAL_free(this->host_dplay_data);
+        this->host_dplay_data = nullptr;
+    }
+#endif
     GameObject_DtorBody(this);
 }
 
@@ -661,22 +706,35 @@ uint32_t VehicleEditor::GetResourceId()
 /**
  * GetDPlayData — Get pointer to DPLAY network data if initialized.
  * Address: 0x40D750
- * TODO: decompile 0x40D750
  */
-uint8_t* VehicleEditor::GetDPlayData()
+DPlayManager* VehicleEditor::GetDPlayData()
 {
-    /* TODO: decompile 0x40D750 */
-    return nullptr;
+    if (this->dplay_initialized == 0) return nullptr;
+#ifdef _WIN32
+    return reinterpret_cast<DPlayManager*>(this->dplay_data);
+#else
+    return this->host_dplay_data;
+#endif
 }
 
 /**
  * SetDPlayData — Copy network data into the editor's DPLAY buffer.
  * Address: 0x40D770
- * TODO: decompile 0x40D770
  */
-int VehicleEditor::SetDPlayData(void* data)
+int VehicleEditor::SetDPlayData(const DPlayManager* data)
 {
-    (void)data;
-    /* TODO: decompile 0x40D770 */
-    return 0;
+    if (this->dplay_initialized != 0 && data != nullptr) return 0;
+    if (data == nullptr) {
+        this->dplay_initialized = 0;
+        return 1;
+    }
+#ifdef _WIN32
+    auto* destination = reinterpret_cast<DPlayManager*>(this->dplay_data);
+#else
+    auto* destination = this->host_dplay_data;
+#endif
+    if (destination == nullptr) return 0;
+    destination->CopyLogicalStateFrom(*data);
+    this->dplay_initialized = 1;
+    return 1;
 }

@@ -131,7 +131,6 @@ void GetOpenFileNameA() {}
 void NET_GetOrCreateSurface() {}
 void NET_UploadAsset() {}
 void PlaySoundFile() {}
-void STR_Default() {}
 void TileMap_CreateOverlay() {}
 void FMT_LAYOUT_PATH() {}
 void RESMGR_ResourceData_Init() {}

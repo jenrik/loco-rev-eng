@@ -148,9 +148,20 @@ public:
     ButtonSprite* layoutSprite[9];      // +0x23C..+0x25C
 
 #ifndef _WIN32
-    // SDL DirectPlay has no session provider. This records completion of the
-    // original Search control's empty-session scan without changing x86 ABI.
+    // Host-only discovery lifecycle; owned platform handles remain on the
+    // dedicated discovery worker and never enter this decompiled class.
+    bool hostSearchRequested = false;
     bool hostSearchCompleted = false;
+    bool hostSearchEventEmitted = false;
+    bool hostTransportRequested = false;
+    bool hostTransportEventEmitted = false;
+    bool hostDiscoveryPublished = false;
+    bool hostJoinRequested = false;
+    bool hostSessionReady = false;
+    bool hostDirectConnectFocused = false;
+    char hostDirectConnectText[256] = {};
+    uint8_t hostPublishedPlayers = 0;
+    int hostSelectedDiscoveryIndex = -1;
     // GAMESTATE_HandleClick (0x40A548 et seq.) displays frame 1 and blocks
     // for 150 ms before completing each main lobby-control action.
     uint8_t hostPressedControl = 0;
@@ -386,5 +397,7 @@ public:
      * dispatches the controls currently rendered by hostRenderFrame().
      */
     void hostHandlePointer(float display_x, float display_y, bool pressed);
+    bool hostHandleKey(int32_t key_code);
+    void hostHandleTextInput(const char* utf8_text);
 #endif
 };

@@ -15,6 +15,9 @@
 #include "Game.h"
 #include "../game/PlayerConfig.h"
 #include "../shared/types.h"
+#ifndef _WIN32
+#include "../../sdl3_shims/sdl3_net_game_bridge.h"
+#endif
 #include <cstdio>
 
 /* ================================================================== */
@@ -74,6 +77,9 @@ extern void*    g_train;             /* 0x4FD3A4 */
 extern void*    g_train_resources;   /* 0x4FD394 */
 extern void*    g_game_config;       /* 0x4FD3A8 */
 extern void*    g_netman;            /* 0x4FD3AC */
+#ifndef _WIN32
+extern Netman*  _g_netman;           /* stale translated alias of 0x4FD3AC */
+#endif
 extern void*    g_dplay;             /* 0x4FD3B0 */
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 */
 extern void*    g_dplay_config;      /* 0x4FD3B4 */
@@ -171,8 +177,13 @@ extern "C" int GameLoop_Setup(void* cgwnd)
 
     /* Allocate NETMAN (0x804 bytes) */
     trace_setup_stage("step 3c: Netman");
+#ifdef _WIN32
     mem = operator_new(0x804);
     g_netman = mem ? NETMAN_constructor(mem) : nullptr;
+#else
+    g_netman = lego_loco::network::CreateHostNetman();
+    _g_netman = static_cast<Netman*>(g_netman);
+#endif
 
     /* Allocate DirectPlay (0xBE4 bytes) */
     trace_setup_stage("step 3d: DirectPlay");
@@ -270,6 +281,14 @@ extern "C" void GameLoop_FrameUpdate(void)
 
     /* Step 3: Network update */
     if (g_netman) {
+#ifndef _WIN32
+        if (g_train && g_player_config) {
+            lego_loco::network::PumpTransportIntoGame(
+                static_cast<Netman*>(g_netman),
+                static_cast<TrainSubsystem*>(g_train),
+                g_player_config->name);
+        }
+#endif
         NETMAN_Update(g_netman);
     }
 

@@ -162,6 +162,11 @@ public:
      * @return         Pointer to this (the populated player slot)
      */
     DPlayManager* DestroyPlayer(const void* session);
+#ifndef _WIN32
+    /** Host wire adapter for one original 0x390-byte DPLAY_SessionData.
+     *  Layout evidence: DPlayManager::DestroyPlayer, address 0x4428E0. */
+    bool LoadLegacySessionWire(const uint8_t* session, size_t size);
+#endif
 
     /**
      * CleanupPlayer — Reset vtable (exception handler safety).
@@ -200,6 +205,8 @@ public:
      * @param source  Source player slot to copy from
      */
     void InitPlayerSlot(const DPlayManager* source);
+    // Layout-safe equivalent used by typed editor/session state.
+    void CopyLogicalStateFrom(const DPlayManager& source);
 
     /**
      * FreePlayerSlot — Convert this slot to compact packet format.
@@ -436,6 +443,7 @@ struct DPLAY_SessionData {
 /* Extern declarations for globals used by these functions              */
 /* ================================================================== */
 
-extern void* g_player_config;   /* 0x4AA4A8 — PlayerConfig singleton */
+class PlayerConfig;
+extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern char  g_empty_string;    /* 0x4851D0 — empty string constant  */
 extern void* g_primary_surface; /* 0x4FD3C4 — primary DDraw surface  */

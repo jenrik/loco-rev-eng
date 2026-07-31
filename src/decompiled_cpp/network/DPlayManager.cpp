@@ -6,6 +6,7 @@
  */
 
 #include "DPlayManager.h"
+#include "../game/PlayerConfig.h"
 #include <new>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
@@ -73,7 +74,7 @@ void __cdecl GLOBAL_free(void* ptr);
 /* Global variables referenced                                         */
 /* ================================================================== */
 
-extern void* g_player_config;    /* 0x4AA4A8 — PlayerConfig singleton */
+extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern char  g_empty_string;     /* 0x4851D0 — empty string constant  */
 extern void* g_primary_surface;  /* 0x4FD3C4 — primary DDraw surface  */
 
@@ -263,11 +264,8 @@ void __fastcall DPlayManager::CreatePlayer()
     m_unknown93 = 0;                            /* +0x93 */
     m_configId = 0;                             /* +0x0C */
 
-    /* Copy player color ID from global config */
-    {
-        void* config = *(void**)0x4AA4A8;       /* g_player_config */
-        m_colorId = *(int32_t*)((uintptr_t)config + 0x18);  /* +0x08 */
-    }
+    /* 0x44289C reads the canonical PlayerConfig field at original +0x18. */
+    m_colorId = g_player_config != nullptr ? g_player_config->player_id : 0;
 
     m_playerType = 0;                           /* +0x94 */
     m_playerTrack = 0;                          /* +0x95 */
@@ -321,6 +319,41 @@ DPlayManager* __thiscall DPlayManager::DestroyPlayer(const void* session_ptr)
     m_magic = 0x66;
     return this;
 }
+
+#ifndef _WIN32
+/** Host wire adapter corresponding to DPlayManager::DestroyPlayer (0x4428E0).
+ * Native vptr width makes reinterpret_cast<DPLAY_SessionData*> invalid. */
+bool DPlayManager::LoadLegacySessionWire(const uint8_t* session, size_t size)
+{
+    if (session == nullptr || size != 0x390) return false;
+    inline_memcpy(m_sessionBlk1, session + 0x08, sizeof(m_sessionBlk1));
+    inline_memcpy(m_sessionBlk2, session + 0x1D, sizeof(m_sessionBlk2));
+    m_wordValue = static_cast<uint16_t>(session[0x32]) |
+                  static_cast<uint16_t>(session[0x33] << 8);
+    m_dwordValue = static_cast<int32_t>(
+        static_cast<uint32_t>(session[0x34]) |
+        (static_cast<uint32_t>(session[0x35]) << 8) |
+        (static_cast<uint32_t>(session[0x36]) << 16) |
+        (static_cast<uint32_t>(session[0x37]) << 24));
+    m_flag40 = session[0x38];
+    m_flag41 = session[0x39];
+    m_flag42 = session[0x3A];
+    inline_memcpy(m_playerName, session + 0x3B, sizeof(m_playerName));
+    m_unknown93 = session[0x8B];
+    m_playerType = session[0x8C];
+    m_playerTrack = session[0x8D];
+    const uint16_t wire_count = static_cast<uint16_t>(session[0x8E]) |
+                                static_cast<uint16_t>(session[0x8F] << 8);
+    const uint16_t entry_count = wire_count > 128 ? 128 : wire_count;
+    inline_memcpy(m_trackEntries, session + 0x90, entry_count * 6);
+    for (uint16_t index = entry_count; index < 128; ++index) {
+        m_trackEntries[index * 6] = 0;
+        m_trackEntries[index * 6 + 1] = 0;
+    }
+    m_magic = 0x66;
+    return true;
+}
+#endif
 
 /* ================================================================== */
 /* CleanupPlayer — 0x442A00                                           */
@@ -376,6 +409,26 @@ void __thiscall DPlayManager::InitPlayerSlot(const DPlayManager* source)
     *(int32_t*)((uintptr_t)this + 0x32) = *(int32_t*)((uintptr_t)source + 0x32);  /* +0x32 */
     *(uint8_t*)((uintptr_t)this + 0x36) = *(uint8_t*)((uintptr_t)source + 0x36);  /* +0x36 */
     *(int32_t*)((uintptr_t)this + 0x48) = *(int32_t*)((uintptr_t)source + 0x48);  /* +0x48 */
+}
+
+void DPlayManager::CopyLogicalStateFrom(const DPlayManager& source)
+{
+    m_magic = source.m_magic;
+    m_colorId = source.m_colorId;
+    m_configId = source.m_configId;
+    inline_memcpy(m_sessionBlk1, source.m_sessionBlk1, sizeof(m_sessionBlk1));
+    inline_memcpy(m_sessionBlk2, source.m_sessionBlk2, sizeof(m_sessionBlk2));
+    m_flag39 = source.m_flag39;
+    m_wordValue = source.m_wordValue;
+    m_dwordValue = source.m_dwordValue;
+    m_flag40 = source.m_flag40;
+    m_flag41 = source.m_flag41;
+    m_flag42 = source.m_flag42;
+    inline_memcpy(m_playerName, source.m_playerName, sizeof(m_playerName));
+    m_unknown93 = source.m_unknown93;
+    m_playerType = source.m_playerType;
+    m_playerTrack = source.m_playerTrack;
+    inline_memcpy(m_trackEntries, source.m_trackEntries, sizeof(m_trackEntries));
 }
 
 /* ================================================================== */

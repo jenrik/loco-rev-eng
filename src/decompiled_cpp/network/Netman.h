@@ -73,7 +73,9 @@
 #pragma once
 
 #include "../shared/types.h"
+#include "TrainMessage.h"
 #include "../resources/ResourceManager.h"
+#include "../game/Vehicle.h"
 class AssetMgr;  /* forward declaration for g_asset_mgr */
 
 /* ================================================================== */
@@ -97,22 +99,7 @@ class AssetMgr;  /* forward declaration for g_asset_mgr */
 /* ================================================================== */
 
 class Building;
-
-/* ================================================================== */
-/* TrainMessage — 0x1C-byte message structure queued to _g_train       */
-/*                                                                      */
-/* Used for both in-process messages (type 0x19 / 0x1B) and network    */
-/* data messages (type 6, with inner packet payload).                   */
-/* ================================================================== */
-struct TrainMessage {
-    int32_t  type;              /* +0x00  message type                   */
-    int32_t  data_len;          /* +0x04  length of attached data        */
-    void*    data_ptr;          /* +0x08  pointer to data payload        */
-    int32_t  target_dpId;       /* +0x0C  target DirectPlay ID           */
-    int32_t  flags;             /* +0x10  queue/processing flags         */
-    int32_t  _pad_14;           /* +0x14  (unused/padding)               */
-    void*    next;              /* +0x18  linked list next pointer       */
-};
+class PlayerConfig;
 
 /* ================================================================== */
 /* PingEntry — per-ping tracking node (0x14 bytes)                     */
@@ -141,36 +128,7 @@ struct PingEntry {
 /* fields. Pass 3 (INTEGRATED) should resolve the Vehicle/InboundTrain  */
 /* relationship, potentially through a common base or union.            */
 /* ================================================================== */
-struct InboundTrainNode {
-    /* +0x00: compiler-managed vtable pointer */
-    void*     vtable;            /* +0x00  vtable (set by Vehicle_Ctor)  */
-
-    /* +0x04..+0x6F: Vehicle fields (shared with Vehicle allocation) */
-    uint8_t   vehicle_payload[0x6C]; /* +0x04  inherited from Vehicle   */
-
-    /* +0x70..+0x93: Network metadata (repurposed Vehicle padding) */
-    union {
-        InboundTrainNode* next;  /* +0x70  linked-list next pointer      */
-        int32_t           _pad_70_raw; /* ensure 4-byte alignment        */
-    };
-    uint16_t  tunnel_angle;      /* +0x74  tunnel exit angle (0,0x5A,0xB4,0x10E) */
-    uint16_t  field_76;          /* +0x76  unknown uint16_t              */
-    uint8_t   slot_index;        /* +0x78  source player slot index      */
-    uint8_t   _pad_79;           /* +0x79  padding                       */
-    uint16_t  network_id;        /* +0x7A  network-assigned node ID      */
-    uint8_t   peer_index;        /* +0x7C  peer routing index            */
-    uint8_t   _pad_7D;           /* +0x7D  padding                       */
-    uint16_t  field_7E;          /* +0x7E  unknown uint16_t              */
-    uint16_t  field_80;          /* +0x80  unknown uint16_t              */
-    uint8_t   field_82;          /* +0x82  unknown uint8_t               */
-    uint8_t   _pad_83;           /* +0x83  padding                       */
-    uint16_t  field_84;          /* +0x84  unknown uint16_t              */
-    uint16_t  field_86;          /* +0x86  unknown uint16_t              */
-    uint8_t   process_delay;     /* +0x88  process delay counter         */
-    uint8_t   ack_counter;       /* +0x89  ack countdown (decremented)   */
-    uint8_t   _pad_8A[10];       /* +0x8A..+0x93  remaining padding     */
-    /* Total: 0x94 bytes (matches Vehicle allocation size) */
-};
+using InboundTrainNode = Vehicle;
 
 /* ================================================================== */
 /* CarObject — minimal forward-declared type for car handles            */
@@ -352,6 +310,17 @@ public:
      * Address: 0x43D2B0
      */
     void SetGameMode(int32_t newMode);
+
+#ifndef _WIN32
+    // Host transport projection. These fields mirror the state established
+    // by NETMAN_ProcessMessage type 3 and NETMAN_SetGameMode, but SDL_net
+    // supplies virtual player IDs instead of DirectPlay DPIDs.
+    void HostBeginTransportSession(bool hosting, int32_t localPlayerId,
+                                   const char* localPlayerName);
+    void HostAddTransportPlayer(int32_t playerId, const char* playerName);
+    void HostRemoveTransportPlayer(int32_t playerId);
+    void HostEndTransportSession();
+#endif
 
     /* ================================================================ */
     /* Network Data Send Methods                                         */
@@ -892,7 +861,7 @@ extern void*    _g_dplay;             /* 0x4FD3A8 — DPLAY/NetworkPlayerList in
 extern void*    _g_dplay_config;      /* 0x4FD3AC — DPLAY config instance */
 extern int32_t  g_object_count;       /* 0x4AAD04 — object count       */
 extern Netman*  _g_netman;            /* 0x4FD3AC — Netman singleton pointer */
-extern void*    g_player_config;      /* 0x4AA4A8 — PlayerConfig singleton */
+extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern char     g_empty_string;       /* 0x4851D0 — empty string constant  */
 
 /* -- CRT helpers (C++ linkage) -- */

@@ -18,6 +18,17 @@
 #include "../resources/ResourceManager.h"
 #include "WndProcStream.h"
 
+#ifndef _WIN32
+#include "EditWindow.h"
+#include "../../sdl3_shims/discovery_runtime.h"
+#include "../../sdl3_shims/sdl3_net_runtime.h"
+#include "../../sdl3_shims/sdl3_net_game_bridge.h"
+#include "../game/Train.h"
+#include "../../sdl3_shims/sdl3_ddraw.h"
+#include "../../sdl3_shims/host_test_events.h"
+#include "../../sdl3_shims/sdl3_game_audio.h"
+#endif
+
 /* AssetMgr forward-declared (struct matches AssetMgr.h layout);
    AssetMgr_LoadFile declared in Netman.h */
 /* TODO: include AssetMgr.h directly once OutputDebugStringA conflict is resolved */
@@ -79,6 +90,9 @@ extern void   UIPANEL_EndPaintEx(void* self, HWND hWnd,
 
 /* UI_CenterWindow — TODO: decompile 0x425A50 */
 extern void   UI_CenterWindow(void* param1, void* param2); /* 0x425A50 */
+#ifndef _WIN32
+extern void   CGWND_SetMode(int mode);
+#endif
 
 
 /* ================================================================== */
@@ -94,6 +108,10 @@ extern void   UI_CenterWindow(void* param1, void* param2); /* 0x425A50 */
    0x4FD3AC is the Netman singleton (written by GameLoop_Setup @ 0x406C9D).
    _g_dplay is at 0x4FD3A8 (written by GameLoop_Setup @ 0x406C6C). */
 extern Netman* _g_netman;              /* 0x4FD3AC — network manager singleton */
+#ifndef _WIN32
+extern char* _g_netman_state;           /* 0x4FD3A8 — host/join menu selection */
+extern void* _g_train;                   /* 0x4FD3A4 — TrainSubsystem */
+#endif
 /* g_resmgr now declared in ResourceManager.h (included above) */
 /* g_asset_mgr declared as AssetMgr* in Netman.h; typed access available */
 extern void* g_font_normal;           /* 0x4855F0 — normal UI font handle */
@@ -194,6 +212,18 @@ void GameSetupPanel::init()
 /* ================================================================== */
 void GameSetupPanel::base_destructor()
 {
+#ifndef _WIN32
+    if (this->hostSearchRequested || this->hostDiscoveryPublished) {
+        lego_loco::network::HostDiscoveryWorker().StopDiscovery();
+        this->hostSearchRequested = false;
+        this->hostDiscoveryPublished = false;
+    }
+    if (this->hostTransportRequested || this->hostJoinRequested) {
+        lego_loco::network::HostTransportWorker().StopTransport();
+        this->hostTransportRequested = false;
+        this->hostJoinRequested = false;
+    }
+#endif
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Free title list linked list (+0xEC) */
@@ -995,10 +1025,6 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
 }
 
 #ifndef _WIN32
-#include "EditWindow.h"
-#include "../../sdl3_shims/host_test_events.h"
-#include "../../sdl3_shims/sdl3_game_audio.h"
-
 /* ================================================================== */
 /* GameSetupPanel::hostRenderFrame — SDL3 host composition              */
 /* Assembly basis: GameSetupPanel::render (0x409280), drawGrid          */
@@ -1031,6 +1057,7 @@ extern "C" SDL_Renderer* SDL3_GetRenderer(void);
 
 namespace {
 constexpr uint32_t kLobbyBackdropResource = 0x439;  // startup\apback.bmp
+constexpr uint32_t kGoResource = 0x42A;               // startup\apgo.bmp
 constexpr uint32_t kExitResource = 0x42C;             // startup\apExit.bmp
 constexpr uint32_t kSearchResource = 0x429;           // startup\apsearch.bmp
 constexpr uint32_t kOptionsResource = 0x42B;          // startup\apoption.bmp
@@ -1075,6 +1102,15 @@ constexpr int kExitLeft = kWorkingLeft + kWorkingAreaWidth - 208;
 constexpr int kExitTop = kGridTop + 0x1C0;
 constexpr int kOptionsLeft = kGridLeft + 0x20C;
 constexpr int kOptionsTop = kGridTop + 0x162;
+// 0x409149..0x409197 positions resource 0x42A immediately left of Exit,
+// one pixel below its top edge. 0x42A decodes to two 144x120 frames.
+constexpr int kGoLeft = kExitLeft - 144;
+constexpr int kGoTop = kExitTop + 1;
+// Host-only Direct Connect field occupies the bottom of the list interior.
+constexpr int kDirectLeft = kLayoutTextLeft;
+constexpr int kDirectTop = kLayoutTextBottom - 28;
+constexpr int kDirectRight = kLayoutTextRight;
+constexpr int kDirectBottom = kLayoutTextBottom;
 
 struct HostGridLayout {
     const char* label;
@@ -1180,6 +1216,37 @@ void host_apply_layout(GameSetupPanel& panel, int index)
                                           layout.display_columns * layout.display_rows);
 }
 
+const lego_loco::network::EndpointCandidate* host_preferred_endpoint(
+    const lego_loco::network::DiscoveredSession& session)
+{
+    for (const auto& endpoint : session.endpoints) {
+        if (endpoint.host_or_numeric_address.find('.') != std::string::npos &&
+            endpoint.host_or_numeric_address.find(".local.") == std::string::npos) return &endpoint;
+    }
+    for (const auto& endpoint : session.endpoints) {
+        if (endpoint.host_or_numeric_address.find(".local.") == std::string::npos) return &endpoint;
+    }
+    // Do not hand an unresolved .local SRV target to SDL_net; wait for the
+    // backend's A/AAAA update so joining is independent of host NSS setup.
+    return nullptr;
+}
+
+std::string host_endpoint_address(const lego_loco::network::EndpointCandidate& endpoint)
+{
+    if (endpoint.scope_id != 0 && endpoint.host_or_numeric_address.find(':') != std::string::npos)
+        return endpoint.host_or_numeric_address + "%" + std::to_string(endpoint.scope_id);
+    return endpoint.host_or_numeric_address;
+}
+
+int host_discovery_session_at(float canvas_x, float canvas_y, std::size_t count)
+{
+    if (canvas_x < kLayoutTextLeft || canvas_x >= kLayoutTextRight ||
+        canvas_y < kLayoutTextTop || canvas_y >= kLayoutTextBottom) return -1;
+    const int row = static_cast<int>((canvas_y - kLayoutTextTop) / kOriginalListLineStep);
+    const int index = row - kHostGridLayoutCount;
+    return index >= 0 && static_cast<std::size_t>(index) < count ? index : -1;
+}
+
 int host_layout_at(float canvas_x, float canvas_y)
 {
     // drawLayoutList (0x409635..0x409642) applies 12px inner padding then
@@ -1219,12 +1286,50 @@ bool host_blit_frame(uint32_t resource_id, int frame, int frame_width, int frame
 
 enum class HostLobbyControl : uint8_t {
     None,
+    Go,
     Exit,
     Search,
     Options,
 };
 
 constexpr uint64_t kLobbyPressDurationMs = 150;  // Sleep(0x96) at 0x40A591 etc.
+
+std::string host_network_player_name()
+{
+    if (_g_netman_state != nullptr) {
+        const char* name = _g_netman_state + 0x6C;
+        const std::size_t length = strnlen(name, 11);
+        if (length != 0) return std::string(name, length);
+    }
+    return "Player";
+}
+
+lego_loco::network::SessionAdvertisement host_advertisement(
+    const lego_loco::network::TransportRuntimeSnapshot& transport)
+{
+    lego_loco::network::SessionAdvertisement advertisement;
+    advertisement.session_uuid = transport.session_uuid;
+    advertisement.display_name = "Lego Loco Game";
+    advertisement.transport_version = lego_loco::network::kTransportVersion;
+    advertisement.legacy_version = lego_loco::network::kLegacyProtocolVersion;
+    advertisement.current_players = transport.player_count;
+    advertisement.max_players = 9;
+    advertisement.tcp_port = transport.port;
+    return advertisement;
+}
+
+void host_stop_network(GameSetupPanel& panel)
+{
+    lego_loco::network::HostDiscoveryWorker().StopDiscovery();
+    lego_loco::network::HostTransportWorker().StopTransport();
+    if (_g_netman != nullptr) _g_netman->HostEndTransportSession();
+    panel.hostSearchRequested = false;
+    panel.hostDiscoveryPublished = false;
+    panel.hostTransportRequested = false;
+    panel.hostJoinRequested = false;
+    panel.hostSessionReady = false;
+    panel.hostDirectConnectFocused = false;
+}
 
 HostLobbyControl host_pressed_control(const GameSetupPanel& panel)
 {
@@ -1234,24 +1339,53 @@ HostLobbyControl host_pressed_control(const GameSetupPanel& panel)
 void host_complete_lobby_control(GameSetupPanel& panel, HostLobbyControl control)
 {
     switch (control) {
+    case HostLobbyControl::Go:
+        if (panel.hostSessionReady && _g_netman != nullptr &&
+            _g_netman->m_bInit != 0 && _g_netman->m_bFlag1 != 0) {
+            _g_netman->SetGameMode(2);
+            if (g_editwindow_ptr != nullptr) {
+                // State 6 selects the mode-1 loading transition. As with host
+                // Exit, native SDL composition does not need Win32 child HWND
+                // hides before changing the recovered state/mode.
+                g_editwindow_ptr->dialogState = 6;
+                CGWND_SetMode(1);
+            }
+        }
+        return;
+
     case HostLobbyControl::Exit:
         // 0x40A65C..0x40A709: reset session state, then state 7.
+        host_stop_network(panel);
         if (g_editwindow_ptr != nullptr) {
-            g_editwindow_ptr->setState(7);
+            // The SDL compositor selects the main-menu frame from this same
+            // recovered state. Avoid re-entering the Win32 child-window Hide
+            // chain after native transport teardown; those HWND operations have
+            // no host presentation role.
+            g_editwindow_ptr->dialogState = 7;
             panel.titleDrawnFlag = 0;
         }
         return;
 
     case HostLobbyControl::Search:
-        // 0x40A70C..0x40A82A starts a client search. The SDL DirectPlay
-        // boundary is deliberately empty, so retain the completed empty scan.
+        // 0x40A70C..0x40A82A starts the client session enumeration. The host
+        // substitutes the typed DNS-SD worker while preserving this click path.
         if (g_editwindow_ptr != nullptr && g_editwindow_ptr->dialogState == 5) {
-            panel.hostSearchCompleted = true;
-            loco::host_test::emit_search_completed(0);
+            panel.hostSearchRequested = true;
+            panel.hostSearchCompleted = false;
+            panel.hostSearchEventEmitted = false;
+            const lego_loco::network::TransportRuntimeSnapshot transport =
+                lego_loco::network::HostTransportWorker().Snapshot();
+            const std::optional<lego_loco::network::SessionAdvertisement> publication =
+                transport.state == lego_loco::network::TransportRuntimeState::Listening
+                    ? std::optional<lego_loco::network::SessionAdvertisement>(
+                        host_advertisement(transport))
+                    : std::nullopt;
+            lego_loco::network::HostDiscoveryWorker().Start({true, publication});
         }
         return;
 
     case HostLobbyControl::Options:
+        host_stop_network(panel);
         // 0x40A873..0x40A908 returns through state 2. NameEntryPanel has no
         // SDL compositor, so state 7 remains the explicit host presentation
         // fallback after preserving the recovered state-2 transition.
@@ -1274,13 +1408,16 @@ bool host_lobby_contains(int left, int top, int width, int height,
     return x >= left && x < left + width && y >= top && y < top + height;
 }
 
-HostLobbyControl host_lobby_control_at(float canvas_x, float canvas_y)
+HostLobbyControl host_lobby_control_at(float canvas_x, float canvas_y, bool ready)
 {
     // The first three PtInRect checks in 0x40A4E0 use ButtonSprite rects
     // for Go (0x42A), Exit (0x42C), and Search (0x429).  Go is only drawn
-    // after a DirectPlay session is available; the SDL DirectPlay boundary
-    // currently reports no sessions, so only the three controls composed in
-    // hostRenderFrame() are candidates here.
+    // after a session is selected and the gameplay transport is ready. DNS-SD
+    // Search now supplies typed session rows, but joining remains disabled until
+    // the SDL_net handshake path is integrated.
+    if (ready && host_lobby_contains(kGoLeft, kGoTop, 144, 112, canvas_x, canvas_y)) {
+        return HostLobbyControl::Go;
+    }
     if (host_lobby_contains(kExitLeft, kExitTop, 144, 112, canvas_x, canvas_y)) {
         return HostLobbyControl::Exit;
     }
@@ -1297,6 +1434,75 @@ HostLobbyControl host_lobby_control_at(float canvas_x, float canvas_y)
 
 void GameSetupPanel::hostRenderFrame()
 {
+    const bool network_lobby = g_editwindow_ptr != nullptr &&
+                               g_editwindow_ptr->dialogState == 5;
+    if (network_lobby && _g_netman != nullptr && _g_train != nullptr) {
+        lego_loco::network::PumpTransportIntoGame(
+            _g_netman, static_cast<TrainSubsystem*>(_g_train),
+            host_network_player_name().c_str());
+        // The Win32 build runs 0x43F0C0 from its timer-driven game loop.
+        // Mode-2 host composition is the guaranteed host heartbeat.
+        _g_netman->Update();
+    }
+    const bool hosting = network_lobby && _g_netman_state != nullptr &&
+                         _g_netman_state[8] != 0;
+    if (hosting && !this->hostTransportRequested) {
+        this->hostTransportRequested = true;
+        this->hostSessionReady = false;
+        this->hostTransportEventEmitted = false;
+        lego_loco::network::HostTransportWorker().StartHost({
+            lego_loco::network::kDefaultLegoLocoPort, 9,
+            host_network_player_name(), {}});
+    }
+
+    const lego_loco::network::TransportRuntimeSnapshot transport =
+        lego_loco::network::HostTransportWorker().Snapshot();
+    const bool transport_ready =
+        (transport.mode == lego_loco::network::TransportRuntimeMode::Host &&
+         transport.state == lego_loco::network::TransportRuntimeState::Listening) ||
+        (transport.mode == lego_loco::network::TransportRuntimeMode::Client &&
+         transport.state == lego_loco::network::TransportRuntimeState::Connected);
+    if (transport_ready && !this->hostSessionReady && _g_netman != nullptr &&
+        _g_netman->m_bInit != 0 && _g_netman->m_bFlag1 != 0) {
+        this->ConnectToNetworkGame(
+            this->hostSelectedDiscoveryIndex >= 0 ? this->hostSelectedDiscoveryIndex : 0);
+    }
+    if (hosting && transport.state == lego_loco::network::TransportRuntimeState::Listening) {
+        if (!this->hostTransportEventEmitted) {
+            loco::host_test::emit_transport_listening(transport.port);
+            this->hostTransportEventEmitted = true;
+        }
+        lego_loco::network::SessionAdvertisement advertisement =
+            host_advertisement(transport);
+        if (!this->hostDiscoveryPublished) {
+            lego_loco::network::HostDiscoveryWorker().Start({false, advertisement});
+            this->hostDiscoveryPublished = true;
+            this->hostPublishedPlayers = transport.player_count;
+        } else if (this->hostPublishedPlayers != transport.player_count) {
+            lego_loco::network::HostDiscoveryWorker().UpdatePublication(advertisement);
+            this->hostPublishedPlayers = transport.player_count;
+        }
+    }
+    if (this->hostJoinRequested &&
+        transport.state == lego_loco::network::TransportRuntimeState::Connected &&
+        !this->hostTransportEventEmitted) {
+        loco::host_test::emit_transport_connected(transport.local_player_id);
+        this->hostTransportEventEmitted = true;
+    }
+
+    lego_loco::network::DiscoveryRuntimeSnapshot discovery;
+    if (this->hostSearchRequested) {
+        discovery = lego_loco::network::HostDiscoveryWorker().Snapshot();
+        if (discovery.browse_ready) {
+            this->hostSearchCompleted = true;
+            if (!this->hostSearchEventEmitted) {
+                loco::host_test::emit_search_completed(
+                    static_cast<int>(discovery.sessions.size()));
+                this->hostSearchEventEmitted = true;
+            }
+        }
+    }
+
     // 0x409280 starts with a full background blit.  Resource 0x439 is the
     // exact background asset (startup\apback.bmp) used by this panel family.
     if (!host_blit_resource(kLobbyBackdropResource, 0, 0)) {
@@ -1308,6 +1514,10 @@ void GameSetupPanel::hostRenderFrame()
     // Sprite_SetState (0x454C30) expects.  Go (0x42A) is not drawn here: the
     // original only exposes it after network/session selection updates it.
     const HostLobbyControl pressed_control = host_pressed_control(*this);
+    if (this->hostSessionReady) {
+        host_blit_frame(kGoResource, pressed_control == HostLobbyControl::Go ? 1 : 0,
+                        144, 120, kGoLeft, kGoTop);
+    }
     host_blit_frame(kExitResource, pressed_control == HostLobbyControl::Exit ? 1 : 0,
                     144, 112, kExitLeft, kExitTop);
     host_blit_frame(kSearchResource, pressed_control == HostLobbyControl::Search ? 1 : 0,
@@ -1339,12 +1549,10 @@ void GameSetupPanel::hostRenderFrame()
 
     // updateTitle (0x409360) selects resource 0x71 while network mode is
     // active; drawLayoutList (0x4094B0) falls back to resource 0x7F when
-    // the DirectPlay session list is empty. The guarded primary glyph path
+    // the asynchronous DNS-SD session snapshot is empty. The guarded primary glyph path
     // below follows drawLayoutList's recovered list colours and row cadence.
     if (SDL_Renderer* renderer = SDL3_GetRenderer()) {
         SDL_SetRenderTarget(renderer, SDL3_GetPrimarySurface()->texture);
-        const bool network_lobby = g_editwindow_ptr != nullptr &&
-                                   g_editwindow_ptr->dialogState == 5;
         if (network_lobby) {
             for (int index = 0; index < kHostGridLayoutCount; ++index) {
                 const HostGridLayout& layout = kHostGridLayouts[index];
@@ -1354,10 +1562,44 @@ void GameSetupPanel::hostRenderFrame()
                                kLayoutTextTop + index * kOriginalListLineStep,
                                layout.label, color);
             }
-            if (this->hostSearchCompleted) {
+            int discovery_row = kHostGridLayoutCount;
+            for (const lego_loco::network::DiscoveredSession& session : discovery.sessions) {
+                const std::string label = session.metadata.display_name + "  " +
+                    std::to_string(session.metadata.current_players) + "/" +
+                    std::to_string(session.metadata.max_players);
                 host_draw_text(renderer, kLayoutTextLeft,
-                               kLayoutTextTop + kHostGridLayoutCount * kOriginalListLineStep,
-                               "NO NETWORK GAMES FOUND", kOriginalListTextColor);
+                               kLayoutTextTop + discovery_row * kOriginalListLineStep,
+                               label.c_str(), kOriginalListTextColor);
+                ++discovery_row;
+            }
+            if (!hosting) {
+                host_draw_text(renderer, kDirectLeft, kDirectTop - kOriginalListLineStep,
+                               "DIRECT CONNECT", kOriginalListTextColor);
+                SDL_SetRenderTarget(renderer, nullptr);
+                SDL3_DrawPrimaryTextInput(kDirectLeft, kDirectTop, kDirectRight, kDirectBottom,
+                                          this->hostDirectConnectText,
+                                          this->hostDirectConnectFocused);
+                SDL_SetRenderTarget(renderer, SDL3_GetPrimarySurface()->texture);
+            }
+            if (hosting && transport.state == lego_loco::network::TransportRuntimeState::Listening) {
+                const std::string status = "HOSTING ON PORT " + std::to_string(transport.port);
+                host_draw_text(renderer, kLayoutTextLeft,
+                               kLayoutTextTop + discovery_row * kOriginalListLineStep,
+                               status.c_str(), kOriginalListTextColor);
+            } else if (this->hostJoinRequested) {
+                const char* status = transport.state == lego_loco::network::TransportRuntimeState::Connected
+                    ? "CONNECTED TO HOST"
+                    : transport.state == lego_loco::network::TransportRuntimeState::Failed
+                        ? "JOIN FAILED" : "CONNECTING...";
+                host_draw_text(renderer, kLayoutTextLeft,
+                               kLayoutTextTop + discovery_row * kOriginalListLineStep,
+                               status, kOriginalListTextColor);
+            } else if (this->hostSearchCompleted && discovery.sessions.empty()) {
+                const char* status = discovery.error.empty()
+                    ? "NO NETWORK GAMES FOUND" : "DISCOVERY UNAVAILABLE";
+                host_draw_text(renderer, kLayoutTextLeft,
+                               kLayoutTextTop + discovery_row * kOriginalListLineStep,
+                               status, kOriginalListTextColor);
             }
         } else {
             host_draw_text(renderer, kLayoutTextLeft, kLayoutTextTop, "NO LAYOUTS AVAILABLE",
@@ -1382,9 +1624,9 @@ void GameSetupPanel::hostRenderFrame()
  *
  * Assembly basis: GAMESTATE_HandleClick (0x40A4E0).  It checks the Go,
  * Exit, Search, and Options ButtonSprite rectangles in that order.  Go and
- * grid selection are unreachable on this host until DirectPlay reports a
- * session (the SDL DirectPlay boundary deliberately reports none); the three
- * controls rendered above retain their original click ordering/actions.
+ * grid selection are unreachable on this host until the SDL_net join path can
+ * consume a selected DNS-SD endpoint; the three controls rendered above retain
+ * their original click ordering/actions.
  */
 void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pressed)
 {
@@ -1400,6 +1642,34 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
     // layout-list row, update the same Netman fields, and let drawGrid's
     // original dimensions control the next frame.
     if (g_editwindow_ptr != nullptr && g_editwindow_ptr->dialogState == 5) {
+        if (_g_netman_state != nullptr && _g_netman_state[8] == 0 &&
+            host_lobby_contains(kDirectLeft, kDirectTop,
+                                kDirectRight - kDirectLeft, kDirectBottom - kDirectTop,
+                                canvas_x, canvas_y)) {
+            this->hostDirectConnectFocused = true;
+            return;
+        }
+        this->hostDirectConnectFocused = false;
+        const lego_loco::network::DiscoveryRuntimeSnapshot discovery =
+            lego_loco::network::HostDiscoveryWorker().Snapshot();
+        const int session_index = host_discovery_session_at(
+            canvas_x, canvas_y, discovery.sessions.size());
+        if (session_index >= 0) {
+            const lego_loco::network::DiscoveredSession& session =
+                discovery.sessions[static_cast<std::size_t>(session_index)];
+            if (const lego_loco::network::EndpointCandidate* endpoint =
+                    host_preferred_endpoint(session)) {
+                SDL3_GameAudioPlayResource(0x5015);
+                this->hostJoinRequested = true;
+                this->hostSessionReady = false;
+                this->hostTransportEventEmitted = false;
+                this->hostSelectedDiscoveryIndex = session_index;
+                lego_loco::network::HostTransportWorker().Join({
+                    host_endpoint_address(*endpoint), endpoint->port, host_network_player_name(),
+                    session.metadata.session_uuid});
+            }
+            return;
+        }
         const int layout_index = host_layout_at(canvas_x, canvas_y);
         if (layout_index >= 0) {
             if (layout_index != this->hostLayoutIndex) {
@@ -1410,7 +1680,8 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
         }
     }
 
-    const HostLobbyControl control = host_lobby_control_at(canvas_x, canvas_y);
+    const HostLobbyControl control = host_lobby_control_at(
+        canvas_x, canvas_y, this->hostSessionReady);
     if (control == HostLobbyControl::None ||
         this->hostPressedControl != static_cast<uint8_t>(HostLobbyControl::None)) {
         return;
@@ -1423,5 +1694,48 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
     SDL3_GameAudioPlayResource(0x5015);
     this->hostPressedControl = static_cast<uint8_t>(control);
     this->hostPressedUntilMs = SDL_GetTicks() + kLobbyPressDurationMs;
+}
+
+bool GameSetupPanel::hostHandleKey(int32_t key_code)
+{
+    if (!this->hostDirectConnectFocused) return false;
+    if (key_code == 27) {
+        this->hostDirectConnectFocused = false;
+        return true;
+    }
+    if (key_code == 8) {
+        const std::size_t length = std::strlen(this->hostDirectConnectText);
+        if (length != 0) this->hostDirectConnectText[length - 1] = '\0';
+        return true;
+    }
+    if (key_code == 13) {
+        lego_loco::network::DirectConnectEndpoint endpoint;
+        std::string error;
+        if (lego_loco::network::ParseDirectConnectEndpoint(
+                this->hostDirectConnectText, &endpoint, &error)) {
+            SDL3_GameAudioPlayResource(0x5015);
+            this->hostJoinRequested = true;
+            this->hostSessionReady = false;
+            this->hostTransportEventEmitted = false;
+            this->hostSelectedDiscoveryIndex = -1;
+            this->hostDirectConnectFocused = false;
+            lego_loco::network::HostTransportWorker().Join({
+                endpoint.host, endpoint.port, host_network_player_name(), {}});
+        }
+        return true;
+    }
+    return false;
+}
+
+void GameSetupPanel::hostHandleTextInput(const char* utf8_text)
+{
+    if (!this->hostDirectConnectFocused || !utf8_text) return;
+    std::size_t length = std::strlen(this->hostDirectConnectText);
+    for (const unsigned char* ch = reinterpret_cast<const unsigned char*>(utf8_text);
+         *ch != '\0' && length + 1 < sizeof(this->hostDirectConnectText); ++ch) {
+        if (*ch >= 0x20 && *ch < 0x7f)
+            this->hostDirectConnectText[length++] = static_cast<char>(*ch);
+    }
+    this->hostDirectConnectText[length] = '\0';
 }
 #endif  // !_WIN32

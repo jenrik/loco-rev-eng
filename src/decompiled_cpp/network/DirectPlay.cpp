@@ -30,7 +30,7 @@
 /* CLSID_DirectPlay: used to query IDirectPlay4 interface via CoCreateInstance/Ordinal_1 */
 static const uint32_t CLSID_DirectPlay[4] = {0x0ab1c531, 0x11d14745, 0x0000a1a7, 0xfcab03f8};
 /* GUID for DPSESSIONDESC2: used in IDirectPlay4::Open / CreateSession calls */
-static const uint32_t GUID_SessionDesc[4]  = {0xf9cd2546, 0x11d2577f, 0x00a09426, 0x7ada4b24};
+static const uint32_t GUID_SessionDesc[4]  = {0xf9cd2546, 0x11d2577f, 0xa0002694, 0x7ada4b24};
 
 /* ================================================================== */
 /* DirectPlay session struct (layout documented in DirectPlay.h)       */

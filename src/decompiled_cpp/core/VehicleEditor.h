@@ -44,6 +44,10 @@
 #include "../world/EditorState.h"
 
 class Vehicle;  // forward — see game/Vehicle.h
+class DPlayManager;
+#ifndef _WIN32
+struct HostNetworkEditorTag {};
+#endif
 
 class VehicleEditor : public Entity {
 public:
@@ -53,6 +57,9 @@ public:
     uint8_t   dplay_data[0x398];  // +0x88  DPLAY network sync data (0x398 bytes)
     uint32_t  dplay_trailer;      // +0x420  final 4 bytes from DPLAY data payload
     uint8_t   dplay_initialized;  // +0x424  1 = DPLAY data is valid
+#ifndef _WIN32
+    DPlayManager* host_dplay_data = nullptr; // native-width owned copy
+#endif
     uint8_t   _pad_425[3];        // +0x425
     int32_t   res_id;             // +0x428  copy of resource ID from constructor
     int32_t   res_id_2;           // +0x42C  secondary resource ID (for track? from ctor param_2)
@@ -81,6 +88,9 @@ public:
      * @param flag     Direction flag (0 = forward-first, non-zero = backward-first)
      */
     VehicleEditor(int res_id, int param_2, char flag);
+#ifndef _WIN32
+    VehicleEditor(HostNetworkEditorTag, int res_id, int param_2, char flag);
+#endif
 
     /**
      * Destructor — releases EditorState objects and DPLAY data.
@@ -236,7 +246,7 @@ public:
      *
      * @return  Pointer to +0x88 if flag at +0x424 is set, or NULL
      */
-    uint8_t* GetDPlayData();
+    DPlayManager* GetDPlayData();
 
     /**
      * SetDPlayData — Copy network data into the editor's DPLAY buffer.
@@ -245,6 +255,6 @@ public:
      * @param data  Incoming DPLAY network data buffer
      * @return  non-zero on success
      */
-    int SetDPlayData(void* data);
+    int SetDPlayData(const DPlayManager* data);
 };
 

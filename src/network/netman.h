@@ -122,13 +122,13 @@
 
 /* ---------------------------------------------------------------
    DPSESSION descriptor (built at NETMAN+0x158C, size 0x50)
-   Application GUID: {0xf9cd2546, 0x11d2, 0x577f, a0-00-26-94-7a-da-4b-24}
+   Application GUID: {0xf9cd2546, 0x577f, 0x11d2, 94-26-00-a0-24-4b-da-7a}
    --------------------------------------------------------------- */
 typedef struct DPSESSIONDESC2 {
     uint32_t dwSize;              /* 0x50 */
     uint32_t dwFlags;
     uint8_t  guidInstance[16];   /* +0x08 */
-    uint8_t  guidApplication[16];/* +0x18  {F9CD2546-11D2-577F-A000-26947ADA4B24} */
+    uint8_t  guidApplication[16];/* +0x18  {F9CD2546-577F-11D2-9426-00A0244BDA7A} */
     uint32_t dwMaxPlayers;        /* from NETMAN+0x920 */
     uint32_t dwCurrentPlayers;
     uint8_t  _pad[0x20];

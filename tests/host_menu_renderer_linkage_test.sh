@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verifies that GameSetupPanel's SDL host renderer links its C-exported renderer
 # lookup directly. A mangled unresolved declaration is silently tolerated by the
-# permissive host linker and previously jumped to __stack_chk_fail after Enter.
+# permissive host linker and previously jumped into an unrelated PLT entry after Enter.
 set -euo pipefail
 
 binary="${1:?usage: $0 /path/to/lego_loco}"
@@ -12,7 +12,7 @@ disassembly=$(objdump -d --demangle --start-address="0x$start" --stop-address="$
 printf '%s\n' "$disassembly" | grep -qE 'call.*<SDL3_GetRenderer>' || {
     echo "FAIL: host renderer does not call SDL3_GetRenderer directly" >&2; exit 1;
 }
-if printf '%s\n' "$disassembly" | grep -qE 'call.*<__stack_chk_fail'; then
-    echo "FAIL: host renderer still calls __stack_chk_fail" >&2; exit 1
+if nm -C -u "$binary" | grep -qE 'SDL3_GetRenderer\(\)'; then
+    echo "FAIL: host renderer retains an unresolved C++-mangled renderer lookup" >&2; exit 1
 fi
 echo "PASS: GameSetupPanel host renderer resolves SDL3_GetRenderer directly"

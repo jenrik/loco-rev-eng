@@ -1,4 +1,5 @@
-extern void* g_player_config;
+class PlayerConfig;
+extern PlayerConfig* g_player_config;
 /**
  * Netman_ReceiveSignalChange.cpp — NETMAN_ReceiveSignalChange implementation
  *

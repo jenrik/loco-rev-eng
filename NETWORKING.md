@@ -4,6 +4,8 @@
 
 Lego Loco (1998) supports multiplayer sessions for up to 9 players over a TCP/IP network. The networking subsystem — called **NETMAN** — is built on Microsoft DirectPlay 4 (IDirectPlay4A) and implements a client/host architecture for sharing trains, signal changes, player avatars, and session state.
 
+On non-Windows hosts, DirectPlay transport is being replaced by the explicitly framed SDL_net TCP protocol documented in `docs/sdl-net-wire-protocol.md`. The original application payloads and version-300 field remain authoritative; the outer envelope, virtual player IDs, DNS-SD discovery, and host relay are host-only additions.
+
 The core NETMAN object is 0x804 bytes (2052 bytes), constructed at `NETMAN_Constructor` (`0x0043d0a0`). The Train subsystem (`TrainSubsystem`) acts as the message dispatch target and also handles its own set of DirectPlay message types for asset transfers, connection setup, and controller synchronization.
 
 ## Architecture
@@ -336,7 +338,7 @@ Functions: `CreateDirectPlay()` (`0x45f390`), `ConnectSession()` (`0x45e730`), `
 ### Application GUID
 
 ```
-{F9CD2546-11D2-577F-A000-26947ADA4B24}
+{F9CD2546-577F-11D2-9426-00A0244BDA7A}
 ```
 
 Stored in `DPSESSIONDESC2.guidApplication`. Defined in `src/network/netman.h`.
