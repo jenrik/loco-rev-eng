@@ -365,7 +365,6 @@ void GetResourceType(int) {}
 void CGWND_AudioChannel_Play(unsigned int) {}
 void CGWND_AudioChannel_Pause(int) {}
 void Game_SetScreenMode(void*, int, int, int) {}
-void CGWND_EnterMode3(int) {}
 void BuildingMgr_DestroyAll(void*, int) {}
 void UI_ResetTooltips(void*, int) {}
 void World_Reset(void*, int) {}
@@ -385,7 +384,6 @@ void GetResourceType() {}
 void CGWND_AudioChannel_Play() {}
 void CGWND_AudioChannel_Pause() {}
 void Game_SetScreenMode() {}
-void CGWND_EnterMode3() {}
 void BuildingMgr_DestroyAll() {}
 void UI_ResetTooltips() {}
 void World_Reset() {}

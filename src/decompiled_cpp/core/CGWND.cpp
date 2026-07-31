@@ -714,6 +714,221 @@ void CGWND_SetMode(int new_mode)
 
 
 /* ================================================================== */
+/* CGWND_EnterMode3 — Transition handler for entering game mode 3      */
+/* Address: 0x4086F0 — free function; __cdecl                          */
+/*                                                                      */
+/* Receives the PREVIOUS mode and cleans up/transitions based on what's */
+/* being left. Case 2 (main menu) cancels. Cases 5/6/7/9 hide their    */
+/* overlays. All paths fall through to common cleanup: reset buildings, */
+/* tooltips, world, build mode, cursor, and audio.                     */
+/* ================================================================== */
+void CGWND_EnterMode3(int old_mode)
+{
+    /* ---- helper declarations (already declared elsewhere) ---------- */
+    extern void  CGWND_SetFullscreenMode(char go_windowed);
+    extern void  Game_SetScreenMode(void* game, int a, int b, int c);
+    extern void  NETMAN_SendMapData(void* net, int flags);
+    extern int   Config_GetIniInt(void* config, const char* section,
+                                  const char* key, int defaultVal);
+    extern void  UI_ProcessObjectTimers(void);
+    extern void  WIN32_QueueAsyncTask(void* queue, void* callback, int param);
+
+    /* ---- typed adapters for void* globals -------------------------- */
+    extern void* g_main_window;        /* 0x4AA4A0 — CGWND* */
+    extern int   g_timer_id;           /* 0x4A97A4 */
+    extern void* g_netman;             /* 0x4FD3AC */
+    extern void* g_audio;              /* 0x4FD3BC */
+    extern void* g_config_ini;         /* 0x4A9EEC */
+    extern int   g_world_width;        /* 0x4AAD0C */
+    extern void* g_town;               /* 0x4FD37C */
+    extern void* g_postcard;           /* 0x4FD384 */
+    extern void* g_cursor;             /* 0x4FD380 */
+    extern void* g_postcard_send;      /* 0x4FD388 */
+    extern void* g_game;               /* 0x4854C8 */
+    extern void* g_tilemap;            /* 0x4AAD08 */
+    extern int   g_viewport_rect_left; /* 0x4AAD14 */
+    extern int   g_viewport_rect_top;  /* 0x4AAD18 */
+    extern int   g_viewport_rect_right;/* 0x4AAD1C */
+    extern int   g_viewport_rect_bottom;/* 0x4AAD20 */
+    extern void* g_building_mgr;       /* 0x485448 */
+    extern void* g_tooltip_mgr;        /* 0x4FD220 */
+    extern void* g_audio_mgr;          /* 0x4FD38C */
+    extern void* g_async_task_queue;   /* 0x4A9AD0 */
+
+    /* ---- subsystem method adapters --------------------------------- */
+    /* GameAudio::SetMute — Address: 0x413530 */
+    extern void GameAudio_SetMute(void* audio, uint8_t mute);
+    /* GameAudio::UpdateVolume — Address: 0x4135B0 */
+    extern void GameAudio_UpdateVolume(void* audio, int level);
+    /* HelpWnd (AudioMgr)::PlayNarration — Address: 0x44F560 */
+    extern void HelpWnd_PlayNarration(void* audio_mgr, int page, uint flags);
+    /* TileMap::UpdateAll — Address: 0x457320 */
+    extern void TileMap_UpdateAll(void* tilemap);
+    /* TileMap::InvalidateRect — Address: 0x455840 */
+    extern void TileMap_InvalidateRect(void* tilemap, int left, int top,
+                                       int right, int bottom);
+    /* BuildingMgr::UpdateStoredTargets — Address: 0x434690 */
+    extern void BuildingMgr_UpdateStoredTargets(void* mgr);
+    /* BuildingMgr::InvalidateAll — Address: 0x434800 */
+    extern void BuildingMgr_InvalidateAll(void* mgr, int unused);
+    /* UI_ResetTooltips — Address: 0x423F80 */
+    extern void UI_ResetTooltips(void* mgr, int reset_type);
+    /* World_Reset — Address: 0x44DBD0 */
+    extern void World_Reset(void* world, int flags);
+    /* Game::DispatchCursorFeedback — Address: 0x411760 */
+    extern void Game_DispatchCursorFeedback(void* game);
+
+    switch (old_mode) {
+
+    /* ---------------------------------------------------------------- */
+    /* Case 2 — Coming from main menu: just cancel                      */
+    /* 0x408726: MOV [0x4851F4], 2; return                             */
+    /* ---------------------------------------------------------------- */
+    case 2:
+        g_game_mode = 2;
+        return;
+
+    /* ---------------------------------------------------------------- */
+    /* Cases 5, 6, 7 — Coming from town/postcard/cursor overlays       */
+    /* 0x408739..0x4087AD: hide each overlay via vtable[1], then        */
+    /*                    GameAudio::UpdateVolume, Game_SetScreenMode,   */
+    /*                    TileMap::InvalidateRect → common tail          */
+    /* ---------------------------------------------------------------- */
+    case 5:
+    case 6:
+    case 7:
+        {
+            /* Hide each overlay subsystem (vtable slot 1 = hide) */
+            {
+                void** vt = *(void***)g_town;
+                reinterpret_cast<void(__thiscall*)()>(vt[1])();
+            }
+            {
+                void** vt = *(void***)g_postcard;
+                reinterpret_cast<void(__thiscall*)()>(vt[1])();
+            }
+            {
+                void** vt = *(void***)g_cursor;
+                reinterpret_cast<void(__thiscall*)()>(vt[1])();
+            }
+            if (g_audio != nullptr) {
+                GameAudio_UpdateVolume(g_audio, 0);  /* 0x4135B0 */
+            }
+            Game_SetScreenMode(g_game, 1, 1, 0);     /* 0x411DC0 */
+            TileMap_InvalidateRect(g_tilemap,
+                g_viewport_rect_left, g_viewport_rect_top,
+                g_viewport_rect_right, g_viewport_rect_bottom);
+        }
+        break;  /* → common tail */
+
+    /* ---------------------------------------------------------------- */
+    /* Case 9 — Coming from postcard-send overlay                       */
+    /* 0x4087B2..0x40880E: hide postcard send, same tail as 5/6/7       */
+    /* ---------------------------------------------------------------- */
+    case 9:
+        {
+            {
+                void** vt = *(void***)g_postcard_send;
+                reinterpret_cast<void(__thiscall*)()>(vt[1])();
+            }
+            if (g_audio != nullptr) {
+                GameAudio_UpdateVolume(g_audio, 0);
+            }
+            Game_SetScreenMode(g_game, 1, 1, 0);
+            TileMap_InvalidateRect(g_tilemap,
+                g_viewport_rect_left, g_viewport_rect_top,
+                g_viewport_rect_right, g_viewport_rect_bottom);
+        }
+        break;  /* → common tail */
+
+    /* ---------------------------------------------------------------- */
+    /* Case 1 — Coming from loading screen / mode 1                     */
+    /* 0x408813..0x4088CD: fullscreen toggle, kill timer, netman send,  */
+    /*                    demo audio check, tilemap update, narration,   */
+    /*                    then FALLS THROUGH to case 4                   */
+    /* ---------------------------------------------------------------- */
+    case 1:
+        {
+            /* JGE: g_world_width >= g_screen_width → go_windowed=1 */
+            char go_windowed = (g_world_width >= g_screen_width) ? 1 : 0;
+            CGWND_SetFullscreenMode(go_windowed);   /* 0x407D20 */
+
+            HWND hWnd = *(HWND*)((uint8_t*)g_main_window + 0x08);
+            KillTimer(hWnd, (uintptr_t)g_timer_id); /* IAT */
+            g_timer_id = 0;
+
+            NETMAN_SendMapData(g_netman, 0);        /* 0x43D350 */
+            PostMessageA(hWnd, 0x406, (uint32_t)g_game_time, 0);  /* WM_USER+6 */
+
+            if (g_demo_mode == 1 && g_audio != nullptr) {
+                int sound_flag = Config_GetIniInt(g_config_ini,
+                    "ScreenSaver", "Sound", 0);     /* 0x452D60 */
+                GameAudio_SetMute(g_audio, (sound_flag != 0) ? 1 : 0);
+            }
+            TileMap_UpdateAll(g_tilemap);           /* 0x457320 */
+            HelpWnd_PlayNarration(g_audio_mgr, 5, 0); /* 0x44F560 */
+        }
+        /* FALLS THROUGH to case 4 */
+        [[fallthrough]];
+
+    /* ---------------------------------------------------------------- */
+    /* Case 4 — Coming from scenario / world setup                      */
+    /* 0x4088CD..0x40892A: PostMessage, netman send, screen mode,       */
+    /*                    UI_ProcessObjectTimers, conditional build-     */
+    /*                    mode cleanup → common tail                     */
+    /* ---------------------------------------------------------------- */
+    case 4:
+        {
+            HWND hWnd = *(HWND*)((uint8_t*)g_main_window + 0x08);
+            PostMessageA(hWnd, 0x406, (uint32_t)g_game_time, 0);
+            NETMAN_SendMapData(g_netman, 0);
+            Game_SetScreenMode(g_game, 1, 1, 0);
+            UI_ProcessObjectTimers();              /* 0x420000 */
+
+            if (g_in_build_mode != 0) {
+                TileMap_UpdateAll(g_tilemap);
+                BuildingMgr_UpdateStoredTargets(g_building_mgr);
+            }
+        }
+        break;  /* → common tail */
+
+    /* ---------------------------------------------------------------- */
+    /* Default / cases 0, 3, 8, 10, >9 → straight to common tail        */
+    /* ---------------------------------------------------------------- */
+    default:
+        break;
+    }
+
+    /* ================================================================ */
+    /* Common tail — 0x40892A..0x40899E                                  */
+    /* ================================================================ */
+
+    BuildingMgr_InvalidateAll(g_building_mgr, 1);  /* 0x434800 */
+    UI_ResetTooltips(g_tooltip_mgr, 1);            /* 0x423F80 */
+    World_Reset((void*)0x4A98B0, 1);               /* 0x44DBD0 */
+
+    /* Queue async task with callback at 0x42CC60 */
+    WIN32_QueueAsyncTask(&g_async_task_queue,
+        reinterpret_cast<void*>(static_cast<uintptr_t>(0x42CC60)), 0);
+
+    /* Build-mode state cleanup */
+    if (g_build_mode != 0) {
+        g_build_mode = 0;
+        g_road_build_mode = 0;
+        g_placement_resource_id = -1;
+    }
+
+    /* Game cursor feedback dispatch */
+    Game_DispatchCursorFeedback(g_game);           /* 0x411760 */
+
+    /* Audio volume update (silence) */
+    if (g_audio != nullptr) {
+        GameAudio_UpdateVolume(g_audio, 0);        /* 0x4135B0 */
+    }
+}
+
+
+/* ================================================================== */
 /* CGWND_Cleanup — Full game shutdown                                  */
 /* Address: 0x4077A0 — free function; no this pointer                  */
 /* ================================================================== */
