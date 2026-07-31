@@ -204,8 +204,8 @@ public:
     /* ================================================================ */
 
     int  create(HWND hWndParent);                        /* 0x4204D0 */
-    void show();                                         /* 0x4206B0 */
-    void hide();                                         /* 0x420860 */
+    void show() override;                                /* 0x4206B0 */
+    void hide() override;                                /* 0x420860 */
     void setState(int32_t state);                        /* 0x4208F0 */
     void HandleClick();                                  /* 0x421200 */
     int  netPanelWndProc(HWND hwnd, UINT msg,            /* 0x422D80 */

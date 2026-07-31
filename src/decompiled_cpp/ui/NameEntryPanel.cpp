@@ -211,8 +211,11 @@ bool NameEntryPanel::create_window(HWND hWndParent)
     GetClientRect(hDesktop, &desktopRect);
 
     /* Load icon resource */
-    HICON hIcon = LoadIconA(this->hInstance, (LPCSTR)0x65);  /* +0x04 */
-    this->gameMode = (int32_t)hIcon;  /* +0x144 — store icon handle */
+    HICON hIcon = LoadIconA(
+        this->hInstance,
+        reinterpret_cast<LPCSTR>(static_cast<uintptr_t>(0x65)));  /* +0x04 */
+    this->gameMode = static_cast<int32_t>(reinterpret_cast<intptr_t>(hIcon));
+                                                                    /* +0x144 — store icon handle */
     /* BUG: icon handle overwrites gameMode field. This is likely a
        misinterpretation: the icon may be stored at a different field.
        In the disassembly, +0x144 is written with the icon handle after
@@ -227,7 +230,7 @@ bool NameEntryPanel::create_window(HWND hWndParent)
         desktopRect.top,                /* y */
         desktopRect.right - desktopRect.left,   /* width */
         desktopRect.bottom - desktopRect.top,   /* height */
-        (HMENU)0,                       /* hMenu = NULL */
+        nullptr,                        /* hMenu = NULL */
         hIcon,                          /* icon */
         0                               /* class style */
     );

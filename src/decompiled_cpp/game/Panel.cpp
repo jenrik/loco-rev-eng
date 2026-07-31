@@ -6,7 +6,42 @@
  */
 
 #include "Panel.h"
+#include "TrackPiece.h"
+#include "../resources/ResourceManager.h"
+#include <new>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
+
+namespace {
+
+struct PanelResourceSurfaceFields {
+    uint8_t prefix_00_0f[0x10];
+    void* surface;
+};
+
+struct SurfaceLockFields {
+    uint8_t prefix_00_03[4];
+    int32_t locked;
+};
+
+struct ChildLinkFields {
+    uint8_t prefix_00_27[0x28];
+    void* next;
+};
+
+struct ChildSpriteFields {
+    void** vtable;
+    uint8_t prefix_04_27[0x24];
+    ChildSpriteFields* next;
+};
+
+struct TrackChildStateFields {
+    uint8_t prefix_00_47[0x48];
+    int16_t type;
+    uint8_t prefix_4a_53[0x0A];
+    int16_t state;
+};
+
+} // namespace
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -48,20 +83,44 @@ extern void __thiscall Town_SelectBuilding(void* town_view, int building); /* 0x
 extern void __thiscall DDRAW_SelectBuilding(void* ddraw_building,
                                             int building);                 /* 0x46AA80 */
 
-/* Child sprite constructors */
-extern void* __fastcall TrackPiece_Ctor(void* obj, int parent,
-                                         int res_handle, ushort z_order);  /* 0x43E480 */
-extern void* __fastcall RESMGR_SoundObject_Ctor(void* obj, int sound_res,
-                                                  int parent, int res_handle,
-                                                  void* font,
-                                                  ushort z_order);          /* 0x448F10 */
-
 /* Tilemap */
 extern void __thiscall TileMap_InvalidateRect(void* tilemap, int left, int top,
                                                int right, int bottom);     /* 0x455840 */
 
 /* Memory */
 void* __cdecl operator_new(size_t size);                                   /* 0x465CE0 */
+
+namespace {
+
+#ifndef _WIN32
+void* AllocateTrackPieceStorage()
+{
+    return operator_new(sizeof(TrackPiece));
+}
+
+void* AllocateSoundObjectStorage()
+{
+    return operator_new(sizeof(SoundObject));
+}
+#else
+void* AllocateTrackPieceStorage()
+{
+    return operator_new(0x58);
+}
+
+void* AllocateSoundObjectStorage()
+{
+    return operator_new(0x68);
+}
+#endif
+
+RESDATA* ResourceFromHandle(int res_handle)
+{
+    return reinterpret_cast<RESDATA*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(res_handle)));
+}
+
+} // namespace
 
 /* ================================================================== */
 /* Panel::UpdateResourceByState                                         */
@@ -137,12 +196,13 @@ void Panel::DtorBody()
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Destroy child surface at +0xD0 */
-    if (this->child_surface != NULL) {          /* +0xD0 */
+    if (this->child_surface != nullptr) {          /* +0xD0 */
         /* Call vtable[0] (scalar deleting destructor) on child */
-        typedef void* (__thiscall* DtorFunc)(void* self, byte flags);
-        DtorFunc dtor = (DtorFunc)((void**)this->child_surface)[0];
+        using DtorFunc = void* (__thiscall*)(void* self, byte flags);
+        DtorFunc dtor = reinterpret_cast<DtorFunc>(
+            reinterpret_cast<void**>(this->child_surface)[0]);
         dtor(this->child_surface, 1);           /* delete with free */
-        this->child_surface = NULL;
+        this->child_surface = nullptr;
     }
 
     /* Destroy tooltip at +0xA0 */
@@ -183,11 +243,13 @@ byte Panel::Init(int resource_id, int anim_index, byte force_reload)
     int result;
 
     result = GameObject_InitBase(this, resource_id, anim_index, force_reload);
-    byte cResult = (byte)result;
+    byte cResult = static_cast<byte>(result);
 
     if (cResult != 0 && resource_id != 0x2401) {
-        void* surface = *(void**)(uintptr_t)(*(uintptr_t*)((uint8_t*)this + 0x40) + 0x10);
-        int surface_locked = *(int*)((uint8_t*)surface + 4);
+        const auto* resource_surface = reinterpret_cast<const PanelResourceSurfaceFields*>(
+            this->surface_ref);
+        void* surface = resource_surface->surface;
+        int surface_locked = reinterpret_cast<const SurfaceLockFields*>(surface)->locked;
 
         if (surface_locked == 0) {
             UIPANEL_UnlockSurface(surface);
@@ -213,12 +275,13 @@ byte Panel::Init(int resource_id, int anim_index, byte force_reload)
 void Panel::PartialDtor()
 {
     /* Destroy child surface at +0xD0 */
-    if (this->child_surface != NULL) {          /* +0xD0 */
+    if (this->child_surface != nullptr) {          /* +0xD0 */
         /* Call vtable[0] (scalar deleting destructor) on child with flag 1 */
-        typedef void* (__thiscall* DtorFunc)(void* self, byte flags);
-        DtorFunc dtor = (DtorFunc)((void**)this->child_surface)[0];
+        using DtorFunc = void* (__thiscall*)(void* self, byte flags);
+        DtorFunc dtor = reinterpret_cast<DtorFunc>(
+            reinterpret_cast<void**>(this->child_surface)[0]);
         dtor(this->child_surface, 1);
-        this->child_surface = NULL;
+        this->child_surface = nullptr;
     }
 
     /* Destroy tooltip at +0xA0 */
@@ -260,50 +323,55 @@ void* Panel::CreateChildSprite(int res_handle, ushort z_order, int sound_res)
     void* new_child;
     int cleanup_flag;
 
-    if (this->child_surface != NULL) {   /* +0xD0 — existing child, prepend to chain */
+    if (this->child_surface != nullptr) {   /* +0xD0 — existing child, prepend to chain */
         if (sound_res == 0) {
-            /* Create TrackPiece (0x58 bytes) */
-            void* mem = operator_new(0x58);
+            /* Create TrackPiece (0x58 bytes in the original x86 binary). */
+            void* mem = AllocateTrackPieceStorage();
             cleanup_flag = 3;
-            if (mem != NULL) {
-                new_child = TrackPiece_Ctor(mem, (int)this, res_handle, z_order);
+            if (mem != nullptr) {
+                new_child = ::new (mem) TrackPiece(
+                    this, ResourceFromHandle(res_handle), z_order);
             } else {
-                new_child = NULL;
+                new_child = nullptr;
             }
         } else {
-            /* Create SoundObject (0x68 bytes) */
-            void* mem = operator_new(0x68);
+            /* Create SoundObject (0x68 bytes in the original x86 binary). */
+            void* mem = AllocateSoundObjectStorage();
             cleanup_flag = 2;
-            if (mem != NULL) {
-                new_child = RESMGR_SoundObject_Ctor(mem, sound_res, (int)this,
-                                                     res_handle, g_font_normal, z_order);
+            if (mem != nullptr) {
+                new_child = ::new (mem) SoundObject(
+                    sound_res, this, ResourceFromHandle(res_handle),
+                    g_font_normal, z_order);
             } else {
-                new_child = NULL;
+                new_child = nullptr;
             }
         }
         /* The new child's vtable[?] is stored at DAT_00485270[10] and
            DAT_00485270 is updated to the new child pointer */
-        *(void**)((uint8_t*)DAT_00485270 + 0x28) = new_child;  /* link old child as next */
-        return *(void**)((uint8_t*)DAT_00485270 + 0x28);        /* return new child */
+        ChildLinkFields* old_child = reinterpret_cast<ChildLinkFields*>(DAT_00485270);
+        old_child->next = new_child;                              /* link old child as next */
+        return old_child->next;                                   /* return new child */
     }
 
     /* No existing child — create first child */
     if (sound_res == 0) {
-        void* mem = operator_new(0x58);
+        void* mem = AllocateTrackPieceStorage();
         cleanup_flag = 1;
-        if (mem != NULL) {
-            DAT_00485270 = TrackPiece_Ctor(mem, (int)this, res_handle, z_order);
+        if (mem != nullptr) {
+            DAT_00485270 = ::new (mem) TrackPiece(
+                this, ResourceFromHandle(res_handle), z_order);
         } else {
-            DAT_00485270 = NULL;
+            DAT_00485270 = nullptr;
         }
     } else {
-        void* mem = operator_new(0x68);
+        void* mem = AllocateSoundObjectStorage();
         cleanup_flag = 0;
-        if (mem != NULL) {
-            DAT_00485270 = RESMGR_SoundObject_Ctor(mem, sound_res, (int)this,
-                                                     res_handle, g_font_normal, z_order);
+        if (mem != nullptr) {
+            DAT_00485270 = ::new (mem) SoundObject(
+                sound_res, this, ResourceFromHandle(res_handle),
+                g_font_normal, z_order);
         } else {
-            DAT_00485270 = NULL;
+            DAT_00485270 = nullptr;
         }
     }
     this->child_surface = DAT_00485270;   /* +0xD0 */
@@ -439,8 +507,6 @@ char Panel::HitTestChildren(int x, int y)
     char hit_any = 0;
 
     /* Quick rejection via vtable[2] (PtInRect) */
-    if (this->PtInRect(x, y))
-
     if (!this->PtInRect(x, y)) {
         return 0;
     }
@@ -453,19 +519,19 @@ char Panel::HitTestChildren(int x, int y)
 
     /* Iterate child linked list (next pointer at +0x28) */
     /* NOTE: +0x9C is a "selected child" pointer that is SKIPPED during hit-testing */
-    for (uintptr_t child = (uintptr_t)this->child_surface; child != 0;
-         child = *(uintptr_t*)(child + 0x28)) {
+    for (ChildSpriteFields* child = reinterpret_cast<ChildSpriteFields*>(this->child_surface);
+         child != nullptr; child = child->next) {
 
-        if ((void*)child == this->field_9C) {
+        if (child == reinterpret_cast<ChildSpriteFields*>(this->field_9C)) {
             /* Skip the currently selected child */
             continue;
         }
 
         /* Call vtable[0x11] (slot 17 at +0x44) for hit-test on child */
-        typedef char (__thiscall* ChildHitTestFunc)(void* self, int x, int y);
-        void* child_vtab = *(void**)(uintptr_t)child;
-        ChildHitTestFunc childTest = (ChildHitTestFunc)((void**)child_vtab)[0x11];
-        char hit = childTest((void*)(uintptr_t)child, rel_x, rel_y);
+        using ChildHitTestFunc = char (__thiscall*)(void* self, int x, int y);
+        ChildHitTestFunc child_test = reinterpret_cast<ChildHitTestFunc>(
+            child->vtable[0x11]);
+        char hit = child_test(child, rel_x, rel_y);
 
         if (hit) {
             hit_any = 1;
@@ -491,10 +557,11 @@ uint Panel::HandleKey(int key_code)
     switch (key_code) {
     case 0x0D:  /* Enter/Return */
     {
-        void* child = this->panel_state;
-        if (child != NULL && *(short*)((uint8_t*)child + 0x48) == 1) {
+        void* child = reinterpret_cast<void*>(static_cast<uintptr_t>(this->panel_state));
+        TrackChildStateFields* child_state = reinterpret_cast<TrackChildStateFields*>(child);
+        if (child != nullptr && child_state->type == 1) {
             CGWND_TrackPiece_SetZoom(child, 2);
-            *(short*)((uint8_t*)child + 0x54) = 6;
+            child_state->state = 6;
         }
         return 1;
     }
@@ -502,10 +569,10 @@ uint Panel::HandleKey(int key_code)
     case 0x1B:  /* Escape */
     {
         void* child = this->child_ptr;
-        if (child != NULL && *(short*)((uint8_t*)child + 0x48) == 1) {
+        TrackChildStateFields* child_state = reinterpret_cast<TrackChildStateFields*>(child);
+        if (child != nullptr && child_state->type == 1) {
             CGWND_TrackPiece_SetZoom(child, 2);
-            uintptr_t result = (uintptr_t)this->child_ptr;
-            *(short*)(result + 0x54) = 6;
+            child_state->state = 6;
             return 1;
         }
         return 1;  /* Always returns 1 for Escape even if no child */

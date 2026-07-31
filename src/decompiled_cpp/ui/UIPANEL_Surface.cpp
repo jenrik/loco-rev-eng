@@ -24,6 +24,8 @@
  */
 
 #include "UIPANEL.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* UIPANEL_Surface struct — 0x20 bytes, grounded in Ghidra disassembly */
@@ -120,7 +122,7 @@ extern "C" {
     void Stream_BeginRead(void* stream, uint32_t offset, int mode);
     void* WNDPROC_StreamFromMemory(void* obj, char* data, int size, int mode);
     void WNDPROC_StreamCleanup(void* stream);
-    void* AssetMgr_LoadFile(void* mgr, void* path, int* out_size);
+    void* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
     int   DDRAW_RestoreSurfaces(int* surf, void* desc);
     void* DDRAW_GetDdrawErrorString(int code);
     HDC   DDRAW_LoadBmpToSurface(LPCSTR path, int bpp, int unk1, int unk2, char unk3);
@@ -145,6 +147,18 @@ extern "C" {
     /* UIPANEL surface helpers (forward-declared, defined later) */
     uint32_t __thiscall UIPANEL_ClearSurface(void* surface, int width, int height);
     uint32_t __thiscall UIPANEL_ReadPaletteFromBMP(void* surface, void* stream);
+    uint32_t __thiscall UIPANEL_InitSurface(void* surface, int width, int height,
+                                             int mode, uint32_t palette_param,
+                                             uint8_t fill_byte);
+    void __thiscall UIPANEL_SetClipRect(void* surface, uint8_t fill_byte,
+                                         uint32_t blit_flags);
+    uint8_t __thiscall UIPANEL_StretchBlit(void* surface, LPCSTR file_path,
+                                            uint32_t param_2, int param_3,
+                                            int param_4);
+    bool __thiscall UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
+                                 int src_w, uint32_t src_h, void* dest_surface,
+                                 uint32_t dest_x, uint32_t dest_y, int dest_w,
+                                 uint32_t dest_h, uint32_t flags);
 
     uint32_t __thiscall UIPANEL_InitSurface(void* surface,
     int width, int height, int mode, uint32_t palette_param, uint8_t fill_byte)
@@ -325,7 +339,7 @@ extern "C" {
         LPCSTR rel_path = file_path + install_len;
         if (*rel_path == '\\') rel_path++;
 
-        asset_data = AssetMgr_LoadFile(g_asset_mgr, (void*)rel_path, &asset_size);
+        asset_data = AssetMgr_LoadFile(g_asset_mgr, rel_path, &asset_size);
         if (asset_data != NULL) {
             mem_stream = operator_new(0x5C);
             if (mem_stream != NULL) {
@@ -872,3 +886,5 @@ bool __thiscall UIPANEL_Blit(void* renderer,
 
     return true;
 }
+
+#pragma GCC diagnostic pop

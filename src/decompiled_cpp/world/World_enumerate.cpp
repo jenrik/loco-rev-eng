@@ -19,6 +19,8 @@
 extern int32_t g_game_mode;            /* 0x004851F4 */
 extern void AssetMgr_EnumerateCategory(uint32_t** category);
 
+extern "C" void World_EnumeratePostLoadAssets(void* world_ptr);
+
 /* ================================================================== */
 /* World_EnumeratePostLoadAssets                                        */
 /* Address: 0x457380                                                    */
@@ -38,14 +40,14 @@ extern "C" void World_EnumeratePostLoadAssets(void* world_ptr)
 
     /* Enumerate first asset category list (at +0x52488) */
     uint32_t** cat_a = *(uint32_t***)((uint8_t*)world_ptr + 0x52488);
-    if (cat_a != nullptr && *cat_a != 0) {
+    if (cat_a != nullptr && *cat_a != nullptr) {
         AssetMgr_EnumerateCategory(cat_a);
     }
 
     /* Second enumeration (only in town mode) */
     if (g_game_mode == 3) {
         uint32_t** cat_b = *(uint32_t***)((uint8_t*)world_ptr + 0x5248C);
-        if (cat_b != nullptr && *cat_b != 0) {
+        if (cat_b != nullptr && *cat_b != nullptr) {
             AssetMgr_EnumerateCategory(cat_b);
         }
 

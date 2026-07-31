@@ -6,6 +6,7 @@
  */
 
 #include "Entity.h"
+#include <cstring>
 
 Entity::Entity() : Entity(0, 0, 0, 0) {}
 
@@ -61,15 +62,15 @@ Entity::Entity(int resource_id, int16_t anim_idx, int world_x, int world_y)
 
         /* 4-byte aligned copy */
         src = &g_empty_string;
-        size_t words = len >> 2;
-        for (size_t i = 0; i < words; i++) {
-            *(uint32_t*)dst = *(const uint32_t*)src;
-            src += 4;
-            dst += 4;
+        const size_t words = len >> 2;
+        if (words != 0) {
+            std::memcpy(dst, src, words * sizeof(uint32_t));
+            src += words * sizeof(uint32_t);
+            dst += words * sizeof(uint32_t);
         }
 
         /* Remaining bytes */
-        size_t remainder = len & 3;
+        const size_t remainder = len & 3;
         for (size_t i = 0; i < remainder; i++) {
             *dst++ = *src++;
         }
@@ -116,7 +117,8 @@ void Entity::GetSubObjectPosition(int* out_xy, int sub_index)
     }
 
     /* Read offset pair from resource's sub-object table */
-    int* offset_table = (int*)((uint8_t*)resource + 0x5FC);
+    int* offset_table = reinterpret_cast<int*>(
+        static_cast<uint8_t*>(resource) + 0x5FC);
     int offset_x = offset_table[sub_index * 2];       /* +0x5FC + sub_index*8 */
     int offset_y = offset_table[sub_index * 2 + 1];   /* +0x600 + sub_index*8 */
 

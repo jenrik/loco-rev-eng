@@ -18,8 +18,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
         /* primary_surface→vtable[26] = IDirectDrawSurface4::Lock() or similar.
          * DirectDraw surfaces are COM platform API; literal vtable dispatch
          * preserved as these are opaque COM objects. */
-        void** vtbl = *(void***)this->primary_surface();
-        ((void (*)(void*, void*))vtbl[0x68 / 4])(this->primary_surface(), hdc);
+        SurfaceLock_t lock_surface =
+            Cursor_SurfaceLock(this->primary_surface());
+        lock_surface(this->primary_surface(), hdc);
     }
 
     /* ================================================================ */
@@ -62,8 +63,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
                 clientR->right  + screenPt.x,
                 clientR->bottom + screenPt.y);
 
-        void** vtbl = *(void***)_g_backbuffer;
-        int result = ((SurfaceBlt_t)vtbl[0x14 / 4])(
+        int result = Cursor_SurfaceBlt(_g_backbuffer)(
             _g_backbuffer,
             &screenDest,
             this->primary_surface(),
@@ -94,14 +94,15 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
 
     /* ---- 4c. Get animation RESDATA + adjust hotspot ---- */
     void* animData = this->anim_resdata();  /* +0x44 */
-    cursorPos.x -= *(int16_t*)((intptr_t)animData + 0x32);  /* hotspot_x */
-    cursorPos.y -= *(int16_t*)((intptr_t)animData + 0x34);  /* hotspot_y */
+    auto* animationBytes = static_cast<uint8_t*>(animData);
+    cursorPos.x -= *reinterpret_cast<int16_t*>(animationBytes + 0x32); /* hotspot_x */
+    cursorPos.y -= *reinterpret_cast<int16_t*>(animationBytes + 0x34); /* hotspot_y */
 
     /* ---- 4d. Get sprite dimensions from RESDATA ---- */
     uint32_t spriteW, spriteH;
     if (animData != nullptr) {
-        spriteW = *(uint16_t*)((intptr_t)animData + 0x14);  /* width  */
-        spriteH = *(uint16_t*)((intptr_t)animData + 0x16);  /* height */
+        spriteW = *reinterpret_cast<uint16_t*>(animationBytes + 0x14); /* width  */
+        spriteH = *reinterpret_cast<uint16_t*>(animationBytes + 0x16); /* height */
     } else {
         spriteW = 0;
         spriteH = 0;
@@ -112,8 +113,8 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     RECT cursorRect;
     cursorRect.left   = cursorPos.x;
     cursorRect.top    = cursorPos.y;
-    cursorRect.right  = cursorPos.x + (int)spriteW;
-    cursorRect.bottom = cursorPos.y + (int)spriteH;
+    cursorRect.right  = cursorPos.x + static_cast<int>(spriteW);
+    cursorRect.bottom = cursorPos.y + static_cast<int>(spriteH);
 
     /* Clip right edge: if cursorRect.right > clip_rect_right */
     if (this->clip_rect_right() < cursorRect.right) {
@@ -135,7 +136,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Cursor+0x48  = anim_frame   (wraps at frame_count)         */
 
     RECT  srcRect;      /* source sub-rect within sprite sheet */
-    uint16_t frameCount = *(uint16_t*)((intptr_t)animData + 0x160);
+    uint16_t frameCount = *reinterpret_cast<uint16_t*>(animationBytes + 0x160);
 
     if (frameCount <= 1) {
         /* Single-frame sprite: use entire surface */
@@ -143,10 +144,10 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
         srcRect.right  = spriteW;
     } else {
         /* Multi-frame animation: advance + wrap */
-        if (this->anim_frame() >= (int32_t)frameCount) {
+        if (this->anim_frame() >= static_cast<int32_t>(frameCount)) {
             this->anim_frame() = 0;
         }
-        uint32_t frameWidth  = *(uint16_t*)((intptr_t)animData + 0x14);
+        uint32_t frameWidth  = *reinterpret_cast<uint16_t*>(animationBytes + 0x14);
         uint32_t frameOffset = frameWidth * this->anim_frame();
         srcRect.left   = frameOffset;
         srcRect.right  = frameOffset + spriteW;
@@ -176,8 +177,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Src rect:  offsetRect (surface coords on primary_surface)     */
     /* Flags: DDBLT_WAIT (0x1000000)                                 */
     {
-        void** vtbl = *(void***)this->backbuffer();
-        ((SurfaceBlt_t)vtbl[0x14 / 4])(
+        Cursor_SurfaceBlt(this->backbuffer())(
             this->backbuffer(),
             &cursorRect,
             this->primary_surface(),
@@ -192,8 +192,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Src rect:  srcRect (animation frame sub-rect of sprite sheet) */
     /* Flags: DDBLT_WAIT | DDBLT_KEYSRC (0x1008000)                  */
     {
-        void** vtbl = *(void***)this->primary_surface();
-        ((SurfaceBlt_t)vtbl[0x14 / 4])(
+        Cursor_SurfaceBlt(this->primary_surface())(
             this->primary_surface(),
             &offsetRect,
             this->cursor_sprite_surface(),   /* +0x14 = cursor sprite surface (aliased via union) */
@@ -227,8 +226,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Src rect:  client_rect(+0x104) (surface-space region)         */
     /* Flags: DDBLT_WAIT (0x1000000)                                 */
     {
-        void** vtbl = *(void***)_g_backbuffer;
-        int result = ((SurfaceBlt_t)vtbl[0x14 / 4])(
+        int result = Cursor_SurfaceBlt(_g_backbuffer)(
             _g_backbuffer,
             &screenDestRect,
             this->primary_surface(),
@@ -251,8 +249,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Copies the saved background (captured in Blit 1) back onto    */
     /* the primary surface so the next frame starts clean.           */
     {
-        void** vtbl = *(void***)this->primary_surface();
-        ((SurfaceBlt_t)vtbl[0x14 / 4])(
+        Cursor_SurfaceBlt(this->primary_surface())(
             this->primary_surface(),
             &spriteDestRect,
             this->backbuffer(),

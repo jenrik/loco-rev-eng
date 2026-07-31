@@ -14,7 +14,6 @@
  */
 
 #include "collections.h"
-#include "vtable_addrs.h"
 #include <cstring>          /* memset, memcpy */
 
 /* ================================================================== */
@@ -42,7 +41,7 @@ void Collection::Resize(int32_t newCapacity) {
 void* Collection::InternalExtract(int32_t index) {
     /* Base: return items[index].
      * Subclasses may override for custom extraction logic. */
-    if ((uint32_t)index >= (uint32_t)this->count) return nullptr;
+    if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(this->count)) return nullptr;
     return this->items[index];
 }
 
@@ -87,7 +86,7 @@ void Collection::Compact() {
 /* ================================================================== */
 void* Collection::RemoveAt(int32_t index)
 {
-    if ((uint32_t)index >= (uint32_t)this->count) {
+    if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(this->count)) {
         return nullptr;
     }
 
@@ -111,17 +110,17 @@ void* Collection::RemoveAt(int32_t index)
 /* ================================================================== */
 void* SortedCollection::SetAt(int32_t index, void* element)
 {
-    if ((uint32_t)index > (uint32_t)this->capacity) {
+    if (static_cast<uint32_t>(index) > static_cast<uint32_t>(this->capacity)) {
         return nullptr;
     }
 
     /* Grow array if index is at or beyond current count */
-    if ((uint32_t)index >= (uint32_t)this->count) {
+    if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(this->count)) {
         /* Growth formula: newCapacity = 1 - (int)(index * -1.0)
            The double -1.0 at 0x4780A8 inverts the sign, then __ftol
            truncates to int. Result: newCapacity = index + 1. */
-        long fltResult = __ftol((double)index * GROWTH_NEG_ONE);
-        int32_t newCap = 1 - (int)fltResult;   /* = 1 - (-index) = index + 1 */
+        long fltResult = __ftol(static_cast<double>(index) * GROWTH_NEG_ONE);
+        int32_t newCap = 1 - static_cast<int>(fltResult);   /* = 1 - (-index) = index + 1 */
 
         /* Virtual dispatch to Resize (original vtable[0]). */
         this->Resize(newCap);
@@ -149,13 +148,13 @@ uint32_t SortedCollection::FindItem(int32_t target, uint32_t low, uint32_t high)
 {
     if (high - low > 2) {
         uint32_t mid = ((high - low) >> 1) + low;
-        int32_t cmp = this->Comparator((void*)(intptr_t)target, this->items[mid]);
+        int32_t cmp = this->Comparator(reinterpret_cast<void*>(static_cast<intptr_t>(target)), this->items[mid]);
         return cmp < 0 ? this->FindItem(target, low, mid)
                        : this->FindItem(target, mid, high);
     }
 
     for (; low <= high; ++low) {
-        int32_t cmp = this->Comparator((void*)(intptr_t)target, this->items[low]);
+        int32_t cmp = this->Comparator(reinterpret_cast<void*>(static_cast<intptr_t>(target)), this->items[low]);
         if (cmp <= 0) return cmp == 0 ? low : UINT32_MAX;
     }
     return UINT32_MAX;
@@ -250,7 +249,7 @@ void Timer::Resize(int32_t newCapacity)
     /* Step 2: Allocate new array */
     if (cap > 0) {
         void* newItems = operator_new(cap * 4);      /* cap * sizeof(void*) */
-        this->items = (void**)newItems;
+        this->items = static_cast<void**>(newItems);
         memset(newItems, 0, cap * 4);
     }
 
@@ -310,9 +309,8 @@ bool Timer::IsSorted()
 /* Timer::Destructor                                                   */
 /* Address: 0x435CA0                                                   */
 /*                                                                     */
-/* In the original binary, the vtable is reset to VTBL_TIMER_BASE      */
-/* during destruction to limit available virtual methods. In idiomatic  */
-/* C++, the compiler handles vtable teardown during ~Timer().          */
+/* The original binary narrows the vtable during destruction; C++ emits  */
+/* the compiler-managed destructor slots and requires no manual vtable write. */
 /* ================================================================== */
 void Timer::Destructor()
 {
@@ -329,7 +327,7 @@ void Timer::Destructor()
 
 /* ================================================================== */
 /* Timer::~Timer — Scalar deleting destructor                          */
-/* Address: 0x436360 (Timer_DtorWrapper2)                              */
+/* Address: 0x436360 (compiler-generated Timer destructor slot)       */
 /* ================================================================== */
 Timer::~Timer()
 {
@@ -346,13 +344,13 @@ Timer::~Timer()
 /* ================================================================== */
 void* SortedCollection2::SetAt(int32_t index, void* element)
 {
-    if ((uint32_t)index > (uint32_t)this->capacity) {
+    if (static_cast<uint32_t>(index) > static_cast<uint32_t>(this->capacity)) {
         return nullptr;
     }
 
-    if ((uint32_t)index >= (uint32_t)this->count) {
-        long fltResult = __ftol((double)index * GROWTH_NEG_ONE);
-        int32_t newCap = 1 - (int)fltResult;   /* = index + 1 */
+    if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(this->count)) {
+        long fltResult = __ftol(static_cast<double>(index) * GROWTH_NEG_ONE);
+        int32_t newCap = 1 - static_cast<int>(fltResult);   /* = index + 1 */
         this->Resize(newCap);
     }
 
@@ -389,69 +387,6 @@ Timer2::~Timer2()
 }
 
 
-/* ================================================================== */
-/* Scalar-deleting destructor wrappers (free functions)                 */
-/* These were the vtable[1] slot functions in the original binary.     */
-/* ================================================================== */
-
-void* __thiscall Timer_DtorWrapper(void* this_ptr, uint8_t flags)
-{
-    /* Inlined destructor: reset vtable, free items, optionally free self */
-    *(void***)this_ptr = (void**)VTBL_TIMER_BASE;
-    ((Collection*)this_ptr)->count = 0;
-
-    if (((Collection*)this_ptr)->items != nullptr) {
-        GLOBAL_free(((Collection*)this_ptr)->items);
-    }
-    ((Collection*)this_ptr)->items = nullptr;
-
-    if (flags & 1) {
-        GLOBAL_free(this_ptr);
-    }
-
-    return this_ptr;
-}
-
-
-void* __thiscall Timer_DtorWrapper2(void* this_ptr, uint8_t flags)
-{
-    Timer* timer = (Timer*)this_ptr;
-    timer->Destructor();
-
-    if (flags & 1) {
-        GLOBAL_free(this_ptr);
-    }
-
-    return this_ptr;
-}
-
-
-void* __thiscall Timer2_DtorWrapper(void* this_ptr, uint8_t flags)
-{
-    *(void***)this_ptr = (void**)VTBL_TIMER2_BASE;
-    ((Collection*)this_ptr)->count = 0;
-
-    if (((Collection*)this_ptr)->items != nullptr) {
-        GLOBAL_free(((Collection*)this_ptr)->items);
-    }
-    ((Collection*)this_ptr)->items = nullptr;
-
-    if (flags & 1) {
-        GLOBAL_free(this_ptr);
-    }
-
-    return this_ptr;
-}
-
-
-void* __thiscall Timer2_DtorWrapper2(void* this_ptr, uint8_t flags)
-{
-    Timer2* timer2 = (Timer2*)this_ptr;
-    timer2->Destructor();
-
-    if (flags & 1) {
-        GLOBAL_free(this_ptr);
-    }
-
-    return this_ptr;
-}
+/* Timer and Timer2 destruction is emitted by their C++ destructors above.
+ * The original scalar-deleting slots are compiler-generated ABI helpers and
+ * are intentionally not reimplemented here. */

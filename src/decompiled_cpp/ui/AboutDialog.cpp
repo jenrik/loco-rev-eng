@@ -179,7 +179,7 @@ AboutDialog::~AboutDialog()
 void AboutDialog::base_destructor()
 {
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
-    ((GameWindow*)this)->base_destructor();
+    this->GameWindow::base_destructor();
 }
 
 /* ================================================================== */
@@ -201,7 +201,9 @@ bool AboutDialog::Create(HWND hWndParent)
     int  height = 0xE8;   /* 232 pixels */
 
     /* Load icon from resource 0x65 (101 = IDI_APPLICATION) */
-    this->hIcon = LoadIconA(this->hInstance, (const char*)0x65);  /* +0x150 */
+    this->hIcon = LoadIconA(
+        this->hInstance,
+        reinterpret_cast<const char*>(static_cast<uintptr_t>(0x65)));  /* +0x150 */
 
     /* Get desktop dimensions for centering */
     HWND hDesktop = GetDesktopWindow();

@@ -26,17 +26,112 @@
 #define CHANNEL_STATE_PAUSED    3   /* Playback paused */
 #define CHANNEL_STATE_STOPPING  4   /* Flagged for reclaim by allocator */
 
+/* ------------------------------------------------------------------ */
+/* DirectSound ABI views                                               */
+/* ------------------------------------------------------------------ */
+
+/*
+ * These declarations describe the DirectSound COM slots used by the game.
+ * They are deliberately interfaces rather than hand-written vtable reads:
+ * the first three entries are IUnknown, followed by the DirectSound methods
+ * in their original order.  The protected non-virtual destructors prevent
+ * accidental deletion through these borrowed interface views.
+ */
+#ifdef _WIN32
+#define LOCO_AUDIO_STDCALL __stdcall
+#else
+#ifndef _WIN32
+/* Host-only ABI deviation: native GCC does not provide stdcall. */
+#define LOCO_AUDIO_STDCALL
+#endif
+#endif
+
+class AudioDirectSoundBuffer {
+public:
+    virtual int32_t LOCO_AUDIO_STDCALL QueryInterface(void* iid, void** object) = 0;
+    virtual uint32_t LOCO_AUDIO_STDCALL AddRef() = 0;
+    virtual uint32_t LOCO_AUDIO_STDCALL Release() = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetCaps(void* caps) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetCurrentPosition(uint32_t* play, uint32_t* write) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetFormat(void* format, uint32_t size, uint32_t* written) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetVolume(int32_t* volume) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetPan(int32_t* pan) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetFrequency(uint32_t* frequency) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetStatus(uint32_t* status) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL Initialize(void* device, void* description) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL Lock(uint32_t offset, uint32_t bytes,
+                                             void** region1, uint32_t* bytes1,
+                                             void** region2, uint32_t* bytes2,
+                                             uint32_t flags) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL Play(uint32_t reserved1, uint32_t reserved2,
+                                            uint32_t flags) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL SetCurrentPosition(uint32_t position) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL SetFormat(void* format) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL SetVolume(int32_t volume) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL SetPan(int32_t pan) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL SetFrequency(uint32_t frequency) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL Stop() = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL Unlock(void* region1, uint32_t bytes1,
+                                              void* region2, uint32_t bytes2) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL Restore() = 0;
+
+protected:
+    ~AudioDirectSoundBuffer() = default;
+};
+
+class AudioDirectSoundDevice {
+public:
+    virtual int32_t LOCO_AUDIO_STDCALL QueryInterface(void* iid, void** object) = 0;
+    virtual uint32_t LOCO_AUDIO_STDCALL AddRef() = 0;
+    virtual uint32_t LOCO_AUDIO_STDCALL Release() = 0;
+    /* The recovered slot-3 calls use both the ordinary and full
+       DirectSound argument forms, so the tail remains variadic. */
+    virtual int32_t LOCO_AUDIO_STDCALL CreateSoundBuffer(void* description,
+                                                          void* buffer,
+                                                          ...) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL GetCaps(void* caps) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL DuplicateSoundBuffer(void* source,
+                                                              void* copy) = 0;
+    virtual int32_t LOCO_AUDIO_STDCALL SetCooperativeLevel(void* window,
+                                                            int32_t level) = 0;
+
+protected:
+    ~AudioDirectSoundDevice() = default;
+};
+
+#undef LOCO_AUDIO_STDCALL
+
+/* ------------------------------------------------------------------ */
+/* SoundResource — ResourceEntry sound view                            */
+/* ------------------------------------------------------------------ */
+
+class SoundResource {
+public:
+    /* ResourceEntry's original slot-0 destructor is compiler-managed here. */
+    virtual ~SoundResource() = default;
+
+    int32_t     resource_id;        /* +0x04  resource identifier */
+    uint16_t    flags;              /* +0x08  resource flags */
+    uint8_t     is_valid;           /* +0x0A  loaded flag */
+    uint8_t     reserved_0b;        /* +0x0B  x86 padding */
+    void*       buffer;              /* +0x0C  DirectSound/wave buffer */
+    int32_t     cooldown_interval;  /* +0x10  replay cooldown */
+    uint32_t    cooldown_timer;     /* +0x14  next permitted game tick */
+    uint8_t     reserved_18[0x10C]; /* +0x18..+0x123 unknown resource data */
+    int32_t     max_instances;      /* +0x124 maximum concurrent instances */
+};
+
 struct AudioChannel {
     /* ============================================================ */
     /* Fields (offsets from this)                                    */
     /* ============================================================ */
 
-    void**      output_ptr;         /* +0x00  pointer to caller's slot (SetOutput) */
+    AudioChannel** output_ptr;      /* +0x00  pointer to caller's channel slot */
     uint8_t     looping;            /* +0x04  0=oneshot, 1=looping */
     int32_t     attenuation_type;   /* +0x08  curve selector (1-4, used by SetAttenuation) */
     int32_t     attenuation_level;  /* +0x0c  0-100 applied level */
     int32_t     state;              /* +0x10  CHANNEL_STATE_* constant */
-    void*       ds_buffer;          /* +0x14  IDirectSoundBuffer* (secondary) */
+    AudioDirectSoundBuffer* ds_buffer; /* +0x14  secondary DirectSound buffer */
     int32_t     pos_x;              /* +0x18  current world X */
     int32_t     pos_y;              /* +0x1c  current world Y */
     int32_t     bounds_max_x;       /* +0x20  clamp maximum X */
@@ -83,7 +178,7 @@ struct AudioChannel {
      * Stores param_1 as output_ptr. If param_1 is non-NULL, also writes `this`
      * into *param_1 so the caller can track which channel owns a slot.
      */
-    void SetOutput(void** ptr);
+    void SetOutput(AudioChannel** ptr);
 
     /**
      * LoadSound — Create a DS secondary buffer and load PCM data.
@@ -97,8 +192,8 @@ struct AudioChannel {
      * (0x8878000a), calls GameAudio::StopFinished to reclaim DS memory, then retries.
      * Stores attenuation_type, resource_id, looping flag, then sets state=LOADED.
      */
-    void LoadSound(void* ds_device, void* sound_resource, int32_t pos_x,
-                   int32_t pos_y, int32_t atten_type, uint8_t looping);
+    void LoadSound(AudioDirectSoundDevice* ds_device, SoundResource* sound_resource,
+                   int32_t pos_x, int32_t pos_y, int32_t atten_type, uint8_t looping);
 
     /**
      * Pause — Stop DS buffer playback, set state to PAUSED.

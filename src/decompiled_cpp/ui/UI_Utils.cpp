@@ -6,6 +6,8 @@
  */
 
 #include "UI_Utils.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include <stdint.h>
 
 /* ================================================================== */
@@ -586,3 +588,5 @@ void UI_Manager::resetTooltips(int param)
         }
     }
 }
+
+#pragma GCC diagnostic pop

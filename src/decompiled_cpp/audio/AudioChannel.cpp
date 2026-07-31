@@ -12,6 +12,7 @@
 #define _USE_MATH_DEFINES
 
 #include "AudioChannel.h"
+#include "GameAudio.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <cmath>
 
@@ -19,22 +20,33 @@
 /* External references                                                 */
 /* ================================================================== */
 
+#ifdef _WIN32
+#define LOCO_AUDIO_STDCALL __stdcall
+#define LOCO_AUDIO_FASTCALL __fastcall
+#else
+#ifndef _WIN32
+/* Host-only ABI deviation: native GCC has no Win32 calling conventions. */
+#define LOCO_AUDIO_STDCALL
+#define LOCO_AUDIO_FASTCALL
+#endif
+#endif
+
 extern "C" {
     /* Win32 / CRT */
-    void __stdcall OutputDebugStringA(const char* lpOutputString);
+    void LOCO_AUDIO_STDCALL OutputDebugStringA(const char* lpOutputString);
 }
 
-    /* Resource manager */
-    void __fastcall RESMGR_LoadSoundResource(void* sound_res);  /* 0x448D60 */
+/* Resource manager */
+void LOCO_AUDIO_FASTCALL RESMGR_LoadSoundResource(void* sound_res); /* 0x448D60 */
 
-    /* GameAudio helper (called only from LoadSound) */
-    void __fastcall GameAudio_StopFinished(void* g_audio);     /* 0x4130F0 */
+/* Error string helper */
+void LOCO_AUDIO_STDCALL DDRAW_GetDsoundErrorString(int32_t hr);     /* 0x45C2E0 */
 
-    /* Error string helper */
-    void __stdcall DDRAW_GetDsoundErrorString(int32_t hr);     /* 0x45C2E0 */
+/* Global audio instance (used only by LoadSound) */
+extern GameAudio* g_audio;                                         /* 0x4FD3BC */
 
-    /* Global audio instance (used only by LoadSound) */
-    extern void* g_audio;                                       /* 0x4FD3BC, GameAudio* */
+#undef LOCO_AUDIO_STDCALL
+#undef LOCO_AUDIO_FASTCALL
 
 /* ================================================================== */
 /* Debug string constant                                               */
@@ -98,11 +110,11 @@ static const double kAttenM2     = 0.09;
 void AudioChannel::Init()
 {
     this->attenuation_type  = 2;    /* +0x08 */
-    this->output_ptr        = NULL; /* +0x00 */
-    this->looping           = 0;    /* +0x04 */
+    this->output_ptr        = nullptr; /* +0x00 */
+    this->looping           = 0;       /* +0x04 */
     this->attenuation_level = 100;  /* +0x0c */
     this->state             = CHANNEL_STATE_IDLE; /* +0x10 */
-    this->ds_buffer         = NULL; /* +0x14 */
+    this->ds_buffer         = nullptr; /* +0x14 */
     this->pos_x             = 0;    /* +0x18 */
     this->pos_y             = 0;    /* +0x1c */
     this->bounds_max_x      = 0;    /* +0x20 */
@@ -120,25 +132,17 @@ void AudioChannel::Init()
 void AudioChannel::Release()
 {
     /* Release the DS secondary buffer if it exists */
-    if (this->ds_buffer != NULL) {                      /* +0x14 */
-        void* buf = this->ds_buffer;
-        void** vtbl = *(void***)buf;
-
-        /* vtable[0x48] = IDirectSoundBuffer::Stop */
-        typedef long (__stdcall* StopFunc)(void*);
-        ((StopFunc)vtbl[0x48 / 4])(buf);
-
-        /* vtable[8] = IUnknown::Release */
-        typedef long (__stdcall* ReleaseFunc)(void*);
-        ((ReleaseFunc)vtbl[8 / 4])(buf);
-
-        this->ds_buffer = NULL;                         /* +0x14 */
+    if (this->ds_buffer != nullptr) {                   /* +0x14 */
+        /* DirectSoundBuffer slots 18 and 2: Stop, then IUnknown::Release. */
+        this->ds_buffer->Stop();
+        this->ds_buffer->Release();
+        this->ds_buffer = nullptr;                       /* +0x14 */
     }
 
     /* Clear the output pointer back-link */
-    if (this->output_ptr != NULL) {                     /* +0x00 */
-        *this->output_ptr = NULL;
-        this->output_ptr = NULL;                        /* +0x00 */
+    if (this->output_ptr != nullptr) {                  /* +0x00 */
+        *this->output_ptr = nullptr;
+        this->output_ptr = nullptr;                      /* +0x00 */
     }
 
     /* Reset state back to idle */
@@ -154,9 +158,9 @@ void AudioChannel::Release()
 /* ================================================================== */
 void AudioChannel::Reset()
 {
-    if (this->output_ptr != NULL) {                     /* +0x00 */
-        *this->output_ptr = NULL;
-        this->output_ptr = NULL;                        /* +0x00 */
+    if (this->output_ptr != nullptr) {                  /* +0x00 */
+        *this->output_ptr = nullptr;
+        this->output_ptr = nullptr;                      /* +0x00 */
     }
 }
 
@@ -166,10 +170,10 @@ void AudioChannel::Reset()
 /*                                                                     */
 /* Called by: GameAudio::AllocChannel after loading/playing             */
 /* ================================================================== */
-void AudioChannel::SetOutput(void** ptr)
+void AudioChannel::SetOutput(AudioChannel** ptr)
 {
     this->output_ptr = ptr;                             /* +0x00 */
-    if (ptr != NULL) {
+    if (ptr != nullptr) {
         *ptr = this;    /* back-link: caller can find this channel */
     }
 }
@@ -187,36 +191,33 @@ void AudioChannel::SetOutput(void** ptr)
 /*   atten_type     — attenuation curve type to apply (1-4)             */
 /*   looping        — 0=oneshot, 1=looping                             */
 /* ================================================================== */
-void AudioChannel::LoadSound(void* ds_device, void* sound_resource,
+void AudioChannel::LoadSound(AudioDirectSoundDevice* ds_device,
+                             SoundResource* sound_resource,
                              int32_t pos_x, int32_t pos_y,
                              int32_t atten_type, uint8_t looping)
 {
     /* Debug assert: should not have an existing buffer */
-    if (this->ds_buffer != NULL) {                      /* +0x14 */
+    if (this->ds_buffer != nullptr) {                   /* +0x14 */
         OutputDebugStringA(kAssertNeverHere);
     }
 
     /* Ensure the sound resource has its data loaded */
-    if (*(int32_t*)((uint8_t*)sound_resource + 0x0c) == 0) {
-        RESMGR_LoadSoundResource(sound_resource);       /* 0x448D60 */
+    if (sound_resource->buffer == nullptr) {
+        RESMGR_LoadSoundResource(sound_resource);        /* 0x448D60 */
     }
 
-    /* Attempt to create the DS secondary buffer */
-    void** ds_vtbl = *(void***)ds_device;
-    typedef long (__stdcall* CreateSoundBufferFunc)(void*, void*, void**);
-    int32_t hr = ((CreateSoundBufferFunc)ds_vtbl[0x14 / 4])(
-        ds_device,
-        *(void**)((uint8_t*)sound_resource + 0x0c),     /* wave data */
-        &this->ds_buffer);                              /* +0x14 */
+    /* Attempt the recovered secondary-buffer call (device slot 5, +0x14). */
+    int32_t hr = ds_device->DuplicateSoundBuffer(
+        sound_resource->buffer,                          /* wave data */
+        &this->ds_buffer);                               /* +0x14 */
 
     /* If DSERR_BUFFERLOST, stop all channels and retry */
     if (hr == 0x8878000a /* DSERR_BUFFERLOST */) {
-        GameAudio_StopFinished(g_audio);                /* 0x4130F0 */
+        g_audio->StopFinished();                         /* 0x4130F0 */
 
-        hr = ((CreateSoundBufferFunc)ds_vtbl[0x14 / 4])(
-            ds_device,
-            *(void**)((uint8_t*)sound_resource + 0x0c),
-            &this->ds_buffer);                          /* +0x14 */
+        hr = ds_device->DuplicateSoundBuffer(
+            sound_resource->buffer,
+            &this->ds_buffer);
     }
 
     /* On any error, print debug string and return without loading */
@@ -234,15 +235,13 @@ void AudioChannel::LoadSound(void* ds_device, void* sound_resource,
 
     /* Record looping flag and resource ID */
     this->looping      = looping;                       /* +0x04 */
-    this->resource_id  = *(int32_t*)((uint8_t*)sound_resource + 4);  /* +0x38 */
+    this->resource_id  = sound_resource->resource_id;   /* +0x38 */
 
     /* Start playback — position 0, either oneshot or looping */
-    void** buf_vtbl = *(void***)this->ds_buffer;
-    typedef long (__stdcall* PlayFunc)(void*, uint32_t, uint32_t, uint32_t);
     if (looping == 0) {
-        ((PlayFunc)buf_vtbl[0x30 / 4])(this->ds_buffer, 0, 0, 0);
+        this->ds_buffer->Play(0, 0, 0);
     } else {
-        ((PlayFunc)buf_vtbl[0x30 / 4])(this->ds_buffer, 0, 0, 1); /* DSBPLAY_LOOPING */
+        this->ds_buffer->Play(0, 0, 1);                  /* DSBPLAY_LOOPING */
     }
 
     this->state = CHANNEL_STATE_LOADED;                 /* +0x10 */
@@ -256,12 +255,10 @@ void AudioChannel::LoadSound(void* ds_device, void* sound_resource,
 /* ================================================================== */
 void AudioChannel::Pause()
 {
-    if (this->ds_buffer != NULL) {                      /* +0x14 */
-        void** vtbl = *(void***)this->ds_buffer;
-        typedef long (__stdcall* StopFunc)(void*);
-        ((StopFunc)vtbl[0x48 / 4])(this->ds_buffer);   /* Stop */
+    if (this->ds_buffer != nullptr) {                   /* +0x14 */
+        this->ds_buffer->Stop();                         /* Stop */
     }
-    this->state = CHANNEL_STATE_PAUSED;                 /* +0x10 */
+    this->state = CHANNEL_STATE_PAUSED;                  /* +0x10 */
 }
 
 /* ================================================================== */
@@ -275,17 +272,14 @@ void AudioChannel::Pause()
 /* ================================================================== */
 void AudioChannel::Play()
 {
-    if (this->ds_buffer == NULL) {                      /* +0x14 */
+    if (this->ds_buffer == nullptr) {                   /* +0x14 */
         return;
     }
-
-    void** vtbl = *(void***)this->ds_buffer;
 
     /* If state == LOADED, check if the DS buffer is already playing */
     if (this->state == CHANNEL_STATE_LOADED) {          /* +0x10 */
         uint32_t status = 0;
-        typedef long (__stdcall* GetStatusFunc)(void*, uint32_t*);
-        ((GetStatusFunc)vtbl[0x24 / 4])(this->ds_buffer, &status);
+        this->ds_buffer->GetStatus(&status);
 
         /* DSBSTATUS_PLAYING is bit 0 — if set, buffer is already playing */
         if ((status & 1) != 0) {
@@ -295,16 +289,14 @@ void AudioChannel::Play()
 
     /* Seek to start if not paused (paused should resume from current pos) */
     if (this->state != CHANNEL_STATE_PAUSED) {          /* +0x10 */
-        typedef long (__stdcall* SetPosFunc)(void*, uint32_t);
-        ((SetPosFunc)vtbl[0x34 / 4])(this->ds_buffer, 0);  /* SetCurrentPosition(0) */
+        this->ds_buffer->SetCurrentPosition(0);         /* SetCurrentPosition(0) */
     }
 
     /* Start playback with or without looping */
-    typedef long (__stdcall* PlayFunc)(void*, uint32_t, uint32_t, uint32_t);
     if (this->looping == 0) {                           /* +0x04 */
-        ((PlayFunc)vtbl[0x30 / 4])(this->ds_buffer, 0, 0, 0);
+        this->ds_buffer->Play(0, 0, 0);
     } else {
-        ((PlayFunc)vtbl[0x30 / 4])(this->ds_buffer, 0, 0, 1); /* DSBPLAY_LOOPING */
+        this->ds_buffer->Play(0, 0, 1);                 /* DSBPLAY_LOOPING */
     }
 
 done:
@@ -341,15 +333,13 @@ bool AudioChannel::IsActive()
         return true;
 
     case CHANNEL_STATE_LOADED:      /* 2 */
-        if (this->ds_buffer == NULL) {                  /* +0x14 */
+        if (this->ds_buffer == nullptr) {               /* +0x14 */
             return false;
         }
         /* Call GetStatus to verify buffer is still valid */
         {
-            void** vtbl = *(void***)this->ds_buffer;
-            typedef long (__stdcall* GetStatusFunc)(void*, uint32_t*);
             uint32_t status;
-            ((GetStatusFunc)vtbl[0x24 / 4])(this->ds_buffer, &status);
+            this->ds_buffer->GetStatus(&status);
         }
         return true;
 
@@ -424,7 +414,8 @@ void AudioChannel::UpdatePosition(int32_t pos_x, int32_t pos_y)
         int32_t center_x = this->bounds_max_x >> 1;    /* +0x20 / 2 */
 
         /* Ratio in [-1, 1]: horizontal position relative to center */
-        double ratio = (double)(pos_x - center_x) / (double)center_x;
+        double ratio = static_cast<double>(pos_x - center_x) /
+                       static_cast<double>(center_x);
 
         if (ratio != kDblZero) {
             double abs_r = fabs(ratio);
@@ -442,16 +433,14 @@ void AudioChannel::UpdatePosition(int32_t pos_x, int32_t pos_y)
                 raw_pan = -raw_pan;
             }
 
-            pan = (int32_t)raw_pan;
+            pan = static_cast<int32_t>(raw_pan);
         }
         /* else ratio == 0.0 → pan stays 0 (center) */
     }
 
     /* Apply pan to DS buffer */
-    if (this->ds_buffer != NULL) {                      /* +0x14 */
-        void** vtbl = *(void***)this->ds_buffer;
-        typedef long (__stdcall* SetPanFunc)(void*, int32_t);
-        ((SetPanFunc)vtbl[0x40 / 4])(this->ds_buffer, pan);
+    if (this->ds_buffer != nullptr) {                   /* +0x14 */
+        this->ds_buffer->SetPan(pan);
     }
 }
 
@@ -556,7 +545,8 @@ void AudioChannel::ApplyAttenuation(int32_t level)
     /* ---------- Compute fVar2 = (double)(uint32_t)(multiplier * level) * scale ---------- */
     /* Original: IMUL truncates to 32 bits, zero-extended via MOV [ESP+0x08]=0, then FILD */
     int32_t product_32 = multiplier * level;
-    double fVar2 = (double)(uint32_t)product_32 * kAttenScale;
+    double fVar2 = static_cast<double>(static_cast<uint32_t>(product_32))
+                 * kAttenScale;
 
     /* ---------- Volume computation ---------- */
     double volume;
@@ -580,9 +570,7 @@ void AudioChannel::ApplyAttenuation(int32_t level)
     }
 
     /* ---------- Apply to DS buffer ---------- */
-    if (this->ds_buffer != NULL) {                      /* +0x14 */
-        void** vtbl = *(void***)this->ds_buffer;
-        typedef long (__stdcall* SetVolumeFunc)(void*, int32_t);
-        ((SetVolumeFunc)vtbl[0x3c / 4])(this->ds_buffer, (int32_t)volume);
+    if (this->ds_buffer != nullptr) {                   /* +0x14 */
+        this->ds_buffer->SetVolume(static_cast<int32_t>(volume));
     }
 }

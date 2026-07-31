@@ -53,7 +53,45 @@ else
 endif
 
 CXXFLAGS  := -c -std=c++17 -fpermissive
-WARNFLAGS := -Wno-error -Wno-unused -Wno-unknown-pragmas -Wno-attributes
+# Anti-pattern compiler flags (see AGENTS.md "Fix anti-patterns on sight")
+# Three tiers:
+#   make                    Tier 1 — always-on ABI/layout correctness checks
+#   make STRICT=1           Tier 1+2 — calling-convention and cv/null checks
+#   make STRICT=2           Tier 1+3 — old-style-cast and Effective C++ audits
+WARNFLAGS := -Werror=delete-non-virtual-dtor \
+              -Werror=non-virtual-dtor \
+              -Werror=class-memaccess \
+              -Werror=cast-function-type \
+              -Werror=return-type \
+              -Werror=strict-aliasing \
+              -Werror=write-strings \
+              -Werror=narrowing \
+              -Werror=reorder \
+              -Werror=overloaded-virtual \
+              -Werror=pmf-conversions \
+              -Werror=invalid-offsetof \
+              -Werror=missing-field-initializers \
+              -Werror=suggest-override \
+              -Werror=subobject-linkage \
+              -Werror=cast-align \
+              -Werror=int-to-pointer-cast \
+              -Werror=pointer-arith \
+              -Wno-unknown-pragmas \
+              -Wno-cpp \
+              -Wno-unused \
+              -Wno-unused-parameter \
+              -Wno-attributes
+# Tier 2 — STRICT=1: diagnose ignored attributes and tighten type hygiene.
+# GCC reports an ignored calling-convention attribute in -Wattributes;
+# -Werror=ignored-attributes does not promote that diagnostic.
+ifdef STRICT
+  ifeq ($(STRICT),1)
+    WARNFLAGS += -Wattributes -Werror=attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+  else ifeq ($(STRICT),2)
+    WARNFLAGS += -Wattributes -Werror=attributes -Werror=old-style-cast -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Weffc++ -Werror=missing-declarations
+  endif
+endif
 INCLUDES  := -I$(SRCDIR) -I$(SRCDIR)/shared -I$(SRCDIR)/../sdl3_shims $(WIN_INC)
 
 # Force-include compat.h for standard headers + MSVC calling convention shims
@@ -177,7 +215,7 @@ DEFAULT_OBJS := $(GOOD_OBJS)
 # Phony targets
 # ---------------------------------------------------------------------
 
-.PHONY: all default clean check help dirs
+.PHONY: all default clean check help dirs diagnostic-census
 
 default: dirs $(DEFAULT_OBJS)
 	@echo "=== Compiled $(words $(DEFAULT_OBJS)) of $(words $(ALL_OBJS)) files ==="
@@ -191,6 +229,23 @@ all: dirs
 _compile_all: $(ALL_OBJS)
 	@ok=$$(find $(BUILDDIR) -name '*.o' | wc -l); \
 	echo "=== $$ok of $(words $(ALL_OBJS)) object files generated ==="
+
+diagnostic-census:
+	@set -eu; \
+	 tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/lego-loco-dcp-census.XXXXXX")"; \
+	 trap 'rm -rf "$$tmp"' EXIT; \
+	 echo "=== Full decompiled C++ diagnostic census (temporary build: $$tmp) ==="; \
+	 $(MAKE) --no-print-directory BUILDDIR="$$tmp/build" clean >/dev/null; \
+	 status=0; $(MAKE) --no-print-directory -k BUILDDIR="$$tmp/build" all >"$$tmp/build.log" 2>&1 || status=$$?; \
+	 errors="$$(grep -Ec 'error:' "$$tmp/build.log" || true)"; \
+	 warnings="$$(grep -Ec 'warning:' "$$tmp/build.log" || true)"; \
+	 failed="$$(grep -Ec '^=== FAILED:|Error [0-9]+' "$$tmp/build.log" || true)"; \
+	 objects="$$(find "$$tmp/build" -name '*.o' -type f 2>/dev/null | wc -l)"; \
+	 result="$$status"; \
+	 if [ "$$failed" -gt 0 ] && [ "$$result" -eq 0 ]; then result=1; fi; \
+	 printf 'status=%s errors=%s warnings=%s failed-files=%s objects=%s\n' "$$result" "$$errors" "$$warnings" "$$failed" "$$objects"; \
+	 cat "$$tmp/build.log"; \
+	 exit "$$result"
 
 check:
 	@echo "=== Compilation status check ==="
@@ -225,6 +280,7 @@ help:
 	@echo "Targets:"
 	@echo "  make              Compile known-good files (default)"
 	@echo "  make all          Attempt all files (expect failures)"
+	@echo "  make diagnostic-census Clean/-k all-files build in a temporary tree"
 	@echo "  make check        Show per-file compilation status"
 	@echo "  make clean        Remove build artifacts"
 	@echo ""

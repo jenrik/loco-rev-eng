@@ -64,6 +64,7 @@
 
 #include "../shared/types.h"
 #include "../core/Entity.h"
+#include "../ui/ButtonSprite.h"
 
 /* ================================================================ */
 /* Forward declarations for dependent types                          */
@@ -78,6 +79,7 @@ struct RESDATA;  /* Resource data descriptor */
 
 class PostcardAlbum {
 public:
+    virtual ~PostcardAlbum() {}
     /* ================================================================ */
     /* Fields (inherited from GameObject -> Entity -> UI_WindowBase)     */
     /* ================================================================ */
@@ -124,7 +126,7 @@ public:
     int32_t     sprite_state_value;  // +0x128  sprite state index for surface_type 7
     uint8_t     show_debug_text;     // +0x12C  1 = render debug tile names (checked by GFX_RenderAllTiles)
     // +0x12D to +0x12F: padding
-    int32_t     field_130;           // +0x130  extra sprite or state pointer (init to 0)
+    ButtonSprite* extra_sprite;      // +0x130  extra sprite or state pointer (init to nullptr)
     int32_t     high_res;            // +0x134  1 if screen >= 800x600, else 0
 
     /* ================================================================ */
@@ -149,14 +151,14 @@ public:
     /*   8 = +0x164  (indicator/big sprite, used by type 7)              */
     /* ================================================================ */
 
-    void*       sprite_main;         // +0x148  surface_type 1: main button
-    void*       sprite_toggle_a;     // +0x14C  surface_type 2: toggle with flag +0x1D6
-    void*       sprite_button_b;     // +0x150  surface_type 3: aux button
-    void*       sprite_toggle_b;     // +0x154  surface_type 4: toggle with flag +0x1D7
-    void*       sprite_help;         // +0x158  surface_type 9: help/question
-    void*       sprite_toggle_c;     // +0x15C  surface_type 5: toggle with up-arrow flag +0x1D4
-    void*       sprite_toggle_d;     // +0x160  surface_type 6: toggle with down-arrow flag +0x1D5
-    void*       sprite_indicator;    // +0x164  surface_type 7: indicator/big nav sprite
+    ButtonSprite* sprite_main;         // +0x148  surface_type 1: main button
+    ButtonSprite* sprite_toggle_a;     // +0x14C  surface_type 2: toggle with flag +0x1D6
+    ButtonSprite* sprite_button_b;     // +0x150  surface_type 3: aux button
+    ButtonSprite* sprite_toggle_b;     // +0x154  surface_type 4: toggle with flag +0x1D7
+    ButtonSprite* sprite_help;         // +0x158  surface_type 9: help/question
+    ButtonSprite* sprite_toggle_c;     // +0x15C  surface_type 5: toggle with up-arrow flag +0x1D4
+    ButtonSprite* sprite_toggle_d;     // +0x160  surface_type 6: toggle with down-arrow flag +0x1D5
+    ButtonSprite* sprite_indicator;    // +0x164  surface_type 7: indicator/big nav sprite
 
     /* ================================================================ */
     /* Sprite pointers — per-row elements (6 rows, 3 sprites each)       */
@@ -164,15 +166,15 @@ public:
     /* Surface_type 10 = tile_right[6] (at +0x198-0x1AC)                */
     /* ================================================================ */
 
-    void*       tile_left[6];        // +0x168..+0x17C  left selection rect per row (type 8)
-    void*       tile_mid[6];         // +0x180..+0x194  mid background per row (used for name text)
-    void*       tile_right[6];       // +0x198..+0x1AC  right nav rect per row (type 10)
+    ButtonSprite* tile_left[6];        // +0x168..+0x17C  left selection rect per row (type 8)
+    ButtonSprite* tile_mid[6];         // +0x180..+0x194  mid background per row (used for name text)
+    ButtonSprite* tile_right[6];       // +0x198..+0x1AC  right nav rect per row (type 10)
 
     /* ================================================================ */
     /* Thumbnail/extra sprites (9 sprites for the grid, surface_type 7)  */
     /* ================================================================ */
 
-    void*       thumb_sprites[9];    // +0x1B0..+0x1CC  thumbnail sprite pointers
+    ButtonSprite* thumb_sprites[9];    // +0x1B0..+0x1CC  thumbnail sprite pointers
 
     // +0x1D0 to +0x1D3: padding/unknown
 
@@ -486,7 +488,7 @@ public:
      * @param sprite  sprite pointer with rect at +0x04
      * @return        TRUE on successful blit, FALSE on failure
      */
-    bool BlitToSurface(void* sprite);
+    bool BlitToSurface(ButtonSprite* sprite);
 };
 
 /* ================================================================ */

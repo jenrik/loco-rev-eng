@@ -178,6 +178,29 @@ void Cursor_UnlockAllSurfaces(void);
 /* Surface vtable function pointer types (DirectDraw ABI — __stdcall convention) */
 typedef int (__stdcall *SurfaceBlt_t)(void*, RECT*, void*, RECT*, uint32_t, void*);
 typedef int (__stdcall *SurfacePollBlit_t)(void*, void*);
+using SurfaceLock_t = void (*)(void*, void*);
+using SurfaceFill_t = int (*)(void*, int, int, int, int, int*);
+using SurfaceLegacyBlt_t = int (*)(void*, int*, void*, int*, int, void*);
+
+static inline SurfaceBlt_t Cursor_SurfaceBlt(void* surface) {
+    void** vtbl = *reinterpret_cast<void***>(surface);
+    return reinterpret_cast<SurfaceBlt_t>(vtbl[0x14 / 4]);
+}
+
+static inline SurfaceLock_t Cursor_SurfaceLock(void* surface) {
+    void** vtbl = *reinterpret_cast<void***>(surface);
+    return reinterpret_cast<SurfaceLock_t>(vtbl[0x68 / 4]);
+}
+
+static inline SurfaceFill_t Cursor_SurfaceFill(void* surface) {
+    void** vtbl = *reinterpret_cast<void***>(surface);
+    return reinterpret_cast<SurfaceFill_t>(vtbl[5]);
+}
+
+static inline SurfaceLegacyBlt_t Cursor_SurfaceLegacyBlt(void* surface) {
+    void** vtbl = *reinterpret_cast<void***>(surface);
+    return reinterpret_cast<SurfaceLegacyBlt_t>(vtbl[5]);
+}
 #define BLIT_WAIT 0x1000000
 #define BLIT_KEYSRC 0x8000
 #define BLIT_KEYSRC_WAIT (BLIT_KEYSRC | BLIT_WAIT)
@@ -206,12 +229,14 @@ typedef int (__stdcall *SurfacePollBlit_t)(void*, void*);
 /*   [1]  GetSurface(resdata, flags, mode) → surface ptr              */
 /*   [2]  ReleaseSurface(resdata)                                     */
 /* ================================================================== */
-static inline void* RESDATA_GetSurface(void* resdata, int flags, int mode) {
-    void** vtbl = *(void***)resdata;
-    return ((void* (*)(void*, int, int))vtbl[1])(resdata, flags, mode);
+static inline void* RESDATA_GetSurface(RESDATA* resdata, int flags, int mode) {
+    void** vtbl = *reinterpret_cast<void***>(resdata);
+    using GetSurface = void* (*)(void*, int, int);
+    return reinterpret_cast<GetSurface>(vtbl[1])(resdata, flags, mode);
 }
-static inline void RESDATA_ReleaseSurface(void* resdata) {
-    void** vtbl = *(void***)resdata;
-    ((void (*)(void*))vtbl[2])(resdata);
+static inline void RESDATA_ReleaseSurface(RESDATA* resdata) {
+    void** vtbl = *reinterpret_cast<void***>(resdata);
+    using ReleaseSurface = void (*)(void*);
+    reinterpret_cast<ReleaseSurface>(vtbl[2])(resdata);
 }
 

@@ -13,6 +13,8 @@
 // Status: TRANSCRIBED
 
 #include "GameWindow.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "../stubs/ddraw.h"
 #include "../shared/vtable_addrs.h"
 /* vtable_addrs.h: VTBL_* reference constants for documentation and cross-validation */
@@ -694,3 +696,5 @@ void GameWindow::cleanup_sprites()
 {
     /* Base implementation: no-op */
 }
+
+#pragma GCC diagnostic pop

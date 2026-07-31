@@ -66,8 +66,19 @@ struct CursorEditorRecord {
 /* Cursor class                                                        */
 /* ================================================================== */
 
+/* These members overlay storage inherited from UI_WindowBase at the
+ * documented x86 offsets.  may_alias keeps the representation-preserving
+ * accessors explicit without making GCC assume unrelated field types cannot
+ * occupy the same bytes. */
+template <typename T>
+struct CursorOverlayValue {
+    T value;
+} __attribute__((__may_alias__));
+
 class Cursor : public UI_WindowBase {
 public:
+    using UI_WindowBase::show;
+
     /* ================================================================ */
     /* Base class field accessors                                        */
     /*                                                                   */
@@ -84,7 +95,7 @@ public:
 
     /* +0x14: cursor_state / cursor_sprite_surface aliases field_14 */
     int32_t&    cursor_state()   { return this->field_14; }
-    void*&      cursor_sprite_surface() { return *(void**)&this->field_14; }
+    void*&      cursor_sprite_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_14)->value; }
 
     /* +0x18..+0x24: clip_rect_* aliases field_18..field_24 */
     int32_t&    clip_rect_left()   { return this->field_18; }
@@ -96,10 +107,10 @@ public:
     UINT_PTR&   timer_id()       { return this->timerId; }
 
     /* +0x38: primary_surface aliases field_38 */
-    void*&      primary_surface() { return *(void**)&this->field_38; }
+    void*&      primary_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_38)->value; }
 
     /* +0x3C: sprite_width (uint32_t) overlays captureFlag + _pad_3E */
-    uint32_t&   sprite_width()   { return *(uint32_t*)&this->captureFlag; }
+    uint32_t&   sprite_width()   { return reinterpret_cast<CursorOverlayValue<uint32_t>*>(&this->captureFlag)->value; }
 
     /* +0x3D: field_3D in Cursor = field_3D in base (same name, same type) */
 
@@ -107,7 +118,7 @@ public:
     int32_t&    sprite_height()  { return this->field_40; }
 
     /* +0x44: anim_resdata (RESDATA*) overlays activeFlag + _pad_45 (4 bytes) */
-    RESDATA*&   anim_resdata()   { return *(RESDATA**)&this->activeFlag; }
+    RESDATA*&   anim_resdata()   { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(&this->activeFlag)->value; }
 
     /* +0x48: anim_frame aliases cursorRefCount */
     int32_t&    anim_frame()     { return this->cursorRefCount; }
@@ -119,44 +130,47 @@ public:
     int32_t&    dirty_rect_top()   { return this->field_54; }
 
     /* +0x58: capture_flag (uint8_t) overlays field_58 */
-    uint8_t&    capture_flag()   { return *(uint8_t*)&this->field_58; }
+    uint8_t&    capture_flag()   { return reinterpret_cast<CursorOverlayValue<uint8_t>*>(&this->field_58)->value; }
 
     /* +0x5C: backbuffer aliases field_5C */
-    void*&      backbuffer()     { return *(void**)&this->field_5C; }
+    void*&      backbuffer()     { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_5C)->value; }
 
     /* +0x60: child_obj_60 aliases childCount0 */
-    void*&      child_obj_60()   { return *(void**)&this->childCount0; }
+    void*&      child_obj_60()   { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->childCount0)->value; }
 
     /* +0x64: curs_pos_x aliases childObj0 */
-    int32_t&    curs_pos_x()     { return *(int32_t*)&this->childObj0; }
+    int32_t&    curs_pos_x()     { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->childObj0)->value; }
 
     /* +0x68: cursor_rect (RECT) overlays childCount1..childObj2 */
-    RECT&       cursor_rect()    { return *(RECT*)&this->childCount1; }
+    RECT&       cursor_rect()    { return reinterpret_cast<CursorOverlayValue<RECT>*>(&this->childCount1)->value; }
+    const RECT& cursor_rect() const {
+        return reinterpret_cast<const CursorOverlayValue<RECT>*>(&this->childCount1)->value;
+    }
 
     /* +0x78: prev_cursor_rect (RECT) overlays title[50] */
-    RECT&       prev_cursor_rect() { return *(RECT*)this->title; }
+    RECT&       prev_cursor_rect() { return reinterpret_cast<CursorOverlayValue<RECT>*>(this->title)->value; }
 
     /* +0x88: viewport_render_enabled (inside title buffer at +0x10) */
-    uint8_t&    viewport_render_enabled() { return *(uint8_t*)(this->title + 0x10); }
+    uint8_t&    viewport_render_enabled() { return reinterpret_cast<CursorOverlayValue<uint8_t>*>(this->title + 0x10)->value; }
 
     /* +0x90: primary_surface_fmt (inside title buffer at +0x18) */
-    int32_t&    primary_surface_fmt()  { return *(int32_t*)(this->title + 0x18); }
+    int32_t&    primary_surface_fmt()  { return reinterpret_cast<CursorOverlayValue<int32_t>*>(this->title + 0x18)->value; }
     /* +0x94: primary_surface_obj (inside title buffer at +0x1C) */
-    void*&      primary_surface_obj()  { return *(void**)(this->title + 0x1C); }
+    void*&      primary_surface_obj()  { return reinterpret_cast<CursorOverlayValue<void*>*>(this->title + 0x1C)->value; }
     /* +0x98: primary_resdata (RESDATA*, inside title buffer at +0x20) */
-    RESDATA*&   primary_resdata()      { return *(RESDATA**)(this->title + 0x20); }
+    RESDATA*&   primary_resdata()      { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(this->title + 0x20)->value; }
     /* +0x9C: overlay_surface_fmt (inside title buffer at +0x24) */
-    int32_t&    overlay_surface_fmt()  { return *(int32_t*)(this->title + 0x24); }
+    int32_t&    overlay_surface_fmt()  { return reinterpret_cast<CursorOverlayValue<int32_t>*>(this->title + 0x24)->value; }
     /* +0xA0: overlay_surface_obj (inside title buffer at +0x28) */
-    void*&      overlay_surface_obj()  { return *(void**)(this->title + 0x28); }
+    void*&      overlay_surface_obj()  { return reinterpret_cast<CursorOverlayValue<void*>*>(this->title + 0x28)->value; }
     /* +0xA4: overlay_resdata (RESDATA*, inside title buffer at +0x2C) */
-    RESDATA*&   overlay_resdata()      { return *(RESDATA**)(this->title + 0x2C); }
+    RESDATA*&   overlay_resdata()      { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(this->title + 0x2C)->value; }
 
     /* +0xDB: wndproc_flag (inside workRect at +0x7) */
-    uint8_t&    wndproc_flag()   { return *((uint8_t*)&this->workRect + 7); }
+    uint8_t&    wndproc_flag()   { return reinterpret_cast<CursorOverlayValue<uint8_t>*>(reinterpret_cast<uint8_t*>(&this->workRect) + 7)->value; }
 
     /* +0xE4: cached_width (int32_t) overlays visible (uint8_t) + _pad_E5 */
-    int32_t&    cached_width()   { return *(int32_t*)&this->visible; }
+    int32_t&    cached_width()   { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->visible)->value; }
 
     /* +0xE8: cached_height — first field beyond base class (0xE8 bytes) */
     int32_t     cached_height;          // +0xE8  client height cache
@@ -835,7 +849,7 @@ public:
      *
      * Called by: (indirectly via Cursor base destructor)
      */
-    void hide();
+    void hide() override;
 
     /**
      * Main cursor compositing / render function.

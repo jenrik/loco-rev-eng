@@ -154,35 +154,63 @@ typedef struct tagOFNA {
 
 /* ================================================================== */
 /* MSVC calling convention aliases                                     */
-/* MinGW provides these natively; for native GCC they're approximations */
+/*                                                                      */
+/* The recovered binary is PE32/MSVC, so these annotations are part of */
+/* the Windows ABI and must remain active for x86 Windows builds.  The  */
+/* host build is normally x86_64 Linux, where GCC warns that the x86    */
+/* attributes are ignored.  Keep the source annotations syntactically   */
+/* present there, but make their host meaning the native default ABI.    */
 /* ================================================================== */
 
-#ifndef __thiscall
-#define __thiscall __attribute__((thiscall))
-#endif
+#if defined(_MSC_VER)
+/* MSVC owns these keywords.  Do not define a macro with the same name: */
+/* __thiscall is a real keyword even though it is not a preprocessor     */
+/* macro, and replacing it would silently change the original ABI.      */
+# ifndef CDECL
+#  define CDECL __cdecl
+# endif
+# ifndef WINAPI
+#  define WINAPI __stdcall
+# endif
+# ifndef CALLBACK
+#  define CALLBACK __stdcall
+# endif
+#else
+# if defined(_WIN32) && (defined(_M_IX86) || defined(__i386__)) && \
+     (defined(__GNUC__) || defined(__clang__))
+#  define LOCO_THIS_CALL __attribute__((__thiscall__))
+#  define LOCO_FAST_CALL __attribute__((__fastcall__))
+#  define LOCO_STD_CALL  __attribute__((__stdcall__))
+#  define LOCO_CDECL     __attribute__((__cdecl__))
+# else
+/* Non-x86 Windows hosts and all non-Windows hosts use their native ABI. */
+#  define LOCO_THIS_CALL
+#  define LOCO_FAST_CALL
+#  define LOCO_STD_CALL
+#  define LOCO_CDECL
+# endif
 
-#ifndef __fastcall
-#define __fastcall __attribute__((fastcall))
-#endif
-
-#ifndef __stdcall
-#define __stdcall __attribute__((stdcall))
-#endif
-
-#ifndef __cdecl
-#define __cdecl __attribute__((cdecl))
-#endif
-
-#ifndef CDECL
-#define CDECL __cdecl
-#endif
-
-#ifndef WINAPI
-#define WINAPI __stdcall
-#endif
-
-#ifndef CALLBACK
-#define CALLBACK __stdcall
+# ifndef __thiscall
+#  define __thiscall LOCO_THIS_CALL
+# endif
+# ifndef __fastcall
+#  define __fastcall LOCO_FAST_CALL
+# endif
+# ifndef __stdcall
+#  define __stdcall LOCO_STD_CALL
+# endif
+# ifndef __cdecl
+#  define __cdecl LOCO_CDECL
+# endif
+# ifndef CDECL
+#  define CDECL __cdecl
+# endif
+# ifndef WINAPI
+#  define WINAPI __stdcall
+# endif
+# ifndef CALLBACK
+#  define CALLBACK __stdcall
+# endif
 #endif
 
 #endif /* STUBS_COMPAT_H */

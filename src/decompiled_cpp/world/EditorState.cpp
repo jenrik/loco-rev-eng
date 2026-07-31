@@ -51,10 +51,13 @@ extern uint8_t  Resource_IsBuildingTile(void* resource);
 /* BuildingMgr singleton at 0x485448 */
 extern BuildingMgr* g_building_mgr;          /* 0x485448 — BuildingMgr singleton */
 
+extern "C" void EditorState_DetachCompat(void* editor_state);
+
 /* Helper: read int16_t from control point array */
 static inline int16_t ReadCP(uintptr_t cp_array_base, int index, int byte_offset)
 {
-    return *(int16_t*)(cp_array_base + (uintptr_t)(index * 4 + byte_offset));
+    return *reinterpret_cast<int16_t*>(
+        cp_array_base + static_cast<uintptr_t>(index * 4 + byte_offset));
 }
 
 /* ==================================================================== */
@@ -84,8 +87,9 @@ EditorState::EditorState(char viewport_side)
 /* ==================================================================== */
 EditorState::~EditorState()
 {
-    if (this->building != NULL && g_game_mode != 10) {
-        int16_t* ref_count = (int16_t*)((uint8_t*)this->building + 0x114);
+    if (this->building != nullptr && g_game_mode != 10) {
+        int16_t* ref_count = reinterpret_cast<int16_t*>(
+            reinterpret_cast<uint8_t*>(this->building) + 0x114);
         (*ref_count)--;
         this->building = NULL;
     }
@@ -97,8 +101,9 @@ EditorState::~EditorState()
 /* ==================================================================== */
 void EditorState::Detach()
 {
-    if (this->building != NULL && g_game_mode != 10) {
-        int16_t* ref_count = (int16_t*)((uint8_t*)this->building + 0x114);
+    if (this->building != nullptr && g_game_mode != 10) {
+        int16_t* ref_count = reinterpret_cast<int16_t*>(
+            reinterpret_cast<uint8_t*>(this->building) + 0x114);
         (*ref_count)--;
         this->building = NULL;
     }
@@ -140,17 +145,17 @@ int EditorState::FindTrackPosition(int pixel_x, int pixel_y)
         return 0;
     }
 
-    resource = *(void**)((uint8_t*)building_ptr + 0x40);
-    control_points = *(int16_t**)((uint8_t*)resource + 0x630);
+    resource = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(building_ptr) + 0x40);
+    control_points = *reinterpret_cast<int16_t**>(reinterpret_cast<uint8_t*>(resource) + 0x630);
 
-    int tile_x_pixels = *(int16_t*)((uint8_t*)building_ptr + 0x88) * 16;
-    int tile_y_pixels = *(int16_t*)((uint8_t*)building_ptr + 0x8A) * 16;
+    int tile_x_pixels = *reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(building_ptr) + 0x88) * 16;
+    int tile_y_pixels = *reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(building_ptr) + 0x8A) * 16;
 
     if (pixel_x == tile_x_pixels + control_points[0]) {
         if (pixel_y != tile_y_pixels + control_points[1]) {
             for (i = 0; i < *(uint16_t*)((uint8_t*)resource + 0x636); i++) {
                 if (pixel_y - tile_y_pixels == control_points[i * 2 + 1]) {
-                    this->track_pos = (int32_t)i;
+                    this->track_pos = static_cast<int32_t>(i);
                     this->pos_y = control_points[i * 2 + 1] + tile_y_pixels;
                     result = 1;
                     break;

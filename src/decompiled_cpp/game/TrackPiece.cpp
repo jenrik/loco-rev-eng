@@ -7,6 +7,57 @@
 
 #include "TrackPiece.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
+
+namespace {
+
+struct TrackResourceGeometry {
+    uint8_t prefix_00_27[0x28];
+    uint16_t frame_width;
+    uint16_t frame_height;
+    uint8_t prefix_2c[2];
+    int16_t world_x;
+    int16_t world_y;
+};
+
+struct TownTrackFields {
+    void* viewport;
+    uint8_t prefix_04_07[4];
+    int32_t scroll_x;
+    int32_t scroll_y;
+    uint8_t prefix_10_9b[0x8C];
+    void* zoom_sub_object;
+    uint8_t prefix_a0_a3[4];
+    int32_t camera_x;
+    int32_t camera_limit;
+};
+
+struct TrackViewportFields {
+    uint8_t prefix_00_2f[0x30];
+    int32_t left;
+    int32_t top;
+    int32_t right;
+    int32_t bottom;
+    void* surface_object;
+};
+
+struct SurfaceFields {
+    uint8_t prefix_00_0f[0x10];
+    void* surface;
+};
+
+struct OwnedSubResourceFields {
+    void** vtable;
+};
+
+#if UINTPTR_MAX == 0xffffffffu
+static_assert(offsetof(TrackResourceGeometry, frame_width) == 0x28);
+static_assert(offsetof(TrackResourceGeometry, world_x) == 0x2E);
+static_assert(offsetof(TownTrackFields, zoom_sub_object) == 0x9C);
+static_assert(offsetof(TownTrackFields, camera_x) == 0xA4);
+static_assert(offsetof(TrackViewportFields, surface_object) == 0x40);
+#endif
+
+} // namespace
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -65,7 +116,7 @@ TrackPiece::TrackPiece(void* town, RESDATA* res, uint16_t flags)
 
     /* Zero all TrackPiece-specific fields (exact order as assembly) */
     this->sub_resource = 0;            /* +0x28 */
-    *(uint16_t*)&this->flags = 0;      /* +0x2C (word zero, matches MOV word ptr) */
+    this->flags = 0;                   /* +0x2C (word zero, matches MOV word ptr) */
     this->current_frame = 0;           /* +0x4C */
     this->anim_tick = 0;               /* +0x50 */
     this->field_30 = 0;                /* +0x30 */
@@ -121,8 +172,11 @@ void TrackPiece::_Dtor()
     /* Release sub-resource at +0x28 if non-null */
     if (this->sub_resource != 0) {
         /* Call scalar deleting destructor on sub-resource with flags=1 (free) */
-        void** vtbl = *(void***)(int32_t*)(uintptr_t)this->sub_resource;
-        ((void(*)(void*, byte))vtbl[0])((void*)(uintptr_t)this->sub_resource, 1);
+        OwnedSubResourceFields* sub_resource = reinterpret_cast<OwnedSubResourceFields*>(
+            static_cast<uintptr_t>(static_cast<uint32_t>(this->sub_resource)));
+        using Destructor = void (*)(void*, byte);
+        Destructor destroy = reinterpret_cast<Destructor>(sub_resource->vtable[0]);
+        destroy(sub_resource, 1);
         this->sub_resource = 0;
     }
 
@@ -169,24 +223,26 @@ void TrackPiece::Init(void* town, RESDATA* res, uint16_t new_flags)
     }
 
     /* Read resource geometry fields */
-    int16_t world_x = *(int16_t*)((uint8_t*)res + 0x2e);
-    int16_t world_y = *(int16_t*)((uint8_t*)res + 0x30);
-    uint16_t frame_w = *(uint16_t*)((uint8_t*)res + 0x28);
-    uint16_t frame_h = *(uint16_t*)((uint8_t*)res + 0x2a);
+    const TrackResourceGeometry* geometry =
+        reinterpret_cast<const TrackResourceGeometry*>(res);
+    int16_t world_x = geometry->world_x;
+    int16_t world_y = geometry->world_y;
+    uint16_t frame_w = geometry->frame_width;
+    uint16_t frame_h = geometry->frame_height;
 
     /* Set screen_rect from resource's world coords and frame dimensions */
     SetRect(&this->screen_rect,
-            (int)world_x,
-            (int)world_y,
-            (int)frame_w + (int)world_x,
-            (int)frame_h + (int)world_y);
+            static_cast<int>(world_x),
+            static_cast<int>(world_y),
+            static_cast<int>(frame_w) + static_cast<int>(world_x),
+            static_cast<int>(frame_h) + static_cast<int>(world_y));
 
     /* Set source_rect from resource frame dimensions (starts at origin) */
     SetRect(&this->source_rect,
             0,
             0,
-            (int)frame_w,
-            (int)frame_h);
+            static_cast<int>(frame_w),
+            static_cast<int>(frame_h));
 
     /* Initialize zoom and flags */
     this->zoom_level = 1;              /* +0x48 */
@@ -196,8 +252,8 @@ void TrackPiece::Init(void* town, RESDATA* res, uint16_t new_flags)
     /* If edge piece (flags & 2), adjust camera X offset in town manager */
     if ((new_flags & 2) != 0) {
         /* Signed divide world_x by 0x39 (57 px/tile), then subtract 2 */
-        int tile_x = (int)world_x / 0x39 - 2;
-        int* manager_cam_x = (int*)((uint8_t*)town + 0xa8);
+        int tile_x = static_cast<int>(world_x) / 0x39 - 2;
+        int32_t* manager_cam_x = &reinterpret_cast<TownTrackFields*>(town)->camera_limit;
 
         if (*manager_cam_x < tile_x) {
             *manager_cam_x = tile_x;
@@ -258,24 +314,22 @@ void TrackPiece::SetZoom(short zoom)
     case 4:
         {
             /* Get sub-object from manager at town+0x9c */
-            void* sub_obj = *(void**)((uint8_t*)this->town_ptr + 0x9c)    /* Town/GameView +0x9c: game_view sub-obj */;
+            TownTrackFields* town_fields = reinterpret_cast<TownTrackFields*>(this->town_ptr);
+            TrackPiece* sub_piece = reinterpret_cast<TrackPiece*>(town_fields->zoom_sub_object);
 
-            /* Copy this object's screen_rect into sub_obj's rect */
-            *(int32_t*)((uint8_t*)sub_obj + 8) = this->screen_rect.left;
-            *(int32_t*)((uint8_t*)sub_obj + 0x0c) = this->screen_rect.top;
-            *(int32_t*)((uint8_t*)sub_obj + 0x10) = this->screen_rect.right;
-            *(int32_t*)((uint8_t*)sub_obj + 0x14) = this->screen_rect.bottom;
+            /* Copy this object's screen_rect into sub_piece's rect */
+            sub_piece->screen_rect = this->screen_rect;
 
             /* Get camera offset from town manager at +0xa4 */
-            int cam_x_offset = *(int*)((uint8_t*)this->town_ptr + 0xa4)     /* Town/GameView +0xa4: camera X offset */;
-            *(int32_t*)((uint8_t*)sub_obj + 8) += cam_x_offset * -0x39;
-            *(int32_t*)((uint8_t*)sub_obj + 0x10) += cam_x_offset * -0x39;
+            int cam_x_offset = town_fields->camera_x;
+            sub_piece->screen_rect.left += cam_x_offset * -0x39;
+            sub_piece->screen_rect.right += cam_x_offset * -0x39;
 
             /* Recurse: set sub-object zoom to 2 */
-            ((TrackPiece*)sub_obj)->SetZoom(2);
+            sub_piece->SetZoom(2);
 
             /* Call UpdateAnim on sub-object */
-            ((TrackPiece*)sub_obj)->UpdateAnim();
+            sub_piece->UpdateAnim();
         }
         return;
     }
@@ -306,8 +360,8 @@ void TrackPiece::SetFrame(int frame)
 
     /* Update source_rect X offsets based on frame index */
     uint16_t frame_w = this->resource->frame_w  /* entity_buffer[0x24]: frame_w */;
-    this->source_rect.left = frame * (int)frame_w;
-    this->source_rect.right = (frame + 1) * (int)frame_w;
+    this->source_rect.left = frame * static_cast<int>(frame_w);
+    this->source_rect.right = (frame + 1) * static_cast<int>(frame_w);
 
     /* Call Render to blit updated frame */
     this->Render();
@@ -406,19 +460,22 @@ void TrackPiece::Render()
     onscreen.right  = this->screen_rect.right;
     onscreen.bottom = this->screen_rect.bottom;
 
+    TownTrackFields* town_fields = reinterpret_cast<TownTrackFields*>(this->town_ptr);
+
     /* Apply edge offset if this is an edge piece (flags & 2) */
     if ((this->flags & 2) != 0) {
-        int cam_x = *(int*)((uint8_t*)this->town_ptr + 0xa4)               /* Town/GameView +0xa4: camera X */;
+        int cam_x = town_fields->camera_x;                    /* +0xa4 */
         onscreen.left   += cam_x * -0x39;
         onscreen.right  += cam_x * -0x39;
     }
 
     /* Get town viewport bounds */
-    void* town_view = *(void**)(uint8_t*)this->town_ptr              /* Town/GameView vtable */;
-    int view_left   = *(int*)((uint8_t*)town_view + 0x30);
-    int view_top    = *(int*)((uint8_t*)town_view + 0x34);
-    int view_right  = *(int*)((uint8_t*)town_view + 0x38);
-    int view_bottom = *(int*)((uint8_t*)town_view + 0x3c);
+    TrackViewportFields* town_view =
+        reinterpret_cast<TrackViewportFields*>(town_fields->viewport);
+    int view_left   = town_view->left;
+    int view_top    = town_view->top;
+    int view_right  = town_view->right;
+    int view_bottom = town_view->bottom;
 
     /* Check visibility against viewport */
     if (onscreen.left + view_left <= view_left ||
@@ -430,12 +487,14 @@ void TrackPiece::Render()
 
     /* Blit via Town_BlitElement */
     Town_BlitElement(
-        *(void**)&this->resource->entity_buffer[0x20],  /* UI panel from resource */
+        *reinterpret_cast<void**>(this->resource->entity_buffer + 0x20),
+        /* UI panel from resource */
         onscreen.left + view_left,
         onscreen.top,
         onscreen.right + view_left,
         onscreen.bottom,
-        *(void**)((uintptr_t)(*(int*)((uint8_t*)town_view + 0x40)) + 0x10),  /* blit surface */
+        reinterpret_cast<SurfaceFields*>(town_view->surface_object)->surface,
+        /* blit surface */
         this->source_rect.left,
         this->source_rect.top,
         this->source_rect.right,
@@ -445,8 +504,8 @@ void TrackPiece::Render()
 
     /* Offset onscreen rect by town scroll position */
     OffsetRect(&onscreen,
-               *(int*)((uint8_t*)this->town_ptr + 8)         /* hWnd */,
-               *(int*)((uint8_t*)this->town_ptr + 0x0c)        /* field_0C */);
+               town_fields->scroll_x,                          /* +0x08 */
+               town_fields->scroll_y);                         /* +0x0c */
 
     /* Invalidate tilemap rect for dirty rect tracking */
     TileMap_InvalidateRect(
@@ -489,15 +548,16 @@ void TrackPiece::RecalcRect()
     uint16_t frame_h = this->resource->frame_h  /* entity_buffer[0x26]: frame_h */;
 
     SetRect(&this->screen_rect,
-            (int)world_x,
-            (int)world_y,
-            (int)frame_w + (int)world_x,
-            (int)frame_h + (int)world_y);
+            static_cast<int>(world_x),
+            static_cast<int>(world_y),
+            static_cast<int>(frame_w) + static_cast<int>(world_x),
+            static_cast<int>(frame_h) + static_cast<int>(world_y));
 
     /* If edge piece, adjust camera offset */
     if ((this->flags & 2) != 0) {
-        int tile_x = (int)world_x / 0x39 - 2;
-        int* manager_cam_x = (int*)((uint8_t*)this->town_ptr + 0xa8) /* Town/GameView +0xa8: cam_max ptr */;
+        int tile_x = static_cast<int>(world_x) / 0x39 - 2;
+        int32_t* manager_cam_x =
+            &reinterpret_cast<TownTrackFields*>(this->town_ptr)->camera_limit;
 
         if (*manager_cam_x < tile_x) {
             *manager_cam_x = tile_x;

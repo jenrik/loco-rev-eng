@@ -46,7 +46,8 @@ public:
     /** Check if the stream is valid (flags & 5 == 0). */
     bool IsValid() const {
         int32_t offset = this->metadata->flagsOffset;
-        int32_t* flagsPtr = (int32_t*)((uint8_t*)this + offset + 8);
+        const uint8_t* bytes = reinterpret_cast<const uint8_t*>(this);
+        const int32_t* flagsPtr = reinterpret_cast<const int32_t*>(bytes + offset + 8);
         int32_t flags = *flagsPtr;
         return (flags & 5) == 0;
     }

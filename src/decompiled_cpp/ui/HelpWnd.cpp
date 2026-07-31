@@ -30,6 +30,8 @@
 // Status: TRANSCRIBED
 
 #include "HelpWnd.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
 #include <cstdint>
 #include <new>
@@ -235,7 +237,7 @@ void HelpWnd::init()
      * Matches original binary behavior at 0x451180. */
 
     /* Zero initial state fields */
-    this->hIcon = 0;                    /* +0x154 */
+    this->hIcon = nullptr;               /* +0x154 */
     this->audioChannel = NULL;          /* +0x158 */
     this->spritesInited = 0;            /* +0x14E (byte) */
     this->active = 0;                   /* +0x14C (byte) */
@@ -1656,3 +1658,5 @@ byte HelpWnd::hit_test(int x, int y)
     if (PtInRect((RECT*)((uintptr_t)this->btnScrollBar + 4), x, y)) return 8;
     return 0;
 }
+
+#pragma GCC diagnostic pop

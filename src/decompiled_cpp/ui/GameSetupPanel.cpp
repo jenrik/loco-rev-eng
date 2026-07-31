@@ -13,6 +13,8 @@
 // Status: TRANSCRIBED
 
 #include "GameSetupPanel.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
 #include "../network/Netman.h"
 #include "../resources/ResourceManager.h"
@@ -1284,6 +1286,7 @@ bool host_blit_frame(uint32_t resource_id, int frame, int frame_width, int frame
 }
 }  // namespace
 
+namespace {
 enum class HostLobbyControl : uint8_t {
     None,
     Go,
@@ -1432,6 +1435,7 @@ HostLobbyControl host_lobby_control_at(float canvas_x, float canvas_y, bool read
     }
     return HostLobbyControl::None;
 }
+}  // namespace
 
 void GameSetupPanel::hostRenderFrame()
 {
@@ -1740,3 +1744,5 @@ void GameSetupPanel::hostHandleTextInput(const char* utf8_text)
     this->hostDirectConnectText[length] = '\0';
 }
 #endif  // !_WIN32
+
+#pragma GCC diagnostic pop

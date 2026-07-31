@@ -24,27 +24,25 @@
 /* ================================================================== */
 void Cursor_UnlockAllSurfaces(void)
 {
-    if (g_town != 0 && ((UI_WindowBase*)g_town)->visible != 0) {
-        DDRAW_UnlockPrimary(((UI_WindowBase*)g_town)->hWnd);
+    const auto unlock_if_visible = [](void* opaque_window) {
+        auto* window = static_cast<UI_WindowBase*>(opaque_window);
+        if (window != nullptr && window->visible != 0) {
+            DDRAW_UnlockPrimary(window->hWnd);
+            return true;
+        }
+        return false;
+    };
+
+    if (unlock_if_visible(g_town) ||
+        unlock_if_visible(g_postcard) ||
+        unlock_if_visible(g_cursor) ||
+        unlock_if_visible(g_postcard_send) ||
+        unlock_if_visible(g_ui_main)) {
         return;
     }
-    if (g_postcard != 0 && ((UI_WindowBase*)g_postcard)->visible != 0) {
-        DDRAW_UnlockPrimary(((UI_WindowBase*)g_postcard)->hWnd);
-        return;
-    }
-    if (g_cursor != 0 && ((UI_WindowBase*)g_cursor)->visible != 0) {
-        DDRAW_UnlockPrimary(((UI_WindowBase*)g_cursor)->hWnd);
-        return;
-    }
-    if (g_postcard_send != 0 && ((UI_WindowBase*)g_postcard_send)->visible != 0) {
-        DDRAW_UnlockPrimary(((UI_WindowBase*)g_postcard_send)->hWnd);
-        return;
-    }
-    if (g_ui_main != 0 && ((UI_WindowBase*)g_ui_main)->visible != 0) {
-        DDRAW_UnlockPrimary(((UI_WindowBase*)g_ui_main)->hWnd);
-        return;
-    }
-    DDRAW_UnlockPrimary(((UI_WindowBase*)g_main_window)->hWnd);
+
+    auto* main_window = static_cast<UI_WindowBase*>(g_main_window);
+    DDRAW_UnlockPrimary(main_window->hWnd);
 }
 
 /* ================================================================== */
@@ -168,13 +166,15 @@ void Cursor::base_destructor()
      * DirectDraw surfaces are platform API; literal vtable dispatch preserved
      * because these are opaque COM objects, not our classes. */
     if (this->editor_surf_a != nullptr) {                       /* +0x590 */
-        void** vtbl = *(void***)this->editor_surf_a;
-        ((void (*)(void*))vtbl[2])(this->editor_surf_a);
+        void** vtbl = *reinterpret_cast<void***>(this->editor_surf_a);
+        using ReleaseSurface = void (*)(void*);
+        reinterpret_cast<ReleaseSurface>(vtbl[2])(this->editor_surf_a);
         this->editor_surf_a = nullptr;
     }
     if (this->editor_surf_b != nullptr) {                       /* +0x598 */
-        void** vtbl = *(void***)this->editor_surf_b;
-        ((void (*)(void*))vtbl[2])(this->editor_surf_b);
+        void** vtbl = *reinterpret_cast<void***>(this->editor_surf_b);
+        using ReleaseSurface = void (*)(void*);
+        reinterpret_cast<ReleaseSurface>(vtbl[2])(this->editor_surf_b);
         this->editor_surf_b = nullptr;
     }
 
@@ -312,14 +312,19 @@ void Cursor::init()
     int* streamObj = nullptr;
     int* memBuffer = nullptr;
     int fileSize = 0;
+    uint8_t* streamBytes = nullptr;
+    uint8_t* streamHeader = nullptr;
 
     /* Try Asset Manager first */
     if (g_asset_mgr != nullptr) {
-        memBuffer = AssetMgr_LoadFile(&g_asset_mgr, (uint8_t*)(filePath), &fileSize);
+        memBuffer = AssetMgr_LoadFile(&g_asset_mgr,
+                                      reinterpret_cast<uint8_t*>(filePath),
+                                      &fileSize);
         if (memBuffer != nullptr) {
             void* stream = operator_new(0x5C);
             if (stream != nullptr) {
-                streamObj = (int*)WNDPROC_StreamFromMemory(stream, (char*)memBuffer, fileSize, 1);
+                streamObj = static_cast<int*>(
+                    WNDPROC_StreamFromMemory(stream, reinterpret_cast<char*>(memBuffer), fileSize, 1));
             }
         }
     }
@@ -328,7 +333,8 @@ void Cursor::init()
     if (streamObj == nullptr) {
         void* stream = operator_new(0x5C);
         if (stream != nullptr) {
-            streamObj = (int*)WIN32_StreamOpenFile(stream, filePath, 0xA0, 0x479190, 1);
+            streamObj = static_cast<int*>(
+                WIN32_StreamOpenFile(stream, filePath, 0xA0, 0x479190, 1));
         }
         if (streamObj == nullptr) {
             goto skip_palette_load;
@@ -336,7 +342,12 @@ void Cursor::init()
     }
 
     /* Read palette file data */
-    if (*(int*)((intptr_t)*streamObj + *(int*)((intptr_t)*streamObj + 4) + 8 + (intptr_t)streamObj) == 0) {
+    streamBytes = reinterpret_cast<uint8_t*>(streamObj);
+    streamHeader = reinterpret_cast<uint8_t*>(
+        static_cast<intptr_t>(*streamObj));
+    if (*reinterpret_cast<int32_t*>(streamHeader +
+                                    *reinterpret_cast<int32_t*>(streamHeader + 4) +
+                                    8 + reinterpret_cast<intptr_t>(streamBytes)) == 0) {
         WIN32_StreamRead(streamObj, readBuffer, 0x2000);
         if (streamObj[2] != 0 && streamObj[2] < 0x2000) {
             /* Parse 10 rows x 3 bytes from Edit_colour.dat (whitespace-delimited ints) */
@@ -345,17 +356,17 @@ void Cursor::init()
                 for (int col = 0; col < 3; col++) {
                     /* Skip whitespace */
                     while (byteIdx < 0x2000) {
-                        char c = ((char*)readBuffer)[byteIdx];
+                        char c = reinterpret_cast<char*>(readBuffer)[byteIdx];
                         if (c != ' ' && c != '\n' && c != '\r') break;
                         byteIdx++;
                     }
                     /* Read integer */
-                    int val = CRT_atoi((char*)readBuffer + byteIdx);
-                    this->edit_colors[row * 3 + col] = (uint8_t)val;  /* +0x22C */
+                    int val = CRT_atoi(reinterpret_cast<char*>(readBuffer) + byteIdx);
+                    this->edit_colors[row * 3 + col] = static_cast<uint8_t>(val);  /* +0x22C */
 
                     /* Skip non-whitespace */
                     while (byteIdx < 0x2000) {
-                        char c = ((char*)readBuffer)[byteIdx];
+                        char c = reinterpret_cast<char*>(readBuffer)[byteIdx];
                         if (c == ' ' || c == '\n' || c == '\r') break;
                         byteIdx++;
                     }
@@ -369,8 +380,13 @@ skip_palette_load:
         GLOBAL_free(readBuffer);
     }
     if (streamObj != nullptr) {
-        void** vtbl = *(void***)(*(int*)((intptr_t)*streamObj + 4) + (intptr_t)streamObj);
-        ((void (*)(void*, uint8_t))vtbl[0])((void*)(intptr_t)streamObj, 1);
+        auto* streamAddress = reinterpret_cast<uint8_t*>(streamObj);
+        auto* streamVtableAddress = reinterpret_cast<uint8_t*>(
+            static_cast<intptr_t>(*streamObj) + 4);
+        void** vtbl = *reinterpret_cast<void***>(
+            streamAddress + *reinterpret_cast<int32_t*>(streamVtableAddress));
+        using CloseStream = void (*)(void*, uint8_t);
+        reinterpret_cast<CloseStream>(vtbl[0])(streamObj, 1);
     }
     if (memBuffer != nullptr) {
         CRT_free(memBuffer);
@@ -385,13 +401,13 @@ skip_palette_load:
             unique = true;
             id = CRT_rand() % 0x421 + 1;  /* Range 1..1057 */
             for (int j = 0; j < i; j++) {
-                if (this->bonus_ids[j] == (uint8_t)id) {
+                if (this->bonus_ids[j] == static_cast<uint8_t>(id)) {
                     unique = false;
                     break;
                 }
             }
         } while (!unique);
-        this->bonus_ids[i] = (uint8_t)id;                       /* +0x370 */
+        this->bonus_ids[i] = static_cast<uint8_t>(id);          /* +0x370 */
     }
 
     /* ---- PHASE 5: Toolbar resource ID table at +0x6F0 -- +0x738 ---- */
@@ -430,7 +446,8 @@ skip_palette_load:
 void Cursor::init_sprites()
 {
     /* Resource 0x1400 — primary cursor sprite */
-    RESDATA* resdata = (RESDATA*)ResourceManager_GetById(&g_resmgr, 0x1400);
+    RESDATA* resdata = static_cast<RESDATA*>(
+        ResourceManager_GetById(&g_resmgr, 0x1400));
     this->primary_resdata() = resdata;                          /* +0x98 */
 
     if (resdata != nullptr) {
@@ -440,20 +457,25 @@ void Cursor::init_sprites()
         UIPANEL_UnlockSurface(surface);
 
         /* Read pixel format from surface (+0x1C), dimensions from RESDATA (+0x14/+0x16) */
-        this->primary_surface_fmt() = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x90 */
-        this->sprite_width() = *(uint16_t*)((intptr_t)resdata + 0x14);        /* +0x3C */
-        this->sprite_height() = *(uint16_t*)((intptr_t)resdata + 0x16);       /* +0x40 */
+        this->primary_surface_fmt() = *reinterpret_cast<int32_t*>(
+            reinterpret_cast<uint8_t*>(surface) + 0x1C);                    /* +0x90 */
+        this->sprite_width() = *reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(resdata) + 0x14);                    /* +0x3C */
+        this->sprite_height() = *reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(resdata) + 0x16);                    /* +0x40 */
     }
 
     /* Resource 0x1403 — cursor overlay sprite */
-    resdata = (RESDATA*)ResourceManager_GetById(&g_resmgr, 0x1403);
+    resdata = static_cast<RESDATA*>(
+        ResourceManager_GetById(&g_resmgr, 0x1403));
     this->overlay_resdata() = resdata;                           /* +0xA4 */
 
     if (resdata != nullptr) {
         void* surface = RESDATA_GetSurface(resdata, 0, 0);
         this->overlay_surface_obj() = surface;                   /* +0xA0 */
         UIPANEL_UnlockSurface(surface);
-        this->overlay_surface_fmt() = *(int32_t*)((intptr_t)surface + 0x1C);  /* +0x9C */
+        this->overlay_surface_fmt() = *reinterpret_cast<int32_t*>(
+            reinterpret_cast<uint8_t*>(surface) + 0x1C);                    /* +0x9C */
     }
 
     /* Create shared 256x256 cursor backbuffer if not yet created */
@@ -465,15 +487,20 @@ void Cursor::init_sprites()
         desc[2] = 0x100;      /* dwHeight = 256 */
         desc[3] = 0x100;      /* dwWidth = 256 */
 
-        int* ddrawVtbl = *(int**)g_ddraw;
-        ((int (*)(void*, int*, void**, int))(uintptr_t)ddrawVtbl[6])(g_ddraw, desc, &_g_cursor_back, 0);
+        void** ddrawVtbl = *reinterpret_cast<void***>(g_ddraw);
+        using CreateSurface = int (*)(void*, int*, void**, int);
+        reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
+            g_ddraw, desc, &_g_cursor_back, 0);
 
         DDRAW_GetSurfaceWidthHeight(_g_cursor_back);
-        DDRAW_SetSurfaceFormat(_g_cursor_back, (int)(intptr_t)&desc[0xFFFFFF74]);
-        DDRAW_RestoreSurfaces(_g_cursor_back, &desc[0xFFFFFF74]);
+        auto* formatStorage = desc - 0x8C;
+        DDRAW_SetSurfaceFormat(
+            _g_cursor_back,
+            static_cast<int>(reinterpret_cast<intptr_t>(formatStorage)));
+        DDRAW_RestoreSurfaces(_g_cursor_back, formatStorage);
     }
 
-    this->backbuffer() = (void*)(intptr_t)_g_cursor_back;         /* +0x5C */
+    this->backbuffer() = _g_cursor_back;                           /* +0x5C */
     _g_cursor_refcount++;                                        /* global counter */
 }
 
@@ -502,7 +529,7 @@ void Cursor::init_background()
     } else {
         surface = nullptr;
     }
-    this->background_surface = (UIPANEL*)surface;                /* +0x1E8 */
+    this->background_surface = static_cast<UIPANEL*>(surface);   /* +0x1E8 */
 
     UIPANEL_InitSurface(surface, 0x500, 0x400, 1, 0, 0);
 
@@ -511,38 +538,42 @@ void Cursor::init_background()
 
     /* Composite resource 0x3CAA — main panel background */
     {
-        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CAA);
+        RESDATA* resdata = static_cast<RESDATA*>(
+            ResourceManager_GetById(&g_resmgr, 0x3CAA));
         void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         /* Blit at full surface rect */
         UIPANEL_Blit(srcSurf, 0, 0, 0x500, 0x400,
-                     (int)(intptr_t)this->background_surface, 0, 0, 0x500, 0x400, 0);
+                     this->background_surface, 0, 0, 0x500, 0x400, 0);
         RESDATA_ReleaseSurface(resdata);
     }
 
     /* Composite resource 0x3CC4 */
     {
-        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CC4);
+        RESDATA* resdata = static_cast<RESDATA*>(
+            ResourceManager_GetById(&g_resmgr, 0x3CC4));
         void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         UIPANEL_Blit(srcSurf, 0, 0, 0, 0,
-                     (int)(intptr_t)this->background_surface, 0, 0, 0, 0, 0);
+                     this->background_surface, 0, 0, 0, 0, 0);
         RESDATA_ReleaseSurface(resdata);
     }
 
     /* Composite resource 0x3CC5 */
     {
-        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CC5);
+        RESDATA* resdata = static_cast<RESDATA*>(
+            ResourceManager_GetById(&g_resmgr, 0x3CC5));
         void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         UIPANEL_Blit(srcSurf, 0, 0, 0, 0,
-                     (int)(intptr_t)this->background_surface, 0, 0, 0, 0, 0);
+                     this->background_surface, 0, 0, 0, 0, 0);
         RESDATA_ReleaseSurface(resdata);
     }
 
     /* Composite resource 0x3CC6 */
     {
-        void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CC6);
+        RESDATA* resdata = static_cast<RESDATA*>(
+            ResourceManager_GetById(&g_resmgr, 0x3CC6));
         void* srcSurf = RESDATA_GetSurface(resdata, 0, 0);
         UIPANEL_Blit(srcSurf, 0, 0, 0, 0,
-                     (int)(intptr_t)this->background_surface, 0, 0, 0, 0, 0);
+                     this->background_surface, 0, 0, 0, 0, 0);
         RESDATA_ReleaseSurface(resdata);
     }
 }

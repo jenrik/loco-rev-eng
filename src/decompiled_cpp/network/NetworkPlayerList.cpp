@@ -25,6 +25,9 @@
 
 #include "NetworkPlayerList.h"
 #include "../graphics/LOCOBITMAP.h"
+#ifndef _WIN32
+#include <cstdio>
+#endif
 /* Dispatch-table addresses are documentation only; C++ manages dispatch. */
 /* ================================================================== */
 /* External references                                                 */
@@ -151,14 +154,14 @@ static int32_t find_lru_slot(NetworkPlayerList* list)
 }
 
 /* ================================================================== */
-/* NetworkPlayerList_ctor — 0x443000                                    */
+/* NetworkPlayerList::NetworkPlayerList — 0x443000                   */
 /*                                                                      */
 /* Constructor: creates PostBag directories, zeros cache, init state.  */
-/* __fastcall (ECX = this).                                             */
+/* C++ constructor; the compiler establishes the dispatch pointer.     */
 /*                                                                      */
 /* Called by: GameLoop_Setup (0x406CBC)                                */
 /* ================================================================== */
-void* __fastcall NetworkPlayerList::NetworkPlayerList_ctor()
+NetworkPlayerList::NetworkPlayerList()
 {
     char path_buf[0x104];    /* local path buffer for directory creation */
     int32_t i;
@@ -182,6 +185,19 @@ void* __fastcall NetworkPlayerList::NetworkPlayerList_ctor()
     this->enumerated = 0;
 
     /* Create PostBag subdirectories */
+#ifndef _WIN32
+    /* Host addresses do not contain the original PE string literals. */
+    static const char* const host_subdirectories[] = {
+        "", "Easter", "Sort", "Sort_In", "Sort_Out", "Sort_Bag",
+        "AlbIndex", "Album", "Att_In", "Att_Out"
+    };
+    for (const char* subdirectory : host_subdirectories) {
+        std::snprintf(path_buf, sizeof(path_buf), "%s/PostBag/%s",
+                      g_install_path, subdirectory);
+        CreateDirectoryA(path_buf, NULL);
+    }
+    return;
+#endif
     path_buf[0] = g_empty_string;
     {
         uint32_t* p = (uint32_t*)(path_buf + 1);
@@ -276,19 +292,15 @@ void* __fastcall NetworkPlayerList::NetworkPlayerList_ctor()
               (const char*)0x0047eb90); /* "Att_Out" */
     CreateDirectoryA(path_buf, NULL);
 
-    return this;
 }
 
 /* ================================================================== */
-/* Term — 0x4431F0                                                     */
+/* NetworkPlayerList::~NetworkPlayerList — 0x4431F0                  */
 /*                                                                      */
-/* Scalar deleting destructor (virtual slot [0], binary table 0x478268).
-/* Frees sub-object resource_mgr, frees all 256 cached surfaces, calls */
-/* DPLAY_SendMessages, optionally frees self.                          */
-/*                                                                      */
-/* __thiscall (ECX = this, stack byte param_1 = flags).                */
+/* Destructor body for virtual slot [0], address 0x4431F0.             */
+/* Frees resource_mgr and cached surfaces, then cleans PostBag state.   */
 /* ================================================================== */
-void* __thiscall NetworkPlayerList::Term(uint8_t flags)
+NetworkPlayerList::~NetworkPlayerList()
 {
     int32_t i;
 
@@ -315,12 +327,8 @@ void* __thiscall NetworkPlayerList::Term(uint8_t flags)
     /* Clean up PostBag messages */
     DPLAY_SendMessages();
 
-    /* Optionally free self */
-    if ((flags & 1) != 0) {
-        GLOBAL_free(this);
-        return NULL;
-    }
-    return this;
+    /* Heap release is emitted by the compiler's deleting-destructor
+     * wrapper, not by the user destructor body. */
 }
 
 /* ================================================================== */
@@ -328,7 +336,7 @@ void* __thiscall NetworkPlayerList::Term(uint8_t flags)
 /*                                                                      */
 /* Lookup or create a cached UIPANEL surface keyed by 3-byte tag.      */
 /* ================================================================== */
-void* __thiscall NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
+void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
                                                          uint8_t variant,
                                                          uint8_t tag_low,
                                                          uint8_t no_evict)
@@ -465,7 +473,7 @@ void* __thiscall NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
 /* Blit a cached track entry surface onto a HDC with computed source   */
 /* and destination rectangles. Clips to target bounds.                 */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::RenderTrackEntry(void* hdc,
+void NetworkPlayerList::RenderTrackEntry(void* hdc,
                                                       uint32_t clip_x,
                                                       uint32_t clip_y,
                                                       int32_t clip_right,
@@ -532,7 +540,7 @@ void __thiscall NetworkPlayerList::RenderTrackEntry(void* hdc,
 /*                                                                      */
 /* MISNAMED — renders track entry and manages resource cache.           */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::PeekMessage(void* player_slot, void* hdc,
+void NetworkPlayerList::PeekMessage(void* player_slot, void* hdc,
                                                  uint32_t param3, uint32_t param4,
                                                  int32_t param5, uint32_t param6,
                                                  uint32_t param7)
@@ -595,7 +603,7 @@ void __thiscall NetworkPlayerList::PeekMessage(void* player_slot, void* hdc,
 /* ================================================================== */
 /* RenderSessionFrame — 0x443F00                                         */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::RenderSessionFrame(void* hdc)
+void NetworkPlayerList::RenderSessionFrame(void* hdc)
 {
     void* surface;
     int32_t i;
@@ -619,7 +627,7 @@ void __thiscall NetworkPlayerList::RenderSessionFrame(void* hdc)
 /* ================================================================== */
 /* RenderSessionBase — 0x443FF0                                          */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::RenderSessionBase(void* hdc,
+void NetworkPlayerList::RenderSessionBase(void* hdc,
                                                        uint32_t param2,
                                                        int32_t param3,
                                                        int32_t param4,
@@ -668,7 +676,7 @@ void __thiscall NetworkPlayerList::RenderSessionBase(void* hdc,
 /* Due to Ghidra register confusion (unaff_EBP / unaff_retaddr          */
 /* across 1855 bytes), some exact parameter details are approx.        */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
+void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
                                                   void* playerData, int32_t param4,
                                                   int32_t param5, uint32_t param6,
                                                   const void* param7)
@@ -940,7 +948,7 @@ void __thiscall NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
 /* Save a DPLAY_PlayerSlot to a .crd file in the specified PostBag     */
 /* subdirectory. Updates message count cache.                          */
 /* ================================================================== */
-uint32_t __thiscall NetworkPlayerList::RegisterPlayer(void* player_slot,
+uint32_t NetworkPlayerList::RegisterPlayer(void* player_slot,
                                                         int32_t type,
                                                         int32_t param3)
 {
@@ -996,7 +1004,7 @@ uint32_t __thiscall NetworkPlayerList::RegisterPlayer(void* player_slot,
 /*                                                                      */
 /* Delete a player's .crd file and update message count cache.         */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::UnregisterPlayer(const char* filepath)
+void NetworkPlayerList::UnregisterPlayer(const char* filepath)
 {
     if (DeleteFileA(filepath) != 0) {
         void* node;
@@ -1019,7 +1027,7 @@ void __thiscall NetworkPlayerList::UnregisterPlayer(const char* filepath)
 /*                                                                      */
 /* Delete a player's .crd file by reading configId from player_slot.   */
 /* ================================================================== */
-void __thiscall NetworkPlayerList::GetPlayerAddress(void* player_slot,
+void NetworkPlayerList::GetPlayerAddress(void* player_slot,
                                                       int32_t type)
 {
     char filepath[0x504];

@@ -28,12 +28,14 @@ void __thiscall UI_DrawListBox(void* self, int param1, int param2)
        are constructor artifacts.  A copy construction installs the final
        UIEntity vtable while preserving the complete 0xA4-byte snapshot. */
     void* storage = operator_new(sizeof(UIEntity));
-    UIEntity* ctx = storage != NULL
-        ? new (storage) UIEntity(*(UIEntity*)(uintptr_t)param2)
-        : NULL;
+    const auto* source = reinterpret_cast<const UIEntity*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(param2)));
+    UIEntity* ctx = storage != nullptr
+        ? new (storage) UIEntity(*source)
+        : nullptr;
 
     /* Slot 10 is the collection's polymorphic insertion operation. */
-    ((Collection*)self)->InsertAt(param1, ctx);
+    static_cast<Collection*>(self)->InsertAt(param1, ctx);
 
 }
 
@@ -43,29 +45,33 @@ void __thiscall UI_DrawListBox(void* self, int param1, int param2)
 /* ================================================================== */
 uint __thiscall UI_ListBox_FindItem(void* self, int target, uint low, uint high)
 {
-    SortedCollection* collection = (SortedCollection*)self;
+    SortedCollection* collection = static_cast<SortedCollection*>(self);
+    Collection* base = static_cast<Collection*>(collection);
 
     /* If range > 2 elements, binary search */
-    if ((uint)(high - low) > 2) {
-        int mid = ((int)(high - low) >> 1) + (int)low;
-        int** items = *(int***)((uint8_t*)self + 0x04);
+    if (high - low > 2U) {
+        int mid = static_cast<int>((high - low) >> 1) + static_cast<int>(low);
+        void** items = base->items;
 
-        int cmp = collection->Comparator((void*)(intptr_t)target, (void*)items[mid]);
+        void* target_value = reinterpret_cast<void*>(static_cast<intptr_t>(target));
+        int cmp = collection->Comparator(target_value, items[mid]);
         if (cmp < 0) {
-            return collection->FindItem(target, low, (uint)mid);
+            return collection->FindItem(target, low, static_cast<uint>(mid));
         }
         /* target >= items[mid] — search upper half (note: uses target as high bound!) */
         /* BUG: param_1 (target) is passed as the high bound instead of high.
            This means the function searches from mid to target value, not mid to high.
            This is a likely decompilation artifact or intentional narrowing. */
-        return collection->FindItem(target, (uint)mid, (uint)target);
+        return collection->FindItem(target, static_cast<uint>(mid),
+                                    static_cast<uint>(target));
     }
 
     /* Linear search for small ranges */
-    int** items = *(int***)((uint8_t*)self + 0x04);
+    void** items = base->items;
     uint idx = low;
     while (idx <= high) {
-        int cmp = collection->Comparator((void*)(intptr_t)target, (void*)items[idx]);
+        void* target_value = reinterpret_cast<void*>(static_cast<intptr_t>(target));
+        int cmp = collection->Comparator(target_value, items[idx]);
         if (cmp > 0) {
             idx++;
             continue;
@@ -75,7 +81,8 @@ uint __thiscall UI_ListBox_FindItem(void* self, int target, uint low, uint high)
     }
 
     /* Verify exact match */
-    if (idx <= high && (int)(intptr_t)items[idx] == target) {
+    if (idx <= high &&
+        static_cast<int32_t>(reinterpret_cast<intptr_t>(items[idx])) == target) {
         return idx;
     }
 
@@ -88,7 +95,7 @@ uint __thiscall UI_ListBox_FindItem(void* self, int target, uint low, uint high)
 /* ================================================================== */
 void __fastcall UI_ListBox_Clear(void* self)
 {
-    Collection* collection = (Collection*)self;
+    Collection* collection = static_cast<Collection*>(self);
     if (collection->items != NULL) {
         GLOBAL_free(collection->items);
     }

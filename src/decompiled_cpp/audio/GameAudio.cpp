@@ -8,13 +8,22 @@
 #include "GameAudio.h"
 #include "AudioChannel.h"
 #include "../shared/types.h"
+#include <cstring>
 
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
 
 /* Resource manager */
-void* __fastcall RESMGR_GetById(void* resmgr, uint32_t id); /* 0x4472B0 */
+#ifdef _WIN32
+#define LOCO_AUDIO_FASTCALL __fastcall
+#else
+#ifndef _WIN32
+/* Host-only ABI deviation: native GCC has no Win32 calling conventions. */
+#define LOCO_AUDIO_FASTCALL
+#endif
+#endif
+void* LOCO_AUDIO_FASTCALL RESMGR_GetById(void* resmgr, uint32_t id); /* 0x4472B0 */
 
 /* Heap allocation */
 void* operator_new(size_t size);                    /* 0x465CE0 */
@@ -41,52 +50,42 @@ extern void* g_resmgr;                                  /* 0x4855E8 */
 extern int32_t g_listener_x;                            /* 0x4AAD2C */
 extern int32_t g_listener_y;                            /* 0x4AAD30 */
 
-/* ================================================================== */
-/* SoundResource — WAV resource loaded into DS buffer                  */
-/* ================================================================== */
-struct SoundResource {
-    int32_t resource_id;         /* +0x04 */
-    /* +0x08-0x0F: unknown */
-    int32_t cooldown_interval;   /* +0x10 */
-    uint32_t cooldown_timer;     /* +0x14 */
-    /* ... */
-    int32_t max_instances;       /* +0x124 */
+/* Four-byte prefix retained by the original channel-pool allocation. */
+struct ChannelAllocationHeader {
+    int32_t count;
 };
+
+#undef LOCO_AUDIO_FASTCALL
 
 /* ================================================================== */
 /* GameAudio_Ctor                                                       */
 /* Address: 0x412BD0                                                   */
 /* ================================================================== */
 GameAudio::GameAudio()
+    : saved_bounds{},
+      active_bounds{},
+      pad_24{},
+      max_channels(0),
+      channels(nullptr),
+      channel_usage(nullptr),
+      listener_x(0),
+      listener_y(0),
+      ds_device(nullptr),
+      ds_primary(nullptr),
+      flags(0),
+      muted(0)
 {
-    /* Zero all high-offset fields */
-    this->flags          = 0;                /* +0xb0 */
-    this->muted          = 0;                /* +0xb4 */
-    this->ds_device      = NULL;             /* +0xa8 */
-    this->ds_primary     = NULL;             /* +0xac */
-    this->listener_x     = 0;                /* +0xa0 */
-    this->listener_y     = 0;                /* +0xa4 */
-    this->max_channels   = 0;                /* +0x94 */
-    this->channels       = NULL;             /* +0x98 */
-    this->channel_usage  = NULL;             /* +0x9c */
-
-    /* Zero the 0x60-byte buffer at +0x24 and saved/active bounds */
-    for (int i = 0; i < 0x60 / 4; i++) {
-        ((int32_t*)(this->pad_24))[i] = 0;
-    }
-    for (int i = 0; i < 4; i++) {
-        this->saved_bounds[i] = 0;
-        this->active_bounds[i] = 0;
-    }
+    /* The member initializers reproduce the original zeroing of the
+       +0x24 format buffer, saved/active bounds, and high-offset state. */
 }
 
 /* ================================================================== */
-/* scalar deleting destructor                                           */
+/* Destructor body (compiler supplies the deleting wrapper)              */
 /* Address: 0x412C20 (vtable[0])                                       */
 /* ================================================================== */
 GameAudio::~GameAudio()
 {
-    this->Cleanup(NULL);
+    this->Cleanup(nullptr);
 }
 
 /* ================================================================== */
@@ -98,10 +97,10 @@ uint32_t GameAudio::Init()
     int32_t select_best = 1;
 
     /* Cleanup any previous init state */
-    this->Cleanup((void*)NULL);
+    this->Cleanup(nullptr);
 
     /* Check config for device enumeration preference */
-    if (g_config_ini != NULL) {
+    if (g_config_ini != nullptr) {
         select_best = Config_GetIniInt(g_config_ini, "Sound", "SelectBestDevice", 1);
     }
 
@@ -114,13 +113,12 @@ uint32_t GameAudio::Init()
         }
 
         /* Zero the WAVEFORMATEX/device config at +0x24 for 0x60 bytes */
-        for (int i = 0; i < 0x60 / 4; i++) {
-            ((int32_t*)(this->pad_24))[i] = 0;
-        }
-        *(int32_t*)(this->pad_24) = 0x60;
+        std::memset(this->pad_24, 0, sizeof(this->pad_24));
+        const int32_t format_size = 0x60;
+        std::memcpy(this->pad_24, &format_size, sizeof(format_size));
     } else {
         /* Enumerate devices, pick best */
-        Ordinal_2((void*)0x412FB0);
+        Ordinal_2(reinterpret_cast<void*>(static_cast<uintptr_t>(0x412FB0)));
         int32_t result = Ordinal_1(0, &this->ds_device);
         if (result != 0) {
             return result & 0xFFFFFF00;
@@ -128,10 +126,8 @@ uint32_t GameAudio::Init()
     }
 
     /* Set cooperative level */
-    void* dev = this->ds_device;
-    void** dev_vtbl = *(void***)dev;
-    int32_t hr = ((int32_t (*)(void*, void*, int32_t))dev_vtbl[0x18 / 4])(
-        dev, NULL, 2); /* DSSCL_NORMAL */
+    AudioDirectSoundDevice* dev = this->ds_device;
+    int32_t hr = dev->SetCooperativeLevel(nullptr, 2); /* DSSCL_NORMAL */
 
     if (hr == 0) {
         /* Create primary buffer */
@@ -142,14 +138,11 @@ uint32_t GameAudio::Init()
         wfx.size   = 0x14;
         wfx.format = 1;
 
-        hr = ((int32_t (*)(void*, void*, void**, void*))dev_vtbl[0x0c / 4])(
-            dev, &wfx, &this->ds_primary, NULL);
+        hr = dev->CreateSoundBuffer(&wfx, &this->ds_primary, nullptr);
 
         if (hr == 0) {
             /* Set primary buffer format */
-            void** prim_vtbl = *(void***)this->ds_primary;
-            ((int32_t (*)(void*, void*))prim_vtbl[0x38 / 4])(
-                this->ds_primary, &wfx);
+            this->ds_primary->SetFormat(&wfx);
         }
 
         /* Determine channel count */
@@ -161,19 +154,22 @@ uint32_t GameAudio::Init()
 
         this->max_channels = num_channels;
 
-        /* Allocate channel array */
-        int32_t alloc_size = num_channels * sizeof(AudioChannel) + 4;
-        int32_t* channel_mem = (int32_t*)operator_new(alloc_size);
-        if (channel_mem != NULL) {
-            channel_mem[0] = num_channels;
-            AudioChannel* ch = (AudioChannel*)(channel_mem + 1);
-            this->channels = ch;
+        /* Allocate channel array.  The four-byte count header is part of the
+           original allocation and is retained for the matching free below. */
+        int32_t alloc_size = num_channels * sizeof(AudioChannel)
+                           + sizeof(ChannelAllocationHeader);
+        ChannelAllocationHeader* channel_mem =
+            static_cast<ChannelAllocationHeader*>(operator_new(alloc_size));
+        if (channel_mem != nullptr) {
+            channel_mem->count = num_channels;
+            this->channels = reinterpret_cast<AudioChannel*>(channel_mem + 1);
         } else {
-            this->channels = NULL;
+            this->channels = nullptr;
         }
 
         /* Allocate usage tracking array */
-        uint32_t* usage = (uint32_t*)operator_new(num_channels * sizeof(uint32_t));
+        uint32_t* usage = static_cast<uint32_t*>(
+            operator_new(num_channels * sizeof(uint32_t)));
         this->channel_usage = usage;
 
         /* Set default volume bounds */
@@ -204,7 +200,7 @@ uint32_t GameAudio::Init()
         this->listener_y   = 0;
     }
 
-    return (uint32_t)(uint8_t)(hr == 0);
+    return static_cast<uint32_t>(hr == 0);
 }
 
 /* ================================================================== */
@@ -214,38 +210,34 @@ uint32_t GameAudio::Init()
 void GameAudio::Cleanup(void* hwnd)
 {
     /* Release all channels and free the channel array */
-    if (this->channels != NULL) {
+    if (this->channels != nullptr) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             this->channels[i].Release();
         }
 
-        int32_t* base = ((int32_t*)this->channels) - 1;
-        if (base != NULL) {
-            GLOBAL_free(base);
-        }
-        this->channels = NULL;
+        ChannelAllocationHeader* base =
+            reinterpret_cast<ChannelAllocationHeader*>(this->channels) - 1;
+        GLOBAL_free(base);
+        this->channels = nullptr;
     }
 
     /* Free usage tracking array */
-    if (this->channel_usage != NULL) {
+    if (this->channel_usage != nullptr) {
         GLOBAL_free(this->channel_usage);
-        this->channel_usage = NULL;
+        this->channel_usage = nullptr;
     }
 
     /* Release primary buffer */
-    if (this->ds_primary != NULL) {
-        void** vtbl = *(void***)this->ds_primary;
-        ((int32_t (*)(void*))vtbl[8 / 4])(this->ds_primary);
-        this->ds_primary = NULL;
+    if (this->ds_primary != nullptr) {
+        this->ds_primary->Release();
+        this->ds_primary = nullptr;
     }
 
     /* Release DS device */
-    if (this->ds_device != NULL) {
-        void** vtbl = *(void***)this->ds_device;
-        ((int32_t (*)(void*, void*, int32_t))vtbl[0x18 / 4])(
-            this->ds_device, hwnd, 1);
-        ((int32_t (*)(void*))vtbl[8 / 4])(this->ds_device);
-        this->ds_device = NULL;
+    if (this->ds_device != nullptr) {
+        this->ds_device->SetCooperativeLevel(hwnd, 1);
+        this->ds_device->Release();
+        this->ds_device = nullptr;
     }
 }
 
@@ -255,10 +247,8 @@ void GameAudio::Cleanup(void* hwnd)
 /* ================================================================== */
 int32_t GameAudio::Play(void* param1, void* param2, void* param3)
 {
-    if (this->ds_device != NULL) {
-        void** vtbl = *(void***)this->ds_device;
-        return ((int32_t (*)(void*, void*, void*, void*))vtbl[0x0c / 4])(
-            this->ds_device, param1, param2, param3);
+    if (this->ds_device != nullptr) {
+        return this->ds_device->CreateSoundBuffer(param1, param2, param3);
     }
     return -1;
 }
@@ -272,7 +262,7 @@ void GameAudio::SetListenerPos(int32_t x, int32_t y)
     this->listener_x = x;
     this->listener_y = y;
 
-    if (this->channels != NULL) {
+    if (this->channels != nullptr) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             this->channels[i].SetPosition(x, y);
         }
@@ -285,7 +275,7 @@ void GameAudio::SetListenerPos(int32_t x, int32_t y)
 /* ================================================================== */
 void GameAudio::StopFinished()
 {
-    if (this->channels != NULL) {
+    if (this->channels != nullptr) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             if (this->channels[i].IsActive()) {
                 this->channels[i].Release();
@@ -300,7 +290,7 @@ void GameAudio::StopFinished()
 /* ================================================================== */
 void GameAudio::StopAll()
 {
-    if (this->channels != NULL) {
+    if (this->channels != nullptr) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             this->channels[i].Release();
         }
@@ -313,8 +303,9 @@ void GameAudio::StopAll()
 /* ================================================================== */
 void GameAudio::PlayResource(uint32_t resource_id)
 {
-    SoundResource* res = (SoundResource*)RESMGR_GetById(g_resmgr, resource_id);
-    this->AllocChannel(res, NULL,
+    SoundResource* res = static_cast<SoundResource*>(
+        RESMGR_GetById(g_resmgr, resource_id));
+    this->AllocChannel(res, nullptr,
                        g_listener_x, g_listener_y,
                        4, 0);
 }
@@ -325,11 +316,12 @@ void GameAudio::PlayResource(uint32_t resource_id)
 /* ================================================================== */
 void GameAudio::PlayResourceEx(uint32_t resource_id, AudioChannel** output_ptr)
 {
-    if (output_ptr != NULL && *output_ptr != NULL) {
+    if (output_ptr != nullptr && *output_ptr != nullptr) {
         (*output_ptr)->Release();
     }
 
-    SoundResource* res = (SoundResource*)RESMGR_GetById(g_resmgr, resource_id);
+    SoundResource* res = static_cast<SoundResource*>(
+        RESMGR_GetById(g_resmgr, resource_id));
     this->AllocChannel(res, output_ptr,
                        g_listener_x, g_listener_y,
                        4, 0);
@@ -347,7 +339,7 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
     uint32_t free_count = 0;
     int32_t res_id = 0;
 
-    if (this->channels == NULL || resource == NULL) {
+    if (this->channels == nullptr || resource == nullptr) {
         goto no_channel;
     }
 
@@ -365,7 +357,7 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
     }
 
     /* --- Check instance limits and cooldown --- */
-    if (free_count < (uint32_t)resource->max_instances) {
+    if (free_count < static_cast<uint32_t>(resource->max_instances)) {
         goto no_channel;
     }
     if (resource->cooldown_timer > g_game_time) {
@@ -377,7 +369,7 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
         for (uint32_t i = 0; i < this->max_channels && found_idx == -1; i++) {
             AudioChannel* ch = &this->channels[i];
             if (ch->resource_id == res_id && ch->IsActive()) {
-                found_idx = (int32_t)i;
+                found_idx = static_cast<int32_t>(i);
             }
         }
 
@@ -385,10 +377,10 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
             AudioChannel* ch = &this->channels[found_idx];
             ch->Reset();
             ch->UpdatePosition(pos_x, pos_y);
-            ch->SetAttenuation((int32_t)attenuation);
+            ch->SetAttenuation(static_cast<int32_t>(attenuation));
             ch->looping = looping;
             ch->Play();
-            ch->SetOutput((void**)output_ptr);
+            ch->SetOutput(output_ptr);
             return;
         }
     }
@@ -396,7 +388,7 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
     /* --- Find any non-IDLE (state != 1) channel --- */
     for (uint32_t i = 0; i < this->max_channels && found_idx == -1; i++) {
         if (!this->channels[i].IsPlaying()) {
-            found_idx = (int32_t)i;
+            found_idx = static_cast<int32_t>(i);
         }
     }
 
@@ -405,10 +397,10 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
         ch->state = CHANNEL_STATE_STOPPING;
         ch->Reset();
         ch->UpdatePosition(pos_x, pos_y);
-        ch->SetAttenuation((int32_t)attenuation);
+        ch->SetAttenuation(static_cast<int32_t>(attenuation));
         ch->looping = looping;
         ch->Play();
-        ch->SetOutput((void**)output_ptr);
+        ch->SetOutput(output_ptr);
         return;
     }
 
@@ -416,7 +408,7 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
     for (uint32_t i = 0; i < this->max_channels && found_idx == -1; i++) {
         if (this->channels[i].IsActive()) {
             this->channels[i].state = CHANNEL_STATE_STOPPING;
-            found_idx = (int32_t)i;
+            found_idx = static_cast<int32_t>(i);
         }
     }
 
@@ -424,11 +416,11 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
     if (found_idx == -1) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             AudioChannel* ch = &this->channels[i];
-            if ((uint32_t)ch->attenuation_type <= attenuation) {
+            if (static_cast<uint32_t>(ch->attenuation_type) <= attenuation) {
                 if (found_idx == -1 ||
                     ch->attenuation_type < this->channels[found_idx].attenuation_type ||
                     this->channel_usage[i] < this->channel_usage[found_idx]) {
-                    found_idx = (int32_t)i;
+                    found_idx = static_cast<int32_t>(i);
                 }
             }
         }
@@ -441,14 +433,14 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
 
         ch->LoadSound(this->ds_device, resource,
                       pos_x, pos_y,
-                      (int32_t)attenuation, looping);
+                      static_cast<int32_t>(attenuation), looping);
 
         if (ch->state != CHANNEL_STATE_LOADED) {
             ch->Release();
             return;
         }
 
-        ch->SetOutput((void**)output_ptr);
+        ch->SetOutput(output_ptr);
 
         /* Set cooldown on the sound resource */
         if (resource->cooldown_interval > 0) {
@@ -458,8 +450,8 @@ void GameAudio::AllocChannel(SoundResource* resource, AudioChannel** output_ptr,
     }
 
 no_channel:
-    if (output_ptr != NULL) {
-        *output_ptr = NULL;
+    if (output_ptr != nullptr) {
+        *output_ptr = nullptr;
     }
 }
 
@@ -483,7 +475,7 @@ void GameAudio::SetMute(uint8_t mute)
         this->active_bounds[3] = 0;
     }
 
-    if (this->channels != NULL) {
+    if (this->channels != nullptr) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             this->channels[i].SetBounds(
                 this->active_bounds[3],
@@ -513,7 +505,7 @@ void GameAudio::UpdateVolume(uint8_t silence)
         this->active_bounds[3] = 0;
     }
 
-    if (this->channels != NULL) {
+    if (this->channels != nullptr) {
         for (uint32_t i = 0; i < this->max_channels; i++) {
             this->channels[i].SetBounds(
                 this->active_bounds[3],

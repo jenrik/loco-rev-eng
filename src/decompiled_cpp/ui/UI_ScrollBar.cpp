@@ -12,6 +12,15 @@
 #include <stdint.h>
 #include <cstring>
 
+namespace {
+/* UI scrollbar objects extend Collection with the two state words used by
+ * 0x424490 at original offsets +0x10 and +0x14. */
+struct ScrollCollection : Collection {
+    int32_t stored_param_10;
+    int32_t stored_param_14;
+};
+}
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -30,12 +39,14 @@ void __thiscall UI_DrawScrollBar(void* self, int param1, int param2)
        constructor artifacts.  Copy construction preserves the complete
        0x88-byte descriptor and installs Entity's compiler-managed vtable. */
     void* storage = operator_new(sizeof(Entity));
-    Entity* ctx = storage != NULL
-        ? new (storage) Entity(*(Entity*)(uintptr_t)param2)
-        : NULL;
+    const auto* source = reinterpret_cast<const Entity*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(param2)));
+    Entity* ctx = storage != nullptr
+        ? new (storage) Entity(*source)
+        : nullptr;
 
     /* Slot 10 is the collection's polymorphic insertion operation. */
-    ((Collection*)self)->InsertAt(param1, ctx);
+    static_cast<Collection*>(self)->InsertAt(param1, ctx);
 
 }
 
@@ -47,28 +58,26 @@ int __thiscall UI_HandleScrollMessage(void* self, uint param1)
 {
     /* Virtual dispatch to InternalExtract (vtable[7]).
      * Returns void* — non-null means item was handled. */
-    int handled = ((Collection*)self)->InternalExtract(param1) ? 1 : 0;
+    Collection* collection = static_cast<Collection*>(self);
+    int handled = collection->InternalExtract(param1) ? 1 : 0;
 
     if (handled != 0) {
         /* Get count at +0x0C */
-        int count = *(int*)((uint8_t*)self + 0x0C);
+        int count = collection->count;
 
         /* If not the last element, shift items left */
-        if (param1 < (uint)count - 1) {
-            void** items = *(void***)((uint8_t*)self + 0x04);
+        if (param1 < static_cast<uint>(count) - 1U) {
+            void** items = collection->items;
             /* memmove items[param1..count-2] = items[param1+1..count-1] */
-            int bytesToShift = (count - 1 - (int)param1) * 4;
-            CRT_strncpy(
-                (void*)((uint8_t*)items + param1 * 4),
-                (void*)((uint8_t*)items + (param1 + 1) * 4),
-                bytesToShift);
+            int bytesToShift = (count - 1 - static_cast<int>(param1)) * 4;
+            CRT_strncpy(items + param1, items + param1 + 1, bytesToShift);
         }
 
         /* Zero the last slot and decrement count */
-        void** items2 = *(void***)((uint8_t*)self + 0x04);
-        int count2 = *(int*)((uint8_t*)self + 0x0C);
-        items2[count2 - 1] = NULL;
-        *(int*)((uint8_t*)self + 0x0C) = count2 - 1;
+        void** items = collection->items;
+        int count_after_shift = collection->count;
+        items[count_after_shift - 1] = nullptr;
+        collection->count = count_after_shift - 1;
     }
 
     return handled;
@@ -80,17 +89,17 @@ int __thiscall UI_HandleScrollMessage(void* self, uint param1)
 /* ================================================================== */
 void __fastcall UI_GetScrollPos(void* self)
 {
-    int* selfInt = (int*)self;
+    Collection* collection = static_cast<Collection*>(self);
 
     /* Get count at +0x0C */
-    int count = selfInt[3];  /* *(int*)(self + 0x0C) */
+    int count = collection->count;
 
     while (count != 0) {
         /* Virtual dispatch to RemoveAt (vtable[3]) */
-        ((Collection*)self)->RemoveAt(count - 1);
+        collection->RemoveAt(count - 1);
 
         /* Re-read count (may have changed) */
-        count = selfInt[3];
+        count = collection->count;
     }
 }
 
@@ -100,17 +109,17 @@ void __fastcall UI_GetScrollPos(void* self)
 /* ================================================================== */
 void __fastcall UI_SetScrollPos(void* self)
 {
-    int* selfInt = (int*)self;
+    Collection* collection = static_cast<Collection*>(self);
 
     /* Get count at +0x0C */
-    int count = selfInt[3];
+    int count = collection->count;
 
     while (count != 0) {
         /* Virtual dispatch to RemoveElement (vtable[4]) */
-        ((Collection*)self)->RemoveElement(count - 1);
+        collection->RemoveElement(count - 1);
 
         /* Re-read count */
-        count = selfInt[3];
+        count = collection->count;
     }
 }
 
@@ -120,7 +129,7 @@ void __fastcall UI_SetScrollPos(void* self)
 /* ================================================================== */
 void __fastcall UI_InitScrollBar(void* self)
 {
-    Collection* collection = (Collection*)self;
+    Collection* collection = static_cast<Collection*>(self);
     if (collection->items != NULL) {
         GLOBAL_free(collection->items);
     }
@@ -140,11 +149,12 @@ void __fastcall UI_InitScrollBar(void* self)
 int __thiscall UI_FreeScrollBar(void* self, int param1, int param2)
 {
     /* Store params at +0x10 and +0x14 */
-    *(int*)((uint8_t*)self + 0x10) = param1;
-    *(int*)((uint8_t*)self + 0x14) = param2;
+    ScrollCollection* collection = static_cast<ScrollCollection*>(self);
+    collection->stored_param_10 = param1;
+    collection->stored_param_14 = param2;
 
     /* Virtual dispatch to Compact (vtable[20]) */
-    ((Collection*)self)->Compact();
+    collection->Compact();
 
     return 0;
 }
@@ -155,10 +165,10 @@ int __thiscall UI_FreeScrollBar(void* self, int param1, int param2)
 /* ================================================================== */
 void __fastcall UI_EnableScrollBar(void* self)
 {
-    int* selfInt = (int*)self;
+    Collection* collection = static_cast<Collection*>(self);
 
     /* Get count at +0x08 */
-    int count = selfInt[2];
+    int count = collection->count;
     uint32_t idx = 0;
 
     if (count == 0) {
@@ -167,8 +177,8 @@ void __fastcall UI_EnableScrollBar(void* self)
 
     do {
         /* Virtual dispatch to RemoveElement (vtable[4]) */
-        ((Collection*)self)->RemoveElement(idx);
+        collection->RemoveElement(static_cast<int32_t>(idx));
 
         idx++;
-    } while (idx < (uint32_t)selfInt[2]);   /* compare against updated count at +0x08 */
+    } while (idx < static_cast<uint32_t>(collection->count));   /* compare against updated count at +0x08 */
 }

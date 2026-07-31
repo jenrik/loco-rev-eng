@@ -72,7 +72,7 @@ public:
     void SetWorldPos(int x, int y) { MoveTo(x, y); }
 
     /** Address: 0x405900, vtable [6]. */
-    virtual int InitBase(int resource_id, int anim_index, bool force_reload);
+    int InitBase(int resource_id, int anim_index, bool force_reload) override;
     /** Address: 0x405A20, vtable [7]. */
     virtual void StopSound(int param);
     /** Address: 0x405DE0, vtable [8]. */
@@ -80,7 +80,7 @@ public:
     /** Address: 0x4061B0, vtable [9]. */
     virtual void SetVisible(bool visible);
     /** Address: 0x405C40, vtable [10]. */
-    virtual void Update();
+    void Update() override;
     /** Address: 0x405E60, vtable [11]. */
     virtual void Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags);
     /** Address: 0x405FD0, vtable [12]. */

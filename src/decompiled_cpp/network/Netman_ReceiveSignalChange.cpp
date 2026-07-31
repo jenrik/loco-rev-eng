@@ -89,16 +89,16 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
     char  addrStr[0x10];           /* extracted address string */
     char  resolvedName[0x50];      /* processed player name */
     int32_t bytesRead;
-    void* resolved = NULL;
+    void* resolved = nullptr;
     int32_t playerEnumIdx;
     bool   playerFound = false;
-    char   emptyByte = *(char*)0x4851D0; /* g_empty_string */
+    char   emptyByte = g_empty_string;
 
     /* Initialize playerIdStr to empty */
     {
         int32_t i;
         for (i = 0; i < 0x7F; i++) {
-            ((int32_t*)playerIdStr)[i] = 0;
+            reinterpret_cast<int32_t*>(playerIdStr)[i] = 0;
         }
     }
     playerIdStr[0] = emptyByte;
@@ -154,19 +154,20 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
             routeFilePath,
             GENERIC_READ,
             FILE_SHARE_READ,
-            NULL,
+            nullptr,
             OPEN_EXISTING,
             FILE_FLAG_SEQUENTIAL_SCAN,
-            NULL
+            nullptr
         );
 
         if (hFile == INVALID_HANDLE_VALUE) {
-            return NULL;
+            return nullptr;
         }
 
-        if (!ReadFile(hFile, fileBuf, BUF_SIZE, (LPDWORD)&bytesRead, NULL)) {
+        if (!ReadFile(hFile, fileBuf, BUF_SIZE,
+                      reinterpret_cast<uint32_t*>(&bytesRead), nullptr)) {
             CloseHandle(hFile);
-            return NULL;
+            return nullptr;
         }
         CloseHandle(hFile);
 
@@ -214,19 +215,20 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
             addrFilePath,
             GENERIC_READ,
             FILE_SHARE_READ,
-            NULL,
+            nullptr,
             OPEN_EXISTING,
             FILE_FLAG_SEQUENTIAL_SCAN,
-            NULL
+            nullptr
         );
 
         if (hFile == INVALID_HANDLE_VALUE) {
-            return NULL;
+            return nullptr;
         }
 
-        if (!ReadFile(hFile, fileBuf, BUF_SIZE, (LPDWORD)&bytesRead, NULL)) {
+        if (!ReadFile(hFile, fileBuf, BUF_SIZE,
+                      reinterpret_cast<uint32_t*>(&bytesRead), nullptr)) {
             CloseHandle(hFile);
-            return NULL;
+            return nullptr;
         }
         CloseHandle(hFile);
 
@@ -299,8 +301,10 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
 
         /* ---- Copy player name to session data block 2 (+0x25) ---- */
         {
-            const char* src = (const char*)playerDPlayData + 0x10;
-            char* dst = (char*)resolved + 0x25;
+            const char* src = reinterpret_cast<const char*>(
+                reinterpret_cast<const uint8_t*>(playerDPlayData) + 0x10);
+            char* dst = reinterpret_cast<char*>(
+                reinterpret_cast<uint8_t*>(resolved) + 0x25);
 
             int32_t slen;
             for (slen = 0; src[slen] != '\0'; slen++) {
@@ -309,8 +313,10 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
             dst[slen] = '\0';
         }
 
-        *(uint16_t*)((uint8_t*)resolved + 0x3A) = 0; /* m_wordValue */
-        *(int32_t*)((uint8_t*)resolved + 0x3C) = 1;  /* m_dwordValue */
+        *reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(resolved) + 0x3A) = 0; /* m_wordValue */
+        *reinterpret_cast<int32_t*>(
+            reinterpret_cast<uint8_t*>(resolved) + 0x3C) = 1; /* m_dwordValue */
 
         /* ---- Process escape sequences in address string ---- */
         {
@@ -370,8 +376,9 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
         /* ---- Copy processed name to DPlayData player name field (+0x43) ---- */
         {
             const char* src = resolvedName;
-            char* dst = (char*)resolved + 0x43;
-    int outPos = 0;
+            char* dst = reinterpret_cast<char*>(
+                reinterpret_cast<uint8_t*>(resolved) + 0x43);
+            int outPos = 0;
 
             if (outPos < 0x50) {
                 int32_t slen;
@@ -395,7 +402,7 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
     }
 
     /* Finalize: set player track/type via DPLAY_SetPlayerName */
-    if (resolved != NULL) {
+    if (resolved != nullptr) {
         DPLAY_SetPlayerName(resolved, 1, -1);
     }
 

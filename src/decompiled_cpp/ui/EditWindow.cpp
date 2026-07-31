@@ -251,7 +251,7 @@ void EditWindow::base_destructor()
     destroy_popup_window(this->pPopupWindow, this->savedPopupWndProc);
 
     /* Release music resource 0x5015 */
-    int musicRes = ResourceManager_GetStringById((void**)&g_resmgr, 0x5015);
+    int musicRes = ResourceManager_GetStringById(reinterpret_cast<void**>(&g_resmgr), 0x5015);
     if (musicRes != 0) {
         RESMGR_ReleaseSoundResource(musicRes);
     }
@@ -275,7 +275,9 @@ int EditWindow::create(HWND hWndParent)
     GetClientRect(desktop, &desktopRect);
 
     /* Load app icon */
-    this->icon = LoadIconA(this->hInstance, (const char*)0x65);  /* +0xF8 */
+    this->icon = LoadIconA(
+        this->hInstance,
+        reinterpret_cast<const char*>(static_cast<uintptr_t>(0x65)));  /* +0xF8 */
 
     /* Load sprites */
     std::fprintf(stderr, "[TRACE] EditWindow::create: load sprites\n");
@@ -328,8 +330,12 @@ int EditWindow::create(HWND hWndParent)
         NULL);
 
     /* Set edit control font and limit text length */
-    PostMessageA(this->hwndEdit, 0x30, (void*)0x4855F8, 1);  /* WM_SETFONT */
-    PostMessageA(this->hwndEdit, 0xC5, (void*)0x0B, 0);     /* EM_LIMITTEXT = 11 */
+    PostMessageA(this->hwndEdit, 0x30,
+                 reinterpret_cast<void*>(static_cast<uintptr_t>(0x4855F8)),
+                 1);  /* WM_SETFONT */
+    PostMessageA(this->hwndEdit, 0xC5,
+                 reinterpret_cast<void*>(static_cast<uintptr_t>(0x0B)),
+                 nullptr);     /* EM_LIMITTEXT = 11 */
 
     /* Subclass edit control's WndProc to 0x420B20 */
     this->prevEditWndProc = SetWindowLongA(this->hwndEdit, -4, 0x420B20);
@@ -403,13 +409,14 @@ void EditWindow::show()
     SetFocus(this->hwndEdit);
     SetWindowTextA(this->hwndEdit, g_player_config->name);
     /* Send EM_SETSEL (0xB1) -- select end of text (start=0, end=-1) */
-    SendMessageA(this->hwndEdit, 0xB1, 0, (void*)-1);
+    SendMessageA(this->hwndEdit, 0xB1, nullptr,
+                 reinterpret_cast<void*>(static_cast<intptr_t>(-1)));
 #endif
     std::fprintf(stderr, "[TRACE] EditWindow::show: player name set\n");
     std::fprintf(stderr, "[TRACE] EditWindow::show: edit selection set\n");
 
     /* Set NetMan game mode based on netman state */
-    if (*(char*)(_g_netman_state + 7) == 0) {
+    if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
         NETMAN_SetGameMode(g_netman, 0);     /* Single-player */
     } else {
         NETMAN_SetGameMode(g_netman, 3);     /* Multiplayer */
@@ -428,7 +435,7 @@ void EditWindow::show()
 
     /* 0x420780 loads resource 0x5015 (sounds\toybox\clstray1) on menu entry. */
 #ifdef _WIN32
-    int musicRes = ResourceManager_GetStringById((void**)&g_resmgr, 0x5015);
+    int musicRes = ResourceManager_GetStringById(reinterpret_cast<void**>(&g_resmgr), 0x5015);
     if (musicRes != 0) {
         RESMGR_LoadSoundResource(musicRes);
     }
@@ -488,7 +495,7 @@ void EditWindow::setState(int32_t state)
         return;
     case 3:
         this->pPanelA->hide();
-        if (*(char*)(_g_netman_state + 0x18) == 0) {
+        if (*reinterpret_cast<char*>(_g_netman_state + 0x18) == 0) {
             this->dialogState = 4;
         } else {
             this->dialogState = 5;
@@ -503,9 +510,9 @@ void EditWindow::setState(int32_t state)
     case 6:
         this->pPanelB->hide();
         this->pPanelA->hide();
-        if (*(char*)(_g_netman_state + 7) != 0) NETMAN_SetGameMode(g_netman, 1);
+        if (*reinterpret_cast<char*>(_g_netman_state + 7) != 0) NETMAN_SetGameMode(g_netman, 1);
         WIN32_ResumeThread(_g_network_thread, 1);
-        CGWND_SetMode((void*)1);
+        CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
         return;
     case 7:
         if (this->pPopupWindow) {
@@ -748,14 +755,14 @@ void EditWindow::onPlayerNameChanged()
     NETMAN_SendPacket(_g_netman_state);
 
     /* Transition based on network state */
-    if (*(char*)(_g_netman_state + 7) == 0) {
+    if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
         /* Single-player mode */
         TileMap_Init(&g_tilemap, 1);
 
-        if (*(char*)(_g_netman_state + 8) == 0) {
+        if (*reinterpret_cast<char*>(_g_netman_state + 8) == 0) {
             /* Standard single-player or scenario */
-            if (*(char*)(_g_netman_state + 0x24) != 0) {
-                const int gameMode = *(int*)(_g_netman_state + 0x28);
+            if (*reinterpret_cast<char*>(_g_netman_state + 0x24) != 0) {
+                const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x28);
                 if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
                     (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
                     this->setState(4);     /* Single-player */
@@ -764,8 +771,8 @@ void EditWindow::onPlayerNameChanged()
             }
         } else {
             /* Scenario select screen */
-            if (*(char*)(_g_netman_state + 0x18) != 0) {
-                const int gameMode = *(int*)(_g_netman_state + 0x1C);
+            if (*reinterpret_cast<char*>(_g_netman_state + 0x18) != 0) {
+                const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x1C);
                 if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
                     (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
                     this->setState(5);     /* Multiplayer */
@@ -781,12 +788,12 @@ void EditWindow::onPlayerNameChanged()
 
     /* Multiplayer mode */
     TileMap_Init(&g_tilemap, 0);
-    if (*(char*)(_g_netman_state + 7) != 0) {
+    if (*reinterpret_cast<char*>(_g_netman_state + 7) != 0) {
         NETMAN_SetGameMode(g_netman, 1);
     }
 
     WIN32_ResumeThread(_g_network_thread, 1);
-    CGWND_SetMode((void*)1);
+    CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
 }
 
 /* ================================================================== */
@@ -797,10 +804,10 @@ void EditWindow::netPanelInit()
 {
     std::fprintf(stderr, "[TRACE] EditWindow::netPanelInit: config=%p train=%p\n", static_cast<void*>(_g_netman_state), _g_train);
     /* Set polling interval based on game mode */
-    if (*(char*)(_g_netman_state + 7) == 0) {
-        *(int*)(_g_netman_state + 0x0C) = 0x1E;    /* 30ms for single-player */
+    if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
+        *reinterpret_cast<int*>(_g_netman_state + 0x0C) = 0x1E;    /* 30ms for single-player */
     } else {
-        *(int*)(_g_netman_state + 0x0C) = 0x32;    /* 50ms for multiplayer */
+        *reinterpret_cast<int*>(_g_netman_state + 0x0C) = 0x32;    /* 50ms for multiplayer */
     }
 
     /* Skip if train subsystem already exists */
@@ -842,9 +849,10 @@ void EditWindow::netPanelInit()
     extern int __stdcall WIN32_QueueAsyncTask(void* thread, void* func, void* param);
     extern void Train_ProcessMessages(void* train);    /* 0x439240 */
 
-    int result = WIN32_QueueAsyncTask(_g_network_thread,
-                                       (void*)&Train_ProcessMessages,
-                                       _g_train);
+    int result = WIN32_QueueAsyncTask(
+        _g_network_thread,
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(&Train_ProcessMessages)),
+        _g_train);
     if (result != 1) {
         /* 0x4228ED dispatches the base no-op failure hook (vtable[5]). */
         this->on_async_task_failure(0);

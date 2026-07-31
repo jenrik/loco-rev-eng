@@ -102,12 +102,35 @@ extern int32_t  g_level_data[16];        /* level table data */
 /* Inline helpers                                                      */
 /* ================================================================== */
 
-static inline uint8_t  rb(void* p, int o) { return *((uint8_t*)((char*)p + o)); }
-static inline int32_t  rd(void* p, int o) { return *((int32_t*)((char*)p + o)); }
-static inline void     wb(void* p, int o, uint8_t v) { *((uint8_t*)((char*)p + o)) = v; }
-static inline void     wd(void* p, int o, int32_t v) { *((int32_t*)((char*)p + o)) = v; }
-static inline void*    rp(void* p, int o) { return *((void**)((char*)p + o)); }
-static inline void     wp(void* p, int o, void* v) { *((void**)((char*)p + o)) = v; }
+template <typename T>
+struct InputOverlayValue {
+    T value;
+} __attribute__((__may_alias__));
+
+static inline uint8_t rb(void* p, int o) {
+    return reinterpret_cast<InputOverlayValue<uint8_t>*>(
+        static_cast<uint8_t*>(p) + o)->value;
+}
+static inline int32_t rd(void* p, int o) {
+    return reinterpret_cast<InputOverlayValue<int32_t>*>(
+        static_cast<uint8_t*>(p) + o)->value;
+}
+static inline void wb(void* p, int o, uint8_t v) {
+    reinterpret_cast<InputOverlayValue<uint8_t>*>(
+        static_cast<uint8_t*>(p) + o)->value = v;
+}
+static inline void wd(void* p, int o, int32_t v) {
+    reinterpret_cast<InputOverlayValue<int32_t>*>(
+        static_cast<uint8_t*>(p) + o)->value = v;
+}
+static inline void* rp(void* p, int o) {
+    return reinterpret_cast<InputOverlayValue<void*>*>(
+        static_cast<uint8_t*>(p) + o)->value;
+}
+static inline void wp(void* p, int o, void* v) {
+    reinterpret_cast<InputOverlayValue<void*>*>(
+        static_cast<uint8_t*>(p) + o)->value = v;
+}
 
 /* ================================================================== */
 /* InputMgr — Constructor / Destructor / Init                          */
@@ -147,7 +170,10 @@ InputMgr::~InputMgr()
 void InputMgr::ShowFileDialog()
 {
     if (editorState == 9) return;
-    if (this->hWnd != nullptr) { timerHandle = (void*)(uintptr_t)SetTimer(this->hWnd, 0x44, 200, nullptr); }
+    if (this->hWnd != nullptr) {
+        timerHandle = reinterpret_cast<void*>(static_cast<uintptr_t>(
+            SetTimer(this->hWnd, 0x44, 200, nullptr)));
+    }
     editorState = 9;
     int state = 1; Sprite_SetState(nullptr, state, &state);
     UIPANEL_EndPaintEx(this, 0, 0, 0, nullptr);
@@ -264,7 +290,7 @@ void InputMgr::LoadSaveFile(const char* filename)
 {
     /* @ 0x41D5C0 — loads .loco save file via RESMGR_LoadResource */
     char fullPath[260]; CRT_memset(fullPath, 0, sizeof(fullPath));
-    CRT_sprintf(fullPath, "%s%s", (const char*)g_install_path, filename);
+    CRT_sprintf(fullPath, "%s%s", static_cast<const char*>(g_install_path), filename);
 
     /* Load resource: returns header+buffer and pixel data */
     /* RESMGR_LoadResource parses the .loco format:
@@ -299,7 +325,7 @@ void InputMgr::SaveCurrentWorld(const char* filename)
 {
     /* @ 0x41D9B0 — serializes world to .loco save file */
     char fullPath[260]; CRT_memset(fullPath, 0, sizeof(fullPath));
-    CRT_sprintf(fullPath, "%s%s", (const char*)g_install_path, filename);
+    CRT_sprintf(fullPath, "%s%s", static_cast<const char*>(g_install_path), filename);
 
     /* Allocate save buffer */
     /* Header + entity records + vehicle records */
@@ -390,7 +416,7 @@ void InputMgr::AdjustColorComponent(int32_t component, int32_t delta)
     if (component < 0 || component >= 3) return;
     int32_t val = colourPalette[0][component] + delta;
     if (val < 0) val = 0; if (val > 255) val = 255;
-    colourPalette[0][component] = (uint8_t)val;
+    colourPalette[0][component] = static_cast<uint8_t>(val);
 }
 
 /* ================================================================== */
@@ -509,11 +535,15 @@ void InputMgr::UpdateScrollPosition(int32_t delta)
 
 LRESULT InputMgr::ToolbarWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    InputMgr* self = (InputMgr*)g_input_mgr;
+    InputMgr* self = static_cast<InputMgr*>(g_input_mgr);
     if (!self) return DefWindowProcA(hWnd, msg, wParam, lParam);
     switch (msg) {
     case 0x000F: /* WM_PAINT */ { UIPANEL_BeginPaint(self); UIPANEL_EndPaintEx(self, 0, 0, 0, nullptr); } return 0;
-    case 0x0201: /* WM_LBUTTONDOWN */ { int16_t x=(int16_t)(lParam&0xFFFF), y=(int16_t)(lParam>>16); self->HandleToolbarHover(x, y); } return 0;
+    case 0x0201: { /* WM_LBUTTONDOWN */
+        int16_t x = static_cast<int16_t>(lParam & 0xFFFF);
+        int16_t y = static_cast<int16_t>(lParam >> 16);
+        self->HandleToolbarHover(x, y);
+    } return 0;
     case 0x0113: /* WM_TIMER */ return 0;
     }
     return DefWindowProcA(hWnd, msg, wParam, lParam);

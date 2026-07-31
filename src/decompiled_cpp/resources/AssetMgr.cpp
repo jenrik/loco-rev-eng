@@ -56,6 +56,92 @@ extern char   g_empty_string;         /* 0x4851D0 */
 /* Error string */
 const char s_invalid_path_error[] = "ERROR: Invalid path in GetOppositeDirection";
 
+namespace {
+using CollectionLookup = int (__thiscall*)(uint32_t);
+
+class CollectionView {
+public:
+    virtual void Slot0(uint8_t flags) = 0;
+    virtual void Slot1() = 0;
+    virtual void Slot2() = 0;
+    virtual void Remove(uint32_t index) = 0;
+    virtual void Slot4() = 0;
+    virtual void Slot5() = 0;
+    virtual void Slot6() = 0;
+    virtual void Slot7() = 0;
+    virtual void* Get(uint32_t index) = 0;
+    virtual void Slot9() = 0;
+    virtual int32_t Add(uint32_t index, void* object) = 0;
+
+protected:
+    ~CollectionView() = default;
+};
+
+class CollectionFirstView {
+public:
+    virtual void Slot0(uint8_t flags) = 0;
+    virtual void Slot1() = 0;
+    virtual void Slot2() = 0;
+    virtual void Slot3() = 0;
+    virtual void Slot4() = 0;
+    virtual void Slot5() = 0;
+    virtual void Slot6() = 0;
+    virtual void Slot7() = 0;
+    virtual void* First() = 0;
+
+protected:
+    ~CollectionFirstView() = default;
+};
+
+void** timer_array()
+{
+    return reinterpret_cast<void**>(&g_empty_string);
+}
+
+void* collection_object(void** array, uint32_t index)
+{
+    return reinterpret_cast<CollectionView*>(array)->Get(index);
+}
+
+void* global_collection_object(uint32_t index)
+{
+    const CollectionLookup lookup = reinterpret_cast<CollectionLookup>(DAT_004a9994);
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(lookup(index)));
+}
+
+void* collection_first(void** array)
+{
+    return reinterpret_cast<CollectionFirstView*>(array)->First();
+}
+
+int32_t collection_add(void** array, uint32_t index, void* object)
+{
+    return reinterpret_cast<CollectionView*>(array)->Add(index, object);
+}
+
+void collection_remove(void** array, uint32_t index)
+{
+    reinterpret_cast<CollectionView*>(array)->Remove(index);
+}
+
+template <typename T>
+T* object_field(void* object, size_t offset)
+{
+    return reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(object) + offset);
+}
+
+template <typename T>
+T pointer_from_word(uint32_t value)
+{
+    return reinterpret_cast<T>(static_cast<uintptr_t>(value));
+}
+
+uint32_t pointer_to_word(const void* pointer)
+{
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(pointer));
+}
+}
+
 /* ================================================================== */
 /* Direction reversal helper — returns opposite direction              */
 /* 0->2, 1->3, 2->0, 3->1                                            */
@@ -89,31 +175,31 @@ static int32_t OppositeDirection(int32_t dir)
 void __fastcall AssetMgr_LoadFileEx(uint32_t* param_1)
 {
     /* SEH prologue */
-    void** timer_arr = (void**)(uintptr_t)(&g_empty_string);
+    void** timer_arr = timer_array();
     uint32_t timer_cap = 0;
-    void* exception_buf = 0;
+    void* exception_buf = nullptr;
     uint32_t entry_count = 0;
 
     Timer_Resize(&timer_arr, 10);
-    timer_arr = (void**)(uintptr_t)(&g_empty_string);  /* timer type change */
+    timer_arr = timer_array();  /* timer type change */
 
     /* Step 1: Free old data */
     AssetMgr_ReadFile(param_1);
 
     /* Step 2: Iterate all game objects, count those in viewport */
-    for (uint32_t i = 0; i < (uint32_t)g_object_count; i++) {
-        /* Get object via collection vtable[8] */
-        void* obj = (void*)(uintptr_t)((int (__thiscall*)(uint32_t))DAT_004a9994)(i);
-        *(int*)((uint8_t*)obj + 0xE4) = -1;  /* clear neighbor index */
+    for (uint32_t i = 0; i < static_cast<uint32_t>(g_object_count); i++) {
+        /* Get object via the global collection lookup operation. */
+        void* obj = global_collection_object(i);
+        *object_field<int>(obj, 0xE4) = -1;  /* clear neighbor index */
 
-        if (TileMap_UpdateViewport(g_tilemap, obj, (int16_t)param_1[3])) {
+        if (TileMap_UpdateViewport(g_tilemap, obj, static_cast<int16_t>(param_1[3]))) {
             /* Grow timer array if needed */
             if (timer_cap <= entry_count) {
-                Timer_Resize(&timer_arr, 1 - (int32_t)entry_count);
+                Timer_Resize(&timer_arr, 1 - static_cast<int32_t>(entry_count));
             }
             uint32_t idx = entry_count;
             entry_count++;
-            int32_t result = ((int (__thiscall*)(uint32_t, void*))timer_arr[10])(idx, obj);
+            int32_t result = collection_add(timer_arr, idx, obj);
             if (result == 0) {
                 entry_count--;
             }
@@ -124,8 +210,8 @@ void __fastcall AssetMgr_LoadFileEx(uint32_t* param_1)
 
     /* Step 3: Allocate entry array (one 0x2C-byte entry per entry) */
     if (entry_count != 0) {
-        uint32_t* entry_arr = (uint32_t*)CRT_malloc_zero(entry_count * 4);
-        param_1[2] = (uint32_t)(uintptr_t)entry_arr;
+        uint32_t* entry_arr = static_cast<uint32_t*>(CRT_malloc_zero(entry_count * 4));
+        param_1[2] = pointer_to_word(entry_arr);
         for (uint32_t i = 0; i < entry_count; i++) {
             entry_arr[i] = 0;
         }
@@ -134,47 +220,49 @@ void __fastcall AssetMgr_LoadFileEx(uint32_t* param_1)
     /* Step 4: Allocate and initialize each entry */
     for (uint32_t i = 0; i < param_1[0]; i++) {
         void* entry_mem = operator_new(0x2C);
-        ((uint32_t*)(uintptr_t)param_1[2])[i] = (uint32_t)(uintptr_t)entry_mem;
-        uint32_t* entry = (uint32_t*)entry_mem;
+        pointer_from_word<uint32_t*>(param_1[2])[i] = pointer_to_word(entry_mem);
+        uint32_t* entry = static_cast<uint32_t*>(entry_mem);
         for (int j = 0; j < 11; j++) {
             entry[j] = 0;
         }
         entry[0] = i;  /* node_id */
 
         /* Get game object for this entry and assign index */
-        uint32_t* obj = (uint32_t*)(uintptr_t)((int (__thiscall*)(uint32_t))timer_arr[8])(i);
+        uint32_t* obj = static_cast<uint32_t*>(collection_object(timer_arr, i));
         obj[0xE4 / 4] = i;
     }
 
     /* Step 5: Get tile rects for all objects */
-    for (uint32_t i = 0; i < (uint32_t)g_object_count; i++) {
-        void* obj = (void*)(uintptr_t)((int (__thiscall*)(uint32_t))DAT_004a9994)(i);
+    for (uint32_t i = 0; i < static_cast<uint32_t>(g_object_count); i++) {
+        void* obj = global_collection_object(i);
         TileMap_GetTileRect(g_tilemap, obj);
     }
 
     /* Step 6: Build adjacency links between entries */
     for (uint32_t srcIdx = 0; srcIdx < param_1[0]; srcIdx++) {
-        uint32_t* srcObj = (uint32_t*)(uintptr_t)((int (__thiscall*)(uint32_t))timer_arr[8])(srcIdx);
-        int32_t* neighbor_ptrs = (int32_t*)((uint8_t*)srcObj + 0xC4); /* 4 neighbor slots */
+        uint32_t* srcObj = static_cast<uint32_t*>(collection_object(timer_arr, srcIdx));
+        int32_t* neighbor_ptrs = object_field<int32_t>(srcObj, 0xC4); /* 4 neighbor slots */
 
-        uint32_t* srcEntry = (uint32_t*)(uintptr_t)((uint32_t*)(uintptr_t)param_1[2])[srcIdx];
-        srcEntry[1] = (uint32_t)(uintptr_t)srcObj;  /* parent_ptr */
+        uint32_t* srcEntry = pointer_from_word<uint32_t*>(
+            pointer_from_word<uint32_t*>(param_1[2])[srcIdx]);
+        srcEntry[1] = pointer_to_word(srcObj);  /* parent_ptr */
 
-        int32_t* dir_slots = (int32_t*)(srcEntry + 2); /* children[4] */
-        int32_t* ref_slots = (int32_t*)(srcEntry + 6); /* subtree_refs[4] */
+        int32_t* dir_slots = reinterpret_cast<int32_t*>(srcEntry + 2); /* children[4] */
+        int32_t* ref_slots = reinterpret_cast<int32_t*>(srcEntry + 6); /* subtree_refs[4] */
 
         for (int dir = 0; dir < 4; dir++) {
             if (neighbor_ptrs[dir] == 0) {
                 ref_slots[dir] = 0;
                 dir_slots[dir] = 0;
             } else {
-                uint32_t neighborIdx = *(uint32_t*)((uint8_t*)(uintptr_t)neighbor_ptrs[dir] + 0xE4);
+                uint32_t neighborIdx = *object_field<uint32_t>(
+                    reinterpret_cast<void*>(static_cast<uintptr_t>(neighbor_ptrs[dir])), 0xE4);
                 if (neighborIdx < param_1[0]) {
-                    ref_slots[dir] = ((uint32_t*)(uintptr_t)param_1[2])[neighborIdx];
+                    ref_slots[dir] = pointer_from_word<uint32_t*>(param_1[2])[neighborIdx];
                     if (dir_slots[dir] == 0) {
                         /* Create 0x10-byte edge node linking src->neighbor */
-                        int32_t* edge = (int32_t*)operator_new(0x10);
-                        dir_slots[dir] = (int32_t)(uintptr_t)edge;
+                        int32_t* edge = static_cast<int32_t*>(operator_new(0x10));
+                        dir_slots[dir] = static_cast<int32_t>(reinterpret_cast<uintptr_t>(edge));
                         edge[1] = 0;
                         edge[0] = neighbor_ptrs[4];  /* store neighbor data */
                         edge[2] = srcIdx;
@@ -182,7 +270,9 @@ void __fastcall AssetMgr_LoadFileEx(uint32_t* param_1)
 
                         int32_t oppDir = OppositeDirection(dir);
                         /* Set back-link in neighbor's entry */
-                        ((uint32_t*)(uintptr_t)((uint32_t*)(uintptr_t)param_1[2])[neighborIdx])[2 + oppDir] = (uint32_t)(uintptr_t)edge;
+                        pointer_from_word<uint32_t*>(
+                            pointer_from_word<uint32_t*>(param_1[2])[neighborIdx])[2 + oppDir] =
+                            pointer_to_word(edge);
                     }
                 }
             }
@@ -191,20 +281,20 @@ void __fastcall AssetMgr_LoadFileEx(uint32_t* param_1)
 
     /* Step 7: Free timer objects */
     while (entry_count != 0) {
-        ((void (__thiscall*)(uint32_t))timer_arr[3])(entry_count - 1);
+        collection_remove(timer_arr, entry_count - 1);
     }
 
     /* Step 8: Free old pair buffer and allocate new one */
-    if ((void*)(uintptr_t)param_1[1] != NULL) {
-        CRT_free((void*)(uintptr_t)param_1[1]);
+    if (param_1[1] != 0) {
+        CRT_free(reinterpret_cast<void*>(static_cast<uintptr_t>(param_1[1])));
         param_1[1] = 0;
     }
 
     uint32_t n = param_1[0];
     if (n != 0) {
         uint32_t matrix_size = (n - 1) * n / 2;
-        uint8_t* matrix = (uint8_t*)CRT_malloc_zero(matrix_size);
-        param_1[1] = (uint32_t)(uintptr_t)matrix;
+        uint8_t* matrix = static_cast<uint8_t*>(CRT_malloc_zero(matrix_size));
+        param_1[1] = pointer_to_word(matrix);
         /* Initialize all bytes to 0x80 (valid unset) */
         for (uint32_t i = 0; i < matrix_size; i++) {
             matrix[i] = 0x80;
@@ -225,29 +315,29 @@ void __fastcall AssetMgr_LoadFileEx(uint32_t* param_1)
 /* ================================================================== */
 void __fastcall AssetMgr_EnumFiles(uint32_t* param_1)
 {
-    void** timer_arr = (void**)(uintptr_t)(&g_empty_string);
+    void** timer_arr = timer_array();
     uint32_t timer_cap = 0;
-    void* exception_buf = 0;
+    void* exception_buf = nullptr;
     uint32_t entry_count = 0;
 
     Timer_Resize(&timer_arr, 10);
-    timer_arr = (void**)(uintptr_t)(&g_empty_string);
+    timer_arr = timer_array();
 
     /* Free old data */
     AssetMgr_ReadFile(param_1);
 
     /* Iterate objects, count those accepted by TileMap_SetViewport */
-    for (uint32_t i = 0; i < (uint32_t)g_object_count; i++) {
-        void* obj = (void*)(uintptr_t)((int (__thiscall*)(uint32_t))DAT_004a9994)(i);
-        *(int*)((uint8_t*)obj + 0x108) = -1;  /* clear index at different offset */
+    for (uint32_t i = 0; i < static_cast<uint32_t>(g_object_count); i++) {
+        void* obj = global_collection_object(i);
+        *object_field<int>(obj, 0x108) = -1;  /* clear index at different offset */
 
         if (TileMap_SetViewport(g_tilemap, obj)) {
             if (timer_cap <= entry_count) {
-                Timer_Resize(&timer_arr, 1 - (int32_t)entry_count);
+                Timer_Resize(&timer_arr, 1 - static_cast<int32_t>(entry_count));
             }
             uint32_t idx = entry_count;
             entry_count++;
-            int32_t result = ((int (__thiscall*)(uint32_t, void*))timer_arr[10])(idx, obj);
+            int32_t result = collection_add(timer_arr, idx, obj);
             if (result == 0) {
                 entry_count--;
             }
@@ -258,8 +348,8 @@ void __fastcall AssetMgr_EnumFiles(uint32_t* param_1)
 
     /* Allocate entry pointer array */
     if (entry_count != 0) {
-        uint32_t* entry_arr = (uint32_t*)CRT_malloc_zero(entry_count * 4);
-        param_1[2] = (uint32_t)(uintptr_t)entry_arr;
+        uint32_t* entry_arr = static_cast<uint32_t*>(CRT_malloc_zero(entry_count * 4));
+        param_1[2] = pointer_to_word(entry_arr);
         for (uint32_t i = 0; i < entry_count; i++) {
             entry_arr[i] = 0;
         }
@@ -268,57 +358,61 @@ void __fastcall AssetMgr_EnumFiles(uint32_t* param_1)
     /* Allocate and init entries */
     for (uint32_t i = 0; i < param_1[0]; i++) {
         void* entry_mem = operator_new(0x2C);
-        ((uint32_t*)(uintptr_t)param_1[2])[i] = (uint32_t)(uintptr_t)entry_mem;
-        uint32_t* entry = (uint32_t*)entry_mem;
+        pointer_from_word<uint32_t*>(param_1[2])[i] = pointer_to_word(entry_mem);
+        uint32_t* entry = static_cast<uint32_t*>(entry_mem);
         for (int j = 0; j < 11; j++) {
             entry[j] = 0;
         }
         entry[0] = i;
 
-        if ((int16_t)param_1[3] == 7) {
-            uint32_t* obj = (uint32_t*)(uintptr_t)((int (__thiscall*)())timer_arr[8])();
+        if (static_cast<int16_t>(param_1[3]) == 7) {
+            uint32_t* obj = static_cast<uint32_t*>(collection_first(timer_arr));
             obj[0xE4 / 4] = i;
         } else {
-            uint32_t* obj = (uint32_t*)(uintptr_t)((int (__thiscall*)(uint32_t))timer_arr[8])(i);
+            uint32_t* obj = static_cast<uint32_t*>(collection_object(timer_arr, i));
             obj[0x108 / 4] = i;
         }
     }
 
     /* Get tile rects */
-    for (uint32_t i = 0; i < (uint32_t)g_object_count; i++) {
-        void* obj = (void*)(uintptr_t)((int (__thiscall*)(uint32_t))DAT_004a9994)(i);
+    for (uint32_t i = 0; i < static_cast<uint32_t>(g_object_count); i++) {
+        void* obj = global_collection_object(i);
         TileMap_GetTileAt(g_tilemap, obj);
     }
 
     /* Build adjacency (same logic as LoadFileEx, but using +0xE8 offset for neighbors) */
     for (uint32_t srcIdx = 0; srcIdx < param_1[0]; srcIdx++) {
-        uint32_t* srcObj = (uint32_t*)(uintptr_t)((int (__thiscall*)(uint32_t))timer_arr[8])(srcIdx);
-        int32_t* neighbor_ptrs = (int32_t*)((uint8_t*)srcObj + 0xE8); /* different offset */
+        uint32_t* srcObj = static_cast<uint32_t*>(collection_object(timer_arr, srcIdx));
+        int32_t* neighbor_ptrs = object_field<int32_t>(srcObj, 0xE8); /* different offset */
 
-        uint32_t* srcEntry = (uint32_t*)(uintptr_t)((uint32_t*)(uintptr_t)param_1[2])[srcIdx];
-        srcEntry[1] = (uint32_t)(uintptr_t)srcObj;
+        uint32_t* srcEntry = pointer_from_word<uint32_t*>(
+            pointer_from_word<uint32_t*>(param_1[2])[srcIdx]);
+        srcEntry[1] = pointer_to_word(srcObj);
 
-        int32_t* dir_slots = (int32_t*)(srcEntry + 2);
-        int32_t* ref_slots = (int32_t*)(srcEntry + 6);
+        int32_t* dir_slots = reinterpret_cast<int32_t*>(srcEntry + 2);
+        int32_t* ref_slots = reinterpret_cast<int32_t*>(srcEntry + 6);
 
         for (int dir = 0; dir < 4; dir++) {
             if (neighbor_ptrs[dir] == 0) {
                 ref_slots[dir] = 0;
                 dir_slots[dir] = 0;
             } else {
-                uint32_t neighborIdx = *(uint32_t*)((uint8_t*)(uintptr_t)neighbor_ptrs[dir] + 0x108);
+                uint32_t neighborIdx = *object_field<uint32_t>(
+                    reinterpret_cast<void*>(static_cast<uintptr_t>(neighbor_ptrs[dir])), 0x108);
                 if (neighborIdx < param_1[0]) {
-                    ref_slots[dir] = ((uint32_t*)(uintptr_t)param_1[2])[neighborIdx];
+                    ref_slots[dir] = pointer_from_word<uint32_t*>(param_1[2])[neighborIdx];
                     if (dir_slots[dir] == 0) {
-                        int32_t* edge = (int32_t*)operator_new(0x10);
-                        dir_slots[dir] = (int32_t)(uintptr_t)edge;
+                        int32_t* edge = static_cast<int32_t*>(operator_new(0x10));
+                        dir_slots[dir] = static_cast<int32_t>(reinterpret_cast<uintptr_t>(edge));
                         edge[1] = 0;
                         edge[0] = neighbor_ptrs[4];
                         edge[2] = srcIdx;
                         edge[3] = neighborIdx;
 
                         int32_t oppDir = OppositeDirection(dir);
-                        ((uint32_t*)(uintptr_t)((uint32_t*)(uintptr_t)param_1[2])[neighborIdx])[2 + oppDir] = (uint32_t)(uintptr_t)edge;
+                        pointer_from_word<uint32_t*>(
+                            pointer_from_word<uint32_t*>(param_1[2])[neighborIdx])[2 + oppDir] =
+                            pointer_to_word(edge);
                     }
                 }
             }
@@ -327,20 +421,20 @@ void __fastcall AssetMgr_EnumFiles(uint32_t* param_1)
 
     /* Free timer objects */
     while (entry_count != 0) {
-        ((void (__thiscall*)(uint32_t))timer_arr[3])(entry_count - 1);
+        collection_remove(timer_arr, entry_count - 1);
     }
 
     /* Free old pair buffer, allocate new */
-    if ((void*)(uintptr_t)param_1[1] != NULL) {
-        CRT_free((void*)(uintptr_t)param_1[1]);
+    if (param_1[1] != 0) {
+        CRT_free(reinterpret_cast<void*>(static_cast<uintptr_t>(param_1[1])));
         param_1[1] = 0;
     }
 
     uint32_t n = param_1[0];
     if (n != 0) {
         uint32_t matrix_size = (n - 1) * n / 2;
-        uint8_t* matrix = (uint8_t*)CRT_malloc_zero(matrix_size);
-        param_1[1] = (uint32_t)(uintptr_t)matrix;
+        uint8_t* matrix = static_cast<uint8_t*>(CRT_malloc_zero(matrix_size));
+        param_1[1] = pointer_to_word(matrix);
         for (uint32_t i = 0; i < matrix_size; i++) {
             matrix[i] = 0x80;
         }
@@ -360,19 +454,19 @@ void __fastcall AssetMgr_EnumerateCategory(uint32_t* param_1)
 {
     uint32_t count = param_1[0];
 
-    param_1[4] = (uint32_t)(uintptr_t)CRT_malloc_zero(count);         /* temp byte array */
-    param_1[8] = (uint32_t)(uintptr_t)CRT_malloc_zero(count * 4);     /* temp uint32 array */
-    param_1[9] = (uint32_t)(uintptr_t)CRT_malloc_zero(count * 4);     /* temp uint32 array */
-    param_1[10] = (uint32_t)(uintptr_t)CRT_malloc_zero(count * 4);    /* temp uint32 array */
+    param_1[4] = pointer_to_word(CRT_malloc_zero(count));         /* temp byte array */
+    param_1[8] = pointer_to_word(CRT_malloc_zero(count * 4));     /* temp uint32 array */
+    param_1[9] = pointer_to_word(CRT_malloc_zero(count * 4));     /* temp uint32 array */
+    param_1[10] = pointer_to_word(CRT_malloc_zero(count * 4));    /* temp uint32 array */
 
     for (uint32_t i = 0; i < count; i++) {
-        AssetMgr_FindFile((AssetMgr*)param_1, i);
+        AssetMgr_FindFile(reinterpret_cast<AssetMgr*>(param_1), i);
     }
 
-    CRT_free((void*)(uintptr_t)param_1[8]);
-    CRT_free((void*)(uintptr_t)param_1[9]);
-    CRT_free((void*)(uintptr_t)param_1[10]);
-    CRT_free((void*)(uintptr_t)param_1[4]);
+    CRT_free(reinterpret_cast<void*>(static_cast<uintptr_t>(param_1[8])));
+    CRT_free(reinterpret_cast<void*>(static_cast<uintptr_t>(param_1[9])));
+    CRT_free(reinterpret_cast<void*>(static_cast<uintptr_t>(param_1[10])));
+    CRT_free(reinterpret_cast<void*>(static_cast<uintptr_t>(param_1[4])));
 }
 
 /* ================================================================== */
@@ -385,14 +479,14 @@ void __fastcall AssetMgr_EnumerateCategory(uint32_t* param_1)
 void __thiscall AssetMgr_FindFile(AssetMgr* self, uint32_t entry_index)
 {
     /* Clear result arrays for all entries */
-    uint32_t count = *(uint32_t*)self;
+    uint32_t count = self->entry_count;
     for (uint32_t i = 0; i < count; i++) {
-        ((uint32_t*)(self->result_array))[i] = 0xFFFFFFFF;
+        self->result_array[i] = 0xFFFFFFFF;
     }
 
     /* Clear tree entry array (+0x24) */
     uint32_t* tree_entry = self->tree_entry;
-    uint32_t n = *(uint32_t*)self;
+    uint32_t n = self->entry_count;
     for (uint32_t i = 0; i < n; i++) {
         tree_entry[i] = 0;
     }
@@ -418,10 +512,10 @@ void __thiscall AssetMgr_FindFile(AssetMgr* self, uint32_t entry_index)
     }
 
     /* Free temporary tree node (free 4 subtree references + node) */
-    if (result != NULL) {
+    if (result != nullptr) {
         for (int i = 0; i < 4; i++) {
-            if ((void*)(uintptr_t)result[i + 6] != NULL) {
-                AssetMgr_TreeFreeNode((void*)(uintptr_t)result[i + 6]);
+            if (result[i + 6] != 0) {
+                AssetMgr_TreeFreeNode(pointer_from_word<void*>(result[i + 6]));
             }
         }
         GLOBAL_free(result);
@@ -440,21 +534,22 @@ uint32_t* __thiscall AssetMgr_SearchFile(AssetMgr* self, uint32_t currentId,
                                           int32_t depth, uint32_t distance,
                                           int32_t parentNode)
 {
-    if (g_game_mode != 3 || currentId > *(uint32_t*)self) {
-        return NULL;
+    if (g_game_mode != 3 || currentId > self->entry_count) {
+        return nullptr;
     }
 
     /* Mark self node as active */
-    *(uint8_t*)(self->active_flag + currentId) = 1;
+    self->active_flag[currentId] = 1;
 
     /* Check if self distance is better than the stored best */
-    uint32_t* best_dist = (uint32_t*)(self->result_array + currentId * 4);
+    uint32_t* best_dist = self->result_array + currentId * 4;
     if (distance < *best_dist) {
         *best_dist = distance;
 
         /* Allocate path node (0x2C bytes, 11 dwords) */
-        uint32_t* path_node = (uint32_t*)operator_new(0x2C);
-        uint32_t* src_entry = *(uint32_t**)(self->resource_array + currentId * 4);
+        uint32_t* path_node = static_cast<uint32_t*>(operator_new(0x2C));
+        uint32_t* src_entry = *reinterpret_cast<uint32_t**>(
+            reinterpret_cast<uint8_t*>(self->resource_array) + currentId * 4);
 
         /* Copy source entry data into new node */
         for (int i = 0; i < 11; i++) {
@@ -462,22 +557,23 @@ uint32_t* __thiscall AssetMgr_SearchFile(AssetMgr* self, uint32_t currentId,
         }
 
         /* Replace in tree entry lookup */
-        uint32_t** tree_entries = &self->tree_entry;
-        if (tree_entries[currentId] != NULL) {
-            AssetMgr_RemoveNode(self, (int32_t*)tree_entries[currentId]);
+        uint32_t* tree_entries = self->tree_entry;
+        if (tree_entries[currentId] != 0) {
+            AssetMgr_RemoveNode(self, pointer_from_word<int32_t*>(tree_entries[currentId]));
         }
-        tree_entries[currentId] = path_node;
+        tree_entries[currentId] = pointer_to_word(path_node);
 
         /* Store parent/depth info */
-        *(int*)(self->heap_entry + currentId * 4) = parentNode;
+        self->heap_entry[currentId * 4] = static_cast<uint32_t>(parentNode);
 
         /* Save original child refs, clear ours */
         int32_t saved_refs[4];
-        int32_t* child_slots = (int32_t*)(path_node + 2);
+        int32_t* child_slots = reinterpret_cast<int32_t*>(path_node + 2);
         for (int i = 0; i < 4; i++) {
             saved_refs[i] = child_slots[i];
             if (child_slots[i] != 0) {
-                uint32_t child_entry = *(uint32_t*)((uintptr_t)child_slots[i] + 4);
+                uint32_t child_entry = *reinterpret_cast<uint32_t*>(
+                    static_cast<uintptr_t>(child_slots[i]) + 4);
                 saved_refs[i] = child_entry;
                 if (child_entry != 0) {
                     child_slots[4 + i] = 0;  /* clear ref_slot */
@@ -488,23 +584,25 @@ uint32_t* __thiscall AssetMgr_SearchFile(AssetMgr* self, uint32_t currentId,
         /* Recursively search children */
         for (int i = 0; i < 4; i++) {
             if (child_slots[i] != 0) {
-                int32_t* edge = (int32_t*)(uintptr_t)child_slots[i];
+                int32_t* edge = pointer_from_word<int32_t*>(child_slots[i]);
                 edge[1] = 1;  /* mark as visited */
-                int32_t* edge_data = (int32_t*)(uintptr_t)edge[0];
+                int32_t* edge_data = pointer_from_word<int32_t*>(edge[0]);
                 uint32_t childId = edge_data[2];
                 if (childId == currentId) {
                     childId = edge_data[3];
                 }
                 uint32_t* child_result = AssetMgr_SearchFile(
-                    self, childId, depth + 1, distance + edge_data[0], (int32_t)(uintptr_t)path_node);
-                child_slots[4 + i] = (int32_t)(uintptr_t)child_result;
+                    self, childId, depth + 1, distance + edge_data[0],
+                    static_cast<int32_t>(reinterpret_cast<uintptr_t>(path_node)));
+                child_slots[4 + i] = static_cast<int32_t>(
+                    reinterpret_cast<uintptr_t>(child_result));
             }
         }
 
         /* Restore saved refs */
         for (int i = 0; i < 4; i++) {
             if (child_slots[i] != 0) {
-                int32_t* edge = (int32_t*)(uintptr_t)child_slots[i];
+                int32_t* edge = pointer_from_word<int32_t*>(child_slots[i]);
                 edge[1] = saved_refs[i];
             }
         }
@@ -512,7 +610,7 @@ uint32_t* __thiscall AssetMgr_SearchFile(AssetMgr* self, uint32_t currentId,
         return path_node;
     }
 
-    return NULL;
+    return nullptr;
 }
 
 /* ================================================================== */
@@ -523,12 +621,12 @@ uint32_t* __thiscall AssetMgr_SearchFile(AssetMgr* self, uint32_t currentId,
 /* ================================================================== */
 void AssetMgr_TreeFreeNode(void* node)
 {
-    if (node == NULL) return;
+    if (node == nullptr) return;
 
-    uint32_t* children = (uint32_t*)((uint8_t*)node + 0x18);
+    uint32_t* children = object_field<uint32_t>(node, 0x18);
     for (int i = 0; i < 4; i++) {
-        if ((void*)(uintptr_t)children[i] != NULL) {
-            AssetMgr_TreeFreeNode((void*)(uintptr_t)children[i]);
+        if (children[i] != 0) {
+            AssetMgr_TreeFreeNode(pointer_from_word<void*>(children[i]));
         }
     }
     GLOBAL_free(node);
@@ -543,25 +641,25 @@ void AssetMgr_TreeFreeNode(void* node)
 /* ================================================================== */
 void __thiscall AssetMgr_RemoveNode(AssetMgr* self, int32_t* node)
 {
-    if (node == NULL) return;
+    if (node == nullptr) return;
 
     /* Remove from tree entry lookup at +0x24 */
-    *(uint32_t*)(self->tree_entry + node[0] * 4) = 0;
+    self->tree_entry[node[0] * 4] = 0;
 
     /* Unlink from parent at +0x28 */
-    int32_t parentPtr = *(int*)(self->heap_entry + node[0] * 4);
-    uint32_t* parentSlots = (uint32_t*)(uintptr_t)(parentPtr + 0x18);
+    int32_t parent_word = static_cast<int32_t>(self->heap_entry[node[0] * 4]);
+    void* parent = reinterpret_cast<void*>(static_cast<uintptr_t>(parent_word));
     for (uint32_t offset = 0x18; offset < 0x28; offset += 4) {
-        if (*(int**)(uintptr_t)(parentPtr + offset) == node) {
-            *(uint32_t*)(uintptr_t)(parentPtr + offset) = 0;
+        if (*object_field<int32_t*>(parent, offset) == node) {
+            *object_field<uint32_t>(parent, offset) = 0;
         }
     }
 
     /* Recursively remove children */
     int32_t* child_ptr = node + 6;
     for (int i = 0; i < 4; i++) {
-        if ((int32_t*)(uintptr_t)child_ptr[i] != NULL) {
-            AssetMgr_RemoveNode(self, (int32_t*)(uintptr_t)child_ptr[i]);
+        if (child_ptr[i] != 0) {
+            AssetMgr_RemoveNode(self, pointer_from_word<int32_t*>(child_ptr[i]));
         }
     }
 
@@ -579,22 +677,25 @@ void __fastcall AssetMgr_ReadFile(uint32_t* param_1)
 {
     if (param_1[2] == 0) return;
 
+    uint32_t* entries = pointer_from_word<uint32_t*>(param_1[2]);
+
     /* For each entry, remove cross-references in children, then free */
     for (uint32_t i = 0; i < param_1[0]; i++) {
-        uint32_t* entry = *(uint32_t**)(uintptr_t)(param_1[2] + i * 4);
+        uint32_t* entry = pointer_from_word<uint32_t*>(entries[i]);
         /* Scan children at offsets 8, 0xC, 0x10, 0x14 */
         for (uint32_t childOff = 8; childOff < 0x18; childOff += 4) {
-            void* child = *(void**)((uint8_t*)entry + childOff);
-            if (child != NULL) {
-                uint32_t childId = *(uint32_t*)((uint8_t*)child + 8);
+            uint32_t child_word = *object_field<uint32_t>(entry, childOff);
+            if (child_word != 0) {
+                void* child = pointer_from_word<void*>(child_word);
+                uint32_t childId = *object_field<uint32_t>(child, 8);
                 if (childId == i) {
-                    childId = *(uint32_t*)((uint8_t*)child + 0xC);
+                    childId = *object_field<uint32_t>(child, 0xC);
                 }
                 /* Remove back-reference from child's entry */
-                uint32_t* childEntry = *(uint32_t**)(uintptr_t)(param_1[2] + childId * 4);
+                uint32_t* childEntry = pointer_from_word<uint32_t*>(entries[childId]);
                 for (uint32_t backOff = 8; backOff < 0x18; backOff += 4) {
-                    if (*(void**)((uint8_t*)childEntry + backOff) == child) {
-                        *(uint32_t*)((uint8_t*)childEntry + backOff) = 0;
+                    if (*object_field<uint32_t>(childEntry, backOff) == child_word) {
+                        *object_field<uint32_t>(childEntry, backOff) = 0;
                     }
                 }
                 GLOBAL_free(child);
@@ -604,12 +705,12 @@ void __fastcall AssetMgr_ReadFile(uint32_t* param_1)
 
     /* Free entry nodes themselves */
     for (uint32_t i = 0; i < param_1[0]; i++) {
-        GLOBAL_free(*(void**)(uintptr_t)(param_1[2] + i * 4));
-        *(uint32_t*)(uintptr_t)(param_1[2] + i * 4) = 0;
+        GLOBAL_free(pointer_from_word<void*>(entries[i]));
+        entries[i] = 0;
     }
 
     /* Free entry array and reset */
-    CRT_free((void*)(uintptr_t)param_1[2]);
+    CRT_free(pointer_from_word<void*>(param_1[2]));
     param_1[0] = 0;
     param_1[2] = 0;
 }
@@ -625,7 +726,7 @@ void __fastcall AssetMgr_ReadFile(uint32_t* param_1)
 int32_t AssetMgr_WriteFile(int32_t* param_1, int32_t param_2, int32_t param_3,
                             uint32_t param_4, uint32_t param_5)
 {
-    if (param_1 == NULL) return -1;
+    if (param_1 == nullptr) return -1;
     if (param_1[0] == param_3) return 0;  /* reached target */
     if (param_4 <= param_5) return -1;    /* exceeded max distance */
 
@@ -636,7 +737,7 @@ int32_t AssetMgr_WriteFile(int32_t* param_1, int32_t param_2, int32_t param_3,
     for (uint8_t dir = 0; dir < 4; dir++) {
         if (child_refs[dir] != 0) {
             int32_t result = AssetMgr_WriteFile(
-                (int32_t*)(uintptr_t)child_refs[4 + dir],
+                pointer_from_word<int32_t*>(child_refs[4 + dir]),
                 param_2, param_3, param_4,
                 param_5 + child_refs[0]);
 
@@ -651,7 +752,7 @@ int32_t AssetMgr_WriteFile(int32_t* param_1, int32_t param_2, int32_t param_3,
     }
 
     if (best_dist != -1) {
-        *(uint8_t*)(param_1 + 10) = best_dir;  /* direction_byte */
+        *object_field<uint8_t>(param_1, 0x28) = best_dir;  /* direction_byte */
     }
     return best_dist;
 }
@@ -671,7 +772,8 @@ void __thiscall AssetMgr_TraverseTo(AssetMgr* self, int32_t* startNode, int32_t 
     int32_t nodeId = startNode[0];
     while (nodeId != targetId) {
         steps++;
-        startNode = (int32_t*)(uintptr_t)startNode[6 + *(uint8_t*)(startNode + 10)];
+        startNode = pointer_from_word<int32_t*>(
+            startNode[6 + *object_field<uint8_t>(startNode, 0x28)]);
         self->traversal_step = steps;
         nodeId = startNode[0];
     }
@@ -686,22 +788,23 @@ void __thiscall AssetMgr_TraverseTo(AssetMgr* self, int32_t* startNode, int32_t 
 /* ================================================================== */
 void __fastcall AssetMgr_DeleteFile(void* param_1)
 {
-    uint32_t count = *(uint32_t*)((uint8_t*)param_1 + 0x14);
+    AssetMgr* self = reinterpret_cast<AssetMgr*>(param_1);
+    uint32_t count = self->traversal_step;
     if (count <= 1) return;
 
-    uint32_t* id_buf = *(uint32_t**)((uint8_t*)param_1 + 0x1C);
-    uint8_t* dir_buf = *(uint8_t**)((uint8_t*)param_1 + 0x18);
+    uint32_t* id_buf = reinterpret_cast<uint32_t*>(self->path_dir_buf);
+    uint8_t* dir_buf = reinterpret_cast<uint8_t*>(self->path_id_buf);
 
     for (uint32_t i = 0; i < count - 1; i++) {
         uint32_t idA = id_buf[i];
         for (uint32_t j = i + 1; j < count; j++) {
             uint32_t idB = id_buf[j];
 
-            uint8_t pair_val = AssetMgr_ReadPairValue((AssetMgr*)param_1, idA, idB);
+            uint8_t pair_val = AssetMgr_ReadPairValue(self, idA, idB);
             if (pair_val == 0x80) {
-                AssetMgr_WritePairValue((AssetMgr*)param_1, idA, idB, dir_buf[i]);
+                AssetMgr_WritePairValue(self, idA, idB, dir_buf[i]);
                 int32_t opp_dir = OppositeDirection(dir_buf[j - 1]);
-                AssetMgr_WritePairValue((AssetMgr*)param_1, idB, idA, (uint8_t)opp_dir);
+                AssetMgr_WritePairValue(self, idB, idA, static_cast<uint8_t>(opp_dir));
             }
         }
     }
@@ -724,18 +827,20 @@ uint8_t __thiscall AssetMgr_GetFileInfo(AssetMgr* self, uint32_t* treeNode,
     }
 
     /* Check if path is valid */
-    if (*(uint8_t*)(self->active_flag + toId) != 0 && fromId != toId) {
+    if (self->active_flag[toId] != 0 && fromId != toId) {
         uint32_t best_dist = 0xFFFFFFFF;
         int32_t best_dir_results[4];
         uint32_t* child_slots = treeNode + 6;
 
         for (int i = 0; i < 4; i++) {
             best_dir_results[i] = AssetMgr_WriteFile(
-                (int32_t*)(uintptr_t)child_slots[i], (int32_t)fromId, (int32_t)toId,
+                pointer_from_word<int32_t*>(child_slots[i]),
+                static_cast<int32_t>(fromId), static_cast<int32_t>(toId),
                 best_dist, 0);
 
             if (best_dir_results[i] != -1 &&
-                (best_dist == 0xFFFFFFFF || best_dir_results[i] < (int32_t)best_dist)) {
+                (best_dist == 0xFFFFFFFF ||
+                 best_dir_results[i] < static_cast<int32_t>(best_dist))) {
                 best_dist = best_dir_results[i];
             }
         }
@@ -745,47 +850,50 @@ uint8_t __thiscall AssetMgr_GetFileInfo(AssetMgr* self, uint32_t* treeNode,
         uint32_t min_dist = best_dir_results[0];
         for (int i = 1; i < 4; i++) {
             if (best_dir_results[i] != -1 &&
-                (min_dist == 0xFFFFFFFF || best_dir_results[i] < (int32_t)min_dist)) {
+                (min_dist == 0xFFFFFFFF ||
+                 best_dir_results[i] < static_cast<int32_t>(min_dist))) {
                 min_dist = best_dir_results[i];
-                best_dir = (uint8_t)i;
+                best_dir = static_cast<uint8_t>(i);
             }
         }
 
         if (min_dist != 0xFFFFFFFF) {
             /* Store direction byte and traverse */
-            *(uint8_t*)(treeNode + 10) = best_dir;
+            *object_field<uint8_t>(treeNode, 0x28) = best_dir;
             self->traversal_step = 1;
 
             if (treeNode[0] != toId) {
                 AssetMgr_TraverseTo(self,
-                    (int32_t*)(uintptr_t)treeNode[6 + *(uint8_t*)(treeNode + 10)], toId);
+                    pointer_from_word<int32_t*>(
+                        treeNode[6 + *object_field<uint8_t>(treeNode, 0x28)]), toId);
             }
 
             /* Allocate path buffers */
-            uint32_t* path_buf = (uint32_t*)CRT_malloc_zero(self->traversal_step);
-            self->path_id_buf = (int32_t*)(uintptr_t)path_buf;
+            uint32_t* path_buf = static_cast<uint32_t*>(CRT_malloc_zero(self->traversal_step));
+            self->path_id_buf = reinterpret_cast<int32_t*>(path_buf);
 
-            uint32_t* dir_buf = (uint32_t*)CRT_malloc_zero(self->traversal_step * 4);
-            self->path_dir_buf = (int32_t*)(uintptr_t)dir_buf;
+            uint32_t* dir_buf = static_cast<uint32_t*>(CRT_malloc_zero(self->traversal_step * 4));
+            self->path_dir_buf = reinterpret_cast<int32_t*>(dir_buf);
 
             self->traversal_step = 0;
 
             /* Store first entry */
             dir_buf[0] = treeNode[0];
-            *(uint8_t*)(self->path_id_buf + self->traversal_step) =
-                (uint8_t)treeNode[10];
+            reinterpret_cast<uint8_t*>(self->path_id_buf)[self->traversal_step] =
+                static_cast<uint8_t>(treeNode[10]);
             self->traversal_step = self->traversal_step + 1;
 
             if (treeNode[0] != toId) {
                 DirectPlay_SessionMgr(self,
-                    (int32_t*)(uintptr_t)treeNode[6 + *(uint8_t*)(treeNode + 10)], toId);
+                    pointer_from_word<int32_t*>(
+                        treeNode[6 + *object_field<uint8_t>(treeNode, 0x28)]), toId);
             }
 
             /* Write adjacency pairs and clean up */
             AssetMgr_DeleteFile(self);
 
-            CRT_free((void*)self->path_id_buf);
-            CRT_free((void*)self->path_dir_buf);
+            CRT_free(self->path_id_buf);
+            CRT_free(self->path_dir_buf);
         }
 
         if (min_dist == 0xFFFFFFFF) {
@@ -810,19 +918,19 @@ uint8_t __thiscall AssetMgr_GetFileInfo(AssetMgr* self, uint32_t* treeNode,
 /* ================================================================== */
 void __thiscall DirectPlay_SessionMgr(AssetMgr* self, int32_t* startNode, int32_t targetId)
 {
-    uint32_t* dir_buf = (uint32_t*)self->path_dir_buf;
-    uint8_t* path_buf = (uint8_t*)self->path_id_buf;
+    uint32_t* dir_buf = reinterpret_cast<uint32_t*>(self->path_dir_buf);
+    uint8_t* path_buf = reinterpret_cast<uint8_t*>(self->path_id_buf);
     int32_t* step_ptr = &self->traversal_step;
 
     dir_buf[*step_ptr] = startNode[0];
-    path_buf[*step_ptr] = (uint8_t)startNode[10];
+    path_buf[*step_ptr] = static_cast<uint8_t>(startNode[10]);
     (*step_ptr)++;
 
     int32_t nodeId = startNode[0];
     while (nodeId != targetId) {
-        startNode = (int32_t*)(uintptr_t)startNode[6 + startNode[10]];
+        startNode = pointer_from_word<int32_t*>(startNode[6 + startNode[10]]);
         dir_buf[*step_ptr] = startNode[0];
-        path_buf[*step_ptr] = (uint8_t)startNode[10];
+        path_buf[*step_ptr] = static_cast<uint8_t>(startNode[10]);
         (*step_ptr)++;
         nodeId = startNode[0];
     }
@@ -837,7 +945,7 @@ void __thiscall DirectPlay_SessionMgr(AssetMgr* self, int32_t* startNode, int32_
 /* ================================================================== */
 uint8_t __thiscall AssetMgr_ReadPairValue(AssetMgr* self, uint32_t a, uint32_t b)
 {
-    uint32_t count = *(uint32_t*)self;
+    uint32_t count = self->entry_count;
 
     if (a == b || a >= count || b >= count) {
         return 0xFF;
@@ -851,7 +959,7 @@ uint8_t __thiscall AssetMgr_ReadPairValue(AssetMgr* self, uint32_t a, uint32_t b
     }
 
     uint32_t offset = (i - 1) * i / 2 + j;
-    uint8_t* matrix = (uint8_t*)self->search_cursor;
+    uint8_t* matrix = self->pair_matrix;
     uint8_t val = matrix[offset];
 
     if (val == 0xFF) return 0xFF;
@@ -881,7 +989,7 @@ void __thiscall AssetMgr_WritePairValue(AssetMgr* self, uint32_t a, uint32_t b, 
     }
 
     uint32_t offset = (i - 1) * i / 2 + j;
-    uint8_t* matrix = (uint8_t*)self->search_cursor;
+    uint8_t* matrix = self->pair_matrix;
     uint8_t* cell = &matrix[offset];
     uint8_t cur = *cell;
 

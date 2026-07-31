@@ -101,6 +101,10 @@ struct HelpPageData {
 
 class HelpWnd : public GameWindow {
 public:
+    using GameWindow::show;
+    using GameWindow::create;
+    using GameWindow::set_mode;
+
     /* ================================================================ */
     /* Fields (offsets from this)                                        */
     /* ================================================================ */

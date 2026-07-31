@@ -147,7 +147,7 @@ void GameVehicle::Update()
         /* No active vehicle: drain the destination queue */
         DestNode* head = this->dest_list_head;
         if (head != nullptr && this->busy_flag == 0) {
-            head->vehicle->FindPath((int32_t*)this, 1);
+            head->vehicle->FindPath(reinterpret_cast<int32_t*>(this), 1);
 
             this->dest_list_head = head->next;
             GLOBAL_free(head);
@@ -178,7 +178,7 @@ void GameVehicle::AddDestination(Vehicle* vehicle)
         curr = curr->next;
     }
 
-    DestNode* node    = (DestNode*)operator_new(sizeof(DestNode));
+    DestNode* node = static_cast<DestNode*>(operator_new(sizeof(DestNode)));
     node->vehicle     = vehicle;
     node->next        = nullptr;
 

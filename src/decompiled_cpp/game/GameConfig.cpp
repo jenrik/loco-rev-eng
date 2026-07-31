@@ -39,7 +39,7 @@ void* __fastcall GameConfig::GameConfig_ctor()
     this->m_clientPlayerCount = 4;                  /* +0x1C */
     this->m_hostPlayerCountAlt = 2;                 /* +0xAC */
 
-    this->m_providerList = NULL;                    /* +0x10 */
+    this->m_providerList = nullptr;                 /* +0x10 */
     this->m_magic = 0x006A;                         /* +0x04 */
 
     this->m_hostFlagAuto       = 0;                 /* +0x18 */
@@ -54,7 +54,7 @@ void* __fastcall GameConfig::GameConfig_ctor()
     this->m_timeout            = 0x1E;              /* +0x0C = 30 */
 
     /* Load existing settings from NetSettings.dat (or create defaults) */
-    NETMAN_FreePacket((int32_t)this);
+    NETMAN_FreePacket(static_cast<int32_t>(reinterpret_cast<intptr_t>(this)));
 
     return this;
 }
@@ -76,11 +76,12 @@ void* __thiscall GameConfig::GameConfig_dtor(uint8_t flags)
 
     /* Free the provider linked list */
     void* node = this->m_providerList;              /* +0x10 */
-    while (node != NULL) {
-        this->m_providerList = *(void**)node;        /* follow linked list */
+    while (node != nullptr) {
+        this->m_providerList = *reinterpret_cast<void**>(node); /* follow linked list */
         GLOBAL_free(node);
         node = this->m_providerList;
     }
 
     /* Optionally free self */
+    return this;
 }

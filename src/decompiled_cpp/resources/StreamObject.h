@@ -24,7 +24,27 @@
 #pragma once
 
 #include "../shared/types.h"
+/* compat.h is force-included for the native build; undefine the three
+ * duplicate macro definitions before the stub Win32 header supplies them. */
+#ifdef INVALID_HANDLE_VALUE
+#undef INVALID_HANDLE_VALUE
+#endif
+#ifdef HKEY_CURRENT_USER
+#undef HKEY_CURRENT_USER
+#endif
+#ifdef HKEY_LOCAL_MACHINE
+#undef HKEY_LOCAL_MACHINE
+#endif
 #include <windows.h>
+
+/* ================================================================== */
+/* StreamObject layout                                                 */
+/* ================================================================== */
+struct StreamObject {
+    uint8_t _pad_00[0x34];
+    int32_t sync_flag;             /* +0x34 */
+    CRITICAL_SECTION critical_section; /* +0x38 */
+};
 
 /* ================================================================== */
 /* StreamObject_Lock — Enter CRITICAL_SECTION if sync is active       */
@@ -37,7 +57,7 @@
 /*                                                                     */
 /* @param stream  Pointer to stream object                            */
 /* ================================================================== */
-void __cdecl StreamObject_Lock(void* stream);
+void __cdecl StreamObject_Lock(StreamObject* stream);
 
 /* ================================================================== */
 /* StreamObject_Unlock — Leave CRITICAL_SECTION if sync is active     */
@@ -50,4 +70,4 @@ void __cdecl StreamObject_Lock(void* stream);
 /*                                                                     */
 /* @param stream  Pointer to stream object                            */
 /* ================================================================== */
-void __cdecl StreamObject_Unlock(void* stream);
+void __cdecl StreamObject_Unlock(StreamObject* stream);

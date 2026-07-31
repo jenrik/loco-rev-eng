@@ -11,8 +11,23 @@
  */
 
 #include "PlayerConfig.h"
-#include "../shared/vtable_addrs.h"
 #include "../shared/types.h"
+
+namespace {
+
+/* The descriptor values are data sentinels in this non-polymorphic class,
+ * not C++ vtables. Keep their recovered addresses local to this bridge. */
+void* player_config_descriptor()
+{
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(0x004784BC));
+}
+
+void* player_record_descriptor()
+{
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(0x004784C0));
+}
+
+} // namespace
 
 #include <string.h>
 
@@ -42,7 +57,7 @@ extern "C" {
 #define FILE_SHARE_READ 1
 #define OPEN_EXISTING 3
 #define CREATE_ALWAYS 2
-#define INVALID_HANDLE_VALUE ((HANDLE)(uintptr_t)-1)
+#define INVALID_HANDLE_VALUE reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1))
 
 extern "C" {
     HANDLE CreateFileA(const char*, DWORD, DWORD, void*, DWORD, DWORD, HANDLE);
@@ -107,11 +122,11 @@ PlayerConfig::PlayerConfig(const char* name)
     const char* src;
     char* dst;
 
-    this->descriptor = (void*)VTBL_PLAYERCONFIG;   /* +0x00 */
+    this->descriptor = player_config_descriptor(); /* +0x00 */
 
     /* Copy name string (including null terminator) to +0x04 */
     /* This writes the name into the overlapping magic+name area */
-    dst = (char*)&this->magic;                     /* +0x04 */
+    dst = reinterpret_cast<char*>(&this->magic);   /* +0x04 */
     src = name;
     len = strlen(name) + 1;
 
@@ -130,7 +145,7 @@ PlayerConfig::PlayerConfig(const char* name)
 /* ================================================================== */
 PlayerConfig::~PlayerConfig()
 {
-    this->descriptor = (void*)VTBL_PLAYERCONFIG;   /* +0x00 */
+    this->descriptor = player_config_descriptor(); /* +0x00 */
 }
 
 /* ================================================================== */
@@ -298,7 +313,7 @@ const char* PlayerConfig::SaveToFile()
     DWORD bytes_written;
 
     /* Format save-ID string at +0x20 */
-    wsprintfA((char*)(this->reserved),           /* +0x20 */
+    wsprintfA(reinterpret_cast<char*>(this->reserved), /* +0x20 */
               STR_SAVEDATA_FORMAT,
               this->player_id,                   /* +0x18 */
               this->save_counter);               /* +0x1C */
@@ -321,14 +336,14 @@ const char* PlayerConfig::SaveToFile()
                         NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
-        return (const char*)(this->reserved);  /* Return string even on write failure */
+        return reinterpret_cast<const char*>(this->reserved); /* Return string even on write failure */
     }
 
     WriteFile(hFile, &this->magic, PLAYERCONFIG_FILE_SIZE,
               &bytes_written, NULL);
     CloseHandle(hFile);
 
-    return (const char*)(this->reserved);
+    return reinterpret_cast<const char*>(this->reserved);
 }
 
 /* ================================================================== */
@@ -456,7 +471,7 @@ PlayerConfig* PlayerRecord_constructor(PlayerConfig* config)
     size_t name_len;
 
     /* Step 1: Initialize struct fields */
-    config->descriptor = (void*)VTBL_PLAYERRECORD;  /* +0x00 = 0x4784C0 */
+    config->descriptor = player_record_descriptor(); /* +0x00 = 0x4784C0 */
     config->magic = PLAYERCONFIG_MAGIC;             /* +0x04 = 0x66 */
     config->name[0] = '\0';                         /* +0x06[0] = 0 */
     config->field_14 = 0;                           /* +0x14 = 0 */

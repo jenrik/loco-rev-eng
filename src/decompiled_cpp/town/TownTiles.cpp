@@ -54,25 +54,26 @@ bool TownTileRenderer::InitTileCache(
     int clip_left, int clip_top, int clip_right, int clip_bottom)
 {
     /* Guard: must have pixel data and palette loaded */
-    if (this->pixels == NULL || this->palette == NULL) {    /* +0x18, +0x14 */
+    if (this->pixels == nullptr || this->palette == nullptr) { /* +0x18, +0x14 */
         return false;
     }
 
     /* Compute clipped tile dimensions */
-    uint32_t tile_width   = (uint32_t)(clip_right - clip_left) & 0xFFFF;
+    uint32_t tile_width   = static_cast<uint32_t>(clip_right - clip_left) & 0xFFFF;
     uint32_t half_pitch   = (dest_pitch >> 1) & 0xFFFF;              /* pitch in uint16_t units */
-    uint32_t tile_height  = (uint32_t)(clip_bottom - clip_top) & 0xFFFF;
+    uint32_t tile_height  = static_cast<uint32_t>(clip_bottom - clip_top) & 0xFFFF;
 
     /* Destination pointer: start of the clipped area on 16-bit surface */
-    uint16_t* dest = (uint16_t*)((uint8_t*)dest_surface +
-                                  (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        dest_surface + (half_pitch * static_cast<uint32_t>(src_y) +
+                        static_cast<uint32_t>(src_x)) * 2);
 
     /* Source pointer: start of clipped area in 8-bit tile cache */
     uint8_t* src  = this->pixels + clip_top * this->stride + clip_left;   /* +0x18, +0x08 */
 
     /* Row strides (bytes to advance after each row) */
-    int32_t src_stride  = this->stride - (int32_t)tile_width;             /* +0x08 */
-    int32_t dest_stride = (int32_t)(half_pitch - tile_width) * 2;
+    int32_t src_stride  = this->stride - static_cast<int32_t>(tile_width); /* +0x08 */
+    int32_t dest_stride = static_cast<int32_t>(half_pitch - tile_width) * 2;
 
     /* Source row end marker */
     uint8_t* src_row_end = src + (tile_height - 1) * this->stride + tile_width;  /* +0x08 */
@@ -97,7 +98,8 @@ bool TownTileRenderer::InitTileCache(
 
         /* Advance to next row */
         src  += src_stride;
-        dest  = (uint16_t*)((uint8_t*)dest + dest_stride);
+        dest  = reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(dest) + dest_stride);
     }
 
     return true;
@@ -121,7 +123,8 @@ void TownTileRenderer::BlitElement(
     int clip_right, uint32_t clip_bottom, uint32_t flags)
 {
     /* Extract the DirectDraw surface pointer from element+0x1C */
-    int** ddraw_surface = *(int***)((uint8_t*)element + 0x1C);
+    int** ddraw_surface = *reinterpret_cast<int***>(
+        reinterpret_cast<uint8_t*>(element) + 0x1C);
 
     /* Delegate to the main blit dispatcher */
     UIPANEL_Blit(this, src_x, src_y, dest_x, dest_y,
@@ -154,7 +157,7 @@ bool TownTileRenderer::DrawTile(
     uint16_t* pal    = this->palette;          /* +0x14 */
 
     /* Guard: must have pixel data and palette */
-    if (pixels == NULL || pal == NULL) {
+    if (pixels == nullptr || pal == nullptr) {
         return false;
     }
 
@@ -169,7 +172,8 @@ bool TownTileRenderer::DrawTile(
     }
 
     /* Destination: 16-bit pointer at (src_x, src_y) within the locked surface */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
 
     /* Source: 8-bit pointer at (clip_left, clip_top) in tile cache */
     uint8_t* src = pixels + clip_top * this->stride + clip_left;   /* +0x08 */
@@ -189,7 +193,8 @@ bool TownTileRenderer::DrawTile(
 
         /* Advance to next row (skip remaining stride) */
         src  += src_advance;
-        dest  = (uint16_t*)((uint8_t*)dest + dest_advance);
+        dest  = reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(dest) + dest_advance);
     }
 
     return true;
@@ -217,8 +222,10 @@ bool TownTileRenderer::FlushTileCache(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer for 16-bit 2x2 blocks */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
-                                  (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) +
+        (half_pitch * static_cast<uint32_t>(src_y) +
+         static_cast<uint32_t>(src_x)) * 2);
 
     int32_t clip_area_width = (clip_left + tile_width) & 0xFFFF;
 
@@ -252,7 +259,7 @@ bool TownTileRenderer::FlushTileCache(
 
                 dest += 2;                     /* advance 2 pixels (one source -> 2 output) */
                 col++;
-            } while ((col & 0xFFFF) < (uint32_t)clip_area_width);
+            } while ((col & 0xFFFF) < static_cast<uint32_t>(clip_area_width));
         }
 
         row++;
@@ -284,8 +291,9 @@ bool TownTileRenderer::DrawCachedTile(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer for 16-bit 2x2 blocks */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
-                                  (half_pitch * src_y + (int)src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) +
+        (half_pitch * src_y + static_cast<int>(src_x)) * 2);
 
     int32_t clip_area_width = (clip_left + tile_width) & 0xFFFF;
 
@@ -314,7 +322,7 @@ bool TownTileRenderer::DrawCachedTile(
 
                 dest += 2;
                 col++;
-            } while ((col & 0xFFFF) < (uint32_t)clip_area_width);
+            } while ((col & 0xFFFF) < static_cast<uint32_t>(clip_area_width));
         }
 
         row++;
@@ -346,13 +354,15 @@ bool TownTileRenderer::DrawTileEx(
     uint32_t clip_left, uint32_t clip_top,
     int clip_right, int clip_bottom)
 {
-    int32_t tile_width  = (clip_right - (int)clip_left) & 0xFFFF;
+    int32_t tile_width  = (clip_right - static_cast<int>(clip_left)) & 0xFFFF;
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
-    int32_t clip_area_width = ((int)clip_left + tile_width) & 0xFFFF;
+    int32_t clip_area_width = (static_cast<int>(clip_left) + tile_width) & 0xFFFF;
 
     /* Destination pointer: each output pixel is 3 wide on dest */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
-                                  (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) +
+        (half_pitch * static_cast<uint32_t>(src_y) +
+         static_cast<uint32_t>(src_x)) * 2);
 
     /* Height = (clip_bottom & 0xFFFF) -- clipped to 16 bits */
     int32_t out_height = (clip_bottom & 0xFFFF);
@@ -388,8 +398,9 @@ bool TownTileRenderer::DrawTileEx(
                     row1[1] = color;
                     row1[2] = color;
 
-                    uint16_t* row2 = (uint16_t*)((uint8_t*)&dest[half_pitch - 2] +
-                                                  (half_pitch - 2) * 2 + 2);
+                    uint16_t* row2 = reinterpret_cast<uint16_t*>(
+                        reinterpret_cast<uint8_t*>(&dest[half_pitch - 2]) +
+                        (half_pitch - 2) * 2 + 2);
                     row2[0] = color;
                     row2[1] = color;
                     row2[2] = color;
@@ -398,14 +409,14 @@ bool TownTileRenderer::DrawTileEx(
                 dest = dest_row_start;
                 dest_row_start += 3;
                 col++;
-            } while ((col & 0xFFFF) < (uint32_t)clip_area_width);
+            } while ((col & 0xFFFF) < static_cast<uint32_t>(clip_area_width));
         }
 
         row++;
         /* Advance dest by (half_pitch - tile_width) * 3 uint16_t units */
         dest = dest + (half_pitch - tile_width) * 3;
 
-    } while ((row & 0xFFFF) < (uint32_t)out_height);
+    } while ((row & 0xFFFF) < static_cast<uint32_t>(out_height));
 
     return true;
 }
@@ -433,7 +444,8 @@ bool TownTileRenderer::DrawTileLine(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination 16-bit buffer pointer */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
 
     /* Source position in tile cache */
     int src_pos = clip_top * this->stride + clip_left;          /* +0x08 */
@@ -448,15 +460,15 @@ bool TownTileRenderer::DrawTileLine(
 
     if (g_surface_bpp == 0x235) {
         /* 565 format: channel1 R[4..0] (DEC 1) -> shift by (channel2-1) */
-        channel_mask1 = (uint16_t)(1 << ((g_surface_channel2 - 1) & 0x1F));
-        channel_mask2 = (uint16_t)(1 << (g_surface_channel1 & 0x1F));
+        channel_mask1 = static_cast<uint16_t>(1 << ((g_surface_channel2 - 1) & 0x1F));
+        channel_mask2 = static_cast<uint16_t>(1 << (g_surface_channel1 & 0x1F));
     } else {
         /* 555 format: standard */
-        channel_mask1 = (uint16_t)(1 << (g_surface_channel2 & 0x1F));
-        channel_mask2 = (uint16_t)(1 << (g_surface_channel1 & 0x1F));
+        channel_mask1 = static_cast<uint16_t>(1 << (g_surface_channel2 & 0x1F));
+        channel_mask2 = static_cast<uint16_t>(1 << (g_surface_channel1 & 0x1F));
     }
 
-    blend_mask = (uint16_t)~(channel_mask1 | channel_mask2 | 1);
+    blend_mask = static_cast<uint16_t>(~(channel_mask1 | channel_mask2 | 1));
 
     /* End of destination for this operation */
     uint16_t* dest_end = dest + (tile_height - 1) * half_pitch + tile_width;
@@ -518,7 +530,8 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
     int32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
     int32_t tile_width  = (clip_right - clip_left) & 0xFFFF;
     int32_t tile_height = (clip_bottom - clip_top) & 0xFFFF;
 
@@ -541,7 +554,8 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
             this->palette[0] = saved;                               /* +0x14 */
 
             /* Compute half-bright shadow and store in palette[1] */
-            this->palette[1] = (uint16_t)((saved & g_pixel_format_mask) >> 1);  /* +0x14 */
+            this->palette[1] = static_cast<uint16_t>(
+                (saved & g_pixel_format_mask) >> 1);  /* +0x14 */
 
             /* Read source byte and write remapped color */
             uint8_t index = *src++;
@@ -550,7 +564,8 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
         }
 
         /* Advance to next row */
-        dest  = (uint16_t*)((uint8_t*)dest + half_pitch * 2);
+        dest  = reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(dest) + half_pitch * 2);
         src  += this->stride;                                       /* +0x08 */
     }
 
@@ -581,7 +596,8 @@ bool TownTileRenderer::DrawTiles16bpp_Reversed(
     int32_t tile_height = (clip_bottom - clip_top) & 0xFFFF;
 
     /* Destination pointer */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface + (half_pitch * src_y + src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
 
     /* Source: starts at RIGHT edge of clip rect and goes left */
     uint8_t* src = this->pixels + clip_top * this->stride + clip_right;  /* +0x18, +0x08 */
@@ -652,12 +668,15 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
     }
 
     int32_t tile_width  = (clip_right - clip_left) & 0xFFFF;
-    int32_t tile_height = (clip_bottom - (int)clip_top) & 0xFFFF;
+    int32_t tile_height =
+        (clip_bottom - static_cast<int>(clip_top)) & 0xFFFF;
 
     /* Destination pointer */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
-                                  (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
-    int src_pos = (int)clip_top * this->stride + clip_left;         /* +0x08 */
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) +
+        (half_pitch * static_cast<uint32_t>(src_y) +
+         static_cast<uint32_t>(src_x)) * 2);
+    int src_pos = static_cast<int>(clip_top) * this->stride + clip_left; /* +0x08 */
 
     uint32_t row = 0;
 
@@ -686,7 +705,7 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
                 col_dest++;
                 src_pos++;
                 col++;
-            } while ((col & 0xFFFF) < (uint32_t)tile_width);
+            } while ((col & 0xFFFF) < static_cast<uint32_t>(tile_width));
         }
 
         /* Advance by 2 rows (checkerboard skip) */
@@ -694,7 +713,7 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
         src_pos = src_pos + (this->stride * 2 - tile_width);        /* +0x08 */
         row += 2;
 
-    } while ((row & 0xFFFF) < (uint32_t)tile_height);
+    } while ((row & 0xFFFF) < static_cast<uint32_t>(tile_height));
 
     return true;
 }
@@ -722,15 +741,18 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
     int clip_right, int clip_bottom)
 {
     uint32_t half_pitch = (dest_pitch >> 1) & 0xFFFF;
-    uint32_t tile_width  = (uint32_t)(clip_right - clip_left) & 0xFFFF;
-    uint32_t tile_height = (uint32_t)(clip_bottom - (int)clip_top) & 0xFFFF;
+    uint32_t tile_width  = static_cast<uint32_t>(clip_right - clip_left) & 0xFFFF;
+    uint32_t tile_height = static_cast<uint32_t>(
+        clip_bottom - static_cast<int>(clip_top)) & 0xFFFF;
 
     /* Destination 16-bit pointer at (src_x, src_y) */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
-                                 (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) +
+        (half_pitch * static_cast<uint32_t>(src_y) +
+         static_cast<uint32_t>(src_x)) * 2);
 
     /* Source position in 8-bit tile cache */
-    int src_pos = (int)clip_top * this->stride + clip_left;         /* +0x08 */
+    int src_pos = static_cast<int>(clip_top) * this->stride + clip_left; /* +0x08 */
 
     /* Checkerboard toggle — starts based on clip_left parity */
     bool toggle = ((clip_left & 1) != 0);
@@ -765,8 +787,9 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
         }
 
         /* Advance to next row */
-        dest     = (uint16_t*)((uint8_t*)dest + half_pitch * 2);
-        src_pos += this->stride - (int)tile_width;                  /* +0x08 */
+        dest     = reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(dest) + half_pitch * 2);
+        src_pos += this->stride - static_cast<int>(tile_width);    /* +0x08 */
     }
 
     return true;
@@ -806,8 +829,8 @@ void TownTileRenderer::CopyTiles8bpp_Transparent(
     int src_pos = src_top * this->stride + src_left;                /* +0x08 */
 
     /* Iterate rows */
-    for (uint32_t row = 0; (row & 0xFFFF) < (uint32_t)tile_height; row++) {
-        for (uint32_t col = 0; (col & 0xFFFF) < (uint32_t)tile_width; col++) {
+    for (uint32_t row = 0; (row & 0xFFFF) < static_cast<uint32_t>(tile_height); row++) {
+        for (uint32_t col = 0; (col & 0xFFFF) < static_cast<uint32_t>(tile_width); col++) {
             uint8_t pixel = *(this->pixels + src_pos);              /* +0x18 */
 
             if (pixel != 0) {
@@ -858,8 +881,8 @@ void TownTileRenderer::CopyTiles8bpp_Direct(
     int src_pos = src_top * this->stride + src_left;                /* +0x08 */
 
     /* Iterate rows */
-    for (uint32_t row = 0; (row & 0xFFFF) < (uint32_t)tile_height; row++) {
-        for (uint32_t col = 0; (col & 0xFFFF) < (uint32_t)tile_width; col++) {
+    for (uint32_t row = 0; (row & 0xFFFF) < static_cast<uint32_t>(tile_height); row++) {
+        for (uint32_t col = 0; (col & 0xFFFF) < static_cast<uint32_t>(tile_width); col++) {
             uint8_t pixel = *(this->pixels + src_pos);              /* +0x18 */
             *dest = pixel;
 
@@ -897,13 +920,15 @@ bool TownTileRenderer::BlitTileSurface(
     int clip_right, int clip_bottom)
 {
     /* Compute clipped region dimensions */
-    uint32_t tile_width  = (uint32_t)(clip_right - clip_left) & 0xFFFF;
-    uint32_t tile_height = (uint32_t)(clip_bottom - clip_top) & 0xFFFF;
+    uint32_t tile_width  = static_cast<uint32_t>(clip_right - clip_left) & 0xFFFF;
+    uint32_t tile_height = static_cast<uint32_t>(clip_bottom - clip_top) & 0xFFFF;
     uint32_t half_pitch  = (dest_pitch >> 1) & 0xFFFF;
 
     /* Destination pointer: 16-bit at (src_x, src_y) on surface       */
-    uint16_t* dest = (uint16_t*)((uintptr_t)dest_surface +
-                                  (half_pitch * (uint32_t)src_y + (uint32_t)src_x) * 2);
+    uint16_t* dest = reinterpret_cast<uint16_t*>(
+        static_cast<uintptr_t>(dest_surface) +
+        (half_pitch * static_cast<uint32_t>(src_y) +
+         static_cast<uint32_t>(src_x)) * 2);
 
     /* Source position: RIGHT EDGE of clip rect, read right-to-left   */
     /* Start at clip_top * stride + (clip_right - 1)                  */
@@ -934,7 +959,9 @@ bool TownTileRenderer::BlitTileSurface(
 
         /* Advance to next row */
         /* Dest: skip to next row = (half_pitch - tile_width) * 2 bytes */
-        dest = (uint16_t*)((uint8_t*)dest + (half_pitch - tile_width) * 2);
+        dest = reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(dest) +
+            (half_pitch - tile_width) * 2);
 
         /* Source: advance to right edge of next row                  */
         src_pos += this->stride + tile_width;                        /* +0x08 */

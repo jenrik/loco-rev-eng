@@ -45,7 +45,7 @@ extern "C" {
     int32_t DDRAW_RestoreSurfaces(void* backbuffer, int32_t* desc);                       /* @0x456550 */
 
     /* Sprite management */
-    void* RESDATA_CreateSpriteObject(void* mem, uint32_t resource_id);      /* @0x454B50 */
+    ButtonSprite* RESDATA_CreateSpriteObject(void* mem, uint32_t resource_id); /* @0x454B50 */
     void  Sprite_SetState(void* sprite, int32_t state, void* surface);      /* @0x454C30 */
     bool  Sprite_Init(void* sprite);                                        /* @0x454BF0 - __fastcall */
     void  Sprite_Destroy(void* sprite);                                     /* @0x454BC0 - __fastcall */
@@ -68,7 +68,7 @@ extern "C" {
                        uint32_t flags);                                      /* @0x42B050 */
     void  UIPANEL_BeginPaint(void* self);                                   /* @0x426B00 */
 
-    void  CGWND_SetMode(void* mode);                                        /* @0x408130 */
+    void  CGWND_SetMode(int mode);                                         /* @0x408130 */
 
     /* Rendering helpers */
     bool  CopyRect(RECT* dst, const RECT* src);                             /* USER32 */
@@ -116,19 +116,117 @@ extern int32_t g_viewport_rect_top;     /* 0x004851D4 */
 extern int32_t g_viewport_rect_right;   /* 0x004851DC */
 extern int32_t g_viewport_rect_bottom;  /* 0x004851E0 */
 
+namespace {
+
+/* ResourceData's recovered COM-like table has a destructor at slot 0,
+ * surface acquisition at slot 1, and release at slot 2.  This interface
+ * gives those calls typed C++ dispatch without open-coded vtable indexing. */
+struct ResourceDataView {
+    virtual void* destroy(uint8_t flags) = 0;
+    virtual void* get_surface(int flags, int mode) = 0;
+    virtual void release_surface() = 0;
+
+protected:
+    ~ResourceDataView() = default;
+};
+
+struct PixelEntryView {
+    virtual void* destroy(int flags) = 0;
+
+protected:
+    ~PixelEntryView() = default;
+};
+
+/* IDirectDrawSurface's COM slots used by the recovered present path. */
+/* DirectDrawSurface4's vtable is a COM ABI table.  Every entry is
+ * __stdcall; omitting it makes the x86 callee/caller stack contract wrong.
+ * Slots 5 and 27 are the only non-IUnknown entries used by this file. */
+struct DirectDrawSurfaceView {
+    virtual HRESULT __stdcall query_interface(const void* riid,
+                                               void** object) = 0; // slot 0
+    virtual uint32_t __stdcall add_reference() = 0;               // slot 1
+    virtual uint32_t __stdcall release() = 0;                     // slot 2
+    virtual HRESULT __stdcall slot3() = 0;
+    virtual HRESULT __stdcall slot4() = 0;
+    virtual HRESULT __stdcall blt(RECT* dst_rect, void* source,
+                                  RECT* src_rect, DWORD flags,
+                                  void* fx) = 0;                   // slot 5
+    virtual HRESULT __stdcall slot6() = 0;
+    virtual HRESULT __stdcall slot7() = 0;
+    virtual HRESULT __stdcall slot8() = 0;
+    virtual HRESULT __stdcall slot9() = 0;
+    virtual HRESULT __stdcall slot10() = 0;
+    virtual HRESULT __stdcall slot11() = 0;
+    virtual HRESULT __stdcall slot12() = 0;
+    virtual HRESULT __stdcall slot13() = 0;
+    virtual HRESULT __stdcall slot14() = 0;
+    virtual HRESULT __stdcall slot15() = 0;
+    virtual HRESULT __stdcall slot16() = 0;
+    virtual HRESULT __stdcall slot17() = 0;
+    virtual HRESULT __stdcall slot18() = 0;
+    virtual HRESULT __stdcall slot19() = 0;
+    virtual HRESULT __stdcall slot20() = 0;
+    virtual HRESULT __stdcall slot21() = 0;
+    virtual HRESULT __stdcall slot22() = 0;
+    virtual HRESULT __stdcall slot23() = 0;
+    virtual HRESULT __stdcall slot24() = 0;
+    virtual HRESULT __stdcall slot25() = 0;
+    virtual HRESULT __stdcall slot26() = 0;
+    virtual HRESULT __stdcall restore() = 0;                      // slot 27
+
+protected:
+    ~DirectDrawSurfaceView() = default;
+};
+
+static RECT sprite_rect(const ButtonSprite& sprite)
+{
+    RECT rect{};
+    rect.left = sprite.x;
+    rect.top = sprite.y;
+    rect.right = sprite.sourceX;
+    rect.bottom = sprite.sourceY;
+    return rect;
+}
+
+static bool sprite_contains(const ButtonSprite* sprite, int x, int y)
+{
+    RECT rect = sprite_rect(*sprite);
+    return PtInRect(&rect, x, y) != 0;
+}
+
+static void destroy_allocated_sprite(ButtonSprite* sprite)
+{
+    if (sprite != nullptr) {
+        sprite->destroy();
+        GLOBAL_free(sprite);
+    }
+}
+
+static void destroy_resource(void* resource)
+{
+    if (resource != nullptr) {
+        reinterpret_cast<ResourceDataView*>(resource)->destroy(1);
+    }
+}
+
+static void* resource_surface(void* resource)
+{
+    return resource == nullptr
+        ? nullptr
+        : reinterpret_cast<ResourceDataView*>(resource)->get_surface(0, 0);
+}
+
+} // namespace
+
 /* ================================================================== */
 /* BlitToSurface — apply scroll offsets and blit from background       */
 /* panel to primary surface. Repeating pattern in BlitElement,        */
 /* RenderTileName, and RenderAllTiles.                                 */
 /* ================================================================== */
-bool PostcardAlbum::BlitToSurface(void* sprite)
+bool PostcardAlbum::BlitToSurface(ButtonSprite* sprite)
 {
-    /* Extract rect from sprite data at +0x04 */
-    RECT src_rect;
-    src_rect.left   = *(int32_t*)((int8_t*)sprite + 4);   /* +0x04 */
-    src_rect.top    = *(int32_t*)((int8_t*)sprite + 8);   /* +0x08 */
-    src_rect.right  = *(int32_t*)((int8_t*)sprite + 0xC); /* +0x0C */
-    src_rect.bottom = *(int32_t*)((int8_t*)sprite + 0x10);/* +0x10 */
+    /* ButtonSprite stores the recovered destination rectangle at +0x04..+0x10. */
+    RECT src_rect = sprite_rect(*sprite);
 
     /* Skip blit if paint or window not ready */
     if (this->paint_inited == 0 || this->window_visible == 0) {
@@ -147,7 +245,7 @@ bool PostcardAlbum::BlitToSurface(void* sprite)
         this->background_ui_panel,  /* +0x13C */
         src_offset.left, src_offset.top,
         src_offset.right, src_offset.bottom,
-        (int*)g_primary_surface,
+        g_primary_surface,
         dst_offset.left, dst_offset.top,
         dst_offset.right, dst_offset.bottom,
         1  /* flags = 1 (no color key, DDBLT_WAIT) */
@@ -246,50 +344,50 @@ int PostcardAlbum::HitTest(int x, int y)
     /* Phase 1: Test individual sprites in priority order */
 
     /* Type 1: main button at +0x148 */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_main + 4), x, y)) {
+    if (sprite_contains(this->sprite_main, x, y)) {
         return 1;
     }
 
     /* Type 9: help sprite at +0x158 (checked 2nd!) */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_help + 4), x, y)) {
+    if (sprite_contains(this->sprite_help, x, y)) {
         return 9;
     }
 
     /* Type 4: toggle_b at +0x154 */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_toggle_b + 4), x, y)) {
+    if (sprite_contains(this->sprite_toggle_b, x, y)) {
         return 4;
     }
 
     /* Type 2: toggle_a at +0x14C */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_toggle_a + 4), x, y)) {
+    if (sprite_contains(this->sprite_toggle_a, x, y)) {
         return 2;
     }
 
     /* Type 3: button_b at +0x150 */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_button_b + 4), x, y)) {
+    if (sprite_contains(this->sprite_button_b, x, y)) {
         return 3;
     }
 
     /* Type 5: toggle_c (up) at +0x15C */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_toggle_c + 4), x, y)) {
+    if (sprite_contains(this->sprite_toggle_c, x, y)) {
         return 5;
     }
 
     /* Type 6: toggle_d (down) at +0x160 */
-    if (PtInRect((RECT*)((int8_t*)this->sprite_toggle_d + 4), x, y)) {
+    if (sprite_contains(this->sprite_toggle_d, x, y)) {
         return 6;
     }
 
     /* Phase 2: Row-based tile items (6 rows, 2 sprites each) */
     for (uint16_t i = 0; i < 6; i++) {
         /* Type 8: tile_left[i] at +0x168 + i*4 */
-        if (PtInRect((RECT*)((int8_t*)this->tile_left[i] + 4), x, y)) {
+        if (sprite_contains(this->tile_left[i], x, y)) {
             this->hit_index = i;
             return 8;
         }
 
         /* Type 10: tile_right[i] at +0x198 + i*4 */
-        if (PtInRect((RECT*)((int8_t*)this->tile_right[i] + 4), x, y)) {
+        if (sprite_contains(this->tile_right[i], x, y)) {
             this->hit_index = i;
             return 10;
         }
@@ -298,8 +396,7 @@ int PostcardAlbum::HitTest(int x, int y)
     /* Phase 3: Thumbnail sprites (9 sprites at +0x1B0) */
     for (uint16_t i = 0; i < 9; i++) {
         /* Type 7: thumb_sprites[i] at +0x1B0 + i*4 */
-        RECT* rect = (RECT*)((int8_t*)this->thumb_sprites[i] + 4);
-        if (PtInRect(rect, x, y)) {
+        if (sprite_contains(this->thumb_sprites[i], x, y)) {
             this->hit_index = i;
             return 7;
         }
@@ -431,13 +528,11 @@ void PostcardAlbum::InitWindowSurface()
     }
 
     /* Load background RESDATA and create surface */
-    void* resdata = ResourceManager_GetById((void*)&g_resmgr, res_id);
+    void* resdata = ResourceManager_GetById(static_cast<void*>(&g_resmgr), res_id);
     this->background_resdata = resdata;                 /* +0x138 */
 
-    /* Call RESDATA vtable[1] (GetSurface/Lock) to create the surface */
-    typedef void* (*GetSurfaceFn)(void*, int);
-    uintptr_t* vtbl = (uintptr_t*)resdata;
-    void* surface = ((GetSurfaceFn)((void**)(vtbl[0]))[1])(nullptr, 0);
+    /* Call the typed RESDATA surface accessor. */
+    void* surface = resource_surface(resdata);
     this->background_ui_panel = surface;                 /* +0x13C */
 
     this->background_loaded = 1;                         /* +0xFC */
@@ -474,12 +569,10 @@ void PostcardAlbum::InitSprites()
     }
 
     /* Load paint resource 0x3CFA and create surface */
-    void* resdata = ResourceManager_GetById((void*)&g_resmgr, 0x3CFA);
+    void* resdata = ResourceManager_GetById(static_cast<void*>(&g_resmgr), 0x3CFA);
     this->paint_resdata = resdata;                       /* +0x140 */
 
-    typedef void* (*GetSurfaceFn)(void*, int);
-    uintptr_t* vtbl = (uintptr_t*)resdata;
-    void* surface = ((GetSurfaceFn)((void**)(vtbl[0]))[1])(nullptr, 0);
+    void* surface = resource_surface(resdata);
     this->paint_surface = surface;                       /* +0x144 */
 
     this->paint_inited = 1;                               /* +0x111 */
@@ -500,11 +593,9 @@ void PostcardAlbum::FreeSprites()
         return;
     }
 
-    /* Release paint RESDATA via vtable[2] (destructor) */
+    /* Release paint RESDATA through its typed destructor entry. */
     if (this->paint_resdata != nullptr) {
-        typedef void (*ResDtor)(void*);
-        uintptr_t* vtbl2 = (uintptr_t*)this->paint_resdata;
-        ((ResDtor)((void**)(vtbl2[0]))[2])(this->paint_resdata);  /* vtable[2] */
+        destroy_resource(this->paint_resdata);
         this->paint_resdata = nullptr;                    /* +0x140 */
     }
 
@@ -552,34 +643,36 @@ void PostcardAlbum::RenderTileName(int tile_index)
         this->BlitToSurface(this->tile_left[tile_index]);
 
         /* Clear the name flag at start of text buffer (checks for empty/not-rendered) */
-        *(uint8_t*)((int8_t*)this + 0x1DA + tile_index * 0x14) = 0;
+        this->tile_text_buf[tile_index][0] = '\0';
         return;
     }
 
     /* Get the tile_left sprite for the blit rect */
-    void* sprite = this->tile_left[tile_index];   /* +0x168 + tile_index*4 */
+    ButtonSprite* sprite = this->tile_left[tile_index];   /* +0x168 + tile_index*4 */
 
     /* Render player name via DPLAY */
-    int32_t rect_bottom = *(int32_t*)((int8_t*)sprite + 0x10);  /* +0x10 */
-    int32_t rect_width  = *(int32_t*)((int8_t*)sprite + 0x0C);  /* +0x0C */
-    int32_t rect_top    = *(int32_t*)((int8_t*)sprite + 0x08);  /* +0x08 */
-    int32_t rect_left   = *(int32_t*)((int8_t*)sprite + 0x04);  /* +0x04 */
+    const RECT tile_rect = sprite_rect(*sprite);
+    int32_t rect_bottom = tile_rect.bottom;
+    int32_t rect_width  = tile_rect.right;
+    int32_t rect_top    = tile_rect.top;
+    int32_t rect_left   = tile_rect.left;
 
     /* DPLAY_RenderPlayer(global_dplay, DC, entry, primary, x, y, w, ???); */
     DPLAY_RenderPlayer(
         g_dplay,
-        (void*)(intptr_t)*(int32_t*)((int8_t*)sprite + 0x0C),  /* hDC derived from width */
+        reinterpret_cast<void*>(static_cast<intptr_t>(sprite->sourceX)),  /* hDC derived from width */
         entry,
         g_primary_surface,
         rect_left,
         rect_top,
         rect_width,
-        (void*)(intptr_t)rect_bottom
+        reinterpret_cast<void*>(static_cast<intptr_t>(rect_bottom))
     );
 
     /* Copy the entry name to tile_text_buf[tile_index] (max 20 bytes) */
     /* Name is at entry + 0x25 */
-    const char* src_name = (const char*)((int8_t*)entry + 0x25);
+    const char* src_name = reinterpret_cast<const char*>(
+        static_cast<const uint8_t*>(entry) + 0x25);
     char* dst_buf = this->tile_text_buf[tile_index];  /* +0x1DA + tile_index*0x14 */
 
     /* Copy full string with strlen + memcpy (no 19-char limit) */
@@ -590,9 +683,8 @@ void PostcardAlbum::RenderTileName(int tile_index)
     }
     dst_buf[len] = '\0';
 
-    /* Mark entry as used (call vtable[0] with 1) */
-    typedef void (*EntryDtor)(void*, int);
-    ((EntryDtor)(*(void**)entry))(entry, 1);
+    /* Mark entry as used through its typed release entry. */
+    reinterpret_cast<PixelEntryView*>(entry)->destroy(1);
 
     /* Set tile_mid sprite state to 0 (default/visible) */
     Sprite_SetState(this->tile_mid[tile_index], 0, nullptr);
@@ -613,8 +705,8 @@ void PostcardAlbum::RenderAllTiles()
 {
     /* Phase 1: Render all visible tile names and blit backgrounds */
     if (this->tile_total_count != 0) {
-        for (uint32_t i = 0; i < (uint32_t)this->tile_total_count; i++) {
-            this->RenderTileName((int)i);
+        for (uint32_t i = 0; i < static_cast<uint32_t>(this->tile_total_count); i++) {
+            this->RenderTileName(static_cast<int>(i));
 
             /* Blit the tile_right rect for this row */
             this->BlitToSurface(this->tile_right[i]);
@@ -623,11 +715,11 @@ void PostcardAlbum::RenderAllTiles()
 
     /* Phase 2: Begin paint (create HDC), render debug text if enabled */
     UIPANEL_BeginPaint(this);
-    void* hdc = (void*)(uintptr_t)0;  /* placeholder — HDC from BeginPaint */
+    void* hdc = nullptr;  /* placeholder — HDC from BeginPaint */
     /* TODO: UIPANEL_BeginPaint returns void; HDC obtained via UI surface */
 
     if (this->tile_total_count != 0 && this->show_debug_text == 1) {
-        for (uint32_t i = 0; i < (uint32_t)this->tile_total_count; i++) {
+        for (uint32_t i = 0; i < static_cast<uint32_t>(this->tile_total_count); i++) {
             SetBkMode(hdc, 1);  /* TRANSPARENT */
 
             SetTextColor(hdc, 0);  /* Black text */
@@ -637,11 +729,8 @@ void PostcardAlbum::RenderAllTiles()
 
             /* Get tile_right rect for text placement */
             RECT text_rect;
-            void* sprite = this->tile_right[i];
-            text_rect.left   = *(int32_t*)((int8_t*)sprite + 4);   /* +0x04 */
-            text_rect.top    = *(int32_t*)((int8_t*)sprite + 8);   /* +0x08 */
-            text_rect.right  = *(int32_t*)((int8_t*)sprite + 0xC); /* +0x0C */
-            text_rect.bottom = *(int32_t*)((int8_t*)sprite + 0x10);/* +0x10 */
+            ButtonSprite* sprite = this->tile_right[i];
+            text_rect = sprite_rect(*sprite);
 
             DrawTextA(hdc, this->tile_text_buf[i], -1, &text_rect, 0x25);
 
@@ -653,7 +742,9 @@ void PostcardAlbum::RenderAllTiles()
     }
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int32_t)(intptr_t)hdc, 0x01, nullptr);
+    UIPANEL_EndPaintEx(this, this->hWnd,
+                       static_cast<int32_t>(reinterpret_cast<intptr_t>(hdc)),
+                       0x01, nullptr);
 
     /* Phase 3: Update scroll toggle flags */
     if (this->tile_offset == 0) {
@@ -685,9 +776,10 @@ void PostcardAlbum::RenderAllTiles()
     }
 
     /* Update down arrow based on DPLAY config entry count */
-    int32_t total_entries = ((PixelDataCache*)g_dplay_config)->GetEntryCount();
+    int32_t total_entries = static_cast<PixelDataCache*>(g_dplay_config)->GetEntryCount();
 
-    if ((uint32_t)(this->tile_offset + this->tile_total_count) < (uint32_t)total_entries) {
+    if (static_cast<uint32_t>(this->tile_offset + this->tile_total_count) <
+        static_cast<uint32_t>(total_entries)) {
         /* More items exist below — hide down arrow (wait, this is confusing) */
         /* BUG or INTENT: When tile_offset + tile_total_count < total_entries,
            scroll_down_visible is set to 0 (can see more below — should be 1).
@@ -747,7 +839,7 @@ void PostcardAlbum::InitFromResource()
     /* SEH prologue */
 
     /* Initialize fields */
-    this->field_0E8 = 0;                     /* +0xE8 */
+    this->field_0E8 = nullptr;              /* +0xE8 */
     this->paint_inited = 0;                  /* +0x111 */
     this->tile_offset = 0;                   /* +0x114 */
     this->tile_shown_count = 0;              /* +0x118 */
@@ -810,7 +902,7 @@ void PostcardAlbum::InitFromResource()
 
     /* Init remaining state */
     this->background_resdata  = nullptr;  /* +0x138 */
-    this->field_130           = 0;        /* +0x130 */
+    this->extra_sprite        = nullptr; /* +0x130 */
     this->background_loaded   = 0;        /* +0xFC */
 }
 
@@ -821,6 +913,7 @@ void PostcardAlbum::InitFromResource()
 void* PostcardAlbum::DestroyFromResource(uint8_t flags)
 {
     this->FreeAllSprites();
+    return this;
 }
 
 /* ================================================================== */
@@ -838,78 +931,53 @@ void PostcardAlbum::FreeAllSprites()
         this->FreeSprites();                   /* @0x404830 */
     }
 
-    /* Step 2: Free 8 individual sprites (+0x148..+0x164) */
-    void* sprites[8] = {
-        this->sprite_main,      /* +0x148 */
-        this->sprite_toggle_a,  /* +0x14C */
-        this->sprite_button_b,  /* +0x150 */
-        this->sprite_toggle_b,  /* +0x154 */
-        this->sprite_help,      /* +0x158 */
-        this->sprite_toggle_c,  /* +0x15C */
-        this->sprite_toggle_d,  /* +0x160 */
-        this->sprite_indicator  /* +0x164 */
+    /* Step 2: Free 8 individual sprites (+0x148..+0x164). */
+    ButtonSprite* sprites[8] = {
+        this->sprite_main,
+        this->sprite_toggle_a,
+        this->sprite_button_b,
+        this->sprite_toggle_b,
+        this->sprite_help,
+        this->sprite_toggle_c,
+        this->sprite_toggle_d,
+        this->sprite_indicator
     };
-    for (int i = 0; i < 8; i++) {
-        if (sprites[i] != nullptr) {
-            void** vtbl = *(void***)&sprites[i];
-            typedef void* (*ScalarDtor)(void*, uint8_t);
-            (*reinterpret_cast<ScalarDtor>(vtbl[0]))(sprites[i], 1);
-            /* Clear the field (already read, store back through pointer) */
-        }
+    for (ButtonSprite* sprite : sprites) {
+        destroy_allocated_sprite(sprite);
     }
-    /* Zero the sprite pointer block (8 * 4 = 32 = 0x20 bytes starting at +0x148) */
-    for (int i = 0; i < 8; i++) {
-        ((void**)this)[0x148 / 4 + i] = nullptr;  /* param_1[0x52 + i] */
-    }
+    this->sprite_main = nullptr;
+    this->sprite_toggle_a = nullptr;
+    this->sprite_button_b = nullptr;
+    this->sprite_toggle_b = nullptr;
+    this->sprite_help = nullptr;
+    this->sprite_toggle_c = nullptr;
+    this->sprite_toggle_d = nullptr;
+    this->sprite_indicator = nullptr;
 
-    /* Step 3: Free 6 rows x 3 sprites (+0x168, +0x180, +0x198 = +0x66*4, +0x60*4, +0x66*4) */
+    /* Step 3: Free 6 rows x 3 sprites. */
     for (int row = 0; row < 6; row++) {
-        /* tile_left[row] */
-        if (this->tile_left[row] != nullptr) {
-            void** vtbl = *(void***)&this->tile_left[row];
-            typedef void* (*ScalarDtor)(void*, uint8_t);
-            (*reinterpret_cast<ScalarDtor>(vtbl[0]))(this->tile_left[row], 1);
-            this->tile_left[row] = nullptr;
-        }
-        /* tile_mid[row] */
-        if (this->tile_mid[row] != nullptr) {
-            void** vtbl = *(void***)&this->tile_mid[row];
-            typedef void* (*ScalarDtor)(void*, uint8_t);
-            (*reinterpret_cast<ScalarDtor>(vtbl[0]))(this->tile_mid[row], 1);
-            this->tile_mid[row] = nullptr;
-        }
-        /* tile_right[row] */
-        if (this->tile_right[row] != nullptr) {
-            void** vtbl = *(void***)&this->tile_right[row];
-            typedef void* (*ScalarDtor)(void*, uint8_t);
-            (*reinterpret_cast<ScalarDtor>(vtbl[0]))(this->tile_right[row], 1);
-            this->tile_right[row] = nullptr;
-        }
+        destroy_allocated_sprite(this->tile_left[row]);
+        destroy_allocated_sprite(this->tile_mid[row]);
+        destroy_allocated_sprite(this->tile_right[row]);
+        this->tile_left[row] = nullptr;
+        this->tile_mid[row] = nullptr;
+        this->tile_right[row] = nullptr;
     }
 
-    /* Step 4: Free 9 thumbnail sprites */
-    for (int i = 0; i < 9; i++) {
-        if (this->thumb_sprites[i] != nullptr) {
-            void** vtbl = *(void***)&this->thumb_sprites[i];
-            typedef void* (*ScalarDtor)(void*, uint8_t);
-            (*reinterpret_cast<ScalarDtor>(vtbl[0]))(this->thumb_sprites[i], 1);
-            this->thumb_sprites[i] = nullptr;
-        }
+    /* Step 4: Free 9 thumbnail sprites. */
+    for (ButtonSprite*& sprite : this->thumb_sprites) {
+        destroy_allocated_sprite(sprite);
+        sprite = nullptr;
     }
 
-    /* Step 5: Free extra sprite at +0x130 */
-    if (this->field_130 != 0) {
-        void** vtbl = *(void***)&this->field_130;
-        typedef void* (*ScalarDtor)(void*, uint8_t);
-        (*reinterpret_cast<ScalarDtor>(vtbl[0]))((void*)(uintptr_t)this->field_130, 1);
-        this->field_130 = 0;
-    }
+    /* Step 5: Free extra sprite at +0x130. */
+    destroy_allocated_sprite(this->extra_sprite);
+    this->extra_sprite = nullptr;
 
-    /* Step 6: Resdata cleanup — field_0E8 and others */
-    if (this->field_0E8 != 0) {
-        typedef void (*ResDtor)(void*, int);
-        ((ResDtor)(*(void**)this->field_0E8))(this->field_0E8, 1);
-        this->field_0E8 = 0;
+    /* Step 6: Resdata cleanup — field_0E8 and others. */
+    if (this->field_0E8 != nullptr) {
+        destroy_resource(this->field_0E8);
+        this->field_0E8 = nullptr;
     }
 
     /* Step 7: Destroy base window (UI_WindowBase_BaseDtor) */
@@ -929,10 +997,12 @@ bool PostcardAlbum::InitWindow(HWND hWndParent)
     GetClientRect(desktop, &desktop_rect);        /* @0x45B960 (indirect) */
 
     /* Load icon resource 0x65 */
-    HICON icon = LoadIconA(this->hInstance, (LPCSTR)0x65);  /* @0x45B800 */
+    HICON icon = LoadIconA(
+        this->hInstance,
+        reinterpret_cast<LPCSTR>(static_cast<uintptr_t>(0x65)));  /* @0x45B800 */
 
     /* Store icon handle */
-    this->field_0E8 = (void*)icon;                /* +0xE8 */
+    this->field_0E8 = static_cast<void*>(icon);  /* +0xE8 */
 
     /* Create the full-screen child window */
     void* result = UI_CreateFullWindow(
@@ -943,12 +1013,12 @@ bool PostcardAlbum::InitWindow(HWND hWndParent)
         desktop_rect.top,                         /* y */
         desktop_rect.right - desktop_rect.left,   /* width */
         desktop_rect.bottom - desktop_rect.top,   /* height */
-        (HMENU)0,                                 /* menu */
+        nullptr,                                  /* menu */
         icon,                                     /* icon */
         0                                         /* flags */
     );                                            /* @0x425150 */
 
-    return (result != 0);
+    return result != nullptr;
 }
 
 /* ================================================================== */
@@ -981,7 +1051,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     case 0x1B:  /* VK_ESCAPE */
         /* Virtual dispatch to DestroyWindow */
         this->DestroyWindow();
-        CGWND_SetMode((void*)3);                   /* @0x408130 — return to game mode */
+        CGWND_SetMode(3);                         /* @0x408130 — return to game mode */
         return 0;
 
     case 0x25:  /* VK_LEFT — previous page */
@@ -1003,7 +1073,8 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
                                / this->tile_total_count;
 
             uint32_t total = g_pixel_cache->GetEntryCount();
-            if ((total % (uint32_t)this->tile_total_count == 0) && (total != 0)) {
+            if ((total % static_cast<uint32_t>(this->tile_total_count) == 0) &&
+                (total != 0)) {
                 this->tile_offset--;
             }
             this->tile_offset *= this->tile_total_count;
@@ -1108,24 +1179,23 @@ void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2]
         blit_flags = 0x200;      /* DDBLT_KEYSRC */
     }
 
-    /* Perform the Blt from primary surface to backbuffer */
-    int32_t blt_result = ((int32_t (*)(void*, RECT*, void*, RECT*, int32_t, void*))
-        (*(void***)g_backbuffer)[0x14 / 4])       /* vtable[5] = Blt */
-        (g_backbuffer, &blit_rect, g_primary_surface, &src_rect, blit_flags, nullptr);
+    /* Perform the Blt from primary surface to backbuffer. */
+    DirectDrawSurfaceView* backbuffer =
+        reinterpret_cast<DirectDrawSurfaceView*>(g_backbuffer);
+    int32_t blt_result = backbuffer->blt(
+        &blit_rect, g_primary_surface, &src_rect, blit_flags, nullptr);
 
     if (blt_result == 0x887601C2) {  /* DDERR_SURFACELOST */
         /* Surface was lost — restore it and retry */
-        int32_t restore_result = ((int32_t (*)(void*))(*(void***)g_backbuffer)[0x6C / 4])
-            (g_backbuffer);                        /* vtable[27] = Restore */
+        int32_t restore_result = backbuffer->restore(); /* slot 27 = Restore */
 
         if (restore_result != 0) {
             goto error;  /* Surface restore failed */
         }
 
-        /* Retry the blit with DDBLT_WAIT */
-        blt_result = ((int32_t (*)(void*, RECT*, void*, RECT*, int32_t, void*))
-            (*(void***)g_backbuffer)[0x14 / 4])
-            (g_backbuffer, &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
+        /* Retry the blit with DDBLT_WAIT. */
+        blt_result = backbuffer->blt(
+            &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
 
         if (blt_result == 0) {
             /* Success — invalidate viewport for full redraw */
@@ -1134,21 +1204,18 @@ void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2]
                 g_viewport_rect_right, g_viewport_rect_bottom);  /* @0x455840 */
         }
     } else if (use_color_key != 0 && blt_result != 0) {
-        /* With color key and non-SURFACELOST error, retry with DDBLT_WAIT */
-        blt_result = ((int32_t (*)(void*, RECT*, void*, RECT*, int32_t, void*))
-            (*(void***)g_backbuffer)[0x14 / 4])
-            (g_backbuffer, &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
+        /* With color key and non-SURFACELOST error, retry with DDBLT_WAIT. */
+        blt_result = backbuffer->blt(
+            &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
 
         if (blt_result == 0x887601C2) {
             /* Surface lost again on retry */
-            int32_t restore_result = ((int32_t (*)(void*))(*(void***)g_backbuffer)[0x6C / 4])
-                (g_backbuffer);
+            int32_t restore_result = backbuffer->restore();
             if (restore_result != 0) {
                 goto error;
             }
-            blt_result = ((int32_t (*)(void*, RECT*, void*, RECT*, int32_t, void*))
-                (*(void***)g_backbuffer)[0x14 / 4])
-                (g_backbuffer, &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
+            blt_result = backbuffer->blt(
+                &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
         }
     }
 
@@ -1207,9 +1274,9 @@ void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags)
 
     /* Release DDraw surface via IDirectDrawSurface::Release */
     if (surface->ddraw_surf != nullptr) {
-        typedef uint32_t (*ReleaseFn)(void*);
-        ReleaseFn release = *(ReleaseFn*)(*(uint8_t**)surface->ddraw_surf + 0x8);  /* vtable[2] */
-        release(surface->ddraw_surf);
+        uint32_t release_result =
+            reinterpret_cast<DirectDrawSurfaceView*>(surface->ddraw_surf)->release();
+        (void)release_result;
         surface->ddraw_surf = nullptr;
     }
 

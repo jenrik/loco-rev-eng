@@ -83,6 +83,9 @@ static void stream_vtable_scalar_dtor(int* streamObj)
     /* vtable[1] = scalar deleting destructor: (void* this, int flags).
      * Reads vtable ptr at *streamObj, indexes slot [1], calls with flags=1.
      * TODO: decompile stream class at 0x479190 — replace with 'delete streamObj'. */
-    (*(void (**)(void*, int))((uintptr_t*)(*(uintptr_t**)streamObj) + 1))(streamObj, 1);
+    using ScalarDeletingDestructor = void (*)(void*, int);
+    ScalarDeletingDestructor* vtable =
+        *reinterpret_cast<ScalarDeletingDestructor**>(streamObj);
+    vtable[1](streamObj, 1);
 }
 

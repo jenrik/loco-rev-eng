@@ -1,4 +1,3 @@
-#undef RESDATA_DEFINED
 /**
  * ResourceManager.cpp — ResourceManager implementation
  *
@@ -26,6 +25,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
+#include <new>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -36,9 +36,6 @@ void* operator_new(uint32_t size);   /* operator new @ 0x00465CE0 */
 void  GLOBAL_free(void* ptr);        /* @ 0x00465CD0 */
 
 extern "C" {
-
-#define VTBL_RESDATA ((void*)0x478274)
-#define VTBL_SOUND_OBJECT ((void*)0x47827C)
 
 /* Windows API */
 void* __stdcall GetModuleHandleA(void* lpModuleName);
@@ -138,9 +135,7 @@ void* CRT_FindFirstFile(const char* path, void* findData); /* @ 0x00468310 */
 int32_t CRT_FindNextFile(void* handle, void* findData);    /* @ 0x00468350 */
 void CRT_FindClose(void* handle);                          /* @ 0x00468370 */
 
-void TrackPiece_Ctor(void* self, int32_t param2, int32_t param3, uint16_t param5); /* @ 0x0040CF20 */
-void __thiscall TrackPiece_Dtor(void* self);                     /* @ 0x0040D040 */
-/* RESDATA_SoundObject_BaseDtor already declared elsewhere */
+/* SoundObject uses the canonical TrackPiece C++ base. */
 
 extern int32_t g_game_mode;                          /* @ 0x004851F4 */
 /* g_config_ini declared in shared/types.h */
@@ -207,6 +202,48 @@ static const int CLOCK_SEGMENTS = 12;
 
 /* Screensaver sound file format */
 static const char SND_MUSIC_FORMAT[] = "%s\\video\\music.wav";
+
+namespace {
+int32_t handle_from_pointer(const void* pointer)
+{
+    return static_cast<int32_t>(reinterpret_cast<uintptr_t>(pointer));
+}
+
+template <typename T>
+T* pointer_from_handle(int32_t handle)
+{
+    return reinterpret_cast<T*>(static_cast<uintptr_t>(static_cast<uint32_t>(handle)));
+}
+
+template <typename T>
+T& field_at(void* object, size_t offset)
+{
+    return *reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(object) + offset);
+}
+
+void destroy_resource(int32_t handle)
+{
+    static_cast<ResourceObject*>(pointer_from_handle<void>(handle))->Destroy(1);
+}
+
+int32_t create_string_resource(int32_t resource_id, char* string_data)
+{
+    void* allocation = operator_new(300);
+    if (allocation == nullptr) {
+        return 0;
+    }
+
+    ResourceEntry* entry = RESMGR_AllocResourceEntry(
+        static_cast<ResourceEntry*>(allocation), resource_id,
+        handle_from_pointer(string_data));
+    int32_t handle = handle_from_pointer(entry);
+    if (entry != nullptr && entry->is_valid == 0) {
+        destroy_resource(handle);
+        return -1;
+    }
+    return handle;
+}
+}
 
 /* ================================================================== */
 /* Helper: compute language-specific string table ID                   */
@@ -290,36 +327,37 @@ bool ResourceManager::Init()
     {
         const char* faceName = "Arial";
         int32_t i;
-        for (i = 0; faceName[i] != '\0' && i < (int32_t)sizeof(fontName) - 1; i++) {
+        for (i = 0; faceName[i] != '\0' &&
+             i < static_cast<int32_t>(sizeof(fontName)) - 1; i++) {
             fontName[i] = faceName[i];
         }
         fontName[i] = '\0';
     }
 
     /* Create 5 GDI fonts with varying sizes and weights */
-    this->font_small = (HFONT)CreateFontA(
+    this->font_small = CreateFontA(
         12, 0, 0, 0, 800, 0, 0, 0, 1, 0, 0, 2, 0, fontName
     );
 
-    this->font_medium = (HFONT)CreateFontA(
+    this->font_medium = CreateFontA(
         14, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 2, 0, fontName
     );
 
-    this->font_title = (HFONT)CreateFontA(
+    this->font_title = CreateFontA(
         16, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 2, 0, fontName
     );
 
-    this->font_large = (HFONT)CreateFontA(
+    this->font_large = CreateFontA(
         24, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 2, 0, fontName
     );
 
-    this->font_clock = (HFONT)CreateFontA(
+    this->font_clock = CreateFontA(
         20, 0, 0, 0, 900, 0, 0, 0, 1, 0, 0, 2, 0, fontName
     );
 
     /* Step 5: Initialize keyboard and mouse input subsystems */
     /* Uses global input context at 0x4A99B0 */
-    void* inputContext = (void*)0x004A99B0;
+    void* inputContext = reinterpret_cast<void*>(static_cast<uintptr_t>(0x004A99B0));
     INPUT_SetKeyboard(inputContext);
     INPUT_SetMouse(inputContext);
 
@@ -340,13 +378,13 @@ bool ResourceManager::Init()
             uint32_t adjustedId = apply_language_offset(this->language_id, id);
 
             /* Load the string from EXE string table */
-            void* hInstance = GetModuleHandleA(NULL);
+            void* hInstance = GetModuleHandleA(nullptr);
             int32_t result = LoadStringA(hInstance, adjustedId, stringBuf, 0x104);
 
-            if (adjustedId == (uint32_t)id) {
+            if (adjustedId == static_cast<uint32_t>(id)) {
                 /* No language offset applied */
                 if (result != 0) {
-                    this->AddString(id, (int32_t)stringBuf);
+                    this->AddString(id, handle_from_pointer(stringBuf));
                 } else {
                     *slotPtr = -1;  /* mark as not found */
                 }
@@ -354,15 +392,15 @@ bool ResourceManager::Init()
                 /* Language offset applied */
                 if (result == 0) {
                     /* Try original ID if translated fails */
-                    hInstance = GetModuleHandleA(NULL);
+                    hInstance = GetModuleHandleA(nullptr);
                     result = LoadStringA(hInstance, id, stringBuf, 0x104);
                     if (result == 0) {
                         *slotPtr = -1;
                     } else {
-                        this->AddString(id, (int32_t)stringBuf);
+                        this->AddString(id, handle_from_pointer(stringBuf));
                     }
                 } else {
-                    this->AddString(id, (int32_t)stringBuf);
+                    this->AddString(id, handle_from_pointer(stringBuf));
                 }
             }
 
@@ -389,10 +427,10 @@ void ResourceManager::InitData()
 {
     char langBuf[1024];  /* 0x400 bytes */
 
-    if (g_config_ini != NULL) {
+    if (g_config_ini != nullptr) {
         /* Read [Locale] Language= key from config */
         Config_GetIniString(g_config_ini, "Locale", "Language", "",
-                            langBuf, (int32_t)sizeof(langBuf));
+                            langBuf, static_cast<int32_t>(sizeof(langBuf)));
 
         /* Uppercase for comparison */
         CRT_strupr(langBuf);
@@ -481,7 +519,7 @@ void ResourceManager::InitData()
 int32_t ResourceManager::Shutdown()
 {
     /* Step 1: Stop all audio */
-    if (g_audio != NULL) {
+    if (g_audio != nullptr) {
         GameAudio_StopAll(g_audio);
     }
 
@@ -493,25 +531,25 @@ int32_t ResourceManager::Shutdown()
     DDRAW_DestroyAudio();
 
     /* Step 5: Delete GDI font objects */
-    if (this->font_small != NULL) {
+    if (this->font_small != nullptr) {
         DeleteObject(this->font_small);
-        this->font_small = NULL;
+        this->font_small = nullptr;
     }
-    if (this->font_medium != NULL) {
+    if (this->font_medium != nullptr) {
         DeleteObject(this->font_medium);
-        this->font_medium = NULL;
+        this->font_medium = nullptr;
     }
-    if (this->font_title != NULL) {
+    if (this->font_title != nullptr) {
         DeleteObject(this->font_title);
-        this->font_title = NULL;
+        this->font_title = nullptr;
     }
-    if (this->font_large != NULL) {
+    if (this->font_large != nullptr) {
         DeleteObject(this->font_large);
-        this->font_large = NULL;
+        this->font_large = nullptr;
     }
-    if (this->font_clock != NULL) {
+    if (this->font_clock != nullptr) {
         DeleteObject(this->font_clock);
-        this->font_clock = NULL;
+        this->font_clock = nullptr;
     }
 
     return 1;
@@ -533,15 +571,12 @@ void ResourceManager::FreeAllResources()
             *slotPtr = 0;  /* reset sentinel */
         }
         if (*slotPtr != 0) {
-            /* Call vtable[0] destructor with free-flag = 1 */
-            void* resource = (void*)(uintptr_t)*slotPtr;
-            void** vtable = (void**)resource;
-            void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
-            dtor(resource, 1);
+            /* Invoke the common typed resource destruction slot. */
+            destroy_resource(*slotPtr);
             *slotPtr = 0;
         }
         /* Clear corresponding type_idx entry */
-        int32_t idx = (int32_t)(slotPtr - this->resource_ptrs);
+        int32_t idx = static_cast<int32_t>(slotPtr - this->resource_ptrs);
         (this->resource_type_idx)[idx] = 0;
 
         slotPtr++;
@@ -557,11 +592,8 @@ void ResourceManager::FreeAllResources()
             *slotPtr = 0;  /* reset sentinel */
         }
         if (*slotPtr != 0) {
-            /* Call vtable[0] destructor with free-flag = 1 */
-            void* resource = (void*)(uintptr_t)*slotPtr;
-            void** vtable = (void**)resource;
-            void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
-            dtor(resource, 1);
+            /* Invoke the common typed resource destruction slot. */
+            destroy_resource(*slotPtr);
             *slotPtr = 0;
         }
 
@@ -586,16 +618,16 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
     /* Extract resource type from ID */
     int32_t rawType = resId >> RESOURCE_TYPE_SHIFT;  /* SAR 10 */
-    uint8_t typeBits = (uint8_t)(rawType & 0xFF);
+    uint8_t typeBits = static_cast<uint8_t>(rawType & 0xFF);
     uint8_t resourceType = (typeBits < 0x10) ? typeBits : 0;  /* clamp to 0-15 */
 
-    void* newObj = NULL;
-    void* result = NULL;
+    void* newObj = nullptr;
+    void* result = nullptr;
 
     if (resourceType > 0xE) {
         /* Fallthrough for type > 14 */
         newObj = operator_new(0x168);
-        if (newObj != NULL) {
+        if (newObj != nullptr) {
             result = UI_CreateChildWindow(newObj, resId, strPtr);
         }
     } else {
@@ -603,12 +635,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 0:
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x168);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = UI_CreateChildWindow(newObj, resId, strPtr);
                 }
             } else {
                 newObj = operator_new(0x630);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = INPUT_ExitGame(newObj, resId, strPtr);
                 }
             }
@@ -616,7 +648,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
         case 1:
             newObj = operator_new(0x168);
-            if (newObj != NULL) {
+            if (newObj != nullptr) {
                 result = UI_CreateChildWindow(newObj, resId, strPtr);
             }
             break;
@@ -625,12 +657,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 4:
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x168);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = UI_CreateChildWindow(newObj, resId, strPtr);
                 }
             } else {
                 newObj = operator_new(0x630);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = INPUT_ExitGame(newObj, resId, strPtr);
                 }
             }
@@ -639,12 +671,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 3:
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x168);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = UI_CreateChildWindow(newObj, resId, strPtr);
                 }
             } else {
                 newObj = operator_new(0x63C);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = RESDATA_ScriptedObject_AddChild(newObj, resId, strPtr);
                 }
             }
@@ -653,24 +685,24 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 5:
             /* Type 5: ChildWindow with persistence enabled */
             newObj = operator_new(0x168);
-            if (newObj != NULL) {
+            if (newObj != nullptr) {
                 result = UI_CreateChildWindow(newObj, resId, strPtr);
             }
-            this->resource_ptrs[resId] = result;
-            if (result != NULL) {
-                *(uint8_t*)((uint8_t*)result + 0x162) = 1;  /* persistent flag */
+            this->resource_ptrs[resId] = handle_from_pointer(result);
+            if (result != nullptr) {
+                field_at<uint8_t>(result, 0x162) = 1;  /* persistent flag */
             }
             return 1;
 
         case 6:
             if (resId == 0x1802 || (resId >= 0x1866 && (resId & 1) == 1)) {
                 newObj = operator_new(0x7AC);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = CGWND_CursorEditWindow_Ctor(newObj, resId, strPtr);
                 }
             } else {
                 newObj = operator_new(0x168);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = UI_CreateChildWindow(newObj, resId, strPtr);
                 }
             }
@@ -680,12 +712,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 8:
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x178);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = TrainStation_Ctor(newObj, resId, strPtr);
                 }
             } else {
                 newObj = operator_new(0x168);
-                if (newObj != NULL) {
+                if (newObj != nullptr) {
                     result = UI_CreateChildWindow(newObj, resId, strPtr);
                 }
             }
@@ -695,7 +727,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 10:
         case 11:
             newObj = operator_new(0x168);
-            if (newObj != NULL) {
+            if (newObj != nullptr) {
                 result = UI_CreateChildWindow(newObj, resId, strPtr);
             }
             break;
@@ -703,26 +735,26 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 12:
         case 13:
             newObj = operator_new(0x630);
-            if (newObj != NULL) {
+            if (newObj != nullptr) {
                 result = INPUT_ExitGame(newObj, resId, strPtr);
             }
             break;
 
         case 14:
             newObj = operator_new(0x168);
-            if (newObj != NULL) {
+            if (newObj != nullptr) {
                 result = UI_CreateChildWindow(newObj, resId, strPtr);
             }
-            this->resource_ptrs[resId] = result;
-            if (resId > 0x3801 && result != NULL) {
-                *(uint8_t*)((uint8_t*)result + 0x162) = 1;
+            this->resource_ptrs[resId] = handle_from_pointer(result);
+            if (resId > 0x3801 && result != nullptr) {
+                field_at<uint8_t>(result, 0x162) = 1;
             }
             return 1;
 
         default:
             /* Fallthrough for types not explicitly handled */
             newObj = operator_new(0x168);
-            if (newObj != NULL) {
+            if (newObj != nullptr) {
                 result = UI_CreateChildWindow(newObj, resId, strPtr);
             }
             break;
@@ -730,19 +762,19 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
     }
 
     /* Store the result in the resource registry */
-    this->resource_ptrs[resId] = result;
+    this->resource_ptrs[resId] = handle_from_pointer(result);
 
     /* Check persistence: type 1 and 15 are always persistent */
     rawType = resId >> RESOURCE_TYPE_SHIFT;
-    uint8_t finalType = (uint8_t)rawType;
+    uint8_t finalType = static_cast<uint8_t>(rawType);
     if (finalType >= 0x10) {
         finalType = 0;
     }
 
     bool isPersistent = (finalType == 1 || finalType == 0xF);
-    if (!isPersistent && result != NULL) {
+    if (!isPersistent && result != nullptr) {
         /* Check persistent flag at +0x162 in ChildWindow */
-        isPersistent = (*(uint8_t*)((uint8_t*)result + 0x162) == 1);
+        isPersistent = (field_at<uint8_t>(result, 0x162) == 1);
     }
 
     if (isPersistent) {
@@ -750,13 +782,11 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
     }
 
     /* Not persistent — destroy the resource */
-    void* stored = this->resource_ptrs[resId];
-    if (stored != NULL) {
-        void** vtable = (void**)stored;
-        void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
-        dtor(stored, 1);
+    int32_t stored = this->resource_ptrs[resId];
+    if (stored != 0) {
+        destroy_resource(stored);
     }
-    this->resource_ptrs[resId] = (void*)-1;
+    this->resource_ptrs[resId] = -1;
 
     return 0;
 }
@@ -773,8 +803,8 @@ BOOL ResourceManager::LoadStringTable(UINT startId, int32_t endId)
         endId = STRING_ID_MAX;
     }
 
-    int32_t id = (int32_t)startId;
-    int32_t idTimes4 = (int32_t)startId * 4;  /* pre-multiplied offset */
+    int32_t id = static_cast<int32_t>(startId);
+    int32_t idTimes4 = static_cast<int32_t>(startId) * 4;  /* pre-multiplied offset */
 
     if (id > endId) {
         return (id == endId + 1) ? 1 : 0;
@@ -791,86 +821,40 @@ BOOL ResourceManager::LoadStringTable(UINT startId, int32_t endId)
 
         /* Apply language offset for IDs in 100-500 range */
         if (id < 100 || id > 500) {
-            adjustedId = (uint32_t)id;
+            adjustedId = static_cast<uint32_t>(id);
         } else {
             adjustedId = apply_language_offset(this->language_id, id);
         }
 
         /* Load string from EXE */
-        void* hInstance = GetModuleHandleA(NULL);
+        void* hInstance = GetModuleHandleA(nullptr);
         int32_t result = LoadStringA(hInstance, adjustedId, stringBuf, 0x104);
 
-        if (adjustedId == (uint32_t)id) {
+        if (adjustedId == static_cast<uint32_t>(id)) {
             /* No language offset — direct load */
             if (result == 0) {
                 this->string_cache[idTimes4/4] = -1;
             } else {
-                void* newEntry = operator_new(300);
-                void* storedEntry = NULL;
-                if (newEntry != NULL) {
-                    storedEntry = RESMGR_AllocResourceEntry(
-                        (ResourceEntry*)newEntry, id, (int32_t)stringBuf
-                    );
-                }
-                this->string_cache[idTimes4/4] = storedEntry;
-
-                /* If entry lacks surface data (flag at +9), destroy immediately */
-                if (storedEntry != NULL &&
-                    ((ResourceEntry*)storedEntry)->is_valid == 0)
-                {
-                    void** vtable = (void**)storedEntry;
-                    void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
-                    dtor(storedEntry, 1);
-                    this->string_cache[idTimes4/4] = -1;
-                }
+                this->string_cache[idTimes4 / 4] =
+                    create_string_resource(id, stringBuf);
             }
         } else {
             /* Language offset applied */
             if (result == 0) {
                 /* Fall back to original ID */
-                hInstance = GetModuleHandleA(NULL);
-                result = LoadStringA(hInstance, (UINT)id, stringBuf, 0x104);
+                hInstance = GetModuleHandleA(nullptr);
+                result = LoadStringA(hInstance, static_cast<UINT>(id), stringBuf, 0x104);
 
                 if (result == 0) {
                     this->string_cache[idTimes4/4] = -1;
                 } else {
-                    void* newEntry = operator_new(300);
-                    void* storedEntry = NULL;
-                    if (newEntry != NULL) {
-                        storedEntry = RESMGR_AllocResourceEntry(
-                            (ResourceEntry*)newEntry, id, (int32_t)stringBuf
-                        );
-                    }
-                    this->string_cache[idTimes4/4] = storedEntry;
-
-                    if (storedEntry != NULL &&
-                        ((ResourceEntry*)storedEntry)->is_valid == 0)
-                    {
-                        void** vtable = (void**)storedEntry;
-                        void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
-                        dtor(storedEntry, 1);
-                        this->string_cache[idTimes4/4] = -1;
-                    }
+                    this->string_cache[idTimes4 / 4] =
+                        create_string_resource(id, stringBuf);
                 }
             } else {
                 /* Translation loaded successfully */
-                void* newEntry = operator_new(300);
-                void* storedEntry = NULL;
-                if (newEntry != NULL) {
-                    storedEntry = RESMGR_AllocResourceEntry(
-                        (ResourceEntry*)newEntry, id, (int32_t)stringBuf
-                    );
-                }
-                this->string_cache[idTimes4/4] = storedEntry;
-
-                if (storedEntry != NULL &&
-                    ((ResourceEntry*)storedEntry)->is_valid == 0)
-                {
-                    void** vtable = (void**)storedEntry;
-                    void (*dtor)(void*, uint8_t) = (void (*)(void*, uint8_t))vtable[0];
-                    dtor(storedEntry, 1);
-                    this->string_cache[idTimes4/4] = -1;
-                }
+                this->string_cache[idTimes4 / 4] =
+                    create_string_resource(id, stringBuf);
             }
         }
 
@@ -896,7 +880,7 @@ int32_t ResourceManager::GetById(int32_t resId)
 
     /* Read from type-index array at +0x2C */
     int32_t* typeEntry = &this->resource_type_idx[resId];
-    if (typeEntry == NULL) {
+    if (typeEntry == nullptr) {
         return 0;
     }
 
@@ -915,28 +899,29 @@ int32_t ResourceManager::GetById(int32_t resId)
 
             while (idx <= endIdx && g_game_mode != 10) {
                 char stringBuf[264];
-                uint32_t adjustedId = apply_language_offset(this->language_id, (uint32_t)idx);
+                uint32_t adjustedId = apply_language_offset(
+                    this->language_id, static_cast<uint32_t>(idx));
 
-                void* hInstance = GetModuleHandleA(NULL);
+                void* hInstance = GetModuleHandleA(nullptr);
                 int32_t result = LoadStringA(hInstance, adjustedId, stringBuf, 0x104);
 
-                if (adjustedId == (uint32_t)idx) {
+                if (adjustedId == static_cast<uint32_t>(idx)) {
                     if (result != 0) {
-                        this->AddString(idx, (int32_t)stringBuf);
+                        this->AddString(idx, handle_from_pointer(stringBuf));
                     } else {
                         *slotPtr = -1;
                     }
                 } else {
                     if (result == 0) {
-                        hInstance = GetModuleHandleA(NULL);
-                        result = LoadStringA(hInstance, (UINT)idx, stringBuf, 0x104);
+                        hInstance = GetModuleHandleA(nullptr);
+                        result = LoadStringA(hInstance, static_cast<UINT>(idx), stringBuf, 0x104);
                         if (result == 0) {
                             *slotPtr = -1;
                         } else {
-                            this->AddString(idx, (int32_t)stringBuf);
+                            this->AddString(idx, handle_from_pointer(stringBuf));
                         }
                     } else {
-                        this->AddString(idx, (int32_t)stringBuf);
+                        this->AddString(idx, handle_from_pointer(stringBuf));
                     }
                 }
 
@@ -947,7 +932,7 @@ int32_t ResourceManager::GetById(int32_t resId)
 
         /* Re-read after loading */
         typeEntry = &this->resource_type_idx[resId];
-        if (typeEntry != NULL) {
+        if (typeEntry != nullptr) {
             resourcePtr = *typeEntry;
         }
 
@@ -984,7 +969,7 @@ int32_t ResourceManager::GetStringById(UINT stringId)
 
     if (value == 0) {
         /* Lazy-load this single ID */
-        this->LoadStringTable(stringId, (int32_t)stringId);
+        this->LoadStringTable(stringId, static_cast<int32_t>(stringId));
 
         /* Re-read after loading */
         value = *cacheEntry;
@@ -1013,7 +998,7 @@ int32_t ResourceManager::GetStringById(UINT stringId)
 int32_t ResourceManager::LoadStringToResource(UINT resId)
 {
     /* Validate ID range */
-    if ((int32_t)resId < 0 || resId > 0x3FFF) {
+    if (static_cast<int32_t>(resId) < 0 || resId > 0x3FFF) {
         *CRT_errno() = 1;
         return 0;
     }
@@ -1035,33 +1020,36 @@ int32_t ResourceManager::LoadStringToResource(UINT resId)
                 adjustedId = apply_language_offset(this->language_id, curId);
             }
 
-            void* hInstance = GetModuleHandleA(NULL);
+            void* hInstance = GetModuleHandleA(nullptr);
             char stringBuf[264];
             int32_t result = LoadStringA(hInstance, adjustedId, stringBuf, 0x104);
 
             if (adjustedId == curId) {
                 if (result != 0) {
-                    this->AddString((int32_t)curId, (int32_t)stringBuf);
+                    this->AddString(static_cast<int32_t>(curId),
+                                    handle_from_pointer(stringBuf));
                 } else {
                     this->resource_ptrs[curId] = -1;
                 }
             } else {
                 if (result == 0) {
-                    hInstance = GetModuleHandleA(NULL);
-                    result = LoadStringA(hInstance, (UINT)curId, stringBuf, 0x104);
+                    hInstance = GetModuleHandleA(nullptr);
+                    result = LoadStringA(hInstance, static_cast<UINT>(curId), stringBuf, 0x104);
                     if (result == 0) {
                         this->resource_ptrs[curId] = -1;
                     } else {
-                        this->AddString((int32_t)curId, (int32_t)stringBuf);
+                        this->AddString(static_cast<int32_t>(curId),
+                                        handle_from_pointer(stringBuf));
                     }
                 } else {
-                    this->AddString((int32_t)curId, (int32_t)stringBuf);
+                    this->AddString(static_cast<int32_t>(curId),
+                                    handle_from_pointer(stringBuf));
                 }
             }
 
             curId++;
             slotPtr++;
-        } while ((int32_t)curId <= (int32_t)resId);
+        } while (static_cast<int32_t>(curId) <= static_cast<int32_t>(resId));
 
         /* Re-read result */
         value = this->resource_ptrs[resId];
@@ -1092,7 +1080,7 @@ void ResourceManager::RegisterDependency(int32_t depIndex, int32_t resIndex)
 {
     /* Write the address of the resource slot into the type-index array */
     this->resource_type_idx[depIndex] =
-        (int32_t)&this->resource_ptrs[resIndex];
+        handle_from_pointer(&this->resource_ptrs[resIndex]);
 }
 
 /* ================================================================== */
@@ -1102,37 +1090,25 @@ void ResourceManager::RegisterDependency(int32_t depIndex, int32_t resIndex)
 
 void ResourceManager::AnimateClock(int32_t timestamp)
 {
-    /* ================================================================ */
-    /* Phase 0: Check if clock background resource has surface data     */
-    /* ================================================================ */
-
     int32_t bgResource = this->GetById(CLOCK_RES_BG);  /* 0x842 */
     if (bgResource == 0) {
         return;
     }
 
-    /* Check if background resource has surface data (flag at +0x10) */
-    int32_t* bgData = (int32_t*)(uintptr_t)bgResource;
+    int32_t* bgData = pointer_from_handle<int32_t>(bgResource);
     if (bgData[4] == 0) {  /* +0x10 */
         return;
     }
 
-    /* ================================================================ */
-    /* Phase 1: Compute clock segment and play sound on change          */
-    /* ================================================================ */
-
     int32_t minutes = (timestamp / 60) % 60;
     int32_t segment = (minutes / 5 + 1) % CLOCK_SEGMENTS;
-
     int32_t soundId = 0;
 
     if (segment != this->clock_hand_segment) {
         if (segment == 0) {
-            /* Hour — play chime (sound 0x53AB) */
             this->clock_hand_segment = 0;
-
-            /* Lazy-load sound at global sound cache entry 0x4A64C8 */
-            int32_t* soundCache = (int32_t*)0x004A64C8;
+            int32_t* soundCache = reinterpret_cast<int32_t*>(
+                static_cast<uintptr_t>(0x004A64C8));
             soundId = *soundCache;
             if (soundId == 0) {
                 this->LoadStringTable(SOUND_HOUR, SOUND_HOUR);
@@ -1146,11 +1122,10 @@ void ResourceManager::AnimateClock(int32_t timestamp)
                 *CRT_errno() = 2;
                 soundId = 0;
             }
-        } else if ((segment == 3) || (segment == 6) || (segment == 9)) {
-            /* Quarter-hour — play tick (sound 0x5399) */
+        } else if (segment == 3 || segment == 6 || segment == 9) {
             this->clock_hand_segment = segment;
-
-            int32_t* soundCache = (int32_t*)0x004A6480;
+            int32_t* soundCache = reinterpret_cast<int32_t*>(
+                static_cast<uintptr_t>(0x004A6480));
             soundId = *soundCache;
             if (soundId == 0) {
                 this->LoadStringTable(SOUND_QUARTER, SOUND_QUARTER);
@@ -1165,178 +1140,127 @@ void ResourceManager::AnimateClock(int32_t timestamp)
                 soundId = 0;
             }
         } else {
-            /* Other segments — update state, no sound */
             this->clock_hand_segment = segment;
         }
 
-        if (g_audio != NULL && soundId != 0) {
-            GameAudio_AllocChannel(
-                g_audio, soundId,
-                NULL,
-                g_listener_x,
-                g_listener_y,
-                4,      /* priority = 4 */
-                0       /* flags = 0 */
-            );
+        if (g_audio != nullptr && soundId != 0) {
+            GameAudio_AllocChannel(g_audio, soundId, nullptr,
+                                    g_listener_x, g_listener_y, 4, 0);
         }
     }
 
-    /* ================================================================ */
-    /* Phase 2: Render hour hand from sprite strips                     */
-    /* ================================================================ */
+    void* background_data = pointer_from_handle<void>(bgData[4]);
 
-    /* Get hour hand background frame sprite (0x3DAE) */
     int32_t hourBgResource = this->GetById(CLOCK_HOUR_BG);
     if (hourBgResource != 0) {
-        void* hourBgRes = (void*)(uintptr_t)hourBgResource;
-        void** hourBgVtbl = *(void***)hourBgRes;
-
-        /* Lock surface (vtable[1]) */
-        void* hourBgSurface = (void*)((void* (*)(void*, int32_t, int32_t))hourBgVtbl[1])(hourBgRes, 0, 0);
-
-        int32_t hourBgWidth  = *(uint16_t*)((uint8_t*)hourBgRes + 0x14);
-        int32_t hourBgHeight = *(uint16_t*)((uint8_t*)hourBgRes + 0x16);
+        void* hourBgRes = pointer_from_handle<void>(hourBgResource);
+        ResourceObject* hourBg = static_cast<ResourceObject*>(hourBgRes);
+        void* hourBgSurface = hourBg->Lock(0, 0);
+        int32_t hourBgWidth = field_at<uint16_t>(hourBgRes, 0x14);
+        int32_t hourBgHeight = field_at<uint16_t>(hourBgRes, 0x16);
 
         RECT srcRect;
         SetRect(&srcRect, 0, 0, hourBgWidth - 1, hourBgHeight - 1);
-
         RECT dstRect;
         CopyRect(&dstRect, &srcRect);
-
         OffsetRect(&srcRect, segment * hourBgWidth, 0);
         OffsetRect(&dstRect, CLOCK_HOUR_OFFSET_X, CLOCK_HOUR_OFFSET_Y);
 
         Town_CopyTiles8bpp_Transparent(
-            hourBgSurface,
-            dstRect.left, dstRect.top, dstRect.right, dstRect.bottom,
-            *(uint32_t*)(uintptr_t)(bgData[4] + 0x18),
-            *(int32_t*)(uintptr_t)(bgData[4] + 0x8),
-            srcRect.left, srcRect.top, srcRect.right, srcRect.bottom
-        );
+            hourBgSurface, dstRect.left, dstRect.top,
+            dstRect.right, dstRect.bottom,
+            field_at<uint32_t>(background_data, 0x18),
+            field_at<int32_t>(background_data, 0x8),
+            srcRect.left, srcRect.top, srcRect.right, srcRect.bottom);
+        hourBg->Unlock();
 
-        /* Unlock surface (vtable[2]) */
-        ((void (*)(void*))hourBgVtbl[2])(hourBgRes);
-
-        /* Get hour hand sprite (0x3DAD) */
         int32_t hourHandResource = this->GetById(CLOCK_HOUR_HAND);
         if (hourHandResource != 0) {
-            void* hourHandRes = (void*)(uintptr_t)hourHandResource;
-            void** hourHandVtbl = *(void***)hourHandRes;
-
-            void* hourHandSurface = (void*)((void* (*)(void*, int32_t, int32_t))hourHandVtbl[1])(hourHandRes, 0, 0);
-
-            int32_t hourWidth  = *(uint16_t*)((uint8_t*)hourHandRes + 0x14);
-            int32_t hourHeight = *(uint16_t*)((uint8_t*)hourHandRes + 0x16);
+            void* hourHandRes = pointer_from_handle<void>(hourHandResource);
+            ResourceObject* hourHand = static_cast<ResourceObject*>(hourHandRes);
+            void* hourHandSurface = hourHand->Lock(0, 0);
+            int32_t hourWidth = field_at<uint16_t>(hourHandRes, 0x14);
+            int32_t hourHeight = field_at<uint16_t>(hourHandRes, 0x16);
 
             RECT srcRect2;
             SetRect(&srcRect2, 0, 0, hourWidth - 1, hourHeight - 1);
-
             RECT dstRect2;
             CopyRect(&dstRect2, &srcRect2);
-
             OffsetRect(&srcRect2, segment * hourWidth, 0);
             OffsetRect(&dstRect2, CLOCK_HOUR_OFFSET_X, CLOCK_HOUR_OFFSET_Y);
 
             Town_CopyTiles8bpp_Transparent(
-                hourHandSurface,
-                dstRect2.left, dstRect2.top, dstRect2.right, dstRect2.bottom,
-                *(uint32_t*)(uintptr_t)(bgData[4] + 0x18),
-                *(int32_t*)(uintptr_t)(bgData[4] + 0x8),
-                srcRect2.left, srcRect2.top, srcRect2.right, srcRect2.bottom
-            );
-
-            ((void (*)(void*))hourHandVtbl[2])(hourHandRes);
+                hourHandSurface, dstRect2.left, dstRect2.top,
+                dstRect2.right, dstRect2.bottom,
+                field_at<uint32_t>(background_data, 0x18),
+                field_at<int32_t>(background_data, 0x8),
+                srcRect2.left, srcRect2.top,
+                srcRect2.right, srcRect2.bottom);
+            hourHand->Unlock();
         }
     }
 
-    /* ================================================================ */
-    /* Phase 3: Render minute hand                                      */
-    /* ================================================================ */
-
     int32_t minuteResource = this->GetById(CLOCK_RES_MINUTE);  /* 0x843 */
-    if (minuteResource != 0 && *(int32_t*)((uintptr_t)minuteResource + 0x10) != 0) {
-        /* Get minute hand background sprite (0x3DB1) */
+    void* minute_data = pointer_from_handle<void>(minuteResource);
+    if (minuteResource != 0 && field_at<int32_t>(minute_data, 0x10) != 0) {
         int32_t minBgResource = this->GetById(CLOCK_MINUTE_BG);
         if (minBgResource != 0) {
-            void* minBgRes = (void*)(uintptr_t)minBgResource;
-            void** minBgVtbl = *(void***)minBgRes;
-
-            void* minBgSurface = (void*)((void* (*)(void*, int32_t, int32_t))minBgVtbl[1])(minBgRes, 0, 0);
-
-            int32_t minBgWidth  = *(uint16_t*)((uint8_t*)minBgRes + 0x14);
-            int32_t minBgHeight = *(uint16_t*)((uint8_t*)minBgRes + 0x16);
+            void* minBgRes = pointer_from_handle<void>(minBgResource);
+            ResourceObject* minBg = static_cast<ResourceObject*>(minBgRes);
+            void* minBgSurface = minBg->Lock(0, 0);
+            int32_t minBgWidth = field_at<uint16_t>(minBgRes, 0x14);
+            int32_t minBgHeight = field_at<uint16_t>(minBgRes, 0x16);
 
             RECT minSrcRect1;
             SetRect(&minSrcRect1, 0, 0, minBgWidth - 1, minBgHeight - 1);
-
             RECT minDstRect1;
             CopyRect(&minDstRect1, &minSrcRect1);
-
             OffsetRect(&minSrcRect1, minutes * minBgWidth, 0);
             OffsetRect(&minDstRect1, CLOCK_MINUTE_OFFSET_X, CLOCK_MINUTE_OFFSET_Y);
 
-            int32_t* minResourceData = (int32_t*)(uintptr_t)minuteResource;
             Town_CopyTiles8bpp_Transparent(
-                minBgSurface,
-                minDstRect1.left, minDstRect1.top,
+                minBgSurface, minDstRect1.left, minDstRect1.top,
                 minDstRect1.right, minDstRect1.bottom,
-                *(uint32_t*)(uintptr_t)(minResourceData[4] + 0x18),
-                *(int32_t*)(uintptr_t)(minResourceData[4] + 0x8),
+                field_at<uint32_t>(field_at<void*>(minute_data, 0x10), 0x18),
+                field_at<int32_t>(field_at<void*>(minute_data, 0x10), 0x8),
                 minSrcRect1.left, minSrcRect1.top,
-                minSrcRect1.right, minSrcRect1.bottom
-            );
+                minSrcRect1.right, minSrcRect1.bottom);
+            minBg->Unlock();
 
-            ((void (*)(void*))minBgVtbl[2])(minBgRes);
-
-            /* Get minute hand sprite (0x3DB0) */
             int32_t minHandResource = this->GetById(CLOCK_MINUTE_HAND);
             if (minHandResource != 0) {
-                void* minHandRes = (void*)(uintptr_t)minHandResource;
-                void** minHandVtbl = *(void***)minHandRes;
-
-                void* minHandSurface = (void*)((void* (*)(void*, int32_t, int32_t))minHandVtbl[1])(minHandRes, 0, 0);
-
-                int32_t minWidth  = *(uint16_t*)((uint8_t*)minHandRes + 0x14);
-                int32_t minHeight = *(uint16_t*)((uint8_t*)minHandRes + 0x16);
+                void* minHandRes = pointer_from_handle<void>(minHandResource);
+                ResourceObject* minHand = static_cast<ResourceObject*>(minHandRes);
+                void* minHandSurface = minHand->Lock(0, 0);
+                int32_t minWidth = field_at<uint16_t>(minHandRes, 0x14);
+                int32_t minHeight = field_at<uint16_t>(minHandRes, 0x16);
 
                 RECT minSrcRect2;
                 SetRect(&minSrcRect2, 0, 0, minWidth - 1, minHeight - 1);
-
                 RECT minDstRect2;
                 CopyRect(&minDstRect2, &minSrcRect2);
-
                 OffsetRect(&minSrcRect2, minutes * minWidth, 0);
                 OffsetRect(&minDstRect2, CLOCK_MINUTE_OFFSET_X, CLOCK_MINUTE_OFFSET_Y);
 
                 Town_CopyTiles8bpp_Transparent(
-                    minHandSurface,
-                    minDstRect2.left, minDstRect2.top,
+                    minHandSurface, minDstRect2.left, minDstRect2.top,
                     minDstRect2.right, minDstRect2.bottom,
-                    *(uint32_t*)(uintptr_t)(minResourceData[4] + 0x18),
-                    *(int32_t*)(uintptr_t)(minResourceData[4] + 0x8),
+                    field_at<uint32_t>(field_at<void*>(minute_data, 0x10), 0x18),
+                    field_at<int32_t>(field_at<void*>(minute_data, 0x10), 0x8),
                     minSrcRect2.left, minSrcRect2.top,
-                    minSrcRect2.right, minSrcRect2.bottom
-                );
-
-                ((void (*)(void*))minHandVtbl[2])(minHandRes);
+                    minSrcRect2.right, minSrcRect2.bottom);
+                minHand->Unlock();
             }
         }
 
-        /* Phase 4: Invalidate viewport */
-        /* Globals: g_viewport_rect vars at fixed addresses */
-        extern int32_t g_viewport_rect_left;   /* @ 0x...... */
+        extern int32_t g_viewport_rect_left;
         extern int32_t g_viewport_rect_top;
         extern int32_t g_viewport_rect_right;
         extern int32_t g_viewport_rect_bottom;
         extern void* g_tilemap;
-
-        TileMap_InvalidateRect(
-            g_tilemap,
-            g_viewport_rect_left,
-            g_viewport_rect_top,
-            g_viewport_rect_right,
-            g_viewport_rect_bottom
-        );
+        TileMap_InvalidateRect(g_tilemap, g_viewport_rect_left,
+                               g_viewport_rect_top, g_viewport_rect_right,
+                               g_viewport_rect_bottom);
     }
 }
 
@@ -1351,9 +1275,9 @@ void ResourceManager::AnimateClock(int32_t timestamp)
 
 UINT __cdecl GetResourceType(UINT id)
 {
-    int32_t rawType = (int32_t)id >> RESOURCE_TYPE_SHIFT;
-    uint8_t typeByte = (uint8_t)rawType;
-    return (typeByte < 0x10) ? (UINT)typeByte : 0;
+    int32_t rawType = static_cast<int32_t>(id) >> RESOURCE_TYPE_SHIFT;
+    uint8_t typeByte = static_cast<uint8_t>(rawType);
+    return (typeByte < 0x10) ? static_cast<UINT>(typeByte) : 0;
 }
 
 /* ================================================================== */
@@ -1373,7 +1297,7 @@ void __cdecl PlaySound(UINT soundId)
     soundRes = g_sound_cache[soundId];
 
     if (soundRes == 0) {
-        g_resmgr.LoadStringTable(soundId, (int32_t)soundId);
+        g_resmgr.LoadStringTable(soundId, static_cast<int32_t>(soundId));
         soundRes = g_sound_cache[soundId];
 
         if (soundRes == 0) {
@@ -1388,11 +1312,11 @@ void __cdecl PlaySound(UINT soundId)
     }
 
 check_audio:
-    if (g_audio != NULL && soundRes != 0) {
+    if (g_audio != nullptr && soundRes != 0) {
         GameAudio_AllocChannel(
             g_audio,
             soundRes,
-            NULL,
+            nullptr,
             g_listener_x,
             g_listener_y,
             4, 0
@@ -1401,15 +1325,12 @@ check_audio:
 }
 
 /* ================================================================== */
-/* ResourceData_Dtor                                                   */
+/* ResourceData_Dtor — compiler-generated vtable slot                  */
 /* Address: 0x447B60                                                   */
 /* ================================================================== */
-void* __thiscall ResourceData_Dtor(void* self, uint8_t flags)
-{
-    *(void***)self = (void**)VTBL_RESDATA;
-    RESMGR_RemoveResource((RESDATA*)self);
-    return self;
-}
+/* The original slot is emitted by the MSVC destructor machinery. The
+ * user cleanup is performed by RESMGR_RemoveResource below; no free
+ * function or literal vtable write is needed in the C++ reconstruction. */
 
 /* ================================================================== */
 /* RESMGR_ResourceData_Init                                            */
@@ -1418,70 +1339,71 @@ void* __thiscall ResourceData_Dtor(void* self, uint8_t flags)
 void RESMGR_ResourceData_Init(RESDATA* resdata)
 {
     /* Save/load fields accessed via offset (not in the sprite-metadata RESDATA layout) */
-    *(void**)((uint8_t*)resdata + 0x1C4) = NULL;   /* pixels          */
-    *(void**)((uint8_t*)resdata + 0x1C8) = NULL;   /* primary_stream  */
-    *(void**)((uint8_t*)resdata + 0x1CC) = NULL;   /* secondary_stream*/
-    *(void**)((uint8_t*)resdata + 0x1D0) = NULL;   /* asset_data      */
-    *(int32_t*)((uint8_t*)resdata + 0x1D4) = 0;    /* asset_size      */
-    *(uint16_t*)((uint8_t*)resdata + 0xB0) = 0;    /* resource_type   */
-    *(uint16_t*)((uint8_t*)resdata + 0xB2) = 0;    /* height          */
-    *(uint16_t*)((uint8_t*)resdata + 0xB4) = 0;    /* width           */
+    field_at<void*>(resdata, 0x1C4) = nullptr;   /* pixels          */
+    field_at<void*>(resdata, 0x1C8) = nullptr;   /* primary_stream  */
+    field_at<void*>(resdata, 0x1CC) = nullptr;   /* secondary_stream*/
+    field_at<void*>(resdata, 0x1D0) = nullptr;   /* asset_data      */
+    field_at<int32_t>(resdata, 0x1D4) = 0;       /* asset_size      */
+    field_at<uint16_t>(resdata, 0xB0) = 0;       /* resource_type   */
+    field_at<uint16_t>(resdata, 0xB2) = 0;       /* height          */
+    field_at<uint16_t>(resdata, 0xB4) = 0;       /* width           */
+}
+
+/** SoundObject::SoundObject — compiler-managed construction body
+ * Address: 0x448F30 */
+SoundObject::SoundObject(int32_t text_length, void* town, RESDATA* resource,
+                         void* font_handle, uint16_t flags)
+    : TrackPiece(town, resource, flags),
+      consume_state(0),
+      _pad_59{0, 0, 0},
+      max_text_len(text_length),
+      text_buf(static_cast<char*>(operator_new(text_length + 1))),
+      font(font_handle)
+{
+    if (text_buf != nullptr) {
+        strcpy(text_buf, "");
+    }
+}
+
+/** SoundObject::~SoundObject — compiler-managed destructor body
+ * Address: 0x448FE0 */
+SoundObject::~SoundObject()
+{
+    if (text_buf != nullptr) {
+        GLOBAL_free(text_buf);
+        text_buf = nullptr;
+    }
 }
 
 /* ================================================================== */
-/* RESMGR_SoundObject_Ctor                                             */
+/* RESMGR_SoundObject_Ctor — ABI bridge to SoundObject::SoundObject    */
 /* Address: 0x448F30                                                   */
 /* ================================================================== */
 void* RESMGR_SoundObject_Ctor(void* self, int32_t strLen, int32_t param2,
                                int32_t param3, void* font, uint16_t param5)
 {
-    TrackPiece_Ctor(self, param2, param3, param5);
-    ((SoundObject*)self)->max_text_len = strLen;
-    *(void***)self = (void**)VTBL_SOUND_OBJECT;
-    ((SoundObject*)self)->type = 8;
-    char* textBuf = (char*)operator_new(strLen + 1);
-    ((SoundObject*)self)->text_buf = textBuf;
-    if (textBuf != NULL) strcpy(textBuf, "");
-    ((SoundObject*)self)->consume_state = 0;
-    ((SoundObject*)self)->font = font;
-    return self;
+    return ::new (self) SoundObject(
+        strLen, pointer_from_handle<void>(param2),
+        pointer_from_handle<RESDATA>(param3), font, param5);
 }
 
-/* ================================================================== */
-/* RESMGR_SoundObject_Dtor                                             */
-/* Address: 0x448FE0                                                   */
-/* ================================================================== */
-void* RESMGR_SoundObject_Dtor(void* self, uint8_t flags)
-{
-    RESDATA_SoundObject_BaseDtor(self);
-    return self;
-}
-
-/* ================================================================== */
-/* RESDATA_SoundObject_BaseDtor                                        */
-/* ================================================================== */
-void __fastcall RESDATA_SoundObject_BaseDtor(void* self)
-{
-    *(void***)self = (void**)VTBL_SOUND_OBJECT;
-    if (((SoundObject*)self)->text_buf != NULL) {
-        GLOBAL_free(((SoundObject*)self)->text_buf);
-        ((SoundObject*)self)->text_buf = NULL;
-    }
-    TrackPiece_Dtor(self);
-}
+/* The original scalar-deleting destructor at 0x448FE0 is emitted by
+ * SoundObject::~SoundObject; no flag-bearing free-function wrapper is
+ * reimplemented. */
 
 /* ================================================================== */
 /* RESDATA_SoundObject_Init                                            */
 /* ================================================================== */
 void* __thiscall RESDATA_SoundObject_Init(void* self, const char* source)
 {
-    char* textBuf = ((SoundObject*)self)->text_buf;
-    int32_t maxLen = ((SoundObject*)self)->max_text_len;
+    SoundObject* sound_object = static_cast<SoundObject*>(self);
+    char* textBuf = sound_object->text_buf;
+    int32_t maxLen = sound_object->max_text_len;
     if (textBuf && maxLen > 0 && source) {
         strncpy(textBuf, source, maxLen - 1);
-    return self;
         textBuf[maxLen - 1] = '\0';
     }
+    return self;
 }
 
 /* ================================================================== */
@@ -1489,7 +1411,7 @@ void* __thiscall RESDATA_SoundObject_Init(void* self, const char* source)
 /* ================================================================== */
 void* __fastcall RESDATA_SoundObject_GetState(void* self)
 {
-    return ((SoundObject*)self)->text_buf;
+    return static_cast<SoundObject*>(self)->text_buf;
 }
 
 /* ================================================================== */
@@ -1497,6 +1419,6 @@ void* __fastcall RESDATA_SoundObject_GetState(void* self)
 /* ================================================================== */
 int32_t __fastcall RESDATA_SoundObject_GetTextLength(void* self)
 {
-    const char* textBuf = ((SoundObject*)self)->text_buf;
-    return textBuf ? (int32_t)strlen(textBuf) : 0;
+    const char* textBuf = static_cast<SoundObject*>(self)->text_buf;
+    return textBuf ? static_cast<int32_t>(strlen(textBuf)) : 0;
 }

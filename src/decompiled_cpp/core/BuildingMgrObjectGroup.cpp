@@ -23,8 +23,11 @@ ResourceGameObject::ResourceGameObject(int resource_id)
     sub_pos_x = sub_pos_y = 0;
     if (resource == nullptr) return;
 
-    uint8_t maximum = *(uint8_t*)((uint8_t*)resource + 0x522);
-    member_limit = maximum == 0 ? 0 : (uint8_t)(CRT_rand() % maximum + 1);
+    uint8_t maximum = *reinterpret_cast<uint8_t*>(
+        static_cast<uint8_t*>(resource) + 0x522);
+    member_limit = maximum == 0
+        ? 0
+        : static_cast<uint8_t>(CRT_rand() % maximum + 1);
     created_count = 0;
     group_flag = 0;
     for (int i = 0; i < 5; ++i) {
@@ -34,12 +37,14 @@ ResourceGameObject::ResourceGameObject(int resource_id)
     field_b8 = field_bc = 0;
     group_active = 1;
 
-    const char* resource_name = (const char*)((uint8_t*)resource + 0x14d);
+    const char* resource_name = reinterpret_cast<const char*>(
+        static_cast<uint8_t*>(resource) + 0x14d);
     if (*resource_name != '\0') SetName(resource_name);
 
-    FrameData* frames = *(FrameData**)((uint8_t*)resource + 0x20);
+    FrameData* frames = *reinterpret_cast<FrameData**>(
+        static_cast<uint8_t*>(resource) + 0x20);
     if (frames[anim_index].wait_time >= 0)
-        timer = (uint32_t)(CRT_rand() % 0x3d) + g_game_time;
+        timer = static_cast<uint32_t>(CRT_rand() % 0x3d) + g_game_time;
 
     for (int i = 0; i < 8; ++i) {
         fields_c4_e0[i] = 0;
@@ -79,45 +84,54 @@ void ResourceGameObject::Draw(RECT clip, int enable_scroll, uint32_t flags)
 Building* ResourceGameObject::CreateMember(uint32_t resource_id)
 {
     if (initialized != 1 || member_limit == 0 ||
-        (uint32_t)(g_building_mgr.building_count +
-                   g_building_mgr.secondary_count) >= 100) return nullptr;
+        static_cast<uint32_t>(g_building_mgr.building_count +
+                              g_building_mgr.secondary_count) >= 100) return nullptr;
 
     int slot = 0;
     while (slot < member_limit && member_objects[slot] != nullptr) ++slot;
     if (slot >= member_limit || slot >= 5) return nullptr;
 
     if (resource_id < 1) {
-        uint16_t* choices = (uint16_t*)((uint8_t*)resource + 0x524);
+        uint16_t* choices = reinterpret_cast<uint16_t*>(
+            static_cast<uint8_t*>(resource) + 0x524);
         resource_id = choices[CRT_rand() % 5];
     }
     void* member_resource = ResourceManager_GetById(g_resmgr, resource_id);
     if (member_resource == nullptr) return nullptr;
 
-    uint8_t kind = *(uint8_t*)((uint8_t*)member_resource + 8);
-    uint16_t references = *(uint16_t*)((uint8_t*)member_resource + 0x158);
-    uint8_t maximum = *(uint8_t*)((uint8_t*)member_resource + 0x16b);
+    uint8_t kind = *reinterpret_cast<uint8_t*>(
+        static_cast<uint8_t*>(member_resource) + 8);
+    uint16_t references = *reinterpret_cast<uint16_t*>(
+        static_cast<uint8_t*>(member_resource) + 0x158);
+    uint8_t maximum = *reinterpret_cast<uint8_t*>(
+        static_cast<uint8_t*>(member_resource) + 0x16b);
     bool building_kind = kind == 7;
     bool train_kind = GetResourceType(resource_id) == 8;
     if ((!building_kind && !train_kind) || references >= maximum) return nullptr;
 
     int x = world_x;
     int y = world_y;
-    RECT bounds = *(RECT*)((uint8_t*)resource + 0x61c);
+    RECT bounds = *reinterpret_cast<RECT*>(
+        static_cast<uint8_t*>(resource) + 0x61c);
     if (!g_IsRectEmpty(&bounds)) {
         g_OffsetRect(&bounds, screen_rect.left, screen_rect.top);
-        int width = *(uint16_t*)((uint8_t*)member_resource + 0x14);
-        int height = *(uint16_t*)((uint8_t*)member_resource + 0x16);
+        int width = *reinterpret_cast<uint16_t*>(
+            static_cast<uint8_t*>(member_resource) + 0x14);
+        int height = *reinterpret_cast<uint16_t*>(
+            static_cast<uint8_t*>(member_resource) + 0x16);
         int x_range = bounds.right - bounds.left - width + 1;
         int y_range = bounds.bottom - bounds.top - height + 1;
         x = x_range > 0 ? bounds.left + CRT_rand() % x_range : bounds.right - width;
         y = y_range > 0 ? bounds.top + CRT_rand() % y_range : bounds.top;
     } else if (building_kind) {
-        x -= *(int16_t*)((uint8_t*)member_resource + 0x32);
-        y -= *(int16_t*)((uint8_t*)member_resource + 0x34);
+        x -= *reinterpret_cast<int16_t*>(
+            static_cast<uint8_t*>(member_resource) + 0x32);
+        y -= *reinterpret_cast<int16_t*>(
+            static_cast<uint8_t*>(member_resource) + 0x34);
     }
 
     Building* member = g_building_mgr.CreateFromResource(
-        (int)resource_id, slot, x, y);
+        static_cast<int>(resource_id), slot, x, y);
     member_objects[slot] = member;
     if (member != nullptr) {
         if (!Building_CheckPlacement(member, world_x, world_y)) {
@@ -148,14 +162,17 @@ bool ResourceGameObject::IsMemberActionActive()
 void ResourceGameObject::UpdateScheduledAnimation()
 {
     if (initialized != 1) return;
-    int16_t scheduled_anim = *(int16_t*)((uint8_t*)resource + 0x530);
+    int16_t scheduled_anim = *reinterpret_cast<int16_t*>(
+        static_cast<uint8_t*>(resource) + 0x530);
     if (scheduled_anim == -1) return;
     tm* now = CRT_localtime(&g_game_time);
     bool in_range = Game_CheckTimeInRange(
-        (int*)now, (int*)((uint8_t*)resource + 0x534),
-        (int*)((uint8_t*)resource + 0x548)) != 0;
+        reinterpret_cast<int*>(now),
+        reinterpret_cast<int*>(static_cast<uint8_t*>(resource) + 0x534),
+        reinterpret_cast<int*>(static_cast<uint8_t*>(resource) + 0x548)) != 0;
     if (!in_range && anim_index != scheduled_anim)
-        SetAnimState(scheduled_anim);
+        SetAnimState(static_cast<int>(scheduled_anim));
     else if (in_range && anim_index == scheduled_anim)
-        SetAnimState(*(int16_t*)((uint8_t*)resource + 0x1e));
+        SetAnimState(static_cast<int>(*reinterpret_cast<int16_t*>(
+            static_cast<uint8_t*>(resource) + 0x1e)));
 }

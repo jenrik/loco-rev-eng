@@ -35,6 +35,37 @@ extern uint16_t g_game_difficulty;  // 0x4aa288
 extern void* g_ddraw_building;      // 0x4a9ef0
 
 namespace {
+
+struct ResourceFactoryFields {
+    uint8_t prefix_00_3f[0x40];
+    int32_t dependency_id;
+    int32_t exclusion_id;
+    uint8_t prefix_48_157[0x110];
+    uint16_t enabled;
+};
+
+struct BuildingParentFields {
+    uint8_t prefix_00_03[4];
+    int32_t resource_id;
+    uint8_t type;
+    uint8_t prefix_09_0f[7];
+    void* surface;
+    uint8_t prefix_18_169[0x152];
+    uint8_t z_limit;
+    uint8_t prefix_16b[1];
+    uint8_t removable;
+};
+
+static const ResourceFactoryFields* resource_factory_fields(const void* resource)
+{
+    return reinterpret_cast<const ResourceFactoryFields*>(resource);
+}
+
+static const BuildingParentFields* building_parent_fields(const Entity* parent)
+{
+    return reinterpret_cast<const BuildingParentFields*>(parent);
+}
+
 void add_to_collection(BuildingCollection& collection, Building* object)
 {
     if (collection.count == collection.capacity) {
@@ -55,7 +86,7 @@ int find_in_collection(const BuildingCollection& collection, const Building* obj
 void* entity_surface(const Building* object)
 {
     return object->parent == nullptr
-        ? nullptr : *(void**)((uint8_t*)object->parent + 0x10);
+        ? nullptr : building_parent_fields(object->parent)->surface;
 }
 
 int collection_occupancy(BuildingCollection& collection, const RECT& clip,
@@ -97,16 +128,17 @@ Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
     /* The binary assumes this primary lookup succeeds. */
     if (resource == nullptr) return nullptr;
 
-    int dependency_id = *(int*)((uint8_t*)resource + 0x40);
+    const ResourceFactoryFields* resource_fields = resource_factory_fields(resource);
+    int dependency_id = resource_fields->dependency_id;
     void* dependency = ResourceManager_GetById(g_resmgr, dependency_id);
     if (dependency_id != -1 &&
-        (dependency == nullptr || *(uint16_t*)((uint8_t*)dependency + 0x158) == 0))
+        (dependency == nullptr || resource_factory_fields(dependency)->enabled == 0))
         return nullptr;
 
-    int exclusion_id = *(int*)((uint8_t*)resource + 0x44);
+    int exclusion_id = resource_fields->exclusion_id;
     void* exclusion = ResourceManager_GetById(g_resmgr, exclusion_id);
-    if (exclusion != nullptr &&
-        *(uint16_t*)((uint8_t*)exclusion + 0x158) != 0) return nullptr;
+    if (exclusion != nullptr && resource_factory_fields(exclusion)->enabled != 0)
+        return nullptr;
 
     Building* object = nullptr;
     uint8_t type = GetResourceType(resource_id);
@@ -124,7 +156,7 @@ Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
         return nullptr;
     }
 
-    object->occupant_a = (void*)(intptr_t)owner_slot;               // +0x8c
+    object->occupant_a = reinterpret_cast<Entity*>(static_cast<intptr_t>(owner_slot)); // +0x8c
     object->MoveTo(world_x, world_y);                               // vtable [3]
     if (type == 7) {
         add_to_collection(buildings, object);                       // +0x4c
@@ -143,7 +175,7 @@ void BuildingMgr::RemoveEmpty()
     for (uint32_t i = 0; i < buildings.GetCount(); ++i) {
         Building* object = buildings.GetItem(i);
         if (object != nullptr && object->occupant_b == nullptr &&
-            *(uint8_t*)((uint8_t*)object->parent + 0x16c) != 0) {
+            building_parent_fields(object->parent)->removable != 0) {
             RemoveObject(object, false);
         }
     }
@@ -153,7 +185,7 @@ void BuildingMgr::RemoveEmpty()
 void BuildingMgr::RemoveObject(Building* object, bool show_message)
 {
     if (object == nullptr || object->parent == nullptr) return;
-    uint8_t type = *(uint8_t*)((uint8_t*)object->parent + 8);
+    uint8_t type = building_parent_fields(object->parent)->type;
     BuildingCollection* collection;
     BuildingCollectionLock* lock;
     int32_t* managed_count;
@@ -211,7 +243,7 @@ int BuildingMgr::BlitOverlaps(int left, int top, int right, int bottom,
     RECT clip = {left, top, right, bottom};
     if (target == nullptr) return InvalidateRects(clip);
 
-    uint8_t z_limit = *(uint8_t*)((uint8_t*)target->parent + 0x16a);
+    uint8_t z_limit = building_parent_fields(target->parent)->z_limit;
     auto local_intersection = [&](Building* object, RECT& object_local,
                                   RECT& target_local) {
         if (object == nullptr || object == target || object->visible == 0) return false;
@@ -259,14 +291,17 @@ void BuildingMgr::HandleClick(void* command, int left, int top,
 {
     if (command == nullptr) return;
     RECT hit = {left, top, right, bottom};
-    int filter = **(int**)((uint8_t*)command + 8);
-    int action = *(int*)((uint8_t*)command + 0x14);
-    int16_t argument = *(int16_t*)((uint8_t*)command + 0x18);
-    uint32_t delay = *(uint32_t*)((uint8_t*)command + 0x1c);
+    const uint8_t* command_bytes = static_cast<const uint8_t*>(command);
+    const int* const* filter_ref =
+        reinterpret_cast<const int* const*>(command_bytes + 8);
+    const int filter = **filter_ref;
+    const int action = *reinterpret_cast<const int*>(command_bytes + 0x14);
+    const int16_t argument = *reinterpret_cast<const int16_t*>(command_bytes + 0x18);
+    const uint32_t delay = *reinterpret_cast<const uint32_t*>(command_bytes + 0x1c);
     for (uint32_t i = 0; i < buildings.GetCount(); ++i) {
         Building* object = buildings.GetItem(i);
         if (object == nullptr) continue;
-        int resource_id = *(int*)((uint8_t*)object->parent + 4);
+        int resource_id = building_parent_fields(object->parent)->resource_id;
         if ((filter != -1 && filter != resource_id) ||
             !g_PtInRect(&hit, object->screen_rect.left,
                         object->screen_rect.top) ||
@@ -280,7 +315,7 @@ void BuildingMgr::HandleClick(void* command, int left, int top,
             if (object->initialized == 1)
                 object->field_68 = delay + g_game_time;
             else
-                object->InitBase((int)object->field_64, -1, false);
+                object->InitBase(static_cast<int>(object->field_64), -1, false);
         }
         if (!g_is_town_mode &&
             !(g_ddraw_active == 1 && g_game_difficulty == 3)) {

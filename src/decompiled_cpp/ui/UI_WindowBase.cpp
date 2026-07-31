@@ -69,6 +69,19 @@ extern int   g_cursor_refcount;  /* 0x4FD3D0 */
 extern void __stdcall UI_DefWndProc(HWND hWnd, UINT msg, void* wParam, void* lParam);
 /* 0x422EA0 — just calls DefWindowProcA */
 
+namespace {
+using ChildReleaseFunction = void (__fastcall *)(void*);
+
+/* The three child slots are heterogeneous binary UI objects, but their
+ * recovered cleanup path uses the common vtable slot 2. */
+void release_child_object(void* object)
+{
+    ChildReleaseFunction* vtable =
+        *reinterpret_cast<ChildReleaseFunction**>(object);
+    vtable[2](object);
+}
+}
+
 /* ================================================================== */
 /* UI_WindowBase Constructor                                           */
 /* Address: 0x425870                                                    */
@@ -150,24 +163,21 @@ void UI_WindowBase::base_destructor()
     /* Release child sub-object pairs via vtable[2] */
     if (this->childCount0 != 0) {                        /* +0x60 */
         void* obj = this->childObj0;                     /* +0x64 */
-        void** vtab = *(void***)obj;
-        ((void (__fastcall*)(void*))(vtab[2]))(obj);
+        release_child_object(obj);
         this->childObj0   = NULL;                        /* +0x64 */
         this->childCount0 = 0;                           /* +0x60 */
     }
 
     if (this->childCount1 != 0) {                        /* +0x68 */
         void* obj = this->childObj1;                     /* +0x6C */
-        void** vtab = *(void***)obj;
-        ((void (__fastcall*)(void*))(vtab[2]))(obj);
+        release_child_object(obj);
         this->childObj1   = NULL;                        /* +0x6C */
         this->childCount1 = 0;                           /* +0x68 */
     }
 
     if (this->childObj2 != NULL) {                       /* +0x74 */
         void* obj = this->childObj2;
-        void** vtab = *(void***)obj;
-        ((void (__fastcall*)(void*))(vtab[2]))(obj);
+        release_child_object(obj);
         this->childObj2    = NULL;                       /* +0x74 */
         this->childCount2  = 0;                          /* +0x70 */
     }
@@ -176,8 +186,7 @@ void UI_WindowBase::base_destructor()
     if (this->cursorRefCount != 0) {                     /* +0x48 */
         g_cursor_refcount--;
         if (g_cursor_refcount == 0 && g_cursor_back != NULL) {
-            void** vtab = *(void***)g_cursor_back;
-            ((void (__fastcall*)(void*))(vtab[2]))(g_cursor_back);
+            release_child_object(g_cursor_back);
             g_cursor_back    = NULL;
             g_cursor_refcount = 0;
         }
@@ -219,7 +228,8 @@ void UI_WindowBase::hide()
 /* ================================================================== */
 void UI_WindowBase::show()
 {
-    this->timerId = (UINT_PTR)SetTimer(this->hWnd, 0x43, 120, NULL);
+    this->timerId = reinterpret_cast<UINT_PTR>(
+        SetTimer(this->hWnd, 0x43, 120, NULL));
 
     this->captureFlag = 0;                  /* +0x3C */
 
@@ -449,7 +459,8 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
         DWORD err = GetLastError();
         if (err != 0) {
             char* buf;
-            FormatMessageA(0x1100, NULL, err, 0x400, (char*)&buf, 0, NULL);
+            FormatMessageA(0x1100, NULL, err, 0x400,
+                           reinterpret_cast<char*>(&buf), 0, NULL);
             LocalFree(buf);
         }
     }
@@ -472,7 +483,8 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     if (self->hWnd == NULL) {
         DWORD err = GetLastError();
         char* buf;
-        FormatMessageA(0x1100, NULL, err, 0x400, (char*)&buf, 0, NULL);
+        FormatMessageA(0x1100, NULL, err, 0x400,
+                       reinterpret_cast<char*>(&buf), 0, NULL);
         LocalFree(buf);
         return 0;
     }

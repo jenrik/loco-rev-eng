@@ -225,7 +225,19 @@ main()
 
 - [x] **EditWindow inherited virtual dispatch** — Ghidra-defined and decompiled `UI_WindowBase::set_mode` (0x425FD0), `set_render_surface` (0x426020), and `on_async_task_failure` (0x426130); replaced all EditWindow self-vtable calls with typed virtual methods.
 
+### Compiler flag cleanup (2026-08-01)
+
+- [x] **Three-tier compiler flag system** — Root and decompiled Makefiles now define Tier 1 default, Tier 2 (`STRICT=1`), and Tier 3 (`STRICT=2`) audits; native Linux calling-convention macros preserve 32-bit Windows ABI annotations while expanding safely on non-x86 hosts. Added isolated `diagnostic-census` targets.
+- [x] **Tier 1 build recovery** — Removed compiler-detected raw vtable/destructor, class-memaccess, pointer-cast, and initialization anti-patterns across enabled source; `make` and `make check` now compile/link all 134 enabled translation units.
+- [x] **High-risk cleanup audit/remediation** — Ghidra-verified typed construction for `TrainMessage`, `NetworkPlayerList`, `TrackPiece`, and `SoundObject`; recovered the `DPlayManager::EnumerateSessions` static fastcall factory; and replaced reviewed GameView/resource/DirectDraw vtable dispatch with typed/ABI-correct adapters.
+
 ## Remaining work
+
+### Compiler flag Tier 2/3 closure
+
+- [ ] **Tier 2 (`STRICT=1`)** — Fresh forced census: 11/134 translation units fail (75 zero-as-null-pointer and 23 cast-qual diagnostics), concentrated in legacy game/network/native/shim files.
+- [ ] **Tier 3 (`STRICT=2`)** — Fresh forced census: 50/134 translation units fail (4,562 old-style-cast, 852 missing-declarations, plus inherited Tier-2 diagnostics). Prioritize `Train_network.cpp`, `Town.cpp`, `Vehicle.cpp`, `World.cpp`, `DirectPlay.cpp`, `scriptengine.cpp`, `EditorState.cpp`, and shared generated stubs; native C sources need a separate C++ migration plan.
+- [ ] **Strict regression gate** — Make Tier 2/3 forced clean builds and the full test layer green after archive test data is available; current `make test` stops because `lego-loco-unpacked/art-res/resource.RFH` is absent.
 
 ### Autonomous reverse-engineering daemon
 
@@ -373,6 +385,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-08-01 (compiler-flags-tier3-cleanup) | Added portable three-tier warning enforcement and isolated forced-build census targets; cleaned all 134 default-enabled translation units to `make`/`make check` success, then Ghidra-remediated TrainMessage/NetworkPlayerList construction, fastcall factory ABI, and raw vtable/COM dispatch findings. Forced audit leaves Tier 2 at 11 failing units and Tier 3 at 50; `make test` is environment-blocked by absent `art-res/resource.RFH`. |
 | 2026-07-31 (sdl-net-netman-cleanup) | Removed temporary cast scripts and reverted their unrelated build-breaking output; recovered Netman 0x440070/0x440310/0x440390/0x440820, added exact compact-slot converters 0x4426D0/0x442750/0x4427D0, replaced widened 0x3F1 offset access with typed fields, and eliminated all remaining Netman decompile stubs; clean 134-object `make check`, `make test`, and all 11 isolated-Wayland flows pass. |
 | 2026-07-31 (sdl-net-in-memory-route-clone) | Removed the duplicate 0x43E900 resolver, replaced host PostBag `.crd` lookup with typed DPlayManager cloning, migrated SendSignalChange to native Vehicle ownership, preserved the session-tail marker, recovered 0x4408B0/0x440A50 and host 0x440A80 behavior, and proved a two-editor route clone enters loading as list depth 2; `make check`, `make test`, and all 11 isolated-Wayland flows pass. |
 | 2026-07-31 (sdl-net-asset-consumer-handoff) | Typed Netman inbound/game-start editor access, recovered VehicleEditor resource IDs, connected DPlayManager asset keys to replace-on-key `0x3EE` ownership with request fallback, and proved a real adopted Vehicle survives recovered multiplayer Go into loading mode; `make check`, `make test`, and all 11 isolated-Wayland flows pass. |
@@ -481,5 +494,6 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 | 2026-07-25 (decomp2) | Decompiled Game_CheckTimeInRange (0x412710), BuildingMgr_CompactCollections (0x434870), Entity::GetBoundingRect (0x4583C0). Unblocked 11 files from broken list (Train, ScriptedObject, Panel, TrackPiece, UIPANEL, UIPANEL_Surface, EditWindow, UI_WindowBase, Netman, Netman_ReceiveSignalChange, Cursor_new_impls). 77→66 C++ files compile. |
 | 2026-07-25 | Fixed binutils 2.46 incompatibility: old --defsym used demangled names with parentheses (rejected by new ld). Switched to mangled names from nm -u. Generated 926-entry defsym.args. Binary links clean. |
 | 2026-07-30 (64bit-cast-cleanup) | Fixed all -Werror=int-to-pointer-cast and -Werror=pointer-arith errors across 25 files (17 C++, 8 C). Used (uintptr_t) intermediates for int↔pointer casts and (uint8_t*) for void* arithmetic. 0 errors, all component tests pass. |
+| 2026-07-31 (ui-cast-warning-gate) | UI translation units now pass the STRICT old-style-cast diagnostic gate. |
 
-[Showing lines 1-447 of 466 (50.0KB limit). Use offset=448 to continue.]
+[Showing lines 1-447 of 466 (50.0KB limit). Use offset=448 to continue.]| 2026-07-31 (main-merge) | Merged the current local `main` into `feature/compiler-flags-tier1-3` (merge commit 7a28372); no conflicts. |

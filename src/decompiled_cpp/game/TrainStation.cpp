@@ -205,7 +205,7 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
     /* Copy bmp filename into window+0x48 buffer */
     /* The buffer at +0x48 holds the .bmp filename for later use */
     {
-        char* dst = (char*)window + 0x48;
+        char* dst = reinterpret_cast<char*>(window) + 0x48;
         const char* src = bmp_filename;
         while (*src) { *dst++ = *src++; }
         *dst = '\0';
@@ -218,23 +218,26 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
         file_data = AssetMgr_LoadFile(g_asset_mgr, dat_path, &file_size);
         if (file_data != nullptr) {
             /* Create sub-stream from the loaded data */
-            mem_stream = (void*)operator_new(0x5C);  /* 92-byte stream object */
+            mem_stream = operator_new(0x5C);  /* 92-byte stream object */
             if (mem_stream != nullptr) {
                 render_result = WNDPROC_StreamFromMemory(
-                    mem_stream, (char*)file_data, file_size, 1);
+                    mem_stream, static_cast<char*>(file_data), file_size, 1);
             } else {
                 render_result = nullptr;
             }
 
             if (render_result != nullptr) {
                 /* Named implementation of UI_ChildWindow's virtual render slot. */
-                uint8_t render_ok = (uint8_t)UI_ChildWindow_Render(window, render_result);
+                uint8_t render_ok = static_cast<uint8_t>(
+                    UI_ChildWindow_Render(window, render_result));
 
                 window->sprites_loaded = render_ok;
 
                 /* Release the memory stream */
-                void** stream_vt = *(void***)render_result;
-                ((void(__thiscall*)(int))stream_vt[0])(1);  /* dtor with free */
+                void** stream_vt = *reinterpret_cast<void***>(render_result);
+                using StreamDestructor = void (__thiscall*)(int);
+                StreamDestructor destroy = reinterpret_cast<StreamDestructor>(stream_vt[0]);
+                destroy(1);  /* dtor with free */
             }
 
             CRT_free(file_data);
@@ -248,11 +251,15 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
         WIN32_StreamOpenPath(stream_handle, path_buffer, 0x20, 0x479190);
 
         /* Check if stream has data (offset +0x4C in stream object) */
-        int stream_data_available = *(int*)((uintptr_t)(
-            *(int*)((uint8_t*)stream_handle + stream_handle[1])) + 0x4C);
+        const uint8_t* stream_bytes = reinterpret_cast<const uint8_t*>(stream_handle);
+        const int stream_data_offset = *reinterpret_cast<const int*>(
+            stream_bytes + stream_handle[1]);
+        int stream_data_available = *reinterpret_cast<const int*>(
+            reinterpret_cast<const uint8_t*>(
+                static_cast<uintptr_t>(static_cast<uint32_t>(stream_data_offset))) + 0x4C);
         if (stream_data_available != -1) {
-            uint8_t render_ok = (uint8_t)UI_ChildWindow_Render(
-                window, (void*)stream_handle);
+            uint8_t render_ok = static_cast<uint8_t>(UI_ChildWindow_Render(
+                window, stream_handle));
 
             window->sprites_loaded = render_ok;
             WIN32_StreamDestroyImmediate(stream_handle);
@@ -260,17 +267,20 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
     }
 
     /* Step 4c: Reset road connection offsets for sub-window entries */
-    sub_window_count = *(int16_t*)((uint8_t*)window + 0x1A);
+    sub_window_count = *reinterpret_cast<const int16_t*>(
+        reinterpret_cast<const uint8_t*>(window) + 0x1A);
     for (i = 0; i < sub_window_count; i++) {
         if (i >= 4) break;  /* only process first 4 entries */
 
         /* Each sub-window entry is at [window+0x20+8 + n*0x18]:
            +0x00..+0x07: header/type
            +0x08: offset_x (int32) — clear when > 0 */
-        void* entry = *(void**)((uint8_t*)window + 0x20);
+        void* entry = *reinterpret_cast<void* const*>(
+            reinterpret_cast<const uint8_t*>(window) + 0x20);
         if (entry == nullptr) break;
 
-        int* offset_x = (int*)((uint8_t*)entry + 8 + i * 0x18);
+        int* offset_x = reinterpret_cast<int*>(
+            static_cast<uint8_t*>(entry) + 8 + i * 0x18);
         if (*offset_x > 0) {
             *offset_x = 0;
             window->sprites_loaded = 0;  /* re-mark as needing refresh */
@@ -281,11 +291,13 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
     for (i = 0; i < sub_window_count; i++) {
         if (i >= 8) break;  /* only process first 8 entries */
 
-        void* entry = *(void**)((uint8_t*)window + 0x20);
+        void* entry = *reinterpret_cast<void* const*>(
+            reinterpret_cast<const uint8_t*>(window) + 0x20);
         if (entry == nullptr) break;
 
         /* Frame ID at [entry + 0x0C + n*0x18] */
-        int16_t* frame_id = (int16_t*)((uint8_t*)entry + 0x0C + i * 0x18);
+        int16_t* frame_id = reinterpret_cast<int16_t*>(
+            static_cast<uint8_t*>(entry) + 0x0C + i * 0x18);
         int16_t current_id = *frame_id;
 
         if (current_id != i && current_id != -1) {
@@ -294,8 +306,10 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
     }
 
     /* Step 4e: Set default road offset if none configured */
-    int16_t* road_offset_x = (int16_t*)((uint8_t*)window + 0x32);
-    int16_t* road_offset_y = (int16_t*)((uint8_t*)window + 0x34);
+    int16_t* road_offset_x = reinterpret_cast<int16_t*>(
+        reinterpret_cast<uint8_t*>(window) + 0x32);
+    int16_t* road_offset_y = reinterpret_cast<int16_t*>(
+        reinterpret_cast<uint8_t*>(window) + 0x34);
 
     if (*road_offset_x == 0 && *road_offset_y == 0) {
         *road_offset_x = 0;   /* no horizontal offset */
@@ -337,7 +351,7 @@ TrainStation_OnMouseMove(TrainStation* window, int32_t param1, int32_t param2)
     uint32_t string_id = window->sound_string_id;  /* +0x174 */
     if (string_id != 0) {
         void* res_handle = ResourceManager_GetStringById(&g_resmgr, string_id);  /* 0x4472B0 */
-        if (res_handle != 0) {
+        if (res_handle != nullptr) {
             RESMGR_LoadSoundResource(res_handle);  /* 0x448D60 */
         }
     }
@@ -368,7 +382,7 @@ TrainStation_OnMouseLeave(TrainStation* window)
     uint32_t string_id = window->sound_string_id;  /* +0x174 */
     if (string_id != 0) {
         void* res_handle = ResourceManager_GetStringById(&g_resmgr, string_id);  /* 0x4472B0 */
-        if (res_handle != 0) {
+        if (res_handle != nullptr) {
             RESMGR_ReleaseSoundResource(res_handle);  /* 0x448EE0 */
         }
     }

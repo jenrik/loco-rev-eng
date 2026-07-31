@@ -17,6 +17,12 @@
 #include "../shared/types.h"
 #include <cstring>
 
+/* Public declarations used by the recovered C ABI callers. */
+extern "C" int Config_GetIniInt(void*, const char*, const char*, int);
+extern "C" int Config_GetIniString(void*, const char*, const char*, const char*, char*, int);
+extern "C" int Config_WriteInt(void*, const char*, const char*, int);
+extern "C" int Config_ReadInt(void*, const char*, const char*, const char*);
+
 /* ================================================================== */
 /* Config object layout:                                                */
 /*   +0x04: const char* - INI file path                                */

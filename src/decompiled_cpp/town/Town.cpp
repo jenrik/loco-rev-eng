@@ -29,7 +29,7 @@
 extern "C" {
     /* CRT memory */
     void*  operator_new(size_t size);               /* 0x465CE0 — operator new */
-    void   GLOBAL_free(void* ptr);                   /* global free */
+    void   GLOBAL_free(const void* ptr);             /* global free */
 
     /* Resource management */
     void*  ResourceManager_GetById(void* resmgr, int id);           /* 0x44CB40 */
@@ -251,14 +251,14 @@ Town::Town(HINSTANCE hInstance, UINT resId)
 void Town::base_ctor()
 {
     /* Zero all Town-specific state fields */
-    this->icon_handle = 0;               /* +0x5F4 */
+    this->icon_handle = nullptr;         /* +0x5F4 */
     this->postcard_active = 0;           /* +0x5F8 */
     this->sprites_initialized = 0;       /* +0x5F9 */
     this->overlay_initialized = 0;       /* +0x5FA */
     this->timer_active = 0;              /* +0x5FC */
     this->frame_counter = 0;             /* +0x600 */
-    this->selected_player = 0;           /* +0x608 */
-    this->postcard_data = 0;             /* +0x60C */
+    this->selected_player = nullptr;    /* +0x608 */
+    this->postcard_data = nullptr;       /* +0x60C */
     this->player_count_flag = 1;         /* +0x610 (default to 1) */
     this->timer_counter = 0;             /* +0x5F0 */
     this->net_update_flag = 0;           /* +0x604 */
@@ -271,32 +271,32 @@ void Town::base_ctor()
     /* Button sprites 1-4 : res 0x3CF0, 0x3CF1, 0x3CF2, 0x3CF3       */
     void* obj;
     obj = operator_new(0x24);
-    this->sprite_btn_close = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF0) : 0;
+    this->sprite_btn_close = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF0) : nullptr;
 
     obj = operator_new(0x24);
-    this->sprite_btn_options = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF1) : 0;
+    this->sprite_btn_options = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF1) : nullptr;
 
     obj = operator_new(0x24);
-    this->sprite_btn_rotate = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF2) : 0;
+    this->sprite_btn_rotate = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF2) : nullptr;
 
     obj = operator_new(0x24);
-    this->sprite_btn_save = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF3) : 0;
+    this->sprite_btn_save = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF3) : nullptr;
 
     /* Inbox preview sprite : res 0x3CAC                              */
     obj = operator_new(0x24);
-    this->sprite_inbox = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CAC) : 0;
+    this->sprite_inbox = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CAC) : nullptr;
 
     /* Inbox counter sprite : res 0x3CF5                              */
     obj = operator_new(0x24);
-    this->sprite_inbox_counter = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF5) : 0;
+    this->sprite_inbox_counter = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF5) : nullptr;
 
     /* Outbox counter sprite : res 0x3CF6                             */
     obj = operator_new(0x24);
-    this->sprite_outbox_counter = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF6) : 0;
+    this->sprite_outbox_counter = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF6) : nullptr;
 
     /* Send button sprite : res 0x3CF9                                */
     obj = operator_new(0x24);
-    this->sprite_send = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF9) : 0;
+    this->sprite_send = (obj) ? RESDATA_CreateSpriteObject(obj, 0x3CF9) : nullptr;
 
     /* Initialize sprite state look-up tables                          */
     this->inbox_state_lut[0] = 0;
@@ -384,42 +384,42 @@ void Town::destroy()
     if (this->sprite_btn_close) {
         ((void (*)(void*, int))(*(void***)this->sprite_btn_close)[0])(
             this->sprite_btn_close, 1);
-        this->sprite_btn_close = 0;
+        this->sprite_btn_close = nullptr;
     }
     if (this->sprite_btn_options) {
         ((void (*)(void*, int))(*(void***)this->sprite_btn_options)[0])(
             this->sprite_btn_options, 1);
-        this->sprite_btn_options = 0;
+        this->sprite_btn_options = nullptr;
     }
     if (this->sprite_btn_rotate) {
         ((void (*)(void*, int))(*(void***)this->sprite_btn_rotate)[0])(
             this->sprite_btn_rotate, 1);
-        this->sprite_btn_rotate = 0;
+        this->sprite_btn_rotate = nullptr;
     }
     if (this->sprite_btn_save) {
         ((void (*)(void*, int))(*(void***)this->sprite_btn_save)[0])(
             this->sprite_btn_save, 1);
-        this->sprite_btn_save = 0;
+        this->sprite_btn_save = nullptr;
     }
     if (this->sprite_inbox) {
         ((void (*)(void*, int))(*(void***)this->sprite_inbox)[0])(
             this->sprite_inbox, 1);
-        this->sprite_inbox = 0;
+        this->sprite_inbox = nullptr;
     }
     if (this->sprite_outbox_counter) {
         ((void (*)(void*, int))(*(void***)this->sprite_outbox_counter)[0])(
             this->sprite_outbox_counter, 1);
-        this->sprite_outbox_counter = 0;
+        this->sprite_outbox_counter = nullptr;
     }
     if (this->sprite_inbox_counter) {
         ((void (*)(void*, int))(*(void***)this->sprite_inbox_counter)[0])(
             this->sprite_inbox_counter, 1);
-        this->sprite_inbox_counter = 0;
+        this->sprite_inbox_counter = nullptr;
     }
     if (this->sprite_send) {
         ((void (*)(void*, int))(*(void***)this->sprite_send)[0])(
             this->sprite_send, 1);
-        this->sprite_send = 0;
+        this->sprite_send = nullptr;
     }
 
     /* Call base class destructor                                       */
@@ -466,7 +466,7 @@ char Town::handle_tile_click()
     /* Create valid-placement indicator sprite (res 0x3807)             */
     /* Stored at +0x170 (cursor_valid_sprite) and +0xD8 (cursor_valid_dup) */
     void* res = ResourceManager_GetById(g_resmgr, 0x3807);
-    if (res && UI_IsBitmapReady((int)res)) {
+    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
         void* sprite = RESDATA_CreateChildSprite(this, res, 0, 0);
         this->cursor_valid_sprite = sprite;          /* +0x170 */
         this->cursor_valid_dup = sprite;             /* +0xD8 */
@@ -475,7 +475,7 @@ char Town::handle_tile_click()
     /* Create invalid-placement indicator sprite (res 0x3808)           */
     /* Stored at +0x174 (cursor_invalid_sprite) and +0xDC (cursor_invalid_dup) */
     res = ResourceManager_GetById(g_resmgr, 0x3808);
-    if (res && UI_IsBitmapReady((int)res)) {
+    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
         void* sprite = RESDATA_CreateChildSprite(this, res, 0, 0);
         this->cursor_invalid_sprite = sprite;        /* +0x174 */
         this->cursor_invalid_dup = sprite;           /* +0xDC */
@@ -484,7 +484,7 @@ char Town::handle_tile_click()
     /* Create hover/empty cursor sprite (res 0x3806)                    */
     /* Stored at +0x178 — overloads track_piece field                    */
     res = ResourceManager_GetById(g_resmgr, 0x3806);
-    if (res && UI_IsBitmapReady((int)res)) {
+    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
         this->track_piece = RESDATA_CreateChildSprite(this, res, 0, 0); /* +0x178 */
     }
 
@@ -498,7 +498,7 @@ char Town::handle_tile_click()
         if (loaded) {
             /* Create overlay UIPANEL surface for placement feedback   */
             void* surface_obj = operator_new(0x20);
-            this->overlay_panel = surface_obj ? UIPANEL_CreateSurface(surface_obj) : 0; /* +0x17C */
+            this->overlay_panel = surface_obj ? UIPANEL_CreateSurface(surface_obj) : nullptr; /* +0x17C */
 
             if (this->overlay_panel) {
                 void* pgfx = *(void**)(*(intptr_t*)this->panel_graphics + 0x10); /* +0x124 */
@@ -524,12 +524,12 @@ char Town::handle_tile_click()
 /* ================================================================== */
 bool Town::is_valid_placement(void* entity)
 {
-    if (entity == 0 || *(char*)((intptr_t)entity + 0x18) != 1) {
+    if (entity == nullptr || *(char*)((intptr_t)entity + 0x18) != 1) {
         return false;
     }
 
     uint8_t tile_type = 0;
-    if (*(void**)((intptr_t)entity + 0x40) != 0) {
+    if (*(void**)((intptr_t)entity + 0x40) != nullptr) {
         tile_type = *(uint8_t*)(*(intptr_t*)((intptr_t)entity + 0x40) + 8);
     }
 
@@ -562,7 +562,7 @@ bool Town::is_valid_placement(void* entity)
     /* Tile type 0x0C = large ID tiles (ID > 0x300F)                  */
     if (tile_type == 0x0C) {
         int id = -1;
-        if (*(void**)((intptr_t)entity + 0x40) != 0) {
+        if (*(void**)((intptr_t)entity + 0x40) != nullptr) {
             id = *(int*)(*(intptr_t*)((intptr_t)entity + 0x40) + 4);
         }
         if (id > 0x300F) {
@@ -581,13 +581,13 @@ bool Town::is_valid_placement(void* entity)
 /* ================================================================== */
 byte Town::select_building(void* building)
 {
-    if (building != 0 && g_game_mode == 3) {
+    if (building != nullptr && g_game_mode == 3) {
         bool valid = Town::is_valid_placement(building);
         if (valid && g_demo_mode != 1) {
             this->selection_active = 1;                         /* +0x88 */
 
             uint16_t tile_type = 0;
-            if (*(void**)((intptr_t)building + 0x40) != 0) {
+            if (*(void**)((intptr_t)building + 0x40) != nullptr) {
                 tile_type = *(uint8_t*)(*(intptr_t*)((intptr_t)building + 0x40) + 8);
             }
             this->selected_building_type = tile_type;            /* +0x16C */
@@ -712,7 +712,7 @@ void Town::track_building()
 
     if (this->selected_building_type == 6 &&                      /* +0x16C */
         !*(char*)((intptr_t)this->selected_building + 0x24)) {
-        this->select_building(0);
+        this->select_building(nullptr);
     }
 
     void* building = this->selected_building;                      /* +0xE0 */
@@ -730,7 +730,7 @@ void Town::track_building()
         this->building_center_y = cy;                              /* +0x194 */
     }
 
-    for (void* child = this->children_list; child != 0;            /* +0xD0 */
+    for (void* child = this->children_list; child != nullptr;      /* +0xD0 */
          child = *(void**)((intptr_t)child + 0x28)) {
         ((void (*)(void*, void*))(*(void***)this)[0x14])(this, child);
     }
@@ -813,7 +813,7 @@ uint8_t Town::check_occupied_ex(int x1, int y1, int x2, int y2)
     uint8_t result = 0;
 
     if (g_surface_lost == 0) {
-        int* ddsd = &DAT_004fd19c;
+        uint32_t* ddsd = &DAT_004fd19c;
         for (int i = 0x1f; i != 0; i--) {
             *ddsd++ = 0;
         }
@@ -992,7 +992,7 @@ void Town::postcard_init_list()
     this->postcard_update_ui(8);
 
     this->clear_postcard_ui();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 
     SetFocus(this->hWnd);
 
@@ -1065,19 +1065,19 @@ void Town::postcard_update_ui(int action_id)
 
     switch (action_id) {
     case 2:
-        Sprite_SetState(this->sprite_btn_close, 0, 0);
+        Sprite_SetState(this->sprite_btn_close, 0, nullptr);
         return;
 
     case 3:
-        Sprite_SetState(this->sprite_btn_options, 0, 0);
+        Sprite_SetState(this->sprite_btn_options, 0, nullptr);
         return;
 
     case 4:
-        Sprite_SetState(this->sprite_btn_rotate, 0, 0);
+        Sprite_SetState(this->sprite_btn_rotate, 0, nullptr);
         return;
 
     case 5:
-        Sprite_SetState(this->sprite_btn_save, 0, 0);
+        Sprite_SetState(this->sprite_btn_save, 0, nullptr);
         return;
 
     case 6:
@@ -1118,7 +1118,7 @@ void Town::postcard_update_ui(int action_id)
             }
 
             if (msg_count != 0) {
-                Sprite_SetState(this->sprite_inbox, 0, 0);
+                Sprite_SetState(this->sprite_inbox, 0, nullptr);
                 return;
             }
         }
@@ -1146,7 +1146,7 @@ void Town::postcard_update_ui(int action_id)
 
             int lut_idx = (msg_count < 5) ? msg_count : 4;
             Sprite_SetState(this->sprite_inbox_counter,
-                            this->inbox_state_lut[lut_idx], 0);
+                            this->inbox_state_lut[lut_idx], nullptr);
         }
         return;
 
@@ -1155,12 +1155,12 @@ void Town::postcard_update_ui(int action_id)
             int msg_count = (int)DPLAY_GetMessageCount(g_dplay);
             int lut_idx = (msg_count < 5) ? msg_count : 4;
             Sprite_SetState(this->sprite_outbox_counter,
-                            this->outbox_state_lut[lut_idx], 0);
+                            this->outbox_state_lut[lut_idx], nullptr);
         }
         return;
 
     case 9:
-        Sprite_SetState(this->sprite_send, 0, 0);
+        Sprite_SetState(this->sprite_send, 0, nullptr);
         return;
     }
 }
@@ -1178,22 +1178,22 @@ void Town::postcard_dlg_proc(int action_id)
     switch (action_id) {
     case 2:
         RESMGR_PlaySound(0x5015);
-        Sprite_SetState(this->sprite_btn_close, 1, 0);
+        Sprite_SetState(this->sprite_btn_close, 1, nullptr);
         return;
 
     case 3:
         RESMGR_PlaySound(0x5015);
-        Sprite_SetState(this->sprite_btn_options, 1, 0);
+        Sprite_SetState(this->sprite_btn_options, 1, nullptr);
         return;
 
     case 4:
         RESMGR_PlaySound(0x5015);
-        Sprite_SetState(this->sprite_btn_rotate, 1, 0);
+        Sprite_SetState(this->sprite_btn_rotate, 1, nullptr);
         return;
 
     case 5:
         RESMGR_PlaySound(0x5015);
-        Sprite_SetState(this->sprite_btn_save, 1, 0);
+        Sprite_SetState(this->sprite_btn_save, 1, nullptr);
         return;
 
     case 6:
@@ -1212,7 +1212,7 @@ void Town::postcard_dlg_proc(int action_id)
                 *(int32_t*)(uintptr_t)(sprite + 0xC) + this->postcard_origin_x,
                 *(uint32_t*)(uintptr_t)(sprite + 0x10) + this->postcard_origin_y,
                 1);
-            Sprite_SetState(this->sprite_inbox, 1, 0);
+            Sprite_SetState(this->sprite_inbox, 1, nullptr);
         }
         return;
 
@@ -1239,7 +1239,7 @@ void Town::postcard_dlg_proc(int action_id)
 
             int lut_idx = (msg_count < 5) ? msg_count : 4;
             Sprite_SetState(this->sprite_inbox_counter,
-                            this->inbox_state_lut[lut_idx] + 1, 0);
+                            this->inbox_state_lut[lut_idx] + 1, nullptr);
         }
         return;
 
@@ -1248,12 +1248,12 @@ void Town::postcard_dlg_proc(int action_id)
             int msg_count = (int)DPLAY_GetMessageCount(g_dplay);
             int lut_idx = (msg_count < 5) ? msg_count : 4;
             Sprite_SetState(this->sprite_outbox_counter,
-                            this->outbox_state_lut[lut_idx], 0);
+                            this->outbox_state_lut[lut_idx], nullptr);
         }
         return;
 
     case 9:
-        Sprite_SetState(this->sprite_send, 1, 0);
+        Sprite_SetState(this->sprite_send, 1, nullptr);
         return;
     }
 }
@@ -1338,11 +1338,11 @@ void Town::hit_test(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         this->repaint_requested = 0;
         this->frame_counter = 0;
         this->postcard_update_buttons();
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
     } else if (this->frame_counter > 19) {
         this->repaint_requested = 1;
         this->postcard_update_buttons();
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
     }
 
     if (this->timer_counter != 0) {                              /* +0x5F0 */
@@ -1377,7 +1377,7 @@ char Town::postcard_click_handler(int x, int y)
 /* ================================================================== */
 int Town::postcard_command_handler(void* control, uint32_t wParam, uint32_t lParam)
 {
-    if (control == 0 || *(char*)((intptr_t)control + 0x56) == 0) {
+    if (control == nullptr || *(char*)((intptr_t)control + 0x56) == 0) {
         return 0;
     }
 
@@ -1401,7 +1401,7 @@ int Town::postcard_command_handler(void* control, uint32_t wParam, uint32_t lPar
             DDRAW_SelectBuilding(&g_ddraw_building, this->selected_building);
             return 1;
         }
-        DDRAW_SelectBuilding(&g_ddraw_building, 0);
+        DDRAW_SelectBuilding(&g_ddraw_building, nullptr);
         return 1;
     } else if (res_id == 0x3808) {
         timer_val = *(short*)((uint8_t*)control + 0x48);
@@ -1420,7 +1420,7 @@ int Town::postcard_command_handler(void* control, uint32_t wParam, uint32_t lPar
 /* ================================================================== */
 byte Town::send_postcard(void* track_piece)
 {
-    if (track_piece == 0) {
+    if (track_piece == nullptr) {
         return 0;
     }
 
@@ -1437,8 +1437,8 @@ byte Town::send_postcard(void* track_piece)
 
             void* world = *(void**)((intptr_t)this->selected_building + 0x44C);
             if (world) {
-                this->select_building(0);
-                DDRAW_SelectBuilding(&g_ddraw_building, 0);
+                this->select_building(nullptr);
+                DDRAW_SelectBuilding(&g_ddraw_building, nullptr);
             }
         }
     } else if (res_id == 0x3807) {
@@ -1457,7 +1457,7 @@ byte Town::send_postcard(void* track_piece)
         if (*(short*)((intptr_t)track_piece + 0x54) == 0 &&
             *(short*)((intptr_t)track_piece + 0x48) == 2) {
             CGWND_TrackPiece_SetZoom(track_piece, 1);
-            this->select_building(0);
+            this->select_building(nullptr);
             return 1;
         }
     }
@@ -1549,8 +1549,8 @@ void Town::init_postcard_ui()
     if (this->selected_player) {
         ((void (*)(void*, int))(*(void***)this->selected_player)[0])(
             this->selected_player, 1);
-        this->selected_player = 0;
-        this->postcard_data = 0;
+        this->selected_player = nullptr;
+        this->postcard_data = nullptr;
     }
 
     if (this->sprites_initialized) {
@@ -1678,7 +1678,7 @@ int32_t Town::postcard_draw_preview(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
     if (this->postcard_active && !this->flag_E8 && !this->audio_playing) {
         if (wParam == 0x1B || wParam == 0x51) {   /* ESC or Q */
             this->postcard_dlg_proc(2);
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
             Sleep(0x96);
             RESMGR_PlaySound(0x5015);
 
@@ -1712,14 +1712,14 @@ void Town::upload_postcard()
             HANDLE hFile = CreateFileA(hostname,
                                        0x40000000,
                                        1,
-                                       0,
+                                       nullptr,
                                        2,
                                        0x8000000,
-                                       0);
+                                       nullptr);
             if (hFile != (HANDLE)-1) {
                 DWORD written;
                 WriteFile(hFile, (void*)((intptr_t)this->selected_player + 4),
-                          0x398, &written, 0);
+                          0x398, &written, nullptr);
                 CloseHandle(hFile);
             }
         }
@@ -1727,7 +1727,7 @@ void Town::upload_postcard()
             ((void (*)(void*, int))(*(void***)addr)[0])(addr, 1);
         }
         const char* next = *(const char**)((intptr_t)hostname + 0x504);
-        GLOBAL_free((void*)hostname);
+        GLOBAL_free(hostname);
         hostname = next;
     }
 }
@@ -1756,7 +1756,7 @@ void Town::receive_postcard()
             ((void (*)(void*, int))(*(void***)addr)[0])(addr, 1);
         }
         const char* next = *(const char**)((intptr_t)hostname + 0x504);
-        GLOBAL_free((void*)hostname);
+        GLOBAL_free(hostname);
         hostname = next;
     }
 
@@ -1770,7 +1770,7 @@ void Town::receive_postcard()
         ((void (*)(void*, int))(*(void***)this->selected_player)[0])(
             this->selected_player, 1);
     }
-    this->selected_player = 0;
+    this->selected_player = nullptr;
 
     this->list_postcards();
 
@@ -1780,7 +1780,7 @@ void Town::receive_postcard()
         while (p) {
             const char* next = *(const char**)((intptr_t)p + 0x504);
             count++;
-            GLOBAL_free((void*)p);
+            GLOBAL_free(p);
             p = next;
         }
         this->has_remote_players = (count > 0) ? 1 : 0;
@@ -1808,13 +1808,13 @@ void Town::list_postcards()
         const char* p = first_hostname;
         while (p) {
             const char* next = *(const char**)((intptr_t)p + 0x504);
-            GLOBAL_free((void*)p);
+            GLOBAL_free(p);
             p = next;
         }
         return;
     }
 
-    void* next_player = 0;
+    void* next_player = nullptr;
     const char* p = first_hostname;
     while (p) {
         void* addr = NET_ResolveAddress(p);
@@ -1831,7 +1831,7 @@ void Town::list_postcards()
             ((void (*)(void*, int))(*(void***)addr)[0])(addr, 1);
         }
         const char* next = *(const char**)((intptr_t)p + 0x504);
-        GLOBAL_free((void*)p);
+        GLOBAL_free(p);
         p = next;
     }
 
@@ -1876,7 +1876,7 @@ void Town::save_postcard()
             ((void (*)(void*, int))(*(void***)addr)[0])(addr, 1);
         }
         const char* next = *(const char**)((intptr_t)hostname + 0x504);
-        GLOBAL_free((void*)hostname);
+        GLOBAL_free(hostname);
         hostname = next;
     }
 
@@ -1886,7 +1886,7 @@ void Town::save_postcard()
         ((void (*)(void*, int))(*(void***)this->selected_player)[0])(
             this->selected_player, 1);
     }
-    this->selected_player = 0;
+    this->selected_player = nullptr;
 
     this->list_postcards();
 
@@ -1896,7 +1896,7 @@ void Town::save_postcard()
         while (p) {
             const char* next = *(const char**)((intptr_t)p + 0x504);
             count++;
-            GLOBAL_free((void*)p);
+            GLOBAL_free(p);
             p = next;
         }
         this->has_remote_players = (count > 0) ? 1 : 0;
@@ -1927,7 +1927,7 @@ void Town::load_postcard()
             ((void (*)(void*, int))(*(void***)addr)[0])(addr, 1);
         }
         const char* next = *(const char**)((intptr_t)hostname + 0x504);
-        GLOBAL_free((void*)hostname);
+        GLOBAL_free(hostname);
         hostname = next;
     }
 
@@ -1937,7 +1937,7 @@ void Town::load_postcard()
         ((void (*)(void*, int))(*(void***)this->selected_player)[0])(
             this->selected_player, 1);
     }
-    this->selected_player = 0;
+    this->selected_player = nullptr;
 
     this->list_postcards();
 
@@ -1947,7 +1947,7 @@ void Town::load_postcard()
         while (p) {
             const char* next = *(const char**)((intptr_t)p + 0x504);
             count++;
-            GLOBAL_free((void*)p);
+            GLOBAL_free(p);
             p = next;
         }
         this->has_remote_players = (count > 0) ? 1 : 0;
@@ -1979,13 +1979,13 @@ void Town::delete_postcard()
                 ((void (*)(void*, int))(*(void***)this->selected_player)[0])(
                     this->selected_player, 1);
             }
-            this->selected_player = 0;
+            this->selected_player = nullptr;
         }
         if (addr) {
             ((void (*)(void*, int))(*(void***)addr)[0])(addr, 1);
         }
         const char* next = *(const char**)((intptr_t)hostname + 0x504);
-        GLOBAL_free((void*)hostname);
+        GLOBAL_free(hostname);
         hostname = next;
     }
 
@@ -1995,7 +1995,7 @@ void Town::delete_postcard()
         while (p) {
             const char* next = *(const char**)((intptr_t)p + 0x504);
             count++;
-            GLOBAL_free((void*)p);
+            GLOBAL_free(p);
             p = next;
         }
         this->has_remote_players = (count > 0) ? 1 : 0;
@@ -2153,7 +2153,7 @@ void Town::save_received_postcard(uint32_t player_id)
         *(uint16_t*)((intptr_t)this->selected_player + 0x3A) = 0;
 
         this->clear_postcard_ui();
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
         return;
     }
 
@@ -2176,7 +2176,7 @@ void Town::save_received_postcard(uint32_t player_id)
 
         *(uint16_t*)((intptr_t)this->selected_player + 0x3A) = 0;
         this->clear_postcard_ui();
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
         return;
     }
 
@@ -2265,7 +2265,7 @@ void Town::save_received_postcard(uint32_t player_id)
 
     /* Step 8: Clean up postcard UI                                     */
     this->clear_postcard_ui();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 }
 
 /* ================================================================== */
@@ -2349,7 +2349,7 @@ uint8_t Town::init_tile_cache(
     uint16_t* pal        = *(uint16_t**)((intptr_t)this + 0x14);   /* +0x14 */
 
     /* Guard: must have pixel data and palette */
-    if (src_pixels == 0 || pal == 0) {
+    if (src_pixels == nullptr || pal == nullptr) {
         return 0;
     }
 
@@ -2416,7 +2416,7 @@ uint8_t Town::draw_tile(
     uint16_t* palette    = *(uint16_t**)((intptr_t)this + 0x14);   /* +0x14 */
 
     /* Guard: must have pixel data and palette */
-    if (src_pixels == 0 || palette == 0) {
+    if (src_pixels == nullptr || palette == nullptr) {
         return 0;
     }
 

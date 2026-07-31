@@ -15,9 +15,17 @@ struct TrainMessage {
 #ifndef _WIN32
     // Pointer widening moves flags to +0x14 on the host. Preserve the
     // original packed metadata in distinct native fields.
-    uint8_t host_metadata_0 = 0;
-    uint8_t host_metadata_1 = 0;
+    uint8_t host_metadata_0;
+    uint8_t host_metadata_1;
 #endif
+
+    TrainMessage()
+        : type(0), data_len(0), data_ptr(nullptr), target_dpId(0), flags(0),
+          _pad_14(0), next(nullptr)
+#ifndef _WIN32
+          , host_metadata_0(0), host_metadata_1(0)
+#endif
+    {}
 
     uint8_t metadata0() const {
 #ifdef _WIN32

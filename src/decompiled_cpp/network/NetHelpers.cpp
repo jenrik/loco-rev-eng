@@ -20,9 +20,8 @@
  *    - Uses SEH for protection
  *    - Calls ResourceManager_Shutdown (0x446340) on the pool
  *    - Frees sub-object at +0x18 via DDRAW_FileData_Dtor (0x45CA20)
- * 4. NET_Unlock (0x445FC0, __thiscall, vtable slot[0]) is called:
- *    - Calls NET_Shutdown
- *    - Optionally frees memory via GLOBAL_free
+ * 4. The compiler-generated deleting destructor wrapper at 0x445FC0
+ *    calls the user destructor, which invokes NET_Shutdown.
  */
 
 #include "NetHelpers.h"
@@ -42,16 +41,13 @@ void __fastcall DDRAW_FileData_Dtor(void* ptr);
    __fastcall: ECX = ResourceManager pointer (this PoolAllocator pointer is passed). */
 void __fastcall ResourceManager_Shutdown(int32_t param_1);
 
-/* CRT / Heap */
-void __cdecl GLOBAL_free(void* ptr);       /* 0x465CD0 */
-
 /* SEH helpers (inline) */
 extern void* CRT_exception_handler;        /* 0x475F8B — __except handler */
 
 /* ================================================================== */
 /* NET_Lock — 0x445F70                                                 */
 /*                                                                     */
-/* __fastcall (ECX = this). Initializes the pool allocator:            */
+/* Initializes the pool allocator:
 /* 1. Zeros the sub-object at +0x18 (DDRAW_FreeClipper)                */
 /* 2. Selects post-initialization dispatch table 0x478270             */
 /* 3. Clears flags array (0x4001 dwords at +0x10030)                  */
@@ -60,7 +56,7 @@ extern void* CRT_exception_handler;        /* 0x475F8B — __except handler */
 /*                                                                     */
 /* Called by: GameLoop_FrameUpdate (0x45C565)                          */
 /* ================================================================== */
-void* __fastcall PoolAllocator::Lock()
+void* PoolAllocator::Lock()
 {
     /* Step 1: Initialize sub-object at +0x18 */
     /* DDRAW_FreeClipper(ptr) zeros 4 dwords at ptr */
@@ -85,7 +81,8 @@ void* __fastcall PoolAllocator::Lock()
     {
         int32_t i;
         for (i = 0; i < 0x4000; i++) {
-            freelist[i] = (int32_t)(uintptr_t)(&freelist[i] + 0x4001);
+            freelist[i] = static_cast<int32_t>(
+                reinterpret_cast<uintptr_t>(&freelist[i] + 0x4001));
         }
     }
 
@@ -99,26 +96,20 @@ void* __fastcall PoolAllocator::Lock()
 }
 
 /* ================================================================== */
-/* NET_Unlock — 0x445FC0                                               */
+/* PoolAllocator::~PoolAllocator — 0x445FC0                         */
 /*                                                                     */
-/* __thiscall (ECX = this, stack param: flags byte).                   */
-/* Scalar deleting destructor (virtual slot [0], table 0x478270).      */
-/* Calls NET_Shutdown then frees memory if flags & 1.                  */
+/* Destructor body for virtual slot [0]. The compiler-generated        */
+/* deleting wrapper owns heap release.                                 */
 /* ================================================================== */
-void* __thiscall PoolAllocator::Unlock(uint8_t flags)
+PoolAllocator::~PoolAllocator()
 {
     this->Shutdown();
-    if ((flags & 1) != 0) {
-        GLOBAL_free(this);
-        return NULL;
-    }
-    return this;
 }
 
 /* ================================================================== */
 /* NET_Shutdown — 0x445FE0                                             */
 /*                                                                     */
-/* __fastcall (ECX = this). Clean up the pool allocator:               */
+/* Clean up the pool allocator:
 /* 1. Restore post-init dispatch table 0x478270 (binary unwind detail) */
 /* 2. Call ResourceManager_Shutdown (0x446340)                         */
 /* 3. Free sub-object at +0x18 (DDRAW_FileData_Dtor, 0x45CA20)        */
@@ -126,7 +117,7 @@ void* __thiscall PoolAllocator::Unlock(uint8_t flags)
 /* Uses SEH (__try/__except) for exception safety. The exception       */
 /* handler pattern matches MSVC's standard SEH prologue/epilogue.      */
 /* ================================================================== */
-void __fastcall PoolAllocator::Shutdown()
+void PoolAllocator::Shutdown()
 {
     /* MSVC SEH setup: save FS:[0] (ExceptionList), set new handler */
     /* The exception handler at 0x475F8B catches all exceptions */
@@ -142,7 +133,8 @@ void __fastcall PoolAllocator::Shutdown()
          * ResourceManager_Shutdown is __fastcall (ECX = param_1).
          * It stops audio, frees all resources, releases DDRAW surfaces,
          * destroys audio, and deletes 5 GDI font objects. */
-        ResourceManager_Shutdown((int32_t)this);
+        ResourceManager_Shutdown(static_cast<int32_t>(
+            reinterpret_cast<intptr_t>(this)));
 
         /* Free sub-object at +0x18 */
         try_level = -1;

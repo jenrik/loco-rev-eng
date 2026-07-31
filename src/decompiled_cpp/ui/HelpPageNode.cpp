@@ -14,6 +14,13 @@
 /* External references                                                  */
 /* ================================================================== */
 
+namespace {
+struct DestinationNode32 {
+    void* vehicle;
+    uint32_t next;
+};
+}
+
     extern void* __cdecl operator_new(size_t size);         /* 0x465CE0 */
     extern void  __cdecl GLOBAL_free(void* ptr);            /* 0x465CD0 */
 
@@ -77,8 +84,11 @@ HelpPageNode::~HelpPageNode()
      * Each node is { Vehicle* vehicle; DestNode* next; }. */
     int next = this->dest_list_head;
     while (next != 0) {
-        int tmp = *(int*)((uintptr_t)next + 4);    /* next->next */
-        GLOBAL_free((void*)(uintptr_t)next);
+        const auto* node = reinterpret_cast<const DestinationNode32*>(
+            static_cast<uintptr_t>(static_cast<uint32_t>(next)));
+        int tmp = static_cast<int32_t>(node->next);    /* next->next */
+        GLOBAL_free(reinterpret_cast<void*>(
+            static_cast<uintptr_t>(static_cast<uint32_t>(next))));
         next = tmp;
     }
 
@@ -101,13 +111,17 @@ void HelpPageNode::Update()
         this->update_flag = 1;
 
         /* Pop first node from list */
-        void* vehicle = *(void**)(uintptr_t)pageData;           /* node->vehicle */
-        this->dest_list_head = *(int*)((uintptr_t)pageData + 4); /* node->next */
-        GLOBAL_free((void*)(uintptr_t)pageData);
+        const auto* node = reinterpret_cast<const DestinationNode32*>(
+            static_cast<uintptr_t>(static_cast<uint32_t>(pageData)));
+        void* vehicle = node->vehicle;                         /* node->vehicle */
+        this->dest_list_head = static_cast<int32_t>(node->next); /* node->next */
+        GLOBAL_free(reinterpret_cast<void*>(
+            static_cast<uintptr_t>(static_cast<uint32_t>(pageData))));
 
         /* Load sounds and set vehicle state */
-        Vehicle_LoadSounds(vehicle, (int*)this, 0);
+        Vehicle_LoadSounds(vehicle, reinterpret_cast<int*>(this), 0);
         Vehicle_SetState(vehicle, 2);
-        *(int*)((uintptr_t)vehicle + 0x60) = 4;      /* action_state = 4 */
+        *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(vehicle) + 0x60) = 4;
+                                                                  /* action_state = 4 */
     }
 }

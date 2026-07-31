@@ -71,16 +71,16 @@ extern int32_t DAT_004aad38;         /* 0x4AAD38 — world center Y            *
 /*   +0x3C: tooltipDuration (int32)                                    */
 /*   +0x168: variantField (byte, type-8 specific)                      */
 /* ================================================================== */
-#define RES_type(p)         (*((uint8_t*)(p) + 0x08))
-#define RES_childCount(p)   (*((int32_t*)((intptr_t)(p) + 0x0C)))
-#define RES_frameWidth(p)   (*((uint16_t*)((intptr_t)(p) + 0x14)))
-#define RES_frameHeight(p)  (*((uint16_t*)((intptr_t)(p) + 0x16)))
-#define RES_frameTable(p)   (*((void**)((intptr_t)(p) + 0x20)))
-#define RES_offsetX(p)      (*((int16_t*)((intptr_t)(p) + 0x32)))
-#define RES_offsetY(p)      (*((int16_t*)((intptr_t)(p) + 0x34)))
-#define RES_tooltipX(p)     (*((int32_t*)((intptr_t)(p) + 0x38)))
-#define RES_tooltipDur(p)   (*((int32_t*)((intptr_t)(p) + 0x3C)))
-#define RES_variant(p)      (*((uint8_t*)((intptr_t)(p) + 0x168)))
+#define RES_type(p)         (*reinterpret_cast<const uint8_t*>(reinterpret_cast<const uint8_t*>(p) + 0x08))
+#define RES_childCount(p)   (*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(p) + 0x0C))
+#define RES_frameWidth(p)   (static_cast<const RESDATA*>(p)->frame_width)
+#define RES_frameHeight(p)  (static_cast<const RESDATA*>(p)->frame_height)
+#define RES_frameTable(p)   (static_cast<const RESDATA*>(p)->anim_table)
+#define RES_offsetX(p)      (static_cast<const RESDATA*>(p)->offset_x)
+#define RES_offsetY(p)      (static_cast<const RESDATA*>(p)->offset_y)
+#define RES_tooltipX(p)     (*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(p) + 0x38))
+#define RES_tooltipDur(p)   (*reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(p) + 0x3C))
+#define RES_variant(p)      (*reinterpret_cast<const uint8_t*>(reinterpret_cast<const uint8_t*>(p) + 0x168))
 
 /* ================================================================== */
 /* UIEntity::UIEntity — Constructor (vtable 0x477A90)                   */
@@ -110,18 +110,19 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Step 3: Initialize tooltip pointer to NULL, animVariant = 1 */
-    this->pTooltip = 0;                                                    /* +0x98 */
+    this->pTooltip = nullptr;                                             /* +0x98 */
     this->animVariant = 1;                                                 /* +0x94 */
 
     /* Step 4: Convert direction to uppercase and store all params */
-    this->direction = (char)CRT_toupper((int)direction);                   /* +0x88 */
+    this->direction = static_cast<char>(CRT_toupper(static_cast<int>(direction)));
+                                                                            /* +0x88 */
     this->worldX = x;                                                      /* +0x8C */
     this->worldY = y;                                                      /* +0x90 */
     this->field_8A = param2;                                               /* +0x8A */
 
     /* Step 5: If resource exists, process frame data and position */
-    void* res = *(void**)((intptr_t)this + 0x40);  /* resource pointer at GameObject+0x40 */
-    if (res == 0) {
+    void* res = this->resource;  /* resource pointer at Entity+0x40 */
+    if (res == nullptr) {
         return;
     }
 
@@ -130,10 +131,11 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
      * If first frame index == last frame index in the FrameData entry,
      * the sprite is static — set timer to current game time + duration.
      */
-    int frameIdx = *(int*)((intptr_t)this + 0x28);        /* +0x28 = anim_index */
-    FrameData* frameEntry = (FrameData*)RES_frameTable(res) + frameIdx;
+    int frameIdx = this->anim_index;                       /* +0x28 = anim_index */
+    FrameData* frameEntry = RES_frameTable(res) + frameIdx;
     if (frameEntry->start_frame == frameEntry->end_frame) {
-        *(int*)((intptr_t)this + 0x58) = frameEntry->wait_time + g_game_time;  /* +0x58 timer */
+        this->timer = static_cast<uint32_t>(frameEntry->wait_time) + g_game_time;
+                                                                            /* +0x58 timer */
     }
 
     /*
@@ -380,7 +382,7 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
             &g_tooltip_mgr,
             RES_childCount(res),     /* Note: overloaded — child resource ID */
             this->field_8A,
-            *(int*)((intptr_t)this + 8) + tooltipXOff,
-            *(int*)((intptr_t)this + 12) + tooltipYOff);
+            this->screen_rect.left + tooltipXOff,
+            this->screen_rect.top + tooltipYOff);
     }
 }

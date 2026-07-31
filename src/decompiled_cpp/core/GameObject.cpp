@@ -14,6 +14,29 @@
 
 #include "GameObject.h"
 #include "Entity.h"
+#include <cstring>
+
+namespace {
+
+template <typename T>
+T* field_at(void* object, size_t offset)
+{
+    return reinterpret_cast<T*>(static_cast<uint8_t*>(object) + offset);
+}
+
+/* RESDATA's three recovered virtual entries.  The object is a resource
+ * descriptor, not an opaque C pointer: typed dispatch preserves the slot
+ * signatures without reading its vptr in executable code. */
+struct ResourceDataView {
+    virtual void* destroy(uint8_t flags) = 0;        /* slot 0 */
+    virtual void* acquire_surface(int x, int y) = 0;/* slot 1 */
+    virtual void release_surface() = 0;              /* slot 2 */
+
+protected:
+    ~ResourceDataView() = default;
+};
+
+} // namespace
 
 /* ================================================================== */
 /* External function declarations (addresses from Ghidra)              */
@@ -147,17 +170,16 @@ Entity::~Entity()
     if (resource != nullptr) {
         /* If resource has a locked flag at +0x162, invalidate rect
          * and release via resource->vtable[2] */
-        if (*(uint8_t*)((uint8_t*)resource + 0x162) == 1) {
+        if (*field_at<uint8_t>(resource, 0x162) == 1) {
             this->InvalidateRect();
-            /* Call resource's Release() — vtable[2] */
-            void** res_vtbl = *(void***)resource;
-            ((void(*)())res_vtbl[2])();
+            reinterpret_cast<ResourceDataView*>(resource)->release_surface();
         }
         this->resource = nullptr;
     }
 
     /* Release sound resource (+0x44) */
-    void* snd_res = (void*)(uintptr_t)this->sound_res_id;
+    void* snd_res = reinterpret_cast<void*>(
+        static_cast<uintptr_t>(this->sound_res_id));
     if (snd_res != nullptr) {
         this->active_state = 0;
         RESMGR_ReleaseSoundResource(snd_res);
@@ -343,7 +365,7 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
 
     /* Check if we already have the right resource loaded */
     if (resource == nullptr || force_reload ||
-        *(int32_t*)((uint8_t*)resource + 4) != resource_id)
+        *field_at<int32_t>(resource, 4) != resource_id)
     {
         /* Mark not initialized until resource loads */
         this->initialized = 1;  /* still 1 during load attempt */
@@ -353,10 +375,7 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
             /* vtable[1] — invalidate */
             this->InvalidateRect();
 
-            /* resource->vtable[2] — Release() */
-            void** res_vtbl = *(void***)&this->resource;
-            ((void(*)())res_vtbl[2])();
-
+            reinterpret_cast<ResourceDataView*>(this->resource)->release_surface();
             this->resource = nullptr;
         }
 
@@ -373,22 +392,20 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
             return 0;
         }
 
-        /* Lock/get surface via resource vtable[1] */
-        void** res_vtbl = *(void***)&this->resource;
-        int raw_x = this->world_x_raw;
-        int raw_y = this->world_y_raw;
-        ((void(*)(int,int))res_vtbl[1])(raw_x, raw_y);
+        /* Acquire the resource surface through its typed slot 1 method. */
+        reinterpret_cast<ResourceDataView*>(this->resource)->acquire_surface(
+            this->world_x_raw, this->world_y_raw);
 
         /* If no surface data (flags at +0x10 == 0), bail */
         resource = this->resource;
-        if (*(uint32_t*)((uint8_t*)resource + 0x10) == 0) {
+        if (*field_at<uint32_t>(resource, 0x10) == 0) {
             this->initialized = 0;
             return 0;
         }
 
         /* Set screen_rect from resource frame dimensions */
-        uint16_t frame_w = *(uint16_t*)((uint8_t*)resource + 0x14);
-        uint16_t frame_h = *(uint16_t*)((uint8_t*)resource + 0x16);
+        uint16_t frame_w = *field_at<uint16_t>(resource, 0x14);
+        uint16_t frame_h = *field_at<uint16_t>(resource, 0x16);
         SetRect(&this->screen_rect,
                 this->screen_rect.left,
                 this->screen_rect.top,
@@ -404,12 +421,12 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
 
     /* Copy default blit flags from resource (+0x164) */
     resource = this->resource;
-    this->blit_flags = *(uint32_t*)((uint8_t*)resource + 0x164);
+    this->blit_flags = *field_at<uint32_t>(resource, 0x164);
 
     /* If no anim_index specified, use resource's default */
     if (anim_index < 0) {
         resource = this->resource;
-        anim_index = *(int16_t*)((uint8_t*)resource + 0x1E);
+        anim_index = *field_at<int16_t>(resource, 0x1E);
     }
 
     /* Select animation via vtable[14] = SetAnimState */
@@ -454,14 +471,14 @@ int Entity::SetAnimState(int anim_index)
     }
 
     void* resource = this->resource;
-    uint16_t anim_count = *(uint16_t*)((uint8_t*)resource + 0x1A);
+    uint16_t anim_count = *field_at<uint16_t>(resource, 0x1A);
 
     if (anim_index >= 0 && anim_index < anim_count) {
         this->anim_index = anim_index;
 
         /* Get FrameData pointer: resource->anim_table[anim_index] */
-        FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
-                                     + anim_index * sizeof(FrameData));
+        FrameData* fd = *field_at<FrameData*>(resource, 0x20)
+                        + anim_index;
 
         /* Reset phase tracking */
         this->phase_timer = 0;  /* phase_timer */
@@ -506,16 +523,19 @@ void Entity::PlayAnimation(int sound_id)
         this->next_sound_time = 0;  /* next_sound_time = 0 */
 
         /* Load sound resource via ResourceManager */
-        int snd_res = (int)(uintptr_t)ResourceManager_GetById(&g_resmgr, sound_id);
-        this->sound_res_id = snd_res;
+        void* sound_resource = ResourceManager_GetById(&g_resmgr, sound_id);
+        const int snd_res = static_cast<int>(
+            reinterpret_cast<uintptr_t>(sound_resource));
+        this->sound_res_id = static_cast<uint32_t>(snd_res);
 
         /* Validate sound resource: if byte +0x09 != 1, not a valid sound */
-        if (snd_res != 0 && *(uint8_t*)((uintptr_t)snd_res + 9) != 1) {
+        if (sound_resource != nullptr &&
+            *field_at<uint8_t>(sound_resource, 9) != 1) {
             this->sound_res_id = 0;
         }
     }
 
-    int snd_res = (int)this->sound_res_id;
+    int snd_res = static_cast<int>(this->sound_res_id);
 
     /* Accept sound_id == -1 as "no sound" marker */
     if (snd_res != 0 || sound_id == -1) {
@@ -528,8 +548,8 @@ void Entity::PlayAnimation(int sound_id)
     }
 
     /* Get FrameData for current animation */
-    FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
-                                 + this->anim_index * sizeof(FrameData));
+    FrameData* fd = *field_at<FrameData*>(resource, 0x20)
+                    + this->anim_index;
 
     void** audio_ch_ptr = &this->audio_channel;
 
@@ -593,8 +613,8 @@ void Entity::MoveTo(int x, int y)
 
     /* Apply resource offset to get final world position */
     void* resource = this->resource;
-    this->world_x = *(int16_t*)((uint8_t*)resource + 0x32) + x;
-    this->world_y = *(int16_t*)((uint8_t*)resource + 0x34) + y;
+    this->world_x = *field_at<int16_t>(resource, 0x32) + x;
+    this->world_y = *field_at<int16_t>(resource, 0x34) + y;
 
     /* Update audio channel position if active */
     void* audio_ch = this->audio_channel;
@@ -615,8 +635,8 @@ void Entity::Update()
     }
 
     void* resource = this->resource;
-    FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
-                                 + this->anim_index * sizeof(FrameData));
+    FrameData* fd = *field_at<FrameData*>(resource, 0x20)
+                    + this->anim_index;
 
     uint16_t start_frame = fd->start_frame;
     uint16_t end_frame   = fd->end_frame;
@@ -637,7 +657,8 @@ void Entity::Update()
     /* Check if waiting at animation boundary */
     if (waiting == 1) {
         /* fps_limit check: DAT_00481170 vs g_main_window+0x11 */
-        if (_DAT_00481170 < (double)*(uint8_t*)((uint8_t*)g_main_window + 0x11) &&
+        if (_DAT_00481170 < static_cast<double>(
+                *field_at<uint8_t>(g_main_window, 0x11)) &&
             fd->wait_time > 0)
         {
             return;
@@ -649,7 +670,7 @@ void Entity::Update()
     }
 
     int32_t new_frame;
-    uint8_t step_mode = *(uint8_t*)((uint8_t*)fd + 0x17);
+    uint8_t step_mode = *field_at<uint8_t>(fd, 0x17);
 
     if (step_mode == 0) {
         /* Normal step mode: advance by 1 per step_delay ticks */
@@ -658,7 +679,7 @@ void Entity::Update()
 
         if (start_frame < end_frame) {
             /* Forward animation */
-            int step = (int16_t)(phase_timer / fd->step_delay);
+            int step = static_cast<int16_t>(phase_timer / fd->step_delay);
             new_frame = step + start_frame;
 
             if (new_frame > end_frame) {
@@ -667,8 +688,8 @@ void Entity::Update()
             }
         } else {
             /* Reverse animation */
-            int step = (int16_t)(phase_timer / fd->step_delay);
-            new_frame = (int32_t)start_frame - step;
+            int step = static_cast<int16_t>(phase_timer / fd->step_delay);
+            new_frame = static_cast<int32_t>(start_frame) - step;
 
             if (new_frame < end_frame) {
                 waiting = 1;
@@ -681,16 +702,18 @@ void Entity::Update()
         this->phase_timer = phase_timer;
 
         if (start_frame < end_frame) {
-            int16_t step = (int16_t)(phase_timer / fd->step_delay) + start_frame;
-            new_frame = (int32_t)step & ~1;  /* sign-extend, then force even */
+            int16_t step = static_cast<int16_t>(phase_timer / fd->step_delay)
+                         + start_frame;
+            new_frame = static_cast<int32_t>(step) & ~1;  /* sign-extend, then force even */
 
             if (new_frame > end_frame) {
                 waiting = 1;
                 new_frame = end_frame;
             }
         } else {
-            int16_t step = (start_frame - (int16_t)(phase_timer / fd->step_delay)) + 1;
-            new_frame = (int32_t)step & ~1;  /* sign-extend, then force even */
+            int16_t step = start_frame -
+                           static_cast<int16_t>(phase_timer / fd->step_delay) + 1;
+            new_frame = static_cast<int32_t>(step) & ~1;  /* sign-extend, then force even */
 
             if (new_frame < end_frame) {
                 waiting = 1;
@@ -735,7 +758,7 @@ void Entity::SetFrame(int frame_id, bool trigger_invalidate)
     this->frame_index = frame_id;
 
     void* resource = this->resource;
-    uint16_t frame_w = *(uint16_t*)((uint8_t*)resource + 0x14);
+    uint16_t frame_w = *field_at<uint16_t>(resource, 0x14);
 
     /* Compute source rect X offsets from frame index and width */
     this->source_rect.left  = frame_id * frame_w;
@@ -784,7 +807,7 @@ void Entity::CopyName(const char* name)
 {
     /* Validate: first char must be alphanumeric or null */
     if (IsCharAlphaNumericA(*name) || *name == '\0') {
-        _strncpy((char*)this + 0x7C, name, 10);
+        _strncpy(this->name, name, 10);
     }
     this->name[10] = 0;  /* null terminate */
 }
@@ -799,7 +822,7 @@ void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
     void* resource = this->resource;
 
     /* Bail if no surface or not visible */
-    if (*(int*)((uint8_t*)resource + 0x10) == 0 || this->visible != 1) {
+    if (*field_at<int>(resource, 0x10) == 0 || this->visible != 1) {
         return;
     }
 
@@ -811,8 +834,8 @@ void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
     uint32_t flags = extra_flags | this->blit_flags;
 
     /* Check for horizontal flip in FrameData */
-    FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
-                                 + this->anim_index * sizeof(FrameData));
+    FrameData* fd = *field_at<FrameData*>(resource, 0x20)
+                    + this->anim_index;
 
     int src_left, src_top, src_right, src_bottom;
 
@@ -846,7 +869,7 @@ void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
     }
 
     /* Blit via UIPANEL */
-    UIPANEL_Blit(*(void**)((uint8_t*)resource + 0x10),
+    UIPANEL_Blit(*field_at<void*>(resource, 0x10),
                  clipped.left, clipped.top, clipped.right, clipped.bottom,
                  g_primary_surface,
                  src_left, src_top, src_right, src_bottom,
@@ -866,10 +889,10 @@ void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_f
     }
 
     void* resource = this->resource;
-    FrameData* fd = (FrameData*)(*(uint8_t**)((uint8_t*)resource + 0x20)
-                                 + this->anim_index * sizeof(FrameData));
+    FrameData* fd = *field_at<FrameData*>(resource, 0x20)
+                    + this->anim_index;
 
-    if (*(uint8_t*)((uint8_t*)fd + 0x17) == 0) {
+    if (*field_at<uint8_t>(fd, 0x17) == 0) {
         return;
     }
 
@@ -925,7 +948,7 @@ void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_f
     SetRect(&src_rect, src2_left, src2_top, src2_right, src2_bottom);
 
     /* Blit connected tile */
-    UIPANEL_Blit(*(void**)((uint8_t*)resource + 0x10),
+    UIPANEL_Blit(*field_at<void*>(resource, 0x10),
                  clipped.right, clipped.bottom,
                  clipped.left, clipped.top,
                  g_primary_surface,
@@ -955,7 +978,7 @@ BOOL Entity::GetBoundingRect(RECT* out_rect)
 
     SetRectEmpty(out_rect);
 
-    RECT* res_rect = (RECT*)((uint8_t*)resource + 0x61C);
+    RECT* res_rect = field_at<RECT>(resource, 0x61C);
     if (IsRectEmpty(res_rect)) {
         return FALSE;
     }

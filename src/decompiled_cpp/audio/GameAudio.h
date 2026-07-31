@@ -11,7 +11,7 @@
  *
  * Size: 0xB8 bytes (184)
  * Vtable address in loco.exe: 0x477894
- *   [0] scalar deleting destructor (GameAudio_Dtor, 0x412C20)
+ *   [0] compiler-generated deleting-destructor slot wrapping 0x412C20
  *
  * Class hierarchy:
  *   (standalone class, no parent)
@@ -21,9 +21,6 @@
 
 #include "../shared/types.h"
 #include "AudioChannel.h"
-
-/* Forward declaration for SoundResource — defined in resource manager */
-struct SoundResource;
 
 class GameAudio {
 public:
@@ -41,8 +38,8 @@ public:
     uint32_t*   channel_usage;          /* +0x9c  per-channel allocation timestamps */
     int32_t     listener_x;             /* +0xa0  listener world X */
     int32_t     listener_y;             /* +0xa4  listener world Y */
-    void*       ds_device;              /* +0xa8  IDirectSound* */
-    void*       ds_primary;             /* +0xac  IDirectSoundBuffer* (primary) */
+    AudioDirectSoundDevice* ds_device;  /* +0xa8  IDirectSound* */
+    AudioDirectSoundBuffer* ds_primary;  /* +0xac  IDirectSoundBuffer* (primary) */
     int32_t     flags;                  /* +0xb0  flags (set to 0) */
     uint8_t     muted;                  /* +0xb4  mute flag (0=unmuted) */
 
@@ -58,12 +55,14 @@ public:
      * Called from DDRAW_InitAudio after heap allocation of 0xB8 bytes.
      */
     GameAudio();
+    GameAudio(const GameAudio&) = delete;
+    GameAudio& operator=(const GameAudio&) = delete;
 
     /**
-     * Scalar deleting destructor (vtable[0]).
+     * Destructor (vtable[0]).
      * Address: 0x412C20
      *
-     * Calls Cleanup(), then if (param_1 & 1) frees the memory.
+     * Calls Cleanup(); the compiler supplies the deleting-destructor wrapper.
      */
     virtual ~GameAudio();
 
@@ -99,7 +98,7 @@ public:
      * Play — Delegate sound playback to DirectSound device.
      * Address: 0x413070
      *
-     * Calls ds_device->vtable[3] (Play). Returns -1 if no device.
+     * Calls the recovered DirectSound device slot 3. Returns -1 if no device.
      */
     int32_t Play(void* param1, void* param2, void* param3);
 

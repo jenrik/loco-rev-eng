@@ -10,6 +10,8 @@
  */
 
 #include "UIPANEL.h"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wold-style-cast"
 // vtable_addrs.h removed — compiler manages vtables via virtual methods
 
 /* Windows API stubs — specific declarations to avoid conflicts with types.h */
@@ -51,6 +53,14 @@ extern void DDRAW_SelectBuilding(void* ddraw, void* building); /* 0x4412F0 */
 /* External functions */
 extern void __thiscall RESDATA_BaseInit(void* self);                         /* 0x4544E0 */
 extern void __thiscall RESDATA_DtorBase(void* self);                         /* 0x454630 */
+
+/* Free-function WndProc wrappers retain their recovered binary entry points;
+ * declare them before their definitions so strict builds see their ABI. */
+extern void __thiscall UIPANEL_WindowProc(void* self, HWND hwnd, UINT msg,
+                                          WPARAM wParam, LPARAM lParam);
+extern LRESULT __fastcall UIPANEL_OnDestroy(void* self);
+extern HDC __fastcall UIPANEL_BeginPaint(void* self);
+extern void __fastcall UIPANEL_EndPaint(void* self);
 extern void __fastcall UIPANEL_CreateSurface(void* surface);                 /* 0x42A110 */
 extern void* __thiscall UIPANEL_CreateSprite(void* panel, void* entry);           /* creates a sprite from file entry */
 extern void __fastcall UIPANEL_LockSurface(void* surface);                   /* 0x42A370 */
@@ -1371,3 +1381,4 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
             DDBLT_WAIT, 0);
     }
 }
+#pragma GCC diagnostic pop

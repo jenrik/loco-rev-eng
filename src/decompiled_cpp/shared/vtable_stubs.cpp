@@ -97,7 +97,7 @@ public:
     virtual void* GetAt(int);
 };
 
-void* Collection::GetAt(int) { return 0; }
+void* Collection::GetAt(int) { return nullptr; }
 
 /* =========================================================== */
 /* SortedCollection::Compare + SortRange                        */

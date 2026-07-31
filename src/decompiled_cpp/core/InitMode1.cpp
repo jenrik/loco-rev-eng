@@ -21,6 +21,7 @@
  */
 
 #include <stddef.h>
+#include <cstring>
 
 
 /* Real class headers for typed casts in initMode1() */
@@ -99,10 +100,8 @@ void CGWND::initMode1()
     char   layout_path[0x104];        /* local_108 — multiplayer layout path   */
 
     /* Zero both path buffers (0x41 DWORDs each = 0x104 bytes) */
-    for (int i = 0; i < 0x41; i++) {
-        ((uint32_t*)screensaver_path)[i] = 0;
-        ((uint32_t*)layout_path)[i] = 0;
-    }
+    std::memset(screensaver_path, 0, sizeof(screensaver_path));
+    std::memset(layout_path, 0, sizeof(layout_path));
 
     HWND hWnd = this->hWnd;
 
@@ -120,7 +119,7 @@ void CGWND::initMode1()
     if (this->field_10 == 0) {
 
         /* Hide the main menu UI (vtable[1] = EditWindow::hide, 0x420860) */
-        ((EditWindow*)g_ui_main)->hide();
+        static_cast<EditWindow*>(g_ui_main)->hide();
 
         /* Set screen mode: loading transition */
         Game_SetScreenMode(&g_game, 0, 1, 0);
@@ -143,24 +142,24 @@ void CGWND::initMode1()
              * to update the loading screen progress. */
 
             /* Town overlay sprite (0x42FDF0) */
-            ((Town*)g_town)->init_overlay_sprite();
+            static_cast<Town*>(g_town)->init_overlay_sprite();
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Cursor background surface (0x416460) */
-            ((Cursor*)g_cursor)->init_background();
+            static_cast<Cursor*>(g_cursor)->init_background();
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Postcard album window surface (0x404720) */
-            ((PostcardAlbum*)g_postcard)->InitWindowSurface();
+            static_cast<PostcardAlbum*>(g_postcard)->InitWindowSurface();
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Postcard preview window — only when hosting/joined.
              * Netman::m_gameMode at +0x7C4: 0=waiting,1=hosting,2=joined */
-            if (((Netman*)g_netman)->m_gameMode == 2) {
-                ((PostcardPreviewWindow*)g_postcard_send)->init_background();
+            if (static_cast<Netman*>(g_netman)->m_gameMode == 2) {
+                static_cast<PostcardPreviewWindow*>(g_postcard_send)->init_background();
                 CGWND_Present(0);
                 CGWND_PumpMessages(1);
             }
@@ -168,7 +167,9 @@ void CGWND::initMode1()
 
         /* Start async background task for loading/intro playback.
          * Callback at 0x45DE40 handles the loading sequence. */
-        WIN32_QueueAsyncTask(&g_async_task_queue, (void*)0x45DE40, 0);
+        WIN32_QueueAsyncTask(
+            &g_async_task_queue,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(0x45DE40)), 0);
 
         /* Invalidate + update to trigger initial repaint */
         InvalidateRect(hWnd, nullptr, FALSE);
@@ -194,12 +195,12 @@ void CGWND::initMode1()
     } else {
         /* --- Retail mode --- */
         /* Check if this is a multiplayer scenario (m_gameMode == 2 = joined) */
-        if (((Netman*)g_netman)->m_gameMode != 2) {
+        if (static_cast<Netman*>(g_netman)->m_gameMode != 2) {
             /* Not multiplayer — fall through to clean-exit check */
         } else {
             /* Multiplayer: build layout path "Layouts\XX.loco"
              * where XX = playerCount + 0x12 (18) */
-            int playerCount = ((Netman*)g_netman)->GetPlayerCount();
+            int playerCount = static_cast<Netman*>(g_netman)->GetPlayerCount();
             if (playerCount == 0) {
                 /* No players — jump to common init (no world to load) */
                 goto common_init;
@@ -226,16 +227,16 @@ common_init:
     /* --- Common subsystem initialization (both paths converge here) --- */
 
     /* Hide the main menu UI (vtable[1] = EditWindow::hide) */
-    ((EditWindow*)g_ui_main)->hide();
+    static_cast<EditWindow*>(g_ui_main)->hide();
 
     /* Incremental subsystem init (no progress pump this time) */
-    ((Town*)g_town)->init_overlay_sprite();
-    ((Cursor*)g_cursor)->init_background();
-    ((PostcardAlbum*)g_postcard)->InitWindowSurface();
+    static_cast<Town*>(g_town)->init_overlay_sprite();
+    static_cast<Cursor*>(g_cursor)->init_background();
+    static_cast<PostcardAlbum*>(g_postcard)->InitWindowSurface();
 
     /* Postcard preview when hosting/joined (m_gameMode == 2) */
-    if (((Netman*)g_netman)->m_gameMode == 2) {
-        ((PostcardPreviewWindow*)g_postcard_send)->init_background();
+    if (static_cast<Netman*>(g_netman)->m_gameMode == 2) {
+        static_cast<PostcardPreviewWindow*>(g_postcard_send)->init_background();
     }
 
     /* Stop any currently playing sound */

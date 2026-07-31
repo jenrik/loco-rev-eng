@@ -186,7 +186,7 @@ public:
      *
      * Called from: GameLoop_FrameUpdate (0x45C3C0) every frame.
      */
-    void Update();
+    void Update() override;
 
     /**
      * Dispatch game-mode-specific cursor feedback. 0x411760.

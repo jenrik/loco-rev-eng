@@ -9,7 +9,7 @@
 #include "sdl3_window.h"
 
 /* Inline stubs for Win32 functions not yet covered by sdl3_window.h */
-static inline void* SetFocus(void*) { return NULL; }
+static inline void* SetFocus(void*) { return nullptr; }
 #endif /* !_WIN32 */
 
 int32_t Cursor::create(HWND hParent)
@@ -20,11 +20,13 @@ int32_t Cursor::create(HWND hParent)
     GetClientRect(desktop, &desktopRect);
 
     /* Load icon resource 0x65 */
-    HICON icon = LoadIconA(this->hInstance, (LPCSTR)(intptr_t)0x65);
+    HICON icon = LoadIconA(
+        this->hInstance,
+        reinterpret_cast<LPCSTR>(static_cast<intptr_t>(0x65)));
     /* Binary temporarily stores HICON at +0xE8 (reuses cached_height slot);
      * icon is consumed by UI_CreateFullWindow and field is re-initialized
      * later by update_client_rect(). */
-    this->cached_height = (int32_t)(intptr_t)icon;
+    this->cached_height = static_cast<int32_t>(reinterpret_cast<intptr_t>(icon));
 
     /* Init editor sprites */
     this->init_editor_sprites();
@@ -35,7 +37,7 @@ int32_t Cursor::create(HWND hParent)
         desktopRect.left, desktopRect.top,
         desktopRect.right - desktopRect.left,
         desktopRect.bottom - desktopRect.top,
-        (HMENU)nullptr,
+        nullptr,
         icon,
         0);
 
@@ -46,7 +48,8 @@ int32_t Cursor::create(HWND hParent)
     /* Create child edit control for toolbar text input */
     HWND editWnd = CreateWindowExA(
         0x200,                                    /* dwExStyle: WS_EX_CLIENTEDGE */
-        (LPCSTR)0x4851D0,                          /* lpClassName: "EDIT" */
+        reinterpret_cast<LPCSTR>(static_cast<intptr_t>(0x4851D0)),
+                                                   /* lpClassName: "EDIT" */
         &g_empty_string[0],                        /* lpWindowName: "" */
         0x40001004,                                /* dwStyle: WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL */
         this->window_rect.top,            /* x */
@@ -54,14 +57,17 @@ int32_t Cursor::create(HWND hParent)
         this->cursor_client_rect.left - this->window_rect.top,  /* width */
         this->cursor_client_rect.top - this->window_rect.right,  /* height */
         this->hWnd,                                 /* parent */
-        (HMENU)0x411,                               /* control ID */
+        reinterpret_cast<HMENU>(static_cast<intptr_t>(0x411)),
+                                                   /* control ID */
         this->hInstance,
         nullptr);
 
     this->hEditWnd = editWnd;                                      /* +0xF4 */
 
     /* Configure edit control: set font, limit text length, subclass WndProc */
-    PostMessageA(editWnd, 0x30, (WPARAM)(intptr_t)g_font_small, 1);  /* WM_SETFONT */
+    PostMessageA(editWnd, 0x30,
+                 static_cast<WPARAM>(reinterpret_cast<uintptr_t>(g_font_small)),
+                 1);  /* WM_SETFONT */
     PostMessageA(editWnd, 0xC5, 0x4F, 0);                            /* EM_LIMITTEXT */
     LONG prevWndProc = SetWindowLongA(editWnd, -4 /* GWL_WNDPROC */, 0x416B00);
     this->prev_wndproc = prevWndProc;                                /* +0x73C */
@@ -84,7 +90,7 @@ int32_t Cursor::destroy_window()
     this->wndproc_flag() = 0;                                         /* +0xDB */
     DestroyWindow(this->hWnd);                                      /* +0x08 */
 
-    if (this->field_0C() == 0) {                                      /* +0x0C */
+    if (this->field_0C() == nullptr) {                                /* +0x0C */
         PostQuitMessage(0);
     }
 
@@ -107,16 +113,18 @@ void* Cursor::wait_for_blit(HWND hWnd)
     DDRAW_UnlockPrimary(hWnd);
 
     /* Poll surface vtable[0x44] (slot 17 = poll blit) */
-    void** vtbl = *(void***)this->primary_surface();                  /* +0x38 */
-    int result = ((int (*)(void*, void*))vtbl[0x44 / 4])(
-        this->primary_surface(), &this->curs_pos_x());                  /* +0x64 */
+    void** vtbl = *reinterpret_cast<void***>(this->primary_surface()); /* +0x38 */
+    using PollBlit = int (*)(void*, void*);
+    int result = reinterpret_cast<PollBlit>(vtbl[0x44 / 4])(
+        this->primary_surface(), &this->curs_pos_x());                 /* +0x64 */
 
     for (int i = 0; i < 1000; i++) {
         if (result == 0) {
-            return (void*)(intptr_t)this->curs_pos_x();               /* +0x64 */
+            return reinterpret_cast<void*>(
+                static_cast<intptr_t>(this->curs_pos_x()));             /* +0x64 */
         }
         Sleep(10);
-        result = ((int (*)(void*, void*))vtbl[0x44 / 4])(
+        result = reinterpret_cast<PollBlit>(vtbl[0x44 / 4])(
             this->primary_surface(), &this->curs_pos_x());
     }
 
@@ -184,7 +192,7 @@ void Cursor::show(void* playerData)
      * dwFlags=7 = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH */
 
     int desc[24] = { 0 };
-    int* ddrawVtbl = *(int**)g_ddraw;
+    void** ddrawVtbl = *reinterpret_cast<void***>(g_ddraw);
 
     int surfWidth = this->field_1B8 - this->field_1B0;
     int surfHeight = this->field_1BC - this->field_1B4;
@@ -195,20 +203,28 @@ void Cursor::show(void* playerData)
     desc[3] = surfWidth;  /* dwWidth */
 
     /* Create surface A at +0x590 */
-    int err = ((int (*)(void*, int*, void**, int))(uintptr_t)ddrawVtbl[6])(g_ddraw, desc, &this->editor_surf_a, 0);
+    using CreateSurface = int (*)(void*, int*, void**, int);
+    int err = reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
+        g_ddraw, desc, &this->editor_surf_a, 0);
     if (err != 0) {
         OutputDebugStringA("EDIT WINDOW : failed to create surface A");
     }
-    DDRAW_SetSurfaceFormat((int*)this->editor_surf_a, (int)(intptr_t)&desc[0xFFFFFF74]);
-    DDRAW_RestoreSurfaces((int*)this->editor_surf_a, &desc[0xFFFFFF74]);
+    auto* formatStorage = desc - 0x8C;
+    DDRAW_SetSurfaceFormat(
+        this->editor_surf_a,
+        static_cast<int>(reinterpret_cast<intptr_t>(formatStorage)));
+    DDRAW_RestoreSurfaces(this->editor_surf_a, formatStorage);
 
     /* Create surface B at +0x598 */
-    err = ((int (*)(void*, int*, void**, int))(uintptr_t)ddrawVtbl[6])(g_ddraw, desc, &this->editor_surf_b, 0);
+    err = reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
+        g_ddraw, desc, &this->editor_surf_b, 0);
     if (err != 0) {
         OutputDebugStringA("EDIT WINDOW : failed to create surface B");
     }
-    DDRAW_SetSurfaceFormat((int*)this->editor_surf_b, (int)(intptr_t)&desc[0xFFFFFF74]);
-    DDRAW_RestoreSurfaces((int*)this->editor_surf_b, &desc[0xFFFFFF74]);
+    DDRAW_SetSurfaceFormat(
+        this->editor_surf_b,
+        static_cast<int>(reinterpret_cast<intptr_t>(formatStorage)));
+    DDRAW_RestoreSurfaces(this->editor_surf_b, formatStorage);
 
     /* Clear dirty flags */
     this->field_594 = 0;                                             /* +0x594 */
@@ -229,26 +245,29 @@ void Cursor::show(void* playerData)
             this->obj_184 = nullptr;
         }
 
-        this->obj_184 = (CursorEditorRecord*)playerData;            /* +0x184 */
+        this->obj_184 = static_cast<CursorEditorRecord*>(playerData); /* +0x184 */
 
         /* Copy player name from playerData+0x43 into edit control */
-        SetWindowTextA(this->hEditWnd, (const char*)((intptr_t)playerData + 0x43));
+        SetWindowTextA(
+            this->hEditWnd,
+            reinterpret_cast<const char*>(static_cast<uint8_t*>(playerData) + 0x43));
 
         /* Zero the upload session field */
-        *(int16_t*)((intptr_t)playerData + 0x3A) = 0;
-        *(int32_t*)((intptr_t)playerData + 0x3C) = 1;
+        *reinterpret_cast<int16_t*>(static_cast<uint8_t*>(playerData) + 0x3A) = 0;
+        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(playerData) + 0x3C) = 1;
 
         /* Copy body colour RGB from player record */
-        uint8_t* playerBytes = (uint8_t*)playerData;
+        uint8_t* playerBytes = static_cast<uint8_t*>(playerData);
         this->color_r = playerBytes[0x40];                           /* +0x298 */
         this->color_g = playerBytes[0x41];                           /* +0x29C */
         this->color_b = playerBytes[0x42];                           /* +0x2A0 */
 
         /* Copy player name from g_player_config into player record at +0x25 */
-        const char* cfgName = (const char*)((intptr_t)g_player_config + 6);
+        const char* cfgName = reinterpret_cast<const char*>(
+            static_cast<uint8_t*>(g_player_config) + 6);
         size_t nameLen = strlen(cfgName);
-        memcpy((void*)((intptr_t)playerData + 0x25), cfgName, nameLen);
-        ((char*)playerData)[0x25 + nameLen] = '\0';
+        memcpy(static_cast<uint8_t*>(playerData) + 0x25, cfgName, nameLen);
+        static_cast<char*>(playerData)[0x25 + nameLen] = '\0';
     }
 
     /* Refresh network player names */
@@ -289,13 +308,15 @@ void Cursor::hide()
     /* Release editor DDraw surfaces.
      * vtable[2] = IDirectDrawSurface4::Release() (COM IUnknown). */
     if (this->editor_surf_a != nullptr) {                            /* +0x590 */
-        void** vtbl = *(void***)this->editor_surf_a;
-        ((void (*)(void*))vtbl[2])(this->editor_surf_a);
+        void** vtbl = *reinterpret_cast<void***>(this->editor_surf_a);
+        using ReleaseSurface = void (*)(void*);
+        reinterpret_cast<ReleaseSurface>(vtbl[2])(this->editor_surf_a);
         this->editor_surf_a = nullptr;
     }
     if (this->editor_surf_b != nullptr) {                            /* +0x598 */
-        void** vtbl = *(void***)this->editor_surf_b;
-        ((void (*)(void*))vtbl[2])(this->editor_surf_b);
+        void** vtbl = *reinterpret_cast<void***>(this->editor_surf_b);
+        using ReleaseSurface = void (*)(void*);
+        reinterpret_cast<ReleaseSurface>(vtbl[2])(this->editor_surf_b);
         this->editor_surf_b = nullptr;
     }
 

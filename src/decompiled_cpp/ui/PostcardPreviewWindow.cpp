@@ -70,6 +70,33 @@ extern int   g_viewport_rect_top;       /* 0x4FD0F4 — Viewport top */
 extern int   g_viewport_rect_right;     /* 0x4FD0F8 — Viewport right */
 extern int   g_viewport_rect_bottom;    /* 0x4FD0FC — Viewport bottom */
 
+namespace {
+using ResourceSurfaceFunction = void* (*)(void*, int, int);
+using ResourceReleaseFunction = void (*)(void*);
+using SpriteDeleteFunction = void* (*)(void*, byte);
+
+void* resource_surface(void* resource)
+{
+    void** vtable = *reinterpret_cast<void***>(resource);
+    auto get_surface = reinterpret_cast<ResourceSurfaceFunction>(vtable[1]);
+    return get_surface(resource, 0, 0);
+}
+
+void release_resource(void* resource)
+{
+    void** vtable = *reinterpret_cast<void***>(resource);
+    auto release = reinterpret_cast<ResourceReleaseFunction>(vtable[2]);
+    release(resource);
+}
+
+void delete_sprite(void* sprite)
+{
+    void** vtable = *reinterpret_cast<void***>(sprite);
+    auto destroy = reinterpret_cast<SpriteDeleteFunction>(vtable[0]);
+    destroy(sprite, 1);
+}
+}
+
 /* ================================================================== */
 /* PostcardPreviewWindow — Constructor                                  */
 /* Address: 0x430A90                                                    */
@@ -112,21 +139,21 @@ void PostcardPreviewWindow::draw_sprites()
     this->timerId = 0;                                       /* +0xEC — start with no timer */
     this->state_field_270 = -1;                              /* +0x270 */
     this->state_field_278 = 0;                               /* +0x278 */
-    this->background_resource = 0;                           /* +0x284 */
-    this->background_surface = 0;                            /* +0x280 */
+    this->background_resource = nullptr;                    /* +0x284 */
+    this->background_surface = nullptr;                     /* +0x280 */
 
     /* Create close button sprite (res 0x3d89) */
     void* mem = operator_new(0x24);
-    this->sprite_close = mem ? ButtonSprite_Ctor(mem, 0x3d89) : 0; /* +0x298 */
+    this->sprite_close = mem ? ButtonSprite_Ctor(mem, 0x3d89) : nullptr; /* +0x298 */
 
     /* Create options button sprite (res 0x3d8b) */
     mem = operator_new(0x24);
-    this->sprite_options = mem ? ButtonSprite_Ctor(mem, 0x3d8b) : 0; /* +0x2C0 */
+    this->sprite_options = mem ? ButtonSprite_Ctor(mem, 0x3d8b) : nullptr; /* +0x2C0 */
 
     /* Create 9 status/indicator sprites (res 0x3da4..0x3dac) */
     for (int i = 0; i < 9; i++) {
         mem = operator_new(0x24);
-        this->sprite_status[i] = mem ? ButtonSprite_Ctor(mem, 0x3DA4 + i) : 0; /* +0x29C+i*4 */
+        this->sprite_status[i] = mem ? ButtonSprite_Ctor(mem, 0x3DA4 + i) : nullptr; /* +0x29C+i*4 */
     }
 }
 
@@ -147,18 +174,19 @@ void PostcardPreviewWindow::draw_sprites()
 /* ================================================================== */
 void PostcardPreviewWindow::init_background()
 {
-    if (this->background_resource != 0) {                    /* +0x284 */
+    if (this->background_resource != nullptr) {             /* +0x284 */
         return;  /* Already initialized */
     }
 
     /* Load background resource (res 0x3d8a) */
     int32_t res = g_resmgr.GetById(0x3d8a);
-    this->background_resource = (void*)(uintptr_t)res;                  /* +0x284 */
+    void* resource = reinterpret_cast<void*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(res)));
+    this->background_resource = resource;                             /* +0x284 */
 
     /* Get surface via vtable[1] (ECX = res, stack args: 0, 0).
        NOTE: Binary dereferences EAX immediately — no null check.     */
-    this->background_surface =                                /* +0x280 */
-        ((void* (*)(void*, int, int))(*(void***)(uintptr_t)res)[1])((void*)(uintptr_t)res, 0, 0);
+    this->background_surface = resource_surface(resource);             /* +0x280 */
 }
 
 /* ================================================================== */
@@ -171,7 +199,7 @@ void PostcardPreviewWindow::init_background()
 void PostcardPreviewWindow::show()
 {
     /* Call base class Show (vtable[2] inherited) */
-    ((void (*)(void*))(*(void***)this)[2])(this);
+    this->UI_WindowBase::show();
 
     /* Lazy-init background resource */
     this->init_background();
@@ -204,12 +232,14 @@ void PostcardPreviewWindow::cleanup()
     UI_WindowBase_Hide(this);
 
     /* Step 3: Send network ack if needed */
-    if (*(int*)((uint8_t*)g_netman + 0x5C) == 2) {            /* netman session state */
+    if (*reinterpret_cast<const int*>(reinterpret_cast<const uint8_t*>(g_netman) + 0x5C) == 2) {
+        /* netman session state */
         NETMAN_SendAck(g_netman);
     }
 
     /* Step 4: Restore focus to main game window */
-    HWND main_hwnd = *(HWND*)((uint8_t*)g_main_window + 8);   /* hWnd at +0x08 */
+    HWND main_hwnd = *reinterpret_cast<const HWND*>(
+        reinterpret_cast<const uint8_t*>(g_main_window) + 8);   /* hWnd at +0x08 */
     SetFocus(main_hwnd);
 
     /* Step 5: Invalidate viewport rect */
@@ -227,17 +257,15 @@ void PostcardPreviewWindow::cleanup()
     if (this->sprites_created) {                               /* +0x27E */
         /* Release overlay resource 2 via vtable[2] */
         if (this->overlay_resource_2) {                        /* +0x28C */
-            ((void (*)(void*))(*(void***)this->overlay_resource_2)[2])(
-                this->overlay_resource_2);
+            release_resource(this->overlay_resource_2);
         }
-        this->overlay_surface_2 = 0;                           /* +0x288 */
+        this->overlay_surface_2 = nullptr;                    /* +0x288 */
 
         /* Release overlay resource 3 via vtable[2] */
         if (this->overlay_resource_3) {                        /* +0x294 */
-            ((void (*)(void*))(*(void***)this->overlay_resource_3)[2])(
-                this->overlay_resource_3);
+            release_resource(this->overlay_resource_3);
         }
-        this->overlay_surface_3 = 0;                           /* +0x290 */
+        this->overlay_surface_3 = nullptr;                    /* +0x290 */
 
         /* Destroy close button sprite (surface only) */
         Sprite_Destroy(this->sprite_close);                    /* +0x298 */
@@ -281,26 +309,23 @@ void PostcardPreviewWindow::destroy()
 
     /* Step 2: Release background resource */
     if (this->background_resource) {                           /* +0x284 */
-        ((void (*)(void*))(*(void***)this->background_resource)[2])(
-            this->background_resource);
-        this->background_surface = 0;                          /* +0x280 */
+        release_resource(this->background_resource);
+        this->background_surface = nullptr;                   /* +0x280 */
     }
 
     /* Step 3: Destroy sprites (surface + object free) */
     if (this->sprites_created) {                               /* +0x27E */
         /* Release overlay resource 2 via vtable[2], clear surface */
         if (this->overlay_resource_2) {                        /* +0x28C */
-            ((void (*)(void*))(*(void***)this->overlay_resource_2)[2])(
-                this->overlay_resource_2);
+            release_resource(this->overlay_resource_2);
         }
-        this->overlay_surface_2 = 0;                           /* +0x288 */
+        this->overlay_surface_2 = nullptr;                    /* +0x288 */
 
         /* Release overlay resource 3 via vtable[2], clear surface */
         if (this->overlay_resource_3) {                        /* +0x294 */
-            ((void (*)(void*))(*(void***)this->overlay_resource_3)[2])(
-                this->overlay_resource_3);
+            release_resource(this->overlay_resource_3);
         }
-        this->overlay_surface_3 = 0;                           /* +0x290 */
+        this->overlay_surface_3 = nullptr;                    /* +0x290 */
 
         /* Destroy close button sprite (Sprite_Destroy — surface only) */
         Sprite_Destroy(this->sprite_close);                    /* +0x298 */
@@ -318,23 +343,20 @@ void PostcardPreviewWindow::destroy()
 
     /* Step 4: Free each sprite object via scalar-deleting destructor */
     if (this->sprite_close) {                                  /* +0x298 */
-        ((void* (*)(void*, byte))(*(void***)this->sprite_close)[0])(
-            this->sprite_close, 1);
+        delete_sprite(this->sprite_close);
     }
-    this->sprite_close = 0;
+    this->sprite_close = nullptr;
 
     if (this->sprite_options) {                                /* +0x2C0 */
-        ((void* (*)(void*, byte))(*(void***)this->sprite_options)[0])(
-            this->sprite_options, 1);
+        delete_sprite(this->sprite_options);
     }
-    this->sprite_options = 0;
+    this->sprite_options = nullptr;
 
     for (int i = 0; i < 9; i++) {
         if (this->sprite_status[i]) {                          /* +0x29C+i*4 */
-            ((void* (*)(void*, byte))(*(void***)this->sprite_status[i])[0])(
-                this->sprite_status[i], 1);
+            delete_sprite(this->sprite_status[i]);
         }
-        this->sprite_status[i] = 0;
+        this->sprite_status[i] = nullptr;
     }
 
     /* Step 5: Call base class destructor */

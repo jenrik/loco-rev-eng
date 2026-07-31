@@ -32,9 +32,11 @@ std::uint32_t Read32(const std::uint8_t* bytes) {
 }
 
 TrainMessage* NewMessage(std::int32_t type) {
-    auto* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
-    if (!message) return nullptr;
-    std::memset(message, 0, sizeof(*message));
+    // Keep the recovered operator_new ownership while starting the native
+    // TrainMessage lifetime through its constructor, not byte clearing.
+    void* storage = operator_new(sizeof(TrainMessage));
+    if (!storage) return nullptr;
+    auto* message = ::new (storage) TrainMessage{};
     message->type = type;
     return message;
 }

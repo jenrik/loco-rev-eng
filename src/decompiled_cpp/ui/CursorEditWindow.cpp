@@ -49,6 +49,21 @@ extern "C" {
     extern void   __fastcall UI_ChildWindow_Dtor(void* self);                  /* 0x424BA0 */
     extern byte   __thiscall UI_ChildWindow_Render(void* self, void* stream);  /* 0x424E00 */
 
+namespace {
+using StreamDestructor = void (__fastcall *)(void*);
+
+void destroy_memory_stream(int* stream_result)
+{
+    void** stream_vtable = *reinterpret_cast<void***>(stream_result);
+    const auto* offset_bytes = reinterpret_cast<const uint8_t*>(stream_vtable) + 4;
+    const uintptr_t stream_offset = *reinterpret_cast<const uintptr_t*>(offset_bytes);
+    auto* stream_base = reinterpret_cast<uint8_t*>(stream_result) + stream_offset;
+    auto destroy = reinterpret_cast<StreamDestructor>(
+        *reinterpret_cast<void**>(stream_base));
+    destroy(stream_result);
+}
+}
+
 /* ================================================================== */
 /* Global variables                                                    */
 /* ================================================================== */
@@ -147,8 +162,8 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
     /* If nameParam is 0, skip all loading */
     if (nameParam == 0) {
-        WIN32_StreamDestroy((void*)(localStream + 2));
-        WNDPROC_StreamCleanup((void*)(localStream + 2));
+        WIN32_StreamDestroy(static_cast<void*>(localStream + 2));
+        WNDPROC_StreamCleanup(static_cast<void*>(localStream + 2));
         return;
     }
 
@@ -157,7 +172,9 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     char fullDatPath[264]; /* 0x108 bytes on stack */
 
     /* Build: "%s\\<name>.dat" */
-    CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path, (const char*)(uintptr_t)resourceId);
+    CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path,
+                    reinterpret_cast<const char*>(
+                        static_cast<uintptr_t>(resourceId)));
     /* Wait — resourceId is an integer, not a string pointer. Let me re-read the Init code... */
 
     /* Actually, looking at the disassembly more carefully:
@@ -180,7 +197,8 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     /* So: sprintf(fullDatPath, "%s\\%s.dat", install_path, nameParam) */
     /*     sprintf(this->bmpPath, "%s\\%s.bmp", install_path, nameParam) */
     /* where nameParam is actually treated as a string pointer! */
-    const char* cursorName = (const char*)(uintptr_t)nameParam;
+    const char* cursorName = reinterpret_cast<const char*>(
+        static_cast<uintptr_t>(static_cast<uint32_t>(nameParam)));
     CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path, cursorName);
     CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, cursorName);
 
@@ -198,9 +216,9 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
             /* Allocate stream */
             void* streamAlloc = operator_new(0x5C);
             if (streamAlloc != NULL) {
-                streamResult = WNDPROC_StreamFromMemory(streamAlloc,
-                                                         (const char*)pLoadedData,
-                                                         dataSize, 1);
+                streamResult = WNDPROC_StreamFromMemory(
+                    streamAlloc, reinterpret_cast<const char*>(pLoadedData),
+                    dataSize, 1);
             }
 
             if (streamResult != NULL) {
@@ -214,12 +232,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
                 }
 
                 /* Close/destroy the stream via vtable[0] with flags=1 */
-                void** streamVtab = *(void***)streamResult;
-                void* streamVtab4 = *(void**)((uint8_t*)streamVtab + 4);
-                void* streamBase = (void*)((uint8_t*)streamResult + (uintptr_t)streamVtab4);
-                void* streamDtorFn = *(void**)streamBase;
-                typedef void (__fastcall* DtorFn)(void*);
-                ((DtorFn)streamDtorFn)(streamResult);
+                destroy_memory_stream(streamResult);
             }
 
             /* Free the asset manager data */
@@ -229,12 +242,15 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
     /* --- Attempt 2: Fall back to direct file open --- */
     if (this->loaded == 0) {
-        WIN32_StreamOpenPath(localStream, fullDatPath, 0x20, *(int*)0x479190);
+        WIN32_StreamOpenPath(
+            localStream, fullDatPath, 0x20,
+            *reinterpret_cast<const int*>(static_cast<uintptr_t>(0x479190)));
 
         /* Check if file is open by validating stream data */
-        int* vt = *(int**)localStream;
-        int vt4 = vt[4];
-        int offset_xx = *(int*)((uint8_t*)localStream + vt4 + 0x4C);
+        const auto* stream_vtable = *reinterpret_cast<const int**>(localStream);
+        int vt4 = stream_vtable[4];
+        const auto* stream_bytes = reinterpret_cast<const uint8_t*>(localStream);
+        int offset_xx = *reinterpret_cast<const int*>(stream_bytes + vt4 + 0x4C);
         if (offset_xx != -1) {   /* valid file handle */
             /* Call loadCursorData to process data from the file stream */
             this->loaded = this->loadCursorData(localStream);
@@ -249,8 +265,8 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     }
 
     /* Clean up local stream */
-    WIN32_StreamDestroy((void*)(localStream + 2));
-    WNDPROC_StreamCleanup((void*)(localStream + 2));
+    WIN32_StreamDestroy(static_cast<void*>(localStream + 2));
+    WNDPROC_StreamCleanup(static_cast<void*>(localStream + 2));
 }
 
 /* ================================================================== */
@@ -263,7 +279,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 /* ================================================================== */
 void CursorEditWindow::cleanup()
 {
-    void* stream = (void*)((uint8_t*)this + 0x0C);
+    void* stream = reinterpret_cast<uint8_t*>(this) + 0x0C;
     WIN32_StreamDestroy(stream);
     WNDPROC_StreamCleanup(stream);
 }

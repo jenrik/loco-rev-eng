@@ -25,11 +25,11 @@ extern "C" {
 /* Conditionally enters the stream's CRITICAL_SECTION if the sync flag */
 /* at +0x34 is negative (signalling active synchronization state).      */
 /* ================================================================== */
-void __cdecl StreamObject_Lock(void* stream)
+void __cdecl StreamObject_Lock(StreamObject* stream)
 {
     /* Check sync flag at +0x34 */
-    if (*(int32_t*)((uint8_t*)stream + 0x34) < 0) {
-        WNDPROC_EnterCriticalSection((uint8_t*)stream + 0x38);  /* CRITICAL_SECTION at +0x38 */
+    if (stream->sync_flag < 0) {
+        WNDPROC_EnterCriticalSection(&stream->critical_section);
     }
 }
 
@@ -42,10 +42,10 @@ void __cdecl StreamObject_Lock(void* stream)
 /* Conditionally leaves the stream's CRITICAL_SECTION if the sync flag */
 /* at +0x34 is negative.                                                */
 /* ================================================================== */
-void __cdecl StreamObject_Unlock(void* stream)
+void __cdecl StreamObject_Unlock(StreamObject* stream)
 {
     /* Check sync flag at +0x34 */
-    if (*(int32_t*)((uint8_t*)stream + 0x34) < 0) {
-        WNDPROC_LeaveCriticalSection((uint8_t*)stream + 0x38);  /* CRITICAL_SECTION at +0x38 */
+    if (stream->sync_flag < 0) {
+        WNDPROC_LeaveCriticalSection(&stream->critical_section);
     }
 }

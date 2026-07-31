@@ -80,6 +80,8 @@ class Vehicle;
  */
 class TrainEntity : public Building {
 public:
+    using Building::Update;
+
     /* ================================================================ */
     /* Fields                                                            */
     /* ================================================================ */
