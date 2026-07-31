@@ -283,7 +283,7 @@ main()
 
 ### Priority 5: Networking
 
-- [ ] **Complete gameplay object/file integration** — Non-empty `0x3EC` records become grouped `Vehicle`/`VehicleEditor` objects and enter Netman’s canonical native-width list; `DownloadMissingAssets` consumes matching typed `0x3EE` keys; and `0x3FC` streams assemble exactly. Migrate residual mode-3 movement/serialization and PostBag route resolution away from raw offsets/filesystem assumptions, then validate train transfer plus backpressure in mode 3.
+- [ ] **Complete gameplay object/file integration** — Non-empty `0x3EC` records become grouped Vehicles, typed `0x3EE` keys are consumed, host PostBag route resolution clones DPlayManager state in memory, and `0x3FC` streams assemble exactly. Migrate later movement/position packet paths and the Windows-only PostBag deserializer, then validate live train transfer plus transport backpressure in mode 3.
 - [ ] **Linux discovery live integration** — Add a real-avahi-daemon cross-process publish/browse test. Embedded mDNS already proves two-process publication of a live SDL_net listener through browse, numeric A resolution, handshake, and payload exchange; publication now waits for listener readiness. Embedded hosting intentionally refuses a competing UDP-5353 owner (observed with systemd-resolved) instead of silently failing.
 - [ ] **Native discovery adapters** — Keep Bonjour, Windows DNS-SD, and Android `NsdManager` behind the same typed backend contract without platform handles crossing the boundary.
 - [ ] **PostBag protocol** — Complete and integrate `DPLAY_SendMessages`/`ReceiveMessage` file-message behavior after live session transport works.
@@ -373,6 +373,7 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ## Session log
 
+| 2026-07-31 (sdl-net-in-memory-route-clone) | Removed the duplicate 0x43E900 resolver, replaced host PostBag `.crd` lookup with typed DPlayManager cloning, migrated SendSignalChange to native Vehicle ownership, preserved the session-tail marker, recovered 0x4408B0/0x440A50 and host 0x440A80 behavior, and proved a two-editor route clone enters loading as list depth 2; `make check`, `make test`, and all 11 isolated-Wayland flows pass. |
 | 2026-07-31 (sdl-net-asset-consumer-handoff) | Typed Netman inbound/game-start editor access, recovered VehicleEditor resource IDs, connected DPlayManager asset keys to replace-on-key `0x3EE` ownership with request fallback, and proved a real adopted Vehicle survives recovered multiplayer Go into loading mode; `make check`, `make test`, and all 11 isolated-Wayland flows pass. |
 | 2026-07-31 (sdl-net-native-vehicle-overlay) | Replaced the duplicate 0x94-byte inbound-node layout with canonical Vehicle metadata, added resource-independent native Vehicle/VehicleEditor construction and typed cleanup, grouped non-empty `0x3EC` routes, and proved Netman type-`0x0F` adoption with a two-editor native list node; `make check`, `make test`, and all 10 isolated-Wayland flows pass. |
 | 2026-07-30 (sdl-net-typed-sessions-attachments) | Decoded non-empty `0x3EC` records into typed owned `DPlayManager` state, implemented VehicleEditor DPlay accessors, proved replace-on-key `0x3EE`, and assembled exact sequenced `0x3FC` attachment/final streams through a real GUI-host admission flow; `make check`, `make test`, and all 10 isolated-Wayland flows pass. |

@@ -21,6 +21,8 @@ void emit_netman_player_joined(uint32_t player_id);
 void emit_netman_message_processed(int type, int flags);
 void emit_netman_vehicle_adopted(uint32_t editor_count, uint16_t network_id,
                                  uint32_t list_depth);
+void emit_netman_route_cloned(uint32_t source_editors, uint32_t clone_editors,
+                              uint32_t list_depth);
 void emit_legacy_service_applied(uint32_t packet_type, std::size_t byte_count);
 void emit_legacy_attachment_updated(
     uint32_t sender, uint16_t train_type, uint16_t sequence, uint8_t subtype,

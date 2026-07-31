@@ -441,9 +441,15 @@ grows with producer load.
      inbound inspection and game-start editor indexing replace their original
      +0x0C/+0x14 offset accesses; an isolated real-client Go flow proves the
      adopted Vehicle survives the recovered loading handoff.
-   - Remaining work: migrate later mode-3 movement/serialization and PostBag
-     route resolution from residual raw offsets/filesystem assumptions, then
-     validate train transfer plus backpressure in mode 3.
+   - Host route resolution now clones the typed `DPlayManager` state supplied
+     by `0x3EC` instead of reopening local PostBag `.crd` files. The recovered
+     `SendSignalChange` path creates a native Vehicle clone, preserves the
+     session tail marker, and enters loading with a two-node typed list.
+     `HandleTimeout`/`SerializePlayerData` and host missing-route filling now
+     operate on typed editors and native-width Vehicle pointers.
+   - Remaining work: migrate the later movement/position packet paths and the
+     Windows-only PostBag deserializer, then validate live train transfer plus
+     transport backpressure in mode 3.
 
 6. **Full subsystem and UI integration**
    - Exercise train transfer, map/building overlays, scenario selection,

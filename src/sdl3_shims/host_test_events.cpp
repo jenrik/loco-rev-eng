@@ -68,6 +68,12 @@ public:
     void netman_player_joined(uint32_t player_id) {
         write("netman_player_joined", ",\"player_id\":%u", player_id);
     }
+    void netman_route_cloned(uint32_t source_editors, uint32_t clone_editors,
+                             uint32_t list_depth) {
+        write("netman_route_cloned",
+              ",\"source_editors\":%u,\"clone_editors\":%u,"
+              "\"list_depth\":%u", source_editors, clone_editors, list_depth);
+    }
     void netman_vehicle_adopted(uint32_t editor_count, uint16_t network_id,
                                 uint32_t list_depth) {
         write("netman_vehicle_adopted",
@@ -231,6 +237,10 @@ void emit_netman_session_ready(uint32_t player_id, bool hosting) {
 }
 void emit_netman_player_joined(uint32_t player_id) {
     sink().netman_player_joined(player_id);
+}
+void emit_netman_route_cloned(uint32_t source_editors, uint32_t clone_editors,
+                              uint32_t list_depth) {
+    sink().netman_route_cloned(source_editors, clone_editors, list_depth);
 }
 void emit_netman_vehicle_adopted(uint32_t editor_count, uint16_t network_id,
                                  uint32_t list_depth) {

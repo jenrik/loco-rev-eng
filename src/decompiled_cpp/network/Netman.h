@@ -240,7 +240,10 @@ public:
     /* -- Inbound train list head -- */
     InboundTrainNode* m_vehicleList; /* +0x7E0  inbound train linked list head */
 
-    int32_t    m_field_7E4;         /* +0x7E4  last processed node ptr  */
+    int32_t    m_field_7E4;         /* +0x7E4  original last-node value */
+#ifndef _WIN32
+    Vehicle*   m_hostLastSerializedVehicle; // native-width counterpart
+#endif
     int32_t    m_field_7E8;         /* +0x7E8  network ID counter       */
     int32_t    m_tickCounter;       /* +0x7EC  tick counter (incremented per Update) */
     int32_t    m_timeout;           /* +0x7F0  tick timeout (500=host, 20=join) */
@@ -320,6 +323,7 @@ public:
     void HostAddTransportPlayer(int32_t playerId, const char* playerName);
     void HostRemoveTransportPlayer(int32_t playerId);
     void HostEndTransportSession();
+    bool HostClonePendingRouteForLoading();
 #endif
 
     /* ================================================================ */

@@ -28,6 +28,10 @@ extern PlayerConfig* g_player_config;
  */
 
 #include "Netman.h"
+#include "DPlayManager.h"
+#include "../game/PlayerConfig.h"
+#include <cstring>
+#include <new>
 
 /* ================================================================== */
 /* NETMAN_ReceiveSignalChange — 0x43E900                               */
@@ -35,6 +39,29 @@ extern PlayerConfig* g_player_config;
 
 void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
 {
+#ifndef _WIN32
+    // The original 0x43E900 selects PostBag route/address files and resolves a
+    // .crd player slot. SDL_net peers already supply the typed slot in 0x3EC;
+    // clone its logical state instead of re-entering the local filesystem ABI.
+    const auto* source = static_cast<const DPlayManager*>(playerDPlayData);
+    if (source == nullptr) return nullptr;
+    void* storage = operator_new(sizeof(DPlayManager));
+    if (storage == nullptr) return nullptr;
+    auto* resolved = ::new (storage) DPlayManager;
+    resolved->CreatePlayer();
+    resolved->CopyLogicalStateFrom(*source);
+    std::memcpy(resolved->m_sessionBlk2, source->m_sessionBlk1,
+                sizeof(resolved->m_sessionBlk2));
+    resolved->m_wordValue = 0;
+    resolved->m_dwordValue = 1;
+    if (resolved->m_playerName[0] == '\0' && g_player_config != nullptr) {
+        std::strncpy(resolved->m_playerName, g_player_config->name,
+                     sizeof(resolved->m_playerName) - 1);
+        resolved->m_playerName[sizeof(resolved->m_playerName) - 1] = '\0';
+    }
+    resolved->SetPlayerName(1, -1);
+    return resolved;
+#else
     /*
      * Stack layout (approximate, frame size = 0x8f98):
      *   local_390[128]   — player index string buffer (CRT_itoa output)
@@ -373,4 +400,5 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
     }
 
     return resolved;
+#endif
 }

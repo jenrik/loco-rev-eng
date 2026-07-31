@@ -187,11 +187,12 @@ bool QueueLegacyPayloadForGame(Netman* netman, TrainSubsystem* train,
             }
             // 0x43CF04..0x43CF41 replaces snapshot block 1 with the local
             // player name and clears m_wordValue before assigning an editor.
-            std::memset(session->m_sessionBlk1, 0, sizeof(session->m_sessionBlk1));
             if (g_player_config != nullptr) {
-                std::strncpy(reinterpret_cast<char*>(session->m_sessionBlk1),
-                             g_player_config->name,
-                             sizeof(session->m_sessionBlk1) - 1);
+                const std::size_t name_size = std::min(
+                    std::strlen(g_player_config->name) + 1,
+                    sizeof(session->m_sessionBlk1));
+                std::memcpy(session->m_sessionBlk1, g_player_config->name,
+                            name_size);
             }
             session->m_wordValue = 0;
             train->host_track_sessions.push_back(session);

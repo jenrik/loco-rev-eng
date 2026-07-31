@@ -203,6 +203,9 @@ def test_multiplayer_ready_go_enters_loading_with_adopted_vehicle(game):
 
     # Recovered 0x42A Go rectangle is [688,700,832,812).
     game.click_logical(720, 720, "multiplayer ready go")
+    game.wait_for_event(
+        "netman_route_cloned", source_editors=2, clone_editors=2, list_depth=2
+    )
     game.wait_for_event("mode_changed", new_mode=1)
     time.sleep(0.5)
     assert game.is_alive(), game._failure("game exited after adopted-Vehicle Go")

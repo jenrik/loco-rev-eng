@@ -695,7 +695,6 @@ uint32_t VehicleEditor::CheckEditBounds2(Vehicle* vehicle)
 /**
  * GetResourceId (vtable[7]) — Returns the resource ID if track resource loaded.
  * Address: 0x40E0D0
- * TODO: decompile 0x40E0D0
  */
 uint32_t VehicleEditor::GetResourceId()
 {

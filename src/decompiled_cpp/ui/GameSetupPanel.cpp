@@ -1342,6 +1342,7 @@ void host_complete_lobby_control(GameSetupPanel& panel, HostLobbyControl control
     case HostLobbyControl::Go:
         if (panel.hostSessionReady && _g_netman != nullptr &&
             _g_netman->m_bInit != 0 && _g_netman->m_bFlag1 != 0) {
+            _g_netman->HostClonePendingRouteForLoading();
             _g_netman->SetGameMode(2);
             if (g_editwindow_ptr != nullptr) {
                 // State 6 selects the mode-1 loading transition. As with host

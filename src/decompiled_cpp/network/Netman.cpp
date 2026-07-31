@@ -145,6 +145,9 @@ Netman::Netman()
     this->m_buildingList = NULL;
     this->m_vehicleList = NULL;
     this->m_field_7E4 = 0;
+#ifndef _WIN32
+    this->m_hostLastSerializedVehicle = nullptr;
+#endif
     this->m_field_7E8 = 0;
     this->m_tickCounter = 0;
     this->m_sendTimer = 0;
@@ -314,6 +317,26 @@ void Netman::HostRemoveTransportPlayer(int32_t playerId)
     slot.layout_name[0] = '\0';
     slot.version = 0;
     if (playerId == this->m_myDpId) this->HostEndTransportSession();
+}
+
+bool Netman::HostClonePendingRouteForLoading()
+{
+    Vehicle* source = this->m_vehicleList;
+    if (source == nullptr) return false;
+    uint32_t before = 0;
+    for (Vehicle* item = this->m_vehicleList; item != nullptr; item = item->next)
+        ++before;
+    this->SendSignalChange(source);
+    uint32_t after = 0;
+    for (Vehicle* item = this->m_vehicleList; item != nullptr; item = item->next)
+        ++after;
+    if (after > before) {
+        loco::host_test::emit_netman_route_cloned(
+            source->editor_count + 1, this->m_vehicleList->editor_count + 1,
+            after);
+        return true;
+    }
+    return false;
 }
 
 void Netman::HostEndTransportSession()
@@ -1680,6 +1703,74 @@ void Netman::SendLayoutSelect(int32_t dpId, int32_t targetSlot,
 /* ================================================================== */
 uint8_t Netman::SendSignalChange(InboundTrainNode* node)
 {
+#ifndef _WIN32
+    DPlayManager* resolved_routes[3] = {nullptr, nullptr, nullptr};
+    bool has_valid_data = false;
+    bool has_stale_track = false;
+    const uint16_t route_count = node != nullptr && node->editor_count < 4
+        ? static_cast<uint16_t>(node->editor_count) : 0;
+    for (uint16_t index = 1; index <= route_count; ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        DPlayManager* source = editor->GetDPlayData();
+        if (source == nullptr) continue;
+        if (source->m_sessionBlk1[20] == 0) {
+            has_stale_track = true;
+            continue;
+        }
+        editor->SetDPlayData(nullptr);
+        resolved_routes[index - 1] = static_cast<DPlayManager*>(
+            NETMAN_ReceiveSignalChange(source));
+        has_valid_data = has_valid_data || resolved_routes[index - 1] != nullptr;
+    }
+
+    if (has_valid_data) {
+        void* storage = operator_new(sizeof(Vehicle));
+        Vehicle* vehicle = storage != nullptr
+            ? ::new (storage) Vehicle(HostNetworkVehicleTag{},
+                  (CRT_rand() % 3) * 2 + 0x1804)
+            : nullptr;
+        if (vehicle != nullptr && vehicle->editors[0] != nullptr) {
+            vehicle->network_id = static_cast<uint16_t>(++this->m_field_7E8);
+            vehicle->editors[0]->CopyName(STR_LEGO_LOCO);
+            vehicle->max_steps = node->max_steps;
+            vehicle->tunnel_angle = 0;
+            vehicle->field_76 = vehicle->field_7E = vehicle->field_80 = 0;
+            vehicle->field_82 = 0;
+            vehicle->field_84 = vehicle->field_86 = 0;
+            for (DPlayManager*& route : resolved_routes) {
+                if (route == nullptr) continue;
+                if (g_player_config != nullptr) {
+                    const std::size_t name_size = std::min(
+                        std::strlen(g_player_config->name) + 1,
+                        sizeof(route->m_sessionBlk1));
+                    std::memcpy(route->m_sessionBlk1, g_player_config->name,
+                                name_size);
+                }
+                route->m_wordValue = 0;
+                vehicle->AddHostNetworkRoute(*route);
+                route->~DPlayManager();
+                GLOBAL_free(route);
+                route = nullptr;
+            }
+            vehicle->direction = 2;
+            vehicle->state = 0;
+            vehicle->init_flag = 0;
+            vehicle->next = this->m_vehicleList;
+            this->m_vehicleList = vehicle;
+        } else if (vehicle != nullptr) {
+            vehicle->~Vehicle();
+            GLOBAL_free(vehicle);
+        }
+    }
+    for (DPlayManager* route : resolved_routes) {
+        if (route == nullptr) continue;
+        route->~DPlayManager();
+        GLOBAL_free(route);
+    }
+    this->HandleTimeout(node);
+    return (!has_stale_track && this->m_gameMode == 1) ? 1 : 0;
+#else
     void* dplayData[3] = { NULL, NULL, NULL };
     uint8_t hasValidData = 0;
     uint8_t hasStaleTrack = 0;
@@ -1764,6 +1855,7 @@ uint8_t Netman::SendSignalChange(InboundTrainNode* node)
     this->HandleTimeout(node);
 
     return (hasStaleTrack == 0 && this->m_gameMode == 1) ? 1 : 0;
+#endif
 }
 
 /* ================================================================== */
@@ -2012,36 +2104,120 @@ void Netman::CheckTimeout(int32_t timeoutVal)
 
 /* ================================================================== */
 /* 42. HandleTimeout - 0x4408B0                                       */
-/* TODO: decompile 0x4408B0                                           */
 /* ================================================================== */
 void Netman::HandleTimeout(InboundTrainNode* node)
 {
-    /* TODO: decompile 0x4408B0 — HandleTimeout body
-     *
-     * Iterates cars in the train node, calls NET_RegisterPlayer,
-     * transitions car resource IDs between LEAVING/ENTERING states.
-     */
-    (void)node;
+    if (node == nullptr) return;
+    bool registered_local_route = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        DPlayManager* dplay = editor->GetDPlayData();
+        if (dplay == nullptr || g_player_config == nullptr) continue;
+        if (std::strcmp(reinterpret_cast<const char*>(dplay->m_sessionBlk1),
+                        g_player_config->name) == 0) {
+            NET_RegisterPlayer(_g_dplay, dplay, 1, 0);
+            editor->SetDPlayData(nullptr);
+            registered_local_route = true;
+        }
+    }
+
+    bool has_dplay_data = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor != nullptr && editor->GetDPlayData() != nullptr) {
+            has_dplay_data = true;
+            break;
+        }
+    }
+    const int32_t desired_resource = has_dplay_data ? 0x1871 : 0x1870;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr) continue;
+        const int32_t resource_id = static_cast<int32_t>(editor->GetResourceId());
+        if ((has_dplay_data && resource_id == 0x1870) ||
+            (!has_dplay_data && resource_id == 0x1871)) {
+#ifndef _WIN32
+            editor->res_id = desired_resource;
+#else
+            CarObject* car = static_cast<CarObject*>(static_cast<void*>(editor));
+            car->SetResourceId(desired_resource, -1);
+            car->SetParam(editor->frame_index, 1);
+#endif
+        }
+    }
+    if (registered_local_route) {
+        if (this->m_timeoutState == 1) this->CheckTimeout(3);
+        else if (this->m_timeoutState == 0) this->CheckTimeout(2);
+    }
 }
 
 /* ================================================================== */
 /* 43. SerializePlayerData - 0x440A50                                 */
-/* TODO: decompile 0x440A50                                           */
 /* ================================================================== */
 void Netman::SerializePlayerData(InboundTrainNode* node)
 {
-    /* TODO: decompile 0x440A50 — SerializePlayerData body */
-    this->m_field_7E4 = (int32_t)(intptr_t)node;
+    this->HandleTimeout(node);
+    if (node != nullptr && node->owner_handle != 1)
+        this->DeserializePlayerData(node);
+#ifndef _WIN32
+    this->m_hostLastSerializedVehicle = node;
+#else
+    this->m_field_7E4 = static_cast<int32_t>(reinterpret_cast<intptr_t>(node));
+#endif
 }
 
 /* ================================================================== */
 /* 44. DeserializePlayerData - 0x440A80                               */
-/* TODO: decompile 0x440A80                                           */
 /* ================================================================== */
 void Netman::DeserializePlayerData(InboundTrainNode* node)
 {
-    /* TODO: decompile 0x440A80 — DeserializePlayerData body */
+#ifndef _WIN32
+    if (node == nullptr) return;
+    const DPlayManager* donor = nullptr;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor != nullptr && editor->GetDPlayData() != nullptr) {
+            donor = editor->GetDPlayData();
+            break;
+        }
+    }
+    if (donor == nullptr) return;
+
+    bool assigned = false;
+    for (uint16_t index = 1; index <= node->editor_count && index < 4;
+         ++index) {
+        VehicleEditor* editor = node->editors[index];
+        if (editor == nullptr || editor->GetDPlayData() != nullptr) continue;
+        const int32_t resource_id = static_cast<int32_t>(editor->GetResourceId());
+        if (resource_id != 0x1870 && resource_id != 0x1871) continue;
+        void* storage = operator_new(sizeof(DPlayManager));
+        if (storage == nullptr) break;
+        auto* replacement = ::new (storage) DPlayManager;
+        replacement->CreatePlayer();
+        replacement->CopyLogicalStateFrom(*donor);
+        replacement->SetPlayerName(1, -1);
+        if (editor->SetDPlayData(replacement)) {
+            editor->res_id = 0x1871;
+            assigned = true;
+        }
+        replacement->~DPlayManager();
+        GLOBAL_free(replacement);
+    }
+    if (assigned) {
+        if (this->m_timeoutState == 3) this->CheckTimeout(2);
+        else this->CheckTimeout(0);
+    }
+#else
+    // Original 0x440A80 enumerates PostBag Sort_Out .crd records through
+    // NET_GetHostName/NET_ResolveAddress. The Windows reconstruction retains
+    // that filesystem behavior in its untranslated path.
     (void)node;
+#endif
 }
 
 /* ================================================================== */
@@ -2195,223 +2371,6 @@ int32_t NETMAN_ReceiveTrainPosition(int p1, int p2, int p3)
     node->process_delay = 1;
     Train_QueueMessage(_g_train, m);
     return 1;
-}
-
-/* NETMAN_ReceiveSignalChange - 0x43E900 */
-void* NETMAN_ReceiveSignalChange(void* playerData)
-{
-    CRT_time();
-
-    uint32_t bytesRead = 0;
-    int32_t playerCount = 0;
-    bool foundMatch = false;
-    void* result = NULL;
-
-    char playerNumStr[8] = "";
-    char routePath[0x500];
-    char addressPath[0x500];
-    char fileBuf[0x8000];
-    char routeAddr[0x14] = "";
-    char playerAddr[0x14] = "";
-    char displayName[0x50] = "";
-
-    const char* targetName = (const char*)((uint8_t*)playerData + 0x10);
-
-    DPLAY_EnumeratePlayers((int32_t)(intptr_t)_g_dplay);
-
-    for (playerCount = 0; playerCount < 0x14; playerCount++) {
-        foundMatch = false;
-
-        for (int32_t nameIdx = 0; nameIdx < 0x10; nameIdx++) {
-            uint8_t* entry = (uint8_t*)_g_dplay + 0xB13 + nameIdx * 0x0D;
-            const uint8_t* pSrc = (const uint8_t*)targetName;
-
-            int32_t cmp;
-            while (1) {
-                uint8_t c1 = *pSrc;
-                uint8_t c2 = *entry;
-                if (c1 != c2) { cmp = (c1 < c2) ? -1 : 1; break; }
-                if (c1 == 0) { cmp = 0; break; }
-                c1 = *(pSrc + 1);
-                c2 = *(entry + 1);
-                if (c1 != c2) { cmp = (c1 < c2) ? -1 : 1; break; }
-                if (c1 == 0) { cmp = 0; break; }
-                pSrc += 2;
-                entry += 2;
-            }
-
-            if (cmp == 0) {
-                foundMatch = true;
-                CRT_itoa(nameIdx + 1, playerNumStr, 10);
-                break;
-            }
-        }
-
-        if (!foundMatch) continue;
-
-        NET_SendFile(playerNumStr, 1, routePath);
-        NET_SendFile(playerNumStr, 0, addressPath);
-
-        /* Read route file */
-        {
-            void* hFile = CreateFileA(routePath, 0x80000000, 1,
-                                      NULL, 3, 0x8000000, NULL);
-            if (hFile == (void*)-1) return NULL;
-            if (!ReadFile(hFile, fileBuf, 0x8000, &bytesRead, NULL)) {
-                CloseHandle(hFile);
-                return NULL;
-            }
-            CloseHandle(hFile);
-
-            int32_t entryCount = CRT_atoi(fileBuf);
-            int32_t rnd = CRT_rand();
-            int32_t targetLine = (int32_t)((uint64_t)rnd / (0x7FFF / (long long)entryCount));
-
-            uint32_t lineStart = 4;
-            while (targetLine > 0 && lineStart < bytesRead) {
-                if (fileBuf[lineStart] == '\n') targetLine--;
-                lineStart++;
-            }
-
-            for (uint32_t j = lineStart; j < bytesRead; j++) {
-                if (fileBuf[j] == '\r') { fileBuf[j] = '\0'; break; }
-            }
-
-            inline_memcpy(routeAddr, &fileBuf[lineStart], 0x14 - 1);
-            routeAddr[0x13] = '\0';
-        }
-
-        /* Read address file */
-        {
-            void* hFile = CreateFileA(addressPath, 0x80000000, 1,
-                                      NULL, 3, 0x8000000, NULL);
-            if (hFile == (void*)-1) return NULL;
-            if (!ReadFile(hFile, fileBuf, 0x8000, &bytesRead, NULL)) {
-                CloseHandle(hFile);
-                return NULL;
-            }
-            CloseHandle(hFile);
-
-            int32_t entryCount = CRT_atoi(fileBuf);
-            int32_t rnd = CRT_rand();
-            int32_t targetLine = (int32_t)((uint64_t)rnd / (0x7FFF / (long long)entryCount));
-
-            uint32_t lineStart = 4;
-            while (targetLine > 0 && lineStart < bytesRead) {
-                if (fileBuf[lineStart] == '\n') targetLine--;
-                lineStart++;
-            }
-
-            for (uint32_t j = lineStart; j < bytesRead; j++) {
-                if (fileBuf[j] == '\r') { fileBuf[j] = '\0'; break; }
-            }
-
-            inline_memcpy(playerAddr, &fileBuf[lineStart], 0x14 - 1);
-            playerAddr[0x13] = '\0';
-        }
-
-        /* Build combined address path */
-        {
-            int32_t rpLen = strlen(routePath);
-            int32_t raLen = strlen(routeAddr);
-            int32_t truncLen = rpLen - (raLen - 1);
-            if (truncLen < 0) truncLen = 0;
-            if (truncLen > (int32_t)sizeof(routePath) - 1) truncLen = sizeof(routePath) - 1;
-            routePath[truncLen] = '\0';
-
-            int32_t base = strlen(routePath);
-            int32_t i;
-            for (i = 0; routeAddr[i] != '\0' && (base + i) < (int32_t)sizeof(routePath) - 1; i++) {
-                routePath[base + i] = routeAddr[i];
-            }
-            routePath[base + i] = '\0';
-
-            base = strlen(routePath);
-            if (base < (int32_t)sizeof(routePath) - 1) {
-                routePath[base] = '/';
-                routePath[base + 1] = '\0';
-            }
-
-            base = strlen(routePath);
-            for (i = 0; playerAddr[i] != '\0' && (base + i) < (int32_t)sizeof(routePath) - 1; i++) {
-                routePath[base + i] = playerAddr[i];
-            }
-            routePath[base + i] = '\0';
-        }
-
-        result = NET_ResolveAddress(_g_dplay, routePath);
-        if (result == NULL) return NULL;
-
-        /* Copy player name into resolved DPlayData at +0x25 */
-        {
-            const uint8_t* src = (const uint8_t*)targetName;
-            uint8_t* dst = (uint8_t*)result + 0x25;
-            int32_t i;
-            for (i = 0; src[i] != 0; i++) dst[i] = src[i];
-            dst[i] = 0;
-        }
-
-        *(uint16_t*)((uint8_t*)result + 0x3A) = 0;
-        *(int32_t*)((uint8_t*)result + 0x3C) = 1;
-
-        /* Decode address path into display name */
-        {
-            const char* decodeSrc = routeAddr;
-            int32_t di = 0;
-            int32_t si = 0;
-
-            while (di < (int32_t)sizeof(displayName) - 1 && decodeSrc[si] != '\0') {
-                char c = decodeSrc[si];
-                if (c == '/') {
-                    char next = decodeSrc[si + 1];
-                    if (next == '/') {
-                        displayName[di++] = '/';
-                        si += 2;
-                    } else if (next == 'n') {
-                        displayName[di++] = '\r';
-                        if (di < (int32_t)sizeof(displayName) - 1) displayName[di++] = '\n';
-                        si += 2;
-                    } else if (next == '?') {
-                        const char* pn = (const char*)((uint8_t*)g_player_config + 6);
-                        while (*pn && di < (int32_t)sizeof(displayName) - 1) {
-                            displayName[di++] = *pn++;
-                        }
-                        if (di < (int32_t)sizeof(displayName) - 1) displayName[di++] = ' ';
-                        si += 2;
-                    } else {
-                        displayName[di++] = c;
-                        si++;
-                    }
-                } else {
-                    displayName[di++] = c;
-                    si++;
-                }
-            }
-            if (di < (int32_t)sizeof(displayName)) {
-                displayName[di] = '\0';
-            } else {
-                displayName[sizeof(displayName) - 1] = '\0';
-            }
-
-            int32_t dnLen = strlen(displayName);
-            if (dnLen < (int32_t)sizeof(displayName)) {
-                foundMatch = true;
-                inline_memcpy((uint8_t*)result + 0x43, displayName, dnLen + 1);
-            } else {
-                displayName[sizeof(displayName) - 1] = '\0';
-                foundMatch = true;
-                inline_memcpy((uint8_t*)result + 0x43, displayName, sizeof(displayName));
-            }
-        }
-
-        if (foundMatch) break;
-    }
-
-    if (result != NULL) {
-        DPLAY_SetPlayerName(result, 1, -1);
-    }
-
-    return result;
 }
 
 /* ================================================================== */

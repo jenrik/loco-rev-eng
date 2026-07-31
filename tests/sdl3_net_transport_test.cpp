@@ -167,6 +167,7 @@ int RunAdmissionClient(std::uint16_t port) {
                 track_sessions[4] = 0x78; track_sessions[5] = 0x56;
                 track_sessions[6] = 0x34; track_sessions[7] = 0x12;
                 track_sessions[8] = 1; track_sessions[12] = 1;
+                track_sessions[0x14 + 0x1c] = 1;
                 track_sessions[0x14 + 0x8e] = 0x80;
                 track_sessions[0x14 + 0x90] = 7;
                 track_sessions[0x14 + 0x91] = 2;
