@@ -138,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -146,7 +146,7 @@ build: $(BINARY)
 
 # Deterministic component and host-boundary suite. GUI interaction is kept in
 # test-integration so agents can run the fast layer independently when needed.
-test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup \
+test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
@@ -344,6 +344,18 @@ $(POSTBAG_CLEANUP_TEST): $(DCP_DIR)/network/PostBagCleanup.cpp tests/postbag_cle
 
 test-postbag-cleanup: $(POSTBAG_CLEANUP_TEST)
 	@$(POSTBAG_CLEANUP_TEST)
+
+# CGWND_EnterMode3(2) safe early return and symbol ownership regression.
+# Links against real CGWND.o; only g_game_mode is provided — all other
+# undefined symbols are ignored, isolating the mode-2 branch contract.
+CGWND_ENTERMODE3_TEST := $(BUILD_DIR)/cgwnd_entermode3_test
+
+$(CGWND_ENTERMODE3_TEST): $(BUILD_DIR)/dcp/core/CGWND.o tests/cgwnd_entermode3_test.cpp | dirs
+	@echo "=== Testing CGWND_EnterMode3(2) safe early return ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs $(FORCE_INC) tests/cgwnd_entermode3_test.cpp $(BUILD_DIR)/dcp/core/CGWND.o -Wl,--unresolved-symbols=ignore-all -o $@
+
+test-cgwnd-entermode3: $(CGWND_ENTERMODE3_TEST)
+	@$(CGWND_ENTERMODE3_TEST)
 
 # Original MCI launch order recovered from 0x421EB0 / 0x420F7F.
 INTRO_VIDEO_SEQUENCE_TEST := $(BUILD_DIR)/intro_video_sequence_test

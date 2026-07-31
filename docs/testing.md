@@ -7,6 +7,16 @@ The root suite has two layers:
   isolated Wayland/Sway sandbox with pytest.
 - `make test-all` runs both layers.
 
+## Component regressions
+
+- `make test-cgwnd-entermode3` — CGWND_EnterMode3(2) safe early return and symbol
+  ownership. Links against the real `CGWND.o` and provides only the one global
+  (`g_game_mode`) that the mode-2 branch touches. All other undefined symbols
+  are left unresolved, isolating the early-return contract without pulling in
+  the full game-object graph. Proves that CGWND_EnterMode3 is a C++ free
+  function (mangled `_Z16CGWND_EnterMode3i`) owned by `core/CGWND.h`, not
+  `extern "C"`.
+
 ## GUI integration artifacts
 
 Every GUI test gets a fresh compositor and game process. Artifacts are retained
