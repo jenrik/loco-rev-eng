@@ -9,7 +9,7 @@
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
 #include <cstring>
 
-/* Subsystem class headers — for InitAllSubsystems */
+/* Subsystem class headers — for InitAllSubsystems and typed dispatch */
 #include "../ui/EditWindow.h"
 // The host menu bootstrap intentionally stops after EditWindow. The remaining
 // original startup chain is retained for the Windows/binary-faithful build.
@@ -22,6 +22,23 @@
 #include "../ui/HelpWnd.h"
 #include "../ui/AboutDialog.h"
 #endif
+
+/* Typed subsystem headers — needed by CGWND_EnterMode3 (0x4086F0) and
+ * CGWND_SetMode (0x408130) for typed virtual-method dispatch. Included
+ * unconditionally because CGWND_EnterMode3 is not behind _WIN32.
+ * Netman.h is excluded (conflicting Config_GetIniInt signature);
+ * a forward declaration is used instead. */
+#include "../town/Town.h"
+#include "../ui/PostcardAlbum.h"
+#include "../ui/PostcardPreviewWindow.h"
+#include "../input/Cursor.h"
+#include "../ui/HelpWnd.h"
+#include "../core/Game.h"
+// Netman: forward-declared below (Netman.h conflicts with Config_GetIniInt)
+class Netman;
+#include "../game/BuildingMgr.h"
+#include "../audio/GameAudio.h"
+#include "../game/World.h"
 
 #ifndef _WIN32
 #include <SDL3/SDL.h>
@@ -191,6 +208,8 @@ extern void*    g_main_window;          /* 0x4AA4A0 */
 extern void*    g_async_task_queue;     /* 0x4A9AD0 */
 extern void*    g_tooltip_mgr;          /* 0x4FD220 */
 extern void*    g_tilemap;              /* 0x4AAD08 */
+extern void*    g_building_mgr;         /* 0x485448 */
+extern World*   g_world;                /* 0x4A98B0 */
 extern uint8_t  g_in_build_mode;
 extern uint8_t  g_asset_mgr;
 
@@ -724,59 +743,15 @@ void CGWND_SetMode(int new_mode)
 /* ================================================================== */
 void CGWND_EnterMode3(int old_mode)
 {
-    /* ---- helper declarations (already declared elsewhere) ---------- */
-    extern void  CGWND_SetFullscreenMode(char go_windowed);
-    extern void  Game_SetScreenMode(void* game, int a, int b, int c);
-    extern void  NETMAN_SendMapData(void* net, int flags);
-    extern int   Config_GetIniInt(void* config, const char* section,
-                                  const char* key, int defaultVal);
+    /* ---- free-function adapters (no typed class yet) ---------------- */
     extern void  UI_ProcessObjectTimers(void);
     extern void  WIN32_QueueAsyncTask(void* queue, void* callback, int param);
-
-    /* ---- typed adapters for void* globals -------------------------- */
-    extern void* g_main_window;        /* 0x4AA4A0 — CGWND* */
-    extern int   g_timer_id;           /* 0x4A97A4 */
-    extern void* g_netman;             /* 0x4FD3AC */
-    extern void* g_audio;              /* 0x4FD3BC */
-    extern void* g_config_ini;         /* 0x4A9EEC */
-    extern int   g_world_width;        /* 0x4AAD0C */
-    extern void* g_town;               /* 0x4FD37C */
-    extern void* g_postcard;           /* 0x4FD384 */
-    extern void* g_cursor;             /* 0x4FD380 */
-    extern void* g_postcard_send;      /* 0x4FD388 */
-    extern void* g_game;               /* 0x4854C8 */
-    extern void* g_tilemap;            /* 0x4AAD08 */
-    extern int   g_viewport_rect_left; /* 0x4AAD14 */
-    extern int   g_viewport_rect_top;  /* 0x4AAD18 */
-    extern int   g_viewport_rect_right;/* 0x4AAD1C */
-    extern int   g_viewport_rect_bottom;/* 0x4AAD20 */
-    extern void* g_building_mgr;       /* 0x485448 */
-    extern void* g_tooltip_mgr;        /* 0x4FD220 */
-    extern void* g_audio_mgr;          /* 0x4FD38C */
-    extern void* g_async_task_queue;   /* 0x4A9AD0 */
-
-    /* ---- subsystem method adapters --------------------------------- */
-    /* GameAudio::SetMute — Address: 0x413530 */
-    extern void GameAudio_SetMute(void* audio, uint8_t mute);
-    /* GameAudio::UpdateVolume — Address: 0x4135B0 */
-    extern void GameAudio_UpdateVolume(void* audio, int level);
-    /* HelpWnd (AudioMgr)::PlayNarration — Address: 0x44F560 */
-    extern void HelpWnd_PlayNarration(void* audio_mgr, int page, uint flags);
-    /* TileMap::UpdateAll — Address: 0x457320 */
-    extern void TileMap_UpdateAll(void* tilemap);
-    /* TileMap::InvalidateRect — Address: 0x455840 */
-    extern void TileMap_InvalidateRect(void* tilemap, int left, int top,
-                                       int right, int bottom);
-    /* BuildingMgr::UpdateStoredTargets — Address: 0x434690 */
-    extern void BuildingMgr_UpdateStoredTargets(void* mgr);
-    /* BuildingMgr::InvalidateAll — Address: 0x434800 */
-    extern void BuildingMgr_InvalidateAll(void* mgr, int unused);
-    /* UI_ResetTooltips — Address: 0x423F80 */
-    extern void UI_ResetTooltips(void* mgr, int reset_type);
-    /* World_Reset — Address: 0x44DBD0 */
-    extern void World_Reset(void* world, int flags);
-    /* Game::DispatchCursorFeedback — Address: 0x411760 */
-    extern void Game_DispatchCursorFeedback(void* game);
+    extern void  UI_ResetTooltips(void* mgr, int reset_type);
+    extern void  Game_DispatchCursorFeedback(void* game);
+    extern void  NETMAN_SendMapData(void* net, int flags);    /* 0x43D350 */
+    extern void  TileMap_UpdateAll(void* tilemap);       /* 0x457320 */
+    extern void  TileMap_InvalidateRect(void* tilemap, int left, int top,
+                                        int right, int bottom); /* 0x455840 */
 
     switch (old_mode) {
 
@@ -791,7 +766,7 @@ void CGWND_EnterMode3(int old_mode)
     /* ---------------------------------------------------------------- */
     /* Cases 5, 6, 7 — Coming from town/postcard/cursor overlays       */
     /* 0x408739..0x4087AD: hide each overlay via vtable[1], then        */
-    /*                    GameAudio::UpdateVolume, Game_SetScreenMode,   */
+    /*                    GameAudio::UpdateVolume, Game::SetScreenMode,  */
     /*                    TileMap::InvalidateRect → common tail          */
     /* ---------------------------------------------------------------- */
     case 5:
@@ -799,22 +774,13 @@ void CGWND_EnterMode3(int old_mode)
     case 7:
         {
             /* Hide each overlay subsystem (vtable slot 1 = hide) */
-            {
-                void** vt = *(void***)g_town;
-                reinterpret_cast<void(__thiscall*)()>(vt[1])();
-            }
-            {
-                void** vt = *(void***)g_postcard;
-                reinterpret_cast<void(__thiscall*)()>(vt[1])();
-            }
-            {
-                void** vt = *(void***)g_cursor;
-                reinterpret_cast<void(__thiscall*)()>(vt[1])();
-            }
+            static_cast<Town*>(g_town)->hide();              /* 0x408739 */
+            static_cast<PostcardAlbum*>(g_postcard)->hide(); /* 0x408759 */
+            static_cast<Cursor*>(g_cursor)->hide();          /* 0x408779 */
             if (g_audio != nullptr) {
-                GameAudio_UpdateVolume(g_audio, 0);  /* 0x4135B0 */
+                static_cast<GameAudio*>(g_audio)->UpdateVolume(0); /* 0x4135B0 */
             }
-            Game_SetScreenMode(g_game, 1, 1, 0);     /* 0x411DC0 */
+            static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0); /* 0x411DC0 */
             TileMap_InvalidateRect(g_tilemap,
                 g_viewport_rect_left, g_viewport_rect_top,
                 g_viewport_rect_right, g_viewport_rect_bottom);
@@ -827,14 +793,11 @@ void CGWND_EnterMode3(int old_mode)
     /* ---------------------------------------------------------------- */
     case 9:
         {
-            {
-                void** vt = *(void***)g_postcard_send;
-                reinterpret_cast<void(__thiscall*)()>(vt[1])();
-            }
+            static_cast<PostcardPreviewWindow*>(g_postcard_send)->hide(); /* 0x4087B2 */
             if (g_audio != nullptr) {
-                GameAudio_UpdateVolume(g_audio, 0);
+                static_cast<GameAudio*>(g_audio)->UpdateVolume(0);
             }
-            Game_SetScreenMode(g_game, 1, 1, 0);
+            static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0);
             TileMap_InvalidateRect(g_tilemap,
                 g_viewport_rect_left, g_viewport_rect_top,
                 g_viewport_rect_right, g_viewport_rect_bottom);
@@ -853,20 +816,23 @@ void CGWND_EnterMode3(int old_mode)
             char go_windowed = (g_world_width >= g_screen_width) ? 1 : 0;
             CGWND_SetFullscreenMode(go_windowed);   /* 0x407D20 */
 
-            HWND hWnd = *(HWND*)((uint8_t*)g_main_window + 0x08);
+            HWND hWnd = static_cast<CGWND*>(g_main_window)->hWnd;  /* +0x08 */
             KillTimer(hWnd, (uintptr_t)g_timer_id); /* IAT */
             g_timer_id = 0;
 
-            NETMAN_SendMapData(g_netman, 0);        /* 0x43D350 */
+            NETMAN_SendMapData(g_netman, 0);            /* 0x43D350 */
             PostMessageA(hWnd, 0x406, (uint32_t)g_game_time, 0);  /* WM_USER+6 */
 
             if (g_demo_mode == 1 && g_audio != nullptr) {
+                extern int Config_GetIniInt(void* config, const char* section,
+                                            const char* key, int defaultVal);
                 int sound_flag = Config_GetIniInt(g_config_ini,
                     "ScreenSaver", "Sound", 0);     /* 0x452D60 */
-                GameAudio_SetMute(g_audio, (sound_flag != 0) ? 1 : 0);
+                static_cast<GameAudio*>(g_audio)->SetMute(
+                    (sound_flag != 0) ? 1 : 0);
             }
             TileMap_UpdateAll(g_tilemap);           /* 0x457320 */
-            HelpWnd_PlayNarration(g_audio_mgr, 5, 0); /* 0x44F560 */
+            static_cast<HelpWnd*>(g_audio_mgr)->play_narration(5, 0); /* 0x44F560 */
         }
         /* FALLS THROUGH to case 4 */
         [[fallthrough]];
@@ -879,15 +845,15 @@ void CGWND_EnterMode3(int old_mode)
     /* ---------------------------------------------------------------- */
     case 4:
         {
-            HWND hWnd = *(HWND*)((uint8_t*)g_main_window + 0x08);
+            HWND hWnd = static_cast<CGWND*>(g_main_window)->hWnd;  /* +0x08 */
             PostMessageA(hWnd, 0x406, (uint32_t)g_game_time, 0);
             NETMAN_SendMapData(g_netman, 0);
-            Game_SetScreenMode(g_game, 1, 1, 0);
+            static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0);
             UI_ProcessObjectTimers();              /* 0x420000 */
 
             if (g_in_build_mode != 0) {
                 TileMap_UpdateAll(g_tilemap);
-                BuildingMgr_UpdateStoredTargets(g_building_mgr);
+                static_cast<BuildingMgr*>(g_building_mgr)->UpdateStoredTargets();
             }
         }
         break;  /* → common tail */
@@ -903,27 +869,27 @@ void CGWND_EnterMode3(int old_mode)
     /* Common tail — 0x40892A..0x40899E                                  */
     /* ================================================================ */
 
-    BuildingMgr_InvalidateAll(g_building_mgr, 1);  /* 0x434800 */
+    static_cast<BuildingMgr*>(g_building_mgr)->InvalidateAll(1); /* 0x434800 */
     UI_ResetTooltips(g_tooltip_mgr, 1);            /* 0x423F80 */
-    World_Reset((void*)0x4A98B0, 1);               /* 0x44DBD0 */
+    g_world->Reset(1);                             /* 0x44DBD0 */
 
     /* Queue async task with callback at 0x42CC60 */
     WIN32_QueueAsyncTask(&g_async_task_queue,
         reinterpret_cast<void*>(static_cast<uintptr_t>(0x42CC60)), 0);
 
-    /* Build-mode state cleanup */
+    /* Build-mode state cleanup — 0x408972..0x408986 */
     if (g_build_mode != 0) {
         g_build_mode = 0;
         g_road_build_mode = 0;
         g_placement_resource_id = -1;
     }
 
-    /* Game cursor feedback dispatch */
+    /* Game cursor feedback dispatch — 0x40898A */
     Game_DispatchCursorFeedback(g_game);           /* 0x411760 */
 
-    /* Audio volume update (silence) */
+    /* Audio volume update (silence) — 0x408992..0x40899E */
     if (g_audio != nullptr) {
-        GameAudio_UpdateVolume(g_audio, 0);        /* 0x4135B0 */
+        static_cast<GameAudio*>(g_audio)->UpdateVolume(0);  /* 0x4135B0 */
     }
 }
 
