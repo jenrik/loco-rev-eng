@@ -447,9 +447,14 @@ grows with producer load.
      session tail marker, and enters loading with a two-node typed list.
      `HandleTimeout`/`SerializePlayerData` and host missing-route filling now
      operate on typed editors and native-width Vehicle pointers.
-   - Remaining work: migrate the later movement/position packet paths and the
-     Windows-only PostBag deserializer, then validate live train transfer plus
-     transport backpressure in mode 3.
+   - The remaining Netman internal stubs are now recovered: timeout signals
+     (0x440820), compact nine-slot serialization (0x440070), and file-transfer
+     state packets 0x3F4/0x3F5 (0x440310/0x440390). The 0x4426D0/0x442750/
+     0x4427D0 slot converters use named native fields and exact 0x3C wire
+     records; host 0x3F1 adoption no longer reads widened TrainMessage offsets.
+   - Remaining work is the distinct gameplay phase: migrate later train
+     movement/position paths and the Windows-only PostBag deserializer, then
+     validate live train transfer plus sustained transport backpressure in mode 3.
 
 6. **Full subsystem and UI integration**
    - Exercise train transfer, map/building overlays, scenario selection,

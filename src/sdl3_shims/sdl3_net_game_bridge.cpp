@@ -48,8 +48,9 @@ void* CopyPayload(const std::vector<std::uint8_t>& payload) {
 void CopyCompactPlayer(PlayerSlot& destination, const std::uint8_t* source) {
     destination.dpId = static_cast<std::int32_t>(Read32(source));
     destination.is_connected = source[0x3a];
-    std::memcpy(reinterpret_cast<std::uint8_t*>(&destination) + 5,
-                source + 0x0c, 13);
+    std::memcpy(destination.compact_name, source + 0x0c,
+                sizeof(destination.compact_name));
+    destination.compact_name[sizeof(destination.compact_name) - 1] = '\0';
     std::memcpy(destination.layout_name, source + 0x19, 32);
     destination.layout_name[31] = '\0';
     destination.player_id = static_cast<std::uint16_t>(Read32(source + 4));

@@ -148,7 +148,6 @@ void DPLAY_CleanupPlayer(void*){}
 void*DPLAY_CreatePlayer(void*){return 0;}
 void DPLAY_InitPlayer(void*,void*,int32_t){}
 void DPLAY_LeaveSession(void*,int32_t){}
-void DPLAY_CopyPlayerData(void*,void*){}
 void Sprite_Destroy(void*){}
 void Sprite_Shutdown(int32_t){}
 void Sprite_UnlockAll(int32_t){}

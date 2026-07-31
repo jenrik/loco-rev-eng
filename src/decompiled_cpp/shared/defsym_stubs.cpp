@@ -235,7 +235,6 @@ void SetRect(void*, int, int, int, int) {}
 void* GAMESTATE_LoadExistingGame = 0;
 void* World_SerializeObject = 0;
 void* STR_REMOVED = 0;
-void* DPLAY_InitPlayerSlot = 0;
 void NETMAN_ReceiveFileTransfer(int) {}
 void NETMAN_SendAck(int) {}
 void* GAMESTATE_SetDifficulty = 0;

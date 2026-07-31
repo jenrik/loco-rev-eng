@@ -182,10 +182,13 @@ public:
 struct PlayerSlot {
     int32_t   dpId;              /* +0x00  DirectPlay player ID         */
     uint8_t   is_connected;      /* +0x04  1 = connected flag            */
-    uint8_t   has_data;          /* +0x05  1 = has pixel overlay data    */
-    uint8_t   _pad_06[2];        /* +0x06  padding                      */
-    /* gap +0x08..+0x11 = 10 unused bytes */
-    uint8_t   _pad_08[10];       /* +0x08  unused                       */
+    union {
+        struct {
+            uint8_t has_data;     /* +0x05 legacy first-byte alias      */
+            uint8_t _pad_06[12];  /* +0x06                              */
+        };
+        char compact_name[13];    /* +0x05 serialized player text       */
+    };
 
     char      layout_name[32];   /* +0x12  layout/scenario name string  */
     uint16_t  player_id;         /* +0x32  short player ID (from global)*/
@@ -959,8 +962,12 @@ void*   DPLAY_CreatePlayer(void* slot);
 int32_t DPLAY_GetPlayerName(void* slot, const char* path);
 int32_t DPLAY_SetPlayerData(void* slot, const char* path);
 void    DPLAY_SetPlayerName(void* slot, int32_t trainId, int8_t specific);
-void    DPLAY_FreePlayerSlot(void* packet, const int32_t* slotSrc);
-void    DPLAY_InitPlayerSlot(void* dstSlot, void* srcData);  /* @ 0x442750 */
+void    DPLAY_CopyPlayerData(void* dstSlot, const void* packet); /* 0x4426D0 */
+void    DPLAY_InitPlayerSlot(void* dstSlot, const void* srcSlot); /* 0x442750 */
+void    DPLAY_FreePlayerSlot(void* packet, const int32_t* slotSrc); /* 0x4427D0 */
+#ifndef _WIN32
+void*   DPLAY_DecodePlayerSlots(const void* firstCompactSlot);
+#endif  /* @ 0x442750 */
 int16_t DPLAY_GetMessageCount(int32_t dplay);
 void    DPLAY_EnumeratePlayers(int32_t dplay);
 

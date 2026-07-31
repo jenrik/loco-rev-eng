@@ -46,6 +46,10 @@
 #include "../game/Building.h"
 #include "../game/PlayerConfig.h"
 #include "../core/VehicleEditor.h"
+#include "../core/Entity.h"
+#include "../shared/Collection.h"
+#include "../core/Entity.h"
+#include "../shared/Collection.h"
 #ifndef _WIN32
 #include "../game/Train.h"
 #include "../../sdl3_shims/host_test_events.h"
@@ -125,6 +129,95 @@ static inline void net_delete(Vehicle* vehicle)
     if (vehicle == nullptr) return;
     vehicle->~Vehicle();
     GLOBAL_free(vehicle);
+}
+
+static TrainMessage* net_new_message()
+{
+    auto* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
+    if (message != nullptr) std::memset(message, 0, sizeof(*message));
+    return message;
+}
+
+namespace {
+void CopyPlayerSlotText(char* destination, std::size_t capacity,
+                        const char* source)
+{
+    if (capacity == 0) return;
+    std::strncpy(destination, source != nullptr ? source : "", capacity - 1);
+    destination[capacity - 1] = '\0';
+}
+}
+
+/** DPLAY_CopyPlayerData
+ *  Address: 0x4426D0 */
+void DPLAY_CopyPlayerData(void* destination, const void* compact_packet)
+{
+    if (destination == nullptr || compact_packet == nullptr) return;
+    auto* slot = static_cast<PlayerSlot*>(destination);
+    const auto* packet = static_cast<const uint8_t*>(compact_packet);
+    std::memcpy(&slot->dpId, packet, sizeof(slot->dpId));
+    slot->is_connected = packet[0x3A];
+    CopyPlayerSlotText(slot->compact_name, sizeof(slot->compact_name),
+                       reinterpret_cast<const char*>(packet + 0x0C));
+    CopyPlayerSlotText(slot->layout_name, sizeof(slot->layout_name),
+                       reinterpret_cast<const char*>(packet + 0x19));
+    std::memcpy(&slot->player_id, packet + 4,
+                sizeof(slot->player_id) + sizeof(slot->player_color));
+    slot->flag_36 = packet[0x39];
+    std::memcpy(&slot->version, packet + 8, sizeof(slot->version));
+}
+
+/** DPLAY_InitPlayerSlot
+ *  Address: 0x442750 */
+void DPLAY_InitPlayerSlot(void* destination, const void* source)
+{
+    if (destination == nullptr || source == nullptr) return;
+    auto* output = static_cast<PlayerSlot*>(destination);
+    const auto* input = static_cast<const PlayerSlot*>(source);
+    output->dpId = input->dpId;
+    output->is_connected = input->is_connected;
+    CopyPlayerSlotText(output->compact_name, sizeof(output->compact_name),
+                       input->compact_name);
+    CopyPlayerSlotText(output->layout_name, sizeof(output->layout_name),
+                       input->layout_name);
+    output->player_id = input->player_id;
+    output->player_color = input->player_color;
+    output->flag_36 = input->flag_36;
+    output->version = input->version;
+}
+
+#ifndef _WIN32
+void* DPLAY_DecodePlayerSlots(const void* first_compact_slot)
+{
+    if (first_compact_slot == nullptr) return nullptr;
+    auto* slots = static_cast<PlayerSlot*>(operator_new(sizeof(PlayerSlot) * 9));
+    if (slots == nullptr) return nullptr;
+    std::memset(slots, 0, sizeof(PlayerSlot) * 9);
+    const auto* compact = static_cast<const uint8_t*>(first_compact_slot);
+    for (int32_t index = 0; index < 9; ++index)
+        DPLAY_CopyPlayerData(&slots[index], compact + index * 0x3C);
+    return slots;
+}
+#endif
+
+/** DPLAY_FreePlayerSlot
+ *  Address: 0x4427D0 */
+void DPLAY_FreePlayerSlot(void* compact_packet, const int32_t* source)
+{
+    if (compact_packet == nullptr || source == nullptr) return;
+    auto* packet = static_cast<uint8_t*>(compact_packet);
+    const auto* slot = reinterpret_cast<const PlayerSlot*>(source);
+    std::memset(packet, 0, 0x3C);
+    std::memcpy(packet, &slot->dpId, sizeof(slot->dpId));
+    packet[0x3A] = slot->is_connected;
+    CopyPlayerSlotText(reinterpret_cast<char*>(packet + 0x0C), 13,
+                       slot->compact_name);
+    CopyPlayerSlotText(reinterpret_cast<char*>(packet + 0x19), 32,
+                       slot->layout_name);
+    std::memcpy(packet + 4, &slot->player_id,
+                sizeof(slot->player_id) + sizeof(slot->player_color));
+    packet[0x39] = slot->flag_36;
+    std::memcpy(packet + 8, &slot->version, sizeof(slot->version));
 }
 
 int32_t NETMAN_GetGameMode(const void* netman)
@@ -511,7 +604,6 @@ void Netman::ProcessPlayerData(int32_t slotIndex)
 
 /* ================================================================== */
 /* 12. LoadScenario - 0x43D820                                        */
-/* TODO: decompile 0x43D820                                           */
 /* ================================================================== */
 void Netman::LoadScenario(const char* layoutName)
 {
@@ -1542,7 +1634,7 @@ void Netman::SyncGameState(TrainMessage* msg)
     /* Update grid dimensions from packet header */
     this->m_playerRows      = msg->metadata0();
     this->m_playerCols      = msg->metadata1();
-    this->m_playerSlotCount = *(int32_t*)((uint8_t*)msg + 0x10);
+    this->m_playerSlotCount = msg->flags;
 
     int32_t newMySlotIdx = 0;
     bool versionChanged = false;
@@ -1557,8 +1649,8 @@ void Netman::SyncGameState(TrainMessage* msg)
         const PlayerSlot* srcData = static_cast<const PlayerSlot*>(msg->data_ptr) + i;
         sl->dpId = srcData->dpId;
         sl->is_connected = srcData->is_connected;
-        std::memcpy(reinterpret_cast<uint8_t*>(sl) + 5,
-                    reinterpret_cast<const uint8_t*>(srcData) + 5, 13);
+        std::memcpy(sl->compact_name, srcData->compact_name,
+                    sizeof(sl->compact_name));
         std::memcpy(sl->layout_name, srcData->layout_name, sizeof(sl->layout_name));
         sl->player_id = srcData->player_id;
         sl->player_color = srcData->player_color;
@@ -1609,7 +1701,8 @@ void Netman::SyncGameState(TrainMessage* msg)
             newMySlotIdx);
     }
 
-    /* Redraw UI */
+#ifdef _WIN32
+    /* Original child-HWND redraw; SDL composition refreshes every frame. */
     {
         void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
         if (IsWindowVisible(*(void**)((uint8_t*)panel + 8))) {
@@ -1619,6 +1712,7 @@ void Netman::SyncGameState(TrainMessage* msg)
                 0, 0, NULL);
         }
     }
+#endif
 }
 
 /* ================================================================== */
@@ -2089,16 +2183,26 @@ PingEntry* Netman::UpdateLatency(int32_t dpId, uint8_t slot_byte, uint32_t peerI
 
 /* ================================================================== */
 /* 41. CheckTimeout - 0x440820                                        */
-/* TODO: decompile 0x440820                                           */
 /* ================================================================== */
 void Netman::CheckTimeout(int32_t timeoutVal)
 {
-    /* TODO: decompile 0x440820 — CheckTimeout body
-     *
-     * Iterates all game objects, finds objects with resource IDs
-     * 0xC5C/0xC5E/0xC60, calls virtual method at vtable[7] with
-     * the timeout value. Updates m_timeoutState.
-     */
+    if (this->m_timeoutState == timeoutVal) return;
+#ifdef _WIN32
+    extern Collection DAT_004a9994; // in-place collection at 0x4A9994
+    const int32_t count = std::min(g_object_count, DAT_004a9994.count);
+    for (int32_t index = 0; index < count; ++index) {
+        auto* object = static_cast<Entity*>(DAT_004a9994.items[index]);
+        if (object == nullptr || object->resource == nullptr) continue;
+        const int32_t resource_id = *reinterpret_cast<const int32_t*>(
+            static_cast<const uint8_t*>(object->resource) + 4);
+        if (resource_id == 0xC5C || resource_id == 0xC5E ||
+            resource_id == 0xC60) {
+            object->StopSound(timeoutVal);
+        }
+    }
+#endif
+    // The SDL host has no mode-3 world objects yet; retain the state so the
+    // future world adapter can apply it when materializing signal objects.
     this->m_timeoutState = timeoutVal;
 }
 
@@ -2375,34 +2479,94 @@ int32_t NETMAN_ReceiveTrainPosition(int p1, int p2, int p3)
 
 /* ================================================================== */
 /* NETMAN_ReceiveLayoutSelect - 0x440070                              */
-/* TODO: decompile 0x440070                                           */
 /* ================================================================== */
 void NETMAN_ReceiveLayoutSelect(Netman* netman)
 {
-    /* TODO: decompile 0x440070 — NETMAN_ReceiveLayoutSelect body
-     *
-     * Serializes all 9 player slots into a 0x228-byte packet via
-     * DPLAY_FreePlayerSlot, queues TrainMessage type=6.
-     */
-    (void)netman;
+    if (netman == nullptr || _g_train == nullptr) return;
+    constexpr int32_t packet_size = 0x228;
+    auto* packet = static_cast<uint8_t*>(operator_new(packet_size));
+    if (packet == nullptr) return;
+    std::memset(packet, 0, packet_size);
+    *reinterpret_cast<uint16_t*>(packet) = 0x3F1;
+    *reinterpret_cast<int32_t*>(packet + 4) = netman->m_playerSlotCount;
+    packet[8] = static_cast<uint8_t>(netman->m_playerRows);
+    packet[9] = static_cast<uint8_t>(netman->m_playerCols);
+    for (int32_t index = 0; index < 9; ++index) {
+        DPLAY_FreePlayerSlot(packet + 0x0C + index * 0x3C,
+                            reinterpret_cast<const int32_t*>(
+                                &netman->m_slots[index]));
+    }
+    TrainMessage* message = net_new_message();
+    if (message == nullptr) {
+        GLOBAL_free(packet);
+        return;
+    }
+    message->type = 6;
+    message->data_len = packet_size;
+    message->data_ptr = packet;
+    message->target_dpId = 0;
+    message->flags = 1;
+    Train_QueueMessage(_g_train, message);
+
+#ifdef _WIN32
+    void* panel = g_ui_main != nullptr
+        ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(g_ui_main) + 0x220)
+        : nullptr;
+    if (panel != nullptr && IsWindowVisible(*reinterpret_cast<void**>(
+            reinterpret_cast<uint8_t*>(panel) + 8))) {
+        CGWND_GameSetup_DrawGrid_Thunk(panel);
+        UIPANEL_EndPaintEx(panel,
+            *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(panel) + 8),
+            0, 0, nullptr);
+    }
+#endif
 }
 
 /* ================================================================== */
 /* NETMAN_ReceiveFileTransfer - 0x440310                              */
-/* TODO: decompile 0x440310                                           */
 /* ================================================================== */
 void NETMAN_ReceiveFileTransfer(Netman* netman)
 {
-    /* TODO: decompile 0x440310 — NETMAN_ReceiveFileTransfer body */
-    (void)netman;
+    if (netman == nullptr || _g_train == nullptr) return;
+    if (netman->m_gameMode == 2 && netman->m_currentSlot != nullptr)
+        netman->m_currentSlot->flag_36 = 1;
+    auto* packet = static_cast<uint8_t*>(operator_new(4));
+    if (packet == nullptr) return;
+    std::memset(packet, 0, 4);
+    *reinterpret_cast<uint16_t*>(packet) = 0x3F4;
+    TrainMessage* message = net_new_message();
+    if (message == nullptr) {
+        GLOBAL_free(packet);
+        return;
+    }
+    message->type = 6;
+    message->data_len = 4;
+    message->data_ptr = packet;
+    message->flags = 1;
+    Train_QueueMessage(_g_train, message);
 }
 
 /* ================================================================== */
 /* NETMAN_SendAck - 0x440390                                          */
-/* TODO: decompile 0x440390                                           */
 /* ================================================================== */
 void NETMAN_SendAck(Netman* netman)
 {
-    /* TODO: decompile 0x440390 — NETMAN_SendAck body */
-    (void)netman;
+    if (netman == nullptr) return;
+    if (netman->m_gameMode == 2 && netman->m_currentSlot != nullptr)
+        netman->m_currentSlot->flag_36 = 0;
+    if (_g_train == nullptr) return;
+    auto* packet = static_cast<uint8_t*>(operator_new(4));
+    if (packet == nullptr) return;
+    std::memset(packet, 0, 4);
+    *reinterpret_cast<uint16_t*>(packet) = 0x3F5;
+    TrainMessage* message = net_new_message();
+    if (message == nullptr) {
+        GLOBAL_free(packet);
+        return;
+    }
+    message->type = 6;
+    message->data_len = 4;
+    message->data_ptr = packet;
+    message->flags = 1;
+    Train_QueueMessage(_g_train, message);
 }

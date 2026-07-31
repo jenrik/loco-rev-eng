@@ -76,7 +76,10 @@ void   __thiscall NETMAN_SendBuildingData(void* netman, int player_id); /* 0x004
 
 /* DPLAY player helpers */
 void*  __thiscall DPLAY_CreatePlayer(void* player);          /* 0x004429C0 */
-void   __thiscall DPLAY_CopyPlayerData(void* dst, void* src); /* 0x00442A20 */
+void DPLAY_CopyPlayerData(void* dst, const void* src); /* 0x4426D0 */
+#ifndef _WIN32
+void* DPLAY_DecodePlayerSlots(const void* firstCompactSlot);
+#endif
 void   __thiscall DPLAY_CleanupPlayer(void* player);         /* 0x00442A00 */
 void   __thiscall DPLAY_InitPlayer(void* player, uint8_t mode, uint8_t sub_mode,
                                     int a, int b, int c, int d, int e); /* 0x00442A40 */
@@ -867,15 +870,22 @@ void TrainSubsystem::ProcessMessages()
                 qmsg->setMetadata0((uint8_t)p[4]);
                 qmsg->setMetadata1(*(uint8_t*)((uint8_t*)p + 9));
 
+#ifndef _WIN32
+                qmsg->data = DPLAY_DecodePlayerSlots(
+                    static_cast<uint8_t*>(payload) + 0x0C);
+#else
                 void* data = operator_new(0x2AC);
                 qmsg->data = data;
-                if (data) {
-                    for (int i = 0; i < 0x2AC; i += 0x4C) {
-                        int source_index = i / 0x4C;
-                        DPLAY_CopyPlayerData((void*)((uint8_t*)data + i),
-                            (uint8_t*)payload + 0x0C + source_index * 0x3C);
+                if (data != nullptr) {
+                    std::memset(data, 0, 0x2AC);
+                    for (int offset = 0; offset < 0x2AC; offset += 0x4C) {
+                        DPLAY_CopyPlayerData(
+                            static_cast<uint8_t*>(data) + offset,
+                            static_cast<uint8_t*>(payload) + 0x0C +
+                                (offset / 0x4C) * 0x3C);
                     }
                 }
+#endif
             }
             NETMAN_QueueMessage(qmsg);
             break;
