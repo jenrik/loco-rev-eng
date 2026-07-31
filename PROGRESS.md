@@ -263,7 +263,7 @@ main()
 - [x] **Linkage fixes**: `GameLoop_Setup`/`GameLoop_FrameUpdate` are `extern "C"` — fixed declarations in main.cpp and CGWND_sdl3.cpp. `ResourceManager_Init` stub fixed (`void`→`int` return).
 - [x] **SDK wiring fixes**: `RegisterWindowClass` SDL3 path now uses `SDL3_GetWindow()`. `g_main_window` set to CGWND instance in main.cpp.
 - [x] **Decompile `CGWND_InitMode1`** (0x408350) — full implementation from Ghidra decompilation. Two code paths: first-time loading screen with incremental subsystem init + progress pump, and return-to-menu world loading. All stubs in place, game transitions to mode 1 and enters main loop cleanly.
-- [ ] **Implement real subsystem constructors** — `UI_MainMenu_Ctor`, `Town_Ctor`, `Cursor_Ctor`, etc. currently return raw memory (no vtable). Need proper class implementations with virtual methods.
+- [ ] **Implement real subsystem constructors / host mode-3 bootstrap** — `Town`, `Cursor`, `PostcardAlbum`, `Game`, `BuildingMgr`, `World`, and tilemap remain absent on the host; mode-1 PATH A and `CGWND_EnterMode3(0x4086F0)` therefore cannot safely progress to host gameplay. Recover and integrate typed constructors plus their SDL boundaries before enabling mode-1→3; never fabricate a town frame.
 - [ ] **Unbreak remaining 3 C++ files**:
   - `game/Building.cpp` — uses `this->vtable`, MSVC `scalar_deleting_destructor` pattern
   - `town/Town.cpp` — signature mismatches, `void*` arithmetic
