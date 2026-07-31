@@ -14,11 +14,13 @@
 #include "CGWND.h"
 #include "Game.h"
 #include "../game/PlayerConfig.h"
+#include "../network/NetworkPlayerList.h"
 #include "../shared/types.h"
 #ifndef _WIN32
 #include "../../sdl3_shims/sdl3_net_game_bridge.h"
 #endif
 #include <cstdio>
+#include <new>
 
 /* ================================================================== */
 /* External declarations (not yet in headers)                          */
@@ -34,7 +36,6 @@ void* operator_new(size_t size);
 void* ScriptEngine_constructor(void* mem);       /* 0x4493A0 */
 void* GameConfig_constructor(void* mem);         /* 0x440C60 */
 void* NETMAN_constructor(void* mem);             /* 0x43D0A0 */
-void* NetworkPlayerList_ctor(void* mem);         /* 0x443000 */
 PlayerConfig* PlayerRecord_constructor(PlayerConfig* config); /* 0x452E10 */
 void* PixelDataCache_Ctor(void* mem);            /* 0x401620 */
 
@@ -80,7 +81,6 @@ extern void*    g_netman;            /* 0x4FD3AC */
 #ifndef _WIN32
 extern Netman*  _g_netman;           /* stale translated alias of 0x4FD3AC */
 #endif
-extern void*    g_dplay;             /* 0x4FD3B0 */
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 */
 extern void*    g_dplay_config;      /* 0x4FD3B4 */
 extern void*    g_resmgr;            /* 0x4855E8 */
@@ -121,6 +121,8 @@ static const char S_SETTING1[] = "Setting1";
 static const char S_SETTING2[] = "Setting2";
 static const char S_SETTING3[] = "Setting3";
 static const char S_GAMELOOP[] = "GameLoop";
+
+extern "C" int GameLoop_Setup(void* cgwnd);
 
 static void trace_setup_stage(const char* stage)
 {
@@ -185,10 +187,12 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     _g_netman = static_cast<Netman*>(g_netman);
 #endif
 
-    /* Allocate DirectPlay (0xBE4 bytes) */
+    /* Allocate NetworkPlayerList (0xBE4 bytes in the original x86 layout).
+     * Placement construction preserves the recovered allocator/null path while
+     * letting C++ establish the dispatch pointer and native host layout. */
     trace_setup_stage("step 3d: DirectPlay");
-    mem = operator_new(0xBE4);
-    g_dplay = mem ? NetworkPlayerList_ctor(mem) : nullptr;
+    mem = operator_new(sizeof(NetworkPlayerList));
+    g_dplay = mem ? ::new (mem) NetworkPlayerList() : nullptr;
 
     /* Allocate PlayerRecord (0x124 bytes) */
     trace_setup_stage("step 3e: PlayerRecord");

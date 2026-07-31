@@ -21,7 +21,7 @@
  *               └─ GameView  <- this class
  *
  * Vtable layout (0x477D30, extends Panel 15-slot GameObject vtable):
- *   [0]  +0x00: scalar deleting destructor (GameView_Dtor, 0x42D810)
+ *   [0]  +0x00: scalar deleting destructor (compiler-generated wrapper, 0x42CD60)
  *   [1]  +0x04: StopSound                (inherited from GameObject)
  *   [2]  +0x08: (inherited stub)
  *   [3]  +0x0C: HitTest dispatch         (inherited stub)
@@ -37,12 +37,15 @@
  *   [13] +0x34: method_13                (overridden: TownGameView_Method13, 0x42D840)
  *   [14] +0x38: AnimStateSelect          (inherited stub)
  *   Beyond [14]: GameView-specific cleanup slot at vtable[15] = +0x3C
- *       GameView_Cleanup (0x42CDD0)
+ *       GameView::cleanup body (0x42CDD0)
  */
 
 #pragma once
 
 #include "../shared/types.h"
+
+class ResourceObject;
+
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* GameView class                                                       */
@@ -54,80 +57,36 @@ public:
     /* Fields (offsets from this)                                        */
     /* ================================================================ */
 
-    /* --- Inherited from RESDATA/GameObject/Panel (partial list of key fields) --- */
-/* vtable at +0x00 is compiler-managed */
-    int32_t    type;                   // +0x04  object type (14 = 0x0E for GameView)
-    /* +0x08..+0xAC: RESDATA/GameObject fields */
+    /* The raw object has a compiler-managed vptr at +0x00.  The unnamed
+     * RESDATA/Panel prefix occupies +0x04..+0xDF.  Keep that prefix named
+     * and opaque: the embedded object and child pointer are the fields this
+     * class actually owns at the recovered offsets. */
+    int32_t    type;                   // +0x04  object type (0x0E)
+    uint8_t    _panel_prefix[0xA5];    // +0x08..+0xAC
+    uint8_t    scroll_active_flag;     // +0xAD  active/drag flag
+    uint8_t    _panel_suffix[0x32];    // +0xAE..+0xDF
+    int32_t    scroll_x;               // +0xE0
 
-    uint8_t    scroll_active_flag;     // +0xAD  1 = scroll/scrollbar active (init to 1)
+    /* Entity constructed by the original call to 0x405790 at +0xE4.
+     * The storage is deliberately opaque because the recovered inline
+     * object is an x86 ABI object, not a separately allocated pointer. */
+    alignas(uint32_t) uint8_t game_object_sub[0x98]; // +0xE4..+0x17B
 
-    /* +0xAE..+0xDF: more RESDATA/GameObject fields */
+    ResourceObject* child_resource;    // +0x17C, released by Cleanup()
 
-    int32_t    scroll_x;               // +0xE0  scroll offset X (init to 0)
-    /* +0xE4: Embedded GameObject sub-object (created via GameObject_BaseCtor) */
-    void*      game_object_sub;        // +0xE4  embedded GameObject for sprite management
-
-    /* +0xE8..+0x17B: more Panel fields */
-
-    int32_t    scroll_y;               // +0x17C  scroll offset Y / child reference (init to 0)
-
-    /* Total size: ~0x180 bytes */
+    /* Total size: 0x180 bytes on the recovered x86 layout. */
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */
     /* ================================================================ */
 
-    /**
-     * GameView constructor.
-     * Address: 0x42CCE0 (__fastcall, ECX = this)
-     *
-     * Initializes the GameView object:
-     *   1. Calls RESDATA_BaseInit to initialize RESDATA base
-     *   2. Creates GameObject sub-object at +0xE4 via GameObject_BaseCtor
-     *   3. C++ construction installs the GameView vtable (0x477D30)
-     *   4. Sets type to 14 (0x0E)
-     *   5. Initializes scroll_x (+0xE0) = 0, scroll_y (+0x17C) = 0
-     *   6. Sets scroll_active_flag (+0xAD) = 1
-     *
-     * Called from: game timer callback during scene setup
-     *
-     * @return  Pointer to the constructed object (same as this)
-     */
-    void* GameView_Ctor();
+    /** GameView constructor — Address: 0x42CCE0 (__fastcall). */
+    GameView();
 
-    /**
-     * Scalar deleting destructor (vtable[0]).
-     * Address: 0x42CD60 (__thiscall)
-     *
-     * Calls DtorBody to release resources, then optionally frees
-     * the heap allocation via GLOBAL_free if flags & 1.
-     *
-     * @param flags  Delete flag (bit 0 = free heap memory)
-     * @return       This pointer (after dtor)
-     */
-    virtual ~GameView();
+    /** GameView destructor body — Address: 0x42CD80 (__fastcall). */
+    ~GameView();
 
-    /**
-     * Full destructor body.
-     * Address: 0x42CD80 (__fastcall, ECX = this)
-     *
-     * 1. Enters destruction with the compiler-managed GameView vtable
-     * 2. Calls GameObject_DtorBody on sub-object at +0xE4
-     * 3. Calls Panel_DtorBody for base class cleanup
-     */
-    void destroy();
-
-    /**
-     * Cleanup — Release child resources and call base cleanup.
-     * Address: 0x42CDD0 (__fastcall, ECX = this, vtable[15] at +0x3C)
-     *
-     * 1. Destroys child reference at +0x17C via vtable[0]
-     * 2. Cleanups up GameObject at +0xE4 via vtable[6]
-     * 3. Cleanups up self via vtable[6]
-     * 4. Calls RESDATA_DtorBase
-     *
-     * Called from: CGWND_Cleanup directly on g_town_view
-     */
+    /** Cleanup — Address: 0x42CDD0 (__fastcall). */
     void cleanup();
 };
 

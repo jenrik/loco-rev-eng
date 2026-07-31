@@ -45,45 +45,10 @@ void TimerSlotList::DtorBody()
     this->items = nullptr;                          /* +0x04 */
 }
 
-/* ================================================================== */
-/* scalar_deleting_dtor_dead — Scalar deleting destructor (dead)       */
-/* Address: 0x412580                                                   */
-/*                                                                     */
-/* Used with vtable at 0x4777C0 (dead/expired entries).                */
-/* Called from EH unwind handlers for TimerSlotList instances that     */
-/* have already been marked dead.                                      */
-/*                                                                     */
-/* This inlines the DtorBody rather than calling it separately.        */
-/* ================================================================== */
-void* __thiscall TimerSlotList::scalar_deleting_dtor_dead(byte flags)
+/* The scalar-deleting destructor slots at 0x412580 and 0x4125C0 are
+ * compiler-generated ABI helpers. The user destructor owns only the
+ * collection cleanup recovered at 0x412410. */
+TimerSlotList::~TimerSlotList()
 {
-    /* Inline DtorBody */
-    /* In the binary: resets vtable to dead marker (0x477798).
-     * Natural C++: dead objects are identified by initialized==0. */
-    this->count  = 0;                               /* +0x08 */
-
-    if (this->items != nullptr) {                   /* +0x04 */
-        GLOBAL_free(this->items);
-    }
-    this->items = nullptr;                          /* +0x04 */
-
-    /* Free this instance if flags & 1 */
-    return this;
-}
-
-/* ================================================================== */
-/* scalar_deleting_dtor_active — Scalar deleting destructor (active)   */
-/* Address: 0x4125C0                                                   */
-/*                                                                     */
-/* Used with vtable at 0x477780 (active/running entries).              */
-/* This is the main destructor called during normal cleanup.           */
-/* Calls DtorBody() then optionally frees this if flags & 1.           */
-/* ================================================================== */
-void* __thiscall TimerSlotList::scalar_deleting_dtor_active(byte flags)
-{
-    /* Call destructor body */
-    this->DtorBody();
-
-    /* Free this instance if flags & 1 */
-    return this;
+    DtorBody();
 }

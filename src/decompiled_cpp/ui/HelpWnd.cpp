@@ -237,7 +237,7 @@ void HelpWnd::init()
      * Matches original binary behavior at 0x451180. */
 
     /* Zero initial state fields */
-    this->hIcon = 0;                    /* +0x154 */
+    this->hIcon = nullptr;               /* +0x154 */
     this->audioChannel = NULL;          /* +0x158 */
     this->spritesInited = 0;            /* +0x14E (byte) */
     this->active = 0;                   /* +0x14C (byte) */

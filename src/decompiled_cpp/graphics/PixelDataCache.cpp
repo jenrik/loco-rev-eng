@@ -23,7 +23,36 @@
 
 #include "PixelDataCache.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
-#include <string.h>   /* for memcpy, strlen */
+#include <cstring>   /* memcpy, memset, strlen */
+#include <cstdint>
+#include <limits>
+
+namespace {
+
+/* The player number is an unaligned dword in the recovered x86 config
+ * block. memcpy preserves that byte-level contract without type-punning. */
+static uint32_t read_player_number(const uint8_t* config)
+{
+    uint32_t player_number = 0;
+    std::memcpy(&player_number, config + 0x18, sizeof(player_number));
+    return player_number;
+}
+
+static uint32_t read_asset_value(const void* asset_desc)
+{
+    uint32_t value = 0;
+    const auto* bytes = static_cast<const uint8_t*>(asset_desc);
+    std::memcpy(&value, bytes + 0x0C, sizeof(value));
+    return value;
+}
+
+static bool is_invalid_file_handle(const void* handle)
+{
+    return reinterpret_cast<uintptr_t>(handle) ==
+           std::numeric_limits<uintptr_t>::max();
+}
+
+} // namespace
 
 /* ================================================================== */
 /* External references                                                 */
@@ -157,7 +186,7 @@ void PixelDataCache::Flush()
 
     /* Build output file path: <inst>/PostBag/AlbIndex_<pid>_<idx>.ind */
     char filepath[1284];
-    uint32_t player_num = *(uint32_t*)(g_player_config + 0x18);  /* player number from config */
+    uint32_t player_num = read_player_number(g_player_config);  /* player number from config */
     wsprintfA(filepath, kFormatPath,
               g_install_path, kPostBagDir, kAlbIndexPrefix,
               player_num, this->current_album_index);
@@ -176,7 +205,7 @@ void PixelDataCache::Flush()
                                   0x80,          /* FILE_ATTRIBUTE_NORMAL */
                                   nullptr);
 
-        if (hFile == (void*)-1) {
+        if (is_invalid_file_handle(hFile)) {
             /* File creation failed -- report error */
             uint32_t err = GetLastError();
             char* msg_buf = nullptr;
@@ -185,7 +214,7 @@ void PixelDataCache::Flush()
                                              FORMAT_MESSAGE_IGNORE_INSERTS */
                           nullptr, err,
                           0x400,          /* MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT) */
-                          (char*)&msg_buf, 0, nullptr);
+                          reinterpret_cast<char*>(&msg_buf), 0, nullptr);
             LocalFree(msg_buf);
             return;
         }
@@ -200,7 +229,7 @@ void PixelDataCache::Flush()
             uint32_t err = GetLastError();
             char* msg_buf = nullptr;
             FormatMessageA(0x1100, nullptr, err,
-                          0x400, (char*)&msg_buf, 0, nullptr);
+                          0x400, reinterpret_cast<char*>(&msg_buf), 0, nullptr);
             LocalFree(msg_buf);
             return;  /* BUG: handle leaked (not closed on WriteFile failure) */
         }
@@ -249,7 +278,7 @@ void PixelDataCache::Load(int32_t album_index)
 
     /* Build the file path */
     char filepath[1284];
-    uint32_t player_num = *(uint32_t*)(g_player_config + 0x18);
+    uint32_t player_num = read_player_number(g_player_config);
     wsprintfA(filepath, kFormatPath,
               g_install_path, kPostBagDir, kAlbIndexPrefix,
               player_num, album_index);
@@ -263,7 +292,7 @@ void PixelDataCache::Load(int32_t album_index)
                               0x80,      /* FILE_ATTRIBUTE_NORMAL */
                               nullptr);
 
-    if (hFile == (void*)-1) {
+    if (is_invalid_file_handle(hFile)) {
         /* File doesn't exist -- set empty state */
         this->current_album_index = album_index;
         this->buffer_size = 0;
@@ -300,7 +329,7 @@ void PixelDataCache::Load(int32_t album_index)
             uint32_t err = GetLastError();
             char* msg_buf = nullptr;
             FormatMessageA(0x1100, nullptr, err,
-                          0x400, (char*)&msg_buf, 0, nullptr);
+                          0x400, reinterpret_cast<char*>(&msg_buf), 0, nullptr);
             LocalFree(msg_buf);
             /* BUG: buffer not freed on ReadFile failure; handle (hFile) also leaked */
             return;
@@ -323,7 +352,7 @@ void PixelDataCache::Load(int32_t album_index)
 /* ================================================================== */
 int32_t PixelDataCache::GetEntryCount()
 {
-    return this->buffer_size / (int32_t)sizeof(PixelFormatEntry);  /* / 0x18 */
+    return this->buffer_size / static_cast<int32_t>(sizeof(PixelFormatEntry));  /* / 0x18 */
 }
 
 /* ================================================================== */
@@ -340,7 +369,7 @@ int32_t PixelDataCache::Unlock(int32_t album_index)
     if (this->current_album_index != album_index) {
         this->Load(album_index);
     }
-    return this->buffer_size / (int32_t)sizeof(PixelFormatEntry);
+    return this->buffer_size / static_cast<int32_t>(sizeof(PixelFormatEntry));
 }
 
 /* ================================================================== */
@@ -360,7 +389,7 @@ void PixelDataCache::Insert(int32_t index, const PixelFormatEntry* entry)
     this->insert_index      = index;                       /* +0x10 */
 
     int32_t old_size = this->buffer_size;
-    int32_t new_size = old_size + (int32_t)sizeof(PixelFormatEntry);
+    int32_t new_size = old_size + static_cast<int32_t>(sizeof(PixelFormatEntry));
 
     /* Special case: first entry (buffer was empty) */
     if (this->pixel_buffer == nullptr) {
@@ -376,7 +405,7 @@ void PixelDataCache::Insert(int32_t index, const PixelFormatEntry* entry)
     PixelFormatEntry* new_buf =
         static_cast<PixelFormatEntry*>(operator_new(new_size));
 
-    int32_t copy_before = index * (int32_t)sizeof(PixelFormatEntry);
+    int32_t copy_before = index * static_cast<int32_t>(sizeof(PixelFormatEntry));
     if (copy_before > 0) {
         memcpy(new_buf, this->pixel_buffer, copy_before);
     }
@@ -414,7 +443,7 @@ void PixelDataCache::RemoveEntry(int32_t index)
     int32_t old_size = this->buffer_size;
 
     /* If only 1 entry remains, just free the whole buffer */
-    if (old_size == (int32_t)sizeof(PixelFormatEntry)) {
+    if (old_size == static_cast<int32_t>(sizeof(PixelFormatEntry))) {
         GLOBAL_free(this->pixel_buffer);
         this->buffer_size  = 0;
         this->pixel_buffer = nullptr;
@@ -422,11 +451,11 @@ void PixelDataCache::RemoveEntry(int32_t index)
     }
 
     /* Allocate smaller buffer */
-    int32_t new_size = old_size - (int32_t)sizeof(PixelFormatEntry);
+    int32_t new_size = old_size - static_cast<int32_t>(sizeof(PixelFormatEntry));
     PixelFormatEntry* new_buf =
         static_cast<PixelFormatEntry*>(operator_new(new_size));
 
-    int32_t remove_offset = index * (int32_t)sizeof(PixelFormatEntry);
+    int32_t remove_offset = index * static_cast<int32_t>(sizeof(PixelFormatEntry));
 
     /* Only copy if the removal offset is within bounds */
     if (remove_offset < old_size) {
@@ -436,7 +465,7 @@ void PixelDataCache::RemoveEntry(int32_t index)
         }
 
         /* Copy data after removal point */
-        int32_t after_offset = (index + 1) * (int32_t)sizeof(PixelFormatEntry);
+        int32_t after_offset = (index + 1) * static_cast<int32_t>(sizeof(PixelFormatEntry));
         int32_t remaining = old_size - after_offset;
         if (remaining > 0) {
             memcpy(reinterpret_cast<uint8_t*>(new_buf) + remove_offset,
@@ -483,7 +512,7 @@ void PixelDataCache::Lookup(void* asset_desc)
     memset(upper_name + name_len, 0, sizeof(upper_name) - name_len);
 
     /* Copy the asset value */
-    asset_value = *(uint32_t*)(reinterpret_cast<uint8_t*>(asset_desc) + 0x0C);
+    asset_value = read_asset_value(asset_desc);
 
     /* Convert to uppercase for category determination */
     CRT_strupr(upper_name);
@@ -505,7 +534,7 @@ void PixelDataCache::Lookup(void* asset_desc)
     /* Load the category data */
     this->Load(category);
 
-    int32_t entry_count = this->buffer_size / (int32_t)sizeof(PixelFormatEntry);
+    int32_t entry_count = this->buffer_size / static_cast<int32_t>(sizeof(PixelFormatEntry));
 
     if (entry_count == 0) {
         /* Buffer is empty -- just insert at position 0 */
@@ -603,10 +632,10 @@ bool PixelDataCache::RemoveByAsset(void* asset_desc)
     memcpy(upper_name, src_name, name_len);
 
     /* Get the value to match from asset_desc */
-    uint32_t match_value = *(uint32_t*)(reinterpret_cast<uint8_t*>(asset_desc) + 0x0C);
+    uint32_t match_value = read_asset_value(asset_desc);
 
     /* Linear scan: find entry with matching value */
-    int32_t entry_count = this->buffer_size / (int32_t)sizeof(PixelFormatEntry);
+    int32_t entry_count = this->buffer_size / static_cast<int32_t>(sizeof(PixelFormatEntry));
     int32_t found_index = -1;
 
     for (int32_t i = 0; i < entry_count; i++) {
@@ -644,7 +673,7 @@ void* PixelDataCache::LookupAsset(int32_t start_index, int32_t album_index)
     }
 
     /* Iterate from start_index */
-    for (int32_t i = start_index; i < this->buffer_size / (int32_t)sizeof(PixelFormatEntry); i++) {
+    for (int32_t i = start_index; i < this->buffer_size / static_cast<int32_t>(sizeof(PixelFormatEntry)); i++) {
         char addr_buffer[1284];
         NET_CheckAssetExists(this->pixel_buffer[i].value, 0, addr_buffer);
         void* result = NET_ResolveAddress(addr_buffer);

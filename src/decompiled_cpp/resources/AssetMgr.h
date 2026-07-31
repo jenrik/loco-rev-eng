@@ -11,9 +11,10 @@
  *
  * === Struct Layout ===
  * The AssetMgr struct (referenced via `this` pointer) has fields at:
- *   +0x00: file_handle (int, CRT file handle for the archive)
- *   +0x04: search_cursor (uint32_t*, linked list of directory entries)
- *   +0x08: resource_array (void**, per-type resource table)
+ *   +0x00: entry_count (uint32_t, number of active entries)
+ *   +0x04: pair_matrix (uint8_t*, packed adjacency pair matrix)
+ *   +0x08: resource_array (void**, per-entry resource table)
+ *   +0x0C: mode (uint32_t, enumeration mode)
  *   +0x10: active_flag (byte*, per-entry active flag array)
  *   +0x14: traversal_step (int, counter during traversal)
  *   +0x18: path_id_buffer (int*, allocated ID path buffer)
@@ -39,7 +40,8 @@
  *   Value 0x80 = valid unset, 0xFF = invalid/cleared, 0-3 = direction
  *
  * === Functions ===
- * All functions are C linkage operating on the AssetMgr struct.
+ * Functions retain the recovered ABI where callers pass the raw manager
+ * storage; implementations use the typed AssetMgr view internally.
  *
  * References:
  *   - AssetMgr_LoadFile: in native/assetmgr_loadfile.c
@@ -88,10 +90,10 @@ extern const char s_invalid_path_error[];  /* "ERROR: Invalid path in GetOpposit
 /* AssetMgr struct — non-virtual, 0x2C bytes                           */
 /* ================================================================== */
 struct AssetMgr {
-    int32_t   file_handle;       /* +0x00  CRT file handle for archive */
-    uint32_t* search_cursor;     /* +0x04  linked list of directory entries */
-    void**    resource_array;    /* +0x08  per-type resource table */
-    uint8_t   _pad_0C[4];        /* +0x0C */
+    uint32_t  entry_count;       /* +0x00  number of active entries */
+    uint8_t*  pair_matrix;       /* +0x04  packed adjacency pair matrix */
+    void**    resource_array;    /* +0x08  per-entry resource table */
+    uint32_t  mode;              /* +0x0C  enumeration mode */
     uint8_t*  active_flag;       /* +0x10  per-entry active flag array */
     int32_t   traversal_step;    /* +0x14  step counter */
     int32_t*  path_id_buf;       /* +0x18  allocated ID path buffer */

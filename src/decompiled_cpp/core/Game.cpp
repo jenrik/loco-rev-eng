@@ -217,13 +217,14 @@ Game::Game()
     GameObject_BaseCtor(this, -1, -1, 0, 0);
 
     /* Initialize timer sub-object */
-    this->timer_sub_ptr = (int32_t)VTBL_TIMER_INIT_VTABLE;  /* +0x10C = 0x477798 */
+    this->timer_sub_ptr = static_cast<int32_t>(VTBL_TIMER_INIT_VTABLE);  /* +0x10C = 0x477798 */
     this->timer_array_ptr = 0;                                      /* +0x110 = NULL */
     this->timer_count = 0;                                          /* +0x114 = 0 */
 
     /* Allocate timer data array (10 entries * 4 bytes = 0x28 bytes) */
-    int* timers = (int*)operator_new(0x28);
-    this->timer_array_ptr = (int32_t)timers;
+    int* timers = static_cast<int*>(operator_new(0x28));
+    this->timer_array_ptr = static_cast<int32_t>(
+        reinterpret_cast<intptr_t>(timers));
 
     if (timers) {
         for (i = 10; i != 0; i--) {
@@ -237,11 +238,12 @@ Game::Game()
     }
 
     /* Switch to running timer vtable */
-    this->timer_sub_ptr = (int32_t)VTBL_TIMER_RUNNING_VTABLE;  /* +0x10C = 0x477758 */
+    this->timer_sub_ptr = static_cast<int32_t>(VTBL_TIMER_RUNNING_VTABLE);  /* +0x10C = 0x477758 */
     this->timer_edit = 0;                                             /* +0x118 = 0 */
 
     /* Set Game vtable */
-    *(void**)this = (void*)VTBL_GAME;              /* +0x00 = 0x477718 */
+    *reinterpret_cast<void**>(this) =
+        reinterpret_cast<void*>(static_cast<uintptr_t>(VTBL_GAME)); /* +0x00 = 0x477718 */
 
     /* Mark active */
     this->initialized = 1;                          /* +0x18 = 1 — inherited from GameObject */
@@ -299,16 +301,25 @@ Game::~Game()
     SystemParametersInfoA(4, 0, this->mouse_spi3, 0);              /* SPI_SETMOUSE (setting 4) */
 
     /* Stop timer sub-object: call vtable[5] (+0x14) — Timer::Stop */
-    void* timer_sub = (void*)(intptr_t)this->timer_sub_ptr;
-    if (timer_sub) {
-        (*(void (__thiscall**)(void*))((int*)timer_sub + 5))(timer_sub); /* vtable[5] on timer */
+    void* timer_sub = reinterpret_cast<void*>(
+        static_cast<intptr_t>(this->timer_sub_ptr));
+    if (timer_sub != nullptr) {
+        using StopMethod = void (__thiscall*)(void*);
+        auto stop = reinterpret_cast<StopMethod>(
+            *reinterpret_cast<void**>(static_cast<uint8_t*>(timer_sub) +
+                                      5 * sizeof(int)));
+        stop(timer_sub); /* vtable[5] on timer */
     }
 
     /* Switch to windowed cursor mode */
     this->SetScreenMode(0, 1, 0);   /* capture=0, show=1, custom=0 */
 
     /* Release resources: vtable[6] = InitBase(0, -1, 0) = resource release call */
-    (*(void (__thiscall**)(void*, int, int, int))((uintptr_t*)this)[6])(this, 0, -1, 0);
+    using ReleaseMethod = void (__thiscall*)(void*, int, int, int);
+    auto release = reinterpret_cast<ReleaseMethod>(
+        *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(this) +
+                                  6 * sizeof(uintptr_t)));
+    release(this, 0, -1, 0);
 }
 
 /* ================================================================== */

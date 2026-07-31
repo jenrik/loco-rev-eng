@@ -13,8 +13,8 @@
 #ifndef _WIN32
 /* Non-Windows stubs for Win32 functions used by set_capture() */
 /* (declared in stubs/windows.h but sdl3_window.h does not yet provide them) */
-static inline HWND GetCapture(void) { return NULL; }
-static inline HWND SetCapture(HWND hWnd) { (void)hWnd; return NULL; }
+static inline HWND GetCapture(void) { return nullptr; }
+static inline HWND SetCapture(HWND hWnd) { (void)hWnd; return nullptr; }
 static inline BOOL ReleaseCapture(void) { return 0; }
 static inline int ShowCursor(int show) { (void)show; return -1; }
 #endif
@@ -64,7 +64,7 @@ void Cursor::set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t 
 
     /* Update animation data and reset rect cache */
     if (resdata != nullptr) {
-        this->anim_resdata() = (RESDATA*)resdata;          /* +0x44 */
+        this->anim_resdata() = static_cast<RESDATA*>(resdata); /* +0x44 */
     }
 
     if (resetPos != 0) {
@@ -196,19 +196,20 @@ void Cursor::update_dirty_rect(uint8_t param)
     }
 
     /* Adjust by hotspot offset */
-    cursorPos.x -= *(int16_t*)((intptr_t)animData + 0x32);  /* hotspot_x */
-    cursorPos.y -= *(int16_t*)((intptr_t)animData + 0x34);  /* hotspot_y */
+    auto* animationBytes = static_cast<uint8_t*>(animData);
+    cursorPos.x -= *reinterpret_cast<int16_t*>(animationBytes + 0x32); /* hotspot_x */
+    cursorPos.y -= *reinterpret_cast<int16_t*>(animationBytes + 0x34); /* hotspot_y */
 
     /* Get sprite dimensions */
-    uint32_t spriteW = *(uint16_t*)((intptr_t)animData + 0x14); /* width  */
-    uint32_t spriteH = *(uint16_t*)((intptr_t)animData + 0x16); /* height */
+    uint32_t spriteW = *reinterpret_cast<uint16_t*>(animationBytes + 0x14); /* width  */
+    uint32_t spriteH = *reinterpret_cast<uint16_t*>(animationBytes + 0x16); /* height */
 
     /* Build new cursor rect */
     RECT newRect;
     newRect.left   = cursorPos.x;
     newRect.top    = cursorPos.y;
-    newRect.right  = cursorPos.x + (int)spriteW;
-    newRect.bottom = cursorPos.y + (int)spriteH;
+    newRect.right  = cursorPos.x + static_cast<int>(spriteW);
+    newRect.bottom = cursorPos.y + static_cast<int>(spriteH);
 
     /* Clip to viewport */
     if (newRect.right > this->clip_rect_right())         /* +0x20 */
@@ -249,8 +250,7 @@ void Cursor::update_dirty_rect(uint8_t param)
             /* ACCELERATED PATH: single composite over union rect */
             /* Capture background */
             {
-                void** vtbl = *(void***)this->backbuffer();      /* +0x5C */
-                ((SurfaceBlt_t)vtbl[0x14 / 4])(
+                Cursor_SurfaceBlt(this->backbuffer())(
                     this->backbuffer(),
                     &unionRect,
                     this->primary_surface(),                     /* +0x38 */
@@ -261,8 +261,7 @@ void Cursor::update_dirty_rect(uint8_t param)
 
             /* Overlay cursor sprite (color-keyed) */
             {
-                void** vtbl = *(void***)this->primary_surface();
-                ((SurfaceBlt_t)vtbl[0x14 / 4])(
+                Cursor_SurfaceBlt(this->primary_surface())(
                     this->primary_surface(),
                     &unionRect,
                     this->cursor_sprite_surface(),               /* +0x14 */
@@ -273,8 +272,7 @@ void Cursor::update_dirty_rect(uint8_t param)
 
             /* Composite to backbuffer */
             {
-                void** vtbl = *(void***)_g_backbuffer;
-                ((SurfaceBlt_t)vtbl[0x14 / 4])(
+                Cursor_SurfaceBlt(_g_backbuffer)(
                     _g_backbuffer,
                     &unionRect,
                     this->primary_surface(),
@@ -286,8 +284,7 @@ void Cursor::update_dirty_rect(uint8_t param)
             /* NORMAL PATH: separate restore + render */
             /* Restore background from primary surface */
             {
-                void** vtbl = *(void***)this->backbuffer();
-                ((SurfaceBlt_t)vtbl[0x14 / 4])(
+                Cursor_SurfaceBlt(this->backbuffer())(
                     this->backbuffer(),
                     &newRect,
                     this->primary_surface(),
@@ -298,13 +295,12 @@ void Cursor::update_dirty_rect(uint8_t param)
 
             /* Composite cursor sprite */
             {
-                void** vtbl = *(void***)this->primary_surface();
                 /* NOTE: srcRect is nullptr for NORMAL PATH blits.
                  *       Per the binary at 0x414FB0, this passes NULL as the
                  *       source rect, which tells DirectDraw to use the entire
                  *       source surface. This is correct for the normal path
                  *       which composites the full cursor sprite. */
-                ((SurfaceBlt_t)vtbl[0x14 / 4])(
+                Cursor_SurfaceBlt(this->primary_surface())(
                     this->primary_surface(),
                     &newRect,
                     this->cursor_sprite_surface(),
@@ -315,8 +311,7 @@ void Cursor::update_dirty_rect(uint8_t param)
 
             /* Composite to backbuffer */
             {
-                void** vtbl = *(void***)_g_backbuffer;
-                ((SurfaceBlt_t)vtbl[0x14 / 4])(
+                Cursor_SurfaceBlt(_g_backbuffer)(
                     _g_backbuffer,
                     &newRect,
                     this->primary_surface(),
@@ -399,18 +394,20 @@ void Cursor::update_network_names()
 
     /* Check if g_netman has scenario player entries */
     /* g_netman→scenarioId at offset +0x7C4 */
-    if (g_netman != nullptr && *(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {
+    if (g_netman != nullptr &&
+        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_netman) + 0x7C4) == 2) {
         /* Read player names from g_netman's player table.
          * Players stored at g_netman+0x30 (or similar), stride 0x4C,
          * name string at player_entry+0x51D.
          * The binary iterates scenario player entries (usually 2 players). */
-        uint8_t* netmanBase = (uint8_t*)g_netman;
+        uint8_t* netmanBase = static_cast<uint8_t*>(g_netman);
         /* Player entries start at offset 0x30, iterate up to 2 entries */
         for (int p = 0; p < 2 && nameIdx < 26; p++) {
             uint8_t* playerEntry = netmanBase + 0x30 + p * 0x4C;
             /* Name at offset +0x51D within the entry (but from player_entry, +0x51D-0x30=+0x4ED?) */
             /* The binary uses a fixed offset from g_netman base */
-            const char* srcName = (const char*)(netmanBase + 0x4ED + p * 0x4C);
+            const char* srcName = reinterpret_cast<const char*>(
+                netmanBase + 0x4ED + p * 0x4C);
             if (srcName[0] != '\0') {
                 /* Copy up to 12 chars + null */
                 for (int c = 0; c < 12; c++) {
@@ -439,9 +436,10 @@ void Cursor::update_network_names()
     /* Read names from _g_dplay player table at +0xB13, stride 0xD */
     /* Up to 16 entries */
     if (_g_dplay != nullptr) {
-        uint8_t* dplayBase = (uint8_t*)_g_dplay;
+        uint8_t* dplayBase = static_cast<uint8_t*>(_g_dplay);
         for (int p = 0; p < 16 && nameIdx < 26; p++) {
-            const char* srcName = (const char*)(dplayBase + 0xB13 + p * 0xD);
+            const char* srcName = reinterpret_cast<const char*>(
+                dplayBase + 0xB13 + p * 0xD);
             if (srcName[0] != '\0') {
                 /* Copy up to 12 chars + null */
                 for (int c = 0; c < 12; c++) {
@@ -477,7 +475,8 @@ void Cursor::init_network_player()
         return;
 
     /* Get player name from config */
-    const char* cfgName = (const char*)((intptr_t)g_player_config + 6);
+    const char* cfgName = reinterpret_cast<const char*>(
+        static_cast<uint8_t*>(g_player_config) + 6);
     char playerName[64] = { 0 };
     size_t nameLen = strlen(cfgName);
     if (nameLen > 63) nameLen = 63;
@@ -489,10 +488,12 @@ void Cursor::init_network_player()
      * name from g_player_config into the record at +0x25. */
     void* record = nullptr;
     if (_g_dplay != nullptr) {
-        record = (void*)(uintptr_t)DPLAY_CreatePlayer(nullptr);
+        record = reinterpret_cast<void*>(
+            static_cast<uintptr_t>(DPLAY_CreatePlayer(nullptr)));
         if (record != nullptr) {
             /* Copy player name into record at offset +0x25 */
-            memcpy((void*)((intptr_t)record + 0x25), playerName, nameLen + 1);
+            memcpy(static_cast<uint8_t*>(record) + 0x25,
+                   playerName, nameLen + 1);
         }
     }
 
@@ -502,13 +503,15 @@ void Cursor::init_network_player()
         if (record != nullptr) {
             /* Zero-initialize */
             for (int i = 0; i < 0x46; i++) {
-                ((uint8_t*)record)[i] = 0;
+                static_cast<uint8_t*>(record)[i] = 0;
             }
             /* Set default values */
-            memcpy((void*)((intptr_t)record + 0x25), playerName, nameLen + 1);
-            *(int32_t*)((intptr_t)record + 0x3C) = 1;   /* is_audio_preview = 1 */
+            memcpy(static_cast<uint8_t*>(record) + 0x25,
+                   playerName, nameLen + 1);
+            *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(record) + 0x3C) = 1;
+                                                               /* is_audio_preview = 1 */
         }
     }
 
-    this->obj_184 = (CursorEditorRecord*)record;      /* +0x184 */
+    this->obj_184 = static_cast<CursorEditorRecord*>(record); /* +0x184 */
 }

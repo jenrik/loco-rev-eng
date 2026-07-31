@@ -58,13 +58,15 @@ char* __cdecl PlayerConfig_SaveToFile(void* config);           /* 0x453320 */
 /* Inline memory copy utility — matches MSVC's rep movsd pattern */
 static void inline_memcpy(void* dst, const void* src, int32_t len)
 {
-    uint32_t* d32 = (uint32_t*)dst;
-    const uint32_t* s32 = (const uint32_t*)src;
+    uint32_t* d32 = reinterpret_cast<uint32_t*>(dst);
+    const uint32_t* s32 = reinterpret_cast<const uint32_t*>(src);
     int32_t dwords = len >> 2;
     int32_t rem = len & 3;
     int32_t i;
     for (i = 0; i < dwords; i++) d32[i] = s32[i];
-    for (i = 0; i < rem; i++) ((uint8_t*)dst)[dwords * 4 + i] = ((const uint8_t*)src)[dwords * 4 + i];
+    uint8_t* d8 = reinterpret_cast<uint8_t*>(dst);
+    const uint8_t* s8 = reinterpret_cast<const uint8_t*>(src);
+    for (i = 0; i < rem; i++) d8[dwords * 4 + i] = s8[dwords * 4 + i];
 }
 
 /* C++ heap helper — Address: 0x465CD0. */
@@ -87,7 +89,7 @@ extern void* g_primary_surface;  /* 0x4FD3C4 — primary DDraw surface  */
  * Not a member of DPlayManager; called by GetPlayerData.
  * Address: 0x442EC0                                                  */
 /* ================================================================== */
-static void __thiscall DestroySessionInternal(DPLAY_SessionData* session, const DPlayManager* slot)
+static void DestroySessionInternal(DPLAY_SessionData* session, const DPlayManager* slot)
 {
     session->data_blk1[0] = 0;
     session->data_blk1[20] = 0;
@@ -125,7 +127,7 @@ DPLAY_SessionData::~DPLAY_SessionData()
 /*                                                                     */
 /* Called by: NETMAN_JoinSession (0x4419AC), unnamed 0x442677          */
 /* ================================================================== */
-void __fastcall DPlayManager::RenderConnectionPanel()
+void DPlayManager::RenderConnectionPanel()
 {
     RECT  panel_rect;          /* local copy of panel bounds (+0x18C) */
     RECT  text_rect;           /* text drawing area (+0x130) */
@@ -200,7 +202,7 @@ void __fastcall DPlayManager::RenderConnectionPanel()
         *(void**)((uintptr_t)this + 8),    /* +0x08: panel handle/HWND */
         (uintptr_t)hdc,
         1,                              /* repaint flag */
-        NULL
+        nullptr
     );
 
     /* Update bottom of text rect */
@@ -240,7 +242,7 @@ void __fastcall DPlayManager::RenderConnectionPanel()
 /*            Train_HandleConnectionSetup, Train_ConnectToServer,       */
 /*            Train_HandleJoinMultiplayer                              */
 /* ================================================================== */
-void __fastcall DPlayManager::CreatePlayer()
+void DPlayManager::CreatePlayer()
 {
     int32_t i;
 
@@ -282,9 +284,8 @@ void __fastcall DPlayManager::CreatePlayer()
 /*                                                                     */
 /* Called by: DPLAY_EnumerateSessions (0x442FD9)                      */
 /* ================================================================== */
-DPlayManager* __thiscall DPlayManager::DestroyPlayer(const void* session_ptr)
+DPlayManager* DPlayManager::DestroyPlayer(const DPLAY_SessionData* session)
 {
-    const DPLAY_SessionData* session = (const DPLAY_SessionData*)session_ptr;
     int32_t i;
     int32_t entry_count;
 
@@ -358,7 +359,7 @@ bool DPlayManager::LoadLegacySessionWire(const uint8_t* session, size_t size)
 /* ================================================================== */
 /* CleanupPlayer — 0x442A00                                           */
 /* ================================================================== */
-void __fastcall DPlayManager::CleanupPlayer()
+void DPlayManager::CleanupPlayer()
 {
     /* Dynamic dispatch is compiler-managed in reconstructed C++. */
 }
@@ -368,7 +369,7 @@ void __fastcall DPlayManager::CleanupPlayer()
 /*                                                                     */
 /* Called by: Train_ProcessMessages (0x439977)                        */
 /* ================================================================== */
-void __thiscall DPlayManager::CopyPlayerData(const void* packet_ptr)
+void DPlayManager::CopyPlayerData(const void* packet_ptr)
 {
     const uint8_t* pkt = (const uint8_t*)packet_ptr;
 
@@ -396,7 +397,7 @@ void __thiscall DPlayManager::CopyPlayerData(const void* packet_ptr)
 /*                                                                     */
 /* Called by: NETMAN_SyncGameState (0x43FCCD)                         */
 /* ================================================================== */
-void __thiscall DPlayManager::InitPlayerSlot(const DPlayManager* source)
+void DPlayManager::InitPlayerSlot(const DPlayManager* source)
 {
     /* Same-layout copy of all relevant fields */
 
@@ -436,7 +437,7 @@ void DPlayManager::CopyLogicalStateFrom(const DPlayManager& source)
 /*                                                                     */
 /* Called by: NETMAN_ReceiveLayoutSelect (0x4400B6)                   */
 /* ================================================================== */
-void __thiscall DPlayManager::FreePlayerSlot(void* packet_ptr)
+void DPlayManager::FreePlayerSlot(void* packet_ptr)
 {
     uint8_t* pkt = (uint8_t*)packet_ptr;
 
@@ -464,18 +465,18 @@ void __thiscall DPlayManager::FreePlayerSlot(void* packet_ptr)
 /*                                                                     */
 /* Called by: Train_SendPlayerInfo (0x43CD89)                         */
 /* ================================================================== */
-void* __fastcall DPlayManager::GetPlayerData()
+void* DPlayManager::GetPlayerData()
 {
     DPLAY_SessionData* session;
     void* result;
 
-    session = (DPLAY_SessionData*)operator_new(sizeof(DPLAY_SessionData));
-    if (session != NULL) {
-        session = ::new (session) DPLAY_SessionData;
+    void* storage = operator_new(sizeof(DPLAY_SessionData));
+    if (storage != nullptr) {
+        session = ::new (storage) DPLAY_SessionData;
         DestroySessionInternal(session, this);
         result = session;
     } else {
-        result = NULL;
+        result = nullptr;
     }
     return result;
 }
@@ -485,7 +486,7 @@ void* __fastcall DPlayManager::GetPlayerData()
 /*                                                                     */
 /* Called by: NET_RegisterPlayer (0x444EAD)                           */
 /* ================================================================== */
-int32_t __thiscall DPlayManager::SetPlayerData(const char* name)
+int32_t DPlayManager::SetPlayerData(const char* name)
 {
     char filename[0x504];                /* stack buffer for filename */
     void* hFile;
@@ -518,10 +519,10 @@ int32_t __thiscall DPlayManager::SetPlayerData(const char* name)
         filename,
         0x40000000,         /* GENERIC_WRITE */
         1,                  /* FILE_SHARE_READ */
-        NULL,
+        nullptr,
         2,                  /* CREATE_ALWAYS */
         0x8000000,          /* FILE_FLAG_SEQUENTIAL_SCAN */
-        NULL
+        nullptr
     );
 
     if (hFile == (void*)-1) {
@@ -529,7 +530,8 @@ int32_t __thiscall DPlayManager::SetPlayerData(const char* name)
     }
 
     /* Write 0x398 bytes starting from this+4 (skip vtable) */
-    if (!WriteFile(hFile, (const uint8_t*)this + 4, 0x398, &bytesWritten, NULL)) {
+    if (!WriteFile(hFile, (const uint8_t*)this + 4, 0x398, &bytesWritten,
+                   nullptr)) {
         CloseHandle(hFile);
         return 0xFFFFFF00;
     }
@@ -543,14 +545,14 @@ int32_t __thiscall DPlayManager::SetPlayerData(const char* name)
 /*                                                                     */
 /* Called by: NET_ResolveAddress (0x444CC0)                           */
 /* ================================================================== */
-int32_t __thiscall DPlayManager::GetPlayerName(const char* path)
+int32_t DPlayManager::GetPlayerName(const char* path)
 {
     void* hFile;
     uint32_t bytesRead;
 
     bytesRead = 0;
 
-    if (path == NULL) {
+    if (path == nullptr) {
         return 0;
     }
 
@@ -559,10 +561,10 @@ int32_t __thiscall DPlayManager::GetPlayerName(const char* path)
         path,
         0x80000000,         /* GENERIC_READ */
         1,                  /* FILE_SHARE_READ */
-        NULL,
+        nullptr,
         3,                  /* OPEN_EXISTING */
         0x8000000,          /* FILE_FLAG_SEQUENTIAL_SCAN */
-        NULL
+        nullptr
     );
 
     if (hFile == (void*)-1) {
@@ -570,7 +572,7 @@ int32_t __thiscall DPlayManager::GetPlayerName(const char* path)
     }
 
     /* Read 0x398 bytes into this+4 (after vtable) */
-    if (!ReadFile(hFile, &m_magic, 0x398, &bytesRead, NULL)) {
+    if (!ReadFile(hFile, &m_magic, 0x398, &bytesRead, nullptr)) {
         CloseHandle(hFile);
         return 0xFFFFFF00;
     }
@@ -592,7 +594,7 @@ int32_t __thiscall DPlayManager::GetPlayerName(const char* path)
 /* Called by: NETMAN_ReceiveSignalChange (0x43EE34),                  */
 /*            NETMAN_DeserializePlayerData (0x440B97)                 */
 /* ================================================================== */
-void __thiscall DPlayManager::SetPlayerName(int32_t trainId, int8_t specific)
+void DPlayManager::SetPlayerName(int32_t trainId, int8_t specific)
 {
     int32_t rnd;
     uint8_t abs_val;
@@ -642,7 +644,7 @@ void __thiscall DPlayManager::SetPlayerName(int32_t trainId, int8_t specific)
 /* ================================================================== */
 /* InitPlayer — 0x442C90                                              */
 /* ================================================================== */
-uint8_t __thiscall DPlayManager::InitPlayer(uint8_t packedHigh, uint8_t typeLow,
+uint8_t DPlayManager::InitPlayer(uint8_t packedHigh, uint8_t typeLow,
                                               uint8_t signalType, int32_t xPos, int32_t yPos,
                                               uint8_t flag3, uint8_t flag5)
 {
@@ -697,7 +699,7 @@ uint8_t __thiscall DPlayManager::InitPlayer(uint8_t packedHigh, uint8_t typeLow,
 /* Called by: PostcardGame_HandleClick (0x41A98B),                    */
 /*            Town_HandleClick (0x41C28E)                              */
 /* ================================================================== */
-uint8_t __thiscall DPlayManager::GetSessionName(int32_t x, int32_t y)
+uint8_t DPlayManager::GetSessionName(int32_t x, int32_t y)
 {
     int32_t i;
 
@@ -762,7 +764,7 @@ uint8_t __thiscall DPlayManager::GetSessionName(int32_t x, int32_t y)
 /*                                                                     */
 /* Called by: GetSessionName (0x442DE0), InitPlayer (0x442CC1)        */
 /* ================================================================== */
-void __fastcall DPlayManager::SetSessionName()
+void DPlayManager::SetSessionName()
 {
     int32_t dst;  /* destination index (gap to fill) */
     int32_t src;  /* source index (non-empty entry to move) */
@@ -809,18 +811,17 @@ void __fastcall DPlayManager::SetSessionName()
 /* EnumerateSessions — 0x442FA0                                       */
 /*                                                                     */
 /* Factory: allocate new DPlayManager and populate from session data.  */
-/* __fastcall (ECX = session data).                                    */
+/* Static __fastcall: ECX carries the sole session-data argument.       */
 /*                                                                     */
 /* Called by: Train_HandleTrackBuild (0x43CEFD)                       */
 /* ================================================================== */
-void* __fastcall DPlayManager::EnumerateSessions(const void* session)
+DPlayManager* __fastcall DPlayManager::EnumerateSessions(
+    const DPLAY_SessionData* session)
 {
-    void* new_slot;
-
-    new_slot = operator_new(sizeof(DPlayManager));
-    if (new_slot != NULL) {
+    void* new_slot = operator_new(sizeof(DPlayManager));
+    if (new_slot != nullptr) {
         DPlayManager* slot = ::new (new_slot) DPlayManager;
         return slot->DestroyPlayer(session);
     }
-    return NULL;
+    return nullptr;
 }

@@ -33,11 +33,10 @@
  *   [0] +0x00: scalar deleting destructor (dtor at 0x442EA0)
  *
  * === Calling convention note ===
- * MSVC compiled these methods with both __thiscall and __fastcall
- * depending on optimization. The `this` pointer in ECX always points
- * to the DPLAY_PlayerSlot (or the DPLAY_SessionData for snapshot ops).
- * Where EDX is unused in __fastcall, it is simply the second register
- * parameter preserved for ABI compatibility.
+ * MSVC compiled instance methods with both __thiscall and __fastcall
+ * depending on optimization; their `this` pointer is in ECX. The static
+ * EnumerateSessions factory at 0x442FA0 is different: its sole session
+ * argument is passed in ECX under __fastcall, and it has no `this` pointer.
  *
  * === NOTE on DPLAY_Ctor (0x4421D0, renamed RenderConnectionPanel) ===
  * This function is a UI rendering method, NOT a class constructor. It
@@ -50,6 +49,8 @@
 
 #include "../shared/types.h"
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
+struct DPLAY_SessionData;
+
 /* ================================================================== */
 /* DPlayManager — DirectPlay player slot management class              */
 /*                                                                     */
@@ -163,7 +164,7 @@ public:
      * @param session  Source session snapshot to deserialize
      * @return         Pointer to this (the populated player slot)
      */
-    DPlayManager* DestroyPlayer(const void* session);
+    DPlayManager* DestroyPlayer(const DPLAY_SessionData* session);
 #ifndef _WIN32
     /** Host wire adapter for one original 0x390-byte DPLAY_SessionData.
      *  Layout evidence: DPlayManager::DestroyPlayer, address 0x4428E0. */
@@ -385,7 +386,8 @@ public:
      * @param session  Source DPLAY_SessionData to populate from
      * @return         Newly allocated DPlayManager slot, or NULL on failure
      */
-    void* EnumerateSessions(const void* session);
+    static DPlayManager* __fastcall EnumerateSessions(
+        const DPLAY_SessionData* session);
 };
 
 /* ================================================================== */

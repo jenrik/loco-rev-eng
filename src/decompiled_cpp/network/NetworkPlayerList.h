@@ -10,18 +10,18 @@
  * eviction, 256 cached UIPANEL surfaces keyed by 3-byte tags, and
  * a player name array for the lobby.
  *
- * Size: ~0xB40 bytes (estimated)
- * Binary dispatch table: 0x478268
+ * Original x86 size: 0xBE4 bytes
+ * Binary dispatch table: 0x47826C
  *   [0] scalar deleting destructor (NetworkPlayerList_Term, 0x4431F0)
  *
  * === Architecture ===
  *
  * The class has 4 main sections:
- * 1. Surface cache (offsets +0x04 to +0x7FC):
+ * 1. Surface cache (offsets +0x04 to +0x807):
  *    256 surface pointers + 256 per-surface LRU timestamps
  * 2. Frame counter (+0x404)
  * 3. Tag array (+0x808): 256 entries of 3 bytes each
- * 4. Player data (+0xB08 to +0xB3F):
+ * 4. Player data (+0xB08 to +0xBE2):
  *    - +0xB08: resource manager pointer
  *    - +0xB0C: resource data pointer
  *    - +0xB10: message count (int16 cache, -1 = uncached)
@@ -68,33 +68,27 @@ struct DPlayPlayer {
 /* ================================================================== */
 /* NetworkPlayerList — Top-level DPLAY player/surface cache class      */
 /*                                                                     */
-/* Size: ~0xB40 bytes (estimated, last field at +0xB1F + 0xD0)        */
-/* Vtable: 0x478268                                                    */
+/* Original x86 size: 0xBE4 bytes                                      */
+/* Vtable: 0x47826C                                                    */
 /* ================================================================== */
 class NetworkPlayerList {
 public:
-    virtual ~NetworkPlayerList() {}
+    virtual ~NetworkPlayerList();
 
     /* ================================================================ */
     /* Fields (offsets from this)                                        */
     /* ================================================================ */
 
-    /* +0x00: compiler-managed dispatch pointer (binary table 0x478268) */
+    /* +0x00: compiler-managed dispatch pointer (binary table 0x47826C) */
     /* vtable at +0x00 is compiler-managed via virtual methods */
-    /* +0x04 to +0x3FC: Array of 256 surface pointers (4 bytes each) */
+    /* +0x04 to +0x403: Array of 256 surface pointers (4 bytes each) */
     UIPANEL_Surface* surface_cache[256];
-
-    /* +0x400: Unused/padding (4 bytes) */
-    uint8_t     _pad_400[4];
 
     /* +0x404: Frame counter — incremented per render, used for LRU eviction */
     uint32_t    frame_counter;
 
-    /* +0x408 to +0x7FC: Array of 256 LRU timestamps (4 bytes each) */
+    /* +0x408 to +0x807: Array of 256 LRU timestamps (4 bytes each) */
     uint32_t    lru_timestamps[256];
-
-    /* +0x800 to +0x807: Unused/padding (8 bytes) */
-    uint8_t     _pad_800[8];
 
     /* +0x808 to +0xB07: Tag array — 256 entries of 3 bytes each */
     struct {
@@ -124,9 +118,10 @@ public:
 
     /**
      * NetworkPlayerList constructor — Create PostBag directories, init cache.
-     * Address: 0x443000 (formerly DirectPlay_constructor)
+     * Address: 0x443000
      *
-     * __fastcall (ECX = this). Uses binary dispatch table 0x478268,
+     * The C++ constructor establishes dispatch through the normal
+     * constructor chain and initializes the recovered fields,
      * zeros the surface cache, initializes frame counter to
      * 0, sets msg_count_cache to -1, zeros resource_mgr and resource_data,
      * sets enumerated to 0. Then creates all PostBag subdirectories:
@@ -135,26 +130,19 @@ public:
      *
      * Called by: GameLoop_Setup (0x406CBC)
      *
-     * @return  Pointer to this (the constructed object)
      */
-    void* __fastcall NetworkPlayerList_ctor();
+    NetworkPlayerList();
 
     /**
-     * NetworkPlayerList_Term — Scalar deleting destructor.
+     * NetworkPlayerList destructor body.
      * Address: 0x4431F0
      *
-     * This is virtual slot [0] in the binary table at 0x478268.
+     * The compiler supplies the deleting-destructor wrapper for virtual slot [0].
      *
-     * Preserves compiler-managed dispatch, destroys the sub-object
-     * at +0xB08 (resource_mgr) via vtable[2], frees all 256 cached
-     * surface pointers (calls each surface's vtable[0] destructor),
-     * calls DPLAY_SendMessages to clean up PostBag file dirs, and
-     * optionally frees this via GLOBAL_free if flags & 1.
-     *
-     * @param flags  0 = don't free, 1 = free memory after cleanup
-     * @return       Pointer to this (or NULL if freed)
+     * Releases the resource manager sub-object, frees all 256 cached
+     * surface pointers, and calls DPLAY_SendMessages for PostBag cleanup.
+     * The compiler supplies heap release when the deleting wrapper is used.
      */
-    virtual void* __thiscall Term(uint8_t flags);
 
     /* ================================================================ */
     /* Methods                                                           */
@@ -178,8 +166,8 @@ public:
      * @param no_evict  If non-zero, skip eviction when cache is full
      * @return          UIPANEL surface pointer, or NULL if not found/created
      */
-    void* __thiscall GetOrCreateSurface(uint8_t type_hi, uint8_t variant,
-                                         uint8_t tag_low, uint8_t no_evict);
+    void* GetOrCreateSurface(uint8_t type_hi, uint8_t variant,
+                              uint8_t tag_low, uint8_t no_evict);
 
     /**
      * RenderTrackEntry — Blit a cached track entry surface onto a HDC.
@@ -196,7 +184,7 @@ public:
      * @param clip_bot   Clip region bottom boundary
      * @param entry      6-byte track entry (packed_flags, signal_type, x, flag3, y, flag5)
      */
-    void __thiscall RenderTrackEntry(void* hdc, uint32_t clip_x, uint32_t clip_y,
+    void RenderTrackEntry(void* hdc, uint32_t clip_x, uint32_t clip_y,
                                       int32_t clip_right, uint32_t clip_bot,
                                       const uint8_t entry[6]);
 
@@ -216,7 +204,7 @@ public:
      * @param param6      Additional parameter
      * @param param7      Optional highlight rectangle
      */
-    void __thiscall RenderPlayer(void* hdc, int32_t param2, void* param3,
+    void RenderPlayer(void* hdc, int32_t param2, void* param3,
                                   int32_t param4, int32_t param5,
                                   uint32_t param6, const void* param7);
 
@@ -228,7 +216,7 @@ public:
      *
      * @param hdc  Target HDC
      */
-    void __thiscall RenderSessionFrame(void* hdc);
+    void RenderSessionFrame(void* hdc);
 
     /**
      * RenderSessionBase — Render session base overlay onto HDC.
@@ -244,7 +232,7 @@ public:
      * @param param5      Additional parameter
      * @param param6      Flag byte
      */
-    void __thiscall RenderSessionBase(void* hdc, uint32_t param2, int32_t param3,
+    void RenderSessionBase(void* hdc, uint32_t param2, int32_t param3,
                                        int32_t param4, uint32_t param5, uint8_t param6);
 
     /**
@@ -263,7 +251,7 @@ public:
      * @param param6       Clip bottom bound
      * @param param7       Additional parameter
      */
-    void __thiscall PeekMessage(void* player_slot, void* hdc,
+    void PeekMessage(void* player_slot, void* hdc,
                                  uint32_t param3, uint32_t param4,
                                  int32_t param5, uint32_t param6,
                                  uint32_t param7);
@@ -281,7 +269,7 @@ public:
      * @param param3       Additional parameter (subdirectory suffix or 0)
      * @return             1 on success, 0xFFFFFF00 on write failure
      */
-    uint32_t __thiscall RegisterPlayer(void* player_slot, int32_t type, int32_t param3);
+    uint32_t RegisterPlayer(void* player_slot, int32_t type, int32_t param3);
 
     /**
      * UnregisterPlayer — Delete a player's .crd file from PostBag.
@@ -289,7 +277,7 @@ public:
      *
      * @param filepath  Full path to the .crd file to delete
      */
-    void __thiscall UnregisterPlayer(const char* filepath);
+    void UnregisterPlayer(const char* filepath);
 
     /**
      * GetPlayerAddress — Delete a player's .crd file by player slot ID.
@@ -301,5 +289,13 @@ public:
      * @param player_slot  DPLAY_PlayerSlot
      * @param type         PostBag subdirectory type (0-7)
      */
-    void __thiscall GetPlayerAddress(void* player_slot, int32_t type);
+    void GetPlayerAddress(void* player_slot, int32_t type);
 };
+
+/** Process-owned NetworkPlayerList singleton — original address 0x4FD3B0. */
+extern NetworkPlayerList* g_dplay;
+
+#if defined(_WIN32) && UINTPTR_MAX == 0xffffffffu
+static_assert(sizeof(NetworkPlayerList) == 0xBE4,
+              "NetworkPlayerList must retain the recovered x86 allocation size");
+#endif

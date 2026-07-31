@@ -1286,6 +1286,7 @@ bool host_blit_frame(uint32_t resource_id, int frame, int frame_width, int frame
 }
 }  // namespace
 
+namespace {
 enum class HostLobbyControl : uint8_t {
     None,
     Go,
@@ -1434,6 +1435,7 @@ HostLobbyControl host_lobby_control_at(float canvas_x, float canvas_y, bool read
     }
     return HostLobbyControl::None;
 }
+}  // namespace
 
 void GameSetupPanel::hostRenderFrame()
 {

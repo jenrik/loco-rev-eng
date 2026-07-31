@@ -180,12 +180,5 @@ struct Timer2 : public Collection {
     ~Timer2() override;
 };
 
-/* ================================================================== */
-/* Free functions — scalar deleting destructor wrappers                 */
-/* (originally the vtable[1] slot functions for Timer/Timer2 variants)  */
-/* ================================================================== */
-
-void* Timer_DtorWrapper(void* self, uint8_t flags);
-void* Timer_DtorWrapper2(void* self, uint8_t flags);
-void* Timer2_DtorWrapper(void* self, uint8_t flags);
-void* Timer2_DtorWrapper2(void* self, uint8_t flags);
+/* Scalar/vector deleting-destructor slots are compiler-generated from the
+ * virtual destructors above; no hand-written wrappers are required. */

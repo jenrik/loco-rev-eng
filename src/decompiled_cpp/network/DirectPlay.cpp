@@ -18,6 +18,7 @@
 
 #include "DirectPlay.h"
 #include "../core/Entity.h"
+#include <cstddef>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
 /* DirectPlay COM interface GUIDs (from .rdata section of loco.exe) */
@@ -499,6 +500,21 @@ void DirectPlay_HostSession(void* self, uint8_t sessionState, uint32_t sessionFl
     s[2] = startupFlag;             /* flag_byte_2 */
 }
 
+static void copy_session_name(char* destination, const char* source,
+                              std::size_t capacity)
+{
+    if (source == nullptr) {
+        destination[0] = '\0';
+        return;
+    }
+    std::size_t index = 0;
+    while (index < capacity && source[index] != '\0') {
+        destination[index] = source[index];
+        ++index;
+    }
+    destination[index] = '\0';
+}
+
 /* ================================================================== */
 /* DirectPlay_ConnectToSession — Join a DirectPlay session            */
 /* Address: 0x45E730                                                   */
@@ -524,54 +540,16 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
         s[0x18 + i] = 0;
     }
 
-    /* Copy player name (max 0x80 bytes) */
-    char* name_dst = (char*)(s + 0x418);
-    *name_dst = 0;
-    if (playerName != NULL) {
-        int32_t len = 0;
-        while (playerName[len] != 0) len++;
-        if (len < 0x80) {
-            for (int32_t i = 0; i <= len; i++) {
-                name_dst[i] = playerName[i];
-            }
-        } else {
-            /* Truncate at 0x80 — copy then force null termination */
-            // DECOMPILER NOTE: binary saves byte at playerName[0x80], writes 0,
-            // copies, restores. Single-byte write, not dword.
-            char saved = playerName[0x80];
-            const_cast<char*>(playerName)[0x80] = 0;
-            int32_t i = 0;
-            while (playerName[i] != 0 && i < 0x80) {
-                name_dst[i] = playerName[i];
-                i++;
-            }
-            name_dst[i] = 0;
-            const_cast<char*>(playerName)[0x80] = saved;
-        }
-    }
+    /* Copy player name (max 0x80 bytes). The original temporarily
+     * terminates the source at +0x80 and restores it; copying into the
+     * fixed destination directly has the same observable result without
+     * casting away constness from the caller's buffer. */
+    char* name_dst = reinterpret_cast<char*>(s + 0x418);
+    copy_session_name(name_dst, playerName, 0x80);
 
     /* Copy password (max 0x80 bytes, same logic) */
-    char* pwd_dst = (char*)(s + 0x498);
-    *pwd_dst = 0;
-    if (password != NULL) {
-        int32_t len = 0;
-        while (password[len] != 0) len++;
-        if (len < 0x80) {
-            for (int32_t i = 0; i <= len; i++) {
-                pwd_dst[i] = password[i];
-            }
-        } else {
-            char saved = password[0x80];
-            const_cast<char*>(password)[0x80] = 0;
-            int32_t i = 0;
-            while (password[i] != 0 && i < 0x80) {
-                pwd_dst[i] = password[i];
-                i++;
-            }
-            pwd_dst[i] = 0;
-            const_cast<char*>(password)[0x80] = saved;
-        }
-    }
+    char* pwd_dst = reinterpret_cast<char*>(s + 0x498);
+    copy_session_name(pwd_dst, password, 0x80);
 
     // DECOMPILER NOTE: verify s[0x498] = 0 against disasm at 0x45E840.
     // This clears password[0] after copy; may target a different field.

@@ -142,3 +142,13 @@ public:
 /* Global instance                                                     */
 /* ================================================================== */
 extern PlayerConfig* g_player_config;  /* 0x4AA4A8 */
+
+/** PlayerRecord_constructor — initialize a preallocated PlayerConfig.
+ * Address: 0x452E10
+ */
+PlayerConfig* PlayerRecord_constructor(PlayerConfig* config);
+
+/** Compatibility bridge retained for legacy callers of the recovered ABI.
+ * Address: 0x452CE0
+ */
+void* PlayerConfig_Ctor(void* memory, const char* name);

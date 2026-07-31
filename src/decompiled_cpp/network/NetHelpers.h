@@ -7,7 +7,7 @@
  * PoolAllocator is a fixed-size memory pool (~0x20034 bytes) used by the
  * network/surface system. The binary uses dispatch tables at 0x47826C
  * during initialization and 0x478270 after initialization. In reconstructed
- * C++, dispatch is represented by the virtual Unlock method.
+ * C++, the compiler supplies the virtual destructor wrapper.
  * NET_Shutdown cleans up resources (calls ResourceManager_Shutdown and
  * a file data destructor at +0x18).
  */
@@ -24,7 +24,7 @@
 /* Vtable (post-init): 0x478270                                        */
 /* ================================================================== */
 struct PoolAllocator {
-    virtual ~PoolAllocator() {}
+    virtual ~PoolAllocator();
 
     /* +0x00: compiler-managed dispatch pointer (binary: 0x47826C/0x478270) */
     /* vtable at +0x00 is compiler-managed via virtual methods */
@@ -65,10 +65,10 @@ struct PoolAllocator {
     /* ================================================================ */
 
     /**
-     * NET_Lock — Pool allocator init (constructor).
+     * NET_Lock — Pool allocator initialization.
      * Address: 0x445F70
      *
-     * __fastcall (ECX = this). The binary selects dispatch table 0x478270,
+     * The binary selects dispatch table 0x478270,
      * clears the flags array (0x4001 dwords), initializes the free-list
      * (each entry points 0x4001 slots ahead), and zeros 4 counters.
      *
@@ -76,28 +76,15 @@ struct PoolAllocator {
      *
      * @return  Pointer to this (the initialized pool)
      */
-    void* __fastcall Lock();
-
-    /**
-     * NET_Unlock — Pool allocator scalar deleting destructor.
-     * Address: 0x445FC0
-     *
-     * __thiscall (ECX = this, stack = flags byte). Calls NET_Shutdown
-     * then frees this via GLOBAL_free if flags & 1.
-     * This is virtual slot [0] in the post-initialization table at 0x478270.
-     *
-     * @param flags  0 = don't free, 1 = free after cleanup
-     * @return       Pointer to this (or NULL if freed)
-     */
-    virtual void* __thiscall Unlock(uint8_t flags);
+    void* Lock();
 
     /**
      * NET_Shutdown — Pool allocator full cleanup.
      * Address: 0x445FE0
      *
-     * __fastcall (ECX = this). Uses SEH for exception safety.
+     * Uses SEH for exception safety.
      * The binary restores dispatch table 0x478270, calls ResourceManager_Shutdown(this),
      * then frees the sub-object at +0x18 via DDRAW_FileData_Dtor.
      */
-    void __fastcall Shutdown();
+    void Shutdown();
 };

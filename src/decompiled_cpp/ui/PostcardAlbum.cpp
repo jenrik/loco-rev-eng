@@ -158,7 +158,7 @@ void PostcardAlbum::InitFromResource()
     /* SEH prologue omitted */
 
     /* Zero-initialize album state fields */
-    this->icon_handle = 0;
+    this->icon_handle = nullptr;
     this->sprites_inited = 0;       /* +0x111 */
     this->scroll_pixel_offset = 0;  /* +0x114 */
     this->tile_index = 0;           /* +0x118 */
@@ -385,8 +385,8 @@ void PostcardAlbum::FreeSprites()
         ((void (*)(void*))(*(void***)this->photo_bg_resource)[2])(
             this->photo_bg_resource);
     }
-    this->photo_bg_resource = 0;
-    this->photo_bg_surface = 0;
+    this->photo_bg_resource = nullptr;
+    this->photo_bg_surface = nullptr;
 
     /* Destroy all 8 button sprites */
     Sprite_Destroy(this->btn_close);
@@ -440,13 +440,13 @@ void PostcardAlbum::FreeAllSprites()
         ((void (*)(void*))(*(void***)this->album_bg_resource)[2])(
             this->album_bg_resource);
     }
-    this->album_bg_resource = 0;
+    this->album_bg_resource = nullptr;
 
     /* Destroy all 8 button sprite objects via vtable[0] (scalar dtor) */
     auto destroy_obj = [](void*& ptr) {
         if (ptr) {
             ((void (*)(void*, int))(*(void***)ptr)[0])(ptr, 1);
-            ptr = 0;
+            ptr = nullptr;
         }
     };
 
@@ -512,7 +512,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
         }
         /* Play click animation: blit + paint + sleep + update */
         this->BlitElement(5);                     /* prev button highlight */
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
         Sleep(0x96);
         this->UpdateSprite(5);                    /* prev button normal */
 
@@ -534,7 +534,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             this->scroll_pixel_offset = this->tiles_per_page * this->scroll_pixel_offset;
 
             /* Update scrollwheel sprite state */
-            Sprite_SetState(this->btn_scrollwheel, this->tile_index, 0);
+            Sprite_SetState(this->btn_scrollwheel, this->tile_index, nullptr);
         } else {
             /* Scroll left by tiles_per_page */
             this->scroll_pixel_offset -= this->tiles_per_page;
@@ -547,7 +547,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
         }
         /* Play click animation */
         this->BlitElement(6);                     /* next button highlight */
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
         Sleep(0x96);
         this->UpdateSprite(6);                    /* next button normal */
 
@@ -558,7 +558,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             this->scroll_pixel_offset = 0;
 
             /* Update scrollwheel sprite state */
-            Sprite_SetState(this->btn_scrollwheel, this->tile_index, 0);
+            Sprite_SetState(this->btn_scrollwheel, this->tile_index, nullptr);
         } else {
             /* Scroll right by tiles_per_page */
             this->scroll_pixel_offset += this->tiles_per_page;
@@ -571,7 +571,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
     /* After scroll: re-render all tiles */
     this->RenderAllTiles();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, 0);
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 
     return 0;
 }
@@ -613,7 +613,7 @@ void PostcardAlbum::BlitElement(int element_id)
                     OutputDebugStringA(s_AW_Blit_failure_reported_0047e0d8);
                 }
             }
-            Sprite_SetState(sprite, 1, 0);
+            Sprite_SetState(sprite, 1, nullptr);
         }
         return;
 
@@ -646,13 +646,13 @@ void PostcardAlbum::BlitElement(int element_id)
                     OutputDebugStringA(s_AW_Blit_failure_reported_0047e0d8);
                 }
             }
-            Sprite_SetState(sprite, 1, 0);
+            Sprite_SetState(sprite, 1, nullptr);
         }
         return;
 
     case 4:  /* btn_rotate */
         if (this->row_enabled_3 != 1) {
-            Sprite_SetState(this->btn_rotate, 2, 0);
+            Sprite_SetState(this->btn_rotate, 2, nullptr);
             return;
         }
         RESMGR_PlaySound(0x5015);
@@ -667,13 +667,13 @@ void PostcardAlbum::BlitElement(int element_id)
             if (this->sprites_inited && this->text_rendered) {
                 /* ... blit from background surface ... */
             }
-            Sprite_SetState(sprite, 1, 0);
+            Sprite_SetState(sprite, 1, nullptr);
         }
         return;
 
     case 5:  /* btn_prev */
         if (this->row_enabled_4 != 1) {
-            Sprite_SetState(this->btn_prev, 2, 0);
+            Sprite_SetState(this->btn_prev, 2, nullptr);
             return;
         }
         RESMGR_PlaySound(0x5015);
@@ -688,13 +688,13 @@ void PostcardAlbum::BlitElement(int element_id)
             if (this->sprites_inited && this->text_rendered) {
                 /* ... blit from background surface ... */
             }
-            Sprite_SetState(sprite, 1, 0);
+            Sprite_SetState(sprite, 1, nullptr);
         }
         return;
 
     case 6:  /* btn_next */
         if (this->row_enabled_5 != 1) {
-            Sprite_SetState(this->btn_next, 2, 0);
+            Sprite_SetState(this->btn_next, 2, nullptr);
             return;
         }
         {
@@ -708,14 +708,14 @@ void PostcardAlbum::BlitElement(int element_id)
             if (this->sprites_inited && this->text_rendered) {
                 /* ... blit from background surface ... */
             }
-            Sprite_SetState(sprite, 1, 0);
+            Sprite_SetState(sprite, 1, nullptr);
         }
         RESMGR_PlaySound(0x5015);
         return;
 
     case 7:  /* btn_scrollwheel */
         RESMGR_PlaySound(0x5015);
-        Sprite_SetState(this->btn_scrollwheel, this->tile_index, 0);
+        Sprite_SetState(this->btn_scrollwheel, this->tile_index, nullptr);
         return;
 
     case 9:  /* btn_print */
@@ -731,14 +731,14 @@ void PostcardAlbum::BlitElement(int element_id)
             if (this->sprites_inited && this->text_rendered) {
                 /* ... blit from background surface ... */
             }
-            Sprite_SetState(sprite, 1, 0);
+            Sprite_SetState(sprite, 1, nullptr);
         }
         return;
     }
 
     /* Handle case 2 (fallthrough from switch) */
     if (this->row_enabled_2 != 1) {
-        Sprite_SetState(this->btn_delete, 2, 0);
+        Sprite_SetState(this->btn_delete, 2, nullptr);
         return;
     }
     RESMGR_PlaySound(0x5015);
@@ -753,7 +753,7 @@ void PostcardAlbum::BlitElement(int element_id)
         if (this->sprites_inited && this->text_rendered) {
             /* ... blit from background surface ... */
         }
-        Sprite_SetState(sprite, 1, 0);
+        Sprite_SetState(sprite, 1, nullptr);
     }
 }
 
@@ -768,45 +768,45 @@ void PostcardAlbum::UpdateSprite(int element_id)
     default:
         return;
     case 1:
-        Sprite_SetState(this->btn_close, 0, 0);
+        Sprite_SetState(this->btn_close, 0, nullptr);
         return;
     case 2:
         break;
     case 3:
-        Sprite_SetState(this->btn_save, 0, 0);
+        Sprite_SetState(this->btn_save, 0, nullptr);
         return;
     case 4:
         if (this->row_enabled_3 != 1) {
-            Sprite_SetState(this->btn_rotate, 2, 0);
+            Sprite_SetState(this->btn_rotate, 2, nullptr);
             return;
         }
-        Sprite_SetState(this->btn_rotate, 0, 0);
+        Sprite_SetState(this->btn_rotate, 0, nullptr);
         return;
     case 5:
         if (this->row_enabled_4 != 1) {
-            Sprite_SetState(this->btn_prev, 2, 0);
+            Sprite_SetState(this->btn_prev, 2, nullptr);
             return;
         }
-        Sprite_SetState(this->btn_prev, 0, 0);
+        Sprite_SetState(this->btn_prev, 0, nullptr);
         return;
     case 6:
         if (this->row_enabled_5 != 1) {
-            Sprite_SetState(this->btn_next, 2, 0);
+            Sprite_SetState(this->btn_next, 2, nullptr);
             return;
         }
-        Sprite_SetState(this->btn_next, 0, 0);
+        Sprite_SetState(this->btn_next, 0, nullptr);
         return;
     case 9:
-        Sprite_SetState(this->btn_print, 0, 0);
+        Sprite_SetState(this->btn_print, 0, nullptr);
         return;
     }
 
     /* Handle case 2 */
     if (this->row_enabled_2 != 1) {
-        Sprite_SetState(this->btn_delete, 2, 0);
+        Sprite_SetState(this->btn_delete, 2, nullptr);
         return;
     }
-    Sprite_SetState(this->btn_delete, 0, 0);
+    Sprite_SetState(this->btn_delete, 0, nullptr);
 }
 
 /* ================================================================== */
@@ -984,7 +984,7 @@ uint8_t PostcardAlbum::RenderTileName(int row_index)
         (void*)(uintptr_t)tile_entry, 1);
 
     /* Set row's tile sprite state to normal */
-    Sprite_SetState(this->row_tile[row_index], 0, 0);
+    Sprite_SetState(this->row_tile[row_index], 0, nullptr);
 
     return 1;
 }
@@ -1074,7 +1074,7 @@ void PostcardAlbum::RenderAllTiles()
     }
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)(uintptr_t)hdc, 1, 0);
+    UIPANEL_EndPaintEx(this, this->hWnd, (int)(uintptr_t)hdc, 1, nullptr);
 
     /* Phase 3: Update navigation flags */
     if (this->scroll_pixel_offset == 0) {

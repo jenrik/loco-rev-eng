@@ -8,6 +8,15 @@
 
 #include "ResdataGameVehicle.h"
 
+namespace {
+
+struct ResourceVehicleTileMetadata {
+    uint8_t prefix_00_639[0x63A];
+    uint8_t tile_type;
+};
+
+} // namespace
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -49,14 +58,17 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
     }
 
     /* Read tile type byte at resource + 0x63A */
-    uint8_t tile_type = *(uint8_t*)((uint8_t*)this->resource + 0x63A);
+    const ResourceVehicleTileMetadata* resource_tile =
+        reinterpret_cast<const ResourceVehicleTileMetadata*>(this->resource);
+    uint8_t tile_type = resource_tile->tile_type;
 
     if (tile_type == 0x0C) {
         /* Train tile */
         this->vehicle_kind = 1;
 
         /* Read animation/state value from resource header at +0x1E */
-        int16_t anim_val = *(int16_t*)((uint8_t*)this->resource + 0x1E);
+        const RESDATA* resource_data = static_cast<const RESDATA*>(this->resource);
+        int16_t anim_val = resource_data->default_anim;
 
         /* NOTE: The binary re-checks tile_type for 0x0B (pedestrian)
          * inside the train branch at 0x44AEEE — dead code since we
@@ -100,9 +112,8 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
             GameObject_StopSound(this, 1);
         } else {
             /* Check resource ID for special vehicles */
-            int32_t res_id = (this->resource != nullptr)
-                ? *(int32_t*)((uint8_t*)this->resource + 4)
-                : -1;
+            const RESDATA* resource_data = static_cast<const RESDATA*>(this->resource);
+            int32_t res_id = (resource_data != nullptr) ? resource_data->resource_id : -1;
             if (res_id == 0xC64 || res_id == 0xC66 ||
                 res_id == 0xC68 || res_id == 0xC6A) {
                 this->vehicle_kind = 8;
@@ -124,7 +135,8 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
 /* ================================================================== */
 RESDATA_GameVehicle::~RESDATA_GameVehicle()
 {
-    World_DeserializeMap(g_world, (int)this);
+    World_DeserializeMap(g_world,
+                         static_cast<int>(reinterpret_cast<intptr_t>(this)));
     /* ~ResourceGameObject() runs automatically after this body */
 }
 
@@ -148,7 +160,9 @@ RESDATA_GameVehicle::~RESDATA_GameVehicle()
 /* ================================================================== */
 void RESDATA_GameVehicle::StopSound(int state)
 {
-    uint8_t tile_type = *(uint8_t*)((uint8_t*)this->resource + 0x63A);
+    const ResourceVehicleTileMetadata* resource_tile =
+        reinterpret_cast<const ResourceVehicleTileMetadata*>(this->resource);
+    uint8_t tile_type = resource_tile->tile_type;
 
     if (tile_type == 0x0B || this->vehicle_kind == 7) {
         /* Pedestrian tile or signal vehicle */

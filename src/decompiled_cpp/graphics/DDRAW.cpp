@@ -16,7 +16,7 @@
 #include <new>
 
 /* ================================================================== */
-/* Vtable slot accessors — grounded in Ghidra vtable 0x478548         */
+/* Typed slot view — grounded in Ghidra vtable 0x478548                */
 /*                                                                     */
 /* DDRAW_Building vtable (0x478548):                                   */
 /*   [3] SetPosition      (move sprite to x,y)   → @ 0x45xxxx         */
@@ -25,44 +25,43 @@
 /*   [8] Refresh           (re-render sprite)     → "Update"/"Refresh" */
 /*   [20]=[0x50/4]: child entity update callback                       */
 /*                                                                     */
-/* These typedefs replace the raw vtable[7]/vtable[8] dispatch with    */
-/* named function pointer types, making the code self-documenting.     */
+/* The adapter below preserves the recovered slots while using typed    */
+/* C++ virtual dispatch at each call site.                             */
 /* ================================================================== */
 
-/* Sprite vtable function pointer types — each slot is a __thiscall method */
-typedef void (__thiscall *VtblRefresh)(void* self);              /* vtable[8]  */
-typedef void (__thiscall *VtblSetAnim)(void* self, int frame);   /* vtable[7]  */
-typedef void (__thiscall *VtblSetPos)(void* self, int x, int y); /* vtable[3]  */
-typedef void (__thiscall *VtblLoadRes)(void* self, int res_id, int a, int b); /* vtable[6] */
-typedef void (__thiscall *VtblChildUpdate)(void* self);          /* vtable[20] */
+/* Sprite slot interface; unused entries preserve the binary indices. */
+struct DDRAW_SpriteView {
+    virtual void* destroy(uint8_t flags) = 0; // slot 0
+    virtual void refresh_child() = 0;         // slot 1
+    virtual int32_t hit_test(int x, int y) = 0; // slot 2
+    virtual void set_position(int x, int y) = 0; // slot 3
+    virtual void slot4() = 0;
+    virtual void slot5() = 0;
+    virtual void load_resource(int resource_id, int arg, int flags) = 0; // slot 6
+    virtual void set_animation(int frame) = 0; // slot 7
+    virtual void refresh() = 0;               // slot 8
+    virtual void slot9() = 0;
+    virtual void slot10() = 0;
+    virtual void slot11() = 0;
+    virtual void slot12() = 0;
+    virtual void slot13() = 0;
+    virtual void slot14() = 0;
+    virtual void slot15() = 0;
+    virtual void slot16() = 0;
+    virtual void slot17() = 0;
+    virtual void slot18() = 0;
+    virtual void slot19() = 0;
+    virtual void child_update() = 0;          // slot 20
 
-/* Working names retained by the recovered method bodies. */
-typedef VtblLoadRes ReleaseRes;
-typedef VtblLoadRes LoadRes;
-typedef VtblRefresh Update;
-typedef VtblSetAnim SetAnim;
+protected:
+    ~DDRAW_SpriteView() = default;
+};
 
-/** Get a vtable slot from a sprite object pointer (void*). */
-static inline VtblRefresh VTABLE_REFRESH(void* sprite) {
-    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
-    return reinterpret_cast<VtblRefresh>(vtable[8]);
+static DDRAW_SpriteView* sprite_view(void* sprite)
+{
+    return static_cast<DDRAW_SpriteView*>(sprite);
 }
-static inline VtblSetAnim VTABLE_SETANIM(void* sprite) {
-    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
-    return reinterpret_cast<VtblSetAnim>(vtable[7]);
-}
-static inline VtblSetPos VTABLE_SETPOS(void* sprite) {
-    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
-    return reinterpret_cast<VtblSetPos>(vtable[3]);
-}
-static inline VtblLoadRes VTABLE_LOADRES(void* sprite) {
-    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
-    return reinterpret_cast<VtblLoadRes>(vtable[6]);
-}
-static inline VtblChildUpdate VTABLE_CHILD_UPDATE(void* sprite) {
-    uintptr_t* vtable = *reinterpret_cast<uintptr_t**>(sprite);
-    return reinterpret_cast<VtblChildUpdate>(vtable[20]);
-}
+
 
 /* ================================================================== */
 /* External references                                                 */
@@ -336,69 +335,38 @@ void DDRAW_Building::CleanupSprites()
 
 void DDRAW_Building::InvalidateAll()
 {
-    ReleaseRes release = reinterpret_cast<ReleaseRes>(
-        (*reinterpret_cast<int**>(*(void***)this))[6]);
-
     // 1. Self
-    release(this, 0, -1, 0);
+    sprite_view(this)->load_resource(0, -1, 0);
 
-    // 2. Sub-object 1 at +0xE0
-    {
-        void* obj = reinterpret_cast<void**>(&this->sub_object_1);
-        void** vtable_ptr = static_cast<void**>(obj);
-        ReleaseRes r = reinterpret_cast<ReleaseRes>((*reinterpret_cast<int**>(*vtable_ptr))[6]);
-        r(obj, 0, -1, 0);
-    }
+    // 2-5. Embedded resource-bearing child objects.
+    sprite_view(static_cast<void*>(&this->sub_object_1))->load_resource(0, -1, 0);
+    sprite_view(static_cast<void*>(&this->popup_panel))->load_resource(0, -1, 0);
+    sprite_view(static_cast<void*>(&this->pattern_container))->load_resource(0, -1, 0);
+    sprite_view(static_cast<void*>(&this->track_sprite))->load_resource(0, -1, 0);
 
-    // 3. Popup panel at +0x3A0
-    {
-        void* obj = reinterpret_cast<void**>(&this->popup_panel);
-        void** vtable_ptr = static_cast<void**>(obj);
-        ReleaseRes r = reinterpret_cast<ReleaseRes>((*reinterpret_cast<int**>(*vtable_ptr))[6]);
-        r(obj, 0, -1, 0);
-    }
-
-    // 4. Pattern container at +0x428
-    {
-        void* obj = reinterpret_cast<void**>(&this->pattern_container);
-        void** vtable_ptr = static_cast<void**>(obj);
-        ReleaseRes r = reinterpret_cast<ReleaseRes>((*reinterpret_cast<int**>(*vtable_ptr))[6]);
-        r(obj, 0, -1, 0);
-    }
-
-    // 5. Track sprite at +0x4B0
-    {
-        void* obj = reinterpret_cast<void**>(&this->track_sprite);
-        void** vtable_ptr = static_cast<void**>(obj);
-        ReleaseRes r = reinterpret_cast<ReleaseRes>((*reinterpret_cast<int**>(*vtable_ptr))[6]);
-        r(obj, 0, -1, 0);
-    }
-
-    // 6. 4 pattern sprites at +0x168 (embedded GameObjects, each 0x88 bytes)
+    // 6. Four pattern sprites at +0x168, each 0x88 bytes.
     for (int i = 0; i < 4; i++) {
-        void* pattern_obj = reinterpret_cast<uint8_t*>(&this->pattern_sprites) + i * 0x88;
-        void** vtable_ptr = static_cast<void**>(pattern_obj);
-        ReleaseRes r = reinterpret_cast<ReleaseRes>((*reinterpret_cast<int**>(*vtable_ptr))[6]);
-        r(pattern_obj, 0, -1, 0);
+        void* pattern_obj = static_cast<void*>(&this->pattern_sprites[i * 0x88]);
+        sprite_view(pattern_obj)->load_resource(0, -1, 0);
     }
 
     // 7. Base resource cleanup
     RESDATA_DtorBase(this);
 
     // 8. Clear 13 sprite slot fields (confirmed order from disassembly)
-    this->tooltip_text_input    = 0;   /* +0x540 */
-    this->entry_sign_sprite     = 0;   /* +0x570 */
-    this->exit_sign_sprite      = 0;   /* +0x56C */
-    this->wheel_right_sprite    = 0;   /* +0x568 */
-    this->wheel_left_sprite     = 0;   /* +0x564 */
-    this->right_turn_sprite     = 0;   /* +0x580 */
-    this->left_turn_sprite      = 0;   /* +0x57C */
-    this->down_arrow_sprite     = 0;   /* +0x578 */
-    this->up_arrow_sprite       = 0;   /* +0x574 */
-    this->track_arrow_right     = 0;   /* +0x5AC */
-    this->track_arrow_mid       = 0;   /* +0x5A8 */
-    this->track_arrow_left      = 0;   /* +0x5A4 */
-    this->selected_entity       = 0;   /* +0x538 */
+    this->tooltip_text_input    = nullptr; /* +0x540 */
+    this->entry_sign_sprite     = nullptr; /* +0x570 */
+    this->exit_sign_sprite      = nullptr; /* +0x56C */
+    this->wheel_right_sprite    = nullptr; /* +0x568 */
+    this->wheel_left_sprite     = nullptr; /* +0x564 */
+    this->right_turn_sprite     = nullptr; /* +0x580 */
+    this->left_turn_sprite      = nullptr; /* +0x57C */
+    this->down_arrow_sprite     = nullptr; /* +0x578 */
+    this->up_arrow_sprite       = nullptr; /* +0x574 */
+    this->track_arrow_right     = nullptr; /* +0x5AC */
+    this->track_arrow_mid       = nullptr; /* +0x5A8 */
+    this->track_arrow_left      = nullptr; /* +0x5A4 */
+    this->selected_entity       = nullptr; /* +0x538 */
 }
 
 /* ================================================================== */
@@ -504,12 +472,7 @@ void DDRAW_Building::BuildingShowTooltip(void* desc)
 void DDRAW_Building::UpdateSubObject()
 {
     RESDATA_UpdateChild(this);
-    if (this->sub_object_1) {
-        typedef void (__thiscall* Show)(void*);
-        Show show = reinterpret_cast<Show>(
-            (*reinterpret_cast<int**>(this->sub_object_1))[1]);
-        show(this->sub_object_1);
-    }
+    sprite_view(static_cast<void*>(&this->sub_object_1))->refresh_child();
 }
 
 /* ================================================================== */
@@ -520,12 +483,7 @@ void DDRAW_Building::UpdateSubObject()
 int32_t DDRAW_Building::HitTest(int32_t x, int32_t y)
 {
     if (GameObject_PtInRect(this, x, y)) return 1;
-    if (this->sub_object_1) {
-        typedef int32_t (__thiscall* HitTestFn)(void*, int32_t, int32_t);
-        HitTestFn hit = reinterpret_cast<HitTestFn>(
-            (*reinterpret_cast<int**>(this->sub_object_1))[2]);
-        if (hit(this->sub_object_1, x, y)) return 1;
-    }
+    if (sprite_view(static_cast<void*>(&this->sub_object_1))->hit_test(x, y)) return 1;
     return 0;
 }
 
@@ -616,13 +574,10 @@ void DDRAW_Building::UpdateBuildingSprites()
     uint8_t sprites_visible = *reinterpret_cast<uint8_t*>(
         reinterpret_cast<uint8_t*>(this) + SPRITES_VISIBLE_OFFSET);  /* +0x39d */
 
-    LoadRes load_res = reinterpret_cast<LoadRes>(
-        (*reinterpret_cast<int**>(*(void***)this))[6]);
-
     if (panel_state == 0) {
-        VTABLE_LOADRES(this)(this, 0x3801, 0, 1);
+        sprite_view(this)->load_resource(0x3801, 0, 1);
     } else {
-        VTABLE_LOADRES(this)(this, 0x3800, 0, 1);
+        sprite_view(this)->load_resource(0x3800, 0, 1);
     }
 
     // Step 2: Determine building type flags
@@ -668,8 +623,8 @@ void DDRAW_Building::UpdateBuildingSprites()
 
     // Refresh tooltip text input
     {
-        VTABLE_REFRESH(this->tooltip_text_input)(this->tooltip_text_input);  /* vtable[8] Refresh */  /* vtable[8] */
-        VTABLE_REFRESH(this->tooltip_text_input)(this->tooltip_text_input);  /* vtable[8] */
+        sprite_view(this->tooltip_text_input)->refresh();
+        sprite_view(this->tooltip_text_input)->refresh();
     }
 
     // Step 4: Update track arrow visibility
@@ -684,20 +639,20 @@ void DDRAW_Building::UpdateBuildingSprites()
             uint8_t* trk_vis = reinterpret_cast<uint8_t*>(this->track_arrow_left);
             trk_vis[0x56] = vis;
         }
-        VTABLE_REFRESH(this->track_arrow_left)(this->track_arrow_left);  /* vtable[8] Refresh */
-        VTABLE_REFRESH(this->track_arrow_left)(this->track_arrow_left);  /* vtable[8] */
+        sprite_view(this->track_arrow_left)->refresh();
+        sprite_view(this->track_arrow_left)->refresh();
 
         {
             uint8_t* trk_vis = reinterpret_cast<uint8_t*>(this->track_arrow_mid);
             trk_vis[0x56] = vis;
         }
-        VTABLE_REFRESH(this->track_arrow_mid)(this->track_arrow_mid);  /* vtable[8] */
+        sprite_view(this->track_arrow_mid)->refresh();
 
         {
             uint8_t* trk_vis = reinterpret_cast<uint8_t*>(this->track_arrow_right);
             trk_vis[0x56] = vis;
         }
-        VTABLE_REFRESH(this->track_arrow_right)(this->track_arrow_right);  /* vtable[8] */
+        sprite_view(this->track_arrow_right)->refresh();
     }
 
     // Step 5: Set wheel sprites always visible
@@ -706,8 +661,8 @@ void DDRAW_Building::UpdateBuildingSprites()
         wh_vis[0x56] = 1;
     }
     {
-        VTABLE_REFRESH(this->wheel_left_sprite)(this->wheel_left_sprite);  /* vtable[8] Refresh */
-        VTABLE_REFRESH(this->wheel_left_sprite)(this->wheel_left_sprite);  /* vtable[8] */
+        sprite_view(this->wheel_left_sprite)->refresh();
+        sprite_view(this->wheel_left_sprite)->refresh();
     }
 
     // Step 6: Set wheel_right sprite — always visible
@@ -747,8 +702,8 @@ void DDRAW_Building::UpdateBuildingSprites()
 
     // Refresh wheel_right
     {
-        VTABLE_REFRESH(this->wheel_right_sprite)(this->wheel_right_sprite);  /* vtable[8] Refresh */
-        VTABLE_REFRESH(this->wheel_right_sprite)(this->wheel_right_sprite);  /* vtable[8] */
+        sprite_view(this->wheel_right_sprite)->refresh();
+        sprite_view(this->wheel_right_sprite)->refresh();
     }
 
     // Step 8: Update exit_sign_sprite (+0x56C) visibility
@@ -763,8 +718,8 @@ void DDRAW_Building::UpdateBuildingSprites()
         s_vis[0x56] = exit_vis ? 1 : 0;
     }
     {
-        VTABLE_REFRESH(this->exit_sign_sprite)(this->exit_sign_sprite);  /* vtable[8] Refresh */
-        VTABLE_REFRESH(this->exit_sign_sprite)(this->exit_sign_sprite);  /* vtable[8] */
+        sprite_view(this->exit_sign_sprite)->refresh();
+        sprite_view(this->exit_sign_sprite)->refresh();
     }
 
     // Step 9: Update 8 row label sprites at +0x544..+0x560
@@ -778,8 +733,8 @@ void DDRAW_Building::UpdateBuildingSprites()
             }
             uint8_t* s_vis = reinterpret_cast<uint8_t*>(this->station_name_sprites[i]);
             s_vis[0x56] = label_vis ? 1 : 0;
-            VTABLE_REFRESH(this->station_name_sprites[i])(this->station_name_sprites[i]);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->station_name_sprites[i])(this->station_name_sprites[i]);  /* vtable[8] */
+            sprite_view(this->station_name_sprites[i])->refresh();
+            sprite_view(this->station_name_sprites[i])->refresh();
         }
     }
 
@@ -795,8 +750,8 @@ void DDRAW_Building::UpdateBuildingSprites()
         s_vis[0x56] = entry_vis ? 1 : 0;
     }
     {
-        VTABLE_REFRESH(this->entry_sign_sprite)(this->entry_sign_sprite);  /* vtable[8] Refresh */
-        VTABLE_REFRESH(this->entry_sign_sprite)(this->entry_sign_sprite);  /* vtable[8] */
+        sprite_view(this->entry_sign_sprite)->refresh();
+        sprite_view(this->entry_sign_sprite)->refresh();
     }
 
     // Step 11: Directional sprites (depending on sprites_visible)
@@ -805,8 +760,8 @@ void DDRAW_Building::UpdateBuildingSprites()
         // Hide down_arrow
         reinterpret_cast<uint8_t*>(this->down_arrow_sprite)[0x56] = 0;
         {
-            VTABLE_REFRESH(this->down_arrow_sprite)(this->down_arrow_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->down_arrow_sprite)(this->down_arrow_sprite);  /* vtable[8] */
+            sprite_view(this->down_arrow_sprite)->refresh();
+            sprite_view(this->down_arrow_sprite)->refresh();
         }
 
         // left_turn: visible if selected entity has no occupancy (building->occupancy==0)
@@ -817,14 +772,11 @@ void DDRAW_Building::UpdateBuildingSprites()
             reinterpret_cast<uint8_t*>(this->left_turn_sprite)[0x56] = (occupancy == 0) ? 1 : 0;
         }
         {
-            typedef void (__thiscall* SetPos)(void*, int, int);
-            SetPos sp = reinterpret_cast<SetPos>(
-                (*reinterpret_cast<int**>(this->left_turn_sprite))[3]);
-            sp(this->left_turn_sprite, 0x8C, 0xB8);
+            sprite_view(this->left_turn_sprite)->set_position(0x8C, 0xB8);
         }
         {
-            VTABLE_REFRESH(this->left_turn_sprite)(this->left_turn_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->left_turn_sprite)(this->left_turn_sprite);  /* vtable[8] */
+            sprite_view(this->left_turn_sprite)->refresh();
+            sprite_view(this->left_turn_sprite)->refresh();
         }
 
         // right_turn: visible if selected entity DOES have occupancy
@@ -835,14 +787,11 @@ void DDRAW_Building::UpdateBuildingSprites()
             reinterpret_cast<uint8_t*>(this->right_turn_sprite)[0x56] = (occupancy != 0) ? 1 : 0;
         }
         {
-            typedef void (__thiscall* SetPos)(void*, int, int);
-            SetPos sp = reinterpret_cast<SetPos>(
-                (*reinterpret_cast<int**>(this->right_turn_sprite))[3]);
-            sp(this->right_turn_sprite, 0x8C, 0xB8);
+            sprite_view(this->right_turn_sprite)->set_position(0x8C, 0xB8);
         }
         {
-            VTABLE_REFRESH(this->right_turn_sprite)(this->right_turn_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->right_turn_sprite)(this->right_turn_sprite);  /* vtable[8] */
+            sprite_view(this->right_turn_sprite)->refresh();
+            sprite_view(this->right_turn_sprite)->refresh();
         }
 
         // Hide up_arrow
@@ -856,44 +805,38 @@ void DDRAW_Building::UpdateBuildingSprites()
             reinterpret_cast<uint8_t*>(this->down_arrow_sprite)[0x56] = is_station ? 1 : 0;
         }
         {
-            VTABLE_REFRESH(this->down_arrow_sprite)(this->down_arrow_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->down_arrow_sprite)(this->down_arrow_sprite);  /* vtable[8] */
+            sprite_view(this->down_arrow_sprite)->refresh();
+            sprite_view(this->down_arrow_sprite)->refresh();
         }
 
         {
             reinterpret_cast<uint8_t*>(this->left_turn_sprite)[0x56] = is_station ? 1 : 0;
         }
         {
-            typedef void (__thiscall* SetPos)(void*, int, int);
-            SetPos sp = reinterpret_cast<SetPos>(
-                (*reinterpret_cast<int**>(this->left_turn_sprite))[3]);
-            sp(this->left_turn_sprite, 0xA6, 0x33);
+            sprite_view(this->left_turn_sprite)->set_position(0xA6, 0x33);
         }
         {
-            VTABLE_REFRESH(this->left_turn_sprite)(this->left_turn_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->left_turn_sprite)(this->left_turn_sprite);  /* vtable[8] */
+            sprite_view(this->left_turn_sprite)->refresh();
+            sprite_view(this->left_turn_sprite)->refresh();
         }
 
         {
             reinterpret_cast<uint8_t*>(this->right_turn_sprite)[0x56] = is_station ? 1 : 0;
         }
         {
-            typedef void (__thiscall* SetPos)(void*, int, int);
-            SetPos sp = reinterpret_cast<SetPos>(
-                (*reinterpret_cast<int**>(this->right_turn_sprite))[3]);
-            sp(this->right_turn_sprite, 0xEC, 0x33);
+            sprite_view(this->right_turn_sprite)->set_position(0xEC, 0x33);
         }
         {
-            VTABLE_REFRESH(this->right_turn_sprite)(this->right_turn_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->right_turn_sprite)(this->right_turn_sprite);  /* vtable[8] */
+            sprite_view(this->right_turn_sprite)->refresh();
+            sprite_view(this->right_turn_sprite)->refresh();
         }
 
         {
             reinterpret_cast<uint8_t*>(this->up_arrow_sprite)[0x56] = is_station ? 1 : 0;
         }
         {
-            VTABLE_REFRESH(this->up_arrow_sprite)(this->up_arrow_sprite);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->up_arrow_sprite)(this->up_arrow_sprite);  /* vtable[8] */
+            sprite_view(this->up_arrow_sprite)->refresh();
+            sprite_view(this->up_arrow_sprite)->refresh();
         }
 
         // For stations without occupancy, manage zoom levels
@@ -944,12 +887,10 @@ void DDRAW_Building::UpdateBuildingSprites()
 
             // Refresh all directional sprites
             {
-                Update upd;
-
-                VTABLE_REFRESH(this->left_turn_sprite)(this->left_turn_sprite);  /* vtable[8] */
-                VTABLE_REFRESH(this->down_arrow_sprite)(this->down_arrow_sprite);  /* vtable[8] */
-                VTABLE_REFRESH(this->right_turn_sprite)(this->right_turn_sprite);  /* vtable[8] */
-                VTABLE_REFRESH(this->up_arrow_sprite)(this->up_arrow_sprite);  /* vtable[8] */
+                sprite_view(this->left_turn_sprite)->refresh();
+                sprite_view(this->down_arrow_sprite)->refresh();
+                sprite_view(this->right_turn_sprite)->refresh();
+                sprite_view(this->up_arrow_sprite)->refresh();
             }
         }
     }
@@ -961,12 +902,12 @@ colored_dots_update:
         for (int i = 0; i < 4; i++) {
             uint8_t* dot_a = reinterpret_cast<uint8_t*>(this->colored_dots_A[i]);
             dot_a[0x56] = sprites_visible;
-            VTABLE_REFRESH(this->colored_dots_A[i])(this->colored_dots_A[i]);  /* vtable[8] Refresh */
-            VTABLE_REFRESH(this->colored_dots_A[i])(this->colored_dots_A[i]);  /* vtable[8] */
+            sprite_view(this->colored_dots_A[i])->refresh();
+            sprite_view(this->colored_dots_A[i])->refresh();
 
             uint8_t* dot_b = reinterpret_cast<uint8_t*>(this->colored_dots_B[i]);
             dot_b[0x56] = sprites_visible;
-            VTABLE_REFRESH(this->colored_dots_B[i])(this->colored_dots_B[i]);  /* vtable[8] */
+            sprite_view(this->colored_dots_B[i])->refresh();
         }
     }
 
@@ -1000,17 +941,16 @@ colored_dots_update:
                         : -1;
                     int count = (frame_count - 0x1804) / 2;
 
-                    SetAnim anim = reinterpret_cast<SetAnim>(
-                        (*reinterpret_cast<int**>(
-                            reinterpret_cast<void**>(&this->pattern_sprites)[0]))[7]);
-                    VTABLE_SETANIM(reinterpret_cast<void**>(&this->pattern_sprites)[0])(reinterpret_cast<void**>(&this->pattern_sprites)[0], count);  /* vtable[7] */
+                    void* pattern_sprite =
+                        static_cast<void*>(&this->pattern_sprites[0]);
+                    sprite_view(pattern_sprite)->set_animation(count);
                 }
 
                 // Pattern sprites 1-3: per-occupant passenger counts
                 for (int slot = 0; slot < 3; slot++) {
                     // pattern sprite at index 1, 2, 3
-                    void** pattern_sprite = &reinterpret_cast<void**>(
-                        &this->pattern_sprites)[1 + slot];
+                    void* pattern_sprite = static_cast<void*>(
+                        &this->pattern_sprites[(1 + slot) * 0x88]);
 
                     void* occupant = *reinterpret_cast<void**>(
                         static_cast<uint8_t*>(static_cast<void*>(&occupancy)) + 4 + slot * 4);
@@ -1026,7 +966,7 @@ colored_dots_update:
                         reinterpret_cast<uint8_t*>(occupancy) + 0x14 + slot * 4);
 
                     int frame_val;
-                    if (occupant_ptr == 0) {
+                    if (occupant_ptr == nullptr) {
                         frame_val = 0;
                     } else {
                         void* occ_res = *reinterpret_cast<void**>(
@@ -1037,19 +977,16 @@ colored_dots_update:
                         frame_val = (occ_frame - 0x1866) / 2 + 1;
                     }
 
-                    VTABLE_SETANIM(pattern_sprite)(pattern_sprite, frame_val);  /* vtable[7] */
+                    sprite_view(pattern_sprite)->set_animation(frame_val);
                 }
             }
         }
     }
 
-    // Step 15: Final SetPosition call via vtable[3]
+    // Step 15: Final SetPosition call via the typed slot-3 view.
     {
-        typedef void (__thiscall* SetPos)(void*, int, int);
-        SetPos sp = reinterpret_cast<SetPos>(
-            (*reinterpret_cast<int**>(*(void***)this))[3]);
-        sp(this, *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(this) + 0x08),
-                 *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(this) + 0x0C));
+        const auto* self_bytes = reinterpret_cast<const int32_t*>(this);
+        sprite_view(this)->set_position(self_bytes[2], self_bytes[3]);
     }
 }
 
@@ -1098,27 +1035,20 @@ void DDRAW_Building::UpdateBuilding()
     // Step 2: Entity alive check
     void* entity = this->selected_entity;
     if (entity && reinterpret_cast<uint8_t*>(entity)[0x18] != 1) {
-        this->SelectBuilding(0);
+        this->SelectBuilding(nullptr);
         return;
     }
 
     // Step 3: Cursor hover management
     {
-        void* sub1_ptr = reinterpret_cast<void**>(&this->sub_object_1);
-        void** sub1_vtbl = static_cast<void**>(sub1_ptr);
-
-        typedef int (__thiscall* PtInRect)(void*, int, int);
-        PtInRect pt = reinterpret_cast<PtInRect>((*reinterpret_cast<int**>(*sub1_vtbl))[2]);
-
         // Hover ON
-        int hovered = pt(sub1_ptr, g_cursor_world_x, g_cursor_world_y);
+        void* sub_object = static_cast<void*>(&this->sub_object_1);
+        int hovered = sprite_view(sub_object)->hit_test(
+            g_cursor_world_x, g_cursor_world_y);
         if (hovered) {
             int* hover_state = reinterpret_cast<int*>(self_u8 + 0x108);
             if (*hover_state != 1) {
-                typedef void (__thiscall* SetHover)(void*, int);
-                SetHover sh = reinterpret_cast<SetHover>(
-                    (*reinterpret_cast<int**>(*sub1_vtbl))[7]);
-                sh(sub1_ptr, 1);
+                sprite_view(sub_object)->set_animation(1);
 
                 // Invalidate rect at +0xE8
                 // TODO: implement invalidation

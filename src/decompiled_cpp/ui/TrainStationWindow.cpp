@@ -64,6 +64,23 @@ extern void  SetRectEmpty(RECT* lprc);
 extern BOOL  UnionRect(RECT* lprcDst, const RECT* lprcSrc1, const RECT* lprcSrc2);
 extern BOOL  IntersectRect(RECT* lprcDst, const RECT* lprcSrc1, const RECT* lprcSrc2);
 
+namespace {
+using SpriteReleaseFunction = void (*)(void*);
+
+void release_sprite_resource(void* resource)
+{
+    void** vtable = *reinterpret_cast<void***>(resource);
+    if (vtable != nullptr) {
+        auto release = reinterpret_cast<SpriteReleaseFunction>(vtable[2]);
+        release(resource);
+    }
+}
+
+int legacy_this_pointer(const void* object)
+{
+    return static_cast<int>(reinterpret_cast<intptr_t>(object));
+}
+}
 
 /* ================================================================== */
 /* TrainStationWindow::TrainStationWindow — Constructor                 */
@@ -130,15 +147,21 @@ bool TrainStationWindow::Create(HWND hWndParent)
     int    result;
 
     /* Load icon resource 0x65 */
-    this->hIcon = LoadIconA(this->hInstance, (LPCSTR)0x65);
+    this->hIcon = LoadIconA(
+        this->hInstance,
+        reinterpret_cast<LPCSTR>(static_cast<uintptr_t>(0x65)));
 
     /* Load train sprites */
-    Train_LoadSprites((int)this);
+    Train_LoadSprites(legacy_this_pointer(this));
 
     /* Read window size from destination data resource */
     /* dest_data_res at +0x188; width at +0x14, height at +0x16 */
-    winWidth  = (uint32_t)*(uint16_t*)((uint8_t*)this->dest_data_res + 0x14);
-    winHeight = (uint32_t)*(uint16_t*)((uint8_t*)this->dest_data_res + 0x16);
+    const auto* destination_bytes = reinterpret_cast<const uint8_t*>(
+        this->dest_data_res);
+    winWidth  = static_cast<uint32_t>(
+        *reinterpret_cast<const uint16_t*>(destination_bytes + 0x14));
+    winHeight = static_cast<uint32_t>(
+        *reinterpret_cast<const uint16_t*>(destination_bytes + 0x16));
 
     /* Set up desktop rect for centering */
     SetRectEmpty(&desktopRect);
@@ -148,22 +171,16 @@ bool TrainStationWindow::Create(HWND hWndParent)
     /* If sprites were previously loaded, release them */
     if (this->sprites_loaded) {
         /* Release sprite resources via vtable[2] (Destroy/Release) */
-        void** vt;
-
-        vt = *(void***)this->sprite_ptr_1;
-        if (vt) { ((void(*)(void*))vt[2])(this->sprite_ptr_1); }
+        release_sprite_resource(this->sprite_ptr_1);
         this->sprite_ptr_1 = nullptr;
 
-        vt = *(void***)this->sprite_ptr_2;
-        if (vt) { ((void(*)(void*))vt[2])(this->sprite_ptr_2); }
+        release_sprite_resource(this->sprite_ptr_2);
         this->sprite_ptr_2 = nullptr;
 
-        vt = *(void***)this->dest_data_res;
-        if (vt) { ((void(*)(void*))vt[2])(this->dest_data_res); }
+        release_sprite_resource(this->dest_data_res);
         this->dest_data_res = nullptr;
 
-        vt = *(void***)this->sprite_ptr_3;
-        if (vt) { ((void(*)(void*))vt[2])(this->sprite_ptr_3); }
+        release_sprite_resource(this->sprite_ptr_3);
         this->sprite_ptr_3 = nullptr;
 
         this->sprites_loaded = 0;
@@ -176,9 +193,9 @@ bool TrainStationWindow::Create(HWND hWndParent)
     /* nCmdShow=0 (hidden), style=WS_EX_TOPMOST|WS_POPUP (0x86000000) */
     result = GameWindow_Create(this, 0, hWndParent, x, y,
                                winWidth - x, winHeight - y,
-                               (HMENU)0, this->hIcon, 0, 0x86000000, 0, 0);
+                               nullptr, this->hIcon, 0, 0x86000000, 0, 0);
 
-    return (uint8_t)result != 0;
+    return static_cast<uint8_t>(result) != 0;
 }
 
 
@@ -198,11 +215,10 @@ void TrainStationWindow::show(int train_type, int context)
     this->train_type = train_type;     /* +0x124 */
 
     /* Load train sprites */
-    Train_LoadSprites((int)this);
+    Train_LoadSprites(legacy_this_pointer(this));
 
     /* Fire vtable[6] — update_client_rect */
-    void** vt = *(void***)this;
-    ((void(*)(void*))vt[6])(this);
+    this->init();
 
     /* Show window and set focus */
     ShowWindow(this->hWnd, 1);   /* SW_SHOWNORMAL */
@@ -216,14 +232,16 @@ void TrainStationWindow::show(int train_type, int context)
 
     /* Activate tooltip */
     this->tooltip_active = 1;          /* +0x1BC */
-    TrainStationWindow_UpdateTooltip((int)this);
+    TrainStationWindow_UpdateTooltip(legacy_this_pointer(this));
 
     /* Load and play sound 0x50F8 if not already loaded */
     if (g_audio != nullptr && this->sound_loaded == 0) {
         strRes = ResourceManager_GetStringById(&g_resmgr, 0x50F8);
         loadResult = RESMGR_LoadSoundResource(strRes);
-        if ((uint8_t)loadResult != 0) {
-            *(uint8_t*)((uintptr_t)strRes + 8) = 1;   /* mark as active */
+        if (static_cast<uint8_t>(loadResult) != 0) {
+            auto* sound_resource = reinterpret_cast<uint8_t*>(
+                static_cast<uintptr_t>(static_cast<uint32_t>(strRes)));
+            sound_resource[8] = 1;   /* mark as active */
             this->sound_loaded = 1;
         }
     }
@@ -248,22 +266,16 @@ void TrainStationWindow::hide()
 
     /* Release sprites if loaded */
     if (this->sprites_loaded) {
-        void** vt;
-
-        vt = *(void***)this->sprite_ptr_1;
-        if (vt) { ((void(*)(void*))vt[2])(this->sprite_ptr_1); }
+        release_sprite_resource(this->sprite_ptr_1);
         this->sprite_ptr_1 = nullptr;
 
-        vt = *(void***)this->sprite_ptr_2;
-        if (vt) { ((void(*)(void*))vt[2])(this->sprite_ptr_2); }
+        release_sprite_resource(this->sprite_ptr_2);
         this->sprite_ptr_2 = nullptr;
 
-        vt = *(void***)this->dest_data_res;
-        if (vt) { ((void(*)(void*))vt[2])(this->dest_data_res); }
+        release_sprite_resource(this->dest_data_res);
         this->dest_data_res = nullptr;
 
-        vt = *(void***)this->sprite_ptr_3;
-        if (vt) { ((void(*)(void*))vt[2])(this->sprite_ptr_3); }
+        release_sprite_resource(this->sprite_ptr_3);
         this->sprite_ptr_3 = nullptr;
 
         this->sprites_loaded = 0;
@@ -289,13 +301,14 @@ void TrainStationWindow::hide()
 
         /* Union with tooltip's stored rect (at tooltip_ptr + 0x08) */
         UnionRect(&unionRect,
-                  (RECT*)((uint8_t*)this->tooltip_ptr + 8),
+                  reinterpret_cast<const RECT*>(
+                      reinterpret_cast<const uint8_t*>(this->tooltip_ptr) + 8),
                   &spriteRect);
 
         /* Intersect with viewport bounds */
         IntersectRect(&intersectRect,
                       &unionRect,
-                      (RECT*)&g_viewport_rect_left);
+                      reinterpret_cast<const RECT*>(&g_viewport_rect_left));
 
         /* Destroy tooltip */
         UI_DestroyTooltip(&g_tooltip_mgr, this->tooltip_ptr);
@@ -311,7 +324,9 @@ void TrainStationWindow::hide()
     /* Release sound resource if loaded */
     if (g_audio != nullptr && this->sound_loaded != 0) {
         strRes = ResourceManager_GetStringById(&g_resmgr, 0x50F8);
-        *(uint8_t*)((uintptr_t)strRes + 8) = 0;   /* mark as inactive */
+        auto* sound_resource = reinterpret_cast<uint8_t*>(
+            static_cast<uintptr_t>(static_cast<uint32_t>(strRes)));
+        sound_resource[8] = 0;   /* mark as inactive */
         RESMGR_ReleaseSoundResource(strRes);
         this->sound_loaded = 0;
     }

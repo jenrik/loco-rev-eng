@@ -17,6 +17,42 @@
 
 #include "ArrivalQueue.h"
 
+#include <cstddef>
+
+namespace {
+
+/* The queue routines are shared by several legacy object layouts. Keep the
+ * assembly-proven field views local instead of doing untyped byte-offset
+ * loads throughout the implementation. */
+struct ArrivalQueueOwnerFields {
+    uint8_t prefix_00_87[0x88];
+    int32_t occupation_level;
+    uint8_t prefix_8c_123[0x98];
+    ArrivalQueueNode* queue_head;
+};
+
+struct ArrivalVehicleFields {
+    uint8_t prefix_00_2d[0x2E];
+    int32_t field_2e;
+    uint8_t prefix_32_5f[0x2E];
+    int32_t direction;
+    uint8_t prefix_64_77[0x14];
+    uint8_t color;
+    uint8_t prefix_79[1];
+    uint16_t player_id;
+};
+
+#if UINTPTR_MAX == 0xffffffffu
+static_assert(offsetof(ArrivalQueueOwnerFields, occupation_level) == 0x88);
+static_assert(offsetof(ArrivalQueueOwnerFields, queue_head) == 0x124);
+static_assert(offsetof(ArrivalVehicleFields, field_2e) == 0x2E);
+static_assert(offsetof(ArrivalVehicleFields, direction) == 0x60);
+static_assert(offsetof(ArrivalVehicleFields, color) == 0x78);
+static_assert(offsetof(ArrivalVehicleFields, player_id) == 0x7A);
+#endif
+
+} // namespace
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -46,31 +82,33 @@ void __thiscall ArrivalQueue_AddVehicle(void* self, void* vehicle)
     ArrivalQueueNode* new_node;
     ArrivalQueueNode* tail;
     int occupation_level;
+    ArrivalQueueOwnerFields* owner = reinterpret_cast<ArrivalQueueOwnerFields*>(self);
+    ArrivalVehicleFields* vehicle_fields = reinterpret_cast<ArrivalVehicleFields*>(vehicle);
 
     /* Step 1: Set vehicle direction to 2 (ARRIVING) */
-    *(int*)((char*)vehicle + 0x60) = 2;                    /* direction +0x60 */
+    vehicle_fields->direction = 2;                         /* +0x60 */
 
     /* Step 2: Copy building's occupation_level (+0x88) to vehicle field +0x2E */
-    occupation_level = *(int*)((char*)self + 0x88);        /* this->occupation_level */
-    *(int*)((char*)vehicle + 0x2E) = occupation_level;     /* vehicle field +0x2E */
+    occupation_level = owner->occupation_level;
+    vehicle_fields->field_2e = occupation_level;
 
     /* Step 3: Set vehicle state to 0 (STOPPED) */
     Vehicle_SetState(vehicle, 0);  /* 0x44D740 */
 
     /* Step 4: Allocate a new 8-byte queue node */
-    new_node = (ArrivalQueueNode*)operator_new(8);  /* 0x465CE0 */
+    new_node = static_cast<ArrivalQueueNode*>(operator_new(sizeof(ArrivalQueueNode)));
     new_node->vehicle = vehicle;                     /* +0x00 */
-    new_node->next = NULL;                           /* +0x04 */
+    new_node->next = nullptr;                        /* +0x04 */
 
     /* Step 5: Append to end of linked list at this+0x124 */
-    tail = *(ArrivalQueueNode**)((char*)self + 0x124);
+    tail = owner->queue_head;
 
-    if (tail == NULL) {
+    if (tail == nullptr) {
         /* List was empty — new node becomes the head */
-        *(ArrivalQueueNode**)((char*)self + 0x124) = new_node;
+        owner->queue_head = new_node;
     } else {
         /* Walk to the end of the list (follow ->next until NULL) */
-        while (tail->next != NULL) {
+        while (tail->next != nullptr) {
             tail = tail->next;
         }
         /* Append new node at the end */
@@ -105,11 +143,13 @@ BOOL __thiscall ArrivalQueue_RemoveVehicle(void* self, uint16_t player_id, byte 
     uint16_t vehicle_player_id;
     byte vehicle_color;
 
+    ArrivalQueueOwnerFields* owner = reinterpret_cast<ArrivalQueueOwnerFields*>(self);
+
     /* Get list head from this+0x124 */
-    current = *(ArrivalQueueNode**)((char*)self + 0x124);
+    current = owner->queue_head;
 
     /* If list is empty, return FALSE */
-    if (current == NULL) {
+    if (current == nullptr) {
         return 0;
     }
 
@@ -120,15 +160,17 @@ BOOL __thiscall ArrivalQueue_RemoveVehicle(void* self, uint16_t player_id, byte 
         vehicle = current->vehicle;  /* +0x00 */
 
         /* Read vehicle player ID (ushort at +0x7A) and color (byte at +0x78) */
-        vehicle_player_id = *(uint16_t*)((char*)vehicle + 0x7A);
-        vehicle_color = *(byte*)((char*)vehicle + 0x78);
+        const ArrivalVehicleFields* vehicle_fields =
+            reinterpret_cast<const ArrivalVehicleFields*>(vehicle);
+        vehicle_player_id = vehicle_fields->player_id;
+        vehicle_color = vehicle_fields->color;
 
         /* Check if this vehicle matches */
         if (vehicle_player_id == player_id && vehicle_color == color) {
             /* Found a match — remove this node */
-            if (prev == NULL) {
+            if (prev == nullptr) {
                 /* Removing the head node */
-                *(ArrivalQueueNode**)((char*)self + 0x124) = current->next;
+                owner->queue_head = current->next;
             } else {
                 /* Removing a middle or tail node */
                 prev->next = current->next;

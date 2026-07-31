@@ -20,6 +20,61 @@
 
 #include "BuildingPanel.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
+
+namespace {
+
+struct SpriteRectFields {
+    uint8_t prefix_00_03[4];
+    LONG left;
+    int top;
+    int right;
+    int bottom;
+};
+
+struct PanelPlayerEntryView {
+    uint8_t prefix_00_04[5];
+    char name[13];
+    uint8_t prefix_12_31[0x20];
+    int16_t icon_cell_width;
+    int16_t icon_cell_height;
+    uint8_t prefix_36_37[2];
+    void* occupant_list;
+    uint32_t icon_data_size;
+    int16_t icon_width;
+    int16_t icon_height;
+    void* icon_pixels;
+    uint8_t tail_48_4b[4];
+};
+
+struct SurfacePixelFields {
+    uint8_t prefix_00_17[0x18];
+    uint8_t* pixels;
+};
+
+struct OccupantEntryView {
+    int x;
+    int y;
+    uint8_t prefix_0c[4];
+    uint8_t type;
+    uint8_t prefix_0d_0f[3];
+    OccupantEntryView* next;
+};
+
+static PanelPlayerEntryView* panel_player_entry(void* netman, int index)
+{
+    uint8_t* table = reinterpret_cast<uint8_t*>(netman) + 0x3C;
+    return reinterpret_cast<PanelPlayerEntryView*>(table + index * 0x4C + 0x18);
+}
+
+#if UINTPTR_MAX == 0xffffffffu
+static_assert(sizeof(PanelPlayerEntryView) == 0x4C);
+static_assert(offsetof(PanelPlayerEntryView, icon_cell_width) == 0x32);
+static_assert(offsetof(PanelPlayerEntryView, occupant_list) == 0x38);
+static_assert(offsetof(PanelPlayerEntryView, icon_pixels) == 0x44);
+static_assert(offsetof(OccupantEntryView, next) == 0x10);
+#endif
+
+} // namespace
 /* ================================================================== */
 /* External references (C-linkage)                                     */
 /* ================================================================== */
@@ -97,16 +152,20 @@ void BuildingPanel::init_sprites()
     this->main_resource = res;                                   /* +0x28C */
     if (res != nullptr) {
         /* Get surface via vtable[1] = GetSurface(res, 0, 0) */
-        void** vt = (void**)res;
-        this->main_surface = ((void*(__thiscall*)(int,int))vt[1])(0, 0);  /* +0x288 */
+        using GetSurface = void* (__thiscall*)(int, int);
+        void** vtable = reinterpret_cast<void**>(res);
+        GetSurface get_surface = reinterpret_cast<GetSurface>(vtable[1]);
+        this->main_surface = get_surface(0, 0);  /* +0x288 */
     }
 
     /* Load selection frame resource 0x3d88 */
     res = ResourceManager_GetById(g_resmgr, 0x3d88);
     this->selection_resource = res;                              /* +0x294 */
     if (res != nullptr) {
-        void** vt = (void**)res;
-        this->selection_surface = ((void*(__thiscall*)(int,int))vt[1])(0, 0);  /* +0x290 */
+        using GetSurface = void* (__thiscall*)(int, int);
+        void** vtable = reinterpret_cast<void**>(res);
+        GetSurface get_surface = reinterpret_cast<GetSurface>(vtable[1]);
+        this->selection_surface = get_surface(0, 0);  /* +0x290 */
     }
 
     /* Initialize main sprite (+0x298) */
@@ -148,29 +207,27 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
                                int cell_right, int cell_bottom,
                                int player_idx)
 {
-    /* Resolve building entry from player index.
-     * In the binary: g_netman[0xF].playerIds + player_idx * 0x13 + 6
-     * Netman has a player data array at offset 0xF * sizeof(entry) from base
-     * Each entry is 0x13 * 4 = 0x4C bytes; +6 skips to name field */
+    /* Resolve building entry from player index. The assembly uses a
+     * 0x4C-byte entry stride and starts at +0x18. */
     int* player_entry;
     if (player_idx < 0) {
         player_entry = nullptr;
     } else {
-        /* g_netman at +0x3C contains playerIds array;
-         * each entry is 0x4C (0x13 * 4) bytes */
-        player_entry = (int*)((uint8_t*)g_netman + 0x3C) + player_idx * 0x13 + 6;
+        player_entry = reinterpret_cast<int*>(panel_player_entry(g_netman, player_idx));
     }
 
     /* Step 1: Set main sprite screen rect */
     void* sprite = this->main_sprite;                            /* +0x298 */
-    *(LONG*)((uint8_t*)sprite + 4) = cell_left;                  /* sprite rect left */
-    *(int*)((uint8_t*)sprite + 8) = cell_top;                    /* sprite rect top */
-    *(int*)((uint8_t*)sprite + 0xC) = cell_right;                /* sprite rect right */
-    *(int*)((uint8_t*)sprite + 0x10) = cell_bottom;              /* sprite rect bottom */
+    SpriteRectFields* sprite_rect = reinterpret_cast<SpriteRectFields*>(sprite);
+    sprite_rect->left = cell_left;                              /* +0x04 */
+    sprite_rect->top = cell_top;                                /* +0x08 */
+    sprite_rect->right = cell_right;                            /* +0x0C */
+    sprite_rect->bottom = cell_bottom;                          /* +0x10 */
 
     /* Step 2: Check if player index is within valid range
      * g_netman->maxPlayers is at offset +0x04 */
-    int max_players = *(int*)((uint8_t*)g_netman + 4);
+    int max_players = *reinterpret_cast<const int*>(
+        reinterpret_cast<const uint8_t*>(g_netman) + 4);
     if (max_players <= player_idx) {
         /* Out of range — set sprite to "empty" state (2) */
         Sprite_SetState(this->main_sprite, 2, nullptr);
@@ -182,7 +239,8 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
     Sprite_SetState(this->main_sprite, state, nullptr);
 
     /* Step 3: Begin GDI painting */
-    HDC hdc = (HDC)(uintptr_t)UIPANEL_BeginPaint((int)(uintptr_t)this);
+    HDC hdc = reinterpret_cast<HDC>(static_cast<uintptr_t>(
+        UIPANEL_BeginPaint(this)));
 
     /* Step 4: Set text color to black, background to transparent */
     COLORREF old_color = SetTextColor(hdc, 0);                   /* black */
@@ -193,7 +251,8 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
 
     /* Step 5: Draw building name text
      * Name starts at player_entry + 5 bytes */
-    const char* name_text = (const char*)player_entry + 5;
+    const char* name_text = reinterpret_cast<const PanelPlayerEntryView*>(
+        player_entry)->name;
     int name_len = 0xFFFFFFFF - 1;  /* strlen placeholder */
 
     /* Compute string length (strlen equivalent) */
@@ -205,7 +264,7 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
             p++;
             remaining--;
         }
-        name_len = (int)(~remaining - 1);
+        name_len = static_cast<int>(~remaining - 1);
     }
 
     if (name_len > 0) {
@@ -230,7 +289,9 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
     this->draw_color_dot(hdc, cell_right - 16, dot_y, player_idx);
 
     /* Step 7: End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)hdc, 1, nullptr);  /* +0x08 = hWnd */
+    UIPANEL_EndPaintEx(this, this->hWnd,
+                       static_cast<int>(reinterpret_cast<uintptr_t>(hdc)),
+                       1, nullptr);  /* +0x08 = hWnd */
 }
 
 
@@ -252,13 +313,14 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
 void BuildingPanel::render_grid()
 {
     /* Read g_netman fields for grid dimensions */
-    int* netman_base = (int*)g_netman;
+    const int* netman_base = reinterpret_cast<const int*>(g_netman);
     int player_count    = netman_base[0];       /* g_netman+0x00 — playerCount */
     int max_players     = netman_base[1];       /* g_netman+0x04 — maxPlayers */
-    int current_player  = *(int*)((uint8_t*)g_netman + 0x08); /* currentPlayer index */
+    int current_player  = *reinterpret_cast<const int*>(
+        reinterpret_cast<const uint8_t*>(g_netman) + 0x08); /* currentPlayer index */
 
     /* Source rect from panel at +0x120 (4 consecutive int32_t fields = RECT layout) */
-    RECT* src_rect = (RECT*)&this->src_rect_left;
+    RECT* src_rect = reinterpret_cast<RECT*>(&this->src_rect_left);
     int src_left   = src_rect->left;            /* +0x120 */
     int src_top    = src_rect->top;             /* +0x124 */
     int src_right  = src_rect->right;           /* +0x128 */
@@ -346,21 +408,24 @@ void BuildingPanel::render_grid()
             void* grid_sprite = this->grid_sprites[row * 3 + col];  /* +0x29C */
 
             /* Set sprite screen rect to current cell */
-            *(LONG*)((uint8_t*)grid_sprite + 4) = cell_rect.left;
-            *(int*)((uint8_t*)grid_sprite + 8) = cell_rect.top;
-            *(int*)((uint8_t*)grid_sprite + 0xC) = cell_rect.right;
-            *(int*)((uint8_t*)grid_sprite + 0x10) = cell_rect.bottom;
+            SpriteRectFields* grid_rect = reinterpret_cast<SpriteRectFields*>(grid_sprite);
+            grid_rect->left = cell_rect.left;
+            grid_rect->top = cell_rect.top;
+            grid_rect->right = cell_rect.right;
+            grid_rect->bottom = cell_rect.bottom;
 
             if (global_player_index < max_players) {
                 /* Determine sprite state: 1 = empty, 2 = occupied */
                 /* Check building entry at playerIds[global_player_index] for occupant count */
-                int* player_entry = (int*)((uint8_t*)g_netman + 0x3C)
-                                   + global_player_index * 0x13 + 6;
-                int sprite_state = (*player_entry == 0) ? 1 : 2;
+                const PanelPlayerEntryView* player_entry =
+                    panel_player_entry(g_netman, global_player_index);
+                int sprite_state = (*reinterpret_cast<const int*>(player_entry) == 0)
+                                       ? 1 : 2;
                 Sprite_SetState(grid_sprite, sprite_state, nullptr);
 
                 /* Draw building icon and occupant dots */
-                BuildingPanel_DrawIcon((uint*)&cell_rect, &global_player_index);
+                BuildingPanel_DrawIcon(reinterpret_cast<uint*>(&cell_rect),
+                                        &global_player_index);
                 this->draw_occupant_dots(&cell_rect.left, &global_player_index);
             }
 
@@ -393,19 +458,18 @@ void BuildingPanel::render_grid()
 void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
 {
     /* Resolve building entry from player index */
-    int* player_entry;
-    if (*player_idx < 0) {
-        player_entry = nullptr;
-    } else {
-        player_entry = (int*)((uint8_t*)g_netman + 0x3C) + *player_idx * 0x13 + 6;
+    PanelPlayerEntryView* player_entry = nullptr;
+    if (*player_idx >= 0) {
+        player_entry = panel_player_entry(g_netman, *player_idx);
     }
 
     /* Calculate cell dimensions */
-    int cell_w = (int)*(short*)((uint8_t*)player_entry + 0x32);
-    int cell_h = (int)(short)player_entry[0x0D];  /* +0x34 */
+    int cell_w = static_cast<int>(player_entry->icon_cell_width);
+    int cell_h = static_cast<int>(player_entry->icon_cell_height); /* +0x34 */
 
     /* Begin GDI painting */
-    HDC hdc = (HDC)(uintptr_t)UIPANEL_BeginPaint((int)(uintptr_t)this);
+    HDC hdc = reinterpret_cast<HDC>(static_cast<uintptr_t>(
+        UIPANEL_BeginPaint(this)));
 
     /* Create black pen for dot outlines */
     HPEN pen = CreatePen(0, 1, 0);                /* PS_SOLID, 1px, black */
@@ -420,16 +484,17 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
     int dot_spacing_x = coords[0] - cell_rect[0];  /* x spacing */
     int dot_spacing_y = sizes[0] - cell_rect[1];   /* y spacing */
 
-    /* Iterate occupant linked list at player_entry+0x38 (0xE * 4 = index 14) */
-    void* occupant = (void*)(uintptr_t)player_entry[0x0E];     /* +0x38 — occupant list head */
+    /* Iterate occupant linked list at player_entry+0x38. */
+    OccupantEntryView* occupant = reinterpret_cast<OccupantEntryView*>(
+        player_entry->occupant_list);
     while (occupant != nullptr) {
-        int occ_x = *(int*)((uint8_t*)occupant + 4);
-        int occ_y = *(int*)((uint8_t*)occupant + 8);
+        int occ_x = occupant->x;
+        int occ_y = occupant->y;
 
         if (occ_x > 0 || occ_y > 0) {
             /* Determine occupant color based on type */
-            uint8_t occ_type = *(uint8_t*)((uint8_t*)occupant + 0x0C);
-            int netman_playercount = *(int*)((uint8_t*)g_netman + 0);
+            uint8_t occ_type = occupant->type;
+            int netman_playercount = *reinterpret_cast<const int*>(g_netman);
 
             int palette_index = occ_type % netman_playercount
                               + (occ_type / netman_playercount) * 3;
@@ -481,7 +546,7 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
 
             /* Determine dot size: larger if this occupant is selected */
             bool is_selected = (this->selection_active &&  /* +0x274 */
-                               this->selected_index == (int)occ_type);  /* +0x270 */
+                               this->selected_index == static_cast<int>(occ_type)); /* +0x270 */
             int inflate_x = is_selected ? 5 : 3;
             int inflate_y = is_selected ? 5 : 3;
             InflateRect(&dot_rect, inflate_x, inflate_y);
@@ -510,14 +575,16 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
         }
 
         /* Next occupant in linked list (at +0x10) */
-        occupant = *(void**)((uint8_t*)occupant + 0x10);
+        occupant = occupant->next;
     }
 
     /* Restore GDI pen state and delete created pen */
     DeleteObject(SelectObject(hdc, old_pen));
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)hdc, 1, nullptr);
+    UIPANEL_EndPaintEx(this, this->hWnd,
+                       static_cast<int>(reinterpret_cast<uintptr_t>(hdc)),
+                       1, nullptr);
 }
 
 
@@ -548,7 +615,7 @@ void BuildingPanel::draw_color_dot(HDC hdc, int x, int y, int player_idx)
     HGDIOBJ old_pen = SelectObject(hdc, pen);
 
     /* Determine color from palette */
-    int netman_playercount = *(int*)((uint8_t*)g_netman + 0);
+    int netman_playercount = *reinterpret_cast<const int*>(g_netman);
     int palette_index = player_idx % netman_playercount
                       + (player_idx / netman_playercount) * 3;
 
@@ -627,21 +694,19 @@ void BuildingPanel::draw_color_dot(HDC hdc, int x, int y, int player_idx)
 void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
 {
     /* Resolve building entry */
-    int* player_entry;
-    if (*player_index < 0) {
-        player_entry = nullptr;
-    } else {
-        player_entry = (int*)((uint8_t*)g_netman + 0x3C) + *player_index * 0x13 + 6;
+    PanelPlayerEntryView* player_entry = nullptr;
+    if (*player_index >= 0) {
+        player_entry = panel_player_entry(g_netman, *player_index);
     }
 
     /* Check if entry has icon data */
-    if (player_entry == nullptr || player_entry[0x11] == 0) {   /* +0x44 */
+    if (player_entry == nullptr || player_entry->icon_pixels == nullptr) { /* +0x44 */
         return;
     }
 
     /* Get icon dimensions */
-    int icon_width  = (int)*(short*)(player_entry + 0x10);     /* +0x40 */
-    int icon_height = (int)*(short*)((uint8_t*)player_entry + 0x42);
+    int icon_width = static_cast<int>(player_entry->icon_width); /* +0x40 */
+    int icon_height = static_cast<int>(player_entry->icon_height); /* +0x42 */
 
     /* Create temp surface for icon */
     void* surface_obj = operator_new(0x20);
@@ -657,16 +722,17 @@ void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
         UIPANEL_InitSurface(tmp_surface, icon_width, icon_height, 0, 0, 0);
 
         /* Copy icon pixel data */
-        uint32_t data_size = (uint32_t)player_entry[0x0F];     /* +0x3C */
-        uint8_t* src_data  = (uint8_t*)(uintptr_t)player_entry[0x11];     /* +0x44 */
-        uint8_t* dst_data  = *(uint8_t**)((uint8_t*)tmp_surface + 0x18);  /* surface pixel ptr +0x18 */
+        uint32_t data_size = player_entry->icon_data_size;    /* +0x3C */
+        uint8_t* src_data = static_cast<uint8_t*>(player_entry->icon_pixels); /* +0x44 */
+        uint8_t* dst_data = reinterpret_cast<SurfacePixelFields*>(tmp_surface)->pixels;
+                                                               /* surface pixel ptr +0x18 */
 
         /* Memcpy whole dwords first, then remaining bytes */
         uint32_t dwords = data_size >> 2;
         uint32_t remainder = data_size & 3;
 
-        uint32_t* src32 = (uint32_t*)src_data;
-        uint32_t* dst32 = (uint32_t*)dst_data;
+        uint32_t* src32 = reinterpret_cast<uint32_t*>(src_data);
+        uint32_t* dst32 = reinterpret_cast<uint32_t*>(dst_data);
         for (uint32_t i = 0; i < dwords; i++) {
             *dst32++ = *src32++;
         }
@@ -685,8 +751,10 @@ void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
 
         /* Release temp surface via vtable[0] */
         if (tmp_surface != nullptr) {
-            void** vt = (void**)tmp_surface;
-            ((void(__thiscall*)(int))vt[0])(1);               /* scalar deleting destructor */
+            using SurfaceDestructor = void (__thiscall*)(int);
+            void** vtable = reinterpret_cast<void**>(tmp_surface);
+            SurfaceDestructor destroy = reinterpret_cast<SurfaceDestructor>(vtable[0]);
+            destroy(1);                                       /* release surface */
         }
     }
 }
@@ -717,7 +785,7 @@ LRESULT __stdcall BuildingPanel_WndProc(HWND hWnd, UINT msg, uint32_t wParam, LP
     /* Check for WM_SYSCOMMAND with SC_SCREENSAVE */
     if (msg == 0x112 && (wParam & 0xFFF0) == 0xF140) {
         /* Switch to town mode instead of screensaver */
-        CGWND_SetMode((void*)3);
+        CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(3)));
         WIN32_PostQuit();
     }
 

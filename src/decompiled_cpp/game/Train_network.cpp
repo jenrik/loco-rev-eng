@@ -20,6 +20,7 @@
 #include "../network/TrainMessage.h"
 #include "../network/DPlayManager.h"
 #include "Vehicle.h"
+#include <new>
 #ifndef _WIN32
 #include "../../sdl3_shims/sdl3_net_runtime.h"
 #include "../../sdl3_shims/host_test_events.h"
@@ -187,6 +188,18 @@ struct NetworkQueueNode;  /* Opaque — used via pointer */
 
 using NetworkMsg = TrainMessage;
 
+namespace {
+
+/* The original allocates a 0x1C-byte queue record with operator_new and
+ * writes its fields directly.  The reconstructed type has a C++ lifetime,
+ * so begin that lifetime before preserving those same field stores. */
+NetworkMsg* AllocateNetworkMessage()
+{
+    void* storage = operator_new(sizeof(NetworkMsg));
+    return storage == nullptr ? nullptr : ::new (storage) NetworkMsg{};
+}
+
+} // namespace
 
 /* ================================================================== */
 /**
@@ -574,7 +587,7 @@ void TrainSubsystem::FlushMessages()
 
     if ((intptr_t)thread_result != 0) {
         /* Thread active — queue DISCONNECT (type-8) message */
-        NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* msg = AllocateNetworkMessage();
         if (msg == NULL) {
             msg = NULL;
         } else {
@@ -721,7 +734,7 @@ void TrainSubsystem::ProcessMessages()
 
                 /* Queue internal type-5 message */
                 {
-                    NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                    NetworkMsg* qmsg = AllocateNetworkMessage();
                     if (qmsg) { qmsg->data = NULL; qmsg->next = NULL; qmsg->type = 5; }
                     NETMAN_QueueMessage(qmsg);
                 }
@@ -730,7 +743,7 @@ void TrainSubsystem::ProcessMessages()
                 if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 1) {
                     uint8_t* car = (uint8_t*)this->sprite_list_1;
                     while (car != 0) {
-                        NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                        NetworkMsg* qmsg = AllocateNetworkMessage();
                         if (qmsg) {
                             qmsg->data = NULL; qmsg->next = NULL;
                             qmsg->type = 0x0F;
@@ -781,7 +794,7 @@ void TrainSubsystem::ProcessMessages()
                 }
             } else if (msg_type == 0x3C) {
                 /* Connection handshake */
-                NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) {
                     qmsg->data = NULL; qmsg->next = NULL;
                     qmsg->type = 0x0C;
@@ -838,7 +851,7 @@ void TrainSubsystem::ProcessMessages()
 
         case 6: { /* 0x3F0 — GameOver control signal */
             if (*(uint8_t*)g_dplay_peer != 0) {
-                NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) {
                     qmsg->data = NULL; qmsg->next = NULL;
                     qmsg->type = 4;
@@ -859,7 +872,7 @@ void TrainSubsystem::ProcessMessages()
             uint16_t* p = (uint16_t*)payload;
             this->player_peer_id = player_id;
 
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) {
                 qmsg->data = NULL; qmsg->next = NULL;
                 qmsg->type = 9;
@@ -890,7 +903,7 @@ void TrainSubsystem::ProcessMessages()
             break;
 
         case 10: { /* 0x3F4 — PlayerJoin request */
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL; qmsg->type = 0x13; }
             int idx = NETMAN_FindPlayerIndex(g_netman, player_id);
             if (qmsg) qmsg->to_player = idx;
@@ -899,7 +912,7 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 0x0B: { /* 0x3F5 — PlayerCount */
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL; qmsg->type = 0x14; }
             int idx = NETMAN_FindPlayerIndex(g_netman, player_id);
             if (qmsg) qmsg->to_player = idx;
@@ -908,7 +921,7 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 0x0C: { /* 0x3F6 — TrainPosUpdate msg */
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                         qmsg->type = 0x15; qmsg->data = payload; }
             NETMAN_QueueMessage(qmsg);
@@ -924,7 +937,7 @@ void TrainSubsystem::ProcessMessages()
 
         case 0x0E: { /* 0x3F8 — PlayerCount/Update */
             uint16_t* p = (uint16_t*)payload;
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) {
                 qmsg->data = NULL; qmsg->next = NULL;
                 qmsg->type = 0x1A;
@@ -940,7 +953,7 @@ void TrainSubsystem::ProcessMessages()
         case 0x0F: { /* 0x3F9 — Carriage data */
             int idx = NETMAN_FindPlayerIndex(g_netman, player_id);
             if (idx >= 0) {
-                NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                             qmsg->type = 0x16; qmsg->data = payload; }
                 NETMAN_QueueMessage(qmsg);
@@ -1205,7 +1218,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
 
         /* Error path */
         {
-            NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* msg = AllocateNetworkMessage();
             if (msg) { msg->data = NULL; msg->next = NULL;
                        msg->type = 0x18;
                        msg->to_player = node->notify_id;
@@ -1226,7 +1239,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
             CloseHandle((void*)(uintptr_t)node->file_handle);
             node->file_handle = 0;
 
-            NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* msg = AllocateNetworkMessage();
             if (msg) { msg->data = NULL; msg->next = NULL;
                        msg->type = 0x18;
                        msg->to_player = node->notify_id;
@@ -1274,7 +1287,7 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
         }
 
         {
-            NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* msg = AllocateNetworkMessage();
             if (msg) { msg->data = NULL; msg->next = NULL;
                        msg->type = 0x18;
                        msg->to_player = node->notify_id;
@@ -1301,7 +1314,7 @@ unlink_node:
 void TrainSubsystem::HandleTrainPosUpdate(void* data, int player_index)
 {
     /* Forward to NETMAN as type-0x17 */
-    NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+    NetworkMsg* msg = AllocateNetworkMessage();
     if (msg) {
         msg->data = NULL; msg->next = NULL;
         msg->type = 0x17;
@@ -1340,7 +1353,7 @@ void TrainSubsystem::HandleTrainPosUpdate(void* data, int player_index)
         *(uint8_t*)(car + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
 
         /* Send type-0x11 notification to UI */
-        NetworkMsg* notify = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* notify = AllocateNetworkMessage();
         if (notify) {
             notify->data = NULL; notify->next = NULL;
             notify->type = 0x11;
@@ -1386,7 +1399,7 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
                     node->file_handle = 0;
                 }
 
-                NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* msg = AllocateNetworkMessage();
                 if (msg) {
                     msg->data = NULL; msg->next = NULL;
                     msg->type = 0x18;
@@ -1407,7 +1420,7 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
     }
 
     /* Broadcast player-left message */
-    NetworkMsg* broadcast = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+    NetworkMsg* broadcast = AllocateNetworkMessage();
     if (broadcast) {
         broadcast->data = NULL; broadcast->next = NULL;
         broadcast->type = 0x0B;
@@ -1475,7 +1488,7 @@ void TrainSubsystem::ShutdownNetwork()
 
     if (*(int*)((uint8_t*)g_dplay_peer + 0x1588) == 0) {
         /* No session — queue type-5 disconnect */
-        NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* msg = AllocateNetworkMessage();
         if (msg) { msg->data = NULL; msg->next = NULL; }
         if (msg) { msg->type = 5; msg->data = NULL; }
         NETMAN_QueueMessage(msg);
@@ -1523,7 +1536,7 @@ void TrainSubsystem::ShutdownNetwork()
 
     if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
         /* Connected — send type-3 shutdown */
-        NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* msg = AllocateNetworkMessage();
         if (msg) { msg->data = NULL; msg->next = NULL; }
         if (msg) {
             msg->type = 3;
@@ -1536,7 +1549,7 @@ void TrainSubsystem::ShutdownNetwork()
 
 send_disconnect:
     /* Could not connect — send type-5 disconnect directly */
-    NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+    NetworkMsg* msg = AllocateNetworkMessage();
     if (msg) { msg->data = NULL; msg->next = NULL; }
     if (msg) { msg->type = 5; msg->data = NULL; }
     NETMAN_QueueMessage(msg);
@@ -1845,7 +1858,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
     *(uint8_t*)((uint8_t*)controller + 0x8A) = 0;
 
     {
-        NetworkMsg* notify = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* notify = AllocateNetworkMessage();
         if (notify) {
             notify->data = NULL; notify->next = NULL;
             notify->type = 0x11;
@@ -1884,7 +1897,7 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
     }
 
     /* Broadcast type-0x12 notification */
-    NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+    NetworkMsg* msg = AllocateNetworkMessage();
     if (msg) {
         msg->data = NULL; msg->next = NULL;
         msg->type = 0x12;
@@ -1970,7 +1983,7 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
                 }
 
                 /* Send type-0x11 release message */
-                NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* msg = AllocateNetworkMessage();
                 if (msg) {
                     msg->data = NULL; msg->next = NULL;
                     msg->type = 0x11;
@@ -2128,7 +2141,7 @@ void TrainSubsystem::UpdateTrainMovement()
             /* Re-notify all cars in sprite_list_2 */
             uint8_t* car = (uint8_t*)this->sprite_list_2;
             while (car != 0) {
-                NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* msg = AllocateNetworkMessage();
                 if (msg) { msg->data = NULL; msg->next = NULL;
                            msg->type = 0x11;
                            msg->data = this->sprite_list_2; }
@@ -2308,7 +2321,7 @@ void TrainSubsystem::UpdateTrainMovement()
                     }
 
                     /* Queue as type-0x15 (TrainPosUpdate broadcast) */
-                    NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                    NetworkMsg* qmsg = AllocateNetworkMessage();
                     if (qmsg) {
                         qmsg->data = NULL; qmsg->next = NULL;
                         qmsg->type = 0x15;
@@ -2317,7 +2330,7 @@ void TrainSubsystem::UpdateTrainMovement()
                     NETMAN_QueueMessage(qmsg);
 
                     /* Queue as type-6 SendNetworkData message */
-                    NetworkMsg* smsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                    NetworkMsg* smsg = AllocateNetworkMessage();
                     if (smsg) {
                         smsg->data = NULL; smsg->next = NULL;
                         smsg->type = 6;
@@ -2574,7 +2587,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
         {
             uint8_t* c = (uint8_t*)this->sprite_list_2;
             while (c != 0) {
-                NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* msg = AllocateNetworkMessage();
                 if (msg) { msg->data = NULL; msg->next = NULL;
                            msg->type = 0x11;
                            msg->data = this->sprite_list_2; }
@@ -2668,7 +2681,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
             /* Demo mode: remove all existing cars from sprite_list_1 */
             uint8_t* c = (uint8_t*)this->sprite_list_1;
             while (c != 0) {
-                NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+                NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                            qmsg->type = 0x0F;
                            qmsg->data = this->sprite_list_1; }
@@ -2696,7 +2709,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
         /* Demo mode or flag set — remove all cars */
         uint8_t* c = (uint8_t*)this->sprite_list_1;
         while (c != 0) {
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                        qmsg->type = 0x0F;
                        qmsg->data = this->sprite_list_1; }
@@ -2770,7 +2783,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     /* Failed to connect — queue error message (type 0x1C) */
     {
-        NetworkMsg* err_msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* err_msg = AllocateNetworkMessage();
         if (err_msg) { err_msg->data = NULL; err_msg->next = NULL;
                       err_msg->type = 0x1C; err_msg->next = NULL; }
         NETMAN_QueueMessage(err_msg);
@@ -2805,7 +2818,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
     {
         uint8_t* c = (uint8_t*)this->sprite_list_1;
         while (c != 0) {
-            NetworkMsg* qmsg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+            NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                        qmsg->type = 0x0F;
                        qmsg->data = this->sprite_list_1; }
@@ -2827,7 +2840,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 void TrainSubsystem::RemoveAllCars()
 {
     while (this->sprite_list_1 != NULL) {
-        NetworkMsg* msg = (NetworkMsg*)operator_new(sizeof(NetworkMsg));
+        NetworkMsg* msg = AllocateNetworkMessage();
         if (msg != NULL) {
             msg->data = NULL;
             msg->next = NULL;

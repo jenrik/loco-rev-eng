@@ -33,7 +33,7 @@ extern uint16_t g_trackSegmentOffsets[];   /* DAT_0047e410 */
 /* ================================================================== */
 void __fastcall TrackPos_Init(TrackPos* pos)
 {
-    pos->vtable = (int32_t)0x00477840;           /* +0x00 = VTBL_TRACKPOS */
+    pos->vtable = static_cast<int32_t>(0x00477840); /* +0x00 = TRACKPOS descriptor */
     pos->field_04 = -1;                          /* +0x04 = -1 */
     pos->field_08 = -1;                          /* +0x08 = -1 */
     pos->coordinate = -1;                        /* +0x0C = -1 */
@@ -54,7 +54,7 @@ void __fastcall TrackPos_Init(TrackPos* pos)
 /* ================================================================== */
 void __fastcall TrackPos_BaseInit(TrackPos* pos)
 {
-    pos->vtable = (int32_t)0x00477840;           /* +0x00 = VTBL_TRACKPOS */
+    pos->vtable = static_cast<int32_t>(0x00477840); /* +0x00 = TRACKPOS descriptor */
 }
 
 /* ================================================================== */
@@ -110,14 +110,14 @@ int __cdecl TrackPos_IsObjectBetween(
     /* ---- Compute absolute positions from segment offsets + coordinates ---- */
 
     /* Start total = segment_offset[start_seg] + start->coordinate */
-    int start_total = (int)g_trackSegmentOffsets[start_seg] + start->coordinate;
+    int start_total = static_cast<int>(g_trackSegmentOffsets[start_seg]) + start->coordinate;
 
     /* Current total = segment_offset[current_seg] + current->coordinate */
     int cur_seg = current->segment_index;              /* +0x10 */
-    int cur_total = (int)g_trackSegmentOffsets[cur_seg] + current->coordinate;  /* +0x0C */
+    int cur_total = static_cast<int>(g_trackSegmentOffsets[cur_seg]) + current->coordinate; /* +0x0C */
 
     /* End total = segment_offset[end_seg] + end->coordinate */
-    int end_total = (int)g_trackSegmentOffsets[end_seg] + end->coordinate;
+    int end_total = static_cast<int>(g_trackSegmentOffsets[end_seg]) + end->coordinate;
 
     /* ---- Range check with wrap-around ---- */
     if (end_total < start_total) {

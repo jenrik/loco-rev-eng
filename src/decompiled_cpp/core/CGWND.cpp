@@ -7,6 +7,7 @@
 
 #include "CGWND.h"
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
+#include <cstring>
 
 /* Subsystem class headers — for InitAllSubsystems */
 #include "../ui/EditWindow.h"
@@ -222,9 +223,10 @@ extern char g_remote_res_path[256];
 
 static void destroy_subsystem(void* ptr) {
     if (ptr != nullptr) {
-        void** vt = *(void***)ptr;
-        void (*dtor)(void*, int) = (void(*)(void*,int))vt[0];
-        dtor(ptr, 1);
+        void** vtable = *reinterpret_cast<void***>(ptr);
+        using DeletingDestructor = void (*)(void*, int);
+        const auto destructor = reinterpret_cast<DeletingDestructor>(vtable[0]);
+        destructor(ptr, 1);
         ptr = nullptr;
     }
 }
@@ -270,7 +272,7 @@ CGWND::CGWND(HINSTANCE hInstance)
 #else
     this->hWndDesktop    = nullptr;             /* +0x04: no desktop concept in SDL3 */
 #endif
-    this->hWnd           = 0;           /* +0x08: reset */
+    this->hWnd           = nullptr;     /* +0x08: reset */
 
     /* Reset build/placement mode globals */
     if (g_build_mode != 0) {
@@ -291,7 +293,7 @@ CGWND::CGWND(HINSTANCE hInstance)
     g_screen_height   = 0;
     g_screen_center_x = 0;
     g_screen_center_y = 0;
-    SetRect((RECT*)&g_window_left,  0, 0, 0, 0);
+    SetRect(reinterpret_cast<RECT*>(&g_window_left),  0, 0, 0, 0);
     SetRect(&g_client_rect, 0, 0, 0, 0);
 
     /* Zero version fields */
@@ -398,23 +400,23 @@ void CGWND::ShowMainMenu()
     }
 
     /* Read per-type FPS balancing limits from INI [BALANCING] */
-    this->minVehicleFPS  = (uint8_t)Config_GetIniInt(g_config_ini,
+    this->minVehicleFPS  = static_cast<uint8_t>(Config_GetIniInt(g_config_ini,
                                s_BALANCING_0047e164,
-                               s_MinVehicleFPS_0047e170, 20);
-    this->minBuildingFPS = (uint8_t)Config_GetIniInt(g_config_ini,
+                               s_MinVehicleFPS_0047e170, 20));
+    this->minBuildingFPS = static_cast<uint8_t>(Config_GetIniInt(g_config_ini,
                                s_BALANCING_0047e164,
-                               s_MinBuildingFPS_0047e154, 18);
-    this->minMinifigFPS  = (uint8_t)Config_GetIniInt(g_config_ini,
+                               s_MinBuildingFPS_0047e154, 18));
+    this->minMinifigFPS  = static_cast<uint8_t>(Config_GetIniInt(g_config_ini,
                                s_BALANCING_0047e164,
-                               s_MinMinifigFPS_0047e144, 16);
-    this->minFlyingFPS   = (uint8_t)Config_GetIniInt(g_config_ini,
+                               s_MinMinifigFPS_0047e144, 16));
+    this->minFlyingFPS   = static_cast<uint8_t>(Config_GetIniInt(g_config_ini,
                                s_BALANCING_0047e164,
-                               s_MinFlyingFPS_0047e134, 14);
+                               s_MinFlyingFPS_0047e134, 14));
 
     /* Read and reset CleanExit flag */
-    g_clean_exit = (uint8_t)Config_GetIniInt(g_config_ini,
+    g_clean_exit = static_cast<uint8_t>(Config_GetIniInt(g_config_ini,
                               s_PROCESS_0047e120,
-                              s_CleanExit_0047e128, 1);
+                              s_CleanExit_0047e128, 1));
     Config_WriteInt(g_config_ini, s_PROCESS_0047e120,
                     s_CleanExit_0047e128, 0);
 }
@@ -478,12 +480,8 @@ void CGWND::ResetState()
 
     CRT_time();
 
-    /* Zero the version string buffer */
-    for (int i = 0; i < 0x3FF; i++) {
-        ((uint32_t*)versionStr)[i] = 0;
-    }
-    *(uint16_t*)(versionStr + 0xFFC) = 0;
-    versionStr[0xFFE] = 0;
+    /* Zero the version string buffer (the original clears through +0xFFE). */
+    std::memset(versionStr, 0, 0xFFF);
 
     HMODULE hMod = GetModuleHandleA(nullptr);
     GetModuleFileNameA(hMod, filePath, 0x504);
@@ -500,7 +498,7 @@ void CGWND::ResetState()
 
             if (VerQueryValueA(verData,
                     s_StringFileInfo_080904B0_FileVer_0047e0f8,
-                    (void**)&verStrPtr, &verStrLen) && verStrLen != 0)
+                    reinterpret_cast<void**>(&verStrPtr), &verStrLen) && verStrLen != 0)
             {
                 const char* src = verStrPtr;
                 char* dst = versionStr;
@@ -509,11 +507,11 @@ void CGWND::ResetState()
                 len++;
                 src = verStrPtr;
 
-                size_t words = len >> 2;
-                for (size_t i = 0; i < words; i++) {
-                    *(uint32_t*)dst = *(const uint32_t*)src;
-                    src += 4;
-                    dst += 4;
+                const size_t words = len >> 2;
+                if (words != 0) {
+                    std::memcpy(dst, src, words * sizeof(uint32_t));
+                    src += words * sizeof(uint32_t);
+                    dst += words * sizeof(uint32_t);
                 }
                 for (size_t i = 0; i < (len & 3); i++) {
                     *dst++ = *src++;
@@ -556,19 +554,22 @@ void CGWND::ResetState()
 /* ================================================================== */
 void __thiscall CGWND_SetPause(void* self, uint8_t paused)
 {
-    *(uint8_t*)((uint8_t*)self + 0x24) = paused ? 1 : 0;
+    auto* self_bytes = static_cast<uint8_t*>(self);
+    *reinterpret_cast<uint8_t*>(self_bytes + 0x24) = paused ? 1 : 0;
 
-    void** vt = *(void***)self;
-    ((void(__thiscall*)())vt[0x04 / 4])();
+    void** vtable = *reinterpret_cast<void***>(self);
+    using PauseMethod = void (__thiscall*)();
+    const auto pause_method = reinterpret_cast<PauseMethod>(vtable[0x04 / 4]);
+    pause_method();
 
-    void* audio_ch = *(void**)((uint8_t*)self + 0x48);
+    void* audio_ch = *reinterpret_cast<void**>(self_bytes + 0x48);
     if (audio_ch != nullptr) {
         if (paused) {
             extern void CGWND_AudioChannel_Play(uint32_t ch);
-            CGWND_AudioChannel_Play((uint32_t)audio_ch);
+            CGWND_AudioChannel_Play(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(audio_ch)));
         } else {
             extern void CGWND_AudioChannel_Pause(int ch);
-            CGWND_AudioChannel_Pause((int)audio_ch);
+            CGWND_AudioChannel_Pause(static_cast<int>(reinterpret_cast<uintptr_t>(audio_ch)));
         }
     }
 }
@@ -592,7 +593,7 @@ void CGWND_SetMode(int new_mode)
 
     switch (new_mode) {
     case 1:
-        ((CGWND*)g_main_window)->initMode1();
+        static_cast<CGWND*>(g_main_window)->initMode1();
         return;
 
     case 2:
@@ -620,7 +621,7 @@ void CGWND_SetMode(int new_mode)
             UI_ResetTooltips(g_tooltip_mgr, 0);
 
             extern void World_Reset(void* world, int flags);
-            World_Reset((void*)0x4A98B0, 0);
+            World_Reset(reinterpret_cast<void*>(static_cast<uintptr_t>(0x4A98B0)), 0);
 
             g_in_build_mode = 0;
         }
@@ -654,16 +655,18 @@ void CGWND_SetMode(int new_mode)
                 screen_obj = g_postcard_send;
             }
             if (screen_obj != nullptr) {
-                void** svt = *(void***)screen_obj;
-                ((void(__thiscall*)())svt[0x08 / 4])();
+                void** vtable = *reinterpret_cast<void***>(screen_obj);
+                using ShowMethod = void (__thiscall*)();
+                const auto show_method = reinterpret_cast<ShowMethod>(vtable[0x08 / 4]);
+                show_method();
             }
         }
         return;
 
     case 8:
         {
-            void* g_audio_mgr = *(void**)0x4FD38C;  /* avoid circular extern */
-            *(int*)((uint8_t*)g_audio_mgr + 0x3074) = old_mode;
+            auto* audio_mgr_bytes = static_cast<uint8_t*>(g_audio_mgr);
+            *reinterpret_cast<int*>(audio_mgr_bytes + 0x3074) = old_mode;
         }
         return;
 
@@ -736,15 +739,17 @@ void CGWND_Cleanup()
         extern void Train_FlushMessages(void* train);
         Train_FlushMessages(_g_train);
 
-        void** nt_vt = *(void***)_g_network_thread;
-        ((void(__thiscall*)(int))nt_vt[0])(1);
+        void** vtable = *reinterpret_cast<void***>(_g_network_thread);
+        using ShutdownMethod = void (__thiscall*)(int);
+        const auto shutdown = reinterpret_cast<ShutdownMethod>(vtable[0]);
+        shutdown(1);
         _g_network_thread = nullptr;
     }
 
     {
         extern int  WIN32_GetThreadResult(void* state);
         extern void WIN32_Sleep(uint32_t ms);
-        void* thread_state = (void*)0x4A9AD0;
+        void* thread_state = reinterpret_cast<void*>(static_cast<uintptr_t>(0x4A9AD0));
         while (WIN32_GetThreadResult(thread_state) != 0) {
             WIN32_Sleep(100);
         }
@@ -756,7 +761,7 @@ void CGWND_Cleanup()
     extern void World_Init(void* world);
     extern void World_Shutdown(int world);
     extern void Sprite_UnlockAll(int mgr);
-    World_Init((void*)0x4A98B0);
+    World_Init(reinterpret_cast<void*>(static_cast<uintptr_t>(0x4A98B0)));
     World_Shutdown(0x4A98B0);
     Sprite_UnlockAll(0x4AAD08);
 
@@ -801,10 +806,14 @@ void CGWND_Cleanup()
     extern int* _g_cursor_surface;
     if (_g_cursor_surface != nullptr) {
         int*   surf    = _g_cursor_surface;
-        void** surf_vt = (void**)(uintptr_t)surf[0];
-        ((void(__thiscall*)())surf_vt[0x08 / 4])();
+        void** vtable = reinterpret_cast<void**>(static_cast<uintptr_t>(surf[0]));
+        using ReleaseMethod = void (__thiscall*)();
+        const auto release = reinterpret_cast<ReleaseMethod>(vtable[0x08 / 4]);
+        release();
         if (surf[1] == -1) {
-            ((void(__thiscall*)(int))surf_vt[0])(1);
+            using DeleteMethod = void (__thiscall*)(int);
+            const auto destroy = reinterpret_cast<DeleteMethod>(vtable[0]);
+            destroy(1);
         }
         _g_cursor_surface = nullptr;
     }
@@ -832,13 +841,13 @@ void CGWND_Cleanup()
     Sprite_Shutdown(0x4AAD08);
 
     extern void Town_GameView_Cleanup(int* view);
-    Town_GameView_Cleanup((int*)0x4852A0);
+    Town_GameView_Cleanup(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4852A0)));
 
     extern void DDRAW_InvalidateAll(int* ddraw);
-    DDRAW_InvalidateAll((int*)0x4A9EF0);
+    DDRAW_InvalidateAll(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4A9EF0)));
 
     extern void RESDATA_ScriptedObject_Shutdown(int* obj);
-    RESDATA_ScriptedObject_Shutdown((int*)0x4AA5B8);
+    RESDATA_ScriptedObject_Shutdown(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4AA5B8)));
 
     extern void UI_FreeMessageBox(int msgbox);
     UI_FreeMessageBox(0x4FD220);
@@ -847,10 +856,10 @@ void CGWND_Cleanup()
     INPUT_Shutdown(0x4A99B0);
 
     extern void INPUT_Cleanup(int* mgr);
-    INPUT_Cleanup((int*)0x4A9990);
+    INPUT_Cleanup(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4A9990)));
 
     extern void Game_Shutdown(int* game);
-    Game_Shutdown((int*)0x4854C8);
+    Game_Shutdown(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4854C8)));
 
     extern int RESMGR_Shutdown(int resmgr);
     RESMGR_Shutdown(0x4855E8);
@@ -944,7 +953,7 @@ BOOL CGWND::RegisterWindowClass()
     if (win == nullptr) {
         return FALSE;
     }
-    this->hWnd = (HWND)win;
+    this->hWnd = static_cast<HWND>(win);
 
     SDL_ShowWindow(win);
 
@@ -1006,42 +1015,42 @@ int CGWND_InstallPathInit()
     extern const char DAT_0047e220[];
     extern const char DAT_0047e224[];
     Config_GetIniString(g_config_ini, "DIRECTORIES", DAT_0047e220, DAT_0047e224,
-                        (char*)g_install_path, 0x100);
+                        g_install_path, 0x100);
     Config_GetIniString(g_config_ini, "DIRECTORIES", "RemoteRes", &g_empty_string,
-                        (char*)g_remote_res_path, 0x100);
+                        g_remote_res_path, 0x100);
 
     /* Step 5: Demo mode */
-    if (g_demo_mode == 1) *(char*)g_remote_res_path = '\0';
+    if (g_demo_mode == 1) g_remote_res_path[0] = '\0';
 
     /* Step 6-7: Path cleanup with forward slashes */
     {
-        int rlen = lstrlenA((const char*)g_remote_res_path);
-        if (rlen == 0 || *(char*)(g_remote_res_path + rlen - 1) != '/')
-            lstrcatA((char*)g_remote_res_path, "/");
+        const int rlen = lstrlenA(g_remote_res_path);
+        if (rlen == 0 || g_remote_res_path[rlen - 1] != '/')
+            lstrcatA(g_remote_res_path, "/");
     }
     {
-        int ilen = lstrlenA((const char*)g_install_path);
-        if (ilen > 0 && *(char*)(g_install_path + ilen - 1) == '/') {
-            *(char*)(g_install_path + ilen - 1) = '\0';
+        const int ilen = lstrlenA(g_install_path);
+        if (ilen > 0 && g_install_path[ilen - 1] == '/') {
+            g_install_path[ilen - 1] = '\0';
             path_len = ilen - 1;
         } else {
             path_len = ilen;
         }
     }
 
-    mkdir_result = CRT_mkdir((const char*)g_install_path);
-    lstrcatA((char*)g_install_path, "/");
+    mkdir_result = CRT_mkdir(g_install_path);
+    lstrcatA(g_install_path, "/");
 
     // If the INI-derived path is a non-existent Windows path (e.g.
     // d:\loco\art-res), fall back to LEGO_LOCO_DATA + /art-res.
     if (path_len < 3 || (mkdir_result != 0 && path_len > 0)) {
         const char* data_root = getenv("LEGO_LOCO_DATA");
         if (!data_root || !*data_root) data_root = "lego-loco-unpacked";
-        lstrcpyA((char*)g_install_path, data_root);
-        lstrcatA((char*)g_install_path, "/art-res");
-        path_len = lstrlenA((const char*)g_install_path);
-        mkdir_result = CRT_mkdir((const char*)g_install_path);
-        lstrcatA((char*)g_install_path, "/");
+        lstrcpyA(g_install_path, data_root);
+        lstrcatA(g_install_path, "/art-res");
+        path_len = lstrlenA(g_install_path);
+        mkdir_result = CRT_mkdir(g_install_path);
+        lstrcatA(g_install_path, "/");
     }
 
     return (mkdir_result == 0 && path_len > 2) ? 1 : 0;

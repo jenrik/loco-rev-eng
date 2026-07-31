@@ -223,8 +223,6 @@ extern void __stdcall SetRect(void* rect, int left, int top, int right, int bott
 extern void __stdcall OffsetRect(void* rect, int dx, int dy);
 extern int  __stdcall IntersectRect(RECT* out, RECT* a, RECT* b);
 extern void __cdecl DDRAW_DimSurfaceRect(int left, int top, int right, int bottom);
-extern void* __fastcall TrackPiece_Ctor(void* obj, int parent, int res_handle, ushort z_order); /* 0x43E480 */
-extern void* __fastcall RESMGR_SoundObject_Ctor(void* obj, int sound_res, int parent, int res_handle, void* font, ushort z_order); /* 0x448F10 */
 extern void* __cdecl operator_new(size_t size);                     /* 0x465CE0 */
 extern void  __cdecl GLOBAL_free(void* ptr);                         /* 0x465CD0 */
 extern int   __thiscall UI_IsBitmapReady(int handle);                /* 0x424C30 */

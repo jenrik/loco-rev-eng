@@ -37,6 +37,22 @@ extern "C" {
     void   UIPANEL_InitSurface(void* surf, int a, int b, int c, int d, int e);
     void   UIPANEL_StretchBlit(void* dst, void* src, int a, int b, int c);
     void   UIPANEL_FillRect(void* surf, int w, int h);
+
+    void __thiscall UIPANEL_DrawBorder(void* self, int resource_ptr);
+    void __thiscall UIPANEL_GetButtonState(void* self, int pos_x, int pos_y);
+    uint32_t __thiscall UIPANEL_SetButtonState(void* self, void* entity,
+                                                uint32_t state, uint32_t mode);
+    uint8_t __thiscall UIPANEL_DrawCheckbox(void* self, void* entity,
+                                             uint32_t state, uint32_t mode);
+    void __thiscall UIPANEL_DrawRadioButton(void* self, void* entity);
+    uint32_t __fastcall UIPANEL_DrawEditField(int param_1);
+    void __fastcall UIPANEL_FreeSprite(void* sprite);
+    void* __thiscall UIPANEL_DtorSprite(void* sprite, uint8_t flags);
+    void __thiscall UIPANEL_CreateSprite(void* self, void* list_entry);
+    void __fastcall UIPANEL_InitSprite(void* self);
+    void __fastcall UIPANEL_BlitSprite(void* self);
+    void __fastcall UIPANEL_BlitSpriteEx(void* self);
+    void __thiscall UIPANEL_Hide(void* self, const char* filename);
     /* operator_new, GLOBAL_free already declared via compat.h */
     void   CRT_strncat_s(void* dst, void* src, void* max, void* src2, void* max2);
     void   RESDATA_BaseInit(void* self);

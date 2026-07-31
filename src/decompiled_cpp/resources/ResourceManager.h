@@ -49,6 +49,14 @@
 #pragma once
 
 #include "../shared/types.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Weffc++"
+#endif
+#include "../game/TrackPiece.h"
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #include <stdint.h>
 
 /* ================================================================== */
@@ -56,6 +64,21 @@
 /* ================================================================== */
 
 struct GameAudio;
+
+/* ================================================================== */
+/* ResourceObject — typed view of the common resource vtable            */
+/* ================================================================== */
+class ResourceObject {
+public:
+    /* Original slot 0 is the compiler-generated scalar deleting
+     * destructor. This bridge names the slot without writing a vtable. */
+    virtual void Destroy(uint8_t flags) = 0;
+    virtual void* Lock(int32_t flags, int32_t mode) = 0;
+    virtual void Unlock() = 0;
+
+protected:
+    ~ResourceObject() = default;
+};
 
 /* ================================================================== */
 /* RESDATA — resource data object (loaded by ResourceManager)          */
@@ -79,8 +102,7 @@ struct GameAudio;
 /* ================================================================== */
 
 struct ResourceEntry {
-    /* +0x00: vtable pointer (0x00478278) */
-    /* vtable at +0x00 is compiler-managed via virtual methods */
+    void* vtable;                 /* +0x00: compiler-managed resource vtable */
     /* +0x04: resource ID (-1 for external files) */
     int32_t resource_id;
 
@@ -128,33 +150,21 @@ struct ScreenSaverModule {
 };
 
 /* ================================================================== */
-/* SoundObject — TrackPiece subclass with text label (vtable 0x478280)*/
-/* Size: ~0x68+ bytes (extends TrackPiece).                           */
-/*                                                                     */
-/* Fields (offsets from this):                                         */
-/*   +0x00: vtable (VTBL_SOUND_OBJECT, 0x478280)                      */
-/*   +0x04: type = 8                                                   */
-/*   +0x08: x position                                                  */
-/*   +0x0C: y position                                                  */
-/*   +0x50: timer counter (used by GetText polling)                    */
-/*   +0x56: active flag (byte) — used by GetText                       */
-/*   +0x58: flag byte / consume-state (0=inactive, 1=active for input) */
-/*   +0x5C: max text length (storage capacity)                         */
-/*   +0x60: text buffer (char*, heap-allocated)                         */
-/*   +0x64: font handle                                                 */
-/*   ... inherited TrackPiece fields (vtable[0x20]=update callback)    */
+/* SoundObject — TrackPiece subclass with text label                    */
+/* Size: 0x68 bytes on the recovered 32-bit layout.                    */
+/* TrackPiece supplies the vtable, type, position, timer, and active    */
+/* fields through +0x57; SoundObject owns the fields beginning at +0x58. */
 /* ================================================================== */
 
-struct SoundObject {
-    /* vtable at +0x00 */
-    int32_t   type;              /* +0x04  type = 8 */
-    int32_t   x;                 /* +0x08  x position */
-    int32_t   y;                 /* +0x0C  y position */
-    uint8_t   _pad_10[0x40];     /* +0x10..+0x4F  TrackPiece/inherited fields */
-    int32_t   timer;             /* +0x50  timer counter */
-    uint8_t   _pad_54[2];        /* +0x54 */
-    uint8_t   active;            /* +0x56  active flag */
-    uint8_t   _pad_57;           /* +0x57 */
+class SoundObject : public TrackPiece {
+public:
+    SoundObject(int32_t text_length, void* town, RESDATA* resource,
+                void* font, uint16_t flags);
+    ~SoundObject() override;
+    SoundObject(const SoundObject&) = delete;
+    SoundObject& operator=(const SoundObject&) = delete;
+
+    /* TrackPiece supplies the inherited fields through +0x57. */
     uint8_t   consume_state;     /* +0x58  0=inactive, 1=consume */
     uint8_t   _pad_59[3];        /* +0x59 */
     int32_t   max_text_len;      /* +0x5C  text buffer capacity */
@@ -612,7 +622,7 @@ void RESMGR_VehicleAnimationTick();
  * RESMGR_ResourceData_Init — Initialize a RESDATA struct to zero.
  * Address: 0x447B20
  *
- * Sets vtable to VTBL_RESDATA (0x478274), zeros all fields:
+ * Initializes the resource-data object and zeros all fields:
  * pixels (+0x1C4), streams (+0x1C8/+0x1CC), asset data (+0x1D0/+0x1D4),
  * dimensions (+0xB0/+0xB2/+0xB4).
  */
@@ -622,7 +632,7 @@ void RESMGR_ResourceData_Init(RESDATA* resdata);
  * RESMGR_ReleaseResource — Mid-level resource release.
  * Address: 0x447B90
  *
- * Resets vtable to VTBL_RESDATA, then calls RESMGR_RemoveResource
+ * Resets resource-data state, then calls RESMGR_RemoveResource
  * to free sub-resources (streams, pixels, asset data). Does NOT free
  * the struct's own memory. Used by save-game + SEH unwind paths.
  */
@@ -731,7 +741,7 @@ bool RESMGR_IsSaveHeader(RESDATA* resdata);
  * RESMGR_AllocResourceEntry — Allocate and init a resource entry.
  * Address: 0x448990
  *
- * Sets vtable to VTBL_RESOURCE_ENTRY (0x478278), stores resource_id,
+ * Initializes the resource-entry object, stores resource_id,
  * formats path as "%s\\name.wav" from param_2 string, calls
  * RESMGR_OpenResourceFile to load the resource.
  * Called by ResourceManager_LoadStringTable.
@@ -747,10 +757,10 @@ ResourceEntry* RESMGR_AllocResourceEntry(ResourceEntry* resEntry, int32_t resId,
  * RESMGR_ResourceEntry_Dtor — Scalar-deleting destructor for ResourceEntry.
  * Address: 0x4489D0
  *
- * Sets vtable to VTBL_RESOURCE_ENTRY (safety), destroys sub-object at
+ * Destroys the resource-entry sub-object at
  * +0x0C via vtable dispatch (slot 0x48/+0x09 then slot 8), clears +0x09
  * status flag. If flags & 1, frees the struct memory.
- * Vtable[0] for VTBL_RESOURCE_ENTRY.
+ * This is the compiler-generated destruction slot.
  *
  * @param flags  Bit 0: free memory flag
  * @return       this pointer
@@ -761,7 +771,7 @@ void* RESMGR_ResourceEntry_Dtor(ResourceEntry* resEntry, uint8_t flags);
  * RESMGR_CreateResourceFromFile — Create ResourceEntry from file path.
  * Address: 0x448A20
  *
- * Sets vtable to VTBL_RESOURCE_ENTRY, calls RESMGR_OpenResourceFile,
+ * Initializes the resource-entry state, calls RESMGR_OpenResourceFile,
  * sets resource_id to -1, copies raw file path to +0x18.
  * Used by RESMGR_PlaySoundFile for external WAV files.
  *
@@ -814,9 +824,9 @@ int32_t ReleaseSoundResource(ResourceEntry* entry);
 
 /* ================================================================== */
 /* SoundObject — TrackPiece subclass with text label                   */
-/* Operates on SoundObject struct (vtable 0x478280).                    */
+/* Operates on the canonical SoundObject class.                        */
 /* SoundObject fields (key offsets from this pointer):                  */
-/*   +0x00: vtable (VTBL_SOUND_OBJECT 0x478280)                        */
+/*   +0x00: compiler-managed TrackPiece-derived vtable                 */
 /*   +0x04: type = 8                                                    */
 /*   +0x08: x position                                                  */
 /*   +0x0C: y position                                                  */
@@ -828,19 +838,11 @@ int32_t ReleaseSoundResource(ResourceEntry* entry);
 /*   +0x64: font handle                                                 */
 /* ================================================================== */
 
-/**
- * RESDATA_SoundObject_BaseDtor — Base destructor for SoundObject.
- * Address: 0x449000
- * Calling convention: __fastcall (ECX = this)
- *
- * Sets vtable to VTBL_SOUND_OBJECT (safety sentinel), frees text buffer
- * at +0x60 via GLOBAL_free, zeroes pointer, then calls TrackPiece_Dtor
- * base destructor. SEH-protected.
- *
- * Called by: RESMGR_SoundObject_Dtor (0x448FE0)
- */
-void __fastcall RESDATA_SoundObject_BaseDtor(void* self);
-
+void* RESMGR_SoundObject_Ctor(void* self, int32_t strLen, int32_t param2,
+                              int32_t param3, void* font, uint16_t param5);
+/* SoundObject::~SoundObject owns the text buffer and invokes the
+ * compiler-generated TrackPiece base destructor. The original scalar
+ * deleting wrapper at 0x448FE0 is compiler-generated. */
 /**
  * RESDATA_SoundObject_Init — Initialize SoundObject text from a source string.
  * Address: 0x449070

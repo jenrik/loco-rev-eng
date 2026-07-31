@@ -134,58 +134,70 @@ extern char     g_scene_name[];          /* 0x4A99C8 */
 /* These map the binary's literal vtable access to typed operations.   */
 /* ================================================================== */
 
-/** Call vtable[3] (MoveTo) on the embedded Entity at +0xE0 */
-static inline void entity_vmove(ScriptedObject* so, int x, int y) {
-    typedef void (*V3)(void*, int, int);
-    ((V3)((*(void***)&so->sub_entity)[3]))(&so->sub_entity, x, y);
+/** Call recovered virtual slots on embedded legacy objects. */
+static inline void entity_vmove(ScriptedObject* so, int x, int y)
+{
+    using MoveTo = void (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->sub_entity);
+    reinterpret_cast<MoveTo>(vtable[3])(so->sub_entity, x, y);
 }
 
-/** Call vtable[6] (Init) on the embedded Entity at +0xE0 */
-static inline void entity_init(ScriptedObject* so, int a, int b, int c) {
-    typedef void (*V6)(void*, int, int, int);
-    ((V6)((*(void***)&so->sub_entity)[6]))(&so->sub_entity, a, b, c);
+static inline void entity_init(ScriptedObject* so, int a, int b, int c)
+{
+    using Init = void (*)(void*, int, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->sub_entity);
+    reinterpret_cast<Init>(vtable[6])(so->sub_entity, a, b, c);
 }
 
-/** Call vtable[15] (Call/shutdown) on the embedded ScriptEngine at +0x178 */
-static inline void se_shutdown(ScriptedObject* so) {
-    typedef void (*V15)(void*);
-    ((V15)((*(void***)&so->script_engine_prefix)[15]))(&so->script_engine_prefix);
+static inline void se_shutdown(ScriptedObject* so)
+{
+    using Shutdown = void (*)(void*);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    reinterpret_cast<Shutdown>(vtable[15])(so->script_engine_prefix);
 }
 
-/** Call vtable[21] (HandleDrag) on the embedded ScriptEngine at +0x178 */
-static inline void se_handle_drag(ScriptedObject* so, void* child, int mode) {
-    typedef void (*V21)(void*, void*, int);
-    ((V21)((*(void***)&so->script_engine_prefix)[21]))(&so->script_engine_prefix, child, mode);
+static inline void se_handle_drag(ScriptedObject* so, void* child, int mode)
+{
+    using HandleDrag = void (*)(void*, void*, int);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    reinterpret_cast<HandleDrag>(vtable[21])(so->script_engine_prefix, child, mode);
 }
 
-/** Call vtable[3] (MoveTo) on the embedded ScriptEngine at +0x178 */
-static inline void se_vmove(ScriptedObject* so, int x, int y) {
-    typedef void (*V3)(void*, int, int);
-    ((V3)((*(void***)&so->script_engine_prefix)[3]))(&so->script_engine_prefix, x, y);
+static inline void se_vmove(ScriptedObject* so, int x, int y)
+{
+    using MoveTo = void (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    reinterpret_cast<MoveTo>(vtable[3])(so->script_engine_prefix, x, y);
 }
 
-/** Call vtable[15] (destructor) on the embedded ScrollPanel at +0x260 */
-static inline void sp_shutdown(ScriptedObject* so) {
-    typedef void (*V15)(void*);
-    ((V15)((*(void***)&so->scroll_panel_prefix)[15]))(&so->scroll_panel_prefix);
+static inline void sp_shutdown(ScriptedObject* so)
+{
+    using Shutdown = void (*)(void*);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    reinterpret_cast<Shutdown>(vtable[15])(so->scroll_panel_prefix);
 }
 
-/** Call vtable[3] (MoveTo) on the embedded ScrollPanel at +0x260 */
-static inline void sp_vmove(ScriptedObject* so, int x, int y) {
-    typedef void (*V3)(void*, int, int);
-    ((V3)((*(void***)&so->scroll_panel_prefix)[3]))(&so->scroll_panel_prefix, x, y);
+static inline void sp_vmove(ScriptedObject* so, int x, int y)
+{
+    using MoveTo = void (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    reinterpret_cast<MoveTo>(vtable[3])(so->scroll_panel_prefix, x, y);
 }
 
-/** Call vtable[3] (MoveTo) on a tooltip handle */
-static inline void tooltip_vmove(int32_t handle, int x, int y) {
-    typedef void (*V3)(void*, int, int);
-    ((V3)((*(void***)&handle)[3]))((void*)(intptr_t)handle, x, y);
+static inline void tooltip_vmove(int32_t handle, int x, int y)
+{
+    using MoveTo = void (*)(void*, int, int);
+    void* object = reinterpret_cast<void*>(static_cast<intptr_t>(handle));
+    void** vtable = *reinterpret_cast<void***>(object);
+    reinterpret_cast<MoveTo>(vtable[3])(object, x, y);
 }
 
-/** Call vtable[7] (SetAnimState) on a tooltip handle */
-static inline void tooltip_set_state(int32_t handle, int state) {
-    typedef void (*V7)(void*, int);
-    ((V7)((*(void***)&handle)[7]))((void*)(intptr_t)handle, state);
+static inline void tooltip_set_state(int32_t handle, int state)
+{
+    using SetAnimState = void (*)(void*, int);
+    void* object = reinterpret_cast<void*>(static_cast<intptr_t>(handle));
+    void** vtable = *reinterpret_cast<void***>(object);
+    reinterpret_cast<SetAnimState>(vtable[7])(object, state);
 }
 
 /* ================================================================== */
@@ -303,7 +315,7 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
     this->sub_entity[0x82] = 0;                              /* loaded_flag at +0x162 = Entity::name[6] */
     this->unk_flag    = 0;                                   /* +0x63A */
 
-    if (name_suffix == NULL) {
+    if (name_suffix == nullptr) {
         WIN32_StreamDestroy(stream_handle);                  /* 0x463A80 */
         WNDPROC_StreamCleanup(stream_handle);                 /* 0x464620 */
         return;
@@ -316,14 +328,14 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
     CRT_sprintf_buf(this->script_bitmap_path, "%s%s.bmp", g_scene_name, name_suffix);
 
     /* Try loading from RFD archive (asset manager) first */
-    if (g_asset_mgr != NULL) {
+    if (g_asset_mgr != nullptr) {
         char* file_data;
         void* stream_obj;
         void* parsed_stream;
 
         CRT_sprintf_buf(asset_path, "%s.dat", name_suffix);
-        file_data = (char*)AssetMgr_LoadFile(
-            g_asset_mgr, asset_path, &loaded_size);          /* 0x45CD00 */
+        file_data = static_cast<char*>(AssetMgr_LoadFile(
+            g_asset_mgr, asset_path, &loaded_size));        /* 0x45CD00 */
 
         if (file_data != NULL) {
             stream_obj = operator_new(0x5C);                 /* 0x465CE0 */
@@ -333,8 +345,12 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
 
                 if (parsed_stream != NULL) {
                     /* Check stream error flag at vtable[1] + offset 8 */
-                    int v4 = *(int*)((uintptr_t)(*(int*)parsed_stream) + 4);
-                    if ((*(uint8_t*)((char*)parsed_stream + v4 + 8) & 4) == 0) {
+                    const uint8_t* parsed_bytes =
+                        reinterpret_cast<const uint8_t*>(parsed_stream);
+                    const uintptr_t parsed_vtable = static_cast<uintptr_t>(
+                        *reinterpret_cast<const uint32_t*>(parsed_bytes));
+                    const int v4 = *reinterpret_cast<const int*>(parsed_vtable + 4);
+                    if ((*reinterpret_cast<const uint8_t*>(parsed_bytes + v4 + 8) & 4) == 0) {
                         char loaded;
 
                         /* Step 1: Parse script via ScriptedObject_ParseStream */
@@ -355,10 +371,13 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
 
                         /* Destroy the temporary stream (vtable[0]) */
                         {
-                            void* par_vtable = *(void**)parsed_stream;
-                            int   par_v4      = *(int*)((char*)par_vtable + 4);
-                            typedef void (*V0)(int flags);
-                            ((V0)((*(void***)((char*)parsed_stream + par_v4))[0]))(1);
+                            void* par_vtable = *reinterpret_cast<void**>(parsed_stream);
+                            const int par_v4 = *reinterpret_cast<const int*>(
+                                reinterpret_cast<const uint8_t*>(par_vtable) + 4);
+                            using V0 = void (*)(int flags);
+                            void** stream_slots = *reinterpret_cast<void***>(
+                                reinterpret_cast<uint8_t*>(parsed_stream) + par_v4);
+                            reinterpret_cast<V0>(stream_slots[0])(1);
                         }
                     }
                 }
@@ -373,8 +392,9 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
                              g_stream_open_flags);            /* 0x463AA0 */
 
         /* Check stream error flag */
-        int idx = *(int*)((char*)stream_handle + 4);
-        if ((*(uint8_t*)((char*)stream_handle + idx + 8) & 4) == 0) {
+        const uint8_t* stream_bytes = reinterpret_cast<const uint8_t*>(stream_handle);
+        int idx = *reinterpret_cast<const int*>(stream_bytes + 4);
+        if ((*reinterpret_cast<const uint8_t*>(stream_bytes + idx + 8) & 4) == 0) {
             char loaded;
 
             loaded = ScriptedObject_ParseStream(stream_handle);      /* 0x41E9F0 */
@@ -416,7 +436,7 @@ void ScriptedObject::MoveTo(int x, int y)
             }
 
             /* Get sprite frame width from RESDATA (+0x14 = frame_width) */
-            sprite_width = ((RESDATA*)this->surface_ref)->frame_width;
+            sprite_width = static_cast<const RESDATA*>(this->surface_ref)->frame_width;
 
             /* Check against ScriptEngine right bound */
             if (this->script_engine_active != 0) {
@@ -446,7 +466,7 @@ void ScriptedObject::MoveTo(int x, int y)
                 x = this->scroll_panel_offset;
             }
             else {
-                sprite_width = ((RESDATA*)this->surface_ref)->frame_width;
+                sprite_width = static_cast<const RESDATA*>(this->surface_ref)->frame_width;
                 if (x > g_world_width - sprite_width) {
                     x = g_world_width - sprite_width;
                 }
@@ -472,9 +492,10 @@ void ScriptedObject::MoveTo(int x, int y)
        frame_data_ptr is at +0x120 (= Entity::resource at sub_entity+0x40).
        Reads int16_t offsets at frame_data+0x2E and +0x30. */
     {
-        void* fdp = *(void**)(&this->sub_entity[0x40]);     /* +0x120 */
-        int go_x = x + (int16_t)(*(int16_t*)((char*)fdp + 0x2E));
-        int go_y = y + (int16_t)(*(int16_t*)((char*)fdp + 0x30));
+        void* fdp = *reinterpret_cast<void**>(&this->sub_entity[0x40]); /* +0x120 */
+        const uint8_t* frame_bytes = reinterpret_cast<const uint8_t*>(fdp);
+        int go_x = x + static_cast<int>(*reinterpret_cast<const int16_t*>(frame_bytes + 0x2E));
+        int go_y = y + static_cast<int>(*reinterpret_cast<const int16_t*>(frame_bytes + 0x30));
         entity_vmove(this, go_x, go_y);
     }
 
@@ -489,7 +510,7 @@ void ScriptedObject::MoveTo(int x, int y)
         }
     }
     else {  /* Direction flag == 1 — positive direction */
-        int sprite_w = ((RESDATA*)this->surface_ref)->frame_width;
+        int sprite_w = static_cast<const RESDATA*>(this->surface_ref)->frame_width;
 
         if (this->script_engine_active != 0) {
             se_vmove(this, sprite_w + x, y + 14);
@@ -513,7 +534,7 @@ void ScriptedObject::MoveTo(int x, int y)
     else {
         /* Mode != 0: Copy embedded Entity's screen_rect into drag_rect.
            sub_entity is at +0xE0, screen_rect (GameObject+0x08) is at +0xE8 */
-        this->drag_rect = *(RECT*)(&this->sub_entity[8]);
+        this->drag_rect = *reinterpret_cast<const RECT*>(&this->sub_entity[8]);
     }
 
     /* Update cursor position if actively dragging */
@@ -531,14 +552,18 @@ void ScriptedObject::MoveTo(int x, int y)
                 int pt[2];
                 pt[0] = screen_x;
                 pt[1] = screen_y;
-                ClientToScreen(*(HWND*)((uintptr_t)(*(int*)g_main_window) + 8), pt);
+                uintptr_t main_window_base = *reinterpret_cast<const uintptr_t*>(g_main_window);
+                HWND main_hwnd = *reinterpret_cast<HWND*>(main_window_base + 8);
+                ClientToScreen(main_hwnd, pt);
                 SetCursorPos(pt[0], pt[1]);
             }
 
             /* Pack cursor position into global for save/restore */
             g_last_cursor_pos =
-                (((uint16_t)(y - g_viewport_y) + (uint16_t)this->drag_offset_y) << 16) |
-                ((uint16_t)(x - g_viewport_x) + (uint16_t)this->drag_offset_x);
+                ((static_cast<uint16_t>(y - g_viewport_y) +
+                  static_cast<uint16_t>(this->drag_offset_y)) << 16) |
+                (static_cast<uint16_t>(x - g_viewport_x) +
+                 static_cast<uint16_t>(this->drag_offset_x));
 
             Game_CheckScreensaverTimeout(g_game);            /* 0x410A20 */
         }
@@ -560,9 +585,9 @@ void ScriptedObject::MoveTo(int x, int y)
 void ScriptedObject::RemoveChild()
 {
     /* Free child script pointer if non-null */
-    if (this->child_script_ptr != NULL) {
+    if (this->child_script_ptr != nullptr) {
         GLOBAL_free(this->child_script_ptr);                 /* 0x465CD0 */
-        this->child_script_ptr = NULL;
+        this->child_script_ptr = nullptr;
     }
 
     /* Call base destructor (ScriptedObject_InitBase with 0,0) */
@@ -580,7 +605,7 @@ ScriptedObject* ScriptedObject::AddChild(uint32_t resource_id, const char* name_
     ScriptedObject_InitBase(resource_id, 0);                     /* 0x4203E0 */
 
     /* Clear child script pointer */
-    this->child_script_ptr = NULL;
+    this->child_script_ptr = nullptr;
 
     /* Load script via HandleEvent */
     this->HandleEvent(resource_id, name_suffix);
@@ -595,7 +620,7 @@ ScriptedObject* ScriptedObject::AddChild(uint32_t resource_id, const char* name_
 
 uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
 {
-    if (tool == NULL) {
+    if (tool == nullptr) {
         return 0;
     }
 
@@ -648,7 +673,8 @@ uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
 
     case 0x240D:  /* Scenario mode indicator */
         /* g_netman[0x17].scenarioId == 2 => scenario mode */
-        if (*(int*)((char*)g_netman + 0x7C4) == 2) {
+        if (*reinterpret_cast<const int*>(
+                reinterpret_cast<const uint8_t*>(g_netman) + 0x7C4) == 2) {
             TrackPiece_SetZoom(tool, 3);
         } else if (timer == 0) {
             TrackPiece_SetZoom(tool, 2);
@@ -659,7 +685,8 @@ uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
         break;
 
     case 0x240E:  /* Mute toggle */
-        if (g_audio != NULL && *(uint8_t*)((char*)g_audio + 0xB4) == 0) {
+        if (g_audio != nullptr && *reinterpret_cast<const uint8_t*>(
+                reinterpret_cast<const uint8_t*>(g_audio) + 0xB4) == 0) {
             TrackPiece_SetZoom(tool, 1);
         } else {
             TrackPiece_SetZoom(tool, 2);
@@ -703,22 +730,28 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
 
             /* Stop ScrollPanel child surface */
             if (this->scroll_panel_offset != 0) {
-                UIPANEL_ScrollPanel_HandleDrag(&scroll_panel_prefix, (intptr_t)child, 0);
+                UIPANEL_ScrollPanel_HandleDrag(
+                    &scroll_panel_prefix,
+                    static_cast<int>(reinterpret_cast<intptr_t>(child)), 0);
             }
 
             this->dim_flag = 0;
             CGWND_SetBuildMode(0);                           /* 0x4089D0 */
 
             /* Reset all track piece zooms in the linked list */
-            while (child != NULL) {
-                int child_type = *(int*)((uintptr_t)(*(int*)((char*)child + 0x44)) + 4);
+            while (child != nullptr) {
+                const uint8_t* child_bytes = reinterpret_cast<const uint8_t*>(child);
+                const uintptr_t resource_address = static_cast<uintptr_t>(
+                    *reinterpret_cast<const uint32_t*>(child_bytes + 0x44));
+                int child_type = *reinterpret_cast<const int*>(resource_address + 4);
                 switch (child_type) {
                 case 0x2403: case 0x2404: case 0x2405:
                 case 0x2406: case 0x2409: case 0x240A:
                     TrackPiece_SetZoom(child, 1);            /* 0x40D170 */
                     break;
                 }
-                child = *(void**)((char*)child + 0x28);      /* linked list: sub_resource */
+                child = *reinterpret_cast<void* const*>(
+                    child_bytes + 0x28);                       /* linked list: sub_resource */
             }
 
             /* Save current world if in build mode */
@@ -736,7 +769,7 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
             }
 
             /* Restore audio volume */
-            if (g_audio != NULL) {
+            if (g_audio != nullptr) {
                 GameAudio_UpdateVolume(g_audio, 0);
             }
         }
@@ -753,7 +786,7 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
                 this->screen_rect.left - 0x31,
                 this->screen_rect.top  - 0x2F);
 
-            CGWND_SetMode((void*)4);
+            CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(4)));
 
             /* Destroy old tooltip if exists */
             if (this->tooltip_handle != 0) {
@@ -763,10 +796,10 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
 
             /* Create new tooltip if visible */
             if (this->initialized != 0) {
-                this->tooltip_handle = (int32_t)(intptr_t)UI_CreateTooltip(
-                    g_tooltip_mgr, 0x3879, 1,
+                this->tooltip_handle = static_cast<int32_t>(reinterpret_cast<intptr_t>(
+                    UI_CreateTooltip(g_tooltip_mgr, 0x3879, 1,
                     this->screen_rect.left + 0x32,
-                    this->screen_rect.top  + 0x32);
+                    this->screen_rect.top  + 0x32)));
             }
 
             /* Mute audio */

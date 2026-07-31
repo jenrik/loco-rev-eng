@@ -54,6 +54,7 @@
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -104,8 +105,20 @@ public:
 static void inline_memcpy(void* dst, const void* src, int32_t len)
 {
     int32_t dw = len >> 2, rm = len & 3;
-    for (int32_t i = 0; i < dw; i++) ((uint32_t*)dst)[i] = ((const uint32_t*)src)[i];
-    for (int32_t i = 0; i < rm; i++) ((uint8_t*)dst)[dw*4+i] = ((const uint8_t*)src)[dw*4+i];
+    for (int32_t i = 0; i < dw; i++)
+        reinterpret_cast<uint32_t*>(dst)[i] =
+            reinterpret_cast<const uint32_t*>(src)[i];
+    for (int32_t i = 0; i < rm; i++)
+        reinterpret_cast<uint8_t*>(dst)[dw * 4 + i] =
+            reinterpret_cast<const uint8_t*>(src)[dw * 4 + i];
+}
+
+static TrainMessage* allocate_train_message()
+{
+    void* storage = operator_new(sizeof(TrainMessage));
+    return storage == nullptr
+        ? nullptr
+        : ::new (storage) TrainMessage{};
 }
 
 /* ================================================================== */
@@ -359,21 +372,22 @@ void Netman::SendMapData(int32_t targetDpId)
     if (!slot) return;
     slot->has_data = 1;
 
-    void* surf = (void*)operator_new(0x20);
-    if (surf) surf = UIPANEL_CreateSurface(surf);
+    void* surf = operator_new(0x20);
+    if (surf != nullptr) surf = UIPANEL_CreateSurface(surf);
     TileMap_CreateOverlay(g_tilemap, surf, 0);
-    if (!surf) return;
+    if (surf == nullptr) return;
 
-    uint16_t w = *(uint16_t*)((uint8_t*)surf + 8);
-    uint16_t h = *(uint16_t*)((uint8_t*)surf + 0xC);
-    int32_t ds = (int32_t)w * (int32_t)h;
-    void* px = *(void**)((uint8_t*)surf + 0x18);
+    const auto* surface_bytes = reinterpret_cast<const uint8_t*>(surf);
+    uint16_t w = *reinterpret_cast<const uint16_t*>(surface_bytes + 8);
+    uint16_t h = *reinterpret_cast<const uint16_t*>(surface_bytes + 0xC);
+    int32_t ds = static_cast<int32_t>(w) * static_cast<int32_t>(h);
+    void* px = *reinterpret_cast<void* const*>(surface_bytes + 0x18);
 
-    uint8_t* pkt = (uint8_t*)operator_new(ds + 0x28);
-    *(uint16_t*)(pkt + 0) = PACKET_MAP_DATA;
-    *(uint16_t*)(pkt + 6) = w;
-    *(uint16_t*)(pkt + 8) = h;
-    *(int32_t*)(pkt + 0x10) = ds;
+    uint8_t* pkt = static_cast<uint8_t*>(operator_new(ds + 0x28));
+    *reinterpret_cast<uint16_t*>(pkt + 0) = PACKET_MAP_DATA;
+    *reinterpret_cast<uint16_t*>(pkt + 6) = w;
+    *reinterpret_cast<uint16_t*>(pkt + 8) = h;
+    *reinterpret_cast<int32_t*>(pkt + 0x10) = ds;
 
     if (this->m_mySlotIndex >= 0) {
         PlayerSlot* ms = &this->m_slots[this->m_mySlotIndex];
@@ -384,12 +398,16 @@ void Netman::SendMapData(int32_t targetDpId)
         ms->version++;
         ms->pixel_width = w;
         ms->pixel_height = h;
-        *(int32_t*)(pkt + 0xC) = ms->version;
+        *reinterpret_cast<int32_t*>(pkt + 0xC) = ms->version;
     }
     inline_memcpy(pkt + 0x14, px, ds);
 
-    TrainMessage* m = (TrainMessage*)operator_new(sizeof(TrainMessage));
-    if (m) m->next = NULL;
+    TrainMessage* m = allocate_train_message();
+    if (m == nullptr) {
+        net_delete(surf);
+        GLOBAL_free(pkt);
+        return;
+    }
     m->type = 6;
     m->data_len = ds + 0x19;
     m->data_ptr = pkt;
@@ -413,17 +431,16 @@ void Netman::SendBuildingData(int32_t targetDpId)
     if (slot->pixel_buffer) {
         int32_t ds = slot->data_size;
         uint16_t w = slot->pixel_width, h = slot->pixel_height;
-        uint8_t* pkt = (uint8_t*)operator_new(ds + 0x28);
-        if (!pkt) return;
-        *(uint16_t*)(pkt + 0) = PACKET_MAP_DATA;
-        *(uint16_t*)(pkt + 6) = w;
-        *(uint16_t*)(pkt + 8) = h;
-        *(int32_t*)(pkt + 0x10) = ds;
-        *(int32_t*)(pkt + 0xC) = slot->version;
+        uint8_t* pkt = static_cast<uint8_t*>(operator_new(ds + 0x28));
+        if (pkt == nullptr) return;
+        *reinterpret_cast<uint16_t*>(pkt + 0) = PACKET_MAP_DATA;
+        *reinterpret_cast<uint16_t*>(pkt + 6) = w;
+        *reinterpret_cast<uint16_t*>(pkt + 8) = h;
+        *reinterpret_cast<int32_t*>(pkt + 0x10) = ds;
+        *reinterpret_cast<int32_t*>(pkt + 0xC) = slot->version;
         inline_memcpy(pkt + 0x14, slot->pixel_buffer, ds);
-        TrainMessage* m = (TrainMessage*)operator_new(sizeof(TrainMessage));
-        if (!m) { GLOBAL_free(pkt); return; }
-        m->next = NULL;
+        TrainMessage* m = allocate_train_message();
+        if (m == nullptr) { GLOBAL_free(pkt); return; }
         m->type = 6;
         m->data_len = ds + 0x19;
         m->data_ptr = pkt;
@@ -431,14 +448,14 @@ void Netman::SendBuildingData(int32_t targetDpId)
         m->flags = 1;
         Train_QueueMessage(_g_train, m);
     } else {
-        TrainMessage* m = (TrainMessage*)operator_new(sizeof(TrainMessage));
-        if (!m) return;
+        TrainMessage* m = allocate_train_message();
+        if (m == nullptr) return;
         m->type = MESSAGE_REFRESH_REQUEST;
         m->data_len = 0;
-        m->data_ptr = NULL;
+        m->data_ptr = nullptr;
         m->target_dpId = 0;
         m->flags = 0;
-        m->next = NULL;
+        m->next = nullptr;
         NETMAN_QueueMessage(m);
     }
 }
@@ -448,14 +465,13 @@ void Netman::SendBuildingData(int32_t targetDpId)
 /* ================================================================== */
 void Netman::UpdatePlayerInfo()
 {
-    uint8_t* pkt = (uint8_t*)operator_new(6);
-    if (!pkt) return;
-    *(uint16_t*)(pkt + 0) = PACKET_PLAYER_INFO;
-    *(uint8_t*)(pkt + 4) = (uint8_t)this->m_mySlotIndex;
+    uint8_t* pkt = static_cast<uint8_t*>(operator_new(6));
+    if (pkt == nullptr) return;
+    *reinterpret_cast<uint16_t*>(pkt + 0) = PACKET_PLAYER_INFO;
+    pkt[4] = static_cast<uint8_t>(this->m_mySlotIndex);
 
-    TrainMessage* m1 = (TrainMessage*)operator_new(sizeof(TrainMessage));
-    if (!m1) { GLOBAL_free(pkt); return; }
-    m1->next = NULL;
+    TrainMessage* m1 = allocate_train_message();
+    if (m1 == nullptr) { GLOBAL_free(pkt); return; }
     m1->type = 6;
     m1->data_len = 6;
     m1->data_ptr = pkt;
@@ -463,14 +479,14 @@ void Netman::UpdatePlayerInfo()
     m1->flags = 1;
     Train_QueueMessage(_g_train, m1);
 
-    TrainMessage* m2 = (TrainMessage*)operator_new(sizeof(TrainMessage));
-    if (!m2) return;
+    TrainMessage* m2 = allocate_train_message();
+    if (m2 == nullptr) return;
     m2->type = MESSAGE_SYNC_TRIGGER;
     m2->data_len = 0;
-    m2->data_ptr = NULL;
+    m2->data_ptr = nullptr;
     m2->target_dpId = 0;
     m2->flags = 0;
-    m2->next = NULL;
+    m2->next = nullptr;
     Train_QueueMessage(_g_train, m2);
 }
 
@@ -750,8 +766,8 @@ int32_t Netman::SendPlayerName()
 
     if (slot_idx >= this->m_playerSlotCount) return slot_idx;
 
-    uint16_t* packet = (uint16_t*)operator_new(0x8000);
-    if (packet == NULL) return slot_idx;
+    uint16_t* packet = static_cast<uint16_t*>(operator_new(0x8000));
+    if (packet == nullptr) return slot_idx;
 
     *packet = 0x3F6;
     *(uint8_t*)(packet + 1) = (uint8_t)this->m_mySlotIndex;
@@ -763,7 +779,7 @@ int32_t Netman::SendPlayerName()
     {
         uint16_t entry_count = 0;
         auto* entry = static_cast<PingEntry*>(msg_queue);
-        while (entry != NULL) {
+        while (entry != nullptr) {
             ++entry_count;
             uint8_t* output = reinterpret_cast<uint8_t*>(packet) +
                               static_cast<std::size_t>(entry_count) * 8 + 1;
@@ -780,17 +796,17 @@ int32_t Netman::SendPlayerName()
 
     /* Wrap in TrainMessage and queue */
     {
-        TrainMessage* msg = (TrainMessage*)operator_new(sizeof(TrainMessage));
-        if (msg == NULL) {
+        TrainMessage* msg = allocate_train_message();
+        if (msg == nullptr) {
             GLOBAL_free(packet);
             return slot_idx;
         }
         msg->type        = 6;
-        msg->data_len    = (int32_t)packet[3] * 8 + 10;
+        msg->data_len    = static_cast<int32_t>(packet[3]) * 8 + 10;
         msg->data_ptr    = packet;
         msg->target_dpId = 0;
         msg->flags       = 0;
-        msg->next        = NULL;
+        msg->next        = nullptr;
 
         Train_QueueMessage(_g_train, msg);
     }
@@ -1871,9 +1887,8 @@ void Netman::ResetNetworkState()
     // Netman queue would feed the reset back into this same dispatcher.
     lego_loco::network::HostTransportWorker().StopTransport();
 #else
-    TrainMessage* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
+    TrainMessage* message = allocate_train_message();
     if (message != nullptr) {
-        std::memset(message, 0, sizeof(*message));
         message->type = 5;
     }
     Train_QueueMessage(_g_train, message);
@@ -1889,9 +1904,8 @@ void Netman::StopSession()
     lego_loco::network::HostTransportWorker().StopTransport();
     this->HostEndTransportSession();
 #else
-    TrainMessage* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
+    TrainMessage* message = allocate_train_message();
     if (message == nullptr) return;
-    std::memset(message, 0, sizeof(*message));
     message->type = 0;
     message->data_ptr = reinterpret_cast<void*>(
         static_cast<uintptr_t>(*reinterpret_cast<uint8_t*>(_g_netman_data + 8) != 0));
@@ -1938,7 +1952,7 @@ void Netman::SendFileTransfer(TrainMessage* msg)
     }
     if (msg->type != 0x12) return;
 
-    uint32_t packed_offset = 0;
+    int32_t packed_offset = 0;
     const int32_t angle = msg->data_len;
     if (angle == 0x5A) {
         packed_offset = INPUT_DirToOffset_Left(&packed_offset);
@@ -1955,7 +1969,8 @@ void Netman::SendFileTransfer(TrainMessage* msg)
     }
     ReceivePing(msg->flags, msg->metadata0(), msg->metadata1(),
                 static_cast<int16_t>(packed_offset),
-                static_cast<int16_t>(packed_offset >> 16));
+                static_cast<int16_t>(
+                    static_cast<uint32_t>(packed_offset) >> 16));
 }
 
 /* ================================================================== */
@@ -1970,8 +1985,11 @@ void Netman::ReceiveAck(int32_t dpId, uint8_t slot_byte, uint32_t peerIndex)
         *reinterpret_cast<int32_t*>(packet + 4) = dpId;
         packet[8] = slot_byte;
         packet[9] = static_cast<uint8_t>(peerIndex);
-        TrainMessage* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
-        std::memset(message, 0, sizeof(*message));
+        TrainMessage* message = allocate_train_message();
+        if (message == nullptr) {
+            GLOBAL_free(packet);
+            return;
+        }
         message->type = 6;
         message->data_len = 0x0c;
         message->data_ptr = packet;
@@ -2227,12 +2245,11 @@ void Netman::DeserializePlayerData(InboundTrainNode* node)
 /* NETMAN_SendDisconnect - 0x43D250 */
 void NETMAN_SendDisconnect(int32_t dpId)
 {
-    uint16_t* pkt = (uint16_t*)operator_new(4);
-    if (!pkt) return;
+    uint16_t* pkt = static_cast<uint16_t*>(operator_new(4));
+    if (pkt == nullptr) return;
     *pkt = PACKET_DISCONNECT;
-    TrainMessage* m = (TrainMessage*)operator_new(sizeof(TrainMessage));
-    if (!m) { GLOBAL_free(pkt); return; }
-    m->next = NULL;
+    TrainMessage* m = allocate_train_message();
+    if (m == nullptr) { GLOBAL_free(pkt); return; }
     m->type = 6;
     m->data_len = 4;
     m->data_ptr = pkt;
@@ -2249,8 +2266,8 @@ void NETMAN_QueueMessage(TrainMessage* msg)
         if (!g_network_queue) {
             g_network_queue = msg;
         } else {
-            TrainMessage* n = (TrainMessage*)g_network_queue;
-            while (n->next) n = (TrainMessage*)n->next;
+            TrainMessage* n = static_cast<TrainMessage*>(g_network_queue);
+            while (n->next) n = static_cast<TrainMessage*>(n->next);
             n->next = msg;
         }
     } else {
@@ -2260,15 +2277,17 @@ void NETMAN_QueueMessage(TrainMessage* msg)
             case 2: {
                 void* sub = d;
                 while (sub) {
-                    void* nx = *(void**)sub;
-                    if (*(void**)((uint8_t*)sub + 8)) {
-                        GLOBAL_free(*(void**)((uint8_t*)sub + 8));
-                        *(void**)((uint8_t*)sub + 8) = NULL;
+                    void* nx = *reinterpret_cast<void**>(sub);
+                    void** sub_data = reinterpret_cast<void**>(
+                        reinterpret_cast<uint8_t*>(sub) + 8);
+                    if (*sub_data != nullptr) {
+                        GLOBAL_free(*sub_data);
+                        *sub_data = nullptr;
                     }
                     GLOBAL_free(sub);
                     sub = nx;
                 }
-                msg->data_ptr = NULL;
+                msg->data_ptr = nullptr;
                 GLOBAL_free(msg);
                 return;
             }
@@ -2278,13 +2297,13 @@ void NETMAN_QueueMessage(TrainMessage* msg)
                 break;
             case 0x15: case 0x17:
                 HeapFree(GetProcessHeap(), 0, d);
-                msg->data_ptr = NULL;
+                msg->data_ptr = nullptr;
                 break;
             default:
                 GLOBAL_free(d);
                 break;
             }
-            msg->data_ptr = NULL;
+            msg->data_ptr = nullptr;
         }
         GLOBAL_free(msg);
     }
@@ -2293,36 +2312,37 @@ void NETMAN_QueueMessage(TrainMessage* msg)
 /* NETMAN_StartHostSession - 0x43F000 */
 void NETMAN_StartHostSession()
 {
-    TrainMessage* m = (TrainMessage*)operator_new(sizeof(TrainMessage));
-    if (!m) return;
+    TrainMessage* m = allocate_train_message();
+    if (m == nullptr) return;
     m->type = 3;
     m->data_len = 0;
-    m->data_ptr = NULL;
+    m->data_ptr = nullptr;
     m->target_dpId = 0;
     m->flags = 0;
-    m->next = NULL;
+    m->next = nullptr;
     Train_QueueMessage(_g_train, m);
 }
 
 /* NETMAN_StartClientSession - 0x43F030 */
 void NETMAN_StartClientSession()
 {
-    TrainMessage* m = (TrainMessage*)operator_new(sizeof(TrainMessage));
-    if (!m) return;
+    TrainMessage* m = allocate_train_message();
+    if (m == nullptr) return;
     m->type = 1;
-    m->data_len = (uint32_t)*(uint8_t*)((uint8_t*)g_net_host_info + 8);
-    m->data_ptr = NULL;
+    const auto* host_info = reinterpret_cast<const uint8_t*>(g_net_host_info);
+    m->data_len = static_cast<uint32_t>(host_info[8]);
+    m->data_ptr = nullptr;
     m->target_dpId = 0;
     m->flags = 0;
-    m->next = NULL;
+    m->next = nullptr;
     Train_QueueMessage(_g_train, m);
 }
 
 /* NETMAN_SendTrainPosition - 0x43EE80 */
 uint32_t NETMAN_SendTrainPosition(InboundTrainNode* vehicle)
 {
-    TrainMessage* m = (TrainMessage*)operator_new(0x1C);
-    if (!m) return 0;
+    TrainMessage* m = allocate_train_message();
+    if (m == nullptr) return 0;
     m->data_len = 0;
     m->flags = 0;
     m->type = 0x0E;
@@ -2342,32 +2362,33 @@ int32_t NETMAN_ReceiveTrainPosition(int p1, int p2, int p3)
     else a = ((p1 <= p2) - 1 & 0xFFFFFFA6) + 0xB4;
 
     /* Use 32-bit zero test instead of truncation to uint8_t */
-    int32_t r = ((Netman*)_g_netman)->CheckTrackConnection(a, -1);
+    int32_t r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(a, -1);
     if (r == 0) {
         a = 0;
-        r = ((Netman*)_g_netman)->CheckTrackConnection(0, -1);
+        r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(0, -1);
         if (r == 0) {
             a = 0x10E;
-            r = ((Netman*)_g_netman)->CheckTrackConnection(0x10E, -1);
+            r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(0x10E, -1);
             if (r == 0) {
                 a = 0x5A;
-                r = ((Netman*)_g_netman)->CheckTrackConnection(0x5A, -1);
+                r = static_cast<Netman*>(_g_netman)->CheckTrackConnection(0x5A, -1);
                 if (r == 0) return r;
             }
         }
     }
 
-    TrainMessage* m = (TrainMessage*)operator_new(0x1C);
-    if (!m) return 0;
+    TrainMessage* m = allocate_train_message();
+    if (m == nullptr) return 0;
     m->data_len = 0;
     m->flags = 0;
     m->type = 0x10;
-    m->data_ptr = (void*)(intptr_t)p3;
+    m->data_ptr = reinterpret_cast<void*>(static_cast<intptr_t>(p3));
     m->target_dpId = a;
-    m->next = NULL;
+    m->next = nullptr;
 
-    InboundTrainNode* node = (InboundTrainNode*)(intptr_t)p3;
-    node->tunnel_angle = (uint16_t)a;
+    InboundTrainNode* node = reinterpret_cast<InboundTrainNode*>(
+        static_cast<intptr_t>(p3));
+    node->tunnel_angle = static_cast<uint16_t>(a);
     node->process_delay = 1;
     Train_QueueMessage(_g_train, m);
     return 1;

@@ -35,6 +35,21 @@ extern "C" {
 /* Global primary surface reference */
 extern void* _g_primary_surface;  /* 0x4FD3C4 */
 
+namespace {
+using PixelReleaseFunction = void (__fastcall *)(void*);
+using PixelSurfaceFunction = void* (__fastcall *)(void*, int, int);
+
+void release_pixel_data(void* pixel_data)
+{
+    const auto* pixel_header = reinterpret_cast<const uint32_t*>(pixel_data);
+    if (pixel_header[4] != 0) {
+        void** vtable = *reinterpret_cast<void***>(pixel_data);
+        auto release = reinterpret_cast<PixelReleaseFunction>(vtable[2]);
+        release(pixel_data);
+    }
+}
+}
+
 /* ================================================================== */
 /* ButtonSprite Constructor                                            */
 /* Address: 0x454B50                                                   */
@@ -72,11 +87,7 @@ ButtonSprite::~ButtonSprite()
 
     /* Release child pixel data sub-object if refcounted */
     if (this->pixelData != NULL) {
-        uint32_t* pixelHeader = (uint32_t*)this->pixelData;
-        if (pixelHeader[4] != 0) {  /* refcount at pixelData+0x10 */
-            void** pixVtab = *(void***)this->pixelData;
-            ((void (__fastcall*)(void*))(pixVtab[2]))(this->pixelData);
-        }
+        release_pixel_data(this->pixelData);
     }
 
     this->pixelData = NULL;  /* +0x14 */
@@ -102,8 +113,9 @@ bool ButtonSprite::init()
     }
 
     /* Query vtable[1] of pixel data to get surface pointer */
-    void** vtab = *(void***)data;
-    void* surf = ((void* (__fastcall*)(void*, int, int))(vtab[1]))(data, 0, 0);
+    void** vtable = *reinterpret_cast<void***>(data);
+    auto get_surface = reinterpret_cast<PixelSurfaceFunction>(vtable[1]);
+    void* surf = get_surface(data, 0, 0);
     this->surface = surf;  /* +0x18 */
 
     return (surf != NULL);
@@ -119,11 +131,7 @@ bool ButtonSprite::init()
 void ButtonSprite::destroy()
 {
     if (this->pixelData != NULL) {
-        uint32_t* pixelHeader = (uint32_t*)this->pixelData;
-        if (pixelHeader[4] != 0) {  /* refcount at pixelData+0x10 */
-            void** vtab = *(void***)this->pixelData;
-            ((void (__fastcall*)(void*))(vtab[2]))(this->pixelData);
-        }
+        release_pixel_data(this->pixelData);
     }
 
     this->pixelData = NULL;  /* +0x14 */
@@ -152,9 +160,9 @@ void ButtonSprite::setState(int frameIndex, void* targetSurface)
     }
 
     /* Read pixel dimensions from the pixel data header */
-    uint8_t* pixelHdr = (uint8_t*)this->pixelData;         /* +0x14 */
-    uint16_t frameWidth  = *(uint16_t*)(pixelHdr + 0x14);  /* width  at pixelData+0x14 */
-    uint16_t frameHeight = *(uint16_t*)(pixelHdr + 0x16);  /* height at pixelData+0x16 */
+    const auto* pixelHdr = reinterpret_cast<const uint8_t*>(this->pixelData); /* +0x14 */
+    uint16_t frameWidth  = *reinterpret_cast<const uint16_t*>(pixelHdr + 0x14);  /* width  at pixelData+0x14 */
+    uint16_t frameHeight = *reinterpret_cast<const uint16_t*>(pixelHdr + 0x16);  /* height at pixelData+0x16 */
 
     /* Build source rectangle */
     RECT srcRect;

@@ -41,8 +41,8 @@ uint32_t GetUserNameA(char* buffer, uint32_t* size)
     *size = static_cast<uint32_t>(required);
     return 1;
 #else
-    (void)buffer;
-    (void)size;
+    static_cast<void>(buffer);
+    static_cast<void>(size);
     return 0;
 #endif
 }
@@ -92,32 +92,32 @@ void INPUT_ExitGame() {}
 void TileMap_GetObjectAt() {}
 void UI_MainMenu_SetState_void() {}
 void Vehicle_GetOccupantCount() {}
-void* DAT_00479190 = 0;
-void* DAT_004A9908 = 0;
-void* DAT_004fd19c = 0;
-void* DAT_004fd1ac = 0;
-void* DAT_004fd1c0 = 0;
-void* g_clipper_0 = 0;
-void* g_clipper_1 = 0;
-void* g_clipper_2 = 0;
-void* g_clipper_3 = 0;
-void* g_clipper_4 = 0;
-void* g_clipper_5 = 0;
-void* g_clipper_surf = 0;
-void* _g_cursor_back = 0;
+void* DAT_00479190 = nullptr;
+void* DAT_004A9908 = nullptr;
+void* DAT_004fd19c = nullptr;
+void* DAT_004fd1ac = nullptr;
+void* DAT_004fd1c0 = nullptr;
+void* g_clipper_0 = nullptr;
+void* g_clipper_1 = nullptr;
+void* g_clipper_2 = nullptr;
+void* g_clipper_3 = nullptr;
+void* g_clipper_4 = nullptr;
+void* g_clipper_5 = nullptr;
+void* g_clipper_surf = nullptr;
+void* _g_cursor_back = nullptr;
 int32_t _g_cursor_refcount = 0;
-void* g_net_host_info = 0;
-void* g_player_color = 0;
-void* _g_primary_surface = 0;
-void* g_remote_res_path = 0;
-void* s_Configuration_0047e734 = 0;
-void* s_PlayerName_0047e73c = 0;
-void* s_Sound_0047e2c0 = 0;
-void* s_VolumeHigh_0047f14c = 0;
-void* s_VolumeLow_0047f164 = 0;
-void* s_VolumeMed_0047f158 = 0;
-void* __imp_SystemParametersInfoA = 0;
-void* g_scene_name = 0;
+void* g_net_host_info = nullptr;
+void* g_player_color = nullptr;
+void* _g_primary_surface = nullptr;
+void* g_remote_res_path = nullptr;
+void* s_Configuration_0047e734 = nullptr;
+void* s_PlayerName_0047e73c = nullptr;
+void* s_Sound_0047e2c0 = nullptr;
+void* s_VolumeHigh_0047f14c = nullptr;
+void* s_VolumeLow_0047f164 = nullptr;
+void* s_VolumeMed_0047f158 = nullptr;
+void* __imp_SystemParametersInfoA = nullptr;
+void* g_scene_name = nullptr;
 void INPUT_DirToOffset_Up() {}
 void INPUT_DirToOffset_Left() {}
 void INPUT_DirToOffset_Down() {}
@@ -136,24 +136,24 @@ void FMT_LAYOUT_PATH() {}
 void RESMGR_ResourceData_Init() {}
 void RESMGR_LoadResource() {}
 void GAMESTATE_StartGameTimer() {}
-void* _g_netman = 0;
+void* _g_netman = nullptr;
 } /* extern "C" */
 void CGWND_PumpMessages(char) {}  /* loading-transition pump — C++ linkage */
 extern "C" {
-void* _g_netman_data = 0;
-void* STR_LEGO_LOCO = 0;
+void* _g_netman_data = nullptr;
+void* STR_LEGO_LOCO = nullptr;
 void CGWND_QuitToMenu() {}
-void* MessageBeep = 0;
+void* MessageBeep = nullptr;
 void IsWindowVisible() {}
-void* RESMGR_ReleaseResource = 0;
-void* World_FinalizeLoad = 0;
-void* World_GetObjectAt = 0;
-void* GAMESTATE_SelectLayout = 0;
-void* CGWND_GameSetup_DrawGrid_Thunk = 0;
+void* RESMGR_ReleaseResource = nullptr;
+void* World_FinalizeLoad = nullptr;
+void* World_GetObjectAt = nullptr;
+void* GAMESTATE_SelectLayout = nullptr;
+void* CGWND_GameSetup_DrawGrid_Thunk = nullptr;
 } /* end extern "C" */
 
 /* C++-linkage stubs */
-void* g_scripted_object = 0;
+void* g_scripted_object = nullptr;
 void RESDATA_GameObject_UpdateAnimation(void*) {}
 void RESDATA_SoundObject_GetState(int) {}
 void RESDATA_SoundObject_GetTextLength(int) {}
@@ -176,14 +176,14 @@ void UI_SetWindowVisible(void*, char) {}
 void GameWindow_Hide(void*) {}
 void ResourceManager_GetStringById(void*, unsigned int) {}
 void TileMap_Init(void**, unsigned char) {}
-void* TrainSubsystem_Ctor = 0;
-void* WIN32_CreateThread = 0;
+void* TrainSubsystem_Ctor = nullptr;
+void* WIN32_CreateThread = nullptr;
 void Train_ProcessMessages(void*) {}
 void WIN32_QueueAsyncTask(void*, void*, void*) {}
 void EditWindow_render(void*) {}
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) {}
 void CRT_exit(char const**, char const**) {}
-void* _g_netman_state = 0;
+void* _g_netman_state = nullptr;
 void WIN32_ResumeThread(void*, int) {}
 void UI_WindowBase_OnCreate(void*) {}
 void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int) {}
@@ -191,8 +191,8 @@ void PlayerConfig_SetName(void*, char const*) {}
 void PlayerConfig_Save(void*) {}
 void Config_ReadInt(void*, char const*, char const*, char const*) {}
 void NETMAN_SendPacket(void*) {}
-void* CreateHatchBrush = 0;
-void* g_editwindow_ptr = 0;
+void* CreateHatchBrush = nullptr;
+void* g_editwindow_ptr = nullptr;
 void EditWindow_cleanupSprites(void*) {}
 void RESDATA_FreeWindow(void*) {}
 void ResourceManager_GetStringById(void**, int) {}
@@ -203,9 +203,9 @@ void CGWND_GameSetup_Create(void*, void*) {}
 void UI_SetWindowVisible(void*, unsigned char) {}
 void NETMAN_CreateSession(void*) {}
 void UI_WindowBase_Show(void*) {}
-void* BringWindowToTop = 0;
-void* ShowCursor = 0;
-void* SendMessageA = 0;
+void* BringWindowToTop = nullptr;
+void* ShowCursor = nullptr;
+void* SendMessageA = nullptr;
 void TrackPiece_Dtor(void*) {}
 void __ftol(double) {}
 void UI_ChildWindow_Dtor(void*) {}
@@ -224,7 +224,7 @@ void RESDATA_ScriptedObject_AddChild(void*, int, int) {}
 void CGWND_CursorEditWindow_Ctor(void*, int, int) {}
 void TrainStation_Ctor(void*, int, int) {}
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) {}
-void* DPLAY_SetPlayerName = 0;
+void* DPLAY_SetPlayerName = nullptr;
 void UIPANEL_CopySurface(void*, int) {}
 void NET_ComputeColor(unsigned char, unsigned char, unsigned char) {}
 void DPLAY_SetPlayerData(void*, char const*) {}
@@ -232,15 +232,15 @@ void NET_GetHostName(int, int) {}
 void TileMap_UpdateViewport(void*, void*, short) {}
 void TileMap_GetTileRect(void*, void*) {}
 void SetRect(void*, int, int, int, int) {}
-void* GAMESTATE_LoadExistingGame = 0;
-void* World_SerializeObject = 0;
-void* STR_REMOVED = 0;
-void* DPLAY_InitPlayerSlot = 0;
+void* GAMESTATE_LoadExistingGame = nullptr;
+void* World_SerializeObject = nullptr;
+void* STR_REMOVED = nullptr;
+void* DPLAY_InitPlayerSlot = nullptr;
 void NETMAN_ReceiveFileTransfer(int) {}
 void NETMAN_SendAck(int) {}
-void* GAMESTATE_SetDifficulty = 0;
-void* DPLAY_EnumeratePlayers = 0;
-void* NET_SendFile = 0;
+void* GAMESTATE_SetDifficulty = nullptr;
+void* DPLAY_EnumeratePlayers = nullptr;
+void* NET_SendFile = nullptr;
 void Vehicle_SetState(void*, int) {}
 void NETMAN_HandleTimeout(void*, void*) {}
 void NETMAN_ReceiveLayoutSelect(int) {}
@@ -276,7 +276,7 @@ void World_CheckActive(void*) {}
 void TrackPiece_SetZoom(void*, short) {}
 void Town_BlitViewport(void*,int,int,int,int,int,int) {}
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) {}
-void* g_game_instance = 0;
+void* g_game_instance = nullptr;
 int32_t g_OutputDebugStringA = 0;
 void NETMAN_ReceiveGameStart(void*, int, int, void*) {}
 void ArrivalQueue_AddVehicle(void*, void*) {}
@@ -310,7 +310,7 @@ void Vehicle_Stop(void*, int, unsigned char) {}
 void Entity_StopSound(void*, int) {}
 void GameObject_InitBase(void*, int, int, unsigned char) {}
 void UIPANEL_UnlockSurface(void*) {}
-void* DAT_00485270 = 0;
+void* DAT_00485270 = nullptr;
 void NETMAN_SetGameMode(void*, int) {}
 void GAMESTATE_FindAdjacentTrack(void*) {}
 void RESDATA_IsValidTrackIndex(void*, short) {}

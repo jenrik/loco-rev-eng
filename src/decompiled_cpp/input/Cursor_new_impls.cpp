@@ -1,6 +1,7 @@
 // Status: TRANSCRIBED
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../ui/ButtonSprite.h"
 
 /* ================================================================== */
 /* Cursor::init_editor_sprites — Init all editor/toolbar sprite objs   */
@@ -17,13 +18,14 @@ void Cursor::init_editor_sprites()
     }
 
     /* Load editor sprite sheet resource 0x3CB9 */
-    RESDATA* resdata = (RESDATA*)ResourceManager_GetById(&g_resmgr, 0x3CB9);
+    RESDATA* resdata = static_cast<RESDATA*>(
+        ResourceManager_GetById(&g_resmgr, 0x3CB9));
     this->editor_resdata = resdata;                          /* +0x1F0 */
 
     if (resdata != nullptr) {
         /* Get surface via RESDATA vtable[1] */
         void* surface = RESDATA_GetSurface(resdata, 0, 0);
-        this->editor_surface = (void*)(intptr_t)surface;    /* +0x1EC */
+        this->editor_surface = surface;                     /* +0x1EC */
     }
 
     /* Initialize all UISprite objects */
@@ -178,7 +180,7 @@ void Cursor::render_editor()
         UIPANEL_Blit(
             this->background_surface,               /* +0x1E8 */
             dstRect.left, dstRect.top, dstRect.right, dstRect.bottom,
-            (int)(intptr_t)_g_primary_surface,
+            _g_primary_surface,
             srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
             1);
     }
@@ -245,7 +247,8 @@ void Cursor::handle_color_swatch_click(LONG x, LONG y)
 
         /* Hit-test sprite rect at sprite+0x04 */
         if (this->editor_sprites[i] != nullptr) {
-            RECT* spriteRect = (RECT*)((uint8_t*)this->editor_sprites[i] + 4);
+            RECT* spriteRect = reinterpret_cast<RECT*>(
+                reinterpret_cast<uint8_t*>(this->editor_sprites[i]) + 4);
             if (PtInRect(spriteRect, &pt)) {
                 /* Highlight the swatch */
                 Sprite_SetState(this->editor_sprites[i], 1, nullptr);
@@ -253,18 +256,18 @@ void Cursor::handle_color_swatch_click(LONG x, LONG y)
                 Sleep(0x96);  /* 150ms pause */
 
                 /* Copy RGB from palette table to active color */
-                this->color_r = (uint32_t)this->edit_colors[i * 3];
-                this->color_g = (uint32_t)this->edit_colors[i * 3 + 1];
-                this->color_b = (uint32_t)this->edit_colors[i * 3 + 2];
+                this->color_r = static_cast<uint32_t>(this->edit_colors[i * 3]);
+                this->color_g = static_cast<uint32_t>(this->edit_colors[i * 3 + 1]);
+                this->color_b = static_cast<uint32_t>(this->edit_colors[i * 3 + 2]);
 
                 /* Redraw color bars */
                 this->draw_color_bars(1);
 
                 /* Propagate to player record if set */
                 if (this->obj_184 != nullptr) {
-                    this->obj_184->color_r = (uint8_t)this->color_r;
-                    this->obj_184->color_g = (uint8_t)this->color_g;
-                    this->obj_184->color_b = (uint8_t)this->color_b;
+                    this->obj_184->color_r = static_cast<uint8_t>(this->color_r);
+                    this->obj_184->color_g = static_cast<uint8_t>(this->color_g);
+                    this->obj_184->color_b = static_cast<uint8_t>(this->color_b);
                     this->blit_edit_preview();
                 }
 
@@ -381,9 +384,9 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
 
     /* Propagate to player record if set */
     if (this->obj_184 != nullptr) {
-        this->obj_184->color_r = (uint8_t)this->color_r;
-        this->obj_184->color_g = (uint8_t)this->color_g;
-        this->obj_184->color_b = (uint8_t)this->color_b;
+        this->obj_184->color_r = static_cast<uint8_t>(this->color_r);
+        this->obj_184->color_g = static_cast<uint8_t>(this->color_g);
+        this->obj_184->color_b = static_cast<uint8_t>(this->color_b);
     }
 
     /* Blit edit preview */
@@ -459,7 +462,9 @@ void Cursor::draw_color_bars(uint8_t reset_buttons)
     DeleteObject(brushBlue);
 
     /* End paint with HDC */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)(intptr_t)hdc, 1, nullptr);
+    UIPANEL_EndPaintEx(this, this->hWnd,
+                       static_cast<int>(reinterpret_cast<intptr_t>(hdc)),
+                       1, nullptr);
 
     /* Reset +/- button sprites if requested */
     if (reset_buttons != 0) {
@@ -481,10 +486,10 @@ void Cursor::blit_edit_preview()
 {
     /* Calculate destination rect from edit_preview_rect (+0x1A0)
        and editor_clip_rect (+0x1D8) offsets */
-    uint editPreviewX = (uint)this->edit_preview_rect.left;     /* +0x1A0 */
-    uint editPreviewY = (uint)this->edit_preview_rect.top;     /* +0x1A4 */
-    uint editPreviewW = (uint)this->edit_preview_rect.right;     /* +0x1A8 */
-    uint editPreviewH = (uint)this->edit_preview_rect.bottom;     /* +0x1AC */
+    uint editPreviewX = static_cast<uint>(this->edit_preview_rect.left);   /* +0x1A0 */
+    uint editPreviewY = static_cast<uint>(this->edit_preview_rect.top);    /* +0x1A4 */
+    uint editPreviewW = static_cast<uint>(this->edit_preview_rect.right);  /* +0x1A8 */
+    uint editPreviewH = static_cast<uint>(this->edit_preview_rect.bottom); /* +0x1AC */
 
     uint destLeft   = this->editor_blit_x + editPreviewX;  /* +0x1D8 */
     uint destTop    = this->editor_blit_y + editPreviewY - 0xB;  /* +0x1DC */
@@ -494,9 +499,9 @@ void Cursor::blit_edit_preview()
     /* Blit from background surface to primary surface */
     UIPANEL_Blit(
         this->background_surface,           /* +0x1E8 */
-        editPreviewX, editPreviewY, (int)editPreviewW, editPreviewH,
-        (int)(intptr_t)_g_primary_surface,
-        destLeft, destTop, (int)destRight, destBottom,
+        editPreviewX, editPreviewY, static_cast<int>(editPreviewW), editPreviewH,
+        _g_primary_surface,
+        destLeft, destTop, static_cast<int>(destRight), destBottom,
         1);
 
     /* Render player cursor overlay if player record exists */
@@ -504,15 +509,17 @@ void Cursor::blit_edit_preview()
         void* dplay = _g_dplay;
         /* The original code constructs an HDC-like handle from
            obj_184 address + field_188 byte */
-        int hdcVal = ((int)(intptr_t)this->obj_184 >> 8) & 0xFFFFFF;
+        int hdcVal =
+            (static_cast<int>(reinterpret_cast<intptr_t>(this->obj_184)) >> 8) &
+            0xFFFFFF;
         hdcVal = (hdcVal << 8) | this->field_188;
 
         /* Ghidra @ 0x4437C0: DPLAY_RenderPlayer last param is RECT*, not int*.
          * Pass address of edit_preview_rect (the binary uses LEA, not MOV). */
         DPLAY_RenderPlayer(
             dplay,
-            (HDC)(intptr_t)hdcVal,
-            (int)(intptr_t)this->obj_184,
+            reinterpret_cast<HDC>(static_cast<intptr_t>(hdcVal)),
+            static_cast<int>(reinterpret_cast<intptr_t>(this->obj_184)),
             _g_primary_surface,
             this->edit_preview_rect.left,
             this->edit_preview_rect.top,
@@ -533,19 +540,20 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
 {
     if (target_surf == nullptr) {
         mode = 0;
-        target_surf = (int*)(intptr_t)_g_primary_surface;
+        target_surf = static_cast<int*>(_g_primary_surface);
     }
 
     /* Determine palette background sprite height */
-    uint palSpriteH = (uint)*(uint16_t*)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x14) + 0x16);
+    auto* paletteData = static_cast<RESDATA*>(this->sprite_37C->pixelData);
+    uint palSpriteH = static_cast<uint>(paletteData->frame_height);
 
     if (mode == 0) {
         /* Normal mode: blit palette background from source */
-        uint bgW = *(int*)((intptr_t)this->sprite_37C + 8) + 1;  /* sprite width + 1 */
+        uint bgW = static_cast<uint>(this->sprite_37C->y + 1); /* sprite width + 1 */
         UIPANEL_Blit(
             this->background_surface,
-            (uint)this->field_1B0,
-            (uint)this->field_1B4,
+            static_cast<uint>(this->field_1B0),
+            static_cast<uint>(this->field_1B4),
             this->field_1B8,
             bgW,
             _g_primary_surface,
@@ -573,8 +581,7 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
         int fillParams[2];
         fillParams[0] = 100;
         fillParams[1] = colorKey;
-        void** surfVtbl = *(void***)target_surf;
-        ((int (*)(void*, int, int, int, int, int*))surfVtbl[5])(
+        Cursor_SurfaceFill(target_surf)(
             target_surf, 0, 0, 0, 0x1000400, fillParams);
     }
 
@@ -583,11 +590,11 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
         int palW = this->field_1B8 - this->field_1B0;
 
         UIPANEL_Blit(
-            *(void**)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x18)),  /* sprite surface */
+            this->sprite_37C->surface,                              /* sprite surface */
             0,
-            (uint)this->field_1BC - this->field_1B4 - palSpriteH,
+            static_cast<uint>(this->field_1BC) - this->field_1B4 - palSpriteH,
             palW,
-            (uint)this->field_1BC,
+            static_cast<uint>(this->field_1BC),
             target_surf,
             0, 0, palW, palSpriteH,
             0);
@@ -605,9 +612,9 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
         int xPos = availWidth - 4;
 
         while (currentIdx <= endIdx) {
-            void* sprite = this->toolbar_sprites[currentIdx];
-            int spriteW = *(int*)((intptr_t)sprite + 8);   /* sprite width */
-            int spriteH = *(int*)((intptr_t)sprite + 0xC); /* sprite height */
+            ButtonSprite* sprite = this->toolbar_sprites[currentIdx];
+            int spriteW = sprite->y;                         /* sprite width */
+            int spriteH = sprite->sourceX;                   /* sprite height */
 
             int availHeight = this->field_1BC;
             if (mode != 0) {
@@ -618,13 +625,13 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
             int clipH = 0;
 
             /* Tiered vertical positioning based on sprite height */
-            if ((uint)(spriteH >> 2) * 3 < 0x38) {
+            if (static_cast<uint>(spriteH >> 2) * 3 < 0x38) {
                 yPos = (availHeight - 0x1C) + (spriteH >> 2);
             } else if ((spriteH / 3) * 2 < 0x38) {
                 yPos = (availHeight - 0x1C) + (spriteH / 3);
             } else if ((spriteH & 0xFFFFFFFE) < 0x70) {
                 yPos = (availHeight - 0x1C) + (spriteH >> 1);
-            } else if ((uint)spriteH < 0x54) {
+            } else if (static_cast<uint>(spriteH) < 0x54) {
                 yPos = availHeight - spriteH;
             } else {
                 yPos = availHeight - 0x54;
@@ -642,17 +649,17 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
                 sprite,
                 destX, destY, destX + spriteW, destY + spriteH,
                 target_surf,
-                0, clipH, spriteW, (uint)spriteH,
+                0, clipH, spriteW, static_cast<uint>(spriteH),
                 0);
 
             /* Cache position in palette_item_rects at +0x38C */
             int slotIdx = currentIdx - this->palette_start_idx;
             if (slotIdx >= 0 && slotIdx < 16) {
-                uint* rectStorage = (uint*)&this->palette_item_rects[slotIdx];
-                rectStorage[0] = destX;
-                rectStorage[1] = destY;
-                rectStorage[2] = destX + spriteW;
-                rectStorage[3] = destY + spriteH;
+                RECT& cachedRect = this->palette_item_rects[slotIdx];
+                cachedRect.left = destX;
+                cachedRect.top = destY;
+                cachedRect.right = destX + spriteW;
+                cachedRect.bottom = destY + spriteH;
             }
 
             /* Advance: subtract 10 for gap between items */
@@ -710,7 +717,8 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     PlaySound(0x5274);
 
     /* Determine palette background sprite height */
-    uint palSpriteH = (uint)*(uint16_t*)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x14) + 0x16);
+    auto* paletteData = static_cast<RESDATA*>(this->sprite_37C->pixelData);
+    uint palSpriteH = static_cast<uint>(paletteData->frame_height);
 
     int* surfA;  /* +0x590 editor_surf_a */
     int* surfB;  /* +0x598 editor_surf_b */
@@ -718,16 +726,16 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
 
     /* Toggle between surface A and B */
     if (this->field_58C == 0) {
-        surfA = (int*)(intptr_t)this->editor_surf_b;   /* +0x598 */
-        surfB = (int*)(intptr_t)this->editor_surf_a;   /* +0x590 */
+        surfA = static_cast<int*>(this->editor_surf_b); /* +0x598 */
+        surfB = static_cast<int*>(this->editor_surf_a); /* +0x590 */
         isSurfBDirty = this->field_59C;
         this->field_58C = 1;
         this->field_59C = 0;
         this->field_594 = 1;
     } else {
         isSurfBDirty = this->field_594;
-        surfA = (int*)(intptr_t)this->editor_surf_b;   /* +0x598 */
-        surfB = (int*)(intptr_t)this->editor_surf_a;   /* +0x590 */
+        surfA = static_cast<int*>(this->editor_surf_b); /* +0x598 */
+        surfB = static_cast<int*>(this->editor_surf_a); /* +0x590 */
         this->field_58C = 0;
         this->field_59C = 1;
         this->field_594 = 0;
@@ -744,7 +752,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
         int palHeight = this->field_1BC - this->field_1B4;
         int palWidth  = this->field_1B8 - this->field_1B0;
 
-        void* spritePanel = *(void**)((uint8_t*)*(uintptr_t*)((uint8_t*)this->sprite_37C + 0x18)); /* sprite surface */
+        void* spritePanel = this->sprite_37C->surface; /* sprite surface */
 
         UIPANEL_Blit(
             spritePanel,
@@ -793,35 +801,34 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
             {
                 int blitRect[4] = { srcX, srcY, srcW, srcH };
                 int dstRect[4]  = { dstX, dstY, dstW, dstH };
-                void** vtbl = *(void***)(intptr_t)_g_primary_surface;
-                ((int (*)(void*, int*, int*, int*, int, void*))vtbl[5])(
-                    (void*)(intptr_t)_g_primary_surface,
-                    blitRect, surfA, dstRect, 0x1008000, 0);
+                Cursor_SurfaceLegacyBlt(_g_primary_surface)(
+                    _g_primary_surface,
+                    blitRect, surfA, dstRect, 0x1008000, nullptr);
             }
 
             /* Second blit for the other direction */
             if (direction == 0) {
                 int srcRect2[4] = { this->field_1B0, srcY, step * 4, srcH };
                 int dstRect2[4]  = { srcW, 0, step * 4, srcH };
-                void** vtbl = *(void***)(intptr_t)_g_primary_surface;
-                ((int (*)(void*, int*, int*, int*, int, void*))vtbl[5])(
-                    (void*)(intptr_t)_g_primary_surface,
-                    srcRect2, surfB, dstRect2, 0x1008000, 0);
+                Cursor_SurfaceLegacyBlt(_g_primary_surface)(
+                    _g_primary_surface,
+                    srcRect2, surfB, dstRect2, 0x1008000, nullptr);
             } else {
                 int srcW2 = this->field_1B8 - step * 4;
                 int srcRect2[4] = { srcW, srcY, srcW2, srcH };
-                void** vtbl = *(void***)(intptr_t)_g_primary_surface;
-                ((int (*)(void*, int*, int*, int*, int, void*))vtbl[5])(
-                    (void*)(intptr_t)_g_primary_surface,
-                    srcRect2, surfB, 0, 0x1008000, 0);
+                Cursor_SurfaceLegacyBlt(_g_primary_surface)(
+                    _g_primary_surface,
+                    srcRect2, surfB, nullptr, 0x1008000, nullptr);
             }
 
             /* End paint per frame */
             UIPANEL_EndPaint(this);
 
             /* Dispatch set_mode to handle messages */
-            this->set_mode((int32_t)(intptr_t)this->child_obj_60(),
-                           (void*)(intptr_t)this->curs_pos_x(), 0, 1);
+            this->set_mode(
+                static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
+                reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
+                0, 1);
 
             /* Sleep for timing */
             if (step < totalWidth / 2) {
@@ -831,7 +838,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     }
 
     /* Finalize: unlock, redraw palette normally, clean up */
-    HWND mainWnd = *(HWND*)((uint8_t*)*(uintptr_t*)((uint8_t*)g_main_window + 8));
+    HWND mainWnd = static_cast<UI_WindowBase*>(g_main_window)->hWnd;
     DDRAW_UnlockPrimary(mainWnd);
 
     this->draw_color_palette(nullptr, 0);
@@ -840,7 +847,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 
     /* Pump messages */
-    CGWND_PumpMessages(0);
+    CGWND_PumpMessages(nullptr);
     EnableWindow(this->hWnd, 1);
 }
 
@@ -873,7 +880,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
             seqNum = this->bonus_ids[0];
             prevStartIdx = -1;
         } else {
-            seqNum = (uint8_t)this->palette_end_idx + 1;  /* palette_end_idx + 1 */
+            seqNum = static_cast<uint8_t>(this->palette_end_idx) + 1;
+                                                               /* palette_end_idx + 1 */
             prevStartIdx = this->palette_end_idx;
         }
 
@@ -884,8 +892,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
         }
 
         /* Get or create surface for first item */
-        void* surf = NET_GetOrCreateSurface(
-            _g_dplay, this->editor_flags[2], this->editor_flags[1], idx + 1, 1);
+        ButtonSprite* surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
+            _g_dplay, this->editor_flags[2], this->editor_flags[1], idx + 1, 1));
         this->toolbar_sprites[idx] = surf;  /* store in cache */
 
         if (surf == nullptr) {
@@ -893,7 +901,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
             return 0;
         }
 
-        int totalWidth = *(int*)((intptr_t)surf + 8) + 4;  /* width + margin */
+        int totalWidth = surf->y + 4;  /* width + margin */
         this->field_2B5 = 1;
 
         int cacheIdx = idx;
@@ -917,8 +925,9 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
                 totalWidth += 10;  /* gap */
 
-                surf = NET_GetOrCreateSurface(
-                    _g_dplay, this->editor_flags[2], this->editor_flags[1], nextSeq + 1, 1);
+                surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
+                    _g_dplay, this->editor_flags[2], this->editor_flags[1],
+                    nextSeq + 1, 1));
                 this->toolbar_sprites[cacheIdx] = surf;
 
                 if (surf == nullptr) {
@@ -927,7 +936,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
                     break;
                 }
 
-                totalWidth += *(int*)((intptr_t)surf + 8);
+                totalWidth += surf->y;
 
                 if (totalWidth >= this->field_1B8 - this->field_1B0) {
                     break;
@@ -949,13 +958,14 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
     } else {
         /* ---- Backward direction ---- */
-        uint8_t bl = (uint8_t)this->palette_start_idx - 1;  /* prevStartIdx - 1 */
+        uint8_t bl = static_cast<uint8_t>(this->palette_start_idx) - 1;
+                                                               /* prevStartIdx - 1 */
         if (bl < 0) return 0;
 
-        void* surf = this->toolbar_sprites[bl];
+        ButtonSprite* surf = this->toolbar_sprites[bl];
         if (surf == nullptr) {
-            surf = NET_GetOrCreateSurface(
-                _g_dplay, this->editor_flags[1], this->editor_flags[2], bl + 1, 1);
+            surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
+                _g_dplay, this->editor_flags[1], this->editor_flags[2], bl + 1, 1));
             this->toolbar_sprites[bl] = surf;
         }
 
@@ -964,7 +974,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
             return 0;
         }
 
-        int totalWidth = *(int*)((intptr_t)surf + 8) + 4;
+        int totalWidth = surf->y + 4;
         this->field_2B4 = 1;
 
         if (totalWidth < this->field_1B8 - this->field_1B0) {
@@ -975,8 +985,9 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
                 surf = this->toolbar_sprites[idx];
                 if (surf == nullptr) {
-                    surf = NET_GetOrCreateSurface(
-                        _g_dplay, this->editor_flags[1], this->editor_flags[2], (uint8_t)(idx + 1), 1);
+                    surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
+                        _g_dplay, this->editor_flags[1], this->editor_flags[2],
+                        static_cast<uint8_t>(idx + 1), 1));
                     this->toolbar_sprites[idx] = surf;
                 }
 
@@ -1026,8 +1037,8 @@ void Cursor::draw_network_status()
 
     /* If netman scenario has player entries, show status */
     /* g_netman is an opaque cross-subsystem pointer here; mode is at +0x7C4. */
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {
-        if (this->obj_184 != 0) {
+    if (*reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_netman) + 0x7C4) == 2) {
+        if (this->obj_184 != nullptr) {
             int status = this->obj_184->upload_id;
             Sprite_SetState(this->sprite_2EC, (status != 0) ? 1 : 0, nullptr);
         }
@@ -1044,14 +1055,14 @@ void Cursor::draw_network_status()
         int state;
         if (this->field_59D == 0) {
             /* Normal mode: highlight sprite matching active tab */
-            if (this->editor_flags[2] == (uint8_t)i || this->field_188 == 0) {
+            if (this->editor_flags[2] == static_cast<uint8_t>(i) || this->field_188 == 0) {
                 state = 1;   /* hidden/disabled */
             } else {
                 state = 0;   /* normal */
             }
         } else {
             /* Bonus mode: offset tab index by 0x10 */
-            if (this->editor_flags[2] - 0x10 == (uint8_t)i || this->field_188 == 0) {
+            if (this->editor_flags[2] - 0x10 == static_cast<uint8_t>(i) || this->field_188 == 0) {
                 state = 1;   /* hidden/disabled */
             } else {
                 state = 0;   /* normal */
@@ -1083,7 +1094,7 @@ void Cursor::update_scroll_buttons()
         HDC hdc = UIPANEL_BeginPaint(this);
 
         /* Set up GDI text rendering */
-        HGDIOBJ oldFont = SelectObject(hdc, (HGDIOBJ)g_font_small);
+        HGDIOBJ oldFont = SelectObject(hdc, static_cast<HGDIOBJ>(g_font_small));
         COLORREF oldColor = SetTextColor(hdc, 0x40C05C);    /* dark green */
         int oldBkMode = SetBkMode(hdc, 1);                  /* TRANSPARENT */
 
@@ -1151,7 +1162,9 @@ void Cursor::update_scroll_buttons()
         SetTextColor(hdc, oldColor);
         SetBkMode(hdc, oldBkMode);
 
-        UIPANEL_EndPaintEx(this, this->hWnd, (int)(intptr_t)hdc, 1, nullptr);
+        UIPANEL_EndPaintEx(this, this->hWnd,
+                           static_cast<int>(reinterpret_cast<intptr_t>(hdc)),
+                           1, nullptr);
 
         /* Reset scroll button sprites */
         Sprite_SetState(this->sprite_148, 0, nullptr);
@@ -1215,14 +1228,18 @@ void Cursor::handle_tab_change()
 LRESULT Cursor::toolbar_wndproc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (msg == 0x133) {                     /* WM_CTLCOLOREDIT */
-        if ((int)lParam == (int)(intptr_t)this->hEditWnd) {
-            SetTextColor((HDC)(intptr_t)wParam, 0x40C05C);  /* dark green */
-            SetBkMode((HDC)(intptr_t)wParam, 2);             /* OPAQUE */
-            SetBkColor((HDC)(intptr_t)wParam, 0xE8E8E8);     /* light grey */
-            return (LRESULT)(intptr_t)this->hBrush;          /* +0x380 */
+        if (static_cast<int>(lParam) ==
+            static_cast<int>(reinterpret_cast<intptr_t>(this->hEditWnd))) {
+            HDC hdc = reinterpret_cast<HDC>(static_cast<intptr_t>(wParam));
+            SetTextColor(hdc, 0x40C05C);  /* dark green */
+            SetBkMode(hdc, 2);             /* OPAQUE */
+            SetBkColor(hdc, 0xE8E8E8);     /* light grey */
+            return static_cast<LRESULT>(reinterpret_cast<intptr_t>(this->hBrush));
+                                                               /* +0x380 */
         }
     } else if (msg == 0x112) {              /* WM_SYSCOMMAND */
-        if (((uint32_t)wParam & 0xFFF0) == 0xF140) {        /* SC_CLOSE */
+        if ((static_cast<uint32_t>(wParam) & 0xFFF0) == 0xF140) {
+                                                               /* SC_CLOSE */
             WIN32_PostQuit();
         }
     } else if (msg == 0x5F5) {              /* WM_USER+0x5F5: upload content */
@@ -1250,7 +1267,7 @@ void Cursor::upload_custom_content()
     char dialogTitle[0x100] = { 0 };
     char sizeMsg[0x100] = { 0 };
     char errMsg[0x100] = { 0 };
-    const char* errorText = nullptr;
+    char* errorText = nullptr;
 
     /* Set editor state to 8 (uploading) */
     this->editor_state = 8;
@@ -1262,7 +1279,7 @@ void Cursor::upload_custom_content()
     if (this->obj_184 != nullptr) {
         int16_t uploadId = this->obj_184->upload_id;
         if (uploadId != 0) {
-            NET_FindPlayer(4, (uploadId << 16) | (uint16_t)uploadId);
+            NET_FindPlayer(4, (uploadId << 16) | static_cast<uint16_t>(uploadId));
             this->obj_184->upload_id = 0;
             this->blit_edit_preview();
             UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
@@ -1311,7 +1328,8 @@ void Cursor::upload_custom_content()
         ofn.lpstrTitle     = dialogTitle;
         ofn.Flags          = 0x81830;                        /* OFN_HIDEREADONLY | OFN_FILEMUSTEXIST | ... */
         ofn.lpstrDefExt    = "dat";                          /* @ 0x47E4D4 */
-        ofn.lpfnHook       = (void*)0x419FD0;                /* hook procedure */
+        ofn.lpfnHook       = reinterpret_cast<void*>(
+            static_cast<intptr_t>(0x419FD0));                  /* hook procedure */
 
         if (GetOpenFileNameA(&ofn) == 0) {
             break;  /* user cancelled */
@@ -1336,9 +1354,10 @@ void Cursor::upload_custom_content()
                 FormatResourceString(&g_resmgr, 0x66, errMsg, 0x100);
                 MessageBoxA(this->hWnd, errMsg, "LEGO LOCO", 0x10);
             } else {
-                FormatMessageA(0x1100, nullptr, err, 0x400, (LPSTR)&errorText, 0, nullptr);
+                FormatMessageA(0x1100, nullptr, err, 0x400,
+                               reinterpret_cast<LPSTR>(&errorText), 0, nullptr);
                 MessageBoxA(this->hWnd, errorText, "LEGO LOCO", 0x10);
-                LocalFree((HLOCAL)errorText);
+                LocalFree(static_cast<void*>(errorText));
                 errorText = nullptr;
             }
             continue;  /* retry dialog */
@@ -1361,9 +1380,10 @@ void Cursor::upload_custom_content()
                 wsprintfA(sizeMsg, "%d", 1000);
                 MessageBoxA(this->hWnd, errMsg, "LEGO LOCO", 0x10);
             } else {
-                FormatMessageA(0x1100, nullptr, err, 0x400, (LPSTR)&errorText, 0, nullptr);
+                FormatMessageA(0x1100, nullptr, err, 0x400,
+                               reinterpret_cast<LPSTR>(&errorText), 0, nullptr);
                 MessageBoxA(this->hWnd, "LEGO LOCO", errorText, 0x10);
-                LocalFree((HLOCAL)errorText);
+                LocalFree(static_cast<void*>(errorText));
                 errorText = nullptr;
             }
             continue;
@@ -1411,7 +1431,7 @@ void Cursor::upload_custom_content()
 
     /* Kill timer if active */
     if (this->timer_id_18C != 0) {
-        KillTimer(this->hWnd, (UINT_PTR)this->timer_id_18C);
+        KillTimer(this->hWnd, static_cast<UINT_PTR>(this->timer_id_18C));
         this->timer_id_18C = 0;
     }
 
@@ -1430,8 +1450,10 @@ void Cursor::upload_custom_content()
     Sprite_SetState(this->sprite_2E0, 0, nullptr);
 
     /* Dispatch set_mode to repaint */
-    this->set_mode((int32_t)(intptr_t)this->child_obj_60(),
-                   (void*)(intptr_t)this->curs_pos_x(), 0, 1);
+    this->set_mode(
+        static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
+        reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
+        0, 1);
 
     UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 }

@@ -87,7 +87,7 @@ struct Collection_Stub {
     int32_t capacity;
     virtual ~Collection_Stub() {}
     virtual void Resize(int32_t) {}
-    virtual void* GetAt(int32_t) { return 0; }
+    virtual void* GetAt(int32_t) { return nullptr; }
 };
 
 struct SortedCollection_Stub : Collection_Stub {
@@ -135,11 +135,11 @@ struct UI_WindowBase_Stub {
 
     /* Ctor — Address: 0x425870 */
     UI_WindowBase_Stub(void*, UINT) {
-        hInstance = 0;
+        hInstance = nullptr;
         resourceId = 0;
-        field_0c = 0;
-        field_10 = 0;
-        field_14 = 0;
+        field_0c = nullptr;
+        field_10 = nullptr;
+        field_14 = nullptr;
         field_18 = 0;
         field_1c = 0;
         width = 0;
@@ -194,7 +194,7 @@ struct UIEntity_Stub {
 struct Building_Stub {
     char data[0xF4];
     Building_Stub(int) {
-        for (int i = 0; i < (int)sizeof(data); i++) data[i] = 0;
+        for (int i = 0; i < static_cast<int>(sizeof(data)); i++) data[i] = 0;
     }
     virtual ~Building_Stub() {}
     virtual void Deserialize(void*, int) {}
@@ -243,7 +243,7 @@ struct HelpWnd_Stub {
 struct TrainEntity_Stub {
     char data[0x90];
     TrainEntity_Stub(int32_t) {
-        for (int i = 0; i < (int)sizeof(data); i++) data[i] = 0;
+        for (int i = 0; i < static_cast<int>(sizeof(data)); i++) data[i] = 0;
     }
     virtual ~TrainEntity_Stub() {}
 };
@@ -265,7 +265,7 @@ struct IDirectDrawSurface4_Stub {
 /* =========================================================== */
 
 /* Collection::GetAt — separate from Collection_Stub vtable */
-void* Collection_GetAt(void*, int32_t) { return 0; }
+void* Collection_GetAt(void*, int32_t) { return nullptr; }
 
 /* Building::Building(int) — separate from Building_Stub */
 void Building_Building(void*, int32_t) {}

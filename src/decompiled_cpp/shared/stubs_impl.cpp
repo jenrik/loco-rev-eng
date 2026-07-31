@@ -9,10 +9,11 @@
 
 #include "types.h"
 #include "../network/DPlayConfig.h"
+#include "../network/NetworkPlayerList.h"
 #include <new>
 #include <cstdlib>
 
-/* Forward-declare Entity for typed pointer globals */
+/* Forward-declare Entity for typed pointer globals. */
 class Entity;
 #include <cstring>
 #include <ctime>
@@ -38,14 +39,16 @@ void CRT_srand(unsigned int s) { srand(s); }
 void OutputDebugStringA(const char* s) { if (s) fprintf(stderr, "DEBUG: %s\n", s); }
 
 /* ---- String ---- */
-int CRT_strlen(const char* s) { return s ? (int)strlen(s) : 0; }
+int CRT_strlen(const char* s) { return s ? static_cast<int>(strlen(s)) : 0; }
 int CRT_memmove(void* d, const void* s, size_t n) { memmove(d, s, n); return 0; }
 int CRT_wcsstr(const char* a, const char* b) { return (a && b && strstr(a, b)) ? 1 : 0; }
 int CRT_sprintf_buf(char* b, const char* f, ...) { return 0; }
 
 /* ---- Time ---- */
 unsigned int CRT_timeGetTime(void) { return 0; }
-unsigned int CRT_time(unsigned int* t) { return (unsigned int)time((time_t*)t); }
+unsigned int CRT_time(unsigned int* t) {
+    return static_cast<unsigned int>(time(reinterpret_cast<time_t*>(t)));
+}
 
 /* ---- Game globals ---- */
 uint32_t g_game_time = 0;
@@ -139,7 +142,9 @@ void WNDPROC_CriticalSectionLock(int*, char*) {}
 int  Config_GetIniInt(void*, const char*, const char*, int def) { return def; }
 
 /* Win32 stubs */
-void* GetProcessHeap(void) { return (void*)1; }
+void* GetProcessHeap(void) {
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+}
 int   CloseHandle(void*) { return 1; }
 void  Sleep(unsigned int ms) { usleep(ms * 1000); }
 void  SetPixel(void*, int, int, unsigned int) {}
@@ -150,13 +155,13 @@ void* g_ddraw = nullptr;
 void* g_backbuffer = nullptr;
 void* g_game = nullptr;
 void* g_audio_mgr = nullptr;
-void* g_dplay = nullptr;
+NetworkPlayerList* g_dplay = nullptr;
 void* g_dplay_config = nullptr;
 void* g_active_panel = nullptr;
 void* g_font_small = nullptr;
 void* g_last_cursor_pos = nullptr;
 void* g_thumbpal_surface = nullptr;
-char* g_thumbpal_bmp_name = (char*)"";
+extern "C" const char g_thumbpal_bmp_name[] = "";
 int g_screen_width = 800;
 int g_screen_height = 600;
 int g_client_width = 800;
@@ -207,8 +212,8 @@ void CRT_strncpy(void*, void*, int) {}
 void CRT_0x4681D0(int) {}
 void CRT_0x468480(char*, void*) {}
 void CRT_0x468610(void*, unsigned int, unsigned int, int) {}
-void* CRT_malloc_zero(unsigned int sz) { return operator_new((size_t)sz); }
-void* operator_new(unsigned int sz) { return operator_new((size_t)sz); }
+void* CRT_malloc_zero(unsigned int sz) { return operator_new(static_cast<size_t>(sz)); }
+void* operator_new(unsigned int sz) { return operator_new(static_cast<size_t>(sz)); }
 
 /* vtable globals (needed for some UI classes) */
 void* vtable_for_UIEntity = nullptr;
@@ -331,7 +336,6 @@ void* GameConfig_constructor(void* memory)
     return config;
 }
 void* NETMAN_constructor(void*) { return nullptr; }
-void* NetworkPlayerList_ctor(void*) { return nullptr; }
 void* PlayerRecord_constructor(void*) { return nullptr; }
 void* PixelDataCache_Ctor(void*) { return nullptr; }
 

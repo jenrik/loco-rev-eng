@@ -22,9 +22,9 @@ CXX        := g++
 CFLAGS     := -std=c++17 -fpermissive -g -O0
 # Anti-pattern compiler flags (see AGENTS.md "Fix anti-patterns on sight")
 # Three tiers:
-#   make                    Tier 1 — always-on, catches real bugs
-#   make STRICT=1           Tier 1+2 — ban C-style casts, tighten type hygiene
-#   make STRICT=2           Tier 1-3 — Effective C++ audits
+#   make                    Tier 1 — always-on ABI/layout correctness checks
+#   make STRICT=1           Tier 1+2 — calling-convention and cv/null checks
+#   make STRICT=2           Tier 1+3 — old-style-cast and Effective C++ audits
 #
 # Tier 1 flags catch: class-memaccess (raw writes on vtable-bearing types),
 # cast-function-type (vtable dispatch casts), strict-aliasing (type-punned
@@ -55,12 +55,14 @@ WARNFLAGS  := -Werror=delete-non-virtual-dtor \
               -Wno-unused \
               -Wno-unused-parameter \
               -Wno-attributes
-# Tier 2 — STRICT=1: ban C-style casts and catch ignored calling-convention attrs
+# Tier 2 — STRICT=1: diagnose ignored attributes and tighten type hygiene.
+# GCC reports an ignored calling-convention attribute in -Wattributes;
+# -Werror=ignored-attributes does not promote that diagnostic.
 ifdef STRICT
   ifeq ($(STRICT),1)
-    WARNFLAGS += -Wattributes -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Wattributes -Werror=attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
   else ifeq ($(STRICT),2)
-    WARNFLAGS += -Wattributes -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Wattributes -Werror=attributes -Werror=old-style-cast -Werror=cast-qual -Werror=zero-as-null-pointer-constant
     WARNFLAGS += -Weffc++ -Werror=missing-declarations
   endif
 endif
@@ -136,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -166,6 +168,23 @@ test-integration: $(BINARY) $(BUILD_DIR)/sdl3_net_transport_test
 	@python3 -m pytest -v -m "integration and gui" tests/integration
 
 test-all: test test-integration
+
+# Reproducible full-build diagnostic census. A temporary BUILD_DIR keeps the
+# clean/-k run and its logs out of the repository's generated build tree.
+diagnostic-census:
+	@set -eu; \
+	 tmp="$$(mktemp -d "$${TMPDIR:-/tmp}/lego-loco-root-census.XXXXXX")"; \
+	 trap 'rm -rf "$$tmp"' EXIT; \
+	 echo "=== Full root diagnostic census (temporary build: $$tmp) ==="; \
+	 $(MAKE) --no-print-directory BUILD_DIR="$$tmp/build" clean >/dev/null; \
+	 status=0; $(MAKE) --no-print-directory -k BUILD_DIR="$$tmp/build" all >"$$tmp/build.log" 2>&1 || status=$$?; \
+	 errors="$$(grep -Ec 'error:' "$$tmp/build.log" || true)"; \
+	 warnings="$$(grep -Ec 'warning:' "$$tmp/build.log" || true)"; \
+	 failed="$$(grep -Ec 'Error [0-9]+' "$$tmp/build.log" || true)"; \
+	 objects="$$(find "$$tmp/build" -name '*.o' -type f 2>/dev/null | wc -l)"; \
+	 printf 'status=%s errors=%s warnings=%s failed-recipes=%s objects=%s\n' "$$status" "$$errors" "$$warnings" "$$failed" "$$objects"; \
+	 cat "$$tmp/build.log"; \
+	 exit "$$status"
 
 # Transport codec and real two-process SDL_net loopback regressions.
 SDL3_NET_PROTOCOL_TEST := $(BUILD_DIR)/sdl3_net_protocol_test
@@ -445,6 +464,7 @@ help:
 	@echo "  make test             Run deterministic regressions"
 	@echo "  make test-integration Run isolated Wayland GUI tests"
 	@echo "  make test-all         Run every test layer"
+	@echo "  make diagnostic-census Clean/-k full build in a temporary tree and count diagnostics"
 	@echo "  make clean            Remove generated build outputs"
 	@echo "  make distclean Reset everything"
 	@echo "  make check    Show status"

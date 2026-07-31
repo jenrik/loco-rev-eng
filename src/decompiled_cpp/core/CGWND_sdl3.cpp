@@ -23,6 +23,8 @@ static SDL_Renderer* g_renderer = nullptr;
 extern void* g_ui_main;
 extern int g_game_mode;
 
+void CGWND_PumpMessages(void* cgwnd_ptr, uint8_t filter);
+
 static EditWindow* active_host_menu()
 {
     return g_game_mode == 2 ? static_cast<EditWindow*>(g_ui_main) : nullptr;

@@ -14,6 +14,16 @@
 #include <cmath>
 #include <new>
 
+namespace {
+
+template <typename T>
+T* field_at(void* object, size_t offset)
+{
+    return reinterpret_cast<T*>(static_cast<uint8_t*>(object) + offset);
+}
+
+} // namespace
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -166,7 +176,7 @@ VehicleEditor::~VehicleEditor()
     }
 
     if (this->target_building != nullptr) {
-        if (((Building*)this->target_building)->occupation_level == 0) {
+        if (static_cast<Building*>(this->target_building)->occupation_level == 0) {
             TileMap_InvalidateRect(
                 &g_tilemap,
                 this->screen_rect.left,
@@ -231,18 +241,20 @@ void VehicleEditor::SetRenderOffset()
     /* Load resource pointer from repurposed Entity parent slot */             /* +0x40 */
     void* resource = this->resource;
 
-    int tile_off_x = *(int16_t*)((uint8_t*)resource + 0x168 +
-                                 (uint32_t)this->angle_frame * 4);
-    int tile_off_y = *(int16_t*)((uint8_t*)resource + 0x16a +
-                                 (uint32_t)this->angle_frame * 4);
+    int tile_off_x = *reinterpret_cast<int16_t*>(
+        static_cast<uint8_t*>(resource) + 0x168 +
+        static_cast<uint32_t>(this->angle_frame) * 4);
+    int tile_off_y = *reinterpret_cast<int16_t*>(
+        static_cast<uint8_t*>(resource) + 0x16a +
+        static_cast<uint32_t>(this->angle_frame) * 4);
 
     int left = this->end_a->pos_x - tile_off_x;
     int top = this->end_a->pos_y - tile_off_y;
 
     this->screen_rect.left = left;
     this->screen_rect.top = top;
-    this->screen_rect.right = *(uint16_t*)((uint8_t*)resource + 0x14) + left;
-    this->screen_rect.bottom = *(uint16_t*)((uint8_t*)resource + 0x16) + top;
+    this->screen_rect.right = *field_at<uint16_t>(resource, 0x14) + left;
+    this->screen_rect.bottom = *field_at<uint16_t>(resource, 0x16) + top;
 
     /* Dispatch vtable[3] (HitTest/position update) with new coordinates */
     GameObject_HitTest(this, left, top);
@@ -259,44 +271,46 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
 {
     /* Determine the "road building" — which editor state (end A or B) */
     /* tracks the road segment for non-road-to-road transitions.        */
-    uintptr_t road_building = 0;
+    Building* road_building = nullptr;
 
     if (vehicle->active_editor == 0) {
         /* Active index 0: use end B from vehicle's child entry */
         uint32_t child_idx = vehicle->editor_count;
-        Vehicle* child_veh = (Vehicle*)vehicle->editors[child_idx];
-        VehicleEditor* child_ed = (VehicleEditor*)child_veh->editors[0]; /* +0x434 = end_b */
-        road_building = (uintptr_t)child_ed->end_b->building;
+        /* The original stores a Vehicle handle in this editor slot. */
+        Vehicle* child_veh = reinterpret_cast<Vehicle*>(vehicle->editors[child_idx]);
+        VehicleEditor* child_ed = static_cast<VehicleEditor*>(child_veh->editors[0]); /* +0x434 = end_b */
+        road_building = child_ed->end_b->building;
     } else {
-        Vehicle* child_veh = (Vehicle*)vehicle->editors[0];
-        VehicleEditor* child_ed = (VehicleEditor*)child_veh->editors[0]; /* +0x430 = end_a */
-        road_building = (uintptr_t)child_ed->end_a->building;
+        /* The original stores a Vehicle handle in this editor slot. */
+        Vehicle* child_veh = reinterpret_cast<Vehicle*>(vehicle->editors[0]);
+        VehicleEditor* child_ed = static_cast<VehicleEditor*>(child_veh->editors[0]); /* +0x430 = end_a */
+        road_building = child_ed->end_a->building;
     }
 
     char moved = 0;
 
     /* Get buildings for both editor ends */
-    uintptr_t bldg_a = (uintptr_t)this->end_a->building;
-    uintptr_t bldg_b = (uintptr_t)this->end_b->building;
+    Building* bldg_a = this->end_a->building;
+    Building* bldg_b = this->end_b->building;
 
-    if (bldg_a != 0 && bldg_b != 0) {
-        int substate_a = *(int32_t*)(bldg_a + 0x10c);
-        int substate_b = *(int32_t*)(bldg_b + 0x10c);
+    if (bldg_a != nullptr && bldg_b != nullptr) {
+        int substate_a = *field_at<int32_t>(bldg_a, 0x10c);
+        int substate_b = *field_at<int32_t>(bldg_b, 0x10c);
 
         if (substate_a == 5 && substate_b == 5 && bldg_a == bldg_b) {
             /* Both ends on the same road building */
             vehicle->detach_flag = 1;
 
-            void* resource = *(void**)(bldg_a + 0x40);
-            char res_type = *(char*)((uint8_t*)resource + 0x63a);
+            void* resource = *field_at<void*>(bldg_a, 0x40);
+            char res_type = *field_at<char>(resource, 0x63a);
 
             if (res_type == 5) {
                 /* Road type — move along track */
-                moved = (char)this->MoveAlongTrack(vehicle);
+                moved = static_cast<char>(this->MoveAlongTrack(vehicle));
             } else {
                 /* Non-road bridge conditions */
-                int a_limit = *(int32_t*)(bldg_a + 0x14) - 0x20;
-                int b_limit = *(int32_t*)(bldg_b + 0x14) - 0x20;
+                int a_limit = *field_at<int32_t>(bldg_a, 0x14) - 0x20;
+                int b_limit = *field_at<int32_t>(bldg_b, 0x14) - 0x20;
 
                 if ((a_limit < this->end_a->pos_y) ||
                     (b_limit < this->end_b->pos_y) ||
@@ -311,7 +325,7 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
             }
         } else {
             this->bound_check_flag = 0;
-            Vehicle_DetachAll((int)(intptr_t)vehicle);
+            Vehicle_DetachAll(static_cast<int>(reinterpret_cast<intptr_t>(vehicle)));
         }
     }
 
@@ -361,31 +375,31 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
     }
 
     /* Road-to-building transition check — same road_building all the way through */
-    if (road_building != 0) {
-        void* road_res = *(void**)(road_building + 0x40);
+    if (road_building != nullptr) {
+        void* road_res = *field_at<void*>(road_building, 0x40);
         if (road_res != nullptr) {
             uint8_t is_road = Resource_IsRoadTile(road_res);
             if (is_road == 1) {
-                uintptr_t target_bldg = 0;
+                Building* target_bldg = nullptr;
                 if (vehicle->active_editor == 0) {
                     uint32_t child_idx = vehicle->editor_count;
-                    Vehicle* child_veh = (Vehicle*)vehicle->editors[child_idx];
-                    VehicleEditor* child_ed = (VehicleEditor*)child_veh->editors[0];
-                    target_bldg = (uintptr_t)child_ed->end_b->building;
+                    Vehicle* child_veh = reinterpret_cast<Vehicle*>(vehicle->editors[child_idx]);
+                    VehicleEditor* child_ed = static_cast<VehicleEditor*>(child_veh->editors[0]);
+                    target_bldg = child_ed->end_b->building;
                 } else {
-                    Vehicle* child_veh = (Vehicle*)vehicle->editors[0];
-                    VehicleEditor* child_ed = (VehicleEditor*)child_veh->editors[0];
-                    target_bldg = (uintptr_t)child_ed->end_a->building;
+                    Vehicle* child_veh = reinterpret_cast<Vehicle*>(vehicle->editors[0]);
+                    VehicleEditor* child_ed = static_cast<VehicleEditor*>(child_veh->editors[0]);
+                    target_bldg = child_ed->end_a->building;
                 }
 
-                if (target_bldg != 0) {
-                    void* target_res = *(void**)(target_bldg + 0x40);
+                if (target_bldg != nullptr) {
+                    void* target_res = *field_at<void*>(target_bldg, 0x40);
                     if (target_res != nullptr) {
                         uint8_t target_is_road = Resource_IsRoadTile(target_res);
                         if (target_is_road == 0 &&
-                            *(int32_t*)(road_building + 0x11c) == 1)
+                            *field_at<int32_t>(road_building, 0x11c) == 1)
                         {
-                            *(int32_t*)(road_building + 0x11c) = 0;
+                            *field_at<int32_t>(road_building, 0x11c) = 0;
                         }
                     }
                 }
@@ -409,29 +423,29 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
     }
 
     int dir = active_end->direction;
-    void* track_bldg = *(void**)((uint8_t*)active_end->building + 0x40);
+    void* track_bldg = *field_at<void*>(active_end->building, 0x40);
     int track_idx = active_end->track_pos;
-    int track_count = *(uint16_t*)((uint8_t*)track_bldg + 0x636);
+    int track_count = *field_at<uint16_t>(track_bldg, 0x636);
 
     /* If at edge, recalibrate both ends */
     if ((dir == 1 && track_idx == track_count - 1) ||
         (dir == 0 && track_idx == 1))
     {
-        int16_t* track_coords = *(int16_t**)((uint8_t*)track_bldg + 0x630);
+        int16_t* track_coords = *field_at<int16_t*>(track_bldg, 0x630);
         /* NOTE: The binary reads 16-bit grid coordinates from Building+0x88
            and Building+0x8A. Building.h names these 'occupation_level' (+0x88)
            and '_pad_8a[0]' (+0x8A), but in VehicleEditor context they are
            16-bit grid positions. TODO: verify with Ghidra whether the owning
            object type at these offsets is truly a Building or a track subtype. */
-        int16_t base_x_a = (int16_t)((Building*)this->end_a->building)->occupation_level;
-        int16_t base_y_a = (int16_t)((Building*)this->end_a->building)->_pad_8a[0];
-        int16_t base_x_b = (int16_t)((Building*)this->end_b->building)->occupation_level;
-        int16_t base_y_b = (int16_t)((Building*)this->end_b->building)->_pad_8a[0];
+        int16_t base_x_a = static_cast<int16_t>(this->end_a->building->occupation_level);
+        int16_t base_y_a = static_cast<int16_t>(this->end_a->building->_pad_8a[0]);
+        int16_t base_x_b = static_cast<int16_t>(this->end_b->building->occupation_level);
+        int16_t base_y_b = static_cast<int16_t>(this->end_b->building->_pad_8a[0]);
 
-        this->end_a->pos_x = (int)track_coords[this->end_a->track_pos * 2] + base_x_a * 0x10;
-        this->end_a->pos_y = (int)track_coords[this->end_b->track_pos * 2 + 1] + base_y_a * 0x10;
-        this->end_b->pos_x = (int)track_coords[this->end_b->track_pos * 2] + base_x_b * 0x10;
-        this->end_b->pos_y = (int)track_coords[this->end_b->track_pos * 2 + 1] + base_y_b * 0x10;
+        this->end_a->pos_x = static_cast<int>(track_coords[this->end_a->track_pos * 2]) + base_x_a * 0x10;
+        this->end_a->pos_y = static_cast<int>(track_coords[this->end_b->track_pos * 2 + 1]) + base_y_a * 0x10;
+        this->end_b->pos_x = static_cast<int>(track_coords[this->end_b->track_pos * 2]) + base_x_b * 0x10;
+        this->end_b->pos_y = static_cast<int>(track_coords[this->end_b->track_pos * 2 + 1]) + base_y_b * 0x10;
         return 0;
     }
 
@@ -442,7 +456,8 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
         } else if (0x50 < track_idx) {
             this->bound_check_flag = 1;
         }
-        if ((uint32_t)track_idx >= (uint32_t)track_count) {
+        if (static_cast<uint32_t>(track_idx) >=
+            static_cast<uint32_t>(track_count)) {
             return 0;
         }
     } else {
@@ -483,16 +498,16 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
         }
     }
 
-    int16_t* track_coords = *(int16_t**)((uint8_t*)track_bldg + 0x630);
-    int16_t base_x_a = (int16_t)((Building*)this->end_a->building)->occupation_level;
-    int16_t base_y_a = (int16_t)((Building*)this->end_a->building)->_pad_8a[0];
-    int16_t base_x_b = (int16_t)((Building*)this->end_b->building)->occupation_level;
-    int16_t base_y_b = (int16_t)((Building*)this->end_b->building)->_pad_8a[0];
+    int16_t* track_coords = *field_at<int16_t*>(track_bldg, 0x630);
+    int16_t base_x_a = static_cast<int16_t>(this->end_a->building->occupation_level);
+    int16_t base_y_a = static_cast<int16_t>(this->end_a->building->_pad_8a[0]);
+    int16_t base_x_b = static_cast<int16_t>(this->end_b->building->occupation_level);
+    int16_t base_y_b = static_cast<int16_t>(this->end_b->building->_pad_8a[0]);
 
-    this->end_a->pos_x = (int)track_coords[offset * 2] + base_x_a * 0x10;
-    this->end_a->pos_y = (int)track_coords[offset * 2 + 1] + base_y_a * 0x10;
-    this->end_b->pos_x = (int)track_coords[this->end_b->track_pos * 2] + base_x_b * 0x10;
-    this->end_b->pos_y = (int)track_coords[this->end_b->track_pos * 2 + 1] + base_y_b * 0x10;
+    this->end_a->pos_x = static_cast<int>(track_coords[offset * 2]) + base_x_a * 0x10;
+    this->end_a->pos_y = static_cast<int>(track_coords[offset * 2 + 1]) + base_y_a * 0x10;
+    this->end_b->pos_x = static_cast<int>(track_coords[this->end_b->track_pos * 2]) + base_x_b * 0x10;
+    this->end_b->pos_y = static_cast<int>(track_coords[this->end_b->track_pos * 2 + 1]) + base_y_b * 0x10;
 
     TileMap_InvalidateRect(
         &g_tilemap,
@@ -501,9 +516,13 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
     );
 
     /* Update render offset via vtable[3] */
-    void* resource = ((Building*)this->end_a->building)->resource;
-    int tile_off_x = *(int16_t*)((uint8_t*)resource + 0x168 + (uint32_t)this->angle_frame * 4);
-    int tile_off_y = *(int16_t*)((uint8_t*)resource + 0x16a + (uint32_t)this->angle_frame * 4);
+    void* resource = this->end_a->building->resource;
+    int tile_off_x = *reinterpret_cast<int16_t*>(
+        static_cast<uint8_t*>(resource) + 0x168 +
+        static_cast<uint32_t>(this->angle_frame) * 4);
+    int tile_off_y = *reinterpret_cast<int16_t*>(
+        static_cast<uint8_t*>(resource) + 0x16a +
+        static_cast<uint32_t>(this->angle_frame) * 4);
 
     int render_x = this->end_a->pos_x - tile_off_x;
     int render_y = this->end_a->pos_y - tile_off_y;
@@ -593,16 +612,16 @@ void VehicleEditor::CalcAngle()
 
     /* FPATAN-based atan2 approximation: compute angle in [0, 2π),
        then map to 128 sprite frames (128 = full circle). */
-    double angle = atan2((double)dy, (double)dx);
+    double angle = atan2(static_cast<double>(dy), static_cast<double>(dx));
     if (angle < 0.0) {
         angle += 2.0 * M_PI;
     }
 
     /* Map to [0, 128) — 128 discrete sprite frames for full rotation */
-    int frame = (int)(angle / (2.0 * M_PI) * 128.0);
+    int frame = static_cast<int>(angle / (2.0 * M_PI) * 128.0);
     if (frame >= 128) frame = 0;
 
-    this->angle_frame = (uint16_t)frame;
+    this->angle_frame = static_cast<uint16_t>(frame);
 }
 
 

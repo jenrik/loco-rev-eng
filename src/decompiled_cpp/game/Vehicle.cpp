@@ -140,7 +140,7 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     this->sound_guard = 0;          /* +0x5A */
     this->active_flag = 0;          /* +0x90 */
     this->detach_flag = 0;          /* +0x2C */
-    this->editor_state_2 = 0;       /* +0x8C */
+    this->editor_state_2 = nullptr; /* +0x8C */
     this->net_sync_flag = 0;        /* +0x68 */
     this->network_next = nullptr;   /* +0x70 */
 
@@ -150,47 +150,49 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     }
 
     /* Clear editor array (4 slots at +0x10) */
-    this->editors[0] = 0;
-    this->editors[1] = 0;
-    this->editors[2] = 0;
-    this->editors[3] = 0;
+    this->editors[0] = nullptr;
+    this->editors[1] = nullptr;
+    this->editors[2] = nullptr;
+    this->editors[3] = nullptr;
     this->direction = 0;            /* +0x60 */
 
     /* Create EditorState sub-object (0x20 bytes) */
-    void* state = operator_new(0x20);
-    if (state != 0) {
-        state = EditorState_Ctor(state, param_3);
+    EditorState* state = static_cast<EditorState*>(operator_new(0x20));
+    if (state != nullptr) {
+        state = static_cast<EditorState*>(EditorState_Ctor(state, param_3));
     }
     this->editor_state = state;     /* +0x20 */
     this->stop_timer = 0;           /* +0x28 */
 
     /* Re-clear editors (redundant, preserved from original) */
-    this->editors[0] = 0;
-    this->editors[1] = 0;
-    this->editors[2] = 0;
-    this->editors[3] = 0;
+    this->editors[0] = nullptr;
+    this->editors[1] = nullptr;
+    this->editors[2] = nullptr;
+    this->editors[3] = nullptr;
     this->editor_count = 0;         /* +0x0C */
 
     /* Create VehicleEditor sub-object (0x450 bytes) */
-    void* vehicle_editor = operator_new(0x450);
-    if (vehicle_editor != 0) {
-        vehicle_editor = VehicleEditor_Ctor(vehicle_editor, param_1, 2, param_3);
+    VehicleEditor* vehicle_editor = static_cast<VehicleEditor*>(operator_new(0x450));
+    if (vehicle_editor != nullptr) {
+        vehicle_editor = static_cast<VehicleEditor*>(
+            VehicleEditor_Ctor(vehicle_editor, param_1, 2, param_3));
     }
     this->editors[0] = vehicle_editor;   /* editors[0] = primary VehicleEditor */
 
     /* Check if first editor slot is active */
-    void** active_slot = (void**)this->editors[this->editor_count];
-    if (active_slot != 0) {
-        uint8_t* editor_bytes = (uint8_t*)active_slot;
+    void** active_slot = reinterpret_cast<void**>(this->editors[this->editor_count]);
+    if (active_slot != nullptr) {
+        uint8_t* editor_bytes = reinterpret_cast<uint8_t*>(active_slot);
         if (editor_bytes[0x18] == 1) {    /* editor active flag at +0x18 */
             /* Store back-reference to Vehicle in editor */
-            *(void**)(editor_bytes + 0x44C) = this;
+            *reinterpret_cast<void**>(editor_bytes + 0x44C) = this;
 
             /* Read speed parameters from editor config */
-            uint8_t* editor_param = (uint8_t*)((VehicleEditor*)this->editors[0])->resource;
-            int16_t fwd_speed = *(int16_t*)(editor_param + 0x7A8);  /* forward speed */
+            const uint8_t* editor_param = reinterpret_cast<const uint8_t*>(
+                reinterpret_cast<VehicleEditor*>(this->editors[0])->resource);
+            int16_t fwd_speed = *reinterpret_cast<const int16_t*>(editor_param + 0x7A8);  /* forward speed */
             this->max_speed = fwd_speed;        /* +0x24 */
-            this->reverse_speed = *(int16_t*)(editor_param + 0x7AA);  /* +0x26 */
+            this->reverse_speed = *reinterpret_cast<const int16_t*>(editor_param + 0x7AA);  /* +0x26 */
             this->max_steps = fwd_speed;        /* +0x58 = forward speed */
             this->active_editor = 0;            /* +0x08 = 0 (forward) */
 
@@ -198,8 +200,8 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
             this->move_timer = 0;               /* +0x36 */
 
             /* Set player colors based on scenario */
-            uint8_t* netman_bytes = (uint8_t*)g_netman;
-            if (*(int32_t*)(netman_bytes + 0x7C4) == 2) {  /* scenario 2 */
+            uint8_t* netman_bytes = reinterpret_cast<uint8_t*>(g_netman);
+            if (*reinterpret_cast<const int32_t*>(netman_bytes + 0x7C4) == 2) {  /* scenario 2 */
                 this->color_r = *(uint8_t*)(netman_bytes + 0x7D0);
                 this->color_g = *(uint8_t*)(netman_bytes + 0x7D0);
             } else {

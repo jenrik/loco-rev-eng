@@ -726,6 +726,9 @@ public:
 /* Standalone network helper functions (C++ linkage)                    */
 /* ================================================================== */
 
+/** Return the current mode from an optional Netman instance. */
+int32_t NETMAN_GetGameMode(const void* netman);
+
 /**
  * NETMAN_SendDisconnect — Build and queue a DISCONNECT packet.
  * Address: 0x43D250

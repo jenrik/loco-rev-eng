@@ -14,6 +14,7 @@
 #endif
 
 #include <cstring>
+#include <new>
 
 extern Netman* _g_netman;
 extern void* _g_train;
@@ -164,9 +165,9 @@ void GameSetupPanel::SendScenarioSelect(int32_t scenarioIndex)
     std::memcpy(packet + 0x16, &g_player_id, sizeof(g_player_id));
     std::memcpy(packet + 0x18, &g_player_color, sizeof(g_player_color));
 
-    auto* message = static_cast<TrainMessage*>(operator_new(sizeof(TrainMessage)));
-    if (!message) { GLOBAL_free(packet); return; }
-    std::memset(message, 0, sizeof(*message));
+    void* messageStorage = operator_new(sizeof(TrainMessage));
+    if (!messageStorage) { GLOBAL_free(packet); return; }
+    auto* message = ::new (messageStorage) TrainMessage{};
     message->type = 6;
     message->data_len = 0x1c;
     message->data_ptr = packet;

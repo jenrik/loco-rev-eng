@@ -39,7 +39,9 @@
 /* ================================================================== */
 
 struct TimerSlotList {
-/* vtable at +0x00 is compiler-managed */
+    /* The vtable and destructor slots are compiler-managed. */
+    virtual ~TimerSlotList();
+
     void**  items;           /* +0x04  dynamic array of slot entries      */
     int32_t count;           /* +0x08  number of populated entries        */
     int32_t capacity;        /* +0x0C  allocated capacity                 */
@@ -54,21 +56,6 @@ struct TimerSlotList {
     /* ================================================================ */
     void DtorBody();
 
-    /* ================================================================ */
-    /* Scalar deleting destructor (dead/expired vtable variant)          */
-    /* Address: 0x412580                                                  */
-    /*                                                                     */
-    /* Used with vtable 0x4777C0 (dead/expired) and invoked via vtable[1] */
-    /* during cleanup. Calls DtorBody, then frees this if flags & 1.      */
-    /* ================================================================ */
-    void* __thiscall scalar_deleting_dtor_dead(byte flags);
-
-    /* ================================================================ */
-    /* Scalar deleting destructor (active/running vtable variant)        */
-    /* Address: 0x4125C0                                                  */
-    /*                                                                     */
-    /* Used with vtable 0x477780 (active) and invoked via vtable[1].       */
-    /* Calls DtorBody, then frees this if flags & 1.                      */
-    /* ================================================================ */
-    void* __thiscall scalar_deleting_dtor_active(byte flags);
+    /* The original 0x412580/0x4125C0 scalar-deleting slots are compiler
+     * generated ABI helpers and are represented by the virtual destructor. */
 };
