@@ -1479,9 +1479,9 @@ void* __thiscall RESDATA_SoundObject_Init(void* self, const char* source)
     int32_t maxLen = ((SoundObject*)self)->max_text_len;
     if (textBuf && maxLen > 0 && source) {
         strncpy(textBuf, source, maxLen - 1);
-    return self;
         textBuf[maxLen - 1] = '\0';
     }
+    return self;
 }
 
 /* ================================================================== */

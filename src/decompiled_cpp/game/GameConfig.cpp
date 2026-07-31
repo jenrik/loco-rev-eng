@@ -83,4 +83,5 @@ void* __thiscall GameConfig::GameConfig_dtor(uint8_t flags)
     }
 
     /* Optionally free self */
+    return this;
 }

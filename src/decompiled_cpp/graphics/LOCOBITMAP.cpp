@@ -821,6 +821,7 @@ void PostcardAlbum::InitFromResource()
 void* PostcardAlbum::DestroyFromResource(uint8_t flags)
 {
     this->FreeAllSprites();
+    return this;
 }
 
 /* ================================================================== */

@@ -37,6 +37,8 @@
 
 class TrainStationWindow : public GameWindow {
 public:
+    using GameWindow::show;
+
     /* ================================================================ */
     /* Fields (offsets from this)                                        */
     /* ================================================================ */
@@ -159,10 +161,6 @@ public:
      */
     virtual void show(int train_type, int context);
 
-    // Override base show() to call the two-param version
-    // (the binary uses a different signature for this vtable slot)
-    using GameWindow::show;
-
     /**
      * Hide — Dismiss the train station dialog.
      * Address: 0x436F70 (vtable[1])
@@ -172,5 +170,5 @@ public:
      * tooltip, destroys tooltip with tilemap invalidation, releases
      * sound resource 0x50F8 if loaded.
      */
-    virtual void hide();
+    void hide() override;
 };

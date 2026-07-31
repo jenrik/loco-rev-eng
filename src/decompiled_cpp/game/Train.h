@@ -75,6 +75,8 @@ struct PlayerConnectionNode;
  */
 class TrainEntity : public Building {
 public:
+    using Building::Update;
+
     /* ================================================================ */
     /* Fields                                                            */
     /* ================================================================ */

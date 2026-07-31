@@ -53,7 +53,43 @@ else
 endif
 
 CXXFLAGS  := -c -std=c++17 -fpermissive
-WARNFLAGS := -Wno-error -Wno-unused -Wno-unknown-pragmas -Wno-attributes
+# Anti-pattern compiler flags (see AGENTS.md "Fix anti-patterns on sight")
+# Three tiers:
+#   make                    Tier 1 — always-on, catches real bugs
+#   make STRICT=1           Tier 1+2 — ban C-style casts, tighten type hygiene
+#   make STRICT=2           Tier 1-3 — Effective C++ audits
+WARNFLAGS := -Werror=delete-non-virtual-dtor \
+              -Werror=non-virtual-dtor \
+              -Werror=class-memaccess \
+              -Werror=cast-function-type \
+              -Werror=return-type \
+              -Werror=strict-aliasing \
+              -Werror=write-strings \
+              -Werror=narrowing \
+              -Werror=reorder \
+              -Werror=overloaded-virtual \
+              -Werror=pmf-conversions \
+              -Werror=invalid-offsetof \
+              -Werror=missing-field-initializers \
+              -Werror=suggest-override \
+              -Werror=subobject-linkage \
+              -Werror=cast-align \
+              -Werror=int-to-pointer-cast \
+              -Werror=pointer-arith \
+              -Wno-unknown-pragmas \
+              -Wno-cpp \
+              -Wno-unused \
+              -Wno-unused-parameter \
+              -Wno-attributes
+# Tier 2 — STRICT=1: ban C-style casts and catch ignored calling-convention attrs
+ifdef STRICT
+  ifeq ($(STRICT),1)
+    WARNFLAGS += -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+  else ifeq ($(STRICT),2)
+    WARNFLAGS += -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Weffc++ -Werror=missing-declarations
+  endif
+endif
 INCLUDES  := -I$(SRCDIR) -I$(SRCDIR)/shared -I$(SRCDIR)/../sdl3_shims $(WIN_INC)
 
 # Force-include compat.h for standard headers + MSVC calling convention shims

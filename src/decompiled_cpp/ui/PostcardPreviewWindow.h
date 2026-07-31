@@ -178,7 +178,7 @@ public:
      *
      * Called by: vtable[2] dispatch
      */
-    void show();
+    void show() override;
 
     /**
      * Cleanup — Hide, kill timer, destroy sprites (vtable[1]).

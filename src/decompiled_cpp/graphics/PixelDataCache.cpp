@@ -131,6 +131,7 @@ void* PixelDataCache::DestroyFromResource(uint8_t flags)
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     this->Flush();
+    return this;
 }
 
 /* ================================================================== */

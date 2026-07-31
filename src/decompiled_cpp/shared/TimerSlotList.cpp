@@ -68,6 +68,7 @@ void* __thiscall TimerSlotList::scalar_deleting_dtor_dead(byte flags)
     this->items = nullptr;                          /* +0x04 */
 
     /* Free this instance if flags & 1 */
+    return this;
 }
 
 /* ================================================================== */
@@ -84,4 +85,5 @@ void* __thiscall TimerSlotList::scalar_deleting_dtor_active(byte flags)
     this->DtorBody();
 
     /* Free this instance if flags & 1 */
+    return this;
 }

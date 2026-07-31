@@ -68,6 +68,8 @@ struct CursorEditorRecord {
 
 class Cursor : public UI_WindowBase {
 public:
+    using UI_WindowBase::show;
+
     /* ================================================================ */
     /* Base class field accessors                                        */
     /*                                                                   */
@@ -835,7 +837,7 @@ public:
      *
      * Called by: (indirectly via Cursor base destructor)
      */
-    void hide();
+    void hide() override;
 
     /**
      * Main cursor compositing / render function.

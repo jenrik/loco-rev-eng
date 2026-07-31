@@ -24,6 +24,8 @@
 /* Vtable (post-init): 0x478270                                        */
 /* ================================================================== */
 struct PoolAllocator {
+    virtual ~PoolAllocator() {}
+
     /* +0x00: compiler-managed dispatch pointer (binary: 0x47826C/0x478270) */
     /* vtable at +0x00 is compiler-managed via virtual methods */
     /* +0x04: Counter 1 (initialized to 0 by NET_Lock) */

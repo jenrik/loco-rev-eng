@@ -20,7 +20,50 @@ SHIMS_DIR    := $(PROJECT_ROOT)src/sdl3_shims
 # Compiler
 CXX        := g++
 CFLAGS     := -std=c++17 -fpermissive -g -O0
-WARNFLAGS  := -Wno-error -Wno-unused -Wno-unknown-pragmas -Wno-attributes -Wno-write-strings -Wno-delete-non-virtual-dtor -Wno-narrowing -Wno-cpp -Werror=int-to-pointer-cast -Werror=pointer-arith
+# Anti-pattern compiler flags (see AGENTS.md "Fix anti-patterns on sight")
+# Three tiers:
+#   make                    Tier 1 — always-on, catches real bugs
+#   make STRICT=1           Tier 1+2 — ban C-style casts, tighten type hygiene
+#   make STRICT=2           Tier 1-3 — Effective C++ audits
+#
+# Tier 1 flags catch: class-memaccess (raw writes on vtable-bearing types),
+# cast-function-type (vtable dispatch casts), strict-aliasing (type-punned
+# offset access), non-virtual-dtor (missing virtual destructors), reorder
+# (initializer-order mismatches), return-type (silent stub returns),
+# overloaded-virtual (hidden virtuals), suggest-override (missing override),
+# narrowing, write-strings, int-to-pointer-cast, pointer-arith.
+WARNFLAGS  := -Werror=delete-non-virtual-dtor \
+              -Werror=non-virtual-dtor \
+              -Werror=class-memaccess \
+              -Werror=cast-function-type \
+              -Werror=return-type \
+              -Werror=strict-aliasing \
+              -Werror=write-strings \
+              -Werror=narrowing \
+              -Werror=reorder \
+              -Werror=overloaded-virtual \
+              -Werror=pmf-conversions \
+              -Werror=invalid-offsetof \
+              -Werror=missing-field-initializers \
+              -Werror=suggest-override \
+              -Werror=subobject-linkage \
+              -Werror=cast-align \
+              -Werror=int-to-pointer-cast \
+              -Werror=pointer-arith \
+              -Wno-unknown-pragmas \
+              -Wno-cpp \
+              -Wno-unused \
+              -Wno-unused-parameter \
+              -Wno-attributes
+# Tier 2 — STRICT=1: ban C-style casts and catch ignored calling-convention attrs
+ifdef STRICT
+  ifeq ($(STRICT),1)
+    WARNFLAGS += -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+  else ifeq ($(STRICT),2)
+    WARNFLAGS += -Werror=old-style-cast -Werror=ignored-attributes -Werror=cast-qual -Werror=zero-as-null-pointer-constant
+    WARNFLAGS += -Weffc++ -Werror=missing-declarations
+  endif
+endif
 INCLUDES   := -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs -I$(DCP_DIR)/native -I$(SHIMS_DIR)
 FORCE_INC  := -include $(DCP_DIR)/stubs/compat.h
 

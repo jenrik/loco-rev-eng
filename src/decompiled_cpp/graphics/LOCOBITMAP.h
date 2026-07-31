@@ -78,6 +78,7 @@ struct RESDATA;  /* Resource data descriptor */
 
 class PostcardAlbum {
 public:
+    virtual ~PostcardAlbum() {}
     /* ================================================================ */
     /* Fields (inherited from GameObject -> Entity -> UI_WindowBase)     */
     /* ================================================================ */
