@@ -368,7 +368,8 @@ extern uint8_t  g_disable_input;        /* 0x4855AC */
 extern uint8_t  g_click_on_town;        /* 0x48557C */
 extern void*    g_cursor_surface;       /* 0x4FD3C8 */
 extern void*    g_primary_surface;      /* 0x4FD3C4 */
-extern void*    g_input_mgr;            /* 0x4A9990 */
+class InputMgr;
+extern InputMgr  g_input_mgr;            /* 0x4A9990 — static InputMgr object (input/InputMgr.h) */
 extern int32_t  g_town_selection_rect_left;   /* 0x4854D0 */
 extern int32_t  g_town_selection_rect_top;    /* 0x4854D4 */
 extern int32_t  g_town_selection_rect_right;  /* 0x4854D8 */
@@ -402,8 +403,8 @@ extern void     DDRAW_PresentRect(RECT* rect, HWND hwnd,
 extern void     GLOBAL_free(void* ptr);
 extern void*    operator_new(size_t size);
 extern int      INPUT_EditCharHandler(int ptr);   /* 0x41F430 */
-extern int      INPUT_PlaceObject(void** mgr, unsigned int resource_id);
-extern int      INPUT_RemoveObject(void** mgr, void* obj, unsigned int param);
+extern void*      INPUT_PlaceObject(InputMgr* mgr, unsigned int resource_id); /* 0x41DD80 */
+extern uintptr_t  INPUT_RemoveObject(InputMgr* mgr, void* obj, unsigned int param); /* 0x41DEF0 */
 extern int      RESDATA_IsSceneryTile(int ptr);    /* 0x44BD90 */
 extern int      RESDATA_IsWaterTile(int ptr);      /* 0x44BD50 */
 extern int      RESDATA_IsTrackTile(int ptr);      /* 0x44BD70 */
@@ -443,7 +444,6 @@ extern void     DDRAW_DispatchToSubObjects(void* ddraw, int x, int y,
 extern void     Game_DeselectGameObject(int game);  /* 0x411580 */
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
-extern void     INPUT_FileDlgProc(void* mgr);
 extern void*    DDRAW_SpriteDataCtor(void* obj, int type);
 extern void     DDRAW_SpriteDataDtor(void* obj);
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);

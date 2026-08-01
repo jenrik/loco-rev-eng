@@ -12,8 +12,9 @@
 
 extern void* operator_new(size_t size);                 /* 0x465CE0 */
 extern void  Game_SelectGameObject(void* game, void*); /* 0x4113A0 */
-extern void* INPUT_FindObjectAt(void* mgr, int id);    /* 0x41E1F0 */
-extern void* g_input_mgr;                              /* 0x4A9990 */
+class InputMgr;
+extern void* INPUT_FindObjectAt(InputMgr* mgr, int id);    /* 0x41E1F0 */
+extern InputMgr g_input_mgr;                               /* 0x4A9990 — static object */
 extern void* g_selected_building;                      /* 0x4855B0 */
 extern void* g_game_instance;                          /* 0x4854C8 */
 extern uint32_t g_game_time;                           /* 0x4A99B4 */
@@ -124,7 +125,7 @@ void TrainEntity::Update(void* next_entity)
         g_selected_building != this) {
         const int object_id = static_cast<int>(CRT_rand() % 0x29) + 0x3400;
         GameObject* target = static_cast<GameObject*>(
-            INPUT_FindObjectAt(g_input_mgr, object_id));
+            INPUT_FindObjectAt(&g_input_mgr, object_id));
 
         if (target != nullptr &&
             (target->world_x != this->prev_target_x ||

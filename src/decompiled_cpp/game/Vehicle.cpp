@@ -58,7 +58,8 @@ extern "C" {
                                               int32_t w, int32_t h);
 
     /* Input */
-    void*   __fastcall INPUT_FindObjectAt(void* input_mgr, int32_t type);
+    class InputMgr;
+    void*   INPUT_FindObjectAt(InputMgr* input_mgr, int32_t type);
 
     /* Building/GameVehicle destination management */
     void __fastcall GameVehicle_AddDestination(int32_t* target, void* vehicle);
@@ -101,7 +102,7 @@ void __fastcall GameObject_StopSound(void* obj, int32_t sound_idx);
 /* ================================================================== */
 extern void* g_tilemap;       /* TileMap singleton, 0x4AAD08 */
 extern void* g_netman;        /* NetMan singleton */
-extern void* g_input_mgr;     /* INPUT manager singleton */
+extern InputMgr g_input_mgr;  /* 0x4A9990 — static InputMgr object */
 extern void* g_tooltip_mgr;   /* Tooltip manager */
 
 /* ================================================================== */

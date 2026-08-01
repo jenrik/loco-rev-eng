@@ -57,7 +57,7 @@ extern void* operator_new(size_t size);                                  /* 0x46
 extern BuildingMgr* g_building_mgr;         /* 0x485448 — BuildingMgr singleton */
 extern Entity*      g_selected_building;    /* currently selected building (pointer) */
 extern void         GLOBAL_free(void* ptr);
-extern InputMgr*    g_input_mgr;            /* 0x4A9990 */
+extern InputMgr     g_input_mgr;            /* 0x4A9990 — static object */
 extern void*        INPUT_FindObjectAt(InputMgr* mgr, int mode);
 extern TileMap*     g_tilemap;
 extern void*        TileMap_GetObjectAt(TileMap* tilemap, int tx, int ty, int flags);
@@ -432,7 +432,7 @@ void Building::Update(void* next_entity)
                 /* Action 3: Idle/wander.
                  * Look for an object under the input hotspot.
                  * If found at a new position, teleport there. */
-                void* found = INPUT_FindObjectAt(g_input_mgr, 2);
+                void* found = INPUT_FindObjectAt(&g_input_mgr, 2);
 
                 if (found != nullptr) {
                     GameObject* found_obj = (GameObject*)found;

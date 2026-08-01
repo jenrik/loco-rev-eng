@@ -66,7 +66,8 @@ extern "C" {
     uint32_t RESMGR_ReleaseResource(void* data);
     int    RESMGR_IsSaveHeader(void* data);
     void   RESMGR_LoadResource(void* res, void* path);
-    void   INPUT_SaveCurrentWorld(void* input, const char* name);
+    class InputMgr;
+   void   INPUT_SaveCurrentWorld(InputMgr* input, const char* name);
     void   Game_SetScreenMode(void* game, char a, char b, char c);
     void   TileMap_InvalidateRect(void* tilemap, int left, int top, int right, int bottom);
     void   TileMap_InvalidateDirtyRects(void* tilemap, char flag);
@@ -92,7 +93,7 @@ extern "C" {
     extern char   g_empty_string;          /* 0x476934 */
     extern void*  g_game;                 /* 0x4FD144 */
     extern void*  g_tilemap;              /* 0x4FD244 */
-    extern void*  g_input_mgr;            /* 0x4FD238 */
+    extern InputMgr g_input_mgr;            /* 0x4A9990 — static InputMgr object */
 
     /* EditWindow references */
     extern int    g_world_width;           /* 0x4FD3D8 */
@@ -813,7 +814,7 @@ void __fastcall UIPANEL_InitSprite(void* self)
     /* Load the world */
     Game_SetScreenMode(g_game, 1, 1, 1);
     TileMap_InvalidateDirtyRects(g_tilemap, 0);
-    INPUT_SaveCurrentWorld(g_input_mgr, path_buf);
+    INPUT_SaveCurrentWorld(&g_input_mgr, path_buf);
     Game_SetScreenMode(g_game, 1, 1, 0);
 }
 
@@ -867,7 +868,7 @@ void __fastcall UIPANEL_BlitSprite(void* self)
     }
 
     /* Save world */
-    INPUT_SaveCurrentWorld(g_input_mgr, path_buf);
+    INPUT_SaveCurrentWorld(&g_input_mgr, path_buf);
 
     /* Rebuild file list and center on saved entry */
     UIPANEL_DrawEditField((int)self);

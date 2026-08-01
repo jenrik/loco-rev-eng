@@ -74,9 +74,10 @@ extern int  HelpWnd_PlayNarration(void* mgr, int category,
                                   int res_id);                 /* 0x44F560 */
 
 /* Input/World */
-extern void INPUT_NewWorld(void* input_mgr);                   /* 0x41E120 */
-extern void INPUT_LoadWorld(void* input_mgr, const char* path); /* 0x41D320 */
-extern void INPUT_SaveCurrentWorld(void* input_mgr,
+class InputMgr;
+extern void INPUT_NewWorld(InputMgr* input_mgr);                   /* 0x41E120 */
+extern void INPUT_LoadWorld(InputMgr* input_mgr, const char* path); /* 0x41D320 */
+extern void INPUT_SaveCurrentWorld(InputMgr* input_mgr,
                                    const char* path);          /* 0x41D9B0 */
 extern void CGWND_SetBuildMode(int mode);                      /* 0x4089D0 */
 extern void CGWND_SetMode(void* mode);                         /* 0x408130 */
@@ -99,7 +100,7 @@ extern void Entity_Ctor(void* obj, int a, int b, int c, int d);/* 0x405790 */
 /* Global variables                                                     */
 /* ================================================================== */
 
-extern void*    g_input_mgr;             /* 0x4A9990 */
+extern InputMgr g_input_mgr;        /* 0x4A9990 — static InputMgr object */
 extern void*    g_asset_mgr;             /* 0x485600 */
 extern void*    g_audio_mgr;             /* 0x4FD38C */
 extern void*    g_audio;                 /* 0x4FD3BC */
@@ -109,7 +110,7 @@ extern void*    g_tilemap;               /* 0x4AAE90 */
 extern void*    g_town_view;             /* 0x4AAD2C */
 extern void*    g_ddraw_building;        /* 0x4A9EF0 */
 extern void*    g_trainstation_window;   /* 0x485258 */
-extern void*    g_game;                  /* 0x4A9990 — alias for g_input_mgr */
+extern void*    g_game;                  /* 0x4854C8 — Game singleton */
 
 extern int      g_world_width;           /* 0x4AAD0C */
 extern int      g_world_height;          /* 0x4AAD10 */
@@ -643,7 +644,7 @@ uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
     case 0x2407:  /* New Game tool */
         if (timer == 0) {
             if (HelpWnd_PlayNarration(g_audio_mgr, 7, 0x2407) == 0) {
-                INPUT_NewWorld(g_input_mgr);                 /* 0x41E120 */
+                INPUT_NewWorld(&g_input_mgr);                 /* 0x41E120 */
             }
         }
         break;
@@ -651,7 +652,7 @@ uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
     case 0x2408:  /* Load Game tool */
         if (timer == 0) {
             HelpWnd_PlayNarration(g_audio_mgr, 7, 0x2408);
-            INPUT_LoadWorld(g_input_mgr, "curr");            /* 0x41D320 */
+            INPUT_LoadWorld(&g_input_mgr, "curr");            /* 0x41D320 */
         }
         break;
 
@@ -756,7 +757,7 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
 
             /* Save current world if in build mode */
             if (g_in_build_mode != 0) {
-                INPUT_SaveCurrentWorld(g_input_mgr, "curr"); /* 0x41D9B0 */
+                INPUT_SaveCurrentWorld(&g_input_mgr, "curr"); /* 0x41D9B0 */
             }
 
             /* Re-init panel */

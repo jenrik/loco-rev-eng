@@ -45,6 +45,8 @@ int   Config_GetIniInt(void* cfg, const char* section, const char* key, int def)
 void  TileMap_Init(void* tilemap, char flags);   /* 0x454E60 */
 void  INPUT_LoadConfig(void* config);            /* 0x41F5E0 */
 int   ResourceManager_Init(void* rmgr);          /* 0x446050 */
+class InputMgr;
+void  INPUT_GetSaveFileName(InputMgr* self);      /* 0x41DD40 — per-frame entity tick */
 void  UIPANEL_Hide(void* panel, void* str);      /* 0x429EF0 */
 int   DDRAW_Init(void);                          /* 0x45C8A0 */
 void  NETMAN_Update(void* netman);               /* 0x43F0C0 */
@@ -54,7 +56,6 @@ void  UI_HideTooltip(void* mgr);                 /* 0x423D70 */
 void  RESDATA_ScriptedObject_Update(void* obj);  /* 0x4497A0 */
 void  Town_TrackBuilding(void* view);            /* 0x42D1A0 */
 void  DDRAW_UpdateBuilding(void* ddraw);         /* 0x459DA0 */
-void  INPUT_GetSaveFileName(void* ptr);          /* 0x41DD40 */
 void  BuildingMgr_UpdateAll(void* mgr);          /* 0x434720 */
 void  TileMap_InvalidateDirtyRects(void* tm, char); /* 0x456150 */
 int   Vehicle_SetState(void* veh, int state);    /* 0x44D740 */
@@ -107,7 +108,8 @@ extern int   DAT_004fd3a0;           /* 0x4FD3A0 */
 extern int   DAT_004a990c;           /* 0x4A990C */
 extern void* g_timer_event_id;       /* 0x485438 */
 extern int   DAT_00485444;           /* 0x485444 */
-extern int   g_input_mgr;            /* 0x4A9990 */
+class InputMgr;
+extern InputMgr g_input_mgr;        /* 0x4A9990 — static InputMgr object */
 extern int   DAT_004a99b0;           /* 0x4A99B0 */
 extern int   DAT_004ff124;           /* 0x4FF124 */
 extern int   DAT_004ff11c;           /* 0x4FF11C */
@@ -352,10 +354,11 @@ extern "C" void GameLoop_FrameUpdate(void)
     /* Step 10: Town mode updates */
     if (game_mode == 3 || game_mode == 9) {
 #ifndef _WIN32
-        /* Host mode-3 cone: g_town_view / g_ddraw_building / g_input_mgr
-         * are still unconstructed on SDL; keep the original calls for the
-         * Win32 build and log the host skips rather than dereferencing
-         * nullptr. */
+        /* Host mode-3 cone: g_town_view / g_ddraw_building are still
+         * unconstructed on SDL; keep the original calls for the Win32
+         * build and log the host skips rather than dereferencing
+         * nullptr.  g_input_mgr is a typed static object and is always
+         * constructed (InputMgr ctor 0x41D250 via static init). */
         if (g_town_view != nullptr) {
             Town_TrackBuilding(g_town_view);
         } else {
@@ -374,20 +377,11 @@ extern "C" void GameLoop_FrameUpdate(void)
                 warned_ddraw_building = 1;
             }
         }
-        if (g_input_mgr != 0) {
-            INPUT_GetSaveFileName(reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<int>(g_input_mgr))));
-        } else {
-            static int warned_input_mgr = 0;
-            if (!warned_input_mgr) {
-                std::fprintf(stderr, "[HOST] FrameUpdate: INPUT_GetSaveFileName skipped (g_input_mgr unconstructed)\n");
-                warned_input_mgr = 1;
-            }
-        }
 #else
         Town_TrackBuilding(g_town_view);
         DDRAW_UpdateBuilding(g_ddraw_building);
-        INPUT_GetSaveFileName((void*)&g_input_mgr);
 #endif
+        INPUT_GetSaveFileName(&g_input_mgr);
         BuildingMgr_UpdateAll(g_building_mgr);
     }
 

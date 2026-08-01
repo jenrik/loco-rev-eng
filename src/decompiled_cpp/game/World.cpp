@@ -46,11 +46,12 @@ extern "C" {
 }
 
 /* Game functions (free functions with no typed C++ equivalent yet) */
+class InputMgr;
 extern void   __thiscall VehicleEditor_Update(Vehicle* vehicle);      /* @ 0x44C3A0 */
 extern uint   __cdecl   CGWND_MapResourceToDirection(int resource_id);/* @ 0x40EB60 */
 extern void*  __thiscall TileMap_GetObjectAt(void* tilemap, short x,
                                              short y, short layer);    /* @ 0x455620 */
-extern void*  __thiscall INPUT_FindObjectAt(void* input_mgr, int param); /* @ 0x41E1F0 */
+extern void*  INPUT_FindObjectAt(InputMgr* input_mgr, int param); /* @ 0x41E1F0 */
 extern void   __thiscall ArrivalQueue_AddVehicle(void* building,
                                                  void* vehicle);       /* @ 0x44F3A0 */
 extern void   __thiscall ArrivalQueue_RemoveVehicle(void* building,
@@ -80,7 +81,7 @@ extern int32_t    g_game_mode;                /* 0x004851F4 */
 extern Netman*    g_netman;                   /* 0x004FD3AC */
 extern void*      g_town_view;                /* 0x004852A0 */
 extern void*      g_ddraw_building;           /* 0x004A9EF0 */
-extern void*      g_input_mgr;                /* 0x004A9990 */
+extern InputMgr  g_input_mgr;                /* 0x004A9990 — static InputMgr object (input/InputMgr.h) */
 extern void*      g_tilemap;                  /* 0x004AAD08 */
 extern void*      g_tooltip_mgr;              /* 0x004FD220  UI/tooltip manager */
 extern uint8_t    g_click_on_town;            /* 0x0048557C */
@@ -566,7 +567,7 @@ char World::FinalizeLoad(Vehicle* vehicle, int packed_coords, char mp_flag)
        Assembly: MOV ECX,[0x004fd3ac]; MOV EAX,[ECX+0x7C4] — no NULL check. */
     if (g_netman->m_gameMode == 1) {
         /* Multiplayer scenario 1 */
-        building = INPUT_FindObjectAt(g_input_mgr, 1);
+        building = INPUT_FindObjectAt(&g_input_mgr, 1);
     } else if (g_netman->m_gameMode == 2) {
         /* Multiplayer scenario 2: adjust destination Y based on mp_flag */
         if (mp_flag == 1 || mp_flag == 2) {
@@ -575,12 +576,12 @@ char World::FinalizeLoad(Vehicle* vehicle, int packed_coords, char mp_flag)
         building = TileMap_GetObjectAt(g_tilemap, dest_x, dest_y, 0);
     } else {
         /* Single player */
-        building = INPUT_FindObjectAt(g_input_mgr, 0);
+        building = INPUT_FindObjectAt(&g_input_mgr, 0);
     }
 
     /* Fallback: try INPUT_FindObjectAt with param=1 */
     if (building == NULL) {
-        building = INPUT_FindObjectAt(g_input_mgr, 1);
+        building = INPUT_FindObjectAt(&g_input_mgr, 1);
     }
 
     if (building == NULL) {

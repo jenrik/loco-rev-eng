@@ -61,7 +61,8 @@ extern void*    g_audio;               /* 0x4FD3BC — GameAudio* */
 extern void*    g_game;                 /* 0x4854C8 — Game* */
 extern void*    g_netman;               /* 0x4FD3AC — Netman* */
 extern int      g_demo_mode;            /* 0x4A9918 */
-extern int      g_input_mgr;            /* 0x4A99B0 — InputMgr */
+class InputMgr;
+extern InputMgr g_input_mgr;            /* 0x4A9990 — static InputMgr object */
 extern uint8_t  g_clean_exit;           /* 0x485218 — clean exit flag */
 extern int   g_timer_id;                /* timer ID global */
 extern void*    g_async_task_queue;     /* 0x4A9AD0 */
@@ -82,7 +83,7 @@ extern "C" void CGWND_Present(uint32_t flags);  /* original __cdecl 0x45E1E0 */
 extern void  CGWND_PumpMessages(char filter);
 extern void  WIN32_QueueAsyncTask(void* queue, void* callback, int param);
 extern void  RESMGR_SelectScreensaver(char* outBuf);
-extern char  INPUT_LoadWorld(void* input_mgr, const char* path);
+extern char  INPUT_LoadWorld(InputMgr* input_mgr, const char* path);
 extern void  CGWND_SetMode(int mode);
 extern int   wsprintfA(char* buf, const char* fmt, ...);
 

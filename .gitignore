@@ -1,5 +1,8 @@
 lego-loco.iso
 lego-loco-unpacked/
+# worktree symlink to the main repo's unpacked game data (tests use the
+# relative lego-loco-unpacked/art-res path)
+lego-loco-unpacked
 wine-prefix/
 DDrawCompat-*.zip
 tools/ghidra-mcp/*.zip

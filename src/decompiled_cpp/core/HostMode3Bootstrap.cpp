@@ -6,9 +6,12 @@
  * The original constructs the embedded singletons (g_world, g_game,
  * g_building_mgr, g_input_mgr, g_scripted_object) via CRT static-init
  * thunks (0x45C560..0x45C650) and initializes the TileMap via
- * TileMap_Init in GameLoop_Setup.  The SDL host keeps the decompiled
- * void* storage in shared/stubs_impl.cpp and constructs the real C++
- * objects here in GameLoop_Setup order, so the mode-1 loading worker
+ * TileMap_Init in GameLoop_Setup.  g_input_mgr is now a typed static
+ * object (InputMgr g_input_mgr; — 0x4A9990, ctor 0x41D250 via the C++
+ * static-init equivalent of thunk 0x45C620), so BootstrapMode3Core does
+ * not construct it.  The SDL host keeps the other decompiled void*
+ * storage in shared/stubs_impl.cpp and constructs the real C++ objects
+ * here in GameLoop_Setup order, so the mode-1 loading worker
  * (original 0x45DE40) and CGWND_EnterMode3 common tail can run against
  * real objects instead of nullptr.
  *
@@ -27,6 +30,7 @@
 #include "../world/scriptengine.h"
 #include "../world/tilemap.h"
 #include "../audio/GameAudio.h"
+#include "../input/InputMgr.h"
 
 #include <cstdio>
 #include <cstring>
@@ -64,6 +68,22 @@ namespace host {
 /* ================================================================== */
 void BootstrapMode3Core()
 {
+    /* g_input_mgr is a typed static object (InputMgr g_input_mgr; —
+     * 0x4A9990) whose no-arg ctor (0x41D250) ran at static init via the
+     * C++ equivalent of the CRT thunk 0x45C620; its embedded entity
+     * collection is ready.  The tooltip manager (g_tooltip_mgr, 0x4FD220,
+     * UI_Ctor 0x4238C0 via thunk 0x45C680) stays unconstructed on the host:
+     * there is no typed UI-Manager reconstruction yet, and the raw-C
+     * native/ui_manager.c is in NATIVE_BROKEN (evidence documented in
+     * input/InputMgr.h). */
+    std::fprintf(stderr,
+        "[HOST] BootstrapMode3Core: g_input_mgr static object at %p "
+        "(ctor 0x41D250, capacity=%d, count=%d); tooltip mgr deferred\n",
+        static_cast<void*>(&g_input_mgr),
+        static_cast<int>(g_input_mgr.capacity),
+        static_cast<int>(g_input_mgr.count));
+    std::fflush(stderr);
+
     /* TileMap first: Game::Game() calls SetScreenMode → TileMap_InvalidateRect,
      * which needs a non-null TileMap.  The TileMap ctor itself only touches
      * empty host stubs (Game_DeselectGameObject/World_Init/tooltips), so it is
@@ -193,10 +213,11 @@ void RunPendingAsyncTask()
 /*                                                                      */
 /* Original: init Game state, load/create the world, init TileMap/      */
 /* ScriptedObject/DDRAW building/town, then wait for mode 1 to change.  */
-/* Host: the cone is constructed in BootstrapMode3Core; the world-file   */
-/* load (INPUT_LoadWorld / INPUT_NewWorld) is deferred until the        */
-/* InputMgr + .loco save parsing are host-wired — this is logged        */
-/* loudly, never silent.  Finishes by entering mode 3.                  */
+/* Host: the cone is constructed in BootstrapMode3Core (g_input_mgr is  */
+/* the typed static object); the world-file load (INPUT_NewWorld /      */
+/* INPUT_LoadWorld) is deferred until the .loco save parsing milestone   */
+/* — the INPUT_* world new/load/save stubs in InputMgr.cpp log and      */
+/* abort rather than silently succeeding.  Finishes by entering mode 3.  */
 /* ================================================================== */
 void HostLoadingSequence(void* /*param*/)
 {

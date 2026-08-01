@@ -59,7 +59,8 @@ void*    g_main_window = nullptr;
 void*    g_building_mgr = nullptr;
 void*    g_resmgr = nullptr;
 void*    g_netman = nullptr;
-void*    g_input_mgr = nullptr;
+/* g_input_mgr: canonical typed static object defined in input/InputMgr.cpp
+ * (InputMgr g_input_mgr; — 0x4A9990).  Removed the old void* placeholder. */
 void*    g_tilemap = nullptr;
 void*    g_asset_mgr = nullptr;
 void*    g_audio = nullptr;
@@ -301,10 +302,7 @@ void CGWND_SetMode(void*) {}
 void CGWND_SetPause(void*, char) {}
 void CGWND_SetBuildMode(int) {}
 void World_Init(void*) {}
-void INPUT_FileDlgProc(void*) {}
-void INPUT_SaveCurrentWorld(void*, const char*) {}
 void INPUT_EditCharHandler(int) {}
-int  INPUT_FindObjectAt(void*, int) { return 0; }
 void PixelDataCache_LookupAsset(void*, int, int) {}
 void PixelDataCache_GetEntryCount(void*) {}
 void PixelDataCache_Unlock(void*, int) {}
@@ -352,7 +350,8 @@ void  UI_HideTooltip(void*) {}
 void  RESDATA_ScriptedObject_Update(void*) {}
 void  Town_TrackBuilding(void*) {}
 void  DDRAW_UpdateBuilding(void*) {}
-void  INPUT_GetSaveFileName(void*) {}
+/* INPUT_GetSaveFileName / INPUT_SaveCurrentWorld / INPUT_FindObjectAt /
+ * INPUT_FileDlgProc: canonical definitions moved to input/InputMgr.cpp. */
 void  BuildingMgr_UpdateAll(void*) {}
 
 /* Asset enumeration */

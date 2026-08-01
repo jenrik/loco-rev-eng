@@ -17,6 +17,7 @@
 #include "tilemap.h"
 
 #include "../core/Entity.h"
+#include "../input/InputMgr.h"
 
 #include <cmath>
 #include <new>
@@ -52,7 +53,6 @@ extern uint8_t  g_click_on_building;     /* 0x48556C */
 extern uint8_t  g_placement_valid;       /* 0x4AA648 */
 extern uint8_t  g_placement_blocked;     /* 0x48558C */
 extern int32_t  g_placement_resource_id; /* 0x485550 */
-extern void*    g_input_mgr;             /* 0x4A9990 */
 extern void*    g_town_view;             /* 0x4852A0 */
 extern void*    g_ddraw_building;        /* 0x4A9EF0 */
 extern void*    g_about;                 /* 0x4FD390 */
@@ -94,8 +94,8 @@ extern int      RESDATA_IsSceneryTile(int ptr);
 extern int      RESDATA_IsWaterTile(int ptr);
 extern int      RESDATA_IsTrackTile(int ptr);
 extern int      INPUT_EditCharHandler(int ptr);
-extern int      INPUT_PlaceObject(void** mgr, unsigned int resource_id);
-extern int      INPUT_RemoveObject(void** mgr, void* obj, unsigned int param);
+extern void*    INPUT_PlaceObject(InputMgr* mgr, unsigned int resource_id); /* 0x41DD80 */
+extern uintptr_t INPUT_RemoveObject(InputMgr* mgr, void* obj, unsigned int param); /* 0x41DEF0 */
 extern int      GetResourceType(unsigned int resource_id);
 extern void     PlaySoundAt(int sound_id, int x, int y, int channel);
 extern int      Town_SelectBuilding(void* town_view, int building);
@@ -121,7 +121,6 @@ extern void     DDRAW_DispatchToSubObjects(void* ddraw, int x, int y,
 extern void     Game_DeselectGameObject(int game);
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
-extern void     INPUT_FileDlgProc(void* mgr);
 extern void*    DDRAW_SpriteDataCtor(void* obj, int type);
 extern void     DDRAW_SpriteDataDtor(void* obj);
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);
@@ -394,7 +393,7 @@ void TileMap::FullReset()
         static_cast<int>(reinterpret_cast<intptr_t>(g_game)));  /* 0x4854C8 */
     World_Init(g_world);  /* 0x4A98B0 */
     UI_CleanupTooltips(g_tooltip_mgr);  /* 0x4FD220 */
-    INPUT_FileDlgProc(g_input_mgr);  /* 0x4A9990 */
+    g_input_mgr.ResetWorldState();  /* 0x4A9990 — InputMgr vtable[3] 0x41E100 */
 
     /* Clear the trailing header bytes and all named tile storage.
      * The assembly zeroes dwords +0x44..+0x52483 (0x14910 dwords),
@@ -2160,8 +2159,8 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
         if (ScrollRect(1, reinterpret_cast<TileMapObject*>(res_data), tile_x,
                        static_cast<unsigned short>(offset + static_cast<int>(adjusted_y)),
                        static_cast<int>(mode)) != 0) {
-            result = reinterpret_cast<int*>(static_cast<uintptr_t>(
-                INPUT_PlaceObject(&g_input_mgr, target_resource_id)));
+            result = reinterpret_cast<int*>(
+                INPUT_PlaceObject(&g_input_mgr, target_resource_id));
             if (result != NULL) {
                 /* Fill the standard layer region of each occupied tile */
                 short gy = 0;

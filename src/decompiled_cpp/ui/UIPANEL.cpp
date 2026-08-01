@@ -84,9 +84,10 @@ extern void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map);
 extern void __thiscall UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param, uint8_t unlock_flag, RECT* restrict_rect);
 
 /* External functions referenced from UIPANEL drawing */
+class InputMgr;
 extern int __fastcall UI_IsBitmapReady(void* res);
 extern void __fastcall UIPANEL_DrawEditField(int param_1);                  /* 0x429490 */
-extern void __thiscall INPUT_SaveCurrentWorld(void* input, const char* name); /* 0x44D280 */
+extern void INPUT_SaveCurrentWorld(InputMgr* input, const char* name); /* 0x41D9B0 */
 extern void __thiscall RESDATA_GameObject_UpdateAnimation(void* obj);        /* 0x44B810 */
 extern void __fastcall PlaySound(int sound_id);                              /* 0x44A290 */
 extern void* __thiscall RESDATA_SoundObject_GetState(int sprite);            /* 0x44CAC0? */
@@ -98,7 +99,8 @@ extern char   g_empty_string[];          /* 0x476934 */
 extern void*  g_scripted_object;         /* 0x4AA5B8 */
 extern void*  g_active_panel;            /* TBD */
 extern int    g_world_width;             /* TBD */
-extern void*  g_input_mgr;              /* TBD */
+class InputMgr;
+extern InputMgr g_input_mgr;             /* 0x4A9990 — static InputMgr object */
 
 /* ================================================================ */
 /* BUG NOTE: The UIPANEL destructor and ClearChildren both call      */
@@ -511,7 +513,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
 
         /* Draw edit field and save current world */
         UIPANEL_DrawEditField((intptr_t)this);
-        INPUT_SaveCurrentWorld(g_input_mgr, "curr");
+        INPUT_SaveCurrentWorld(&g_input_mgr, "curr");
         break;
 
     case 2:

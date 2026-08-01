@@ -129,6 +129,8 @@ extern "C" {
 
 extern HelpWnd* g_audio_mgr;           /* 0x4FD2CC */
 extern Town*    g_town;                /* 0x4FD2D0 */
+class InputMgr;
+extern InputMgr g_input_mgr;           /* 0x4A9990 — static InputMgr object */
 extern PostcardAlbum* g_postcard;      /* 0x4FD2D4 */
 extern Cursor*  g_cursor;              /* 0x4FD2D8 */
 extern int      g_game_mode;           /* 0x4FD2E0 */
@@ -566,8 +568,8 @@ void HelpWnd::hide()
 
         /* Check for new world creation */
         if (this->windowMode == 7 && this->pageResourceType == 0x2407) {
-            extern void __cdecl INPUT_NewWorld(void* param);
-            INPUT_NewWorld(0x4A9990);
+            extern void INPUT_NewWorld(InputMgr* mgr);   /* 0x41E120 */
+            INPUT_NewWorld(&g_input_mgr);
         }
         g_game_mode = 8;
     }

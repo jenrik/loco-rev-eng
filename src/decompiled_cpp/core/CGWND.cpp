@@ -32,6 +32,7 @@
 #include "../ui/PostcardAlbum.h"
 #include "../ui/PostcardPreviewWindow.h"
 #include "../input/Cursor.h"
+#include "../input/InputMgr.h"
 #include "../ui/HelpWnd.h"
 #include "../core/Game.h"
 // Netman: forward-declared below (Netman.h conflicts with Config_GetIniInt)
@@ -1055,8 +1056,9 @@ void CGWND_Cleanup()
     extern void INPUT_Shutdown(int input);
     INPUT_Shutdown(0x4A99B0);
 
-    extern void INPUT_Cleanup(int* mgr);
-    INPUT_Cleanup(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4A9990)));
+    /* Original: mov ecx,0x4A9990; call 0x41D310 (cleanup thunk) which
+     * dispatches vtable[3] = InputMgr::ResetWorldState (0x41E100). */
+    g_input_mgr.ResetWorldState();
 
     extern void Game_Shutdown(int* game);
     Game_Shutdown(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4854C8)));
