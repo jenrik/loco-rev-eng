@@ -319,7 +319,6 @@ void GAMESTATE_InitTrackAtPosition(void*, int, int) {}
 void GameObject_HitTest(void*, int, int) {}
 void Vehicle_DetachAll(int) {}
 void CGWND_InitAllSubsystems(void*) {}
-void INPUT_LoadConfig(void*) {}
 void timeBeginPeriod(unsigned int) {}
 /* CGWND_PumpMessages(void*,unsigned char) — now in CGWND_sdl3.cpp */
 void CGWND_AudioChannel_UpdatePosition(void*, int, int) {}
@@ -372,8 +371,6 @@ void CGWND_AudioChannel_IsActive(unsigned int) {}
 void CGWND_AudioChannel_Release(void*) {}
 void WIN32_CloseHandle(void*) {}
 void WIN32_timeKillEvent(unsigned int) {}
-void INPUT_Shutdown(int) {}
-void INPUT_Cleanup(int*) {}
 void GameAudio_StopFinished() {}
 void DDRAW_GetDsoundErrorString() {}
 void Ordinal_2() {}
@@ -391,8 +388,6 @@ void CGWND_AudioChannel_IsActive() {}
 void CGWND_AudioChannel_Release() {}
 void WIN32_CloseHandle() {}
 void WIN32_timeKillEvent() {}
-void INPUT_Shutdown() {}
-void INPUT_Cleanup() {}
 int WIN32_GetThreadResult(void*) { return 0; }
 void World_Shutdown(int) {}
 void Train_FlushMessages(void*) {}

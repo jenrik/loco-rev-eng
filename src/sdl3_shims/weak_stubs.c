@@ -97,7 +97,6 @@ void __attribute__((weak)) IDirectDrawSurface4::~IDirectDrawSurface4()() {}
 void __attribute__((weak)) IDirectDrawSurface4::IDirectDrawSurface4()() {}
 void* __attribute__((weak)) __imp_SystemParametersInfoA = 0;
 void __attribute__((weak)) INPUT_ExitGame(void*, int, int)() {}
-void __attribute__((weak)) INPUT_LoadConfig(void*)() {}
 void __attribute__((weak)) INPUT_NewWorld(int)() {}
 void __attribute__((weak)) INPUT_SetKeyboard(void*)() {}
 void __attribute__((weak)) INPUT_SetMouse(void*)() {}

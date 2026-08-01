@@ -25,8 +25,10 @@
  * the Cursor-specific type. For example, cursor_state() overlays
  * field_14, primary_surface() overlays field_38, etc.
  *
- * Vtable layout (verified against the Ghidra database; each slot's
- * function was confirmed via DATA references from 0x477930..0x4779F4):
+ * Vtable layout (verified against the raw PE bytes at 0x477930; the
+ * Cursor vtable ends at slot [37] with a NULL terminator at 0x4779C4 —
+ * everything at +0x98 and beyond in older notes was actually the
+ * separate InputMgr vtable at 0x4779C8, not Cursor slots):
  *   [0]  +0x00: scalar deleting destructor (Cursor_Dtor, 0x4159E0)
  *   [1]  +0x04: Hide (Cursor_Hide, 0x416F70)
  *   [2]  +0x08: Show (UI_WindowBase_Show, 0x4259C0, inherited)
@@ -44,8 +46,8 @@
  *               WM_* to slots [13]..[36])
  *   [11] +0x2C: WindowProc (Cursor_ToolbarWndProc, 0x419A60)
  *   [12] +0x30: 0x41A8A0   [13] +0x34: 0x422EA0 (DefWndProc)
- *   [14] +0x38: 0x41AC10   [15] +0x3C: 0x41AA40 (INPUT_CancelColorAdjust)
- *   [16] +0x40: 0x41CA80   [17] +0x44: 0x41AAE0 (INPUT_ConfirmColorAdjust)
+ *   [14] +0x38: 0x41AC10   [15] +0x3C: 0x41AA40 (Cursor_CancelColorAdjust)
+ *   [16] +0x40: 0x41CA80   [17] +0x44: 0x41AAE0 (Cursor_ConfirmColorAdjust)
  *   [18] +0x48: 0x41AB70   [19] +0x4C: 0x422EA0 (DefWndProc)
  *   [20] +0x50: 0x41CE50   [21] +0x54: 0x417040
  *   [22] +0x58: 0x422EA0   [23] +0x5C: 0x426950
@@ -54,14 +56,15 @@
  *   [28] +0x70: 0x426A60   [29] +0x74: 0x422EA0
  *   [30] +0x78: 0x426AC0   [31] +0x7C: 0x426AD0
  *   [32] +0x80: 0x419A10   [33] +0x84: 0x422EA0
- *   [34] +0x88..+0x90: 0x422EA0 (DefWndProc)
- *   [37] +0x94: 0x41D2B0 (INPUT_Dtor)   [38] +0x98: 0x41DD80 (INPUT_PlaceObject)
- *   [39] +0x9C: 0x41DEF0 (INPUT_RemoveObject)  [40] +0xA0: 0x41E100 (INPUT_FileDlgProc)
- *   [41] +0xA4: —        [42] +0xA8: —
- *   [43] +0xAC: 0x41E600 (INPUT_DtorWrapper)
- *   [44] +0xB0: 0x425670 (UI_PaintWindow)  [45] +0xB4: 0x4257F0 (UI_OnMouseLeave)
- *   [46] +0xB8: 0x41E9F0 (INPUT_EditWndProc)  [47] +0xBC: 0x41E6E0 (INPUT_HandleEditMessage)
- *   [48] +0xC0: 0x41F4B0
+ *   [34] +0x88: 0x422EA0   [35] +0x8C: 0x422EA0
+ *   [36] +0x90: 0x422EA0   [37] +0x94: 0x00000000 (NULL — vtable end)
+ *
+ * The dwords at +0x98..+0xC0 are NOT Cursor slots: 0x4779C8 is the
+ * separate InputMgr vtable (slot[0]=0x41D2B0 dtor, [1]=0x41DD80
+ * INPUT_PlaceObject, [2]=0x41DEF0 INPUT_RemoveObject, [3]=0x41E100
+ * InputMgr::ResetWorldState; slots [4]/[5] are float data), and 0x4779F4
+ * begins the 0x4A99B0 event-list object's vtable ([0]=0x41F4B0 scalar
+ * dtor, [1]=0x4203A0, [2]=0x420860).  See input/InputMgr.h.
  *
  * The C++ virtual set below covers the slots the reconstructed code
  * actually dispatches through (dtor [0], hide [1], render_editor [8],

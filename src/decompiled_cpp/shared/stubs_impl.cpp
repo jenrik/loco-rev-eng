@@ -302,7 +302,6 @@ void CGWND_SetMode(void*) {}
 void CGWND_SetPause(void*, char) {}
 void CGWND_SetBuildMode(int) {}
 void World_Init(void*) {}
-void INPUT_EditCharHandler(int) {}
 void PixelDataCache_LookupAsset(void*, int, int) {}
 void PixelDataCache_GetEntryCount(void*) {}
 void PixelDataCache_Unlock(void*, int) {}
@@ -340,7 +339,6 @@ void* PixelDataCache_Ctor(void*) { return nullptr; }
 int   DDRAW_Init(void) { return 1; }
 void  TileMap_Init(void*, char) {}
 void  UIPANEL_Hide(void*, void*) {}
-void  INPUT_LoadConfig(void*) {}
 
 /* Per-frame updates */
 void  NETMAN_Update(void*) {}

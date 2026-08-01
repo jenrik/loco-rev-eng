@@ -359,14 +359,18 @@ test-cgwnd-entermode3: $(CGWND_ENTERMODE3_TEST)
 
 # Canonical InputMgr regression: ctor 0x41D250 / dtor body 0x41D2D0 / embedded
 # entity-collection ops (vtable family 0x477798/0x477758) / ResetWorldState
-# 0x41E100.  Links the real InputMgr.o; the test supplies operator_new /
-# GLOBAL_free / g_game and lets all other symbols resolve to zero (they are
-# not reached by the exercised paths).
+# Canonical InputMgr regression: ctor 0x41D250 / dtor body 0x41D2D0 / embedded
+# entity-collection ops (vtable family 0x477798/0x477758) / INPUT_GetSaveFileName
+# 0x41DD40 / ResetWorldState 0x41E100.  Links the real InputMgr.o; the test
+# supplies g_game, operator_new, GLOBAL_free and a fail-loud
+# Game::DeselectGameObject fixture.  No --unresolved-symbols=ignore-all: the
+# link fails loudly if InputMgr.o references any symbol the test does not
+# truthfully provide.
 INPUTMGR_CANONICAL_TEST := $(BUILD_DIR)/inputmgr_canonical_test
 
 $(INPUTMGR_CANONICAL_TEST): $(BUILD_DIR)/dcp/input/InputMgr.o tests/inputmgr_canonical_test.cpp | dirs
 	@echo "=== Testing canonical InputMgr (0x41D250/0x41D2D0/0x41E100) ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs $(FORCE_INC) tests/inputmgr_canonical_test.cpp $(BUILD_DIR)/dcp/input/InputMgr.o -Wl,--unresolved-symbols=ignore-all -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs $(FORCE_INC) tests/inputmgr_canonical_test.cpp $(BUILD_DIR)/dcp/input/InputMgr.o -o $@
 
 test-inputmgr-canonical: $(INPUTMGR_CANONICAL_TEST)
 	@$(INPUTMGR_CANONICAL_TEST)

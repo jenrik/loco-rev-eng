@@ -70,6 +70,23 @@ struct TileMapResource {
     uint8_t _pad_568[0x94];
     int32_t neighbor_def[4][2];          /* +0x5FC  per-direction neighbor
                                           *   definitions (GetViewport) */
+    uint8_t _pad_61C[0x1E];              /* +0x61C .. +0x639 (unmapped) */
+    uint8_t state_63A;                   /* +0x63A  object state byte read by
+                                          *   the type-3 predicates 0x44BD50 /
+                                          *   0x44BD70 / 0x44BD90 and by
+                                          *   IsEditorSprite (0x41F430) */
+
+    /** Sprite-editor object predicate. Address: 0x41F430 (thiscall).
+     *
+     *  True when the resource is a sprite-editor/creator object that the
+     *  TileMap viewport/placement walks must skip:
+     *    object_type (+0x08) == 0x03: state (+0x63A) ∈ {0x0E,0x0F,0x10,0x11}
+     *                                 (0x44BD50 → {0x0E,0x0F},
+     *                                  0x44BD70 → {0x10,0x11})
+     *    object_type (+0x08) == 0x0C: resource_id (+0x04) ∈ {0x3001,0x3002}
+     *  Verified against objdump 0x41F430 (the legacy "INPUT_EditCharHandler"
+     *  label was fabricated; the function is a resource predicate). */
+    bool IsEditorSprite() const;
 };
 
 struct TileMapObject {
@@ -402,7 +419,6 @@ extern void     DDRAW_PresentRect(RECT* rect, HWND hwnd,
                                    int32_t* viewport_x, char flag);
 extern void     GLOBAL_free(void* ptr);
 extern void*    operator_new(size_t size);
-extern int      INPUT_EditCharHandler(int ptr);   /* 0x41F430 */
 extern void*      INPUT_PlaceObject(InputMgr* mgr, unsigned int resource_id); /* 0x41DD80 */
 extern uintptr_t  INPUT_RemoveObject(InputMgr* mgr, void* obj, unsigned int param); /* 0x41DEF0 */
 extern int      RESDATA_IsSceneryTile(int ptr);    /* 0x44BD90 */

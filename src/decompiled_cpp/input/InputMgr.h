@@ -120,8 +120,9 @@ public:
      * Kept for layout documentation only; typed methods below replace all
      * vtable reads/writes in the C++ model. */
     void*    list_vtable;
-    void**   buffer;          /* +0x08 heap buffer, 10 slots (0x28 bytes
-                                  on x86 = 10×4; host uses 10×sizeof(void*)) */
+    Entity** buffer;          /* +0x08 heap buffer, 10 Entity* slots
+                                  (0x28 bytes on x86 = 10×4; host uses
+                                  10×sizeof(Entity*)) */
     int32_t  capacity;        /* +0x0C 10 if allocated, else 0 */
     int32_t  count;           /* +0x10 populated entries */
     int32_t  entity_count;    /* +0x14 entity sub-count */
@@ -135,16 +136,20 @@ public:
 
     /** GetItem — collection vtable[8] (0x424030) → vtable[7] (0x424530):
      *  buffer[index] when 0 <= index < capacity, else nullptr. */
-    void* ListGetItem(int32_t index) const;
+    Entity* ListGetItem(int32_t index) const;
 
     /** RemoveAt — collection vtable[3], 0x4241E0.  Shift-remove at index,
      *  decrements count, returns the removed element (or nullptr when
      *  index is out of range).  Does not destroy the element. */
-    void* ListRemoveAt(int32_t index);
+    Entity* ListRemoveAt(int32_t index);
 
     /** ClearAll — collection vtable[6], 0x424270.  Repeatedly removes
      *  the last element (RemoveElement, vtable[4] 0x4356E0) which
-     *  destroys each removed element via its virtual destructor. */
+     *  destroys each removed element via its virtual destructor.
+     *
+     *  The collection holds Entity*: INPUT_GetSaveFileName (0x41DD40)
+     *  dispatches each item's vtable[10] = Entity::Update (0x405C40),
+     *  and ClearAll deletes each item as Entity (its virtual dtor). */
     void ListClearAll();
 };
 
@@ -176,8 +181,16 @@ void INPUT_GetSaveFileName(InputMgr* self);
 
 void  INPUT_NewWorld(InputMgr* self);                          /* 0x41E120 */
 char  INPUT_LoadWorld(InputMgr* self, const char* path);       /* 0x41D320 */
-char  INPUT_LoadSaveFile(InputMgr* self, int a, int b,
-                         const char* path);                    /* 0x41D5C0 */
+/** Load a save file. Address: 0x41D5C0.
+ *
+ *  thiscall (ECX = self); stack args verified at 0x41D5FF/0x41D6C9/
+ *  0x41D780: S+4 = path (strlen'd and copied to a stack buffer),
+ *  S+8 = flags (when non-zero, TileMap::FullReset 0x454FE0 runs first),
+ *  S+0xC = flags2 (when zero, byte +0xC0 of each placed object is
+ *  cleared).  Callers: INPUT_LoadWorld (0x41D320) calls (path,1,1) and
+ *  (local-path,0,0); the function returns 1 on success, 0 on failure. */
+char  INPUT_LoadSaveFile(InputMgr* self, const char* path,
+                         int flags, int flags2);               /* 0x41D5C0 */
 void  INPUT_SaveCurrentWorld(InputMgr* self, const char* name);/* 0x41D9B0 */
 
 /* ---- Editor placement (deferred stubs; gameplay, not persistence) -- */

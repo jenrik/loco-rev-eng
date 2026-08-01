@@ -68,11 +68,13 @@ InputMgr::InputMgr()
 
     /* The original allocates 0x28 bytes = 10 four-byte slots on x86 and
      * zeroes 10 dwords (mov ecx,0xA; rep stosd).  The host uses the same
-     * ten-slot capacity with native pointer width (10 * sizeof(void*)),
+     * ten-slot capacity with native pointer width (10 * sizeof(Entity*)),
      * which is byte-identical on 32-bit and a safe native layout on
-     * 64-bit hosts. */
-    const size_t slot_bytes = 10 * sizeof(void*);
-    void** items = static_cast<void**>(operator_new(slot_bytes));
+     * 64-bit hosts.  The collection holds Entity* — INPUT_GetSaveFileName
+     * (0x41DD40) dispatches vtable[10] = Entity::Update (0x405C40) on
+     * each entry. */
+    const size_t slot_bytes = 10 * sizeof(Entity*);
+    Entity** items = static_cast<Entity**>(operator_new(slot_bytes));
     this->buffer = items;
     if (items != nullptr) {
         std::memset(items, 0, slot_bytes);
@@ -131,7 +133,7 @@ int32_t InputMgr::ListGetCount() const
 /* ---- GetItem — collection vtable[8] (0x424030) → vtable[7] (0x424530)
  *      buffer[index] when 0 <= index < capacity (unsigned compare),
  *      else nullptr.                                                ---- */
-void* InputMgr::ListGetItem(int32_t index) const
+Entity* InputMgr::ListGetItem(int32_t index) const
 {
     if (static_cast<uint32_t>(index) >= static_cast<uint32_t>(this->capacity)) {
         return nullptr;
@@ -143,9 +145,9 @@ void* InputMgr::ListGetItem(int32_t index) const
  *      Shift-remove at index: shift the tail left, null the last slot,
  *      decrement count, return the removed element (nullptr out of
  *      range).  Does not destroy the element.                        ---- */
-void* InputMgr::ListRemoveAt(int32_t index)
+Entity* InputMgr::ListRemoveAt(int32_t index)
 {
-    void* element = this->ListGetItem(index);
+    Entity* element = this->ListGetItem(index);
     if (element == nullptr) {
         return nullptr;
     }
@@ -165,9 +167,10 @@ void* InputMgr::ListRemoveAt(int32_t index)
 void InputMgr::ListClearAll()
 {
     while (this->count > 0) {
-        void* element = this->ListRemoveAt(this->count - 1);
+        Entity* element = this->ListRemoveAt(this->count - 1);
         if (element != nullptr) {
-            delete static_cast<Entity*>(element);
+            delete element;     /* RemoveElement vtable[4] 0x4356E0:
+                                   destroys via the virtual dtor */
         }
     }
 }
@@ -213,9 +216,9 @@ void INPUT_GetSaveFileName(InputMgr* self)
 {
     int32_t index = 0;
     while (index < self->ListGetCount()) {
-        void* item = self->ListGetItem(index);
+        Entity* item = self->ListGetItem(index);
         if (item != nullptr) {
-            static_cast<Entity*>(item)->Update();   /* vtable[10] 0x405C40 */
+            item->Update();     /* vtable[10] 0x405C40 */
         }
         index++;
     }
@@ -259,12 +262,12 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)   /* 0x41D320 */
     inputmgr_deferred("INPUT_LoadWorld", 0x41D320);
 }
 
-char INPUT_LoadSaveFile(InputMgr* self, int a, int b, const char* path) /* 0x41D5C0 */
+char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2) /* 0x41D5C0 */
 {
     (void)self;
-    (void)a;
-    (void)b;
     (void)path;
+    (void)flags;
+    (void)flags2;
     inputmgr_deferred("INPUT_LoadSaveFile", 0x41D5C0);
 }
 

@@ -57,10 +57,6 @@ extern "C" {
     void    __thiscall TileMap_InvalidateRect(void* tilemap, int32_t x, int32_t y,
                                               int32_t w, int32_t h);
 
-    /* Input */
-    class InputMgr;
-    void*   INPUT_FindObjectAt(InputMgr* input_mgr, int32_t type);
-
     /* Building/GameVehicle destination management */
     void __fastcall GameVehicle_AddDestination(int32_t* target, void* vehicle);
 
@@ -96,6 +92,12 @@ extern "C" {
 
 /* StopSound on GameObject */
 void __fastcall GameObject_StopSound(void* obj, int32_t sound_idx);
+
+/* Input (C++ linkage — INPUT_FindObjectAt is a C++ function defined in
+ * input/InputMgr.cpp; it must NOT be declared inside extern "C".  The
+ * original is a thiscall with ECX = &g_input_mgr (0x4A9990). */
+class InputMgr;
+void* INPUT_FindObjectAt(InputMgr* input_mgr, int32_t type);   /* 0x41E1F0 */
 
 /* ================================================================== */
 /* Global references                                                    */

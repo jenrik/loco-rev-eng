@@ -93,7 +93,6 @@ extern int      RESDATA_GetTileCategory(void* ptr, short a, unsigned short b);
 extern int      RESDATA_IsSceneryTile(int ptr);
 extern int      RESDATA_IsWaterTile(int ptr);
 extern int      RESDATA_IsTrackTile(int ptr);
-extern int      INPUT_EditCharHandler(int ptr);
 extern void*    INPUT_PlaceObject(InputMgr* mgr, unsigned int resource_id); /* 0x41DD80 */
 extern uintptr_t INPUT_RemoveObject(InputMgr* mgr, void* obj, unsigned int param); /* 0x41DEF0 */
 extern int      GetResourceType(unsigned int resource_id);
@@ -149,6 +148,24 @@ extern BOOL     UpdateWindow(HWND hWnd);
 extern void*    ResourceManager_GetById(void** resmgr, UINT id);
 extern void     UIPANEL_InitSurface(void* surface, int w, int h,
                                      int a, int b, byte c);
+
+/* ================================================================== */
+/* TileMapResource::IsEditorSprite — 0x41F430                          */
+/* ================================================================== */
+bool TileMapResource::IsEditorSprite() const
+{
+    /* type 0x03 (building/track): state byte +0x63A.  0x44BD50 accepts
+     * {0x0E,0x0F}, 0x44BD70 accepts {0x10,0x11}. */
+    if (this->object_type == 0x03) {
+        const uint8_t st = this->state_63A;
+        return st == 0x0E || st == 0x0F || st == 0x10 || st == 0x11;
+    }
+    /* type 0x0C (scenery): resource id +0x04 is 0x3001 or 0x3002. */
+    if (this->object_type == 0x0C) {
+        return this->resource_id == 0x3001 || this->resource_id == 0x3002;
+    }
+    return false;
+}
 
 /* ================================================================== */
 /* Tile Index Helper Macro                                             */
@@ -725,8 +742,10 @@ int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b)
 /*                                                                     */
 /* Checks if tile_b is buildable adjacent to tile_a.                   */
 /* Type codes: 3=track/building, 0x0C=scenery, 0x0D=other (road?).     */
-/* Returns: 100=valid placement, 0x65=buildable but restricted,        */
-/*          -1=blocked.                                                */
+/* Returns: 100=valid placement, 0x64=buildable but restricted,        */
+/*          -1=blocked.  (The restricted paths are the                */
+/*          neg/sbb/and-$0x65/dec idiom: 0x64 when the predicate      */
+/*          holds, -1 otherwise.)                                     */
 /* ================================================================== */
 int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
 {
@@ -743,10 +762,11 @@ int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
         }
     } else if (type_b == 0x0C) {
         /* Scenery on something */
-        if (INPUT_EditCharHandler(tile_resource_b)) {
+        if (resource_b->IsEditorSprite()) {     /* 0x41F430 */
             if (type_a == 0x0C) {
-                int handled_a = INPUT_EditCharHandler(tile_resource_a);
-                return handled_a ? 0x65 : -1;
+                bool handled_a = resource_a->IsEditorSprite();
+                /* 0x457C9E: neg/sbb/and $0x65/dec → 0x64 (100) or -1 */
+                return handled_a ? 0x64 : -1;
             }
             if (type_a == 0x0D) {
                 return 100;
@@ -756,7 +776,8 @@ int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
         /* Road/path type */
         if (type_a == 0x03) {
             int is_track = RESDATA_IsTrackTile(tile_resource_a);
-            return is_track ? 0x65 : -1;
+            /* 0x457C69: neg/sbb/and $0x65/dec → 0x64 (100) or -1 */
+            return is_track ? 0x64 : -1;
         }
         if (type_a == 0x0C || type_a == 0x0D) {
             return 100;
@@ -880,7 +901,7 @@ char TileMap::SetViewport(TileMapObject* building_sprite)
     }
 
     TileMapResource* resource = building_sprite->resource;
-    if (INPUT_EditCharHandler(reinterpret_cast<intptr_t>(resource))) {
+    if (resource->IsEditorSprite()) {     /* 0x41F430 */
         return 0;
     }
 
@@ -895,7 +916,7 @@ char TileMap::SetViewport(TileMapObject* building_sprite)
             TileMapResource* res = neighbor->resource;
 
             /* Skip sprite-editor objects */
-            while (res != NULL && INPUT_EditCharHandler(reinterpret_cast<intptr_t>(res))) {
+            while (res != NULL && res->IsEditorSprite()) {     /* 0x41F430 */
                 neighbor = GetViewport(neighbor, dir);
                 neighbors[dir] = neighbor;
                 res = neighbor == NULL ? NULL : neighbor->resource;
@@ -947,7 +968,7 @@ char TileMap::UpdateViewport(TileMapObject* sprite, short sprite_type)
     }
 
     TileMapResource* resource = sprite->resource;
-    if (INPUT_EditCharHandler(reinterpret_cast<intptr_t>(resource))) {
+    if (resource->IsEditorSprite()) {     /* 0x41F430 */
         return 0;
     }
 
@@ -962,7 +983,7 @@ char TileMap::UpdateViewport(TileMapObject* sprite, short sprite_type)
             TileMapResource* res = neighbor->resource;
 
             /* Skip sprite-editor objects */
-            while (res != NULL && INPUT_EditCharHandler(reinterpret_cast<intptr_t>(res))) {
+            while (res != NULL && res->IsEditorSprite()) {     /* 0x41F430 */
                 neighbor = GetViewport(neighbor, dir);
                 neighbors[dir] = neighbor;
                 res = neighbor == NULL ? NULL : neighbor->resource;
@@ -1052,7 +1073,7 @@ void TileMap::GetTileRect(TileMapObject* sprite)
                 reinterpret_cast<intptr_t>(neighbor_res));
             if (occupancy < 0) break;
 
-            if (!INPUT_EditCharHandler(reinterpret_cast<intptr_t>(neighbor_res))) {
+            if (!neighbor_res->IsEditorSprite()) {     /* 0x41F430 */
                 sprite->occupancy_links[dir] = reinterpret_cast<intptr_t>(neighbor);
             }
             sprite->occupancy_scores[dir] += occupancy;
@@ -1094,7 +1115,7 @@ void TileMap::GetTileAt(TileMapObject* sprite)
                 reinterpret_cast<intptr_t>(neighbor_res));
             if (buildable < 0) break;
 
-            if (!INPUT_EditCharHandler(reinterpret_cast<intptr_t>(neighbor_res))) {
+            if (!neighbor_res->IsEditorSprite()) {     /* 0x41F430 */
                 sprite->build_links[dir] = reinterpret_cast<intptr_t>(neighbor);
             }
             sprite->build_scores[dir] += buildable;

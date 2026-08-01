@@ -43,7 +43,6 @@ void* PixelDataCache_Ctor(void* mem);            /* 0x401620 */
 /* Subsystem init/update (C++ linkage) */
 int   Config_GetIniInt(void* cfg, const char* section, const char* key, int def); /* 0x452D60 */
 void  TileMap_Init(void* tilemap, char flags);   /* 0x454E60 */
-void  INPUT_LoadConfig(void* config);            /* 0x41F5E0 */
 int   ResourceManager_Init(void* rmgr);          /* 0x446050 */
 class InputMgr;
 void  INPUT_GetSaveFileName(InputMgr* self);      /* 0x41DD40 — per-frame entity tick */
@@ -226,8 +225,27 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     TileMap_Init(g_tilemap, 0);
 
     trace_setup_stage("step 7: input config");
-    /* Step 7: Load input config */
-    INPUT_LoadConfig((void*)&DAT_004a99b0);
+    /* Step 7: Load input config — original (GameLoop_Setup 0x406DA8):
+     *   push 0x47E29C; mov ecx,0x4A99B0; call 0x41F5E0
+     * 0x41F5E0 is the 0x4A99B0 event-list object's INI loader (reads
+     * "physical_occupancy"/"LoadEvents"/"TimeEvents" sections).  The
+     * object and its loader are NOT reconstructed yet (event-list
+     * reconstruction belongs to the persistence milestone); the host
+     * path is an explicit guarded adapter — it logs loudly instead of
+     * silently no-op'ing, and the original path is preserved under
+     * _WIN32. */
+#ifndef _WIN32
+    std::fprintf(stderr,
+        "[HOST] INPUT_LoadConfig (0x41F5E0) deferred: 0x4A99B0 event-list "
+        "INI loader not reconstructed\n");
+    std::fflush(stderr);
+#else
+    /* Original thiscall: ECX = &DAT_004a99b0 (0x4A99B0), one stack arg =
+     * the section string at 0x47E29C.  Declared here so the original path
+     * stays expressed; the definition arrives with the reconstruction. */
+    extern void __thiscall INPUT_LoadConfig(void* self, const char* section); /* 0x41F5E0 */
+    INPUT_LoadConfig(&DAT_004a99b0, "ee");
+#endif
 
     trace_setup_stage("step 8: resources");
     /* Step 8: Initialize resource manager */
