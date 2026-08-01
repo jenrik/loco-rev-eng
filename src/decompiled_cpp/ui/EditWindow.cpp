@@ -190,6 +190,14 @@ EditWindow::EditWindow(HINSTANCE hInstance, UINT resourceId) :
     this->previousState  = 0;                        /* +0xEC */
     this->icon           = NULL;                     /* +0xF8 (loaded later in Create) */
     this->spritesLoaded  = 0;                        /* +0x18C */
+#ifndef _WIN32
+    // Host-only deviation: the SDL compositor renders directly to the primary
+    // target, so EditWindow::render never creates the original UIPANEL surface.
+    // The x86 constructor deliberately leaves +0x1F0 uninitialized because its
+    // render path always assigns it before cleanup; make the host-only absence
+    // explicit so mode-1 teardown cannot interpret allocator residue as one.
+    this->pMainSurface = nullptr;
+#endif
     this->pPanelA        = NULL;                     /* +0x21C */
     this->pPanelB        = NULL;                     /* +0x220 */
 
@@ -918,7 +926,13 @@ void EditWindow::cleanupSprites()
     release_sprite(this->sprite_40E);
     release_sprite(this->sprite_40F);
 
+#ifndef _WIN32
+    // Host-only deviation: render() owns no UIPANEL_Surface; SDL presents the
+    // primary target directly. Never apply the original x86 surface destructor
+    // to the intentionally absent host surface.
+#else
     if (this->pMainSurface) UIPANEL_DestroySurface(this->pMainSurface, 1);
+#endif
     this->pMainSurface = nullptr;
     this->spritesLoaded = 0;
 }
