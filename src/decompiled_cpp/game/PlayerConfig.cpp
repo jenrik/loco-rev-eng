@@ -12,6 +12,7 @@
 
 #include "PlayerConfig.h"
 #include "../shared/types.h"
+#include "../input/Cursor.h"
 
 namespace {
 
@@ -78,13 +79,12 @@ void Config_WriteInt(void* ini, const char* section, const char* key, int value)
 
 /* Internal helpers (C++ linkage) */
 void LOCOBITMAP_ColorKeyBlit_thunk(void* dplay_cfg);
-void INPUT_InitNetworkPlayer(void* cursor);
 void NET_UpdatePlayerList(void);
 
 /* Global variables */
 extern char g_install_path[];               /* 0x4A99C8 — install directory path */
 extern void* g_config_ini;                  /* 0x485484 — config INI object handle */
-extern void* g_cursor;                      /* 0x4FD380 — cursor/input state */
+extern Cursor* g_cursor;                    /* 0x4FD380 — cursor/input state */
 extern PlayerConfig* g_player_config;       /* 0x4AA4A8 — global player config ptr */
 extern void* g_dplay_config;                /* 0x4FD3B4 — DirectPlay config ptr */
 
@@ -365,7 +365,7 @@ const char* PlayerConfig::SaveToFile()
 /*   5. If LoadOrCreate returns 1 (existing player):                   */
 /*      Sets is_new_player (+0x120) to 0                               */
 /*   6. If g_player_config is non-NULL:                                */
-/*      Calls INPUT_InitNetworkPlayer(g_cursor) and                    */
+/*      Calls g_cursor->init_network_player() (0x41A0E0) and           */
 /*      NET_UpdatePlayerList() to reinitialize network state.          */
 /*                                                                     */
 /* If names are equal: no-op (returns immediately).                     */
@@ -425,7 +425,7 @@ void PlayerConfig::SetName(const char* new_name)
 
     /* Step 4: Reinitialize network player list */
     if (g_player_config != NULL) {
-        INPUT_InitNetworkPlayer(g_cursor);     /* 0x41A0E0 */
+        g_cursor->init_network_player();    /* 0x41A0E0 */
         NET_UpdatePlayerList();                 /* 0x445170 */
     }
 }
@@ -537,7 +537,7 @@ PlayerConfig* PlayerRecord_constructor(PlayerConfig* config)
 
         /* Reinitialize network player list if global config exists */
         if (g_player_config != NULL) {
-            INPUT_InitNetworkPlayer(g_cursor);     /* 0x41A0E0 */
+            g_cursor->init_network_player();    /* 0x41A0E0 */
             NET_UpdatePlayerList();                 /* 0x445170 */
         }
     }

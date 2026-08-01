@@ -78,17 +78,13 @@ void UIPANEL_ScrollPanel_Dtor() {}
 void ScriptEngine_Call() {}
 void RESDATA_SetPosition() {}
 void HelpWnd_PlayNarration() {}
-void INPUT_NewWorld() {}
 void CGWND_SetBuildMode() {}
-void INPUT_SaveCurrentWorld() {}
 void GameAudio_UpdateVolume() {}
 void UIPANEL_ScrollPanel_HandleDrag() {}
 void Panel_DtorBody() {}
 void CRT_localtime() {}
 void CRT_wcsstr() {}
 void GameObject_GetBoundingRect() {}
-void INPUT_EditWndProc() {}
-void INPUT_ExitGame() {}
 void TileMap_GetObjectAt() {}
 void UI_MainMenu_SetState_void() {}
 void Vehicle_GetOccupantCount() {}
@@ -118,13 +114,8 @@ void* s_VolumeLow_0047f164 = nullptr;
 void* s_VolumeMed_0047f158 = nullptr;
 void* __imp_SystemParametersInfoA = nullptr;
 void* g_scene_name = nullptr;
-void INPUT_DirToOffset_Up() {}
-void INPUT_DirToOffset_Left() {}
-void INPUT_DirToOffset_Down() {}
-void INPUT_DirToOffset_Right() {}
 void Cursor_BlitEditPreview() {}
 void Cursor_UpdateScrollButtons() {}
-void INPUT_SwitchToLocomotiveTab() {}
 void Cursor_DrawColorPalette() {}
 void Cursor_HandleTabChange() {}
 void GetOpenFileNameA() {}
@@ -215,9 +206,6 @@ void TileMap_SetViewport(void*, void*) {}
 void TileMap_GetTileAt(void*, void*) {}
 void DDRAW_GetSurface() {}
 void DDRAW_LoadFile(int*, char const*) {}
-void INPUT_SetKeyboard(void*) {}
-void INPUT_SetMouse(void*) {}
-void INPUT_ExitGame(void*, int, int) {}
 void RESDATA_ScriptedObject_AddChild(void*, int, int) {}
 void CGWND_CursorEditWindow_Ctor(void*, int, int) {}
 void TrainStation_Ctor(void*, int, int) {}
@@ -291,7 +279,6 @@ void GameObject_InvalidateRect(void*) {}
 void GameObject_GetRelPos(void*, int*, int, int) {}
 void Config_WriteInt(void*, char const*, char const*, int) {}
 void LOCOBITMAP_ColorKeyBlit_thunk(void*) {}
-void INPUT_InitNetworkPlayer(void*) {}
 void NET_UpdatePlayerList() {}
 void Town_CheckOccupied(void*, int, int, int, int) {}
 void Town_SelectBuilding(void*, void*) {}

@@ -328,11 +328,11 @@ Known mappings are based on manual analysis; remaining names are best-guess from
 | 0041f0c0 | FUN_0041f0c0 | INPUT_0041f0c0 | input/cursor/UI |  |
 | 0041f2b0 | FUN_0041f2b0 | INPUT_0041f2b0 | input/cursor/UI |  |
 | 0041f430 | FUN_0041f430 | INPUT_0041f430 | input/cursor/UI |  |
-| 0041f480 | FUN_0041f480 | INPUT_0041f480 | input/cursor/UI |  |
-| 0041f4e0 | FUN_0041f4e0 | INPUT_0041f4e0 | input/cursor/UI |  |
+| 0041f480 | FUN_0041f480 | INPUT_0041f480 | input/cursor/UI | ctor of the 0x4A99B0 event-list window (CRT thunk 0x45C650) |
+| 0041f4e0 | FUN_0041f4e0 | INPUT_FreeEvents | input/cursor/UI | RENAMED 2026-08: frees both 0x4A99B0 event lists (LoadEvents head +0x08, TimeEvents head +0x0C); called by CGWND_Cleanup 0x407AB4. Was INPUT_0041f4e0. |
 | 0041f540 | FUN_0041f540 | INPUT_0041f540 | input/cursor/UI |  |
 | 0041f590 | FUN_0041f590 | INPUT_0041f590 | input/cursor/UI |  |
-| 0041f5e0 | FUN_0041f5e0 | INPUT_LoadConfig | input/cursor/UI | RENAMED 2026-07: Was INPUT_0041f5e0 (also misnamed INPUT_Init). Loads input config from LOCO.INI [LoadEvents] section. NOT a constructor. |
+| 0041f5e0 | FUN_0041f5e0 | INPUT_LoadEvents | input/cursor/UI | RENAMED 2026-08: reads the [LoadEvents] section (0x47E608, keys "%03ld") from <ResDir>EE.INI built as "%s%s.ini" (0x47E61C) over the 0x4A99C8 Res-dir buffer + "ee" (0x47E29C); called by GameLoop_Setup step 7 (0x406DA8). Was INPUT_LoadConfig (misnomer — the section is LoadEvents, not input config). |
 | 0041f6e0 | FUN_0041f6e0 | INPUT_0041f6e0 | input/cursor/UI |  |
 | 0041f7e0 | FUN_0041f7e0 | INPUT_0041f7e0 | input/cursor/UI |  |
 | 0041f8e0 | FUN_0041f8e0 | INPUT_0041f8e0 | input/cursor/UI |  |

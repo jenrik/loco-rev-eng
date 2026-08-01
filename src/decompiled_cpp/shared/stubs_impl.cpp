@@ -118,7 +118,13 @@ int g_mouse_spi5[3] = {0,0,0};
 int DAT_004fd3a0 = 0;
 int DAT_004a990c = 0;
 int DAT_00485444 = 0;
-int DAT_004a99b0 = 0;
+/* 0x4A99B0 — 0x630-byte event-list window object (LoadEvents/
+ * TimeEvents/EasterEggs; BSS in the original, constructed by CRT thunk
+ * 0x45C650 -> ctor 0x41F480).  Anchor only: the typed reconstruction is
+ * deferred (persistence milestone), so nothing dereferences it on the
+ * host; the _WIN32 call sites take its address for the original thiscall
+ * shapes (see input/InputMgr.h). */
+uint8_t g_input_events[0x630] = {0};
 int DAT_004ff124 = 0;
 int DAT_004ff11c = 0;
 int DAT_004a98b4 = 0;
@@ -349,7 +355,8 @@ void  RESDATA_ScriptedObject_Update(void*) {}
 void  Town_TrackBuilding(void*) {}
 void  DDRAW_UpdateBuilding(void*) {}
 /* INPUT_GetSaveFileName / INPUT_SaveCurrentWorld / INPUT_FindObjectAt /
- * INPUT_FileDlgProc: canonical definitions moved to input/InputMgr.cpp. */
+ * INPUT_PlaceObject / INPUT_RemoveObject: canonical definitions moved to
+ * input/InputMgr.cpp (0x41DD40 real, the rest loud deferred stubs). */
 void  BuildingMgr_UpdateAll(void*) {}
 
 /* Asset enumeration */

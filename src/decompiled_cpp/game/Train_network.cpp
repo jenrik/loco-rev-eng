@@ -2874,3 +2874,21 @@ void TrainSubsystem::RemoveAllCars()
         NETMAN_QueueMessage(msg);
     }
 }
+
+/* ================================================================== */
+/* Train_QueueMessage — free-function bridge (Netman.h declaration)    */
+/* Address: 0x4393D0 (TrainSubsystem::QueueMessage)                    */
+/*                                                                      */
+/* Netman.h declares `void Train_QueueMessage(void* train,             */
+/* TrainMessage* msg)`; the old defsym/link stubs declared              */
+/* (void*, void*) instead, so the mangled reference stayed unresolved   */
+/* and every call jumped to address 0 (silent crash when reached — the */
+/* ready-Go handoff's NETMAN_SendDisconnect).  The real binary body is  */
+/* TrainSubsystem::QueueMessage; forward to it.                        */
+/* ================================================================== */
+void Train_QueueMessage(void* train, TrainMessage* msg)
+{
+    if (train != nullptr && msg != nullptr) {
+        static_cast<TrainSubsystem*>(train)->QueueMessage(msg);
+    }
+}

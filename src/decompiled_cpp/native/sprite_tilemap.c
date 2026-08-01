@@ -27,7 +27,11 @@ extern void  __cdecl DDRAW_SpriteDataDtor(void* data);   /* 0x45CE10 */
 extern void  __cdecl Game_DeselectGameObject(void* game);
 extern void  __cdecl UI_CleanupTooltips(void* tooltip_mgr);
 extern void  __cdecl World_Init(void* world);
-extern void  __cdecl INPUT_FileDlgProc(void* input);
+/* InputMgr::ResetWorldState (0x41E100) — the legacy "INPUT_FileDlgProc"
+ * label was a misnomer (no file-dialog logic); the canonical typed C++
+ * reconstruction lives in input/InputMgr.{h,cpp}.  This raw-C stand-in
+ * matches the original thiscall on the static object at 0x4A9990. */
+extern void  __fastcall INPUT_ResetWorldState(void* self);   /* 0x41E100 */
 extern void  __cdecl DDRAW_SpriteDataDtor(uint32_t* data);
 extern int32_t __stdcall InvalidateRect(void* hWnd, void* rect, uint32_t erase);
 extern int32_t __stdcall UpdateWindow(void* hWnd);
@@ -134,7 +138,7 @@ void __fastcall Sprite_LockAll(void* tilemap)
 /*   1. Calls Game_DeselectGameObject (deselect from g_game)           */
 /*   2. World_Init (reset global world state)                          */
 /*   3. UI_CleanupTooltips (release tooltips)                          */
-/*   4. INPUT_FileDlgProc (reset file dialog state)                    */
+/*   4. INPUT_ResetWorldState (InputMgr::ResetWorldState, 0x41E100)   */
 /*   5. Clears a large data array at TileMap+0x44 (0x14910 dwords)    */
 /*   6. Re-initialises the occupancy bitmap to all 1s                  */
 /*   7. Clears a 65x81 matrix of two-byte values at TileMap+0x81      */
@@ -161,8 +165,8 @@ void __fastcall Sprite_UnlockAll(void* tilemap)
     /* Step 3: Cleanup tooltips */
     UI_CleanupTooltips((void*)0x4FD220);        /* g_tooltip_mgr */
 
-    /* Step 4: Reset file dialog */
-    INPUT_FileDlgProc((void*)0x4A9990);         /* g_input_mgr */
+    /* Step 4: Reset world/entity state on the InputMgr static object */
+    INPUT_ResetWorldState((void*)0x4A9990);         /* g_input_mgr */
 
     /* Step 5: Clear the large data array at TileMap+0x44 */
     /* 0x14910 dwords = 0x52440 bytes — fills from +0x44 to +0x52484 */

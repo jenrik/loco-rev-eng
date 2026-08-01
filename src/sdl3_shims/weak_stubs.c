@@ -96,10 +96,6 @@ void __attribute__((weak)) HelpWnd::update_anim_sprite(int)() {}
 void __attribute__((weak)) IDirectDrawSurface4::~IDirectDrawSurface4()() {}
 void __attribute__((weak)) IDirectDrawSurface4::IDirectDrawSurface4()() {}
 void* __attribute__((weak)) __imp_SystemParametersInfoA = 0;
-void __attribute__((weak)) INPUT_ExitGame(void*, int, int)() {}
-void __attribute__((weak)) INPUT_NewWorld(int)() {}
-void __attribute__((weak)) INPUT_SetKeyboard(void*)() {}
-void __attribute__((weak)) INPUT_SetMouse(void*)() {}
 void __attribute__((weak)) InvalidateRect(void*, RECT const*, int)() {}
 void __attribute__((weak)) Math_DistSquared(int, int, int, int)() {}
 void __attribute__((weak)) NET_ComputeColor(unsigned char, unsigned char, unsigned char)() {}

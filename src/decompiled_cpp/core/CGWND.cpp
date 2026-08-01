@@ -8,6 +8,7 @@
 #include "CGWND.h"
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
 #include <cstring>
+#include <cstdio>
 
 /* Subsystem class headers — for InitAllSubsystems and typed dispatch */
 #include "../ui/EditWindow.h"
@@ -1054,31 +1055,35 @@ void CGWND_Cleanup()
     UI_FreeMessageBox(0x4FD220);
 
     /* Original (CGWND_Cleanup 0x407AAF..0x407ABE):
-     *   mov ecx,0x4A99B0; call 0x41F4E0  — 0x4A99B0 event-list dtor body
+     *   mov ecx,0x4A99B0; call 0x41F4E0  — 0x4A99B0 event-list teardown
      *   mov ecx,0x4A9990; call 0x41D310  — InputMgr cleanup thunk
      *                                    (vtable[3] = ResetWorldState)
-     * The 0x4A99B0 object (and 0x41F4E0) is not reconstructed yet (its
-     * event lists are only populated by the deferred 0x41F5E0 INI
-     * loader, so on the host there is nothing to tear down).  The host
-     * path is an explicit guarded adapter — it logs loudly instead of
-     * silently no-op'ing — and the original path is preserved under
-     * _WIN32. */
+     * 0x41F4E0 frees both event lists (LoadEvents head +0x08, TimeEvents
+     * head +0x0C), destroying every entry.  The 0x4A99B0 object is not
+     * reconstructed yet (its event lists are only populated by the
+     * deferred 0x41F5E0/0x41F6E0 INI loaders, so on the host there is
+     * nothing to tear down).  The host path is an explicit guarded
+     * adapter — it logs loudly instead of silently no-op'ing — and the
+     * original path is preserved under _WIN32. */
 #ifndef _WIN32
     std::fprintf(stderr,
         "[HOST] CGWND_Cleanup: 0x4A99B0 event-list teardown (0x41F4E0) "
         "deferred\n");
     std::fflush(stderr);
 #else
-    /* Original thiscall: ECX = &DAT_004a99b0 (0x4A99B0).  Declared here
-     * so the original path stays expressed; the definition arrives with
-     * the reconstruction. */
-    extern int DAT_004a99b0;                    /* 0x4A99B0 — 0x4A99B0 object */
-    extern void __thiscall INPUT_Shutdown(void* self);   /* 0x41F4E0 */
-    INPUT_Shutdown(&DAT_004a99b0);
+    /* Original thiscall: ECX = &g_input_events (0x4A99B0).  Declared
+     * here so the original path stays expressed; the definition arrives
+     * with the reconstruction. */
+    extern void INPUT_FreeEvents(void* self);   /* 0x41F4E0 */
+    INPUT_FreeEvents(&g_input_events);
 #endif
 
-    /* Original: mov ecx,0x4A9990; call 0x41D310 (cleanup thunk) which
-     * dispatches vtable[3] = InputMgr::ResetWorldState (0x41E100). */
+    /* Original: mov ecx,0x4A9990; call 0x41D310 (cleanup thunk:
+     * mov eax,[ecx]; jmp [eax+0x0C]) — vtable[3] =
+     * InputMgr::ResetWorldState (0x41E100).  ResetWorldState is virtual
+     * (binary slot[3]), so this typed static-object call emits the same
+     * thiscall + vtable[3] dispatch on g_input_mgr for both the _WIN32
+     * and the host paths (host pointer model unchanged). */
     g_input_mgr.ResetWorldState();
 
     extern void Game_Shutdown(int* game);

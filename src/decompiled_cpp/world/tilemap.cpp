@@ -410,7 +410,11 @@ void TileMap::FullReset()
         static_cast<int>(reinterpret_cast<intptr_t>(g_game)));  /* 0x4854C8 */
     World_Init(g_world);  /* 0x4A98B0 */
     UI_CleanupTooltips(g_tooltip_mgr);  /* 0x4FD220 */
-    g_input_mgr.ResetWorldState();  /* 0x4A9990 — InputMgr vtable[3] 0x41E100 */
+    /* Original (0x455003): mov ecx,0x4A9990; call 0x41E100 — the body
+     * DIRECTLY (the 0x41D310 thunk/vtable[3] dispatch is CGWND_Cleanup's
+     * site).  ResetWorldState is virtual, so the qualified call keeps
+     * this direct-call shape. */
+    g_input_mgr.InputMgr::ResetWorldState();
 
     /* Clear the trailing header bytes and all named tile storage.
      * The assembly zeroes dwords +0x44..+0x52483 (0x14910 dwords),
@@ -740,48 +744,59 @@ int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b)
 /* TileMap_IsTileBuildable                                             */
 /* Address: 0x457C20                                                   */
 /*                                                                     */
-/* Checks if tile_b is buildable adjacent to tile_a.                   */
-/* Type codes: 3=track/building, 0x0C=scenery, 0x0D=other (road?).     */
-/* Returns: 100=valid placement, 0x64=buildable but restricted,        */
-/*          -1=blocked.  (The restricted paths are the                */
-/*          neg/sbb/and-$0x65/dec idiom: 0x64 when the predicate      */
-/*          holds, -1 otherwise.)                                     */
+/* Checks whether tile_b may be placed on top of tile_a (the base     */
+/* tile).  Dispatch is on the BASE tile's object type (+0x08,          */
+/* zero-extended byte, unsigned):                                      */
+/*   3 (track/building): base must be a track tile (0x44BD70 — state   */
+/*       +0x63A in {0x10,0x11}); road (0x0D) on top -> 0x64, all       */
+/*       other top types -> -1                                         */
+/*   0x0C (scenery):    base must be an editor sprite (0x41F430,       */
+/*       IsEditorSprite); scenery on top -> IsEditorSprite(top) ?      */
+/*       0x64 : -1; road on top -> 0x64; else -1                      */
+/*   0x0D (road):       track (3) on top -> IsTrackTile(top) (0x44BD70)*/
+/*       ? 0x64 : -1; scenery/road on top -> 0x64; else -1            */
+/*   anything else:     -1                                             */
+/*                                                                     */
+/* Returns 0x64 (== 100) on every valid placement and -1 when blocked; */
+/* there is no third value.  The neg/sbb/and-$0x65/dec idiom at        */
+/* 0x457C69/0x457C9E yields 0x64 when its predicate holds and -1       */
+/* otherwise (0x65 - 1).                                               */
 /* ================================================================== */
 int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
 {
     TileMapResource* resource_a = reinterpret_cast<TileMapResource*>(tile_resource_a);
     TileMapResource* resource_b = reinterpret_cast<TileMapResource*>(tile_resource_b);
-    char type_a = resource_a->object_type;
-    char type_b = resource_b->object_type;
+    const uint8_t type_a = resource_a->object_type;
+    const uint8_t type_b = resource_b->object_type;
 
-    if (type_b == 0x03) {
-        /* Building on road/path */
-        if (RESDATA_IsTrackTile(tile_resource_b) &&
-            type_a != 0x0C && type_a == 0x0D) {
-            return 100;
+    if (type_a == 0x03) {
+        /* Track/building base (0x457CAB): base must itself be a track
+         * tile; only road (0x0D) may be placed on top. */
+        if (!RESDATA_IsTrackTile(tile_resource_a)) {    /* 0x44BD70 */
+            return -1;
         }
-    } else if (type_b == 0x0C) {
-        /* Scenery on something */
-        if (resource_b->IsEditorSprite()) {     /* 0x41F430 */
-            if (type_a == 0x0C) {
-                bool handled_a = resource_a->IsEditorSprite();
-                /* 0x457C9E: neg/sbb/and $0x65/dec → 0x64 (100) or -1 */
-                return handled_a ? 0x64 : -1;
-            }
-            if (type_a == 0x0D) {
-                return 100;
-            }
+        return type_b == 0x0D ? 0x64 : -1;
+    }
+
+    if (type_a == 0x0C) {
+        /* Scenery base (0x457C76): the base must be an editor sprite
+         * before anything can be placed on it. */
+        if (!resource_a->IsEditorSprite()) {            /* 0x41F430 */
+            return -1;
         }
-    } else if (type_b == 0x0D) {
-        /* Road/path type */
-        if (type_a == 0x03) {
-            int is_track = RESDATA_IsTrackTile(tile_resource_a);
-            /* 0x457C69: neg/sbb/and $0x65/dec → 0x64 (100) or -1 */
-            return is_track ? 0x64 : -1;
+        if (type_b == 0x0C) {
+            /* Scenery on scenery: both must be editor sprites. */
+            return resource_b->IsEditorSprite() ? 0x64 : -1;
         }
-        if (type_a == 0x0C || type_a == 0x0D) {
-            return 100;
+        return type_b == 0x0D ? 0x64 : -1;
+    }
+
+    if (type_a == 0x0D) {
+        /* Road base (0x457C45). */
+        if (type_b == 0x03) {
+            return RESDATA_IsTrackTile(tile_resource_b) ? 0x64 : -1; /* 0x44BD70 */
         }
+        return (type_b == 0x0C || type_b == 0x0D) ? 0x64 : -1;
     }
 
     return -1;

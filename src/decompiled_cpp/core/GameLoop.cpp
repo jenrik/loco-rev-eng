@@ -109,7 +109,7 @@ extern void* g_timer_event_id;       /* 0x485438 */
 extern int   DAT_00485444;           /* 0x485444 */
 class InputMgr;
 extern InputMgr g_input_mgr;        /* 0x4A9990 — static InputMgr object */
-extern int   DAT_004a99b0;           /* 0x4A99B0 */
+extern uint8_t g_input_events[];   /* 0x4A99B0 — event-list window object */
 extern int   DAT_004ff124;           /* 0x4FF124 */
 extern int   DAT_004ff11c;           /* 0x4FF11C */
 extern int   DAT_004a98b4;           /* 0x4A98B4 */
@@ -225,26 +225,28 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     TileMap_Init(g_tilemap, 0);
 
     trace_setup_stage("step 7: input config");
-    /* Step 7: Load input config — original (GameLoop_Setup 0x406DA8):
+    /* Step 7: Load events — original (GameLoop_Setup 0x406DA8):
      *   push 0x47E29C; mov ecx,0x4A99B0; call 0x41F5E0
-     * 0x41F5E0 is the 0x4A99B0 event-list object's INI loader (reads
-     * "physical_occupancy"/"LoadEvents"/"TimeEvents" sections).  The
-     * object and its loader are NOT reconstructed yet (event-list
+     * 0x41F5E0 loads the [LoadEvents] section (string 0x47E608) from
+     * <ResDir>EE.INI — the file name is built as "%s%s.ini" (0x47E61C)
+     * over the Res-dir buffer 0x4A99C8 and the "ee" suffix pushed
+     * here (0x47E29C), with "%03ld" keys (0x47E614).  The 0x4A99B0
+     * event-list object is NOT reconstructed yet (event-list
      * reconstruction belongs to the persistence milestone); the host
      * path is an explicit guarded adapter — it logs loudly instead of
      * silently no-op'ing, and the original path is preserved under
-     * _WIN32. */
+     * _WIN32.  The legacy "INPUT_LoadConfig" label was a misnomer. */
 #ifndef _WIN32
     std::fprintf(stderr,
-        "[HOST] INPUT_LoadConfig (0x41F5E0) deferred: 0x4A99B0 event-list "
-        "INI loader not reconstructed\n");
+        "[HOST] INPUT_LoadEvents (0x41F5E0) deferred: 0x4A99B0 event-list "
+        "object not reconstructed\n");
     std::fflush(stderr);
 #else
-    /* Original thiscall: ECX = &DAT_004a99b0 (0x4A99B0), one stack arg =
-     * the section string at 0x47E29C.  Declared here so the original path
+    /* Original thiscall: ECX = &g_input_events (0x4A99B0), one stack arg =
+     * the "ee" suffix at 0x47E29C.  Declared here so the original path
      * stays expressed; the definition arrives with the reconstruction. */
-    extern void __thiscall INPUT_LoadConfig(void* self, const char* section); /* 0x41F5E0 */
-    INPUT_LoadConfig(&DAT_004a99b0, "ee");
+    extern void INPUT_LoadEvents(void* self, const char* suffix);  /* 0x41F5E0 */
+    INPUT_LoadEvents(&g_input_events, "ee");
 #endif
 
     trace_setup_stage("step 8: resources");

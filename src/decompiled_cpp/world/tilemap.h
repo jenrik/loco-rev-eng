@@ -340,7 +340,9 @@ extern TileMap* g_tilemap;              /* 0x4AAD08 — host-constructed singlet
 /** Check if two tile resources conflict — Address: 0x457B60 */
 int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b);
 
-/** Check if tile_b is buildable next to tile_a — Address: 0x457C20 */
+/** Check if tile_b may be placed on top of tile_a.  Dispatch is on
+ *  tile_a's object type (0x457C20); returns 0x64 (100) when valid,
+ *  -1 when blocked. */
 int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b);
 
 /** Merge overlapping dirty rects in the linked list — Address: 0x456C60.

@@ -44,6 +44,9 @@
 void* operator_new(size_t size) { return std::malloc(size); }
 void  GLOBAL_free(void* ptr) { std::free(ptr); }
 void* g_game = nullptr;   /* host: BootstrapMode3Core constructs this later */
+/* INPUT_DirToOffset_* (0x41D8F0..0x41D980) read these 16-bit globals. */
+int32_t g_player_id = 0;     /* 0x4AAD46 */
+int32_t g_player_color = 0;  /* 0x4AAD48 */
 
 /* ---- Test fixture: Game::DeselectGameObject (0x411580) ----
  * The exercised paths never reach it (g_game == nullptr), so a fail-loud
@@ -159,6 +162,31 @@ int main()
         CHECK(mgr.special_count == 0, "ResetWorldState zeroes special_count (+0x18)");
         CHECK(mgr.count == 0, "ResetWorldState leaves count at 0");
         mgr.DtorBody();
+    }
+
+    /* ---- 5. INPUT_DirToOffset_* (0x41D8F0/0x41D920/0x41D950/0x41D980)
+     * Neighbour-tile offsets packed as (Y << 16) | X from the 16-bit
+     * globals g_player_id (0x4AAD46) / g_player_color (0x4AAD48). ---- */
+    {
+        g_player_id = 0x12;       /* 18 */
+        g_player_color = 0;       /* low 16 bits used */
+        int32_t out = 0;
+        /* Up:   X = id - 3 = 15, Y = (color>>1)-1 = -1 */
+        INPUT_DirToOffset_Up(&out);
+        CHECK(out == (int32_t)(0xFFFF0000u | 0x0Fu),
+              "DirToOffset_Up packs (Y<<16)|X");
+        /* Left: X = 0, Y = -1 */
+        INPUT_DirToOffset_Left(&out);
+        CHECK(out == (int32_t)0xFFFF0000u, "DirToOffset_Left packs Y<<16");
+        /* Down: X = (id>>1)-1 = 8, Y = color-2 = -2 */
+        INPUT_DirToOffset_Down(&out);
+        CHECK(out == (int32_t)(0xFFFE0000u | 0x08u),
+              "DirToOffset_Down packs (Y<<16)|X");
+        /* Right: X = 8, Y = 0 */
+        INPUT_DirToOffset_Right(&out);
+        CHECK(out == 8, "DirToOffset_Right packs X only");
+        g_player_id = 0;
+        g_player_color = 0;
     }
 
     if (failures == 0) {

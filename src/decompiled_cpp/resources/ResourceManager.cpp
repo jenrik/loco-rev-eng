@@ -26,6 +26,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <new>
+#include <cstdio>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -100,10 +101,15 @@ void Config_GetIniString(void* config, const char* section,
 int32_t Config_GetIniInt(void* config, const char* section,
     const char* key, int32_t defaultValue);           /* @ 0x00452D60 */
 
-void INPUT_SetKeyboard(void* obj);                   /* @ 0x0041F7E0 */
-void INPUT_SetMouse(void* obj);                      /* @ 0x0041F970 */
 void* UI_CreateChildWindow(void* obj, int32_t resId, int32_t strPtr); /* @ 0x00424AF0 */
-void* INPUT_ExitGame(void* obj, int32_t resId, int32_t strPtr);       /* @ 0x0041E570 */
+void* INPUT_ExitGame(void* obj, int32_t resId, int32_t strPtr);       /* @ 0x0041E570 —
+                                                                       *   event-list
+                                                                       *   window ctor
+                                                                       *   (legacy
+                                                                       *   misnomer);
+                                                                       *   loud deferred
+                                                                       *   stub in
+                                                                       *   InputMgr.cpp */
 void* TrainStation_Ctor(void* obj, int32_t resId, int32_t strPtr);    /* @ 0x00436400 */
 void* CGWND_CursorEditWindow_Ctor(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0040E600 */
 void* RESDATA_ScriptedObject_AddChild(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0044B190 */
@@ -355,11 +361,29 @@ bool ResourceManager::Init()
         20, 0, 0, 0, 900, 0, 0, 0, 1, 0, 0, 2, 0, fontName
     );
 
-    /* Step 5: Initialize keyboard and mouse input subsystems */
-    /* Uses global input context at 0x4A99B0 */
-    void* inputContext = reinterpret_cast<void*>(static_cast<uintptr_t>(0x004A99B0));
-    INPUT_SetKeyboard(inputContext);
-    INPUT_SetMouse(inputContext);
+    /* Step 5: Initialize keyboard and mouse input subsystems.
+     * Original (ResourceManager_Init 0x4461B4/0x4461C1):
+     *   mov ecx,0x4A99B0; call 0x41F7E0   (INPUT_SetKeyboard —
+     *                                      [EasterEggs] loader)
+     *   mov ecx,0x4A99B0; call 0x41F970   (INPUT_SetMouse — easter-egg
+     *                                      record / season date)
+     * The 0x4A99B0 event-list object is NOT reconstructed yet; the host
+     * path is an explicit guarded adapter — it logs loudly instead of
+     * silently no-op'ing — and the original path is preserved under
+     * _WIN32. */
+#ifndef _WIN32
+    std::fprintf(stderr,
+        "[HOST] ResourceManager_Init: INPUT_SetKeyboard/INPUT_SetMouse "
+        "(0x41F7E0/0x41F970) deferred: 0x4A99B0 event-list object not "
+        "reconstructed\n");
+    std::fflush(stderr);
+#else
+    extern uint8_t g_input_events[];   /* 0x4A99B0 — event-list object */
+    extern void INPUT_SetKeyboard(void* self);  /* 0x41F7E0 */
+    extern void INPUT_SetMouse(void* self);     /* 0x41F970 */
+    INPUT_SetKeyboard(&g_input_events);
+    INPUT_SetMouse(&g_input_events);
+#endif
 
     /* Step 6: Record start time (stack value, not further used) */
     int32_t startTime;
@@ -1073,7 +1097,7 @@ int32_t ResourceManager::LoadStringToResource(UINT resId)
 /*                                                                     */
 /* Writes a pointer to resource slot at +0x10030[resIndex] into the   */
 /* type-index array at +0x2C[depIndex]. Creates a weak reference from */
-/* one slot to another. Called by INPUT_SetMouse.                     */
+/* one slot to another. Called by INPUT_SetMouse (0x41F970).          */
 /* ================================================================== */
 
 void ResourceManager::RegisterDependency(int32_t depIndex, int32_t resIndex)

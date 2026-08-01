@@ -21,6 +21,15 @@
  * 0x41DEF0, INPUT_FindObjectAt 0x41E1F0) are NOT part of this milestone:
  * they live here as deferred stubs that log loudly and abort, replacing the
  * previous silent no-op stubs.  Tracked in PROGRESS.md.
+ *
+ * Also implemented here: the verified neighbour-tile offset helpers
+ * INPUT_DirToOffset_Up/Left/Down/Right (0x41D8F0/0x41D920/0x41D950/
+ * 0x41D980, used by Netman), and loud deferred stubs for the 0x4A99B0
+ * event-list window entry points (INPUT_SetKeyboard 0x41F7E0,
+ * INPUT_SetMouse 0x41F970, INPUT_ExitGame 0x41E570 — a ctor, misnomer —
+ * and Cursor's INPUT_SwitchToLocomotiveTab 0x41A210).  The old silent
+ * no-arg defsym stubs for these were removed (see PROGRESS.md session
+ * log).
  */
 
 #include "InputMgr.h"
@@ -39,6 +48,8 @@
 extern void* operator_new(size_t size);            /* 0x465CE0 */
 extern void  GLOBAL_free(void* ptr);               /* 0x465CD0 */
 extern void* g_game;                               /* 0x4854C8 */
+extern int32_t g_player_id;                        /* 0x4AAD46 */
+extern int32_t g_player_color;                     /* 0x4AAD48 */
 
 /* ================================================================== */
 /* g_input_mgr — static object at 0x4A9990                             */
@@ -178,6 +189,11 @@ void InputMgr::ListClearAll()
 /* ================================================================== */
 /* ResetWorldState — vtable[3] (cleanup thunk 0x41D310 target)         */
 /* Address: 0x41E100                                                   */
+/* Virtual in the C++ model (binary vtable 0x4779C8 slot[3]);          */
+/* CGWND_Cleanup (0x407ABE) dispatches through the 0x41D310 thunk      */
+/* (a virtual call in C++), while TileMap::FullReset (0x455003) calls  */
+/* the body directly (0x41E100 — qualified InputMgr::ResetWorldState   */
+/* at the call site).                                                  */
 /*                                                                      */
 /* Deselects the Game's selected object (Game::DeselectGameObject,      */
 /* 0x411580), clears the embedded entity collection (deleting every     */
@@ -222,6 +238,51 @@ void INPUT_GetSaveFileName(InputMgr* self)
         }
         index++;
     }
+}
+
+/* ================================================================== */
+/* INPUT_DirToOffset_* — neighbour-tile offsets (packed (Y<<16)|X)     */
+/* Addresses: Up 0x41D8F0 / Left 0x41D920 / Down 0x41D950 /           */
+/*            Right 0x41D980                                           */
+/*                                                                      */
+/* Compute the tilemap offset for a direction relative to the current  */
+/* player position and store the packed value (Y << 16) | X in         */
+/* *output (X/Y are 16-bit signed).  The originals load the 16-bit     */
+/* globals g_player_id (0x4AAD46) and g_player_color (0x4AAD48); the   */
+/* host versions truncate the 32-bit globals to 16 bits exactly like   */
+/* the x86 loads.  Used by Netman (0x43E2E0/0x43E500/0x43F140) for     */
+/* tunnel-angle to neighbour-tile conversion.                          */
+/* ================================================================== */
+void INPUT_DirToOffset_Up(int* output)      /* 0x41D8F0 */
+{
+    const int16_t id = static_cast<int16_t>(g_player_id);
+    const int16_t color = static_cast<int16_t>(g_player_color);
+    const uint16_t x = static_cast<uint16_t>(id - 3);             /* sub $0x3, %ax */
+    const uint16_t y = static_cast<uint16_t>((color >> 1) - 1);   /* sar $1, %cx; dec */
+    *output = (static_cast<int32_t>(y) << 16) | static_cast<int32_t>(x);
+}
+
+void INPUT_DirToOffset_Left(int* output)    /* 0x41D920 */
+{
+    const int16_t color = static_cast<int16_t>(g_player_color);
+    const uint16_t y = static_cast<uint16_t>((color >> 1) - 1);   /* sar $1, %ax; dec */
+    *output = static_cast<int32_t>(y) << 16;                      /* X = 0 */
+}
+
+void INPUT_DirToOffset_Down(int* output)    /* 0x41D950 */
+{
+    const int16_t id = static_cast<int16_t>(g_player_id);
+    const int16_t color = static_cast<int16_t>(g_player_color);
+    const uint16_t x = static_cast<uint16_t>((id >> 1) - 1);      /* sar $1, %ax; dec */
+    const uint16_t y = static_cast<uint16_t>(color - 2);          /* add $0xFFFFFFFE, %ecx */
+    *output = (static_cast<int32_t>(y) << 16) | static_cast<int32_t>(x);
+}
+
+void INPUT_DirToOffset_Right(int* output)   /* 0x41D980 */
+{
+    const int16_t id = static_cast<int16_t>(g_player_id);
+    const uint16_t x = static_cast<uint16_t>((id >> 1) - 1);      /* sar $1, %ax; dec */
+    *output = static_cast<int32_t>(x);                            /* Y = 0 */
 }
 
 /* ================================================================== */
@@ -300,4 +361,55 @@ void* INPUT_FindObjectAt(InputMgr* self, int mode)   /* 0x41E1F0 */
     (void)self;
     (void)mode;
     inputmgr_deferred("INPUT_FindObjectAt", 0x41E1F0);
+}
+
+/* ================================================================== */
+/* 0x4A99B0 event-list window entry points (deferred; loud)            */
+/*                                                                      */
+/* The 0x4A99B0 object (LoadEvents/TimeEvents/EasterEggs lists) is not */
+/* reconstructed yet; these replace the old silent no-arg defsym stubs */
+/* so any reachable call fails loudly instead of silently succeeding.  */
+/* The host init paths that would call them are guarded adapters that  */
+/* log loudly and skip (see PROGRESS.md session log).                  */
+/* ================================================================== */
+
+namespace {
+
+[[noreturn]] void input_events_deferred(const char* name, uint32_t address)
+{
+    std::fprintf(stderr,
+        "[InputMgr] %s (0x%08X) is a deferred stub: the 0x4A99B0 "
+        "event-list window class is not reconstructed yet\n",
+        name, address);
+    std::fflush(stderr);
+    std::abort();
+}
+
+} // namespace
+
+void INPUT_SetKeyboard(void* self)   /* 0x41F7E0 — [EasterEggs] loader */
+{
+    (void)self;
+    input_events_deferred("INPUT_SetKeyboard", 0x41F7E0);
+}
+
+void INPUT_SetMouse(void* self)      /* 0x41F970 — egg record / season date */
+{
+    (void)self;
+    input_events_deferred("INPUT_SetMouse", 0x41F970);
+}
+
+void* INPUT_ExitGame(void* self, int32_t resId, int32_t strPtr) /* 0x41E570 */
+{
+    (void)self;
+    (void)resId;
+    (void)strPtr;
+    input_events_deferred("INPUT_ExitGame", 0x41E570);
+}
+
+void INPUT_SwitchToLocomotiveTab(void* self, int tab) /* 0x41A210 — Cursor tab-switch */
+{
+    (void)self;
+    (void)tab;
+    input_events_deferred("INPUT_SwitchToLocomotiveTab", 0x41A210);
 }

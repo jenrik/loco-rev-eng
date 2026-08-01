@@ -282,7 +282,7 @@ test-sdl3-net-discovery-transport: $(SDL3_NET_DISCOVERY_TRANSPORT_TEST)
 
 # Link
 $(BINARY): $(ALL_OBJS) | dirs
-	$(CXX) -std=c++17 $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) $(DBUS_LIBS) -pthread -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
+	$(CXX) -std=c++17 -no-pie $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) $(DBUS_LIBS) -pthread -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 
 # Compilation rules
 $(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp | dirs
@@ -352,7 +352,7 @@ CGWND_ENTERMODE3_TEST := $(BUILD_DIR)/cgwnd_entermode3_test
 
 $(CGWND_ENTERMODE3_TEST): $(BUILD_DIR)/dcp/core/CGWND.o tests/cgwnd_entermode3_test.cpp | dirs
 	@echo "=== Testing CGWND_EnterMode3(2) safe early return ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs $(FORCE_INC) tests/cgwnd_entermode3_test.cpp $(BUILD_DIR)/dcp/core/CGWND.o -Wl,--unresolved-symbols=ignore-all -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -no-pie -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs $(FORCE_INC) tests/cgwnd_entermode3_test.cpp $(BUILD_DIR)/dcp/core/CGWND.o -Wl,--unresolved-symbols=ignore-all -o $@
 
 test-cgwnd-entermode3: $(CGWND_ENTERMODE3_TEST)
 	@$(CGWND_ENTERMODE3_TEST)
