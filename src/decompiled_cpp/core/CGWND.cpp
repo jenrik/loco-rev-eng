@@ -46,6 +46,7 @@ class Netman;
 #include "../../sdl3_shims/sdl3_game_audio.h"
 #include "../../sdl3_shims/host_test_events.h"
 extern "C" { SDL_Window* SDL3_GetWindow(void); }
+namespace loco { namespace host { void HostPostLoadWorker(void* param); } }
 #endif
 
 /* ================================================================== */
@@ -196,7 +197,6 @@ extern void*    g_ui_main;              /* 0x4FD378 */
 extern void*    g_town;                 /* 0x4FD37C */
 extern void*    g_postcard;             /* 0x4FD384 */
 extern void*    g_cursor;               /* 0x4FD380 */
-extern void*    g_postcard_send;        /* 0x4FD388 */
 extern void*    g_trainstation_window;  /* 0x485258 */
 extern void*    g_audio_mgr;            /* 0x4FD38C */
 extern void*    g_about;                /* 0x4FD390 */
@@ -207,6 +207,8 @@ extern void*    g_game;                 /* 0x4854C8 */
 extern void*    g_main_window;          /* 0x4AA4A0 */
 extern void*    g_async_task_queue;     /* 0x4A9AD0 */
 extern void*    g_tooltip_mgr;          /* 0x4FD220 */
+extern "C" void UI_ProcessObjectTimers(void);         /* 0x420000, __cdecl */
+extern "C" void Game_DispatchCursorFeedback(void* game);  /* 0x411760, __cdecl */
 extern void*    g_tilemap;              /* 0x4AAD08 */
 extern void*    g_building_mgr;         /* 0x485448 */
 extern World*   g_world;                /* 0x4A98B0 */
@@ -744,14 +746,18 @@ void CGWND_SetMode(int new_mode)
 void CGWND_EnterMode3(int old_mode)
 {
     /* ---- free-function adapters (no typed class yet) ---------------- */
-    extern void  UI_ProcessObjectTimers(void);
     extern void  WIN32_QueueAsyncTask(void* queue, void* callback, int param);
     extern void  UI_ResetTooltips(void* mgr, int reset_type);
-    extern void  Game_DispatchCursorFeedback(void* game);
+    /* UI_ProcessObjectTimers + Game_DispatchCursorFeedback are declared at
+     * file scope with C linkage (original __cdecl C functions). */
     extern void  NETMAN_SendMapData(void* net, int flags);    /* 0x43D350 */
-    extern void  TileMap_UpdateAll(void* tilemap);       /* 0x457320 */
-    extern void  TileMap_InvalidateRect(void* tilemap, int left, int top,
-                                        int right, int bottom); /* 0x455840 */
+    /* TileMap_UpdateAll / TileMap_InvalidateRect bind to out-of-line
+     * emissions of the tilemap.h inline wrappers (HostMode3Bootstrap.cpp);
+     * g_tilemap is the TileMap* singleton stored in the void* slot. */
+    class TileMap;
+    extern void TileMap_UpdateAll(TileMap* tm);
+    extern void TileMap_InvalidateRect(TileMap* tm, int left, int top,
+                                       int right, int bottom);
 
     switch (old_mode) {
 
@@ -774,14 +780,20 @@ void CGWND_EnterMode3(int old_mode)
     case 7:
         {
             /* Hide each overlay subsystem (vtable slot 1 = hide) */
-            static_cast<Town*>(g_town)->hide();              /* 0x408739 */
-            static_cast<PostcardAlbum*>(g_postcard)->hide(); /* 0x408759 */
-            static_cast<Cursor*>(g_cursor)->hide();          /* 0x408779 */
+            if (g_town != nullptr) {
+                static_cast<Town*>(g_town)->hide();          /* 0x408739 */
+            }
+            if (g_postcard != nullptr) {
+                static_cast<PostcardAlbum*>(g_postcard)->hide(); /* 0x408759 */
+            }
+            if (g_cursor != nullptr) {
+                static_cast<Cursor*>(g_cursor)->hide();      /* 0x408779 */
+            }
             if (g_audio != nullptr) {
                 static_cast<GameAudio*>(g_audio)->UpdateVolume(0); /* 0x4135B0 */
             }
             static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0); /* 0x411DC0 */
-            TileMap_InvalidateRect(g_tilemap,
+            TileMap_InvalidateRect(static_cast<TileMap*>(g_tilemap),
                 g_viewport_rect_left, g_viewport_rect_top,
                 g_viewport_rect_right, g_viewport_rect_bottom);
         }
@@ -793,12 +805,14 @@ void CGWND_EnterMode3(int old_mode)
     /* ---------------------------------------------------------------- */
     case 9:
         {
-            static_cast<PostcardPreviewWindow*>(g_postcard_send)->hide(); /* 0x4087B2 */
+            if (g_postcard_send != nullptr) {
+                static_cast<PostcardPreviewWindow*>(g_postcard_send)->hide(); /* 0x4087B2 */
+            }
             if (g_audio != nullptr) {
                 static_cast<GameAudio*>(g_audio)->UpdateVolume(0);
             }
             static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0);
-            TileMap_InvalidateRect(g_tilemap,
+            TileMap_InvalidateRect(static_cast<TileMap*>(g_tilemap),
                 g_viewport_rect_left, g_viewport_rect_top,
                 g_viewport_rect_right, g_viewport_rect_bottom);
         }
@@ -831,8 +845,12 @@ void CGWND_EnterMode3(int old_mode)
                 static_cast<GameAudio*>(g_audio)->SetMute(
                     (sound_flag != 0) ? 1 : 0);
             }
-            TileMap_UpdateAll(g_tilemap);           /* 0x457320 */
-            static_cast<HelpWnd*>(g_audio_mgr)->play_narration(5, 0); /* 0x44F560 */
+            TileMap_UpdateAll(static_cast<TileMap*>(g_tilemap)); /* 0x457320 */
+            if (g_audio_mgr != nullptr) {
+                static_cast<HelpWnd*>(g_audio_mgr)->play_narration(5, 0); /* 0x44F560 */
+            } else {
+                std::fprintf(stderr, "[HOST] EnterMode3 case 1: narration skipped (g_audio_mgr unconstructed)\n");
+            }
         }
         /* FALLS THROUGH to case 4 */
         [[fallthrough]];
@@ -852,7 +870,7 @@ void CGWND_EnterMode3(int old_mode)
             UI_ProcessObjectTimers();              /* 0x420000 */
 
             if (g_in_build_mode != 0) {
-                TileMap_UpdateAll(g_tilemap);
+                TileMap_UpdateAll(static_cast<TileMap*>(g_tilemap));
                 static_cast<BuildingMgr*>(g_building_mgr)->UpdateStoredTargets();
             }
         }
@@ -873,9 +891,10 @@ void CGWND_EnterMode3(int old_mode)
     UI_ResetTooltips(g_tooltip_mgr, 1);            /* 0x423F80 */
     g_world->Reset(1);                             /* 0x44DBD0 */
 
-    /* Queue async task with callback at 0x42CC60 */
+    /* Queue async task with callback at 0x42CC60 — the SDL host
+     * substitutes its typed post-load worker (HostMode3Bootstrap.cpp). */
     WIN32_QueueAsyncTask(&g_async_task_queue,
-        reinterpret_cast<void*>(static_cast<uintptr_t>(0x42CC60)), 0);
+        reinterpret_cast<void*>(&loco::host::HostPostLoadWorker), 0);
 
     /* Build-mode state cleanup — 0x408972..0x408986 */
     if (g_build_mode != 0) {

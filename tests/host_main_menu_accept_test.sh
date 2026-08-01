@@ -24,12 +24,16 @@ require 'SDL3_GameAudioPlayResource(0x5015);' "$source"
 require 'if (pressed_button == kHostOptionOne) {' "$source"
 require 'this->hostCommitPlayerName();' "$source"
 require 'void EditWindow::hostCommitPlayerName()' "$source"
-require 'this->setState(_g_netman_state[7] != 0 ? 4 : 5);' "$source"
+require 'if (_g_netman_state[7] != 0) {' "$source"
+require 'CGWND_SetMode(1);' "$source"
+require 'this->setState(5);' "$source"
 require 'void hostCommitPlayerName();' "$header"
 
 # Both controls must converge on this helper. It appears once in the accept
-# branch and once in the Enter branch; that helper selects state 4 or state 5
-# from the host-only multiplayer selection.
+# branch and once in the Enter branch; that helper now follows the original
+# 0x422722 DPlayConfig+7 branch: single-player (flag set) goes straight to
+# CGWND_SetMode(1) (mode-1 loading, original 0x4227DA), multiplayer routes
+# to the host network lobby (state 5).
 count=$(grep -Fc 'this->hostCommitPlayerName();' "$source")
 [[ "$count" -eq 2 ]] || {
     echo "FAIL: expected accept and Enter to share two host commit calls, got $count" >&2

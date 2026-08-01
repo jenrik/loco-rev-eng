@@ -315,10 +315,10 @@ void TrainStationWindow::hide()
         this->tooltip_ptr = nullptr;
 
         /* Invalidate affected tilemap regions */
-        TileMap_InvalidateRect(&g_tilemap,
+        TileMap_InvalidateRect(g_tilemap,
                                intersectRect.left, intersectRect.top,
                                intersectRect.right, intersectRect.bottom);
-        TileMap_InvalidateDirtyRects(&g_tilemap, 0);
+        TileMap_InvalidateDirtyRects(g_tilemap, 0);
     }
 
     /* Release sound resource if loaded */

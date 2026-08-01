@@ -69,6 +69,7 @@ void*    g_ui_main = nullptr;
 void*    g_postcard = nullptr;
 void*    g_postcard_send = nullptr;
 Entity*  g_selected_building = nullptr;
+uint8_t  g_mouse_capture = 0;           /* 0x4855AE — cursor capture flag */
 BOOL (*g_IntersectRect)(RECT*, const RECT*, const RECT*) = nullptr;
 BOOL (*g_IsRectEmpty)(const RECT*) = nullptr;
 BOOL (*g_PtInRect)(const RECT*, int, int) = nullptr;
@@ -220,7 +221,7 @@ int growth_factor = 2;
 
 /* DDRAW stubs */
 void Cursor_SetCapture(void*, unsigned char) {}
-void DDRAW_UnlockPrimary(void*) {}
+void DDRAW_UnlockPrimary() {}
 void Cursor_InitSprites(void*) {}
 void Cursor_UnlockAllSurfaces(void*) {}
 void DDRAW_GetSurfaceWidthHeight(void*, unsigned short*, unsigned short*) {}

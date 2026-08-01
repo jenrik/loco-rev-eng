@@ -18,6 +18,11 @@ extern "C" {
     void GameLoop_FrameUpdate(void);
 }
 
+namespace loco { namespace host {
+    bool HasPendingAsyncTask();
+    void RunPendingAsyncTask();
+} }
+
 static SDL_Renderer* g_renderer = nullptr;
 
 extern void* g_ui_main;
@@ -111,7 +116,15 @@ static void PumpMessages_SDL3(uint8_t filter)
         }
         if (isMouseEvent) { continue; }
     }
-        
+
+        /* Pump-once semantics: CGWND_PumpMessages(1) (loading progress,
+         * filter != 0) processes the pending event batch and returns, like
+         * the original PeekMessage(PM_REMOVE) single pass.  The main loop
+         * uses filter == 0 and never hits this. */
+        if (filter != 0) {
+            return;
+        }
+
         /* Check for quit */
         if (event.type == SDL_EVENT_QUIT) {
             break;
@@ -137,6 +150,12 @@ static void PumpMessages_SDL3(uint8_t filter)
             }
             SDL_Delay(1);
             continue;
+        }
+
+        /* Host async task (original worker thread): run one pending
+         * loading/post-load task before the per-frame tick. */
+        if (loco::host::HasPendingAsyncTask()) {
+            loco::host::RunPendingAsyncTask();
         }
 
         /* Game logic tick */

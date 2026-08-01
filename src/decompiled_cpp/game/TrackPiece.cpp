@@ -72,7 +72,7 @@ extern "C" {
 
 /* TileMap */
 struct TileMap { int dummy; };
-extern TileMap g_tilemap;
+extern TileMap* g_tilemap;
 extern void   TileMap_InvalidateRect(TileMap* tm, int left, int top, int right, int bottom);
 
 /* Town rendering */
@@ -509,7 +509,7 @@ void TrackPiece::Render()
 
     /* Invalidate tilemap rect for dirty rect tracking */
     TileMap_InvalidateRect(
-        &g_tilemap,
+        g_tilemap,
         onscreen.left, onscreen.top,
         onscreen.right, onscreen.bottom
     );

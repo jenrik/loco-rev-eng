@@ -26,7 +26,7 @@
 extern int32_t  g_game_mode;        /* 0x004851F4 */
 extern int32_t  g_world_width;
 extern int32_t  g_world_height;
-extern TileMap  g_tilemap;          /* 0x4AAD08 */
+extern TileMap* g_tilemap;          /* 0x4AAD08 */
 
 /* ================================================================== */
 /* External free functions — TODO: refactor to TileData class methods  */
@@ -191,7 +191,7 @@ uint32_t EditorState::InitTrackAtPosition(int pixel_x, int pixel_y)
     uint16_t i;
     int32_t  tile_origin[2];
 
-    building_ptr = (int32_t*)TileMap_GetObjectAt(&g_tilemap, clamped_x, clamped_y, 0);
+    building_ptr = (int32_t*)TileMap_GetObjectAt(g_tilemap, clamped_x, clamped_y, 0);
     this->building = (Building*)building_ptr;
     if (building_ptr == NULL) {
         return 0;
@@ -209,7 +209,7 @@ uint32_t EditorState::InitTrackAtPosition(int pixel_x, int pixel_y)
     if (pixel_y < 0) tile_y = -1;
     if (pixel_x < 0) tile_x = -1;
 
-    int32_t* origin_out = TileMap_GetTileOrigin(&g_tilemap, tile_origin,
+    int32_t* origin_out = TileMap_GetTileOrigin(g_tilemap, tile_origin,
                                                  tile_x, tile_y, 0);
     *(int32_t*)((uint8_t*)building_ptr + 0x88) = *origin_out;
 
@@ -268,7 +268,7 @@ Building* EditorState::FindAdjacentTrack()
     tile_x = (short)(pixel_x >> 4);
     tile_y = (short)(pixel_y >> 4);
 
-    TileMap_GetTileOriginEx(&g_tilemap, tile_origin_packed,
+    TileMap_GetTileOriginEx(g_tilemap, tile_origin_packed,
                              tile_x, tile_y, 0);
     int snapped_tile_x = tile_origin_packed[0] & 0xFFFF;
     int snapped_tile_y = (tile_origin_packed[0] >> 16) & 0xFFFF;
@@ -280,7 +280,7 @@ Building* EditorState::FindAdjacentTrack()
     tile_x_pixels = snapped_tile_x * 16;
     tile_y_pixels = snapped_tile_y * 16;
 
-    adjacent = (int32_t*)TileMap_GetObjectAt(&g_tilemap, tile_x, tile_y, 0);
+    adjacent = (int32_t*)TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
     if (adjacent == NULL) {
         return this->building;
     }

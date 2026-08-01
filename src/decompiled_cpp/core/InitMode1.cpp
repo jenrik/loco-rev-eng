@@ -22,6 +22,11 @@
 
 #include <stddef.h>
 #include <cstring>
+#include <cstdio>
+
+#ifndef _WIN32
+namespace loco { namespace host { void HostLoadingSequence(void* param); } }
+#endif
 
 
 /* Real class headers for typed casts in initMode1() */
@@ -52,7 +57,6 @@ extern void*    g_ui_main;              /* 0x4FD378 — EditWindow* (main menu) 
 extern void*    g_town;                 /* 0x4FD37C — Town* */
 extern void*    g_cursor;               /* 0x4FD380 — Cursor* */
 extern void*    g_postcard;             /* 0x4FD384 — PostcardAlbum* */
-extern void*    g_postcard_send;        /* 0x4FD388 — PostcardPreviewWindow* */
 extern void*    g_audio;               /* 0x4FD3BC — GameAudio* */
 extern void*    g_game;                 /* 0x4854C8 — Game* */
 extern void*    g_netman;               /* 0x4FD3AC — Netman* */
@@ -74,7 +78,7 @@ extern const char s_Layouts_fmt_0047e2a8[];  /* "Layouts\%02d" format string */
 extern void  GameAudio_UpdateVolume(void* audio, int level);
 extern void  Game_SetScreenMode(void* game, int a, int b, int c);
 extern void  DirectPlay_Init(void);
-extern void  CGWND_Present(uint32_t flags);
+extern "C" void CGWND_Present(uint32_t flags);  /* original __cdecl 0x45E1E0 */
 extern void  CGWND_PumpMessages(char filter);
 extern void  WIN32_QueueAsyncTask(void* queue, void* callback, int param);
 extern void  RESMGR_SelectScreensaver(char* outBuf);
@@ -128,7 +132,15 @@ void CGWND::initMode1()
          *   - Fills primary surface with black
          *   - Creates shadow GameObject
          *   - Presents first frame */
+#ifndef _WIN32
+        /* Host deviation: DirectPlay_Init dereferences a 0x402 shadow
+         * GameObject's loaded resource (+0x16 frame height), which the SDL
+         * host does not populate; presentation is SDL-primary-composed. */
+        std::fprintf(stderr, "[HOST] initMode1 PATH A: DirectPlay_Init skipped (host presentation layer)\n");
+        std::fflush(stderr);
+#else
         DirectPlay_Init();
+#endif
 
         /* Disable main window during loading to prevent input */
         EnableWindow(hWnd, FALSE);
@@ -142,34 +154,51 @@ void CGWND::initMode1()
              * to update the loading screen progress. */
 
             /* Town overlay sprite (0x42FDF0) */
-            static_cast<Town*>(g_town)->init_overlay_sprite();
+            if (g_town != nullptr) {
+                static_cast<Town*>(g_town)->init_overlay_sprite();
+            } else {
+                std::fprintf(stderr, "[HOST] initMode1 PATH A: Town overlay sprite skipped (g_town unconstructed)\n");
+            }
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Cursor background surface (0x416460) */
-            static_cast<Cursor*>(g_cursor)->init_background();
+            if (g_cursor != nullptr) {
+                static_cast<Cursor*>(g_cursor)->init_background();
+            } else {
+                std::fprintf(stderr, "[HOST] initMode1 PATH A: Cursor background skipped (g_cursor unconstructed)\n");
+            }
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Postcard album window surface (0x404720) */
-            static_cast<PostcardAlbum*>(g_postcard)->InitWindowSurface();
+            if (g_postcard != nullptr) {
+                static_cast<PostcardAlbum*>(g_postcard)->InitWindowSurface();
+            } else {
+                std::fprintf(stderr, "[HOST] initMode1 PATH A: PostcardAlbum surface skipped (g_postcard unconstructed)\n");
+            }
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Postcard preview window — only when hosting/joined.
              * Netman::m_gameMode at +0x7C4: 0=waiting,1=hosting,2=joined */
             if (static_cast<Netman*>(g_netman)->m_gameMode == 2) {
-                static_cast<PostcardPreviewWindow*>(g_postcard_send)->init_background();
+                if (g_postcard_send != nullptr) {
+                    static_cast<PostcardPreviewWindow*>(g_postcard_send)->init_background();
+                } else {
+                    std::fprintf(stderr, "[HOST] initMode1 PATH A: PostcardPreview background skipped (g_postcard_send unconstructed)\n");
+                }
                 CGWND_Present(0);
                 CGWND_PumpMessages(1);
             }
         }
 
         /* Start async background task for loading/intro playback.
-         * Callback at 0x45DE40 handles the loading sequence. */
+         * Callback at 0x45DE40 handles the loading sequence; the SDL host
+         * substitutes its typed loading task (HostMode3Bootstrap.cpp). */
         WIN32_QueueAsyncTask(
             &g_async_task_queue,
-            reinterpret_cast<void*>(static_cast<uintptr_t>(0x45DE40)), 0);
+            reinterpret_cast<void*>(&loco::host::HostLoadingSequence), 0);
 
         /* Invalidate + update to trigger initial repaint */
         InvalidateRect(hWnd, nullptr, FALSE);

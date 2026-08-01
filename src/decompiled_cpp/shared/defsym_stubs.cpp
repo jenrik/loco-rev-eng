@@ -204,8 +204,6 @@ void UI_SetWindowVisible(void*, unsigned char) {}
 void NETMAN_CreateSession(void*) {}
 void UI_WindowBase_Show(void*) {}
 void* BringWindowToTop = nullptr;
-void* ShowCursor = nullptr;
-void* SendMessageA = nullptr;
 void TrackPiece_Dtor(void*) {}
 void __ftol(double) {}
 void UI_ChildWindow_Dtor(void*) {}

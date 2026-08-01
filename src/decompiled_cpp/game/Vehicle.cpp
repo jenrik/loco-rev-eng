@@ -565,7 +565,7 @@ void Vehicle::ClearRoute()
         this->UpdatePosition(1);
 
         /* Clear tracked vehicle on destination building */
-        int32_t obj_at = TileMap_GetObjectAt(&g_tilemap,
+        int32_t obj_at = TileMap_GetObjectAt(g_tilemap,
             this->target_tile_x, this->target_tile_y + 1, 0);
         if (obj_at != 0) {
             *(int32_t*)((uintptr_t)obj_at + 0x11C) = 0;   /* clear arrival queue ptr */
@@ -810,7 +810,7 @@ uint8_t Vehicle::UpdateEngineSound()
 
             /* Clear target building's tracked vehicle */
             int32_t* target_building = (int32_t*)(uintptr_t)TileMap_GetObjectAt(
-                &g_tilemap, this->target_tile_x, this->target_tile_y + 1, 0);
+                g_tilemap, this->target_tile_x, this->target_tile_y + 1, 0);
             if (target_building != 0 &&
                 (void*)(uintptr_t)target_building[0x48] == this) {
                 target_building[0x47] = 0;              /* clear occupant count */
@@ -1212,7 +1212,7 @@ void Vehicle::UpdatePosition(uint8_t reverse)
         editor[0x24] = reverse;
 
         /* Invalidate rect for repaint */
-        TileMap_InvalidateRect(&g_tilemap,
+        TileMap_InvalidateRect(g_tilemap,
             *(int32_t*)(editor + 8),
             *(int32_t*)(editor + 0x0C),
             *(int32_t*)(editor + 0x10),

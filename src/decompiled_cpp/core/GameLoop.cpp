@@ -18,6 +18,7 @@
 #include "../shared/types.h"
 #ifndef _WIN32
 #include "../../sdl3_shims/sdl3_net_game_bridge.h"
+namespace loco { namespace host { void BootstrapMode3Core(); } }
 #endif
 #include <cstdio>
 #include <new>
@@ -93,7 +94,7 @@ extern void*    g_tooltip_mgr;       /* 0x4FD220 */
 extern void*    g_second_overlay;    /* 0x4851D0 */
 extern void*    g_world;             /* 0x4A98B0 */
 extern uint8_t  g_game_mode;         /* 0x4851F4 */
-extern void*    g_game;              /* 0x4A98D8 */
+extern void*    g_game;              /* 0x4854C8 */
 extern char     g_empty_string;      /* empty string singleton */
 
 /* Mouse settings */
@@ -233,6 +234,14 @@ extern "C" int GameLoop_Setup(void* cgwnd)
         return -1;
     }
 
+#ifndef _WIN32
+    /* Host mode-3 cone: the original constructs these embedded singletons
+     * via CRT static-init thunks (0x45C560..0x45C650) before WinMain. The
+     * SDL host does it here, after ResourceManager_Init, in the same order
+     * (Game, World, BuildingMgr, ScriptedObject, TileMap, GameAudio). */
+    loco::host::BootstrapMode3Core();
+#endif
+
     trace_setup_stage("step 9: UI subsystems");
     /* Step 9: Initialize all subsystems */
     if (((CGWND*)cgwnd)->InitAllSubsystems() != 0) {
@@ -342,9 +351,43 @@ extern "C" void GameLoop_FrameUpdate(void)
 
     /* Step 10: Town mode updates */
     if (game_mode == 3 || game_mode == 9) {
+#ifndef _WIN32
+        /* Host mode-3 cone: g_town_view / g_ddraw_building / g_input_mgr
+         * are still unconstructed on SDL; keep the original calls for the
+         * Win32 build and log the host skips rather than dereferencing
+         * nullptr. */
+        if (g_town_view != nullptr) {
+            Town_TrackBuilding(g_town_view);
+        } else {
+            static int warned_town_view = 0;
+            if (!warned_town_view) {
+                std::fprintf(stderr, "[HOST] FrameUpdate: Town_TrackBuilding skipped (g_town_view unconstructed)\n");
+                warned_town_view = 1;
+            }
+        }
+        if (g_ddraw_building != nullptr) {
+            DDRAW_UpdateBuilding(g_ddraw_building);
+        } else {
+            static int warned_ddraw_building = 0;
+            if (!warned_ddraw_building) {
+                std::fprintf(stderr, "[HOST] FrameUpdate: DDRAW_UpdateBuilding skipped (g_ddraw_building unconstructed)\n");
+                warned_ddraw_building = 1;
+            }
+        }
+        if (g_input_mgr != 0) {
+            INPUT_GetSaveFileName(reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<int>(g_input_mgr))));
+        } else {
+            static int warned_input_mgr = 0;
+            if (!warned_input_mgr) {
+                std::fprintf(stderr, "[HOST] FrameUpdate: INPUT_GetSaveFileName skipped (g_input_mgr unconstructed)\n");
+                warned_input_mgr = 1;
+            }
+        }
+#else
         Town_TrackBuilding(g_town_view);
         DDRAW_UpdateBuilding(g_ddraw_building);
         INPUT_GetSaveFileName((void*)&g_input_mgr);
+#endif
         BuildingMgr_UpdateAll(g_building_mgr);
     }
 

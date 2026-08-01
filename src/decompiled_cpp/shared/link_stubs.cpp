@@ -86,6 +86,31 @@ int32_t PlaySoundA(LPCSTR,HMODULE,DWORD){return 1;}
 int32_t ClientToScreen(HWND,POINT*){return 1;}int32_t SetCursorPos(int32_t,int32_t){return 1;}
 int32_t GetWindowTextA(HWND,char*,int32_t){return 0;}int32_t GetClientRect(HWND,RECT*){return 0;}
 HWND GetCapture(void){return nullptr;}int32_t ReleaseCapture(void){return 1;}
+/* Win32 cursor/screen APIs used by Game::SetScreenMode and the cursor
+ * engine. The SDL host drives the pointer itself; these are no-ops. */
+BOOL ScreenToClient(HWND, void* pt){ (void)pt; return 0; }
+HWND SetCapture(HWND){ return nullptr; }
+void* LoadCursorFromFileA(const char* path){ (void)path; return nullptr; }
+HWND WindowFromPoint(void){ return nullptr; }
+/* Win32 ShowCursor visibility counter. The host SDL cursor is not counted;
+ * mirror the decompiled callers' loop expectations (hide -> -1, show -> 0). */
+int ShowCursor(int bShow){return bShow ? 0 : -1;}
+/* Synchronous window-message send. The SDL host has no Win32 message queue;
+ * CGWND_Present's WM_USER+7 is a presentation sync that the pump does itself.
+ * Signature matches the native cgwnd_present.c declaration. */
+int32_t SendMessageA(void*, uint32_t, uint32_t, int32_t){return 0;}
+
+/* CGWND_Present — original posts WM_USER+7 to sync UI-init presentation.
+ * The SDL pump presents every frame; this is a host no-op with a trace. */
+void CGWND_Present(uint32_t){}
+
+/* Game_DispatchCursorFeedback — original 0x411760; host cursor feedback is
+ * driven by Game::UpdateCursorMode directly. */
+void Game_DispatchCursorFeedback(void*){}
+
+/* UI_ProcessObjectTimers — original 0x420000 walks UI timer lists; the SDL
+ * host drives timers from its own pump. */
+void UI_ProcessObjectTimers(){}
 int32_t UpdateWindow(HWND){return 1;}
 int32_t InvalidateRect(HWND,const RECT*,int32_t){return 1;}
 int32_t GetWindowRect(HWND,RECT*){return 0;}int32_t DestroyWindow(HWND){return 1;}
@@ -491,8 +516,8 @@ void* g_asset_archive = nullptr; void* g_asset_base_path = nullptr; void* _g_aud
 void* _g_backbuffer = nullptr; int32_t g_build_mode = 0; void* _g_dplay = nullptr;
 void* _g_dplay_config = nullptr; void* _g_dsound_object = nullptr;
 int32_t DAT_0047e0f4=0;int32_t DAT_0047e220=0;int32_t DAT_0047e224=0;
-int32_t _DAT_00481170=0;int32_t DAT_00481218=0;int32_t DAT_00485268=0;
-int32_t DAT_0048526c=0;int32_t DAT_004aad34=0;int32_t DAT_004aad38=0;
+int32_t _DAT_00481170=0;int32_t DAT_00481218=0;void* g_world_release_a=nullptr;
+void* g_world_release_b=nullptr;int32_t DAT_004aad34=0;int32_t DAT_004aad38=0;
 int32_t _DAT_004fd3a8=0;int32_t s_BALANCING_0047e164=0;int32_t s_CleanExit_0047e128=0;
 int32_t s_LEGO_LOCO_0047e1c0=0;int32_t s_measure_test_char=0;
 int32_t s_MinBuildingFPS_0047e154=0;int32_t s_MinFlyingFPS_0047e134=0;

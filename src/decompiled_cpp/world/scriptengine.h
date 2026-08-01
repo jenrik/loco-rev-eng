@@ -454,7 +454,7 @@ public:
 /* ================================================================== */
 #define ADDR_g_scripted_object           0x004A99E0
 
-extern RESDATA_ScriptedObject g_scripted_object;  /* singleton at 0x4A99E0 */
+extern RESDATA_ScriptedObject* g_scripted_object;  /* 0x4AA5B8 — host-constructed singleton pointer */
 
 /* ================================================================== */
 /* C-linkage free functions                                            */

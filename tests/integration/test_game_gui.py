@@ -81,7 +81,10 @@ def test_main_menu_exit_plays_click_sound_and_exits_cleanly(game):
     "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
 )
 def test_singleplayer_go_plays_click_sound_and_leaves_main_menu(game):
-    """Scenario 2: single selection + test + Go reaches the local panel."""
+    """Scenario 2: single selection + test + Go enters mode-1 loading, then
+    the mode-3 cone (original 0x4227DA → CGWND_SetMode(1) → InitMode1 →
+    loading task → CGWND_SetMode(3)).  No setup panel is shown for
+    single-player, matching the binary."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.click_logical(600, 550, "select single player")
     game.screenshot("main-menu-singleplayer-selected")
@@ -92,11 +95,11 @@ def test_singleplayer_go_plays_click_sound_and_leaves_main_menu(game):
     before_go = latest_sequence(game)
     game.click_logical(925, 700, "main-menu go")
     game.wait_for_event("audio_queued", after_sequence=before_go, resource_id=0x5015)
-    game.wait_for_event("screen_presented", screen="game_setup", dialog_state=4)
+    game.wait_for_event("mode_changed", after_sequence=before_go, new_mode=1)
+    game.wait_for_event("mode_changed", new_mode=3, timeout=10)
     assert not any(
         item.get("event") == "screen_presented"
-        and item.get("screen") == "multiplayer_lobby"
-        and item.get("dialog_state") == 5
+        and item.get("screen") == "game_setup"
         for item in game.events()
     )
 

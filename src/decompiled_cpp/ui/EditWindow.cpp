@@ -286,8 +286,8 @@ int EditWindow::create(HWND hWndParent)
 
     /* Create full-screen window */
     std::fprintf(stderr, "[TRACE] EditWindow::create: create window\n");
-    int result = UI_WindowBase::create_full_window(
-        this, 0, hWndParent,
+    int result = this->create_full_window(
+         0, hWndParent,
         desktopRect.left, desktopRect.top,
         desktopRect.right - desktopRect.left,
         desktopRect.bottom - desktopRect.top,
@@ -757,7 +757,7 @@ void EditWindow::onPlayerNameChanged()
     /* Transition based on network state */
     if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
         /* Single-player mode */
-        TileMap_Init(&g_tilemap, 1);
+        TileMap_Init(g_tilemap, 1);
 
         if (*reinterpret_cast<char*>(_g_netman_state + 8) == 0) {
             /* Standard single-player or scenario */
@@ -787,7 +787,7 @@ void EditWindow::onPlayerNameChanged()
     }
 
     /* Multiplayer mode */
-    TileMap_Init(&g_tilemap, 0);
+    TileMap_Init(g_tilemap, 0);
     if (*reinterpret_cast<char*>(_g_netman_state + 7) != 0) {
         NETMAN_SetGameMode(g_netman, 1);
     }
@@ -1242,20 +1242,29 @@ void EditWindow::hostCommitPlayerName()
 
     // The original click branch calls OnPlayerNameChanged at 0x422AB2; the
     // edit-subclass Enter branch reaches the same commit flow at 0x420D57.
-    // Preserve the recovered validation while avoiding the unported 32-bit
-    // mode-1 bootstrap used by the native handler.
+    // Preserve the recovered validation. The original then branches on
+    // DPlayConfig+7 (0x422722): the local/single-player path at 0x4227DA
+    // (TileMap_Init(0), SetGameMode(1)) goes straight to CGWND_SetMode(1) —
+    // mode-1 loading — while the cleared flag maps to the setup panels
+    // (states 4/5). The SDL host follows the same routing now that the
+    // mode-1/3 cone is constructed (HostMode3Bootstrap.cpp).
     if (legal && has_alpha && g_player_config != nullptr) {
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
         loco::host_test::emit_player_name_committed(g_player_config->name);
-        // 0x422722 branches on DPlayConfig+7. With the selected-single flag
-        // set, the original takes the local startup path at 0x4227DA and
-        // never enters the multiplayer panel. The SDL host cannot yet run
-        // that full game-start path, so its guarded presentation fallback is
-        // the existing single-player setup (state 4). The cleared flag is
-        // the multiplayer selection and maps to the host network lobby
-        // (state 5).
-        this->setState(_g_netman_state[7] != 0 ? 4 : 5);
+        if (_g_netman_state[7] != 0) {
+            /* Single-player: 0x4227DA → CGWND_SetMode(1) (loading → mode 3). */
+            extern void CGWND_SetMode(int mode);
+            extern void NETMAN_SetGameMode(void* netman, int mode);
+            extern void* _g_netman;
+            /* g_tilemap is declared void** at file scope (0x4855D0). */
+            TileMap_Init(g_tilemap, 0);
+            NETMAN_SetGameMode(_g_netman, 1);
+            CGWND_SetMode(1);
+        } else {
+            /* Multiplayer selection → host network lobby (state 5). */
+            this->setState(5);
+        }
     }
 }
 

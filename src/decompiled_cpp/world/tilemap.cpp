@@ -1,4 +1,4 @@
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 /**
  * tilemap.cpp — TileMap method implementations
  *
@@ -8,14 +8,22 @@
  * TileMap manages the game world's tile grid (82x66 tiles, each 64 bytes for
  * 16 layer slots). It tracks scroll state, dirty regions for rendering, tile
  * occupancy/buildability checks, and viewport scrolling.
+ *
+ * Every method was validated instruction-by-instruction against the Ghidra
+ * disassembly (database "locon"); the original address is annotated on each
+ * implementation.
  */
 
 #include "tilemap.h"
+
+#include "../core/Entity.h"
+
+#include <cmath>
 #include <new>
 
 /* ================================================================== */
 /* External references — declared in tilemap.h; re-declared here for   */
-/* self-contained compilation. Duplicates are intentional for now.     */
+/* self-contained compilation.                                         */
 /* ================================================================== */
 
 /* Memory */
@@ -26,93 +34,99 @@ void   GLOBAL_free(void* ptr);
 extern int32_t  g_game_mode;             /* 0x004851F4 */
 extern int32_t  g_screen_width;          /* 0x004851D8 */
 extern int32_t  g_screen_height;         /* 0x00485214 */
-extern int32_t  g_client_offset_x;
-extern int32_t  g_client_offset_y;
-extern int32_t  g_client_width;
-extern int32_t  g_client_height;
-extern uint8_t  g_is_fullscreen;
-extern int32_t  g_world_width;
+extern int32_t  g_client_offset_x;       /* 0x00485228 */
+extern int32_t  g_client_offset_y;       /* 0x0048522C */
+extern int32_t  g_client_width;          /* 0x00485220 */
+extern int32_t  g_client_height;         /* 0x00485224 */
+extern uint8_t  g_is_fullscreen;         /* 0x00485210 */
+extern int32_t  g_world_width;           /* 0x004AAD0C */
 extern uint8_t  g_is_town_mode;
-extern int32_t  g_town_overlay_rect;
+extern int32_t  g_town_overlay_rect;     /* 0x48538C */
 extern int32_t  g_town_overlay_left;     /* 0x485390 */
 extern int32_t  g_town_overlay_top;      /* 0x485394 */
 extern int32_t  g_town_overlay_right;    /* 0x485398 */
-extern uint8_t  g_build_mode;
-extern uint8_t  g_disable_input;
+extern uint8_t  g_build_mode;            /* 0x485234 */
+extern uint8_t  g_disable_input;         /* 0x4855AC */
 extern uint8_t  g_lock_update_flag;      /* 0x4851F0 */
-extern uint8_t  g_click_on_building;
-extern uint8_t  g_placement_valid;
-extern uint8_t  g_placement_blocked;
-extern int32_t  g_placement_resource_id;
-extern void*    g_input_mgr;
-extern void*    g_town_view;
-extern void*    g_ddraw_building;
-extern void*    g_about;
-extern void*    g_netman;
-extern uint8_t  g_click_on_town;
-extern int32_t  g_selected_building;
-extern int32_t  g_town_selection_rect_left;
-extern int32_t  g_town_selection_rect_top;
-extern int32_t  g_town_selection_rect_right;
-extern int32_t  g_town_selection_rect_bottom;
-extern uint8_t  g_has_selection;
-extern int32_t  g_viewport_x;
-extern int32_t  g_viewport_rect_left;
-extern uint8_t  g_allow_building_placement;
-extern int32_t  g_player_id;
-extern uint8_t  g_player_color;
-extern void*    g_cursor_surface;
-extern void*    g_primary_surface;
-extern void*    g_tile_occupied_bitmap;
-extern void*    g_resmgr;
-extern void*    g_scripted_object;
-extern void*    g_building_mgr;
-extern TileMap  g_tilemap;              /* at 0x4AAD08 */
-extern void*    g_game;
-extern void*    g_world;              /* 0x4A98B0 */
-extern void*    g_tooltip_mgr;        /* 0x4FD220 */
+extern uint8_t  g_click_on_building;     /* 0x48556C */
+extern uint8_t  g_placement_valid;       /* 0x4AA648 */
+extern uint8_t  g_placement_blocked;     /* 0x48558C */
+extern int32_t  g_placement_resource_id; /* 0x485550 */
+extern void*    g_input_mgr;             /* 0x4A9990 */
+extern void*    g_town_view;             /* 0x4852A0 */
+extern void*    g_ddraw_building;        /* 0x4A9EF0 */
+extern void*    g_about;                 /* 0x4FD390 */
+extern void*    g_netman;                /* 0x4FD3AC */
+extern uint8_t  g_click_on_town;         /* 0x48557C */
+extern int32_t  g_selected_building;     /* 0x4855B0 */
+extern int32_t  g_town_selection_rect_left;   /* 0x4854D0 */
+extern int32_t  g_town_selection_rect_top;    /* 0x4854D4 */
+extern int32_t  g_town_selection_rect_right;  /* 0x4854D8 */
+extern int32_t  g_town_selection_rect_bottom; /* 0x4854DC */
+extern uint8_t  g_has_selection;         /* 0x4854EC */
+extern int32_t  g_viewport_x;            /* 0x4AAD24 */
+extern int32_t  g_viewport_rect_left;    /* 0x4AAD14 (TileMap.viewport_rect.left) */
+extern int32_t  g_viewport_rect_top;     /* 0x4AAD18 */
+extern int32_t  g_viewport_rect_right;   /* 0x4AAD1C */
+extern int32_t  g_viewport_rect_bottom;  /* 0x4AAD20 */
+extern uint8_t  g_allow_building_placement; /* 0x485328 */
+extern int32_t  g_player_id;             /* 0x4AAD46 (TileMap.tile_count_x) */
+extern uint8_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) */
+extern void*    g_cursor_surface;        /* 0x4FD3C8 */
+extern void*    g_primary_surface;       /* 0x4FD3C4 */
+extern void*    g_tile_occupied_bitmap;  /* 0x4FD18C */
+extern void*    g_resmgr;                /* 0x4855E8 */
+extern void*    g_scripted_object;       /* 0x4AA5B8 */
+extern void*    g_building_mgr;          /* 0x485448 */
+/* g_tilemap declared canonically in tilemap.h (TileMap* singleton) */
+extern void*    g_game;                  /* 0x4854C8 */
+extern void*    g_world;                 /* 0x4A98B0 */
+extern void*    g_tooltip_mgr;           /* 0x4FD220 */
 extern HWND     g_main_window;
 
 /* Bitmask lookup table */
-extern uint8_t  ATTR_0047f108[8];       /* bitmask lookup (1<<n) */
+extern uint8_t  ATTR_0047f108[8];        /* bitmask lookup (1<<n) */
 
 /* External functions */
-extern int      TileData_IsRoadTile(int ptr);
-extern int      TileData_GetTileCategory(void* ptr, short a, ushort b);
-extern int      TileData_IsSceneryTile(int ptr);
-extern int      TileData_IsWaterTile(int ptr);
-extern int      TileData_IsTrackTile(int ptr);
+extern int      RESDATA_IsRoadTile(int ptr);
+extern int      RESDATA_GetTileCategory(void* ptr, short a, unsigned short b);
+extern int      RESDATA_IsSceneryTile(int ptr);
+extern int      RESDATA_IsWaterTile(int ptr);
+extern int      RESDATA_IsTrackTile(int ptr);
 extern int      INPUT_EditCharHandler(int ptr);
-extern int      INPUT_PlaceObject(void** mgr, uint resource_id);
-extern int      INPUT_RemoveObject(void** mgr, void* obj, uint param);
+extern int      INPUT_PlaceObject(void** mgr, unsigned int resource_id);
+extern int      INPUT_RemoveObject(void** mgr, void* obj, unsigned int param);
+extern int      GetResourceType(unsigned int resource_id);
 extern void     PlaySoundAt(int sound_id, int x, int y, int channel);
-extern int      Town_SelectBuilding(void** town_view, int building);
-extern int      DDRAW_SelectBuilding(void** ddraw_building, int building);
-extern void     CGWND_SetMode(void* mode);
+extern int      Town_SelectBuilding(void* town_view, int building);
+extern int      DDRAW_SelectBuilding(void* ddraw_building, int building);
+extern void     CGWND_SetMode(int mode);
 extern void     Town_RenderSelection(void* town_view);
+extern void     Town_DeselectBuilding(void* town_view);
+extern void     Town_UpdateSelection(void* town_view);
 extern void     Game_SetCursorByResourceId(void* game, int x, int y,
                                             int w, int h, int flag);
+extern void     Game_ResetCursor(void* game);
 extern void     UI_SetTooltipText(void* mgr, int x, int y, int w, int h);
-extern void     UI_UpdateTooltip(void* mgr, int x, int y, int w, int h);
-extern void     BuildingMgr_DispatchAll(void* mgr, int packed_type,
-                                         int x, int y, int w, int h);
+extern void     UI_SetTooltipPos(void* mgr, int x, int y, int w, int h, int flag);
+extern void     UI_UpdateTooltip(void* mgr, int x, int y, int w, int h, int flag);
+extern void     BuildingMgr_DispatchAll(void* mgr, int dispatch_flags,
+                                         int x, int y, int w, int h, int flag);
 extern void     World_InvalidateRect(void* world, int x, int y,
                                       int w, int h, short type);
-extern void     ScriptedObject_Dispatch(void* obj, int x, int y,
-                                         int w, int h, int flag);
+extern void     RESDATA_ScriptedObject_Dispatch(void* obj, int x, int y,
+                                                 int w, int h, int flag);
 extern void     DDRAW_DispatchToSubObjects(void* ddraw, int x, int y,
                                             int w, int h, void* flag);
-extern void     Game_DeselectGameObject(int param);
+extern void     Game_DeselectGameObject(int game);
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
 extern void     INPUT_FileDlgProc(void* mgr);
 extern void*    DDRAW_SpriteDataCtor(void* obj, int type);
 extern void     DDRAW_SpriteDataDtor(void* obj);
-extern void     Town_DeselectBuilding(int param);
-extern void     Town_UpdateSelection(int param);
-extern void     Game_ResetCursor(void* game);
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);
 extern void*    Entity_GetSubObjectPosition(void* obj, int* out_xy, int direction);
+extern void     GameObject_GetSubObjectWorldPos(void* obj, int* out_packed);
 extern void     World_Lock(void* world);
 extern void     World_Unlock(void* world);
 extern void     UIPANEL_Blit(void* src, int sx, int sy, int sw, int sh,
@@ -144,6 +158,94 @@ extern void     UIPANEL_InitSurface(void* surface, int w, int h,
 #define TILE_OFFSET(x, y, layer) \
     (0x48 + (static_cast<int>(x) * 65 + static_cast<int>(y)) * 0x40 + \
      static_cast<int>(layer) * 4)
+
+/* ================================================================== */
+/* Dirty-rect list node: a RECT (16 bytes) + "next" pointer at +0x10.  */
+/* Allocations are 0x14 bytes (TileMap_InvalidateDirtyRects 0x456475). */
+/* ================================================================== */
+static RECT* TileMap_AllocRectNode()
+{
+    RECT* node = reinterpret_cast<RECT*>(operator_new(0x14));
+    if (node != NULL) {
+        node[1].left = 0;
+    }
+    return node;
+}
+
+/* ================================================================== */
+/* Primary-surface Lock/Unlock dispatch (DirectDraw surface vtable).   */
+/*                                                                     */
+/* g_primary_surface (0x4FD3C4) is the DirectDraw primary; slots 25    */
+/* (Lock) and 32 (Unlock) of the standard IDirectDrawSurface4 ABI are  */
+/* called with the ddsurfacedesc buffer at TileMap +0x52494.           */
+/* TODO(integration): type g_primary_surface via sdl3_shims/sdl3_ddraw */
+/* and call Lock/Unlock directly.                                      */
+/* ================================================================== */
+typedef int (__thiscall* DDrawSurfaceLockFn)(void* self, void* rect,
+                                              void* desc, unsigned int flags,
+                                              void* handle);
+typedef int (__thiscall* DDrawSurfaceUnlockFn)(void* self, void* rect);
+
+static int TileMap_LockPrimarySurface(void* desc)
+{
+    void** vtable = *reinterpret_cast<void***>(g_primary_surface);
+    return (*(reinterpret_cast<DDrawSurfaceLockFn>(vtable[25])))(
+        g_primary_surface, NULL, desc, 0, 0);
+}
+
+static int TileMap_UnlockPrimarySurface()
+{
+    void** vtable = *reinterpret_cast<void***>(g_primary_surface);
+    return (*(reinterpret_cast<DDrawSurfaceUnlockFn>(vtable[32])))(
+        g_primary_surface, NULL);
+}
+
+/* ================================================================== */
+/* Mode-3 tile-object click handlers (vtable[16]/[17]).                */
+/*                                                                     */
+/* The mode-3 grid objects are ResourceGameObject-family instances     */
+/* whose vtable slots [16]/[17] hold per-class click handlers:         */
+/*   ResourceGameObject  [16] 0x458800 RestartAnimation                */
+/*                       [17] 0x458810 IsMemberActionActive            */
+/*   RESDATA_GameVehicle [16] 0x44B0B0 (click horn/footstep sound)     */
+/*                       [17] 0x458810                                 */
+/*   GameVehicle         [16] 0x412940 (start move)                    */
+/*                       [17] 0x4129B0                                 */
+/*   HelpPageNode        [16] 0x44B0B0                                 */
+/*                       [17] 0x458810                                 */
+/* The game subclasses do not declare these overrides yet, so the calls  */
+/* are dispatched here through the binary vtable.                      */
+/* TODO(integration): declare the overrides on ResourceGameObject      */
+/* (core/BuildingMgrObjectGroup.h), RESDATA_GameVehicle                */
+/* (game/ResdataGameVehicle.h) and GameVehicle (game/GameVehicle.h),   */
+/* then replace these adapters with typed virtual calls.               */
+/* ================================================================== */
+typedef int (__thiscall* TileMapObjSlot16Fn)(void* self);
+typedef int (__thiscall* TileMapObjSlot17Fn)(void* self);
+
+static int TileMap_CallSlot16(void* obj)
+{
+    void** vtable = *reinterpret_cast<void***>(obj);
+    return (*(reinterpret_cast<TileMapObjSlot16Fn>(vtable[16])))(obj);
+}
+
+static int TileMap_CallSlot17(void* obj)
+{
+    void** vtable = *reinterpret_cast<void***>(obj);
+    return (*(reinterpret_cast<TileMapObjSlot17Fn>(vtable[17])))(obj);
+}
+
+/* g_about (0x4FD390) is the AboutDialog singleton; vtable[2] closes the
+ * about window when a resource-0x820 object is clicked in town mode.
+ * TODO(integration): expose vtable[2] as a typed method on AboutDialog
+ * (ui/AboutDialog.h) and replace this adapter. */
+typedef int (__thiscall* TileMapAboutSlot2Fn)(void* self);
+
+static void TileMap_CloseAbout()
+{
+    void** vtable = *reinterpret_cast<void***>(g_about);
+    (*(reinterpret_cast<TileMapAboutSlot2Fn>(vtable[2])))(g_about);
+}
 
 /* ================================================================== */
 /* TileMap::TileMap — Constructor                                      */
@@ -294,7 +396,9 @@ void TileMap::FullReset()
     UI_CleanupTooltips(g_tooltip_mgr);  /* 0x4FD220 */
     INPUT_FileDlgProc(g_input_mgr);  /* 0x4A9990 */
 
-    /* Clear the trailing header bytes and all named tile storage. */
+    /* Clear the trailing header bytes and all named tile storage.
+     * The assembly zeroes dwords +0x44..+0x52483 (0x14910 dwords),
+     * i.e. _pad_42[2..5] plus the whole tile grid. */
     for (int i = 2; i < 6; ++i) {
         _pad_42[i] = 0;
     }
@@ -319,7 +423,8 @@ void TileMap::FullReset()
         }
     }
 
-    /* Reset tile grid active-layer bytes (at +0x80 within each tile entry) */
+    /* Reset tile grid active-layer bytes (at +0x80 and +0x81 within each
+     * tile entry) for the 0x41 x 0x51 tile array. */
     for (int y = 0; y < 0x41; y++) {
         for (int x = 0; x < 0x51; x++) {
             int tile_base = (x * 0x41 + y) * 0x40;
@@ -328,9 +433,11 @@ void TileMap::FullReset()
         }
     }
 
-    /* Invalidate and update game window if not in game mode 1 */
+    /* Invalidate and update the main window's child handle (CGWND + 0x8)
+     * if not in game mode 1. */
     if (g_main_window != NULL) {
-        HWND child_wnd = g_main_window;
+        HWND child_wnd = *reinterpret_cast<HWND*>(
+            reinterpret_cast<uint8_t*>(g_main_window) + 8);
         if (child_wnd != NULL && g_game_mode != 1) {
             ::InvalidateRect(child_wnd, NULL, FALSE);
             UpdateWindow(child_wnd);
@@ -345,7 +452,7 @@ void TileMap::FullReset()
 /* Initialize TileMap dimensions at startup or on resolution change.   */
 /* Sets up tile grid size, viewport center, allocates occupancy bitmap */
 /* initialized to all-0xFF.                                            */
-/* param use_1024x768: 0=use screen dims (clamped 1024-1280),         */
+/* param use_1024x768: 0=use screen dims (clamped 1024-1280),          */
 /*                      1=use fixed 1024x768                           */
 /* ================================================================== */
 void TileMap::Init(char use_1024x768)
@@ -358,35 +465,35 @@ void TileMap::Init(char use_1024x768)
         if (g_screen_width > 0x3FF) {
             if (g_screen_width < 0x501) {
                 width = g_screen_width;
-                this->total_width = g_screen_width;
-                this->total_height = g_screen_height;
+                this->width = g_screen_width;
+                this->height = g_screen_height;
                 height = g_screen_height;
             } else {
                 width = 0x500;      /* 1280 max */
-                this->total_width = 0x500;
-                this->total_height = 0x400;
+                this->width = 0x500;
+                this->height = 0x400;
                 height = 0x400;
             }
             goto set_center;
         }
         width = 0x400;              /* 1024 */
-        this->total_width = 0x400;
+        this->width = 0x400;
     } else {
         width = 0x400;              /* 1024 */
-        this->total_width = 0x400;
+        this->width = 0x400;
     }
-    this->total_height = 0x300;      /* 768 */
+    this->height = 0x300;           /* 768 */
     height = 0x300;
 
 set_center:
-    scroll_x = 0;
-    scroll_y = 0;
-    center_x = width / 2;
-    total_width = width;
-    total_height = height;
-    viewport_x = 0;
-    viewport_y = 0;
-    center_y = height / 2;
+    viewport_rect.left = 0;         /* +0x0C */
+    viewport_rect.top = 0;          /* +0x10 */
+    center_x = width / 2;           /* +0x24 */
+    viewport_rect.right = width;    /* +0x14 */
+    viewport_rect.bottom = height;  /* +0x18 */
+    viewport_x = 0;                 /* +0x1C */
+    viewport_y = 0;                 /* +0x20 */
+    center_y = height / 2;          /* +0x28 */
     viewport_center_x =
         (g_client_offset_x - g_client_width) / 2 + g_client_width;
     viewport_center_y =
@@ -424,12 +531,15 @@ set_center:
 /* ================================================================== */
 /* TileMap::GetObjectAt                                                */
 /* Address: 0x455620                                                   */
+/*                                                                     */
+/* Bounds: x in [0, 0x51], y in [0, 0x41]. Returns the layer-0 slot    */
+/* value at this+0x48+(x*65+y)*64+layer*4.                             */
 /* ================================================================== */
 void* TileMap::GetObjectAt(short tile_x, short tile_y, short layer)
 {
-    if (tile_x < 0 || tile_x > 0x51 ||
-        tile_y < 0 || tile_y > 0x41) {
-        return nullptr;
+    if (tile_x < 0 || tile_x >= 0x52 ||
+        tile_y < 0 || tile_y >= 0x42) {
+        return NULL;
     }
 
     size_t data_index = TILE_OFFSET(tile_x, tile_y, layer) - 0x48;
@@ -440,40 +550,39 @@ void* TileMap::GetObjectAt(short tile_x, short tile_y, short layer)
 /* TileMap::GetObjectAtEx                                              */
 /* Address: 0x455670                                                   */
 /*                                                                     */
-/* Extended version: scans layers from highest active layer downward   */
-/* (using the active-layer count byte within the tile entry)           */
-/* and returns the first non-empty object.                             */
+/* Extended version: scans layers from the active-layer byte down to   */
+/* 0 in the ORIGIN region (this+0x64+...) and returns the first        */
+/* non-empty object. *layer_out is only written on success (the        */
+/* binary leaves it untouched otherwise).                              */
 /* ================================================================== */
 void* TileMap::GetObjectAtEx(short tile_x, short tile_y, short* layer_out)
 {
-    if (tile_x < 0 || tile_x > 0x51 ||
-        tile_y < 0 || tile_y > 0x42) {
-        if (layer_out) *layer_out = -1;
-        return nullptr;
+    void* result = NULL;
+
+    if (tile_x < 0 || tile_x >= 0x52 ||
+        tile_y < 0 || tile_y >= 0x42) {
+        return NULL;
     }
 
     int tile_index = static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y);
 
-    /* Read the active layer count from byte within the tile entry */
-    int active_layers = static_cast<int8_t>(
+    /* Active-layer byte at this + (tile_index + 2) * 0x40 (= +0x80 within
+     * the tile entry). */
+    int8_t active = static_cast<int8_t>(
         tile_data[(tile_index + 2) * 0x40 - 0x48]);
-    if (active_layers < 0) {
-        if (layer_out) *layer_out = -1;
-        return nullptr;
-    }
-
-    /* Scan from highest active layer down to 0 */
-    for (int l = active_layers; l >= 0; l--) {
-        void* obj = ReadTilePointer(
-            (static_cast<int>(l) + tile_index * 0x10) * 4 + 100 - 0x48);
-        if (obj != nullptr) {
-            *layer_out = static_cast<short>(l);
-            return obj;
+    if (active >= 0) {
+        for (int8_t layer = active; layer >= 0; layer--) {
+            int32_t val = ReadTileValue(
+                (static_cast<int>(layer) + tile_index * 0x10) * 4 + 100 - 0x48);
+            if (val != 0) {
+                *layer_out = layer;
+                result = reinterpret_cast<void*>(static_cast<uintptr_t>(
+                    static_cast<uint32_t>(val)));
+                break;
+            }
         }
     }
-
-    if (layer_out) *layer_out = -1;
-    return nullptr;
+    return result;
 }
 
 /* ================================================================== */
@@ -488,8 +597,8 @@ void* TileMap::FindObjectByPos(int pixel_x, int pixel_y)
     int tile_index = static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y);
     int tile_base = tile_index * 0x40;
 
-    /* Active layer is within the tile entry */
-    int active_layer = static_cast<int8_t>(
+    /* Active layer byte at this + tile_base + 0x80 */
+    int8_t active_layer = static_cast<int8_t>(
         tile_data[tile_base + 0x80 - 0x48]);
 
     return ReadTilePointer(tile_base + 0x64 + active_layer * 4 - 0x48);
@@ -499,25 +608,22 @@ void* TileMap::FindObjectByPos(int pixel_x, int pixel_y)
 /* TileMap::GetTileOrigin                                              */
 /* Address: 0x455740                                                   */
 /*                                                                     */
-/* Gets the packed tile origin coordinates from TileMapObject +0x88:  */
-/* tile_x in low 16 bits, tile_y in high 16 bits. Via out_id pointer.  */
-/* Accesses tile data at this+0x64 (offset 0x1C within each tile entry)*/
-/* rather than the standard this+0x48 (start of tile_data). Verified   */
-/* against disassembly: MOV ECX, [ECX + ESI*4 + 0x64] at 0x455773.    */
-/* Output via out_id pointer. Returns out_id for caller convenience.   */
-/* Returns -1 via *out_id if empty or out of bounds.                   */
+/* Reads the ORIGIN-region slot (this+0x64 + tile*0x40 + layer*4) and, */
+/* when non-empty and in bounds, returns the object's tile origin at   */
+/* +0x88 via *out_id. *out_id = -1 when empty or out of bounds.        */
+/*                                                                     */
+/* The binary reads the slot before checking bounds; for out-of-bounds */
+/* coordinates the result is -1 either way, so the bounds check is     */
+/* done first here (documented equivalence, avoids an OOB array read). */
 /* ================================================================== */
 int* TileMap::GetTileOrigin(int* out_id, short tile_x, short tile_y, short layer)
 {
-    /* Bounds check before any tile data access */
     if (tile_x < 0 || tile_x > 0x51 ||
         tile_y < 0 || tile_y > 0x41) {
         *out_id = -1;
         return out_id;
     }
 
-    /* Direct tile data access at this + 0x64 + (x*65+y)*64 + layer*4 */
-    /* This is tile_data[0x1C + (x*65+y)*0x40 + layer*4] */
     size_t data_index = (static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y)) * 0x40 +
                         static_cast<int>(layer) * 4 + 0x1C;
     int obj_val = ReadTileValue(data_index);
@@ -535,20 +641,17 @@ int* TileMap::GetTileOrigin(int* out_id, short tile_x, short tile_y, short layer
 /* TileMap::GetTileOriginEx                                            */
 /* Address: 0x4557C0                                                   */
 /*                                                                     */
-/* Gets the packed tile origin coordinates from TileMapObject +0x88:  */
-/* tile_x|tile_y<<16. Uses +0x48 offset for tile access (standard     */
-/* tile_data start) vs +0x64 in GetTileOrigin. Output via out_packed.  */
+/* Like GetTileOrigin but reads the standard 0x48 tile slot. Same      */
+/* documented equivalence for the bounds check order.                  */
 /* ================================================================== */
 void TileMap::GetTileOriginEx(int* out_packed, short tile_x, short tile_y, short layer)
 {
-    /* Bounds check before any tile data access */
     if (tile_x < 0 || tile_x > 0x51 ||
         tile_y < 0 || tile_y > 0x41) {
         *out_packed = -1;
         return;
     }
 
-    /* Direct tile data access at this + 0x48 + (x*65+y)*64 + layer*4 */
     size_t data_index = (static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y)) * 0x40 +
                         static_cast<int>(layer) * 4;
     int obj_val = ReadTileValue(data_index);
@@ -566,10 +669,10 @@ void TileMap::GetTileOriginEx(int* out_packed, short tile_x, short tile_y, short
 /* Address: 0x457B60                                                   */
 /*                                                                     */
 /* Checks if two tile resources conflict. Uses type byte at +0x08:     */
-/* 0x0C (12) = scenery, 0x03 (3) = track/building.                    */
-/* Also checks TileData_IsSceneryTile and TileData_IsWaterTile.        */
-/* Returns: 50 = building-building conflict,                           */
-/*          10 = building-scenery/water conflict,                      */
+/* 0x0C (12) = scenery, 0x03 (3) = track/building.                     */
+/* Also checks RESDATA_IsSceneryTile and RESDATA_IsWaterTile.          */
+/* Returns: 50 = scenery-scenery conflict,                             */
+/*          10 = building-building / scenery-water conflict,           */
 /*          -1 = no conflict.                                          */
 /* ================================================================== */
 int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b)
@@ -592,11 +695,11 @@ int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b)
 
     /* Scenery (0x0C) vs building/track (0x03) */
     if (type_a == 0x0C && type_b == 0x03) {
-        if (TileData_IsSceneryTile(tile_resource_b) &&
+        if (RESDATA_IsSceneryTile(tile_resource_b) &&
             resource_a->resource_id > 0x3010) {
             result = 10;
         }
-        if (TileData_IsWaterTile(tile_resource_b)) {
+        if (RESDATA_IsWaterTile(tile_resource_b)) {
             return 10;
         }
         return result;
@@ -604,11 +707,11 @@ int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b)
 
     /* Building/track (0x03) vs scenery (0x0C) */
     if (type_a == 0x03 && type_b == 0x0C) {
-        if (TileData_IsSceneryTile(tile_resource_a) &&
+        if (RESDATA_IsSceneryTile(tile_resource_a) &&
             resource_b->resource_id > 0x3010) {
             result = 10;
         }
-        if (TileData_IsWaterTile(tile_resource_a)) {
+        if (RESDATA_IsWaterTile(tile_resource_a)) {
             return 10;
         }
         return result;
@@ -622,7 +725,7 @@ int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b)
 /* Address: 0x457C20                                                   */
 /*                                                                     */
 /* Checks if tile_b is buildable adjacent to tile_a.                   */
-/* Type codes: 3=track/building, 0x0C=scenery, 0x0D=other (road?).    */
+/* Type codes: 3=track/building, 0x0C=scenery, 0x0D=other (road?).     */
 /* Returns: 100=valid placement, 0x65=buildable but restricted,        */
 /*          -1=blocked.                                                */
 /* ================================================================== */
@@ -635,7 +738,7 @@ int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
 
     if (type_b == 0x03) {
         /* Building on road/path */
-        if (TileData_IsTrackTile(tile_resource_b) &&
+        if (RESDATA_IsTrackTile(tile_resource_b) &&
             type_a != 0x0C && type_a == 0x0D) {
             return 100;
         }
@@ -653,7 +756,7 @@ int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
     } else if (type_b == 0x0D) {
         /* Road/path type */
         if (type_a == 0x03) {
-            int is_track = TileData_IsTrackTile(tile_resource_a);
+            int is_track = RESDATA_IsTrackTile(tile_resource_a);
             return is_track ? 0x65 : -1;
         }
         if (type_a == 0x0C || type_a == 0x0D) {
@@ -665,7 +768,7 @@ int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
 }
 
 /* ================================================================== */
-/* TileMap::InvalidateRect                                              */
+/* TileMap::InvalidateRect                                             */
 /* Address: 0x455840                                                   */
 /* ================================================================== */
 void TileMap::InvalidateRect(int left, int top, int right, int bottom)
@@ -715,9 +818,8 @@ TileMapObject* TileMap::GetViewport(TileMapObject* sprite, int direction)
     }
 
     /* Check if neighbor is defined for this direction */
-    int neighbor_def1 = resource->neighbor_def[direction][0];
-    int neighbor_def2 = resource->neighbor_def[direction][1];
-    if (neighbor_def1 == 0 && neighbor_def2 == 0) {
+    if (resource->neighbor_def[direction][0] == 0 &&
+        resource->neighbor_def[direction][1] == 0) {
         return NULL;
     }
 
@@ -736,15 +838,16 @@ TileMapObject* TileMap::GetViewport(TileMapObject* sprite, int direction)
     case 1:  tile_y++; break;
     case 2:  tile_x++; break;
     case 3:  tile_y--; break;
+    default: break;
     }
 
     /* Bounds check */
-    if (tile_x < 0 || tile_x >= 0x52 ||
-        tile_y < 0 || tile_y >= 0x42) {
+    if (tile_x < 0 || tile_x > 0x51 ||
+        tile_y < 0 || tile_y > 0x41) {
         return NULL;
     }
 
-    /* Get the object at the target tile (first layer) */
+    /* Get the object at the target tile (layer 0) */
     TileMapObject* neighbor = static_cast<TileMapObject*>(
         ReadTilePointer((tile_x * 0x41 + static_cast<int>(tile_y)) * 0x40));
 
@@ -768,8 +871,8 @@ TileMapObject* TileMap::GetViewport(TileMapObject* sprite, int direction)
 /* Address: 0x4576B0                                                   */
 /*                                                                     */
 /* Evaluates 4 adjacent tiles (N/S/E/W) around a building sprite.     */
-/* For each valid neighbor, checks if buildable. Returns count (0-4)  */
-/* or 1 if any neighbor has a station resource (0xC50/0xC52).         */
+/* For each valid neighbor, checks if buildable. Returns count (0-4)   */
+/* or 1 if any neighbor has a station resource (0xC50/0xC52).          */
 /* ================================================================== */
 char TileMap::SetViewport(TileMapObject* building_sprite)
 {
@@ -897,7 +1000,7 @@ char TileMap::UpdateViewport(TileMapObject* sprite, short sprite_type)
 
         /* Subtract scenery tiles (type 0x0C) from valid count */
         for (int i = 0; i < 4; i++) {
-            if (corner[i] != nullptr) {
+            if (corner[i] != NULL) {
                 TileMapResource* corner_res =
                     static_cast<TileMapObject*>(corner[i])->resource;
                 char corner_type = corner_res == NULL ? 0 : corner_res->object_type;
@@ -925,9 +1028,12 @@ char TileMap::UpdateViewport(TileMapObject* sprite, short sprite_type)
 /* TileMap::GetTileRect                                                */
 /* Address: 0x457830                                                   */
 /*                                                                     */
-/* Fills occupancy data for each of the 4 directions. For each         */
-/* direction, walks the chain of connected tiles until a non-          */
-/* conflicting one is found.                                           */
+/* Fills occupancy data for each of the 4 directions. Per direction:   */
+/*   +0xC4 (occupancy_links[dir]) = adjacent object pointer (when it   */
+/*        is not a sprite-editor object),                              */
+/*   +0xD4 (occupancy_scores[dir]) += occupancy score,                 */
+/*   walk continues while the neighbour's +0xE4 (occupancy_more) is    */
+/*        negative; stops when it is >= 0 or the chain ends.           */
 /* ================================================================== */
 void TileMap::GetTileRect(TileMapObject* sprite)
 {
@@ -936,32 +1042,26 @@ void TileMap::GetTileRect(TileMapObject* sprite)
     TileMapResource* resource = sprite->resource;
 
     for (int dir = 0; dir < 4; dir++) {
-        int32_t* neighbor_ptr = &sprite->occupancy_neighbors[dir];
-        int32_t* score_ptr = &sprite->occupancy_scores[dir];
-
-        /* Zero output fields */
-        sprite->occupancy_links[dir] = 0;
-        *score_ptr = 0;
+        sprite->occupancy_links[dir] = 0;     /* +0xC4 */
+        sprite->occupancy_scores[dir] = 0;    /* +0xD4 */
 
         TileMapObject* neighbor = GetViewport(sprite, dir);
-        if (neighbor != NULL) {
-            while (1) {
-                TileMapResource* neighbor_res = neighbor->resource;
-                int occupancy = TileMap_IsTileOccupied(
-                    reinterpret_cast<intptr_t>(resource),
-                    reinterpret_cast<intptr_t>(neighbor_res));
-                if (occupancy < 0) break;
+        while (neighbor != NULL) {
+            TileMapResource* neighbor_res = neighbor->resource;
+            int occupancy = TileMap_IsTileOccupied(
+                reinterpret_cast<intptr_t>(resource),
+                reinterpret_cast<intptr_t>(neighbor_res));
+            if (occupancy < 0) break;
 
-                if (!INPUT_EditCharHandler(reinterpret_cast<intptr_t>(neighbor_res))) {
-                    *neighbor_ptr = reinterpret_cast<intptr_t>(neighbor);
-                }
-                *score_ptr += occupancy;
-
-                /* Walk to next connected tile if chained */
-                if (neighbor->occupancy_scores[0] < 0) break;
-                neighbor = GetViewport(neighbor, dir);
-                if (neighbor == NULL) break;
+            if (!INPUT_EditCharHandler(reinterpret_cast<intptr_t>(neighbor_res))) {
+                sprite->occupancy_links[dir] = reinterpret_cast<intptr_t>(neighbor);
             }
+            sprite->occupancy_scores[dir] += occupancy;
+
+            /* Walk to next connected tile only while the neighbour's
+             * occupancy_more (+0xE4) is negative. */
+            if (neighbor->occupancy_more >= 0) break;
+            neighbor = GetViewport(neighbor, dir);
         }
     }
 }
@@ -970,7 +1070,12 @@ void TileMap::GetTileRect(TileMapObject* sprite)
 /* TileMap::GetTileAt                                                  */
 /* Address: 0x457900                                                   */
 /*                                                                     */
-/* Like GetTileRect but uses IsTileBuildable instead of IsTileOccupied.*/
+/* Like GetTileRect but uses IsTileBuildable instead of IsTileOccupied */
+/* and the build chain fields:                                        */
+/*   +0xE8 (build_links[dir]) = adjacent object pointer,               */
+/*   +0xF8 (build_scores[dir]) += build score,                         */
+/*   walk continues while the neighbour's +0x108 (build_more) is       */
+/*        negative.                                                    */
 /* ================================================================== */
 void TileMap::GetTileAt(TileMapObject* sprite)
 {
@@ -979,31 +1084,24 @@ void TileMap::GetTileAt(TileMapObject* sprite)
     TileMapResource* resource = sprite->resource;
 
     for (int dir = 0; dir < 4; dir++) {
-        int32_t* neighbor_ptr = &sprite->build_links[dir];
-        int32_t* score_ptr = &sprite->build_scores[dir];
-
-        /* Zero output fields */
-        sprite->occupancy_scores[dir + 1] = 0;
-        *score_ptr = 0;
+        sprite->build_links[dir] = 0;         /* +0xE8 */
+        sprite->build_scores[dir] = 0;        /* +0xF8 */
 
         TileMapObject* neighbor = GetViewport(sprite, dir);
-        if (neighbor != NULL) {
-            while (1) {
-                TileMapResource* neighbor_res = neighbor->resource;
-                int buildable = TileMap_IsTileBuildable(
-                    reinterpret_cast<intptr_t>(resource),
-                    reinterpret_cast<intptr_t>(neighbor_res));
-                if (buildable < 0) break;
+        while (neighbor != NULL) {
+            TileMapResource* neighbor_res = neighbor->resource;
+            int buildable = TileMap_IsTileBuildable(
+                reinterpret_cast<intptr_t>(resource),
+                reinterpret_cast<intptr_t>(neighbor_res));
+            if (buildable < 0) break;
 
-                if (!INPUT_EditCharHandler(reinterpret_cast<intptr_t>(neighbor_res))) {
-                    *neighbor_ptr = reinterpret_cast<intptr_t>(neighbor);
-                }
-                *score_ptr += buildable;
-
-                if (neighbor->build_scores[0] < 0) break;
-                neighbor = GetViewport(neighbor, dir);
-                if (neighbor == NULL) break;
+            if (!INPUT_EditCharHandler(reinterpret_cast<intptr_t>(neighbor_res))) {
+                sprite->build_links[dir] = reinterpret_cast<intptr_t>(neighbor);
             }
+            sprite->build_scores[dir] += buildable;
+
+            if (neighbor->build_more >= 0) break;
+            neighbor = GetViewport(neighbor, dir);
         }
     }
 }
@@ -1023,19 +1121,22 @@ void TileMap::ClearInputProcessedFlag()
 /*                                                                     */
 /* Validates placement of a target building at a grid offset from its  */
 /* current position. Checks road tile category, then iterates the      */
-/* 3D occupancy grid (w x h x d) of the target building to verify     */
-/* that no blocking objects are in the way.                            */
+/* 3D occupancy grid (w x h x d, indexed [x][y][z] = x*63 + y*7 + z)   */
+/* of the target building to verify that no blocking objects are in    */
+/* the way.                                                            */
 /* ================================================================== */
 char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
-    short delta_x, ushort delta_y, int placement_mode)
+    short delta_x, unsigned short delta_y, int placement_mode)
 {
     TileMapObject* building = target_building;
-    short grid_w = building->grid_width;
-    short grid_h = building->grid_height;
+    byte grid_w = building->grid_width;
+    byte grid_h = building->grid_height;
 
-    /* Bounds check */
-    if (static_cast<int>(grid_w) + static_cast<int>(delta_x) > static_cast<int>(tile_count_x) ||
-        static_cast<int>(grid_h) + static_cast<int>(delta_y) > static_cast<int>(tile_count_y)) {
+    /* Bounds check (unsigned add of the byte dims, matching the binary) */
+    if (static_cast<int>(static_cast<unsigned int>(grid_w) +
+                         static_cast<unsigned int>(delta_x)) > tile_count_x ||
+        static_cast<int>(static_cast<unsigned int>(grid_h) +
+                         static_cast<unsigned int>(delta_y)) > tile_count_y) {
         return 0;
     }
 
@@ -1043,8 +1144,8 @@ char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
 
     /* Check road tile compatibility */
     if (building->object_type == 0x03) {
-        if (TileData_IsRoadTile(reinterpret_cast<intptr_t>(target_building))) {
-            uint category = TileData_GetTileCategory(
+        if (RESDATA_IsRoadTile(reinterpret_cast<intptr_t>(target_building))) {
+            unsigned int category = RESDATA_GetTileCategory(
                 target_building, delta_x, delta_y);
             valid = static_cast<char>(category);
         }
@@ -1062,9 +1163,11 @@ char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
             for (short iz = 0; iz < depth; iz++) {
                 for (short iy = 0; iy < static_cast<short>(bVar7); iy++) {
                     for (short ix = 0; ix < static_cast<short>(bVar4); ix++) {
-                        int occ_offset = 0x16E + static_cast<int>(iz) * 9 * 7 +
-                                         static_cast<int>(iy) * 7 + static_cast<int>(ix);
-                        int8_t occ = building->occupancy_grid[occ_offset - 0x16E];
+                        /* occupancy grid is indexed [x][y][z] = x*63+y*7+z */
+                        int8_t occ = building->occupancy_grid[
+                            static_cast<int>(ix) * 9 * 7 +
+                            static_cast<int>(iy) * 7 +
+                            static_cast<int>(iz)];
                         if (occ != 0) {
                             int tile_x = static_cast<int>(iy) + static_cast<int>(delta_x);
                             int tile_y = static_cast<int>(ix) + static_cast<int>(delta_y);
@@ -1079,18 +1182,18 @@ char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
                                      g_game_mode == 1)) {
                                     if (use_sound) {
                                         PlaySoundAt(0x5024,
-                                            static_cast<int>(tile_x) << 4,
-                                            static_cast<int>(tile_y) << 4, 4);
-                                    }
-                                    void* ptr = ReadTilePointer(
-                                        TILE_OFFSET(
-                                            static_cast<short>(iy + static_cast<short>(delta_x)),
-                                            static_cast<short>(ix + static_cast<short>(delta_y)),
-                                            iz) - 0x48);
-                                    if (ptr) {
-                                        ScrollTo(
-                                            static_cast<TileMapObject*>(ptr),
-                                            placement_mode);
+                                            static_cast<int>(delta_x) << 4,
+                                            static_cast<int>(delta_y) << 4, 4);
+                                        void* ptr = ReadTilePointer(
+                                            TILE_OFFSET(
+                                                static_cast<short>(ix + delta_x),
+                                                static_cast<short>(iy + delta_y),
+                                                iz) - 0x48);
+                                        if (ptr) {
+                                            ScrollTo(
+                                                static_cast<TileMapObject*>(ptr),
+                                                placement_mode);
+                                        }
                                     }
                                 } else {
                                     valid = 0;
@@ -1113,7 +1216,7 @@ char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
 /* Two-phase clear: removes object from original tile area (Phase 1)   */
 /* and destination area (Phase 2) based on resource grid dimensions.   */
 /* Updates occupancy bitmap and decrements active layer counts.        */
-/* Finally removes object from INPUT manager. Returns 1 on success.    */
+/* Finally removes object from INPUT manager.                          */
 /*                                                                     */
 /* Verified against disassembly (215 instructions, 0x455AB0-0x455D5E). */
 /* ================================================================== */
@@ -1129,9 +1232,8 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
     }
 
     TileMapResource* resource = target->resource;
-    short base_x = *reinterpret_cast<short*>(
-        reinterpret_cast<uint8_t*>(target) + 0x22);
-    short tile_y = target->tile_y;
+    short base_x = target->tile_x;   /* +0x88 */
+    short tile_y = target->tile_y;   /* +0x8A */
 
     byte grid_span_y = resource->grid_span_y;       /* +0x16B */
     byte original_span = resource->original_span;    /* +0x16C */
@@ -1139,22 +1241,24 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
     byte grid_height = resource->grid_height;        /* +0x169 */
 
     /* ---- Phase 1: Clear original tile area ---- */
-    /* Iterates y from tile_y to tile_y+original_span, x from base_x to base_x+grid_span_y */
+    /* Iterates y from tile_y to tile_y+original_span, x from base_x to
+     * base_x+grid_span_y. Scans layers 6..0 in the origin region
+     * (this + tile*0x40 + 0x64 + layer*4). */
     {
         int y = static_cast<int>(tile_y);
-        int y_end = static_cast<int>(static_cast<ushort>(
-            tile_y + static_cast<ushort>(original_span)));
+        int y_end = static_cast<int>(static_cast<unsigned short>(
+            static_cast<unsigned short>(tile_y) +
+            static_cast<unsigned short>(original_span)));
 
         for (; y < y_end; y++) {
             int x = static_cast<int>(base_x);
-            int x_end = static_cast<int>(static_cast<ushort>(
-                static_cast<ushort>(grid_span_y) + base_x));
+            int x_end = static_cast<int>(static_cast<unsigned short>(
+                static_cast<unsigned short>(grid_span_y) + base_x));
 
             for (; x < x_end; x++) {
                 int tile_idx = y + x * 0x41;
 
-                /* Scan layers 6 down to 0, at offset 0x34-0x1C within tile */
-                /* Access: this + tile_idx*0x40 + 0x64 + layer*4 */
+                /* Active layer byte at this + (tile_idx + 2) * 0x40 */
                 int8_t* active_layer_byte =
                     reinterpret_cast<int8_t*>(
                         reinterpret_cast<uint8_t*>(this) + (tile_idx + 2) * 0x40);
@@ -1200,30 +1304,32 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
 
     /* ---- Phase 2: Clear destination area ---- */
     /* Recompute tile_y: tile_y += original_span - grid_height */
-    /* Iterates y from new_tile_y to new_tile_y+grid_height, x from base_x to base_x+grid_width */
+    /* Iterates y from new_tile_y to new_tile_y+grid_height, x from base_x
+     * to base_x+grid_width. Uses the standard layer region
+     * (this + tile*0x40 + 0x48 + layer*4). */
     {
-        tile_y = tile_y + static_cast<ushort>(original_span - grid_height);
+        tile_y = tile_y + static_cast<unsigned short>(original_span - grid_height);
         int y = static_cast<int>(tile_y);
-        int y_end = static_cast<int>(static_cast<ushort>(
-            static_cast<ushort>(grid_height) + tile_y));
+        int y_end = static_cast<int>(static_cast<unsigned short>(
+            static_cast<unsigned short>(grid_height) + tile_y));
 
         for (; y < y_end; y++) {
             int x = static_cast<int>(base_x);
-            int x_end = static_cast<int>(static_cast<ushort>(
-                static_cast<ushort>(grid_width) + base_x));
+            int x_end = static_cast<int>(static_cast<unsigned short>(
+                static_cast<unsigned short>(grid_width) + base_x));
 
             for (; x < x_end; x++) {
                 int tile_idx = y + x * 0x41;
 
-                /* Active layer byte at offset +0x39 within tile (0x48 + tile_idx*0x40 + 0x39 - 0x48) */
+                /* Active layer byte at this + tile_idx*0x40 + 0x81 */
                 int8_t* active_layer_byte =
                     reinterpret_cast<int8_t*>(
                         reinterpret_cast<uint8_t*>(this) + tile_idx * 0x40 + 0x81);
                 int8_t active = *active_layer_byte;
 
                 if (active >= 0) {
-                    /* Scan from active layer down to 0 */
-                    /* Access: this + (tile_idx*0x10 + layer)*4 + 0x48 = standard tile_data */
+                    /* Scan from active layer down to 0 in the standard
+                     * layer region (this + tile_idx*0x40 + 0x48 + layer*4) */
                     int* slot = reinterpret_cast<int*>(
                         reinterpret_cast<uint8_t*>(this) +
                         (tile_idx * 0x10 + static_cast<int>(active)) * 4 + 0x48);
@@ -1255,12 +1361,12 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
         }
     }
 
-    /* Remove object from INPUT manager */
-    extern int INPUT_RemoveObject(void** mgr, void* obj, uint param);
-    INPUT_RemoveObject(&g_input_mgr, target,
-                       static_cast<uint>(scroll_flag));
-
-    return target;
+    /* Remove object from INPUT manager; the binary returns EAX with the
+     * low byte set to 1 (CONCAT31(uVar8 >> 8, 1)). */
+    uintptr_t rem = static_cast<uintptr_t>(
+        INPUT_RemoveObject(&g_input_mgr, target,
+                           static_cast<unsigned int>(scroll_flag)));
+    return reinterpret_cast<void*>((rem & 0xFFFFFF00U) | 1U);
 }
 
 /* ================================================================== */
@@ -1273,50 +1379,140 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
 /* ================================================================== */
 char TileMap::HandleClick(int screen_x, int screen_y)
 {
-    short tile_x = (screen_x < 0) ? -1 : static_cast<short>(screen_x >> 4);
-    short tile_y = (screen_y < 0) ? -1 : static_cast<short>(screen_y >> 4);
+    short tile_x = (screen_x < 0) ? static_cast<short>(-1) : static_cast<short>(screen_x >> 4);
+    short tile_y = (screen_y < 0) ? static_cast<short>(-1) : static_cast<short>(screen_y >> 4);
 
-    if (g_game_mode != 3) {
-        if (g_game_mode != 4) {
-            return 0;
-        }
-        void* obj = GetObjectAtEx(tile_x, tile_y,
-                                  reinterpret_cast<short*>(&screen_y));
-        if (g_build_mode == 1 && g_click_on_building == 1 && g_placement_valid == 0) {
-            if (obj != NULL) {
-                if (scroll_drag_active != 0 &&
-                    (0xf < screen_x - drag_start_x ||
-                     0xf < screen_y - drag_start_y)) {
-                    Scroll(screen_x, screen_y, drag_start_x, drag_start_y);
-                    drag_start_x = screen_x;
-                    scroll_drag_active = 1;
-                    drag_start_y = screen_y;
-                    return 1;
-                }
-                ScrollTo(static_cast<TileMapObject*>(obj), 1);
+    if (g_game_mode == 3) {
+        /* ================= Game mode 3: town object selection ========= */
+        char result = 0;
+        short layer_out = 0;
+        void* obj = GetObjectAtEx(tile_x, tile_y, &layer_out);
+
+        if (g_click_on_building != 0) {
+            if (obj == NULL) {
+                goto mode3_no_object;
             }
-            drag_start_x = screen_x;
-            scroll_drag_active = 1;
-            drag_start_y = screen_y;
+            TileMap_CallSlot16(obj);   /* vtable[16] — click feedback */
+            result = 1;
+        }
+
+        if (obj == NULL) {
+mode3_no_object:
+            if (g_click_on_town != 1) {
+                return result;
+            }
+            if (Town_SelectBuilding(g_town_view, 0) == 0 &&
+                DDRAW_SelectBuilding(g_ddraw_building, 0) == 0) {
+                return 0;
+            }
             return 1;
         }
-        if (g_build_mode == 2 && g_placement_resource_id != -1 &&
-            g_click_on_building == 1 && g_placement_valid == 0) {
-            int* result = FindObject(g_placement_resource_id, tile_x, tile_y, 0, 1);
-            if (g_placement_blocked != 0) {
-                return 1;
-            }
-            if (result != NULL) {
-                return 1;
-            }
-            g_placement_blocked = 1;
-            return 0;
+
+        if (g_click_on_town != 1) {
+            return result;
         }
+
+        result = static_cast<char>(TileMap_CallSlot17(obj));  /* vtable[17] */
+
+        int res_id = *reinterpret_cast<int*>(
+            reinterpret_cast<uint8_t*>(
+                static_cast<TileMapObject*>(obj)->resource) + 4);
+
+        switch (res_id) {
+        case 0x820:
+            /* About dialog */
+            TileMap_CloseAbout();
+            return result;
+        case 0x818:
+            CGWND_SetMode(7);
+            return result;
+        case 0x848:
+            CGWND_SetMode(6);
+            return result;
+        case 0xC5C:
+        case 0xC5E:
+        case 0xC60:
+            CGWND_SetMode(5);
+            return result;
+        case 0xC42:
+        case 0xC44:
+        case 0xC46:
+        case 0xC48:
+        case 0x3011:
+        case 0x3013:
+        case 0x3015:
+        case 0x3017:
+        case 0x3019:
+        case 0x301B:
+            /* Scenario/station objects: enter network setup when a
+             * scenario is active (Netman +0x7C4 == 2). */
+            if (*reinterpret_cast<int*>(
+                    reinterpret_cast<uint8_t*>(g_netman) + 0x7C4) == 2) {
+                CGWND_SetMode(9);
+                return result;
+            }
+            goto mode3_town_select;
+        default:
+            break;
+        }
+
+        if (g_click_on_town != 1) {
+            return result;
+        }
+mode3_town_select:
+        result = static_cast<char>(Town_SelectBuilding(
+            g_town_view, static_cast<int>(reinterpret_cast<intptr_t>(obj))));
+        return result;
+    }
+
+    if (g_game_mode != 4) {
         return 0;
     }
 
-    /* Game mode 3: town mode — hit-test and building selection */
-    /* (additional logic follows in the binary — abbreviated for transcription) */
+    /* ================= Game mode 4: drag-scroll + placement =========== */
+    short layer_out = 0;
+    void* obj = GetObjectAtEx(tile_x, tile_y, &layer_out);
+
+    if (g_build_mode == 1 && g_click_on_building == 1 && g_placement_valid == 0) {
+        if (obj != NULL) {
+            if (scroll_drag_active != 0 &&
+                (screen_x - drag_start_x >= 0x10 ||
+                 screen_y - drag_start_y >= 0x10)) {
+                Scroll(screen_x, screen_y, drag_start_x, drag_start_y);
+                drag_start_x = screen_x;
+                scroll_drag_active = 1;
+                drag_start_y = screen_y;
+                return 1;
+            }
+            ScrollTo(static_cast<TileMapObject*>(obj), 1);
+        }
+        drag_start_x = screen_x;
+        scroll_drag_active = 1;
+        drag_start_y = screen_y;
+        return 1;
+    }
+
+    if (g_build_mode == 2 && g_placement_resource_id != -1 &&
+        g_click_on_building == 1 && g_placement_valid == 0) {
+        int* result = FindObject(static_cast<unsigned int>(g_placement_resource_id),
+                                 tile_x, tile_y, 0, 1);
+        if (g_placement_blocked != 0) {
+            return 1;
+        }
+        if (result == NULL) {
+            if (g_disable_input != 0) {
+                return 1;
+            }
+            PlaySoundAt(0x501B, screen_x, screen_y, 4);
+            return 1;
+        }
+        PlaySoundAt(0x501A, screen_x, screen_y, 4);
+        return 1;
+    }
+
+    if (obj == NULL) {
+        return 0;
+    }
     return 0;
 }
 
@@ -1324,15 +1520,18 @@ char TileMap::HandleClick(int screen_x, int screen_y)
 /* TileMap::InvalidateDirtyRects                                       */
 /* Address: 0x456150                                                   */
 /*                                                                     */
-/* Main render pipeline. Builds dirty RECT list from occupancy bitmap, */
-/* blits cursor surface to primary surface for each dirty region,      */
-/* merges overlapping rects via ProcessDirtyRects, presents each rect. */
+/* Main render pipeline. Builds dirty RECT list from occupancy bitmap  */
+/* (one node per horizontal run of dirty tiles per row), appends the   */
+/* selection rects, blits cursor surface, merges rects via             */
+/* ProcessDirtyRects (until it reports no merge), clips via            */
+/* FreeDirtyRects, then for each rect locks the primary surface,       */
+/* renders via ProcessRect, unlocks, presents and frees. Finally the   */
+/* whole occupancy bitmap is cleared.                                  */
 /* ================================================================== */
 void TileMap::InvalidateDirtyRects(char force_all)
 {
-    RECT* rect_list = NULL;
-    RECT* prev_rect = NULL;
-    RECT* head_rect = NULL;
+    RECT* head = NULL;
+    RECT* last = NULL;
 
     /* Only process in game modes 3 or 4, and not while locked */
     if ((g_game_mode != 3 && g_game_mode != 4) || g_lock_update_flag == 1) {
@@ -1340,8 +1539,9 @@ void TileMap::InvalidateDirtyRects(char force_all)
     }
 
     World_Lock(g_world);  /* 0x4A98B0 */
-    RECT local_20;
-    SetRectEmpty(&local_20);
+
+    RECT pending;
+    bool no_pending = true;    /* bVar3: true = no rect pending */
 
     short start_x, start_y, end_x, end_y;
     if ((g_is_fullscreen == 0 && g_world_width <= g_screen_width) || force_all != 0) {
@@ -1356,68 +1556,193 @@ void TileMap::InvalidateDirtyRects(char force_all)
         start_y = (viewport_y < 0) ? static_cast<short>(-1) : static_cast<short>(viewport_y >> 4);
         end_y = (viewport_y + g_client_offset_y < 0) ? static_cast<short>(-1)
                 : static_cast<short>((viewport_y + g_client_offset_y) >> 4);
-        if (end_x > tile_count_x) end_x = tile_count_x;
-        if (end_y > tile_count_y) end_y = tile_count_y;
+        if (end_x < tile_count_x) end_x = static_cast<short>(end_x + 1);
+        if (end_y < tile_count_y) end_y = static_cast<short>(end_y + 1);
+
+        /* Town-mode clamp: restrict the scan to the town overlay rect. */
+        if (g_allow_building_placement != 0) {
+            int ov;
+            int nx;
+
+            ov = g_town_overlay_rect;
+            nx = (ov < 0) ? -1 : (ov >> 4);
+            if (start_x >= nx) {
+                start_x = static_cast<short>((ov < 0) ? 0xFFFF : (ov >> 4));
+            }
+            if (start_x < 1) start_x = 0;
+
+            ov = g_town_overlay_top;
+            nx = (ov < 0) ? -1 : (ov >> 4);
+            if (end_x <= nx) {
+                end_x = static_cast<short>((ov < 0) ? -1 : (ov >> 4));
+            }
+            if (end_x >= tile_count_x) end_x = tile_count_x;
+
+            ov = g_town_overlay_left;
+            nx = (ov < 0) ? -1 : (ov >> 4);
+            if (start_y >= nx) {
+                start_y = static_cast<short>((ov < 0) ? 0xFFFF : (ov >> 4));
+            }
+            if (start_y < 1) start_y = 0;
+
+            ov = g_town_overlay_right;
+            nx = (ov < 0) ? -1 : (ov >> 4);
+            if (end_y <= nx) {
+                end_y = static_cast<short>((ov < 0) ? -1 : (ov >> 4));
+            }
+            if (end_y >= tile_count_y) end_y = tile_count_y;
+        }
     }
 
-    /* Scan occupancy bitmap for dirty tiles, build rect list */
+    /* Scan occupancy bitmap for dirty tiles, building one rect node per
+     * horizontal run of consecutive dirty tiles in a row. */
     for (short y = start_y; y < end_y; y++) {
         for (short x = start_x; x < end_x; x++) {
-            uint bit_idx = static_cast<uint>(g_player_id) * static_cast<uint>(y) + static_cast<uint>(x);
+            uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
+                               static_cast<uint32_t>(x);
             uint8_t* bitmap = reinterpret_cast<uint8_t*>(g_tile_occupied_bitmap);
             if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
-                /* Dirty tile found — expand dirty rect or create new one */
+                /* Dirty tile found — extend pending rect or start one */
                 RECT tile_rect;
                 tile_rect.left = x * 16;
                 tile_rect.top = y * 16;
                 tile_rect.right = tile_rect.left + 16;
                 tile_rect.bottom = tile_rect.top + 16;
 
-                if (rect_list == NULL) {
-                    rect_list = reinterpret_cast<RECT*>(operator_new(sizeof(RECT) + 8));
-                    CopyRect(rect_list, &tile_rect);
-                    rect_list[1].left = 0;
-                    head_rect = rect_list;
+                if (no_pending) {
+                    pending = tile_rect;
+                    no_pending = false;
                 } else {
-                    UnionRect(&local_20, rect_list, &tile_rect);
-                    CopyRect(rect_list, &local_20);
+                    UnionRect(&pending, &tile_rect, &pending);
                 }
-
-                /* Clear the dirty bit */
-                bitmap[bit_idx >> 3] &= ~ATTR_0047f108[bit_idx & 7];
+            } else if (!no_pending) {
+                /* Flush pending rect */
+                RECT* node = TileMap_AllocRectNode();
+                if (node != NULL) {
+                    *node = pending;
+                    if (last != NULL) {
+                        last[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                    } else {
+                        head = node;
+                    }
+                    last = node;
+                }
+                no_pending = true;
             }
         }
-    }
-
-    /* Process each dirty rect: blit cursor surface to primary surface */
-    for (RECT* r = head_rect; r != nullptr;
-         r = reinterpret_cast<RECT*>(static_cast<uintptr_t>(r[1].left))) {
-        if (g_cursor_surface != NULL && g_primary_surface != NULL) {
-            UIPANEL_Blit(g_cursor_surface, r->left, r->top,
-                         r->right - r->left, r->bottom - r->top,
-                         g_primary_surface, r->left, r->top,
-                         r->right - r->left, r->bottom - r->top, 0);
+        /* Flush pending rect at end of row */
+        if (!no_pending) {
+            RECT* node = TileMap_AllocRectNode();
+            if (node != NULL) {
+                *node = pending;
+                if (last != NULL) {
+                    last[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                } else {
+                    head = node;
+                }
+                last = node;
+            }
+            no_pending = true;
         }
     }
 
-    /* Merge overlapping dirty rects */
-    TileMap_ProcessDirtyRects(head_rect);
-
-    /* Clip rects to viewport */
-    TileMap_FreeDirtyRects(head_rect);
-
-    /* Present each rect */
-    for (RECT* r = head_rect; r != nullptr;
-         r = reinterpret_cast<RECT*>(static_cast<uintptr_t>(r[1].left))) {
-        DDRAW_PresentRect(r, g_main_window, &viewport_x, 0);
+    /* Blit cursor surface to primary surface for each dirty region.
+     * Note the binary passes the rect's right/bottom directly as the
+     * width/height arguments. */
+    for (RECT* r = head; r != NULL; r = reinterpret_cast<RECT*>(
+             static_cast<uintptr_t>(r[1].left))) {
+        void* cursor_pixels = *reinterpret_cast<void**>(
+            reinterpret_cast<uint8_t*>(g_cursor_surface) + 0x10);
+        UIPANEL_Blit(cursor_pixels, r->left, r->top, r->right, r->bottom,
+                     g_primary_surface, r->left, r->top, r->right, r->bottom, 1);
     }
 
-    /* Free rect list */
-    while (head_rect != NULL) {
-        RECT* next = reinterpret_cast<RECT*>(
-            static_cast<uintptr_t>(head_rect[1].left));
-        GLOBAL_free(head_rect);
-        head_rect = next;
+    /* Append selection rects (selected building + town selection rect) */
+    if (g_has_selection != 0) {
+        RECT* prev = last;
+        if (g_selected_building != 0) {
+            RECT* node = TileMap_AllocRectNode();
+            if (node != NULL) {
+                uint8_t* sel = reinterpret_cast<uint8_t*>(
+                    static_cast<uintptr_t>(g_selected_building));
+                node->left   = *reinterpret_cast<int*>(sel + 8);
+                node->top    = *reinterpret_cast<int*>(sel + 0xC);
+                node->right  = *reinterpret_cast<int*>(sel + 0x10);
+                node->bottom = *reinterpret_cast<int*>(sel + 0x14);
+                if (prev != NULL) {
+                    prev[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                } else {
+                    head = node;
+                }
+                prev = node;
+            }
+        }
+        RECT* node = TileMap_AllocRectNode();
+        if (node != NULL) {
+            node->left   = g_town_selection_rect_left;
+            node->top    = g_town_selection_rect_top;
+            node->right  = g_town_selection_rect_right;
+            node->bottom = g_town_selection_rect_bottom;
+            if (prev != NULL) {
+                prev[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+            } else {
+                head = node;
+            }
+            prev = node;
+        }
+        (void)prev;
+    }
+
+    /* Merge overlapping dirty rects until no merge occurs */
+    if (head != NULL) {
+        while (TileMap_ProcessDirtyRects(head) != 0) {
+        }
+        TileMap_FreeDirtyRects(head);
+    }
+
+    /* Present each rect */
+    while (head != NULL) {
+        /* Lock primary surface if not already locked */
+        if (surface_locked == 0) {
+            for (int i = 0; i < 0x1F; i++) {
+                reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[i] = 0;
+            }
+            reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[0] = 0x7C;
+            if (TileMap_LockPrimarySurface(ddsurfacedesc_buf) == 0) {
+                surface_locked = 1;
+            }
+        }
+
+        ProcessRect(head->left, head->top, head->right, head->bottom);
+
+        /* Unlock primary surface */
+        if (surface_locked != 0 && TileMap_UnlockPrimarySurface() == 0) {
+            surface_locked = 0;
+        }
+
+        HWND child_wnd = *reinterpret_cast<HWND*>(
+            reinterpret_cast<uint8_t*>(g_main_window) + 8);
+        DDRAW_PresentRect(head, child_wnd, &viewport_x, 1);
+
+        RECT* next = reinterpret_cast<RECT*>(static_cast<uintptr_t>(head[1].left));
+        GLOBAL_free(head);
+        head = next;
+    }
+
+    /* Clear the whole occupancy bitmap (all dirty bits consumed) */
+    if (occupancy_bitmap != NULL) {
+        int tile_count = static_cast<int>(tile_count_x) * static_cast<int>(tile_count_y);
+        int bitmap_size = ((tile_count + (tile_count >> 31 & 7)) >> 3) + 1;
+
+        uint32_t* bitmap32 = reinterpret_cast<uint32_t*>(occupancy_bitmap);
+        uint32_t dword_count = bitmap_size >> 2;
+        for (uint32_t i = 0; i < dword_count; i++) {
+            bitmap32[i] = 0;
+        }
+        uint8_t* bitmap8 = reinterpret_cast<uint8_t*>(&bitmap32[dword_count]);
+        for (uint32_t i = 0; i < (bitmap_size & 3); i++) {
+            bitmap8[i] = 0;
+        }
     }
 
     World_Unlock(g_world);  /* 0x4A98B0 */
@@ -1428,8 +1753,9 @@ void TileMap::InvalidateDirtyRects(char force_all)
 /* Address: 0x456700                                                   */
 /*                                                                     */
 /* Renders all objects in a dirty rect. Iterates visible tiles, calls  */
-/* Draw on each object. In town mode dispatches BuildingMgr,           */
-/* World_InvalidateRect, tooltips, and cursors.                        */
+/* Draw / DrawConnected on each object. In town mode (mode 3) also     */
+/* dispatches BuildingMgr, World_InvalidateRect, tooltips, cursors and */
+/* the town overlay lock/unlock dance.                                 */
 /* ================================================================== */
 void TileMap::ProcessRect(int left, int top, int right, int bottom)
 {
@@ -1448,7 +1774,8 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                 int cur_tile_idx = tile_idx;
 
                 for (short x = tile_left; x < tile_right; x++) {
-                    uint bit_idx = static_cast<uint>(g_player_id) * static_cast<uint>(y) + static_cast<uint>(x);
+                    uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
+                                       static_cast<uint32_t>(x);
                     uint8_t* bitmap = reinterpret_cast<uint8_t*>(g_tile_occupied_bitmap);
                     if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
                         /* Read active layer count from tile entry */
@@ -1458,12 +1785,88 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
 
                         /* Draw objects in this tile (layers 0..active) */
                         for (int8_t layer = 0; layer <= active; layer++) {
-                            int32_t obj_val = ReadTileValue(
-                                cur_tile_idx * 0x40 + layer * 4);
-                            if (obj_val != 0) {
-                                /* Call draw on the object */
-                                /* (GameObject virtual draw dispatch) */
+                            void* obj = NULL;
+                            if (x < 0 || x > 0x51 ||
+                                y < 0 || y > 0x41) {
+                                obj = NULL;
+                            } else {
+                                /* Objects are read from the origin region
+                                 * (this + 0x64 + tile*0x40 + layer*4). */
+                                obj = ReadTilePointer(
+                                    cur_tile_idx * 0x40 + layer * 4 + 0x1C);
                             }
+                            if (obj != NULL) {
+                                /* vtable[11] = Draw */
+                                static_cast<Entity*>(obj)->Draw(
+                                    RECT{pixel_x, pixel_y,
+                                         pixel_x + 16, pixel_y + 16}, 0, 0);
+                            }
+
+                            /* Town-mode (mode 3) layer dispatch */
+                            if (g_game_mode == 3) {
+                                if (layer == 0) {
+                                    unsigned int res_type = 0;
+                                    TileMapObject* tobj = static_cast<TileMapObject*>(obj);
+                                    if (obj != NULL) {
+                                        res_type = GetResourceType(static_cast<unsigned int>(
+                                            *reinterpret_cast<int*>(
+                                                reinterpret_cast<uint8_t*>(tobj->resource) + 4)));
+                                    }
+                                    if (static_cast<char>(res_type) != 3) {
+                                        /* obj == NULL or non-type-3: BuildingMgr
+                                         * dispatch first, then world invalidation. */
+                                        BuildingMgr_DispatchAll(g_building_mgr, layer,
+                                                                pixel_x, pixel_y,
+                                                                pixel_x + 16, pixel_y + 16, 0);
+                                        World_InvalidateRect(g_world, pixel_x, pixel_y,
+                                                             pixel_x + 16, pixel_y + 16, layer);
+                                    } else {
+                                        /* obj != NULL && type 3: world invalidation
+                                         * first, then BuildingMgr dispatch. */
+                                        World_InvalidateRect(g_world, pixel_x, pixel_y,
+                                                             pixel_x + 16, pixel_y + 16, layer);
+                                        BuildingMgr_DispatchAll(g_building_mgr, layer,
+                                                                pixel_x, pixel_y,
+                                                                pixel_x + 16, pixel_y + 16, 0);
+                                    }
+                                } else if (layer == 1) {
+                                    World_InvalidateRect(g_world, pixel_x, pixel_y,
+                                                         pixel_x + 16, pixel_y + 16, layer);
+                                    UI_SetTooltipPos(g_tooltip_mgr, pixel_x, pixel_y,
+                                                     pixel_x + 16, pixel_y + 16, 1);
+                                }
+                            }
+
+                            /* vtable[12] = DrawConnected when the object's
+                             * frame data marks it as connected. */
+                            if (obj != NULL) {
+                                TileMapObject* tobj = static_cast<TileMapObject*>(obj);
+                                uint8_t* frame_table = *reinterpret_cast<uint8_t**>(
+                                    reinterpret_cast<uint8_t*>(tobj->resource) + 0x20);
+                                int anim_index =
+                                    static_cast<Entity*>(obj)->anim_index;
+                                if (frame_table[anim_index * 3 * 8 + 0x17] == 1) {
+                                    static_cast<Entity*>(obj)->DrawConnected(
+                                        RECT{pixel_x, pixel_y,
+                                             pixel_x + 16, pixel_y + 16}, 0, 0);
+                                }
+                            }
+                        }
+
+                        /* Per-tile UI/scripted dispatch */
+                        UI_SetTooltipText(g_tooltip_mgr, pixel_x, pixel_y,
+                                          pixel_x + 16, pixel_y + 16);
+                        UI_UpdateTooltip(g_tooltip_mgr, pixel_x, pixel_y,
+                                         pixel_x + 16, pixel_y + 16, 1);
+                        RESDATA_ScriptedObject_Dispatch(g_scripted_object, pixel_x, pixel_y,
+                                                        pixel_x + 16, pixel_y + 16, 1);
+                        DDRAW_DispatchToSubObjects(g_ddraw_building, pixel_x, pixel_y,
+                                                   pixel_x + 16, pixel_y + 16,
+                                                   reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
+                        Town_RenderSelection(g_town_view);
+                        if (g_allow_building_placement == 0) {
+                            Game_SetCursorByResourceId(g_game, pixel_x, pixel_y,
+                                                       pixel_x + 16, pixel_y + 16, 1);
                         }
                     }
                     cur_tile_idx += 0x41;
@@ -1474,76 +1877,211 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
             pixel_y += 16;
         }
     }
+
+    /* Town overlay surface lock / unlock around the town selection
+     * rendering. */
+    RECT local_10;
+    RECT param_rect;
+    param_rect.left = left;
+    param_rect.top = top;
+    param_rect.right = right;
+    param_rect.bottom = bottom;
+
+    /* Binary view: the town overlay RECT spans the contiguous globals at
+     * 0x48538C..0x485398. Build an explicit RECT so the host globals do not
+     * need to be contiguous. */
+    RECT town_overlay = { g_town_overlay_rect, g_town_overlay_left,
+                          g_town_overlay_top, g_town_overlay_right };
+    if (IntersectRect(&local_10, &town_overlay, &param_rect)) {
+        if (g_allow_building_placement != 0) {
+            if (surface_locked != 0 &&
+                TileMap_UnlockPrimarySurface() == 0) {
+                surface_locked = 0;
+            }
+            Town_DeselectBuilding(g_town_view);
+            Town_UpdateSelection(g_town_view);
+            if (surface_locked == 0) {
+                for (int i = 0; i < 0x1F; i++) {
+                    reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[i] = 0;
+                }
+                reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[0] = 0x7C;
+                if (TileMap_LockPrimarySurface(ddsurfacedesc_buf) == 0) {
+                    surface_locked = 1;
+                }
+            }
+        }
+    }
+
+    if (g_allow_building_placement != 0) {
+        RECT town_selection = { g_town_selection_rect_left,
+                               g_town_selection_rect_top,
+                               g_town_selection_rect_right,
+                               g_town_selection_rect_bottom };
+        bool intersects = IntersectRect(&local_10, &town_selection, &param_rect);
+        if (!intersects) {
+            RECT sel_rect;
+            if (g_selected_building != 0) {
+                sel_rect = *reinterpret_cast<RECT*>(
+                    reinterpret_cast<uint8_t*>(
+                        static_cast<uintptr_t>(g_selected_building)) + 8);
+                intersects = IntersectRect(&local_10, &sel_rect, &param_rect);
+            }
+        }
+        if (intersects) {
+            Game_ResetCursor(g_game);
+        }
+    }
 }
 
 /* ================================================================== */
 /* TileMap::ProcessObjectTimer                                         */
 /* Address: 0x456D90                                                   */
 /*                                                                     */
-/* Validates object's tile footprint matches expected resource IDs in  */
-/* all 4 directions (up/right/down/left spiral scan). Returns status.  */
+/* Validates that the object's tile footprint matches the expected     */
+/* resource-id layout (resource +0x564, count at +0x560). The          */
+/* footprint is walked in a clockwise spiral starting from the top     */
+/* row (y = world_y - 1). Returns the validity flag (low byte).        */
 /* ================================================================== */
 uint TileMap::ProcessObjectTimer(TileMapObject* obj)
 {
-    if (obj == NULL || obj->resource == NULL) {
+    if (obj == NULL) {
         return 0;
     }
 
     TileMapResource* res = obj->resource;
-    char valid = 1;
+    int packed_world;
+    GameObject_GetSubObjectWorldPos(obj, &packed_world);
 
-    /* Get object's world position and tile footprint bounds */
-    extern void* GameObject_GetSubObjectWorldPos(void* obj, int* out_xy);
-    int out_xy[2];
-    int* pos = reinterpret_cast<int*>(GameObject_GetSubObjectWorldPos(obj, out_xy));
-    int world_x = pos[0];
-    int world_y = pos[1];
+    short world_y = static_cast<short>(
+        static_cast<unsigned int>(packed_world) >> 16);
+    short world_x = static_cast<short>(packed_world);
+    int orig_world_x = static_cast<int>(world_x);
+    short row_y = static_cast<short>(world_y - 1);
 
-    short tile_y_start = static_cast<short>(world_y >> 16);
-    short tile_x_start = static_cast<short>(world_x);
-
-    short tile_y = tile_y_start - 1;
-    int x_end = static_cast<short>(static_cast<ushort>(res->grid_span_y) + obj->tile_x - 1) + 1;
+    int x_end = static_cast<short>(
+        static_cast<unsigned short>(res->grid_span_y) +
+        static_cast<unsigned short>(obj->tile_x) - 1) + 1;
 
     uint idx = 0;
-    int cur_x = static_cast<int>(static_cast<short>(world_x));
+    char valid = 1;
 
-    /* Spiral scan: validate tile footprint in 4 directions */
-    if (cur_x <= x_end) {
-        do {
-            /* Check bounds */
-            if (idx >= *reinterpret_cast<uint*>(reinterpret_cast<uint8_t*>(res) + 0x560) || valid != 1) break;
-
-            int expected_id = *reinterpret_cast<int*>(
-                reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(
-                    *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(res) + 0x564))) + idx * 4);
-            if (expected_id != -1) {
-                if (static_cast<short>(world_x) < 0 ||
-                    g_player_id <= static_cast<short>(world_x) ||
-                    tile_y < 0 || g_player_color <= tile_y) {
-                    valid = 0;
+    /* Expected-id value at this index; -1 = no check for this tile. */
+    /* ---- Loop 1: right along the top row (y = world_y - 1) ---- */
+    int cur_x = static_cast<int>(world_x);
+    while (cur_x <= x_end) {
+        if (idx >= res->expected_count || valid != 1) break;
+        int expected = res->expected_ids[idx];
+        if (expected != -1) {
+            if (world_x < 0 || g_player_id <= world_x ||
+                row_y < 0 || g_player_color <= row_y) {
+                valid = 0;
+            } else {
+                int tile_val = ReadTileValue((cur_x * 0x41 + row_y) * 0x40);
+                if (tile_val == 0) {
+                    if (expected != 0) valid = 0;
                 } else {
-                    int tile_val = ReadTileValue(
-                        (cur_x * 0x41 + static_cast<int>(tile_y)) * 0x40);
-                    if (tile_val == 0) {
-                        if (expected_id != 0) {
-                            valid = 0;
-                        }
-                    } else if (expected_id != *reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(
-                            *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(tile_val)) + 0x40))) + 4)) {
+                    int tile_res = *reinterpret_cast<int*>(
+                        reinterpret_cast<uint8_t*>(
+                            static_cast<uintptr_t>(tile_val)) + 0x40);
+                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
                         valid = 0;
                     }
                 }
             }
-            idx++;
-            world_x++;
-            cur_x = static_cast<int>(static_cast<short>(world_x));
-        } while (cur_x <= x_end);
+        }
+        idx++;
+        world_x++;
+        cur_x = static_cast<int>(world_x);
     }
 
-    /* Continue spiral scan in other directions (abbreviated) */
-    return valid;
+    /* ---- Loop 2: down the right column (x = world_x - 1) ---- */
+    short right_x = static_cast<short>(world_x - 1);
+    short col_y = world_y;
+    int y_end_2 = static_cast<short>(
+        static_cast<unsigned short>(res->original_span) +
+        static_cast<unsigned short>(obj->tile_y) - 1) + 1;
+    while (static_cast<int>(col_y) <= y_end_2) {
+        if (idx >= res->expected_count || valid != 1) break;
+        int expected = res->expected_ids[idx];
+        if (expected != -1) {
+            if (right_x < 0 || g_player_id <= right_x ||
+                col_y < 0 || g_player_color <= col_y) {
+                valid = 0;
+            } else {
+                int tile_val = ReadTileValue((col_y + right_x * 0x41) * 0x40);
+                if (tile_val == 0) {
+                    if (expected != 0) valid = 0;
+                } else {
+                    int tile_res = *reinterpret_cast<int*>(
+                        reinterpret_cast<uint8_t*>(
+                            static_cast<uintptr_t>(tile_val)) + 0x40);
+                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
+                        valid = 0;
+                    }
+                }
+            }
+        }
+        idx++;
+        col_y++;
+    }
+
+    /* ---- Loop 3: left along the bottom row ---- */
+    col_y = static_cast<short>(col_y - 1);
+    int x3 = static_cast<int>(world_x) - 2;
+    while (orig_world_x - 1 <= x3) {
+        if (idx >= res->expected_count || valid != 1) break;
+        int expected = res->expected_ids[idx];
+        if (expected != -1) {
+            if (x3 < 0 || g_player_id <= x3 ||
+                col_y < 0 || g_player_color <= col_y) {
+                valid = 0;
+            } else {
+                int tile_val = ReadTileValue((x3 * 0x41 + col_y) * 0x40);
+                if (tile_val == 0) {
+                    if (expected != 0) valid = 0;
+                } else {
+                    int tile_res = *reinterpret_cast<int*>(
+                        reinterpret_cast<uint8_t*>(
+                            static_cast<uintptr_t>(tile_val)) + 0x40);
+                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
+                        valid = 0;
+                    }
+                }
+            }
+        }
+        idx++;
+        x3--;
+    }
+
+    /* ---- Loop 4: up the left column ---- */
+    x3++;
+    while (true) {
+        if (static_cast<int>(col_y) < static_cast<int>(world_y) - 1 ||
+            idx >= res->expected_count || valid != 1) {
+            return valid;
+        }
+        int expected = res->expected_ids[idx];
+        if (expected != -1) {
+            if (x3 < 0 || g_player_id <= x3 ||
+                col_y < 0 || g_player_color <= col_y) {
+                valid = 0;
+            } else {
+                int tile_val = ReadTileValue((col_y + x3 * 0x41) * 0x40);
+                if (tile_val == 0) {
+                    if (expected != 0) valid = 0;
+                } else {
+                    int tile_res = *reinterpret_cast<int*>(
+                        reinterpret_cast<uint8_t*>(
+                            static_cast<uintptr_t>(tile_val)) + 0x40);
+                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
+                        valid = 0;
+                    }
+                }
+            }
+        }
+        idx++;
+        col_y--;
+    }
 }
 
 /* ================================================================== */
@@ -1579,10 +2117,13 @@ void TileMap::UpdateAll()
 /*                                                                     */
 /* Validates and places building at tile position. Calls ScrollRect    */
 /* for validation, INPUT_PlaceObject to create, fills tile grid with   */
-/* new object pointers in all occupied cells.                          */
+/* new object pointers in all occupied cells (occupancy grid indexed   */
+/* [x][y][z] = x*63+y*7+z), then writes the object's span map (at      */
+/* resource +0x4A1) into the origin region, sets tile_x/tile_y and     */
+/* calls vtable[3] (SetWorldPos) with pixel coordinates.               */
 /* ================================================================== */
-int* TileMap::FindObject(int target_resource_id, short tile_x, short tile_y,
-                          char unknown, int mode)
+int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short tile_y,
+                          char unknown, unsigned int mode)
 {
     int* result = NULL;
 
@@ -1598,9 +2139,10 @@ int* TileMap::FindObject(int target_resource_id, short tile_x, short tile_y,
     }
 
     TileMapResource* resource = reinterpret_cast<TileMapResource*>(res_data);
-    ushort orig_span = static_cast<ushort>(resource->original_span);
+    unsigned short orig_span = static_cast<unsigned short>(resource->original_span);
     byte span_y = resource->grid_span_y;
-    int offset = static_cast<uint>(orig_span) - static_cast<uint>(resource->grid_height);
+    int offset = static_cast<unsigned int>(orig_span) -
+                 static_cast<unsigned int>(resource->grid_height);
 
     short adjusted_y = tile_y;
     if (unknown != 1) {
@@ -1613,39 +2155,104 @@ int* TileMap::FindObject(int target_resource_id, short tile_x, short tile_y,
 
     if (g_allow_building_placement == 0 ||
         ScrollRect(0, reinterpret_cast<TileMapObject*>(res_data), tile_x,
-                   static_cast<ushort>(adjusted_y + static_cast<short>(offset)), mode) != 0) {
+                   static_cast<unsigned short>(adjusted_y + static_cast<short>(offset)),
+                   static_cast<int>(mode)) != 0) {
         if (ScrollRect(1, reinterpret_cast<TileMapObject*>(res_data), tile_x,
-                       static_cast<ushort>(offset + static_cast<int>(adjusted_y)), mode) != 0) {
+                       static_cast<unsigned short>(offset + static_cast<int>(adjusted_y)),
+                       static_cast<int>(mode)) != 0) {
             result = reinterpret_cast<int*>(static_cast<uintptr_t>(
-                INPUT_PlaceObject(&g_input_mgr, static_cast<uint>(target_resource_id))));
+                INPUT_PlaceObject(&g_input_mgr, target_resource_id)));
             if (result != NULL) {
-                /* Fill tile grid with new object pointer */
+                /* Fill the standard layer region of each occupied tile */
                 short gy = 0;
-                int y_end = offset + static_cast<int>(adjusted_y);
+                int y_start = offset + static_cast<int>(adjusted_y);
                 if (resource->grid_height != 0) {
                     do {
                         short gx = 0;
-                        uint x_start = static_cast<uint>(tile_x);
+                        unsigned int x_start = static_cast<unsigned int>(tile_x);
                         if (resource->grid_width != 0) {
                             do {
-                                /* Place object in each occupied tile cell */
+                                /* Occupancy grid indexed [x][y][z] */
                                 for (int8_t iz = 0; iz < resource->grid_depth; iz++) {
-                                    int occ_idx = 0x16E + static_cast<int>(iz) * 9 * 7 +
-                                                  static_cast<int>(gy) * 7 + static_cast<int>(gx);
-                                    if (reinterpret_cast<TileMapObject*>(result)->occupancy_grid[occ_idx - 0x16E] != 0) {
+                                    if (reinterpret_cast<TileMapObject*>(result)
+                                            ->occupancy_grid[
+                                                static_cast<int>(gx) * 9 * 7 +
+                                                static_cast<int>(gy) * 7 +
+                                                static_cast<int>(iz)] == 1) {
+                                        int tile_index =
+                                            (y_start + static_cast<int>(gy)) +
+                                            (static_cast<int>(x_start) +
+                                             static_cast<int>(gx)) * 0x41;
+                                        /* standard layer slot at +0x48 */
                                         WriteTileValue(
-                                            (static_cast<int>(static_cast<short>(x_start + gx)) * 0x41 +
-                                             static_cast<int>(static_cast<short>(y_end))) * 0x40 + iz * 4,
-                                            static_cast<int32_t>(reinterpret_cast<intptr_t>(result)));
+                                            tile_index * 0x40 + static_cast<int>(iz) * 4,
+                                            static_cast<int32_t>(
+                                                reinterpret_cast<intptr_t>(result)));
+                                        /* active byte = max(active, iz) */
+                                        uint8_t& active = tile_data[
+                                            (tile_index + 2) * 0x40 - 0x48];
+                                        if (active <= static_cast<uint8_t>(iz)) {
+                                            active = static_cast<uint8_t>(iz);
+                                        }
                                     }
                                 }
                                 gx++;
                             } while (gx < resource->grid_width);
                         }
                         gy++;
-                        y_end++;
+                        y_start++;
                     } while (gy < resource->grid_height);
                 }
+
+                /* Write the span map (resource +0x4A1, stride 9) into the
+                 * origin region (this + tile*0x40 + 0x64 + (span-1)*4) and
+                 * mark the occupied-bitmap bits. */
+                if (orig_span != 0) {
+                    int y = static_cast<int>(adjusted_y);
+                    int x = static_cast<int>(tile_x);
+                    for (int sy = 0; sy < static_cast<int>(orig_span); sy++, y++) {
+                        uint8_t* span_row = reinterpret_cast<uint8_t*>(res_data) +
+                                            0x4A1 + sy;
+                        if (span_y != 0) {
+                            int sx = 0;
+                            for (; sx < static_cast<int>(span_y); sx++) {
+                                uint8_t span = span_row[sx * 9];
+                                if (span != 0) {
+                                    int tile_index = y + (x + sx) * 0x41;
+                                    int span_slot = static_cast<int>(span) - 1;
+                                    WriteTileValue(
+                                        tile_index * 0x40 + span_slot * 4 + 0x1C,
+                                        static_cast<int32_t>(
+                                            reinterpret_cast<intptr_t>(result)));
+                                    /* active byte = max(active, span-1) */
+                                    uint8_t& active = tile_data[
+                                        (tile_index + 2) * 0x40 - 0x48];
+                                    if (active <= static_cast<uint8_t>(span_slot)) {
+                                        active = static_cast<uint8_t>(span_slot);
+                                    }
+                                    /* occupancy dirty bit */
+                                    uint32_t bit_idx =
+                                        static_cast<uint32_t>(g_player_id) *
+                                            static_cast<uint32_t>(y) +
+                                        static_cast<uint32_t>(x + sx);
+                                    uint8_t* bitmap_byte =
+                                        reinterpret_cast<uint8_t*>(
+                                            g_tile_occupied_bitmap) + (bit_idx >> 3);
+                                    *bitmap_byte |= ATTR_0047f108[bit_idx & 7];
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /* Record tile origin and move the object to pixel coords
+                 * via vtable[3] (SetWorldPos / MoveTo). */
+                TileMapObject* obj = reinterpret_cast<TileMapObject*>(result);
+                obj->tile_y = adjusted_y;
+                obj->tile_x = tile_x;
+                reinterpret_cast<Entity*>(obj)->MoveTo(
+                    static_cast<int>(tile_x) << 4,
+                    static_cast<int>(adjusted_y) << 4);
             }
         }
     }
@@ -1657,47 +2264,46 @@ int* TileMap::FindObject(int target_resource_id, short tile_x, short tile_y,
 /* TileMap::Scroll                                                     */
 /* Address: 0x455960                                                   */
 /*                                                                     */
-/* Vector-based scroll with floating-point interpolation. Steps along  */
-/* vector from drag_start to target, calling GetObjectAtEx at each step*/
-/* and ScrollTo on found objects.                                      */
+/* Vector-based scroll: steps from (delta_x, delta_y) along the unit   */
+/* vector toward the drag start for sqrt(dx^2+dy^2) steps, calling     */
+/* GetObjectAtEx at each step and ScrollTo on found objects. Returns   */
+/* 1 if any object was scrolled.                                       */
 /* ================================================================== */
 uint TileMap::Scroll(int delta_x, int delta_y, int drag_start_x, int drag_start_y)
 {
     int vec_x = delta_x - drag_start_x;
     int vec_y = delta_y - drag_start_y;
 
-    double cur_x = static_cast<double>(delta_x);
-    double cur_y = static_cast<double>(delta_y);
-
-    /* SQRT operation approximated via FPU */
-    double length = static_cast<double>(vec_x * vec_x + vec_y * vec_y);
-    /* length = sqrt(dx*dx + dy*dy) */
+    double length = std::sqrt(static_cast<double>(vec_x) * static_cast<double>(vec_x) +
+                              static_cast<double>(vec_y) * static_cast<double>(vec_y));
     double norm_x = static_cast<double>(vec_x) / length;
     double norm_y = static_cast<double>(vec_y) / length;
 
-    /* Step along the vector */
-    short last_tile_x = 0, last_tile_y = 0;
-    for (double dist = 0; dist < length; dist += 1.0) {
+    double cur_x = static_cast<double>(delta_x);
+    double cur_y = static_cast<double>(delta_y);
+
+    uint result = 0;
+    /* The binary loops while length > 0 (decremented by 1 each step). */
+    while (length > 0.0) {
         cur_x = cur_x + norm_x;
         cur_y = cur_y + norm_y;
 
-        short tile_x = (static_cast<int>(cur_x) < 0) ? -1 :
-                       static_cast<short>(static_cast<int>(cur_x) >> 4);
-        short tile_y = (static_cast<int>(cur_y) < 0) ? -1 :
-                       static_cast<short>(static_cast<int>(cur_y) >> 4);
+        /* __ftol truncates toward zero */
+        long xl = static_cast<long>(cur_x);
+        short tile_x = (xl < 0) ? static_cast<short>(-1) : static_cast<short>(xl >> 4);
+        long yl = static_cast<long>(cur_y);
+        short tile_y = (yl < 0) ? static_cast<short>(-1) : static_cast<short>(yl >> 4);
 
-        if (tile_x != last_tile_x || tile_y != last_tile_y) {
-            short layer_out;
-            void* obj = GetObjectAtEx(tile_x, tile_y, &layer_out);
-            if (obj != NULL) {
-                ScrollTo(reinterpret_cast<TileMapObject*>(obj), 1);
-            }
-            last_tile_x = tile_x;
-            last_tile_y = tile_y;
+        short layer_out;
+        void* obj = GetObjectAtEx(tile_x, tile_y, &layer_out);
+        if (obj != NULL) {
+            ScrollTo(reinterpret_cast<TileMapObject*>(obj), 1);
+            result = 1;
         }
+        length = length - 1.0;
     }
 
-    return 0;
+    return result;
 }
 
 /* ================================================================== */
@@ -1712,7 +2318,7 @@ uint TileMap::Scroll(int delta_x, int delta_y, int drag_start_x, int drag_start_
 char TileMap_ProcessDirtyRects(RECT* rect_list)
 {
     char merged = 0;
-    for (RECT* r = rect_list; r != nullptr;
+    for (RECT* r = rect_list; r != NULL;
          r = reinterpret_cast<RECT*>(static_cast<uintptr_t>(r[1].left))) {
         RECT* next = reinterpret_cast<RECT*>(static_cast<uintptr_t>(r[1].left));
         RECT* prev = r;
@@ -1740,28 +2346,166 @@ char TileMap_ProcessDirtyRects(RECT* rect_list)
     return merged;
 }
 
-/* ====
 /* ================================================================== */
-/* TileMap_FreeDirtyRects stub                                         */
+/* TileMap_FreeDirtyRects                                              */
 /* Address: 0x456D10                                                   */
-/* TODO: full decompilation                                            */
+/*                                                                     */
+/* Clips each dirty rect to the viewport rect (g_viewport_rect_left).  */
+/* Rects that do not intersect the viewport are unlinked and freed     */
+/* with GLOBAL_free; intersecting rects are clipped in place.          */
 /* ================================================================== */
 void TileMap_FreeDirtyRects(RECT* rect_list)
 {
-    (void)rect_list;
+    RECT* prev = NULL;
+
+    while (rect_list != NULL) {
+        RECT local_10;
+        /* Binary view: the viewport RECT spans the contiguous globals at
+         * 0x4AAD14..0x4AAD20 (TileMap.viewport_rect). Build an explicit
+         * RECT so the host globals do not need to be contiguous. */
+        RECT viewport = { g_viewport_rect_left, g_viewport_rect_top,
+                          g_viewport_rect_right, g_viewport_rect_bottom };
+        if (IntersectRect(&local_10, rect_list, &viewport)) {
+            rect_list->left = local_10.left;
+            rect_list->top = local_10.top;
+            rect_list->right = local_10.right;
+            rect_list->bottom = local_10.bottom;
+            prev = rect_list;
+            rect_list = reinterpret_cast<RECT*>(
+                static_cast<uintptr_t>(rect_list[1].left));
+        } else {
+            OutputDebugStringA("Invalid Rect found in world draw chain");
+            if (prev != NULL) {
+                prev[1].left = rect_list[1].left;
+            }
+            RECT* next = reinterpret_cast<RECT*>(
+                static_cast<uintptr_t>(rect_list[1].left));
+            GLOBAL_free(rect_list);
+            rect_list = next;
+        }
+    }
 }
 
 /* ================================================================== */
-/* TileMap_FindNearestObject                                           */
+/* TileMap::CreateOverlay                                              */
+/* Address: 0x457080                                                   */
+/*                                                                     */
+/* Creates the build-placement preview overlay: initializes the target */
+/* UIPANEL surface at the tilemap resolution, then fills its pixel     */
+/* buffer with a per-tile overlay code derived from the tile content:  */
+/*   2=water -> 3, 4 -> 2, 0x0C scenery -> 7, 0x0D road -> 6,          */
+/*   type 3 buildings -> 5 except the four station-corner pieces       */
+/*   (0xC1E/0xC20/0xC22/0xC24) which leave their own corner tile       */
+/*   unwritten, 5..0xB -> untouched. Returns 1 (low byte).             */
+/* ================================================================== */
+void* TileMap::CreateOverlay(void* surface, byte fill_byte)
+{
+    UIPANEL_InitSurface(surface, tile_count_x, tile_count_y, 0, 0, fill_byte);
+
+    /* Surface pixel buffer at +0x18 */
+    uint8_t* pixel = *reinterpret_cast<uint8_t**>(
+        reinterpret_cast<uint8_t*>(surface) + 0x18);
+
+    for (int y = 0; y < tile_count_y; y++) {
+        for (int x = 0; x < tile_count_x; x++) {
+            int tile_val = ReadTileValue((x * 0x41 + y) * 0x40);
+            if (tile_val == 0) {
+                pixel++;
+                continue;
+            }
+
+            TileMapObject* obj;
+            if (x < 0 || x > 0x51 || y < 0 || y > 0x41) {
+                obj = NULL;
+            } else {
+                obj = static_cast<TileMapObject*>(
+                    ReadTilePointer((x * 0x41 + y) * 0x40));
+            }
+
+            /* The binary re-reads the slot with a bounds check and, for the
+             * (unreachable) out-of-range case, dereferences a null object;
+             * the null-guard here is the safe host equivalent. */
+            TileMapResource* res = (obj == NULL) ? NULL : obj->resource;
+            uint8_t type = (res == NULL) ? 0 : res->object_type;
+
+            switch (type) {
+            case 2:                              /* water -> 3 */
+                *pixel = 3;
+                break;
+            case 4:                              /* -> 2 */
+                *pixel = 2;
+                break;
+            case 0x0C:                           /* scenery -> 7 */
+                *pixel = 7;
+                break;
+            case 0x0D:                           /* road -> 6 */
+                *pixel = 6;
+                break;
+            case 3: {                            /* building / station pieces */
+                int res_id = (res == NULL) ? -1 : res->resource_id;
+                int delta = res_id - 0xC1E;
+                if (delta < 0 || delta > 6) {
+                    *pixel = 5;
+                    break;
+                }
+                /* The four station corner pieces leave their own corner
+                 * tile unwritten and mark the rest of the footprint 5. */
+                bool skip = false;
+                switch (delta) {
+                case 0: /* 0xC1E */
+                    skip = (obj->tile_x == x && obj->tile_y == y);
+                    break;
+                case 2: /* 0xC20 */
+                    skip = (obj->tile_x + 2 == x && obj->tile_y == y);
+                    break;
+                case 4: /* 0xC22 */
+                    skip = (obj->tile_x == x && obj->tile_y + 2 == y);
+                    break;
+                case 6: /* 0xC24 */
+                    skip = (obj->tile_x + 2 == x && obj->tile_y + 2 == y);
+                    break;
+                default: /* 0xC1F/0xC21/0xC23 -> default overlay 5 */
+                    skip = false;
+                    break;
+                }
+                if (!skip) {
+                    *pixel = 5;
+                }
+                break;
+            }
+            default:                             /* types 5..0xB: no write */
+                break;
+            }
+            pixel++;
+        }
+    }
+
+    /* Return value: EAX low byte = 1 (upper bytes are loop residue). */
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+}
+
+/* ================================================================== */
+/* TileMap_CreateOverlay — free-function entry used by network/Netman. */
+/* Address: 0x457080 (__thiscall in the binary; this wrapper keeps the */
+/* free-function symbol network/Netman.h declares).                    */
+/* ================================================================== */
+void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags)
+{
+    static_cast<TileMap*>(tilemap)->CreateOverlay(surface, static_cast<byte>(flags));
+}
+
+/* ================================================================== */
+/* TileMap::FindNearestObject                                          */
 /* Address: 0x457CE0                                                   */
 /*                                                                     */
-/* Spatial search in concentric diamond rings. Finds nearest object    */
-/* matching type_filter byte (at TileMapResource+0x08) within          */
-/* search_radius, using Math_DistSquared for distance comparison.      */
+/* Spatial search in concentric square rings. Each ring scans the      */
+/* perimeter in four sweeps (top edge, right edge, bottom edge, left   */
+/* edge), returning the first object matching type_filter (resource    */
+/* type byte at +0x08) found at the smallest ring, using               */
+/* Math_DistSquared for tie-breaking within the ring.                  */
 /* ================================================================== */
-void* TileMap_FindNearestObject(TileMap* tilemap, ushort type_filter,
-                                 int target_x, int target_y,
-                                 int search_radius)
+void* TileMap::FindNearestObject(unsigned short type_filter,
+                                 int target_x, int target_y, int search_radius)
 {
     int best_obj = 0;
     int best_dist_sq = 999999999;
@@ -1771,73 +2515,141 @@ void* TileMap_FindNearestObject(TileMap* tilemap, ushort type_filter,
     short center_y = (target_y < 0) ? -1 : static_cast<short>(target_y >> 4);
 
     for (short ring = 0; ring <= radius_tiles; ring++) {
-        if (best_obj != 0) return reinterpret_cast<void*>(static_cast<uintptr_t>(best_obj));
+        if (best_obj != 0) {
+            return reinterpret_cast<void*>(static_cast<uintptr_t>(best_obj));
+        }
 
         int r = static_cast<int>(ring);
-        int x_start = static_cast<int>(center_x) - r;
-        int y_start = static_cast<int>(center_y) - r;
-        int x_end = static_cast<int>(center_x) + r;
-        int y_end = static_cast<int>(center_y) + r;
+        int left = static_cast<int>(center_x) - r;
+        int top = static_cast<int>(center_y) - r;
+        int right = static_cast<int>(center_x) + r;
+        int bottom = static_cast<int>(center_y) + r;
 
-        /* Clamp to valid tile range */
-        if (x_start < 0) x_start = 0;
-        if (y_start < 0) y_start = 0;
+        int x0 = (left < 1) ? 0 : left;          /* max(left, 0) */
+        int y0 = (top < 1) ? 0 : top;            /* max(top, 0) */
 
-        for (int x = x_start; x <= x_end && x < tilemap->tile_count_x; x++) {
-            for (int y = y_start; y <= y_end && y < tilemap->tile_count_y; y++) {
-                int tile_val = tilemap->ReadTileValue((x * 0x41 + y) * 0x40);
-                if (tile_val != 0) {
-                    uint8_t* tile_object = reinterpret_cast<uint8_t*>(
-                        static_cast<uintptr_t>(tile_val));
-                    int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
-                    if (resource_ptr != 0) {
-                        uint8_t* resource = reinterpret_cast<uint8_t*>(
-                            static_cast<uintptr_t>(resource_ptr));
-                        uint8_t obj_type = resource[8];
-                        if (obj_type == static_cast<uint8_t>(type_filter)) {
-                            int obj_wx = *reinterpret_cast<int*>(tile_object + 0x4C);
-                            int obj_wy = *reinterpret_cast<int*>(tile_object + 0x50);
-                            int dist_sq = Math_DistSquared(target_x, target_y,
-                                                           obj_wx, obj_wy);
-                            if (dist_sq < best_dist_sq) {
-                                best_dist_sq = dist_sq;
-                                best_obj = tile_val;
-                            }
-                        }
+        /* Sweep 1: top edge (y = top), x from left..right */
+        for (int x = x0; x <= right && x < tile_count_x; x++) {
+            int tile_val = 0;
+            if (x < 0 || x > 0x51 || y0 < 0 || y0 > 0x41) {
+                tile_val = 0;
+            } else {
+                tile_val = ReadTileValue((x * 0x41 + y0) * 0x40);
+            }
+            if (tile_val != 0) {
+                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
+                    static_cast<uintptr_t>(tile_val));
+                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
+                uint8_t obj_type = 0;
+                if (resource_ptr != 0) {
+                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
+                }
+                if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
+                    int dist_sq = Math_DistSquared(target_x, target_y,
+                                                   entity->world_x,
+                                                   entity->world_y);
+                    if (dist_sq < best_dist_sq) {
+                        best_dist_sq = dist_sq;
+                        best_obj = tile_val;
+                    }
+                }
+            }
+        }
+
+        /* Sweep 2: right edge (x = right), y from top+1..bottom */
+        int rx = right;
+        if (rx >= tile_count_x) rx = tile_count_x;
+        int y1 = (top + 1 < 1) ? 0 : top + 1;
+        for (int y = y1; y <= bottom && y < tile_count_y; y++) {
+            int tile_val = 0;
+            if (rx < 0 || rx > 0x51 || y < 0 || y > 0x41) {
+                tile_val = 0;
+            } else {
+                tile_val = ReadTileValue((y + rx * 0x41) * 0x40);
+            }
+            if (tile_val != 0) {
+                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
+                    static_cast<uintptr_t>(tile_val));
+                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
+                uint8_t obj_type = 0;
+                if (resource_ptr != 0) {
+                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
+                }
+                if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
+                    int dist_sq = Math_DistSquared(target_x, target_y,
+                                                   entity->world_x,
+                                                   entity->world_y);
+                    if (dist_sq < best_dist_sq) {
+                        best_dist_sq = dist_sq;
+                        best_obj = tile_val;
+                    }
+                }
+            }
+        }
+
+        /* Sweep 3: bottom edge (y = bottom), x from right-1 down..left */
+        int bx = right - 1;
+        if (bx >= tile_count_x) bx = tile_count_x;
+        int by = bottom;
+        if (by >= tile_count_y) by = tile_count_y;
+        for (; left <= bx && bx >= 0; bx--) {
+            int tile_val = 0;
+            if (bx < 0x52 && by >= 0 && by < 0x42) {
+                tile_val = ReadTileValue((bx * 0x41 + by) * 0x40);
+            }
+            if (tile_val != 0) {
+                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
+                    static_cast<uintptr_t>(tile_val));
+                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
+                uint8_t obj_type = 0;
+                if (resource_ptr != 0) {
+                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
+                }
+                if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
+                    int dist_sq = Math_DistSquared(target_x, target_y,
+                                                   entity->world_x,
+                                                   entity->world_y);
+                    if (dist_sq < best_dist_sq) {
+                        best_dist_sq = dist_sq;
+                        best_obj = tile_val;
+                    }
+                }
+            }
+        }
+
+        /* Sweep 4: left edge (x = left), y from bottom-1 down..top+1 */
+        int lx = (left < 1) ? 0 : left;
+        int ly = bottom - 1;
+        if (ly >= tile_count_y) ly = tile_count_y;
+        for (; top < ly && ly >= 0; ly--) {
+            int tile_val = 0;
+            if (lx >= 0 && lx <= 0x51 && ly >= 0 && ly <= 0x41) {
+                tile_val = ReadTileValue((ly + lx * 0x41) * 0x40);
+            }
+            if (tile_val != 0) {
+                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
+                    static_cast<uintptr_t>(tile_val));
+                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
+                uint8_t obj_type = 0;
+                if (resource_ptr != 0) {
+                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
+                }
+                if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
+                    int dist_sq = Math_DistSquared(target_x, target_y,
+                                                   entity->world_x,
+                                                   entity->world_y);
+                    if (dist_sq < best_dist_sq) {
+                        best_dist_sq = dist_sq;
+                        best_obj = tile_val;
                     }
                 }
             }
         }
     }
+
     return reinterpret_cast<void*>(static_cast<uintptr_t>(best_obj));
-}
-
-/* ================================================================== */
-/* TileMap_CreateOverlay stub                                          */
-/* Address: 0x457080                                                   */
-/* TODO: full decompilation                                            */
-/* ================================================================== */
-void* TileMap_CreateOverlay(TileMap* tilemap, int resource_id, byte param_2)
-{
-    (void)tilemap;
-    (void)resource_id;
-    (void)param_2;
-    return NULL;
-}
-
-/* ================================================================== */
-/* TileMap_WorldToScreen                                               */
-/* Address: 0x458270 (address verification needed; Ghidra shows        */
-/* BuildingMgrObjectGroup_DtorBody at this location)                   */
-/*                                                                     */
-/* Converts world pixel coordinates to screen coordinates by applying  */
-/* the current viewport scroll offset.                                 */
-/* TODO: verify address against binary symbol table.                   */
-/* ================================================================== */
-void TileMap_WorldToScreen(void* output_coords)
-{
-    /* The address 0x458270 may be incorrect in the symbol table.      */
-    /* Ghidra decompiles a different function at this address.         */
-    /* Placeholder: apply viewport offset to output coordinates.       */
-    (void)output_coords;
 }

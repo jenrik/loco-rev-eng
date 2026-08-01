@@ -5,7 +5,7 @@
 
 extern int CRT_rand(void);                                      // 0x466150
 extern uint32_t g_game_time;                                    // 0x4a99b4
-extern BuildingMgr g_building_mgr;                              // 0x485448
+extern BuildingMgr* g_building_mgr;                             // 0x485448 — host-constructed singleton
 extern void* g_resmgr;                                          // 0x4855e8
 extern void* ResourceManager_GetById(void*, int);                // 0x446ea0
 extern uint8_t GetResourceType(int);                             // 0x446030
@@ -60,7 +60,7 @@ ResourceGameObject::~ResourceGameObject()
     for (int i = 0; i < 5; ++i) {
         if (member_objects[i] != nullptr) {
             /* Disassembly pushes show_message=1 at 0x4582b3. */
-            g_building_mgr.RemoveObject(member_objects[i], true);
+            g_building_mgr->RemoveObject(member_objects[i], true);
             member_objects[i] = nullptr;
         }
     }
@@ -84,8 +84,8 @@ void ResourceGameObject::Draw(RECT clip, int enable_scroll, uint32_t flags)
 Building* ResourceGameObject::CreateMember(uint32_t resource_id)
 {
     if (initialized != 1 || member_limit == 0 ||
-        static_cast<uint32_t>(g_building_mgr.building_count +
-                              g_building_mgr.secondary_count) >= 100) return nullptr;
+        static_cast<uint32_t>(g_building_mgr->building_count +
+                              g_building_mgr->secondary_count) >= 100) return nullptr;
 
     int slot = 0;
     while (slot < member_limit && member_objects[slot] != nullptr) ++slot;
@@ -130,12 +130,12 @@ Building* ResourceGameObject::CreateMember(uint32_t resource_id)
             static_cast<uint8_t*>(member_resource) + 0x34);
     }
 
-    Building* member = g_building_mgr.CreateFromResource(
+    Building* member = g_building_mgr->CreateFromResource(
         static_cast<int>(resource_id), slot, x, y);
     member_objects[slot] = member;
     if (member != nullptr) {
         if (!Building_CheckPlacement(member, world_x, world_y)) {
-            g_building_mgr.RemoveObject(member, false);
+            g_building_mgr->RemoveObject(member, false);
             member_objects[slot] = nullptr;
             return nullptr;
         }
