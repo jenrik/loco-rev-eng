@@ -1,3 +1,4 @@
+// Status: INTEGRATED
 /**
  * TownTiles.cpp — TownTileRenderer implementation
  *
@@ -13,6 +14,10 @@
  * and write to a locked DirectDraw 16-bit surface. Palette[0] is used as
  * a transparent/temporary save slot in some modes. Palette[1] is a
  * half-bright shadow color. Higher indices are regular tile colors.
+ *
+ * Validated instruction-by-instruction against Ghidra (database "locon"):
+ *   InitTileCache 0x42B9C0, DrawTile 0x42BA90, FlushTileCache 0x42BB90,
+ *   DrawCachedTile 0x42BC80, BlitElement 0x42B960.
  */
 
 #include "TownTiles.h"
@@ -24,8 +29,8 @@
 extern "C" {
     /* Pixel format globals */
     extern int   g_surface_bpp;             /* 0x485274 — surface bits-per-pixel */
-    extern int   g_surface_channel1;        /* 0x485278 — first color channel mask */
-    extern int   g_surface_channel2;        /* 0x48527C — second color channel mask */
+    extern int   g_surface_channel1;        /* 0x485278 — red channel bit shift (10/11) */
+    extern int   g_surface_channel2;        /* 0x48527C — green channel bit shift (5/6) */
     extern int   g_surface_bshift;          /* 0x485280 — bit shift for half-bright */
     extern int   g_pixel_format_mask;       /* 0x485248 — computed: g_bshift << 1 */
 }
@@ -809,7 +814,7 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
 /* NOTE: Parameters dest_r and dest_b (destination rect right/bottom)  */
 /* are passed by callers but not used by the function internally.      */
 /*                                                                     */
-/* Called by: RESMGR_AnimateClock (0x447400) -- clock digit sprites     */
+/* Called by: the clock-digit animation helper (0x447400) -- clock digit sprites     */
 /* ================================================================== */
 void TownTileRenderer::CopyTiles8bpp_Transparent(
     int dest_x, int dest_y,
@@ -905,7 +910,7 @@ void TownTileRenderer::CopyTiles8bpp_Direct(
 /* left) while writing left-to-right to the destination surface.       */
 /* Palette index 0 = transparent (skipped, preserves destination).     */
 /*                                                                     */
-/* Parameter notes: dest_x and dest_y (param_3, param_4) are present   */
+/* Parameter notes: dest_x and dest_y (the 3rd and 4th arguments) are present   */
 /* in the UIPANEL_Blit dispatch calling convention but are NOT used    */
 /* by the implementation. The destination position is determined from  */
 /* src_x and src_y.                                                    */

@@ -1,3 +1,4 @@
+// Status: INTEGRATED
 /**
  * Game.h — Top-level gameplay state singleton
  *
@@ -8,43 +9,38 @@
  * manager. It tracks cursor/mouse state (position, clicks, drags, screen-
  * saver idle), manages selection of buildings/vehicles from the UI palette,
  * and dispatches per-frame updates to all active subsystems via the
- * Game_Update per-frame loop.
+ * Game::Update per-frame loop.
  *
- * A single global instance lives at g_game (0x4A98D8).
+ * A single global instance lives at g_game (0x4854C8).
  *
  * Size: ~0x11C bytes (Entity base 0x88 + Game fields 0x94 bytes)
- * Vtable: 0x477718 (extends Entity vtable 0x477488)
+ * Vtable: 0x477718 (extends the Entity 15-slot vtable 0x477488)
  *
  * Class hierarchy:
  *   GameObject (root, type=1, vtable 0x477820)
  *     +-- Entity (type=2, vtable 0x477488)
  *          +-- Game (vtable 0x477718)  <- this class
  *
- * Destructor chain:
- *   vtable[0] = Game_Dtor (0x410660) — scalar deleting destructor
- *     calls ~Game() (Game_BaseDtor, 0x410680) — SEH-protected body
- *       frees timer array, calls GameObject_DtorBody
- *
- * Vtable layout (inherits from GameObject/Entity):
+ * Vtable layout (0x477718 — bytes verified against the binary; only the
+ * destructor and Update are overridden, everything else is inherited):
  *   [0]  +0x00: scalar deleting destructor (Game_Dtor, 0x410660)
- *                   → calls ~Game() base destructor (Game_BaseDtor, 0x410680)
- *   [1]  +0x04: StopSound (inherited)
- *   [2]  +0x08: (release resource?)
- *   [3]  +0x0C: HitTest dispatch (inherited)
- *   [4]  +0x10: (unknown)
- *   [5]  +0x14: (unknown)
- *   [6]  +0x18: InitBase (resource loading + setup)
- *   [7]  +0x1C: SetAnimState (animation dispatch)
- *   [8]  +0x20: SetFrame (update source rect)
- *   [9]  +0x24: SetName
- *   [10] +0x28: Draw (single-frame)
- *   [11] +0x2C: DrawConnected (multi-frame)
- *   [12] +0x30: OnTimerTick
- *   [13] +0x34: (unknown)
- *   [14] +0x38: AnimStateSelect
- *   -- All Game-specific methods below are non-virtual (direct calls) --
+ *                   -> calls ~Game() body (Game_BaseDtor, 0x410680)
+ *   [1]  +0x04: InvalidateRect   (inherited, 0x436AB0)
+ *   [2]  +0x08: PtInRect         (inherited, 0x436A10)
+ *   [3]  +0x0C: MoveTo/SetWorldPos (inherited, 0x405C00)
+ *   [4]  +0x10: InvokeCallback1  (inherited, 0x436AE0)
+ *   [5]  +0x14: InvokeCallback2  (inherited, 0x436B00)
+ *   [6]  +0x18: InitBase         (inherited, 0x405900)
+ *   [7]  +0x1C: StopSound        (inherited, 0x405A20)
+ *   [8]  +0x20: SetFrame         (inherited, 0x405DE0)
+ *   [9]  +0x24: SetVisible       (inherited, 0x4061B0)
+ *   [10] +0x28: Update           (Game_Update, 0x410840) — OVERRIDDEN
+ *   [11] +0x2C: Draw             (inherited, 0x405E60)
+ *   [12] +0x30: DrawConnected    (inherited, 0x405FD0)
+ *   [13] +0x34: SetName          (inherited, 0x405E20)
+ *   [14] +0x38: SetAnimState     (inherited, 0x405A50)
  *
- * Sound resource IDs used by cursor hover engine:
+ * Sound resource IDs used by the cursor engine:
  *   0x1400 = generic click/feedback sound
  *   0x1402 = edge-of-world / blocked
  *   0x1404 = placement valid / action accepted
@@ -54,14 +50,10 @@
  *   cursor edge sounds:
  *     0xC1A / 0x3409 = horizontal scroll
  *     0xC1C / 0x3408 = vertical scroll
- *     0xC26 = scroll right edge
- *     0xC28 = scroll top edge
- *     0xC2A = scroll bottom edge
- *     0xC2C = scroll left edge
- *     0xC42 = scroll right (drag variant)
- *     0xC44 = scroll left (drag variant)
- *     0xC46 = scroll top (drag variant)
- *     0xC48 = scroll bottom (drag variant)
+ *     0xC26 = scroll right edge, 0xC28 = scroll top edge
+ *     0xC2A = scroll bottom edge, 0xC2C = scroll left edge
+ *     0xC42 = scroll right (drag variant), 0xC44 = scroll left (drag variant)
+ *     0xC46 = scroll top (drag variant),  0xC48 = scroll bottom (drag variant)
  */
 
 #pragma once
@@ -73,11 +65,12 @@
 /* Forward declarations                                                */
 /* ================================================================== */
 struct Timer;        /* Sub-object at +0x10C, collection-inherited */
+class Building;      /* game/Building.h — selected object type */
 
 /* ================================================================== */
 /* Global singleton address                                             */
 /* ================================================================== */
-#define ADDR_g_game                     0x004A98D8  /* g_game singleton */
+#define ADDR_g_game                     0x004854C8  /* g_game singleton */
 
 /* ================================================================== */
 /* Game class -- gameplay state manager (Entity-derived)                 */
@@ -128,7 +121,7 @@ public:
     uint8_t    _pad_E7;                 /* +0xE7 */
 
     /* ---- Selection state (+0xE8..+0xEF) ---- */
-    int32_t    selected_object_ptr;     /* +0xE8  pointer to currently selected GameObject */
+    Building*  selected_object;         /* +0xE8  currently selected Building (or NULL) */
     uint8_t    selected_visible;        /* +0xEC  1=cursor/outline visible for selected object */
     uint8_t    _pad_ED[3];              /* +0xED-0xEF */
 
@@ -137,9 +130,15 @@ public:
     int32_t    mouse_spi4[3];           /* +0xFC  SPI_GETMOUSE (setting 4): threshold, speed, accel */
     int32_t    busy_cursor_handle;      /* +0x108 cached HCURSOR for "busy.ani" cursor file */
 
-    /* ---- Timer sub-object (+0x10C..+0x118) ---- */
-    int32_t    timer_sub_ptr;           /* +0x10C Timer sub-object pointer (vtable 0x477758) */
-    int32_t    timer_array_ptr;         /* +0x110 pointer to allocated timer data (0x28 bytes) */
+    /* ---- Timer sub-object (+0x10C..+0x11B) ---- */
+    /* The binary keeps an inline TimerSlotList here (16 bytes: vtable,
+     * items array, count, capacity; see shared/TimerSlotList.h).  The
+     * recovered x86 fields are kept flat for offset documentation; the
+     * shared TimerSlotList reconstruction does not yet model the running
+     * vtable slots Game dispatches (Stop/GetItem/GetCount/Insert). */
+    int32_t    timer_sub_ptr;           /* +0x10C inline timer sub-object vtable
+                                           (0x477798 init/dead, 0x477758 running) */
+    int32_t    timer_array_ptr;         /* +0x110 allocated timer data (0x28 bytes) */
     int32_t    timer_count;             /* +0x114 timer count (10 if alloc succeeded, else 0) */
     int32_t    timer_edit;              /* +0x118 edit/mode counter */
 
@@ -150,19 +149,22 @@ public:
     /**
      * Game constructor. 0x410510.
      *
-     * Calls Entity(-1,-1,0,0), allocates timer array (10 entries), sets
-     * the compiler-managed Game vtable, clears all event flags, saves SPI_GETMOUSE
-     * (settings 3 and 4), calls SetScreenMode(0,1,0), then runs one
+     * Calls Entity(-1,-1,0,0), allocates the timer slot-list array
+     * (10 entries), sets the compiler-managed Game vtable (binary
+     * 0x477718), saves SPI_GETMOUSE settings 3 and 4, calls
+     * SetScreenMode(0,1,0), clears all event flags, then runs one
      * initial Game_Update tick.
      */
     Game();
 
     /**
-     * Virtual destructor. 0x410660 / 0x410680.
+     * Virtual destructor body. 0x410660 (scalar deleting wrapper) /
+     * 0x410680 (body).
      *
-     * MSVC scalar deleting destructor (vtable[0]) and base object destructor.
-     * Uses the compiler-managed Game vtable, frees timer array buffer at +0x110,
-     * resets timer sub-object, calls Entity base destructor.
+     * The body frees the timer array at +0x110, resets the inline timer
+     * sub-object to its dead vtable, and runs the Entity base destructor
+     * (GameObject_DtorBody).  NOTE: this is NOT Game::Shutdown (0x410700),
+     * which is a separate cleanup function.
      */
     virtual ~Game();
 
@@ -171,20 +173,29 @@ public:
     /* ================================================================ */
 
     /**
-     * MAIN per-frame update (7-step pipeline). 0x410840.
+     * MAIN per-frame update. 0x410840 — vtable [10].
      *
-     *   1. GameObject_Update (animation state machine)
-     *   2. Poll input flags (left-click, right-click, mouse-move, screensaver)
-     *   3. If screensaver_active: check IsScreensaverActive timeout, clear if expired
-     *   4. If left_click_flag: HandleLeftClick
-     *   5. If right_click_flag: HandleRightClick
-     *   6. If selected_object && visible && !click_on_selected:
-     *        hit-test selected object -> deselect on re-click
-     *   7. If mouse_move_flag: ScreenToWorld, update world pos, clear flag
-     *   8. If mouse_drag_flag: ScreenToWorld, update drag, clear flags
-     *   9. After events: dispatch UpdateCursorMode based on g_game_mode
+     *   1. Skip everything unless visible (+0x24) is set.
+     *   2. Entity::Update (animation state machine).
+     *   3. has_event = left_click || mouse_move || right_click ||
+     *      screensaver_active.
+     *   4. If the parent resource (+0x40) is non-null:
+     *        a. screensaver_active: IsScreensaverActive; if the cursor
+     *           moved, ClearMouseMode + clear the flag.
+     *        b. left_click_flag: HandleLeftClick.
+     *        c. right_click_flag: HandleRightClick.
+     *        d. selected && selected_visible && !click_on_selected:
+     *           selected->CheckPlacementCollision(world_x, world_y);
+     *           on hit, DeselectGameObject; when dragging, also clear
+     *           the selection.
+     *        e. mouse_move_flag: ScreenToWorld, store world pos,
+     *           clear the flag + drag_mode, TileMap_ClearInputProcessedFlag.
+     *        f. mouse_drag_flag: ScreenToWorld, store drag world pos,
+     *           clear right-click/drag flags, TileMap_ClearInputProcessedFlag.
+     *   5. If has_event: dispatch cursor mode (UpdateCursorMode), plus a
+     *      fallback 0x1400 sound when initialized (+0x18) is not 1.
      *
-     * Called from: GameLoop_FrameUpdate (0x45C3C0) every frame.
+     * Called from GameLoop_FrameUpdate (0x45C3C0) every frame.
      */
     void Update() override;
 
@@ -194,14 +205,14 @@ public:
      * g_game_mode == 3 (town):  UpdateInputState
      * g_game_mode == 4 (build): HandleCursorHover + ClearMouseMode
      * Otherwise:                PlaySound(0x1400)
-     * Also plays fallback if initialized != 1.
+     * Also plays the fallback 0x1400 when initialized != 1.
      */
     void UpdateCursorMode();
 
     /**
      * Build-mode cursor hover sound engine. 0x4117B0.
      *
-     * Complex decision tree: placement validity, scripted-object drag,
+     * Decision tree: placement validity, scripted-object drag,
      * town/second overlay region, build mode, edge-of-world positioning.
      * Selects and plays the correct cursor sound resource.
      */
@@ -234,8 +245,9 @@ public:
     /**
      * Mouse-button release handler (build mode). 0x410D20.
      *
-     * Clears selection state in Timer, dispatches click to scripted
-     * object or building footprint, signals redraw (action_state=0x400).
+     * Clears the timer slot-list selection state, dispatches the click
+     * to the scripted object or building footprint tiles, and signals a
+     * redraw (action_state = 0x400).
      */
     void ClearMouseMode();
 
@@ -249,6 +261,8 @@ public:
      * capture=0: release capture, show IDC_ARROW.
      * capture=1+custom=0: hide cursor (gameplay).
      * capture=1+custom=1: show busy.ani (build-mode scroll).
+     * When capturing, packs the current cursor position into +0x90 and
+     * runs one IsScreensaverActive check.
      *
      * @param capture  0=release, 1=capture
      * @param show     0=no force show, 1=ensure cursor visible
@@ -257,36 +271,38 @@ public:
     void SetScreenMode(uint8_t capture, uint8_t show, uint8_t custom);
 
     /**
-     * Draw game cursor at given screen rectangle. 0x411C50.
+     * Draw the game cursor at a screen rectangle. 0x411C50.
      *
-     * Checks visible and cursor_disabled flags, draws selected object
-     * sprite, GameObject_Draw, and GameObject_DrawConnected.
+     * Checks visible and cursor_disabled flags, draws the selected
+     * object sprite (vtable[11]), then GameObject_Draw /
+     * GameObject_DrawConnected.
      */
-    void SetCursorByResourceId(RECT* rect, int enable_scroll);
+    void SetCursorByResourceId(int left, int top, int right, int bottom,
+                               int enable_scroll);
 
     /**
-     * Redraw cursor overlay within game's own rect. 0x411D10.
+     * Redraw cursor overlay within the game's own screen rect. 0x411D10.
      *
-     * Sister of SetCursorByResourceId -- uses stored RECT at +0x08.
+     * Sister of SetCursorByResourceId — uses the stored RECT at +0x08.
      */
     void ResetCursor();
 
     /**
-     * Select an object (building/vehicle) from list. 0x4113A0.
+     * Select an object (building/vehicle) from the UI palette. 0x4113A0.
      *
-     * Removes from sorted list, plays selection sound.
-     * Pass NULL to deselect.
+     * Removes it from the sorted building/vehicle list, plays the
+     * selection sound. Pass NULL to deselect.
      *
-     * @param obj  GameObject to select, or NULL to deselect
+     * @param obj  Building to select, or NULL to deselect
      * @return 1 if selected, 0 if deselected
      */
-    int SelectGameObject(GameObject* obj);
+    int SelectGameObject(Building* obj);
 
     /**
-     * Re-insert selected object into sorted list on deselect. 0x411580.
+     * Re-insert the selected object into the sorted list. 0x411580.
      *
-     * Removes selection highlight, re-sorts building/vehicle by distance,
-     * tracks tile overlap count.
+     * Removes the selection highlight, re-sorts building/vehicle by
+     * distance, tracks the tile overlap count (+0x88).
      */
     void DeselectGameObject();
 
@@ -295,37 +311,48 @@ public:
     /* ================================================================ */
 
     /**
-     * Screensaver idle check -- core mouse tracking. 0x410A40.
+     * Screensaver idle check — core mouse tracking. 0x410A40.
      *
-     * Reads packed mouse pos, tests bounds, WindowFromPoint, converts
-     * to world coords, handles drag-scrolling, notifies entity under
-     * cursor via vtable[3]. Returns 1 if mouse moved over game content.
+     * Reads the packed mouse pos (+0x90), bounds-tests against the
+     * client offset, ClientToScreen + WindowFromPoint, converts to world
+     * coords, handles drag-scrolling, and notifies the entity under the
+     * cursor via vtable[3] (MoveTo). Returns 1 when the cursor is over
+     * game content.
      */
     int IsScreensaverActive();
 
     /**
      * Convert screen pixel to game world coords. 0x412060.
      *
-     * Adds viewport offset, clamps to playable area, constrains by
-     * active resource bounds if parent is non-null and not type-5.
-     * Snaps to 16px grid on scripted-object miss.
+     * Adds the viewport offset, clamps to the playable area, constrains
+     * by active resource bounds when the parent is non-null and not
+     * type-5, and snaps to the 16px grid when the scripted object does
+     * not claim the point.
+     *
+     * @param out_xy     int32_t[2] — receives (world_x, world_y)
+     * @param screen_x   screen X
+     * @param screen_y   screen Y
      */
-    void ScreenToWorld(int screen_x, int screen_y,
-                       int32_t* out_x, int32_t* out_y);
+    void ScreenToWorld(int32_t* out_xy, int screen_x, int screen_y);
 
     /**
      * Play a sound resource by ID. 0x411FB0.
      *
-     * Loads via ResourceManager, calls vtable[6] (InitBase), repositions
-     * Game entity for stereo audio panning.
+     * Loads via ResourceManager, calls InitBase (vtable[6]) to start
+     * playback, then repositions the Game entity for stereo panning:
+     * type-5 parents use the mouse world pos minus their offset fields;
+     * otherwise cursor_sound_id = parent resource id and the entity is
+     * placed at (mouse_world_x, mouse_world_y - parent +0x16D).
      */
     void PlaySound(int sound_id);
 
     /**
      * Shutdown/cleanup. 0x410700.
      *
-     * Restores SPI_SETMOUSE, stops timer, switches to windowed mode,
-     * releases resources. Counterpart to Game_Ctor.
+     * Restores SPI_SETMOUSE setting 4, stops the timer sub-object
+     * (vtable[5]), switches to windowed mode via SetScreenMode(0,1,0),
+     * and releases resources via InitBase(0,-1,0). Called from
+     * CGWND_Cleanup (0x407AC8) — NOT the C++ destructor.
      */
     void Shutdown();
 
@@ -337,9 +364,10 @@ public:
      * Load and cache 4 intro/title-screen sounds. 0x410750.
      *
      * Preloads sound resources 0x5014, 0x5015, 0x501A, 0x501B and sets
-     * the keep-alive flag on each so they remain in memory after release.
-     * The 4 sound IDs correspond to intro, click-select, and two other
-     * title-screen sound effects.
+     * the keep-alive flag on each so they remain in memory after
+     * release.  (The original reuses the +0x110 timer array slot as
+     * scratch; the C++ port uses a local instead — final state is
+     * identical and the scratch is invisible to other code.)
      *
      * Called once during GameLoop_Setup (0x406D82).
      *
@@ -348,19 +376,17 @@ public:
     bool LoadIntroSounds();
 
     /**
-     * Check screensaver timeout and clear if expired. 0x410A20.
+     * Check the screensaver timeout and clear it if expired. 0x410A20.
      *
      * Calls IsScreensaverActive(); if the cursor has moved outside the
-     * game window, clears the screensaver_active flag at +0x8E and
-     * calls ClearMouseMode to release mouse capture.
-     *
-     * Called from Game::Update() when screensaver_active flag is set.
+     * game window, clears the screensaver_active flag at +0x8E and calls
+     * ClearMouseMode to release mouse capture.
      */
     void CheckScreensaverTimeout();
 };
 
 /* ================================================================== */
-/* C-linkage (free) functions associated with Game                     */
+/* Free functions associated with Game                                 */
 /* ================================================================== */
 
 #ifdef __cplusplus
@@ -368,20 +394,38 @@ extern "C" {
 #endif
 
 /**
- * Per-frame game loop -- top-level heartbeat. 0x45C3C0.
+ * Per-frame game loop — top-level heartbeat. 0x45C3C0.
  *
  * Called from WinMain: updates time, netman, world tick, scripted
- * objects, tooltips, buildings, tile cache; calls g_game.Update().
+ * objects, tooltips, buildings, tile cache; calls g_game->Update().
+ * Implemented in core/GameLoop.cpp.
  */
 void GameLoop_FrameUpdate(void);
+
+/**
+ * Render network player slots in the game setup screen. 0x405520.
+ *
+ * Operates on a GameSetupPanel, accesses g_dplay_config, calls
+ * NET_GetPlayerAddress. NOT a Game method — separate class (ui/).
+ */
+void CGWND_GameSetup_RenderPlayerSlots(void* panel_this);
+
+#ifdef __cplusplus
+}
+
+/* Game_CheckTimeInRange / Game_IsPositionBetween are __cdecl C-style
+ * helpers but are declared and defined with C++ linkage across the
+ * codebase (Building.cpp, BuildingMgrObjectGroup.cpp, InputMgr.cpp);
+ * the header mirrors that convention. */
 
 /**
  * Check if time falls within [start, end] window. 0x412710.
  *
  * Supports overnight wrap (end < start). -1 sentinel = inactive.
- * Struct layout: { hour, minute, second }.
+ * Struct layout: { hour, minute, second } (tm-style: second@0,
+ * minute@4, hour@8).
  *
- * @param time   Pointer to current time struct {hour, minute, second}
+ * @param time   Pointer to current time struct {second, minute, hour}
  * @param start  Pointer to start time struct
  * @param end    Pointer to end time struct
  * @return 1 if within range, 0 otherwise
@@ -391,10 +435,11 @@ int Game_CheckTimeInRange(int* time, int* start, int* end);
 /**
  * Check if a date/time falls within [start, end] range. 0x412790.
  *
- * Uses a month-day lookup table at 0x47E410 for day-of-year calculation,
- * then checks time component with overnight-wrap support. The three
- * structs each contain: { seconds, minutes, hours, day_of_month, month }.
- * -1 sentinel fields are treated as "match anything".
+ * Uses a month-day lookup table at 0x47E410 for the day-of-year
+ * calculation, then checks the time component with overnight-wrap
+ * support.  The three structs each contain:
+ * { seconds, minutes, hours, day_of_month, month }. -1 sentinel
+ * fields are treated as "match anything".
  *
  * Called by: INPUT_EditSetFocus for scheduled event validation.
  *
@@ -404,15 +449,4 @@ int Game_CheckTimeInRange(int* time, int* start, int* end);
  * @return 1 if current falls within [start, end], 0 otherwise
  */
 int Game_IsPositionBetween(int* current, int* start, int* end);
-
-/**
- * Render network player slots in game setup screen. 0x405520.
- *
- * Operates on a GameSetupPanel, accesses g_dplay_config, calls
- * NET_GetPlayerAddress. NOT a Game method -- separate class.
- */
-void CGWND_GameSetup_RenderPlayerSlots(void* panel_this);
-
-#ifdef __cplusplus
-}
 #endif

@@ -256,7 +256,8 @@ public:
      *
      * @param unused   Unused 4-byte parameter (inherited virtual signature)
      */
-    void render(int unused);
+    /** Binary slot [8] 0x409280 (render). */
+    void on_update(int32_t unused) override;
 
     /**
      * updateTitle — Update the title text from resource strings.

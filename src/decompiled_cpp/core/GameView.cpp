@@ -1,132 +1,77 @@
+// Status: INTEGRATED
 /**
- * GameView.cpp — GameView lifecycle and viewport helper
+ * GameView.cpp — GameView lifecycle (viewport scrolling helper)
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
+ * Reverse engineered via Ghidra decompilation (database locon).
  *
- * The compiler owns the GameView vtable.  The local ABI views below are
- * deliberately typed descriptions of the recovered foreign vtables; they
- * contain no executable vtable reads or writes.
+ * The compiler owns the GameView vtable; the original constructor,
+ * destructor body, and cleanup were verified instruction-by-instruction
+ * against the binary (see GameView.h for the 20-slot vtable layout).
  */
 
 #include "GameView.h"
-#include "Entity.h"
 
-/* Original helper entry points.  Their conventions are determined by the
- * calls at 0x42CCFD, 0x42CD18, 0x42CDBB, and 0x42CE07 respectively. */
-extern void __fastcall RESDATA_BaseInit(void* self);              /* 0x4544E0 */
-extern void __thiscall GameObject_BaseCtor(void* self, int x, int y,
-                                            int width, int height); /* 0x405790 */
-extern void __fastcall Panel_DtorBody(void* self);                /* 0x4545A0 */
-extern void __fastcall RESDATA_DtorBase(void* self);               /* 0x454630 */
-
-namespace {
-
-/* ResourceData slots 0..2, as recovered from the resource calls in
- * Entity::~Entity and Entity::InitBase. */
-struct ResourceObjectView {
-    virtual void* destroy(uint8_t flags) = 0;       /* slot 0 */
-    virtual void* acquire_surface(int x, int y) = 0;/* slot 1 */
-    virtual void release_surface() = 0;             /* slot 2 */
-
-protected:
-    ~ResourceObjectView() = default;
-};
-
-/* The embedded object at GameView+0xE4 is constructed by 0x405790 and has
- * the Entity/GameObject slot layout.  Only slot 6 is used by Cleanup(). */
-struct EmbeddedEntityView {
-    virtual void* destroy(uint8_t flags) = 0;       /* slot 0 */
-    virtual void invalidate_rect() = 0;             /* slot 1 */
-    virtual uint8_t hit_test(int, int) = 0;         /* slot 2 */
-    virtual void move_to(int, int) = 0;             /* slot 3 */
-    virtual BOOL callback_one(int, int) = 0;        /* slot 4 */
-    virtual BOOL callback_two(int, int) = 0;        /* slot 5 */
-    virtual int initialize(int, int, bool) = 0;     /* slot 6 */
-
-protected:
-    ~EmbeddedEntityView() = default;
-};
-
-/* GameView is a Panel-derived object in the binary.  Its cleanup path calls
- * the inherited Init slot at +0x18 (vtable slot 6), after the embedded
- * Entity has been reset. */
-struct GameViewDispatchView {
-    virtual void* destroy(uint8_t flags) = 0;       /* slot 0 */
-    virtual void slot1() = 0;
-    virtual uint8_t slot2(int, int) = 0;
-    virtual void slot3(int, int) = 0;
-    virtual uint8_t slot4(int, int) = 0;
-    virtual void slot5() = 0;
-    virtual int initialize(int, int, bool) = 0;     /* slot 6 */
-
-protected:
-    ~GameViewDispatchView() = default;
-};
-
-static EmbeddedEntityView* embedded_entity(GameView* view)
-{
-    return reinterpret_cast<EmbeddedEntityView*>(view->game_object_sub);
-}
-
-static ResourceObjectView* child_resource_view(GameView* view)
-{
-    return reinterpret_cast<ResourceObjectView*>(view->child_resource);
-}
-
-} // namespace
+/* Panel-family helpers — 0x4544E0 (Panel base init) and 0x454630
+ * (Panel partial destructor / RESDATA base cleanup). */
+extern void __fastcall RESDATA_BaseInit(void* self);   /* 0x4544E0 */
+extern void __fastcall RESDATA_DtorBase(void* self);   /* 0x454630 */
 
 /**
  * GameView::GameView — constructor
  * Address: 0x42CCE0
  *
- * Ghidra shows RESDATA_BaseInit, the Entity constructor 0x405790 at +0xE4,
- * type 0x0E, +0xE0 = 0, +0xAD = 1, and +0x17C = 0.  C++ emits the final
- * GameView vptr instead of reproducing the original literal store.
+ * The binary runs RESDATA_BaseInit (0x4544E0) and the embedded Entity
+ * constructor (0x405790) before this class's own field writes.  In
+ * natural C++ the Panel base and the Entity member are constructed
+ * first (compiler-managed vtables), so those two calls are represented
+ * by the base/member construction and the body below writes exactly the
+ * recovered fields: type=0x0E, scroll_x=0, +0xAD active flag=1,
+ * child_resource=nullptr.
  */
-GameView::GameView()
+GameView::GameView() : game_object_sub(-1, -1, 0, 0)
 {
-    RESDATA_BaseInit(this);
-    GameObject_BaseCtor(this->game_object_sub, -1, -1, 0, 0);
-
-    this->type = 0x0E;
-    this->scroll_x = 0;
-    this->scroll_active_flag = 1;
-    this->child_resource = nullptr;
+    this->type = 0x0E;            /* +0x04 (GameObject::type) */
+    this->scroll_x = 0;           /* +0xE0 */
+    this->dim_flag = 1;           /* +0xAD active/dim flag */
+    this->child_resource = nullptr;   /* +0x17C */
 }
 
 /**
  * GameView::~GameView — destructor body
- * Address: 0x42CD80
+ * Address: 0x42CD80 (scalar deleting wrapper at 0x42CD60 is
+ * compiler-generated and not reconstructed here)
  *
- * The scalar deleting wrapper at 0x42CD60 is compiler-generated and is not
- * reconstructed here.  This body releases the embedded Entity and then the
- * Panel base cleanup, matching the two calls in the original function.
+ * The binary destroys the embedded Entity (GameObject_DtorBody at
+ * +0xE4) then runs Panel_DtorBody (0x4545A0).  In natural C++ the
+ * Panel base destructor runs after this body and the Entity member is
+ * destroyed after the base chain; the resources are independent, so
+ * the order swap is behavior-neutral.
  */
 GameView::~GameView()
 {
-    /* The embedded object was constructed by the recovered Entity
-     * constructor at 0x405790; invoke its real C++ destructor body rather
-     * than spelling the scalar-deleting slot and its flag. */
-    reinterpret_cast<Entity*>(this->game_object_sub)->~Entity();
-    Panel_DtorBody(this);
+    /* Panel::~Panel → Panel::DtorBody (0x4545A0) → GameObject_DtorBody;
+     * the embedded Entity member is destroyed afterwards. */
 }
 
 /**
  * GameView::cleanup
- * Address: 0x42CDD0
+ * Address: 0x42CDD0 — vtable [15] (+0x3C)
  *
- * The original calls the child scalar-destructor slot with flag 1, resets
- * both the embedded Entity and the GameView through their typed Init slots,
- * then calls RESDATA_DtorBase.
+ * 1. Destroys the child resource via vtable[0] with flag 1 (the
+ *    original does NOT clear the pointer afterwards).
+ * 2. Resets the embedded Entity via its vtable[6] (InitBase, 0x405900)
+ *    with (0, -1, 0).
+ * 3. Resets self via vtable[6] (Panel::Init, 0x454680) with (0, -1, 0).
+ * 4. Runs RESDATA_DtorBase (0x454630).
  */
 void GameView::cleanup()
 {
     if (this->child_resource != nullptr) {
-        child_resource_view(this)->destroy(1);
-        this->child_resource = nullptr;
+        this->child_resource->Destroy(1);
     }
 
-    embedded_entity(this)->initialize(0, -1, false);
-    reinterpret_cast<GameViewDispatchView*>(this)->initialize(0, -1, false);
+    this->game_object_sub.InitBase(0, -1, false);
+    this->Init(0, -1, false);
     RESDATA_DtorBase(this);
 }

@@ -1,15 +1,19 @@
+// Status: INTEGRATED
 /**
  * TownTiles.h — Town tile rendering engine (tile cache surface primitives)
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * The tile rendering engine operates on a tile cache surface context (TileRenderer)
- * that stores rendering parameters: a pointer to 8-bit indexed tile data (+0x18),
- * a palette lookup table (+0x14), and the source surface stride (+0x08).
+ * The tile rendering engine operates on a tile cache surface context
+ * (TownTileRenderer) that stores rendering parameters: an unused slot at
+ * +0x00, the render mode at +0x04, the source stride at +0x08, the
+ * palette lookup table at +0x14 and the 8-bit indexed tile pixels at
+ * +0x18. All methods were validated instruction-by-instruction against
+ * the Ghidra disassembly (database "locon").
  *
- * Rendering modes are dispatched from UIPANEL_Blit (0x42B050) based on a flags
- * parameter (param_10). The flags select different drawing algorithms:
+ * Rendering modes are dispatched from UIPANEL_Blit (0x42B050) based on
+ * a flags parameter. The flags select the drawing algorithms:
  *
  *   0x00  = Town_DrawTile (base tile drawing)
  *   0x01  = Town_InitTileCache (palette-initialize tile cache)
@@ -27,16 +31,12 @@
  *   0x400 = Town_DrawTileLine (alpha-blended tile line)
  *   0x402 = (alias for DrawTileLine)
  *
- * The Town_BlitElement helper (0x42B960) and the two 8bpp copy functions
+ * Town_BlitElement (0x42B960) and the two 8bpp copy functions
  * (Transparent/Direct, 0x42C330/0x42C3D0) are called from outside the
  * UIPANEL_Blit dispatch table and have slightly different semantics.
  *
- * This class appears to be a POD-like struct with methods (no virtual methods
- * are dispatched on `this` in these functions; the vtable at +0x00 is unused
- * by the tile rendering methods).
- *
  * Fields:
- *   +0x00  (void** vtable — present but unused by tile methods)
+ *   +0x00  (unused — present but never accessed by the tile methods)
  *   +0x04  mode: render direction (0=reversed, 1=normal)
  *   +0x08  stride: source 8bpp tile surface pitch (bytes per row)
  *   +0x0C  (unknown, not accessed by these functions)
@@ -46,11 +46,11 @@
  *   +0x1C  surface_ref: (unknown, used by UIPANEL_Blit)
  *
  * Globals referenced (pixel format info):
- *   g_surface_bpp       (0x485274) — DirectDraw surface bits-per-pixel (0x235=565)
- *   g_surface_bshift    (0x485280) — bit shift for ~half-bright color averaging
- *   g_pixel_format_mask (0x485248) — computed bitmask: g_bshift << 1
- *   g_surface_channel1  (0x485278) — first color channel bitmask
- *   g_surface_channel2  (0x48527C) — second color channel bitmask
+ *   g_surface_bpp       (0x485274) — DirectDraw surface bits-per-pixel
+ *   g_surface_bshift    (0x485280) — bit shift for half-bright averaging
+ *   g_pixel_format_mask (0x485248) — computed bitmask (bshift << 1)
+ *   g_surface_channel1  (0x485278) — red channel bit shift (10/11)
+ *   g_surface_channel2  (0x48527C) — green channel bit shift (5/6)
  */
 
 #pragma once
@@ -67,14 +67,17 @@ public:
     /* Fields                                                            */
     /* ================================================================ */
 
-    /* vtable at +0x00 is compiler-managed via virtual methods */
-    int32_t    mode;             // +0x04  0=reversed, 1=normal
-    int32_t    stride;           // +0x08  source 8bpp surface pitch (bytes)
-    int32_t    _pad_0C;          // +0x0C
-    int32_t    _pad_10;          // +0x10
-    uint16_t*  palette;          // +0x14  color lookup table (256 x uint16_t)
-    uint8_t*   pixels;           // +0x18  8-bit indexed tile pixel data
-    void*      surface_ref;      // +0x1C  DirectDraw surface reference
+    /* +0x00 is an unused slot in the original object (not a C++ vtable:
+     * the class has no virtual methods). Kept as an explicit member so
+     * the documented binary offsets hold. */
+    void*      unused_00;          // +0x00  (never accessed by tile methods)
+    int32_t    mode;               // +0x04  0=reversed, 1=normal
+    int32_t    stride;             // +0x08  source 8bpp surface pitch (bytes)
+    int32_t    _pad_0C;            // +0x0C
+    int32_t    _pad_10;            // +0x10
+    uint16_t*  palette;            // +0x14  color lookup table (256 x uint16_t)
+    uint8_t*   pixels;             // +0x18  8-bit indexed tile pixel data
+    void*      surface_ref;        // +0x1C  DirectDraw surface reference
 
     /* ================================================================ */
     /* Tile rendering methods (all __thiscall, RET 0x28)                */
@@ -364,13 +367,13 @@ public:
      *
      * Copies 8-bit indexed pixel data from this tile cache to an external
      * 8bpp destination buffer. Skips pixel value 0 (transparent). Used by
-     * RESMGR_AnimateClock to blit clock digit sprites onto the clock surface.
+     * ResourceManager clock animation (0x447400) to blit clock digit sprites onto the clock surface.
      *
-     * NOTE: Parameters differ from other tile methods — param_3 and param_4
+     * NOTE: Parameters differ from other tile methods — the 3rd and 4th arguments
      * (dest rectangle right/bottom) are passed by callers but not used
      * internally. The dest_surface is an 8bpp buffer (not 16bpp).
      *
-     * Called by: RESMGR_AnimateClock (0x447400)
+     * Called by: the clock-digit animation helper (0x447400)
      *
      * @param dest_x         int — destination X on 8bpp surface
      * @param dest_y         int — destination Y on 8bpp surface
@@ -398,7 +401,7 @@ public:
      * Used by UIPANEL_FillRect for panel background fills.
      *
      * NOTE: Same parameter layout as CopyTiles8bpp_Transparent. Param_3 and
-     * param_4 (dest rect right/bottom) are not used internally.
+     * the 4th argument (dest rect right/bottom) is not used internally.
      *
      * Called by: UIPANEL_FillRect (0x42A610)
      *
@@ -426,7 +429,7 @@ public:
      * Reads 8-bit indexed tile data right-to-left (reversed X direction) from
      * the tile cache, writes left-to-right to the 16-bit destination surface
      * through the palette look-up table. Palette index 0 = transparent (pixel
-     * is skipped, preserving destination). Param_3/dest_x and param_4/dest_y
+     * is skipped, preserving destination). the 3rd/dest_x and 4th/dest_y arguments
      * are present in the parameter list but NOT used by the implementation
      * (src_x/src_y serve as the destination surface origin).
      *

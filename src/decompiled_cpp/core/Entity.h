@@ -42,11 +42,11 @@ public:
     uint32_t active_state;              // +0x5C
     uint32_t next_sound_time;           // +0x60
     union {
-        uint32_t field_64;              // +0x64
+        uint32_t stored_resource_id;    // +0x64 Building: resource id (set 0x433A20, used 0x435580)
         uint32_t hit_miss_x;            // historical derived-class alias
     };
     union {
-        uint32_t field_68;              // +0x68
+        uint32_t action_cooldown_time;  // +0x68 Building: click-action cooldown (0x435580, 0x433A20)
         uint32_t hit_hit_x;             // historical derived-class alias
     };
     uint32_t phase_timer;               // +0x6C

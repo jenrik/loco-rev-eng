@@ -41,13 +41,15 @@ extern "C" {
                                           char* lpBuffer, DWORD nSize,
                                           void* Arguments);
     extern void* __stdcall LocalFree(void* hMem);
-    extern void  __stdcall DefWindowProcA(HWND hWnd, UINT Msg, void* wParam,
-                                          void* lParam);
+    extern LRESULT __stdcall DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam,
+                                           LPARAM lParam);
     extern int   __stdcall GetWindowTextA(HWND hWnd, char* lpString, int nMaxCount);
+    extern BOOL  __stdcall DestroyWindow(HWND hWnd);
+    extern void  __stdcall PostQuitMessage(int nExitCode);
 }
 
 /* UI module function declarations */
-extern void  __fastcall DDRAW_UnlockPrimary(HWND hWnd);     /* 0x45B940 — takes HWND */
+extern void  __cdecl DDRAW_UnlockPrimary(void);             /* 0x45B940 */
 extern void  __fastcall Cursor_SetupSurface(int this_ptr);  /* 0x425DC0 */
 extern void  __fastcall UIPANEL_Render(void* panel, byte flag);  /* 0x426EB0 */
 extern void  __thiscall FormatResourceString(void* resmgr, int string_id,
@@ -66,7 +68,7 @@ extern int   g_cursor_refcount;  /* 0x4FD3D0 */
 
 /* Forward declaration of the default WindowProc stub — serves as
    vtable[11] and as the base for the WNDCLASS registration. */
-extern void __stdcall UI_DefWndProc(HWND hWnd, UINT msg, void* wParam, void* lParam);
+extern LRESULT __stdcall UI_DefWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 /* 0x422EA0 — just calls DefWindowProcA */
 
 namespace {
@@ -252,7 +254,7 @@ void UI_WindowBase::show()
 #endif
 
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: unlock primary\n");
-    DDRAW_UnlockPrimary(this->hWnd);
+    DDRAW_UnlockPrimary();
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: render panel\n");
 #ifdef _WIN32
     UIPANEL_Render(this, 1);
@@ -262,7 +264,7 @@ void UI_WindowBase::show()
     SDL3_PresentPrimarySurface();
 #endif
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: unlock primary complete\n");
-    DDRAW_UnlockPrimary(this->hWnd);
+    DDRAW_UnlockPrimary();
 
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: show window\n");
     EnableWindow(this->hWnd, FALSE);
@@ -356,9 +358,9 @@ void UI_WindowBase::set_render_surface(UIPANEL_Surface* surface, uint32_t frame_
         this->field_5C = 0;
     }
     if (force_redraw != 0 && this->captureFlag == 0) {
-        DDRAW_UnlockPrimary(this->hWnd);
+        DDRAW_UnlockPrimary();
         UIPANEL_Render(this, reset_dirty_rect == 0);
-        DDRAW_UnlockPrimary(this->hWnd);
+        DDRAW_UnlockPrimary();
     }
 
     if (this->field_14 != 0) {
@@ -417,24 +419,24 @@ void UI_WindowBase::on_create()
 /*                                                                     */
 /* Returns: 1 on success, 0 on failure.                                */
 /* ================================================================== */
-int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
+int UI_WindowBase::create_full_window(int nCmdShow,
                                        HWND hParent, int x, int y,
                                        int nWidth, int nHeight,
                                        HMENU hMenu, HICON hIcon, UINT classStyle)
 {
     /* Clear existing HWND before creating new one */
-    self->hWnd = NULL;
+    this->hWnd = NULL;
 
     /* Get parent window caption text for the window title */
     char parentTitle[256];
     GetWindowTextA(hParent, parentTitle, sizeof(parentTitle));
 
     /* Store layout parameters */
-    self->windowX      = x;
-    self->windowY      = y;
-    self->windowWidth  = nWidth;
-    self->windowHeight = nHeight;
-    self->hWndParent   = hParent;
+    this->windowX      = x;
+    this->windowY      = y;
+    this->windowWidth  = nWidth;
+    this->windowHeight = nHeight;
+    this->hWndParent   = hParent;
 
     /* Register WNDCLASS */
     // The original zeros 40 bytes for x86 WNDCLASS. Value initialization is
@@ -444,7 +446,7 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     if (classStyle != 0) {
         wc.style   = classStyle;
     }
-    wc.hInstance   = self->hInstance;            /* +0x04 */
+    wc.hInstance   = this->hInstance;            /* +0x04 */
     wc.lpfnWndProc = &DefWindowProcA;            /* NOTE: actual base WndProc at 0x4272F0 */
     wc.cbClsExtra  = 0;
     wc.cbWndExtra  = 0;
@@ -452,7 +454,7 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     wc.hCursor     = NULL;
     wc.hbrBackground = NULL;
     wc.lpszMenuName  = NULL;
-    wc.lpszClassName = self->title;              /* +0x78 — title string as class name */
+    wc.lpszClassName = this->title;              /* +0x78 — title string as class name */
 
     ATOM atom = RegisterClassA(&wc);
     if (atom == 0) {
@@ -466,21 +468,21 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     }
 
     /* Create the actual window */
-    self->hWnd = CreateWindowExA(
+    this->hWnd = CreateWindowExA(
         0,                                    /* dwExStyle */
-        self->title,                          /* lpClassName (same as reg'd class) */
+        this->title,                          /* lpClassName (same as reg'd class) */
         parentTitle,                          /* lpWindowName */
         0x87000000,                           /* dwStyle: WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS |
                                                  WS_CLIPCHILDREN | WS_SYSMENU */
         x, y,
-        self->windowWidth,  self->windowHeight,
-        self->hWndParent,
+        this->windowWidth,  this->windowHeight,
+        this->hWndParent,
         hMenu,
-        self->hInstance,
-        self                                 /* lpParam = this */
+        this->hInstance,
+        this                                /* lpParam = this */
     );
 
-    if (self->hWnd == NULL) {
+    if (this->hWnd == NULL) {
         DWORD err = GetLastError();
         char* buf;
         FormatMessageA(0x1100, NULL, err, 0x400,
@@ -490,8 +492,8 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     }
 
     /* Mark window as created and fire OnCreate (vtable[7]) */
-    self->windowCreated = 1;
-    self->on_create();
+    this->windowCreated = 1;
+    this->on_create();
 
 #ifdef _WIN32
     Cursor_SetupSurface((int)self);  /* set up cursor surface for this window */
@@ -499,8 +501,294 @@ int UI_WindowBase::create_full_window(UI_WindowBase* self, int nCmdShow,
     // Cursor_SetupSurface has not yet been reconstructed for the host and its
     // original int pointer ABI truncates this on 64-bit. SDL owns the cursor.
 #endif
-    ShowWindow(self->hWnd, nCmdShow);
-    UpdateWindow(self->hWnd);
+    ShowWindow(this->hWnd, nCmdShow);
+    UpdateWindow(this->hWnd);
 
     return 1;
+}
+
+
+/* ================================================================== */
+/* Message-handler slots [8]-[36] base defaults (binary vtable 0x477C30) */
+/*                                                                     */
+/* Each matches the binary default at the corresponding slot:          */
+/*   [8]  0x426130 RET 4 no-op  |  [9]  0x4661A0 bare RET              */
+/*   [10] 0x426140 WM_* router  |  [11] 0x422EA0 UI_DefWndProc         */
+/*   [12]-[19],[21]-[22],[24]-[25],[29],[33]-[36] -> 0x422EA0          */
+/*   [20] 0x426900 UIPANEL_WindowProc | [23] 0x426950 returns 0        */
+/*   [26] 0x426960 re-runs on_create  | [27] 0x426980 WM_PAINT         */
+/*   [28] 0x426A60 returns 1 on match | [30] 0x426AC0 returns 1        */
+/*   [31] 0x426AD0 clears hWnd        | [32] 0x426A90 UIPANEL_OnDestroy*/
+/* ================================================================== */
+
+/* vtable[8] - RET 4 no-op in the binary */
+void UI_WindowBase::on_update(int32_t /* param */)
+{
+}
+
+/* vtable[9] - bare RET in the binary */
+void UI_WindowBase::on_noop()
+{
+}
+
+/* vtable[10] - WM_* router 0x426140 */
+LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    /* The recovered dispatcher routes specific messages to typed slots:
+     *   WM_ERASEBKGND(0x14) -> on_erase_bkgnd  [30]
+     *   WM_CREATE(1)        -> on_create_msg   [13]
+     *   WM_DESTROY(2)       -> on_destroy      [31]
+     *   WM_SIZE(5)          -> on_size         [26]
+     *   WM_SETFOCUS(7)      -> on_set_focus    [24]
+     *   WM_KILLFOCUS(8)     -> on_kill_focus   [25]
+     *   WM_PAINT(0xF)       -> on_paint        [27]
+     *   WM_CLOSE(0x10)      -> on_close        [32]
+     *   WM_SHOWWINDOW(0x18) -> on_show_window  [29]
+     *   WM_ACTIVATEAPP(0x1C)-> on_activate_app [36]
+     *   WM_SETCURSOR(0x20)  -> on_set_cursor   [28]
+     *   WM_MOUSEACTIVATE(0x21)-> on_mouse_activate [23]
+     *   WM_NOTIFY(0x4E)     -> on_notify       [33]
+     *   WM_KEYDOWN(0x100)   -> on_key_down     [21]
+     *   WM_KEYUP(0x101)     -> on_key_up       [22]
+     *   WM_COMMAND(0x111)   -> on_command      [34]
+     *   WM_TIMER(0x113)     -> on_timer        [12]
+     *   WM_MOUSEMOVE(0x200) -> on_mouse_move   [20]
+     *   WM_LBUTTONDOWN(0x201)-> on_lbutton_down [14]
+     *   WM_LBUTTONUP(0x202) -> on_lbutton_up   [15]
+     *   WM_LBUTTONDBLCLK(0x203)-> on_lbutton_dblclk [18]
+     *   WM_RBUTTONDOWN(0x204)-> on_rbutton_down [16]
+     *   WM_RBUTTONUP(0x205) -> on_rbutton_up   [17]
+     *   WM_RBUTTONDBLCLK(0x206)-> on_rbutton_dblclk [19]
+     *   0x312               -> on_msg_312      [35]
+     *   default             -> window_proc     [11]
+     */
+    switch (msg) {
+    case 0x14:  return on_erase_bkgnd(hWnd, msg, wParam, lParam);
+    case 1:     return on_create_msg(hWnd, msg, wParam, lParam);
+    case 2:     return on_destroy(hWnd, msg, wParam, lParam);
+    case 5:     return on_size(hWnd, msg, wParam, lParam);
+    case 7:     return on_set_focus(hWnd, msg, wParam, lParam);
+    case 8:     return on_kill_focus(hWnd, msg, wParam, lParam);
+    case 0xF:   return on_paint(hWnd, msg, wParam, lParam);
+    case 0x10:  return on_close(hWnd, msg, wParam, lParam);
+    case 0x18:  return on_show_window(hWnd, msg, wParam, lParam);
+    case 0x1C:  return on_activate_app(hWnd, msg, wParam, lParam);
+    case 0x20:  return on_set_cursor(hWnd, msg, wParam, lParam);
+    case 0x21:  return on_mouse_activate(hWnd, msg, wParam, lParam);
+    case 0x4E:  return on_notify(hWnd, msg, wParam, lParam);
+    case 0x100: return on_key_down(hWnd, msg, wParam, lParam);
+    case 0x101: return on_key_up(hWnd, msg, wParam, lParam);
+    case 0x111: return on_command(hWnd, msg, wParam, lParam);
+    case 0x113: return on_timer(hWnd, msg, wParam, lParam);
+    case 0x200: return on_mouse_move(hWnd, msg, wParam, lParam);
+    case 0x201: return on_lbutton_down(hWnd, msg, wParam, lParam);
+    case 0x202: return on_lbutton_up(hWnd, msg, wParam, lParam);
+    case 0x203: return on_lbutton_dblclk(hWnd, msg, wParam, lParam);
+    case 0x204: return on_rbutton_down(hWnd, msg, wParam, lParam);
+    case 0x205: return on_rbutton_up(hWnd, msg, wParam, lParam);
+    case 0x206: return on_rbutton_dblclk(hWnd, msg, wParam, lParam);
+    case 0x312: return on_msg_312(hWnd, msg, wParam, lParam);
+    default:    return window_proc(hWnd, msg, wParam, lParam);
+    }
+}
+
+/* vtable[11] - UI_DefWndProc 0x422EA0 passthrough */
+LRESULT UI_WindowBase::window_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[12] */
+LRESULT UI_WindowBase::on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[13] */
+LRESULT UI_WindowBase::on_create_msg(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[14] */
+LRESULT UI_WindowBase::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[15] */
+LRESULT UI_WindowBase::on_lbutton_up(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[16] */
+LRESULT UI_WindowBase::on_rbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[17] */
+LRESULT UI_WindowBase::on_rbutton_up(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[18] */
+LRESULT UI_WindowBase::on_lbutton_dblclk(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[19] */
+LRESULT UI_WindowBase::on_rbutton_dblclk(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[20] - UIPANEL_WindowProc 0x426900 */
+LRESULT UI_WindowBase::on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (hWnd == this->hWnd) {
+        DDRAW_UnlockPrimary();
+        UIPANEL_Render(this, 1);
+        DDRAW_UnlockPrimary();
+    }
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[21] */
+LRESULT UI_WindowBase::on_key_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[22] */
+LRESULT UI_WindowBase::on_key_up(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[23] - 0x426950 returns 0 */
+LRESULT UI_WindowBase::on_mouse_activate(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    (void)hWnd; (void)msg; (void)wParam; (void)lParam;
+    return 0;
+}
+
+/* vtable[24] */
+LRESULT UI_WindowBase::on_set_focus(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[25] */
+LRESULT UI_WindowBase::on_kill_focus(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[26] - 0x426960 re-runs on_create when windowCreated */
+LRESULT UI_WindowBase::on_size(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (this->windowCreated != 0) {
+        this->on_create();
+    }
+    (void)hWnd; (void)msg; (void)wParam; (void)lParam;
+    return 0;
+}
+
+/* vtable[27] - 0x426980 WM_PAINT handler */
+LRESULT UI_WindowBase::on_paint(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DDRAW_UnlockPrimary();
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[28] - 0x426A60 returns 1 when hwnd matches */
+LRESULT UI_WindowBase::on_set_cursor(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (hWnd != this->hWnd) {
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+    return 1;
+}
+
+/* vtable[29] */
+LRESULT UI_WindowBase::on_show_window(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[30] - 0x426AC0 returns 1 */
+LRESULT UI_WindowBase::on_erase_bkgnd(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    (void)hWnd; (void)msg; (void)wParam; (void)lParam;
+    return 1;
+}
+
+/* vtable[31] - 0x426AD0 clears hWnd, DefWindowProcA */
+LRESULT UI_WindowBase::on_destroy(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    this->hWnd = NULL;
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[32] - 0x426A90 UIPANEL_OnDestroy */
+LRESULT UI_WindowBase::on_close(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    this->windowCreated = 0;
+    if (hWnd != NULL) {
+        DestroyWindow(hWnd);
+    }
+    if (this->hWndParent == NULL) {
+        PostQuitMessage(0);
+    }
+    (void)msg; (void)wParam; (void)lParam;
+    return 0;
+}
+
+/* vtable[33] */
+LRESULT UI_WindowBase::on_notify(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[34] */
+LRESULT UI_WindowBase::on_command(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[35] */
+LRESULT UI_WindowBase::on_msg_312(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
+}
+
+/* vtable[36] */
+LRESULT UI_WindowBase::on_activate_app(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    DefWindowProcA(hWnd, msg, wParam, lParam);
+    return 0;
 }

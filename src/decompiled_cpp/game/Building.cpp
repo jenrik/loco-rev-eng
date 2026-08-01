@@ -190,11 +190,12 @@ void Building::BaseCtor(int resource_id, bool base_only)
      * Our Entity class uses 'parent' at +0x40 for scene graph, but during
      * construction, +0x40 holds the RESDATA* before it's replaced. */
 
-    /* --- Step 5: Store the resource ID --- */
-    this->field_64 = resource_id;           /* +0x64 */
+    /* --- Step 5: Store the resource ID ---
+     * Binary 0x433A20: *(int*)(this+0x64) = param_1 (resource_id). */
+    this->stored_resource_id = resource_id;  /* +0x64 */
 
     /* --- Step 6: Zero / -1 initialize all remaining fields --- */
-    this->field_68 = 0;                     /* +0x68 */
+    this->action_cooldown_time = 0;         /* +0x68 */
     this->occupant_a         = nullptr;     /* +0x8C */
     this->occupant_b         = nullptr;     /* +0x90 */
     this->field_dc           = 0;           /* +0xDC */
@@ -1177,8 +1178,8 @@ Building* Building::Deserialize(void* data)
     obj->timer              = *(uint32_t*)(src + 0x58);  /* +0x58 */
     obj->active_state       = *(uint32_t*)(src + 0x5C);  /* +0x5C */
     obj->next_sound_time    = *(uint32_t*)(src + 0x60);  /* +0x60 */
-    obj->field_64           = *(uint32_t*)(src + 0x64);  /* +0x64 */
-    obj->field_68           = *(uint32_t*)(src + 0x68);  /* +0x68 */
+    obj->stored_resource_id   = *(uint32_t*)(src + 0x64);  /* +0x64 */
+    obj->action_cooldown_time = *(uint32_t*)(src + 0x68);  /* +0x68 */
     obj->phase_timer        = *(uint32_t*)(src + 0x6C);  /* +0x6C */
     obj->waiting_flag       = *(uint8_t*) (src + 0x70);  /* +0x70 */
     obj->world_x_raw        = *(int32_t*) (src + 0x74);  /* +0x74 */

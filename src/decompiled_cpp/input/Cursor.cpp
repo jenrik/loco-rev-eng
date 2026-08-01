@@ -1,4 +1,4 @@
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 /* Cursor.cpp — Core initialization, lifecycle, and shared utilities */
 
 #include "Cursor.h"
@@ -27,7 +27,7 @@ void Cursor_UnlockAllSurfaces(void)
     const auto unlock_if_visible = [](void* opaque_window) {
         auto* window = static_cast<UI_WindowBase*>(opaque_window);
         if (window != nullptr && window->visible != 0) {
-            DDRAW_UnlockPrimary(window->hWnd);
+            DDRAW_UnlockPrimary();
             return true;
         }
         return false;
@@ -41,8 +41,7 @@ void Cursor_UnlockAllSurfaces(void)
         return;
     }
 
-    auto* main_window = static_cast<UI_WindowBase*>(g_main_window);
-    DDRAW_UnlockPrimary(main_window->hWnd);
+    DDRAW_UnlockPrimary();
 }
 
 /* ================================================================== */
@@ -87,7 +86,12 @@ void Cursor::base_destructor()
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Release obj_184 (player record).
-     * Uses scalar deleting destructor (vtable[0]) in the binary. */
+     * The binary uses the record's scalar deleting destructor (vtable[0])
+     * with flag 1. The record is the 0x39C-byte DPlay player record
+     * created by DPLAY_CreatePlayer; the CursorEditorRecord view covers
+     * only its first 0x43 bytes. delete() on this view frees the
+     * allocation; the record's virtual cleanup (if any) is not modelled
+     * here — TODO: type the full record as a class with a virtual dtor. */
     if (this->obj_184 != nullptr) {                             /* +0x184 */
         delete this->obj_184;
         this->obj_184 = nullptr;
@@ -99,10 +103,16 @@ void Cursor::base_destructor()
         this->hBrush = nullptr;
     }
 
-    /* Release background surface (UIPANEL object).
-     * Uses scalar deleting destructor (vtable[0]) in the binary. */
+    /* Release background surface (UIPANEL object at +0x1E8).
+     * The binary calls its scalar deleting destructor vtable[0](1)
+     * (0x4166F6). UIPANEL's full definition lives in ui/UIPANEL.h but
+     * pulling it here conflicts with the ResourceManager_GetById bridge
+     * declaration (game/Panel.h); this explicit dispatch reproduces the
+     * exact binary ABI instead. */
     if (this->background_surface != nullptr) {                  /* +0x1E8 */
-        delete this->background_surface;
+        void** vtbl = *reinterpret_cast<void***>(this->background_surface);
+        using DeletePanel = void (*)(void*, uint8_t);
+        reinterpret_cast<DeletePanel>(vtbl[0])(this->background_surface, 1);
         this->background_surface = nullptr;
     }
 
@@ -166,15 +176,11 @@ void Cursor::base_destructor()
      * DirectDraw surfaces are platform API; literal vtable dispatch preserved
      * because these are opaque COM objects, not our classes. */
     if (this->editor_surf_a != nullptr) {                       /* +0x590 */
-        void** vtbl = *reinterpret_cast<void***>(this->editor_surf_a);
-        using ReleaseSurface = void (*)(void*);
-        reinterpret_cast<ReleaseSurface>(vtbl[2])(this->editor_surf_a);
+        Cursor_ComSurfaceRelease(this->editor_surf_a);
         this->editor_surf_a = nullptr;
     }
     if (this->editor_surf_b != nullptr) {                       /* +0x598 */
-        void** vtbl = *reinterpret_cast<void***>(this->editor_surf_b);
-        using ReleaseSurface = void (*)(void*);
-        reinterpret_cast<ReleaseSurface>(vtbl[2])(this->editor_surf_b);
+        Cursor_ComSurfaceRelease(this->editor_surf_b);
         this->editor_surf_b = nullptr;
     }
 
@@ -199,7 +205,7 @@ void Cursor::init()
 {
     /* ---- PHASE 1: Reset fields, create brush ---- */
 
-    this->field_59D = 0;                                         /* +0x59D */
+    this->bonus_mode = 0;                                        /* +0x59D */
     this->hEditWnd = nullptr;                                    /* +0xF4 */
     this->cached_client_width = 0;                                 /* +0xEC */
     this->cached_height = 0;                     /* +0xE8 (cached_height) */
@@ -216,7 +222,7 @@ void Cursor::init()
     this->selected_idx_384 = -1;                                 /* +0x384 */
 
     this->counter_24C = 0;                                       /* +0x24C */
-    this->field_188 = 1;                                         /* +0x188 */
+    this->ui_active = 1;                                         /* +0x188 */
     this->cached_client_height = 1;                     /* +0xF0 */
     this->field_388 = 0;                                         /* +0x388 */
 
@@ -282,13 +288,13 @@ void Cursor::init()
         this->toolbar_sprites[i] = nullptr;
     }
 
-    this->field_58C = 0;                    /* +0x58C */
+    this->surface_toggle = 0;                    /* +0x58C */
     this->editor_surf_a = nullptr;                               /* +0x590 */
     this->editor_surf_b = nullptr;                               /* +0x598 */
-    this->field_2B4 = 0;                                         /* +0x2B4 */
-    this->field_2B5 = 0;                                         /* +0x2B5 */
-    this->field_594 = 0;                                         /* +0x594 */
-    this->field_59C = 0;                                         /* +0x59C */
+    this->has_next_page = 0;                                     /* +0x2B4 */
+    this->has_prev_page = 0;                                     /* +0x2B5 */
+    this->surf_a_dirty = 0;                                      /* +0x594 */
+    this->surf_b_dirty = 0;                                      /* +0x59C */
 
     /* 10 palette colour swatch sprites at +0x1F4, resource IDs 0x3CAD..0x3CB6
        Also init their 3-byte RGB slots at +0x22C */
@@ -305,8 +311,10 @@ void Cursor::init()
 
     /* ---- PHASE 3: Load Edit_colour.dat palette ---- */
 
+    /* The binary's format string at 0x47E44C is "%spost\Edit\colour.dat"
+     * (mixed slashes, British spelling) — passed with &g_install_path. */
     char filePath[0x504] = { 0 };
-    wsprintfA(filePath, "%s/spost/Edit_colour.dat", &g_install_path);
+    wsprintfA(filePath, "%spost\\Edit\\colour.dat", &g_install_path);
 
     void* readBuffer = operator_new(0x2000);
     int* streamObj = nullptr;
@@ -379,6 +387,11 @@ skip_palette_load:
     if (readBuffer != nullptr) {
         GLOBAL_free(readBuffer);
     }
+    /* Close the stream object. The stream is an opaque internal ABI object
+     * (created by WNDPROC_StreamFromMemory / WIN32_StreamOpenFile); the
+     * binary calls its vtable slot [0] with flag 1 — equivalent to a
+     * scalar-deleting-dtor. The exact layout is undocumented; the dispatch
+     * below mirrors the binary's pointer chain (*stream + 4 → vtable). */
     if (streamObj != nullptr) {
         auto* streamAddress = reinterpret_cast<uint8_t*>(streamObj);
         auto* streamVtableAddress = reinterpret_cast<uint8_t*>(
@@ -394,12 +407,15 @@ skip_palette_load:
 
     /* ---- PHASE 4: Generate 12 unique random bonus IDs ---- */
 
+    /* The binary divides CRT_rand() by 0x421 (fixed-point imul magic
+     * 0x3E007C01 in the x86) and adds 1 — it does NOT take the modulo.
+     * CRT_rand() returns 0..32767, so the IDs are in 1..31. */
     for (int i = 0; i < 12; i++) {
         uint32_t id;
         bool unique;
         do {
             unique = true;
-            id = CRT_rand() % 0x421 + 1;  /* Range 1..1057 */
+            id = static_cast<uint32_t>(CRT_rand() / 0x421) + 1;
             for (int j = 0; j < i; j++) {
                 if (this->bonus_ids[j] == static_cast<uint8_t>(id)) {
                     unique = false;
@@ -487,6 +503,8 @@ void Cursor::init_sprites()
         desc[2] = 0x100;      /* dwHeight = 256 */
         desc[3] = 0x100;      /* dwWidth = 256 */
 
+        /* g_ddraw is an opaque IDirectDraw4 COM object; CreateSurface via
+         * vtable slot [6] is the documented DirectDraw ABI. */
         void** ddrawVtbl = *reinterpret_cast<void***>(g_ddraw);
         using CreateSurface = int (*)(void*, int*, void**, int);
         reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
@@ -512,6 +530,13 @@ void Cursor::init_sprites()
 /* +0x1E8, then composites 4 resources (0x3CAA, 0x3CC4, 0x3CC5,      */
 /* 0x3CC6) onto it. Guarded: if background_surface already set,       */
 /* function is a no-op.                                                */
+/*                                                                     */
+/* The binary dispatches each resource through Town_BlitElement        */
+/* (0x42B960) with several register-clobbered arguments (unaff_EBX/    */
+/* EBP/ESI/EDI in the decompiler); the exact per-resource blit         */
+/* geometry is not recoverable from the decompilation. UIPANEL_Blit    */
+/* is the same leaf call Town_BlitElement forwards to; the coordinates */
+/* below are a documented approximation pending raw-bytes inspection.  */
 /* ================================================================== */
 void Cursor::init_background()
 {
@@ -576,37 +601,6 @@ void Cursor::init_background()
                      this->background_surface, 0, 0, 0, 0, 0);
         RESDATA_ReleaseSurface(resdata);
     }
-}
-
-/* ================================================================== */
-/* Cursor::update_client_rect — Update client rectangle cache          */
-/* Address: 0x4140A0                                                    */
-/*                                                                     */
-/* Synchronizes cached client rect at +0x104 with current window      */
-/* via GetClientRect. Populates width/height caches at +0xE4..+0xF0.  */
-/* Guarded by wndproc_flag at +0xDB.                                   */
-/* ================================================================== */
-void Cursor::update_client_rect()
-{
-    if (this->wndproc_flag() == 0)                                   /* +0xDB */
-        return;
-
-    RECT* tmpRect = &this->window_rect;               /* overlaps hEditWnd! */
-    GetClientRect(this->hWnd, tmpRect);                            /* +0x08 */
-
-    /* Cache widths */
-    this->cached_width() = this->window_rect.right - tmpRect->left;    /* +0xE4 */
-    this->cached_height = this->window_rect.bottom - this->window_rect.top;  /* +0xE8 */
-
-    /* Store client rect copy at +0x104 */
-    this->cursor_client_rect.left   = tmpRect->left;                     /* +0x104 */
-    this->cursor_client_rect.top    = tmpRect->top;                      /* +0x108 */
-    this->cursor_client_rect.right  = tmpRect->right;                    /* +0x10C */
-    this->cursor_client_rect.bottom = tmpRect->bottom;                   /* +0x110 */
-
-    /* Derive client width/height caches */
-    this->cached_client_width = this->cursor_client_rect.right - this->cursor_client_rect.left;  /* +0xEC */
-    this->cached_client_height = this->cursor_client_rect.bottom - this->cursor_client_rect.top;  /* +0xF0 */
 }
 
 /* ================================================================== */

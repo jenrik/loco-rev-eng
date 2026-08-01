@@ -1,4 +1,4 @@
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 /**
  * Cursor.h — Mouse cursor / UI overlay manager class
  *
@@ -25,16 +25,51 @@
  * the Cursor-specific type. For example, cursor_state() overlays
  * field_14, primary_surface() overlays field_38, etc.
  *
- * Vtable layout:
- *   [0] +0x00: scalar deleting destructor (0x4159E0)
- *   [1] +0x04: Hide (UI_WindowBase::hide, 0x425990)
- *   [2] +0x08: Show (UI_WindowBase_Show, 0x4259C0)
- *   [3] +0x0C: Cursor::set_mode (0x414340) — shared with other cursor vtables
- *   [4] +0x10: virtual (stub, 0x426130)
- *   [5] +0x14: Create (GameWindow::create, 0x413DE0)
- *   [6] +0x18: update_client_rect (0x4140A0)
- *   [7] +0x1C: on_show (stub, 0x426130)
- *   [8] +0x20: render_editor (0x418210)
+ * Vtable layout (verified against the Ghidra database; each slot's
+ * function was confirmed via DATA references from 0x477930..0x4779F4):
+ *   [0]  +0x00: scalar deleting destructor (Cursor_Dtor, 0x4159E0)
+ *   [1]  +0x04: Hide (Cursor_Hide, 0x416F70)
+ *   [2]  +0x08: Show (UI_WindowBase_Show, 0x4259C0, inherited)
+ *   [3]  +0x0C: SetMode (UI_WindowBase_SetMode, 0x425FD0, inherited —
+ *               NOT the GameWindow-family 0x414340!)
+ *   [4]  +0x10: SetRenderSurface (UI_WindowBase_SetRenderSurface, 0x426020, inherited)
+ *   [5]  +0x14: OnAsyncTaskFailure (UI_WindowBase_OnAsyncTaskFailure, 0x426130, inherited)
+ *   [6]  +0x18: CreateFullWindow (UI_CreateFullWindow, 0x425B70, inherited)
+ *   [7]  +0x1C: on_show / on_create hook (0x417180 — unlabeled region;
+ *               sole DATA ref is vtable slot [7]; code at 0x417186 calls
+ *               UI_WindowBase::on_create 0x425D30)
+ *   [8]  +0x20: render_editor (Cursor_RenderEditor, 0x418210)
+ *   [9]  +0x24: no-op thunk (0x4661A0, inherited default)
+ *   [10] +0x28: message dispatcher (FUN_00426140, inherited; routes
+ *               WM_* to slots [13]..[36])
+ *   [11] +0x2C: WindowProc (Cursor_ToolbarWndProc, 0x419A60)
+ *   [12] +0x30: 0x41A8A0   [13] +0x34: 0x422EA0 (DefWndProc)
+ *   [14] +0x38: 0x41AC10   [15] +0x3C: 0x41AA40 (INPUT_CancelColorAdjust)
+ *   [16] +0x40: 0x41CA80   [17] +0x44: 0x41AAE0 (INPUT_ConfirmColorAdjust)
+ *   [18] +0x48: 0x41AB70   [19] +0x4C: 0x422EA0 (DefWndProc)
+ *   [20] +0x50: 0x41CE50   [21] +0x54: 0x417040
+ *   [22] +0x58: 0x422EA0   [23] +0x5C: 0x426950
+ *   [24] +0x60: 0x41CDF0   [25] +0x64: 0x422EA0
+ *   [26] +0x68: 0x426960   [27] +0x6C: 0x426980
+ *   [28] +0x70: 0x426A60   [29] +0x74: 0x422EA0
+ *   [30] +0x78: 0x426AC0   [31] +0x7C: 0x426AD0
+ *   [32] +0x80: 0x419A10   [33] +0x84: 0x422EA0
+ *   [34] +0x88..+0x90: 0x422EA0 (DefWndProc)
+ *   [37] +0x94: 0x41D2B0 (INPUT_Dtor)   [38] +0x98: 0x41DD80 (INPUT_PlaceObject)
+ *   [39] +0x9C: 0x41DEF0 (INPUT_RemoveObject)  [40] +0xA0: 0x41E100 (INPUT_FileDlgProc)
+ *   [41] +0xA4: —        [42] +0xA8: —
+ *   [43] +0xAC: 0x41E600 (INPUT_DtorWrapper)
+ *   [44] +0xB0: 0x425670 (UI_PaintWindow)  [45] +0xB4: 0x4257F0 (UI_OnMouseLeave)
+ *   [46] +0xB8: 0x41E9F0 (INPUT_EditWndProc)  [47] +0xBC: 0x41E6E0 (INPUT_HandleEditMessage)
+ *   [48] +0xC0: 0x41F4B0
+ *
+ * The C++ virtual set below covers the slots the reconstructed code
+ * actually dispatches through (dtor [0], hide [1], render_editor [8],
+ * on_show [7]); the rest of the binary vtable is message/input
+ * handlers documented above. UI_WindowBase's own C++ declaration order
+ * (show before hide) differs from the binary vtable order; this
+ * pre-existing base-class deviation is shared by EditWindow and is
+ * accepted for the native host build (see AGENTS.md "Host deviations").
  *
  * Class hierarchy:
  *   UI_WindowBase
@@ -87,8 +122,7 @@ public:
     /* to the base class storage, preserving the binary-matching layout.  */
     /* ================================================================ */
 
-    /* +0x0C: field_0C aliases hWndParent */
-    HWND&       field_0C()       { return this->hWndParent; }
+    /* +0x0C: parent window HWND (base hWndParent) */
 
     /* +0x10: resource_id aliases resourceId */
     UINT&       resource_id()    { return this->resourceId; }
@@ -97,7 +131,9 @@ public:
     int32_t&    cursor_state()   { return this->field_14; }
     void*&      cursor_sprite_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_14)->value; }
 
-    /* +0x18..+0x24: clip_rect_* aliases field_18..field_24 */
+    /* +0x18..+0x24: viewport clip rectangle (four base int32 fields) */
+    RECT*       clip_rect()      { return reinterpret_cast<RECT*>(&this->field_18); }
+    const RECT* clip_rect() const { return reinterpret_cast<const RECT*>(&this->field_18); }
     int32_t&    clip_rect_left()   { return this->field_18; }
     int32_t&    clip_rect_top()    { return this->field_1C; }
     int32_t&    clip_rect_right()  { return this->field_20; }
@@ -112,7 +148,10 @@ public:
     /* +0x3C: sprite_width (uint32_t) overlays captureFlag + _pad_3E */
     uint32_t&   sprite_width()   { return reinterpret_cast<CursorOverlayValue<uint32_t>*>(&this->captureFlag)->value; }
 
-    /* +0x3D: field_3D in Cursor = field_3D in base (same name, same type) */
+    /* +0x3D: high byte of the sprite_width dword (+0x3C). Alias of base
+     * field_3D. Zeroed by upload_custom_content (0x419B10) together with
+     * sprite_height when clearing the sprite dimensions. */
+    uint8_t&    sprite_width_hi() { return this->field_3D; }
 
     /* +0x40: sprite_height aliases field_40 */
     int32_t&    sprite_height()  { return this->field_40; }
@@ -197,8 +236,8 @@ public:
      * This is separate from base::clientRect at +0xC4. */
     RECT       cursor_client_rect;     // +0x104 client area rect copy
 
-    int32_t    field_114;              // +0x114  (unknown)
-    int32_t    field_118;              // +0x118  (unknown)
+    int32_t    field_114;              // +0x114  (unknown — no evidence of use)
+    int32_t    field_118;              // +0x118  (unknown — no evidence of use)
     uint8_t    _pad_11C[12];           // +0x11C  undocumented gap (verified by binary offset map)
 
     /* --- Editor scroll/list fields (+0x128..+0x184) --- */
@@ -219,20 +258,26 @@ public:
         int32_t              field_184;  // +0x184  integer alias
         CursorEditorRecord*  obj_184;    // +0x184  editor/player record
     };
-    uint8_t    field_188;              // +0x188  byte flag (init to 1)
+    uint8_t    ui_active;              // +0x188  byte: master UI-active flag (init 1).
+                                       //         When 0 the status/scroll sprites render
+                                       //         disabled/hidden (draw_color_palette,
+                                       //         draw_network_status); also forms the low
+                                       //         byte of the HDC handle in blit_edit_preview.
     uint8_t    _pad_189[3];            // +0x189  padding
     uint32_t   timer_id_18C;           // +0x18C  timer ID for periodic update
-    int32_t    field_190;              // +0x190
-    uint8_t    field_194;              // +0x194  byte flag (init to 0)
+    int32_t    field_190;              // +0x190  (unknown — no evidence of use)
+    uint8_t    field_194;              // +0x194  byte flag (init 0 — no evidence of use)
     uint8_t    _pad_195[3];            // +0x195  padding
     uint32_t   timer_id_198;           // +0x198  timer ID for scroll/network update
     uint32_t   timer_id_19C;           // +0x19C  second timer ID
 
     RECT       edit_preview_rect;      // +0x1A0  {x, y, w, h} destination rect for edit preview blit
-    int32_t    field_1B0;              // +0x1B0  (used as rect in palette blit)
-    int32_t    field_1B4;              // +0x1B4
-    int32_t    field_1B8;              // +0x1B8
-    int32_t    field_1BC;              // +0x1BC
+
+    /* +0x1B0..+0x1BF: palette region rect — the binary reads these as a
+     * 4-dword (x, y, width-bound, height-bound) tuple in draw_color_palette
+     * (0x418A90), draw_locomotive_preview (0x418E20), draw_postcard_preview
+     * (0x419260) and show() (0x416B80, surface sizing). */
+    RECT       palette_rect;           // +0x1B0  palette/toolbar region {left, top, right, bottom}
     /* Union: +0x1C0..+0x1E7 — per Ghidra, holds sprites at low offsets
      * and editor_clip_rect overlaps the full 16-byte region */
     union {
@@ -262,10 +307,9 @@ public:
 
     int32_t    counter_24C;            // +0x24C  integer counter (init to 0, used for color-adjust timer)
 
-    int32_t    field_250;              // +0x250  color component index (0=R, 1=G, 2=B) for adjust
-    uint8_t    field_254;              // +0x254  byte: color adjust direction (0=dec, non-zero=inc)
+    int32_t    color_adjust_component; // +0x250  color component index (0=R, 1=G, 2=B) for adjust
+    uint8_t    color_adjust_direction; // +0x254  byte: color adjust direction (0=dec, non-zero=inc)
     uint8_t    _pad_255[3];            // +0x255  padding
-
     RECT       color_bar_rects[3];     // +0x258  three RECTs for R/G/B color bars (16 bytes each)
 
     int32_t    field_288;              // +0x288
@@ -284,8 +328,8 @@ public:
     uint8_t    editor_flags[4];        // +0x2B0  byte flags [0]=tab_visible, [1]=active_tab,
                                        //         [2]=scroll_dir, [3]=? (init: 1,1,0,0)
 
-    uint8_t    field_2B4;              // +0x2B4  byte = 0  (has_next_page flag for palette/postcard)
-    uint8_t    field_2B5;              // +0x2B5  byte = 0  (has_prev_page flag)
+    uint8_t    has_next_page;          // +0x2B4  byte: 1 = more palette/postcard items follow
+    uint8_t    has_prev_page;          // +0x2B5  byte: 1 = previous palette/postcard items exist
 
     int32_t    palette_end_idx;        // +0x2B8  last displayed palette item index
     int32_t    palette_start_idx;      // +0x2BC  first displayed palette item index (init -1)
@@ -332,20 +376,23 @@ public:
 
     int32_t    selected_idx_384;       // +0x384  third selected index (init -1)
 
-    uint8_t    field_388;              // +0x388  byte flag (init 0)
+    uint8_t    field_388;              // +0x388  byte flag (init 0 — no evidence of use)
 
     RECT       palette_item_rects[16]; // +0x38C  cached palette item on-screen positions
                                        //         (16 RECTs, 0x100 bytes)
 
     ButtonSprite*  toolbar_sprites[64];    // +0x48C  toolbar icon sprite array (64 entries)
-    int32_t    field_58C;              // +0x58C  (unknown dword, init 0 — toggles between surfaces)
+    int32_t    surface_toggle;         // +0x58C  dword toggle (0/1) selecting which editor
+                                       //         offscreen surface is the draw target;
+                                       //         inverted each draw_locomotive_preview call
 
-    void*      editor_surf_a;          // +0x590  editor offscreen surface A (released via vtable[2])
-    uint8_t    field_594;              // +0x594  byte (init 0 — dirty flag for surf A)
+    void*      editor_surf_a;          // +0x590  editor offscreen surface A (COM Release via vtable[2])
+    uint8_t    surf_a_dirty;           // +0x594  byte (init 0 — dirty flag for surf A)
 
-    void*      editor_surf_b;          // +0x598  editor offscreen surface B (released via vtable[2])
-    uint8_t    field_59C;              // +0x59C  byte (init 0 — dirty flag for surf B)
-    uint8_t    field_59D;              // +0x59D  byte (init 0 — bonus mode flag)
+    void*      editor_surf_b;          // +0x598  editor offscreen surface B (COM Release via vtable[2])
+    uint8_t    surf_b_dirty;           // +0x59C  byte (init 0 — dirty flag for surf B)
+    uint8_t    bonus_mode;             // +0x59D  byte (init 0 — bonus prize mode flag;
+                                       //         selects the random bonus_ids table)
 
     /* Network player names (26 entries, 13 bytes each, null-terminated) */
     char       player_names[26][13];   // +0x59E  network player names buffer (338 bytes)
@@ -449,10 +496,14 @@ public:
      *
      * Called by: CGWND::InitAllSubsystems @ 0x407444
      *
+     * NOTE: Not a virtual method in the binary — 0x4169E0 has no vtable
+     * DATA reference (all xrefs are direct calls); the Cursor vtable slot
+     * [6] is the inherited UI_WindowBase::create_full_window (0x425B70).
+     *
      * @param hParent  HWND - parent window handle
      * @return         int32_t - 1 on success, 0 on failure
      */
-    virtual int32_t create(HWND hParent);
+    int32_t create(HWND hParent);
 
     /**
      * Initialize cursor sprites from resource registry.
@@ -484,31 +535,15 @@ public:
     void init_background();
 
     /**
-     * Update client rectangle cache.
-     * Address: 0x4140A0
-     *
-     * Synchronizes the cached client rect at +0x104 with the current
-     * window client area via GetClientRect. Populates width/height caches
-     * at +0xE4..+0xF0. Only executes when wndproc_flag at +0xDB is non-zero.
-     * This is a UI_WindowBase virtual method inherited by Cursor.
-     *
-     * NOTE: GetClientRect stores the result at +0xF4, which overlaps with
-     * hEditWnd in the Cursor class. This is safe because:
-     * (a) update_client_rect runs during window creation (before hEditWnd
-     *     is stored), and (b) subsequent calls are gated by wndproc_flag.
-     *
-     * Called by: (vtable dispatch from UI_WindowBase and GameWindow)
-     */
-    virtual void update_client_rect();
-
-    /**
      * Refresh network player names from NetMan + DPLAY sources.
      * Address: 0x416E00
      *
      * Populates player_names[26][13] (+0x59E) with up to 26 player names:
-     *   1. If g_netman->scenarioId == 2: copies scenario player names from
-     *      g_netman's player entries (stride 0x4C, name at +0x51D)
-     *   2. Otherwise: uses a formatted resource string (#0x6E, 13 chars max)
+     *   1. If _g_netman->m_gameMode (+0x7C4) == 2: copies scenario player
+     *      names from _g_netman->m_slots[9] (+0x518, stride 0x4C), skipping
+     *      the local slot (m_mySlotIndex, +0x7D0) and empty dpIds
+     *      (slot+0x00); name at slot+0x51D (PlayerSlot::compact_name)
+     *   2. Otherwise: uses formatted resource string #0x6E (13 chars max)
      *      as a single default name
      *   3. Calls DPLAY_EnumeratePlayers() then appends names from _g_dplay
      *      (+0xB13, stride 0xD, up to 16 entries)
@@ -621,7 +656,8 @@ public:
      *
      * Called by: vtable slot [8] from editor render loop
      */
-    virtual void render_editor();
+    /** Binary slot [8] 0x418210 (render_editor). */
+    void on_update(int32_t param) override;
 
     /**
      * Handle click on a preset color swatch.
@@ -786,7 +822,8 @@ public:
      * @param lParam LPARAM — message parameter
      * @return       LRESULT — result of message processing
      */
-    LRESULT toolbar_wndproc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    /** Binary slot [11] 0x419A60 (toolbar_wndproc). */
+    LRESULT window_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
 
     /**
      * Launch file-open dialog and upload custom content.
@@ -845,7 +882,7 @@ public:
      *   4. Releases two DDraw surfaces at +0x590 and +0x598 via vtable[2]
      *   5. Releases all 64 toolbar sprites at +0x48C via vtable[0](1)
      *   6. Calls DPLAY_LeaveSession to leave network session
-     *   7. Sets field_188 = 1, field_F0 = 1
+     *   7. Sets ui_active (+0x188) = 1, cached_client_height (+0xF0) = 1
      *
      * Called by: (indirectly via Cursor base destructor)
      */
@@ -857,7 +894,7 @@ public:
      *
      * The primary render path for the cursor overlay. When `skipRender` is 0:
      *
-     *   1. Unlocks the primary surface via DDRAW_UnlockPrimary(hWnd)
+     *   1. Unlocks the primary surface via DDRAW_UnlockPrimary()
      *   2. If cursor_state != 0 and capture_flag == 0:
      *      a. Sets dirty rect to (-1, -1)
      *      b. Gets Windows cursor position, adjusts by current sprite hotspot
@@ -978,42 +1015,33 @@ public:
     void set_capture(uint8_t releaseFlag);
 
     /**
-     * Set cursor animation state/mode.
-     * Address: 0x414340
-     *
-     * Changes the cursor's visual state. The state ID selects which
-     * animation strip to play. Vtable slot [3] (0x0C) dispatches here
-     * from multiple cursor vtables (0x47768C, 0x4778A4, 0x47813C, 0x478434)
-     * where other classes share the same slot for set-mode dispatch.
-     *
-     * State 0 hides the cursor; non-zero values select an animation strip
-     * from the current animation data (RESDATA* at +0x44).
-     *
-     * Parameter logic:
-     *   - If new state matches current state (and state != 0), skips
-     *     state change but still processes resetPos/forceRedraw
-     *   - If state == 0, returns immediately (no action for already-hidden)
-     *   - resetPos: if non-zero, zeroes cursor_rect and prev_cursor_rect
-     *   - forceRedraw: if non-zero, triggers immediate UpdateDirtyRect +
-     *     optionally RenderWithViewport
-     *
-     * Called by: virtual dispatch from multiple vtables
-     *
-     * @param stateId     int32_t - cursor animation state (0 = hidden)
-     * @param resdata     void* - RESDATA* for the new animation strip
-     * @param resetPos    uint8_t - if non-zero, reset cursor rect cache
-     * @param forceRedraw uint8_t - if non-zero, force immediate redraw
+     * NOTE ON set_mode: Cursor does NOT override the base slot [3] in the
+     * binary — the Cursor vtable at 0x47793C points to UI_WindowBase::set_mode
+     * (0x425FD0), NOT the GameWindow-family 0x414340. Cursor code that
+     * "sets the cursor mode" (draw_locomotive_preview @ 0x418E20,
+     * upload_custom_content @ 0x419B10) dispatches through vtable slot [3]
+     * with (field_60, field_64, 0, 1), which resolves to the base
+     * implementation (hotspot/frame-count → set_render_surface). The
+     * GameWindow-family 0x414340 implementation lives in ui/GameWindow.cpp
+     * (GameWindow::set_mode) and is not part of the Cursor class.
      */
-    void set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw) override;
 
     /**
      * Pre-show virtual hook (vtable[7]).
-     * Address: 0x426130 (stub — just returns)
+     * Address: 0x417180 (unlabeled code region in Ghidra — not a defined
+     *          function; sole DATA reference is Cursor vtable slot [7] at
+     *          0x47794C. The code at 0x417186 calls UI_WindowBase::on_create
+     *          (0x425D30), so the hook chains to the base client-rect
+     *          synchronizer. The earlier "0x426130 stub" annotation was
+     *          incorrect: 0x426130 is the inherited on_async_task_failure
+     *          slot [5].)
      *
-     * Called before the cursor editor overlay is shown. Base
-     * implementation is a no-op; subclasses may override.
+     * Called before the cursor editor overlay is shown (dispatched from
+     * Cursor::show @ 0x416BA1 via `CALL dword ptr [vtable+0x1C]` with no
+     * arguments). Subclasses may override.
      */
-    virtual void on_show();
+    /** Binary slot [7] 0x417180 (pre-show hook). */
+    void on_create() override;
 
     /**
      * Handle WM_PAINT dispatch for cursor window.
@@ -1029,7 +1057,7 @@ public:
      * Returns 0 always (standard WndProc return for handled message).
      *
      * Called by: HelpWnd_HandleMouseMove, CGWND at 0x40F863,
-     *            Train_HandleClick, and via vtable dispatch at 0x4778E4
+     *            Train_HandleClick
      *
      * @param hWnd  HWND - the window being painted
      * @return      0 (handled)

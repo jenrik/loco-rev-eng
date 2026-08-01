@@ -1,8 +1,14 @@
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 /* Cursor_Render.cpp — Main cursor compositing and rendering
  *
  * Full reconstruction from Ghidra disassembly of Cursor_Render@0x414C20.
  * 254 instructions, 4-blit compositing pipeline with animation advance.
+ * Validated against the decompilation: the skip-render guard, hidden-
+ * cursor restore path, dirty markers (+0x50/+0x54 = -1), hotspot/clip,
+ * animation frame advance (frame_count at RESDATA+0x160), and the four
+ * blits (background capture, colour-keyed overlay, screen composite,
+ * background restore) all match. The literal vtable dispatch on the
+ * DirectDraw surfaces is the documented COM ABI for opaque objects.
  */
 
 #include "Cursor.h"
@@ -11,16 +17,17 @@
 void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
 {
     /* ================================================================ */
-    /* Phase 0: Pre-lock surface if hdc provided                        */
+    /* Phase 0: Pre-render surface helper if hdc provided                */
     /* Address: 0x414C28..0x414C3D                                      */
     /* ================================================================ */
     if (hdc != nullptr) {
-        /* primary_surface→vtable[26] = IDirectDrawSurface4::Lock() or similar.
+        /* primary_surface→vtable[26] (byte offset 0x68) = IDirectDrawSurface4::
+         * ReleaseDC(surface, hdc) per the documented interface slot table.
          * DirectDraw surfaces are COM platform API; literal vtable dispatch
          * preserved as these are opaque COM objects. */
-        SurfaceLock_t lock_surface =
-            Cursor_SurfaceLock(this->primary_surface());
-        lock_surface(this->primary_surface(), hdc);
+        SurfaceReleaseDc_t release_dc =
+            Cursor_SurfaceReleaseDC(this->primary_surface());
+        release_dc(this->primary_surface(), hdc);
     }
 
     /* ================================================================ */
@@ -36,7 +43,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Phase 2: Unlock primary surface                                  */
     /* Address: 0x414C49..0x414C53                                      */
     /* ================================================================ */
-    DDRAW_UnlockPrimary(hWnd);
+    DDRAW_UnlockPrimary();
 
     /* ================================================================ */
     /* Phase 3: Active cursor check                                     */
@@ -99,6 +106,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     cursorPos.y -= *reinterpret_cast<int16_t*>(animationBytes + 0x34); /* hotspot_y */
 
     /* ---- 4d. Get sprite dimensions from RESDATA ---- */
+    /* NOTE: the binary adjusts the hotspot (4c) BEFORE the null check,
+     * implying anim data is always present when the cursor is active;
+     * the guarded read here is host-safe. */
     uint32_t spriteW, spriteH;
     if (animData != nullptr) {
         spriteW = *reinterpret_cast<uint16_t*>(animationBytes + 0x14); /* width  */

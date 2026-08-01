@@ -337,8 +337,8 @@ bool GameSetupPanel::create_window(HWND hWndParent)
     HICON icon = LoadIconA(this->hInstance, (LPCSTR)0x65);  /* +0x04 */
     this->hIcon = icon;  /* +0x1B4 */
 
-    int result = UI_WindowBase::create_full_window(
-        this,
+    int result = this->create_full_window(
+        
         0,                              /* nCmdShow (SW_HIDE) */
         hWndParent,
         desktopRect.left,
@@ -367,7 +367,7 @@ bool GameSetupPanel::create_window(HWND hWndParent)
 /*   7. Set renderFlag                                                  */
 /*   8. End paint operation                                             */
 /* ================================================================== */
-void GameSetupPanel::render(int unused)
+void GameSetupPanel::on_update(int32_t unused)
 {
     /* Step 1: Blit background sprite (at +0x238) to primary surface.
        Source rect: clipRect (+0x1CC), Destination rect: workRect (+0xD4) */

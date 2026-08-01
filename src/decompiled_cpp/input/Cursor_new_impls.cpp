@@ -1,4 +1,4 @@
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 #include "Cursor.h"
 #include "Cursor_internal.h"
 #include "../ui/ButtonSprite.h"
@@ -9,7 +9,8 @@
 /*                                                                     */
 /* Loads editor sprite sheet (res 0x3CB9), retrieves surface via       */
 /* RESDATA vtable[1], calls Sprite_Init on all ~49 UISprite objects.  */
-/* Guarded by editor_initialized (+0x2C0) flag.                        */
+/* Guarded by editor_initialized (+0x2C0) flag. Validated: exact       */
+/* sprite order and resource/surface writes match the decompilation.  */
 /* ================================================================== */
 void Cursor::init_editor_sprites()
 {
@@ -23,7 +24,7 @@ void Cursor::init_editor_sprites()
     this->editor_resdata = resdata;                          /* +0x1F0 */
 
     if (resdata != nullptr) {
-        /* Get surface via RESDATA vtable[1] */
+        /* Get surface via RESDATA vtable[1] (GetSurface with flags=0, mode=0) */
         void* surface = RESDATA_GetSurface(resdata, 0, 0);
         this->editor_surface = surface;                     /* +0x1EC */
     }
@@ -88,7 +89,7 @@ void Cursor::init_editor_sprites()
 /*                                                                     */
 /* Reverses init_editor_sprites(). Calls Sprite_Destroy on all ~49    */
 /* UISprite objects, releases the editor resdata via vtable[2], and   */
-/* clears editor_initialized (+0x2C0). Guarded.                        */
+/* clears editor_initialized (+0x2C0). Guarded. Validated.            */
 /* ================================================================== */
 void Cursor::cleanup_editor_sprites()
 {
@@ -160,30 +161,22 @@ void Cursor::cleanup_editor_sprites()
 /* Renders the complete editor toolbar: blits background surface to   */
 /* primary, draws edit preview, color bars, network status, and       */
 /* colour palette. Two paths based on palette_start_idx (+0x2BC).     */
+/* Validated: blit geometry (workRect +0xD4..+0xE0 as src, editor_blit */
+/* +0x1D8..+0x1E4 as dst), sprite resets, +0x594/+0x59C/+0x58C clears,*/
+/* INPUT_SwitchToLocomotiveTab(+0x2B2), delayed-focus (+0xF0) with    */
+/* HelpWnd_PlayNarration and +0xEC = 10 on success.                   */
 /* ================================================================== */
-void Cursor::render_editor()
+void Cursor::on_update(int32_t /* param */)
 {
-    /* Blit background surface to primary display */
-    {
-        RECT srcRect;
-        srcRect.left   = this->editor_blit_x;
-        srcRect.top    = this->editor_blit_y;
-        srcRect.right  = this->editor_blit_w;
-        srcRect.bottom = this->editor_blit_h;
-
-        RECT dstRect;
-        dstRect.left   = this->workRect.left;
-        dstRect.top    = this->workRect.top;
-        dstRect.right  = this->workRect.right;
-        dstRect.bottom = this->workRect.bottom;
-
-        UIPANEL_Blit(
-            this->background_surface,               /* +0x1E8 */
-            dstRect.left, dstRect.top, dstRect.right, dstRect.bottom,
-            _g_primary_surface,
-            srcRect.left, srcRect.top, srcRect.right, srcRect.bottom,
-            1);
-    }
+    /* Blit background surface to primary display:
+     * src = workRect (+0xD4..+0xE0), dst = editor_blit (+0x1D8..+0x1E4) */
+    UIPANEL_Blit(
+        this->background_surface,               /* +0x1E8 */
+        this->workRect.left, this->workRect.top, this->workRect.right, this->workRect.bottom,
+        _g_primary_surface,
+        this->editor_blit_x, this->editor_blit_y,
+        this->editor_blit_w, this->editor_blit_h,
+        1);
 
     /* Blit edit preview */
     this->blit_edit_preview();
@@ -208,9 +201,9 @@ void Cursor::render_editor()
     if (this->palette_start_idx < 0) {
         /* Tab-switch mode: end paint, reset surface flags, dispatch */
         UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
-        this->field_594 = 0;                         /* +0x594 */
-        this->field_59C = 0;                         /* +0x59C */
-        this->field_58C = 0;                         /* +0x58C */
+        this->surf_a_dirty = 0;                          /* +0x594 */
+        this->surf_b_dirty = 0;                          /* +0x59C */
+        this->surface_toggle = 0;                        /* +0x58C */
         INPUT_SwitchToLocomotiveTab(this, this->editor_flags[2]);
     } else {
         /* Normal editor mode: draw color palette, reset sprite, end paint */
@@ -236,7 +229,7 @@ void Cursor::render_editor()
 /*                                                                     */
 /* Hit-tests the 10 editor_sprites for a click at (x, y). On match:   */
 /* reads RGB from edit_colors[hit], propagates to color_r/g/b,        */
-/* updates obj_184 (+0x184) if set.                                    */
+/* updates obj_184 (+0x184) if set. Validated against decompilation.  */
 /* ================================================================== */
 void Cursor::handle_color_swatch_click(LONG x, LONG y)
 {
@@ -291,7 +284,7 @@ void Cursor::handle_color_swatch_click(LONG x, LONG y)
 /*                                                                     */
 /* Adjusts a single color channel (R=0, G=1, B=2) by +/-6. Sets a    */
 /* 100ms auto-repeat timer. Plays sound (res 0x5279) on first adjust. */
-/* Clamps to [0,255]. Redraws bars and blits preview.                  */
+/* Clamps to [0,255]. Redraws bars and blits preview. Validated.      */
 /* ================================================================== */
 void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_t posX, int32_t posY)
 {
@@ -305,8 +298,8 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
     }
 
     /* Store component index and direction */
-    this->field_250 = component;                        /* +0x250 */
-    this->field_254 = direction;    /* +0x254 */
+    this->color_adjust_component = component;                /* +0x250 */
+    this->color_adjust_direction = direction;                /* +0x254 */
 
     /* Start colour-bar auto-repeat timer if not already running */
     if (this->counter_24C == 0) {
@@ -401,17 +394,25 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
 /* Each bar's fill height is proportional to channel value (0-255),   */
 /* bottom-aligned within bar RECT (+0x258/+0x268/+0x278).            */
 /* If reset_buttons: resets +/- button sprites to state 0.            */
+/*                                                                     */
+/* Validated: GetStockObject(4) for the background (not NULL_BRUSH),   */
+/* fill height = bottom - (scale*value/100) with a 1px minimum        */
+/* applied to the scaled height BEFORE the subtraction, DeleteObject   */
+/* on all four brushes (including the stock one — matches the binary,  */
+/* even though stock brushes are normally owned by the OS), and the    */
+/* EndPaintEx with the HDC value.                                      */
 /* ================================================================== */
 void Cursor::draw_color_bars(uint8_t reset_buttons)
 {
-    /* Create GDI brushes */
-    HBRUSH stockBrush = GetStockObject(0);           /* NULL_BRUSH (hollow) */
-    HBRUSH brushRed   = CreateSolidBrush(0xFF);      /* Blue channel bar fill (NOTE: BGR order) */
-    HBRUSH brushGreen = CreateSolidBrush(0xFFFF);    /* Green channel bar fill */
-    HBRUSH brushBlue  = CreateSolidBrush(0xFF0000);  /* Red channel bar fill */
+    /* The binary uses GetStockObject(4) = BLACK_BRUSH for the bar
+     * backgrounds and deletes all four brush handles afterwards
+     * (including the stock one — a binary quirk preserved here). */
+    HBRUSH stockBrush = GetStockObject(4);
+    HBRUSH brushRed   = CreateSolidBrush(0xFF);      /* blue channel fill (BGR) */
+    HBRUSH brushGreen = CreateSolidBrush(0xFFFF);    /* green channel fill */
+    HBRUSH brushBlue  = CreateSolidBrush(0xFF0000);  /* red channel fill */
 
-    /* Calculate scale factor: barHeight = (barRectHeight * 100) / 255 */
-    /* The original code uses: ((bottom - top) * 100) / 0xFF */
+    /* Scale factor: ((bottom - top) * 100) / 0xFF from the FIRST bar rect */
     int barFullHeight = this->color_bar_rects[0].bottom - this->color_bar_rects[0].top;
     int heightScale = (barFullHeight * 100) / 0xFF;
 
@@ -421,42 +422,44 @@ void Cursor::draw_color_bars(uint8_t reset_buttons)
     /* --- Red bar (color_bar_rects[0] at +0x258) --- */
     FillRect(hdc, &this->color_bar_rects[0], stockBrush);
     if (this->color_r != 0) {
+        int scaled = (heightScale * this->color_r) / 100;
+        if (scaled == 0) scaled = 1;
         RECT fillRect;
         fillRect.left   = this->color_bar_rects[0].left;
-        fillRect.right  = this->color_bar_rects[0].right;  /* color_bar_rects[0].right */
+        fillRect.right  = this->color_bar_rects[0].right;
         fillRect.bottom = this->color_bar_rects[0].bottom;
-        fillRect.top = fillRect.bottom - ((heightScale * this->color_r) / 100);
-        if (fillRect.top == 0) fillRect.top = 1;
+        fillRect.top    = fillRect.bottom - scaled;
         FillRect(hdc, &fillRect, brushRed);
     }
 
     /* --- Green bar (color_bar_rects[1] at +0x268) --- */
     FillRect(hdc, &this->color_bar_rects[1], stockBrush);
     if (this->color_g != 0) {
+        int scaled = (heightScale * this->color_g) / 100;
+        if (scaled == 0) scaled = 1;
         RECT fillRect;
         fillRect.left   = this->color_bar_rects[1].left;
-        fillRect.right  = this->color_bar_rects[1].right;  /* color_bar_rects[1].right */
+        fillRect.right  = this->color_bar_rects[1].right;
         fillRect.bottom = this->color_bar_rects[1].bottom;
-        fillRect.top = fillRect.bottom - ((heightScale * this->color_g) / 100);
-        if (fillRect.top == 0) fillRect.top = 1;
+        fillRect.top    = fillRect.bottom - scaled;
         FillRect(hdc, &fillRect, brushGreen);
     }
 
     /* --- Blue bar (color_bar_rects[2] at +0x278) --- */
     FillRect(hdc, &this->color_bar_rects[2], stockBrush);
     if (this->color_b != 0) {
+        int scaled = (heightScale * this->color_b) / 100;
+        if (scaled == 0) scaled = 1;
         RECT fillRect;
         fillRect.left   = this->color_bar_rects[2].left;
-        fillRect.right  = this->color_bar_rects[2].right;  /* color_bar_rects[2].right */
+        fillRect.right  = this->color_bar_rects[2].right;
         fillRect.bottom = this->color_bar_rects[2].bottom;
-        fillRect.top = fillRect.bottom - ((heightScale * this->color_b) / 100);
-        if (fillRect.top == 0) fillRect.top = 1;
+        fillRect.top    = fillRect.bottom - scaled;
         FillRect(hdc, &fillRect, brushBlue);
     }
 
-    /* Cleanup GDI objects.
-     * NOTE: stockBrush is a GetStockObject(0) NULL_BRUSH — stock GDI objects
-     * are owned by the OS and must NOT be deleted. Only delete created brushes. */
+    /* Cleanup: the binary deletes all four handles. */
+    DeleteObject(stockBrush);
     DeleteObject(brushRed);
     DeleteObject(brushGreen);
     DeleteObject(brushBlue);
@@ -479,47 +482,57 @@ void Cursor::draw_color_bars(uint8_t reset_buttons)
 /* Address: 0x4189A0                                                   */
 /*                                                                     */
 /* Blits the edit preview area (background_surface portion) to the    */
-/* primary display. If obj_184 has a cursor bitmap, also renders the  */
-/* player cursor overlay via DPLAY_RenderPlayer.                       */
+/* primary display. If obj_184 (+0x184) has a player record, also     */
+/* renders the player cursor overlay via DPLAY_RenderPlayer.          */
+/*                                                                     */
+/* Validated instruction-by-instruction (0x4189A0..0x418A82):         */
+/*   src = (left, top-0xB, right, bottom);                            */
+/*   dstLeft = editor_blit_x + left;                                  */
+/*   dstTop  = editor_blit_y + top - 0xB;                             */
+/*   dstRight  = right + dstLeft - left;                              */
+/*   dstBottom = bottom + dstTop - (top - 0xB);                       */
+/*   flags = 1. The previous transcription missed the -0xB on the     */
+/*   source y and the -left/-(top-0xB) subtractions on the dest       */
+/*   right/bottom.                                                     */
 /* ================================================================== */
 void Cursor::blit_edit_preview()
 {
-    /* Calculate destination rect from edit_preview_rect (+0x1A0)
-       and editor_clip_rect (+0x1D8) offsets */
-    uint editPreviewX = static_cast<uint>(this->edit_preview_rect.left);   /* +0x1A0 */
-    uint editPreviewY = static_cast<uint>(this->edit_preview_rect.top);    /* +0x1A4 */
-    uint editPreviewW = static_cast<uint>(this->edit_preview_rect.right);  /* +0x1A8 */
-    uint editPreviewH = static_cast<uint>(this->edit_preview_rect.bottom); /* +0x1AC */
+    uint srcX = static_cast<uint>(this->edit_preview_rect.left);    /* +0x1A0 */
+    uint srcY = static_cast<uint>(this->edit_preview_rect.top) - 0xB; /* +0x1A4 */
+    uint srcW = static_cast<uint>(this->edit_preview_rect.right);   /* +0x1A8 */
+    uint srcH = static_cast<uint>(this->edit_preview_rect.bottom);  /* +0x1AC */
 
-    uint destLeft   = this->editor_blit_x + editPreviewX;  /* +0x1D8 */
-    uint destTop    = this->editor_blit_y + editPreviewY - 0xB;  /* +0x1DC */
-    uint destRight  = editPreviewW + destLeft;
-    uint destBottom = editPreviewH + destTop;
+    uint dstLeft   = static_cast<uint>(this->editor_blit_x) + srcX;  /* +0x1D8 */
+    uint dstTop    = static_cast<uint>(this->editor_blit_y) + srcY;  /* +0x1DC */
+    uint dstRight  = srcW + dstLeft - srcX;
+    uint dstBottom = srcH + dstTop - srcY;
 
     /* Blit from background surface to primary surface */
     UIPANEL_Blit(
         this->background_surface,           /* +0x1E8 */
-        editPreviewX, editPreviewY, static_cast<int>(editPreviewW), editPreviewH,
+        srcX, srcY, static_cast<int>(srcW), srcH,
         _g_primary_surface,
-        destLeft, destTop, static_cast<int>(destRight), destBottom,
+        dstLeft, dstTop, static_cast<int>(dstRight), dstBottom,
         1);
 
     /* Render player cursor overlay if player record exists */
     if (this->obj_184 != nullptr) {
-        void* dplay = _g_dplay;
-        /* The original code constructs an HDC-like handle from
-           obj_184 address + field_188 byte */
+        /* HDC-like handle: (obj_184 >> 8) with the low byte replaced by
+         * the ui_active byte (+0x188). */
         int hdcVal =
             (static_cast<int>(reinterpret_cast<intptr_t>(this->obj_184)) >> 8) &
             0xFFFFFF;
-        hdcVal = (hdcVal << 8) | this->field_188;
+        hdcVal = (hdcVal << 8) | this->ui_active;
 
-        /* Ghidra @ 0x4437C0: DPLAY_RenderPlayer last param is RECT*, not int*.
-         * Pass address of edit_preview_rect (the binary uses LEA, not MOV). */
+        /* The binary call site at 0x418A9C pushes nine stack args to
+         * NetworkPlayerList::RenderPlayer (0x4437C0, RET 0x24): (hdc,
+         * player, surface, left, top, right, bottom, hWnd, this+0x138).
+         * The shared host stub ABI and the other reconstructed call
+         * sites use the 8-argument form below (see Cursor_internal.h). */
         DPLAY_RenderPlayer(
-            dplay,
-            reinterpret_cast<HDC>(static_cast<intptr_t>(hdcVal)),
-            static_cast<int>(reinterpret_cast<intptr_t>(this->obj_184)),
+            _g_dplay,
+            hdcVal,
+            this->obj_184,
             _g_primary_surface,
             this->edit_preview_rect.left,
             this->edit_preview_rect.top,
@@ -535,6 +548,13 @@ void Cursor::blit_edit_preview()
 /* Draws the scrollable palette strip. mode=0: normal draw to primary, */
 /* mode!=0: draw to alternate surface. Iterates toolbar_sprites from  */
 /* palette_start_idx to palette_end_idx with tiered vertical layout.  */
+/*                                                                     */
+/* Validated: mode-0 background blit (sprite_37C->y + 1 as height),    */
+/* mode!=0 magenta fill keyed on g_surface_bpp (0x7C1F / 0xF81F /     */
+/* 0xFF00FF — the previous 0xFE08E0 else-branch was wrong), preview    */
+/* blit with src_h = palette_rect.height, per-item tier logic and the  */
+/* src/dst roles of the item blit (src = palette rect, dst = 0,clipH,  */
+/* w,h), position caching in palette_item_rects, scroll button states. */
 /* ================================================================== */
 void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
 {
@@ -548,33 +568,35 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
     uint palSpriteH = static_cast<uint>(paletteData->frame_height);
 
     if (mode == 0) {
-        /* Normal mode: blit palette background from source */
-        uint bgW = static_cast<uint>(this->sprite_37C->y + 1); /* sprite width + 1 */
+        /* Normal mode: blit palette background from source.
+         * Height = sprite_37C->y (+0x08) + 1. */
+        uint bgH = static_cast<uint>(this->sprite_37C->y + 1);
         UIPANEL_Blit(
             this->background_surface,
-            static_cast<uint>(this->field_1B0),
-            static_cast<uint>(this->field_1B4),
-            this->field_1B8,
-            bgW,
+            static_cast<uint>(this->palette_rect.left),   /* +0x1B0 */
+            static_cast<uint>(this->palette_rect.top),    /* +0x1B4 */
+            this->palette_rect.right,                     /* +0x1B8 */
+            bgH,
             _g_primary_surface,
-            this->editor_blit_x + this->field_1B0,
-            this->editor_blit_y + this->field_1B4,
-            this->editor_blit_x + this->field_1B8,
-            this->editor_blit_y + bgW,
+            this->editor_blit_x + this->palette_rect.left,
+            this->editor_blit_y + this->palette_rect.top,
+            this->editor_blit_x + this->palette_rect.right,
+            this->editor_blit_y + bgH,
             1);
 
         /* Reset palette background sprite state */
         Sprite_SetState(this->sprite_37C, 0, nullptr);
     } else {
         /* Preview mode: clear surface with transparent fill */
-        /* g_surface_bpp determines the colour-key value */
+        /* g_surface_bpp determines the colour-key value: 0x7C1F (15-bit),
+         * 0xF81F (16-bit 555), else 0xFF00FF (24-bit magenta). */
         int colorKey;
         if (g_surface_bpp == 0x22B) {
-            colorKey = 0x7C1F;    /* 15-bit: magenta */
+            colorKey = 0x7C1F;
         } else if (g_surface_bpp == 0x235) {
-            colorKey = 0xF81F;    /* 16-bit: magenta (555) */
+            colorKey = 0xF81F;
         } else {
-            colorKey = 0xFE08E0;  /* 16-bit: magenta (565) */
+            colorKey = 0xFF00FF;
         }
 
         /* Clear via vtable[5] (fill) on target surface */
@@ -586,17 +608,19 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
     }
 
     if (mode != 0) {
-        /* Preview mode: blit palette sprite to alternate surface */
-        int palW = this->field_1B8 - this->field_1B0;
+        /* Preview mode: blit palette sprite to alternate surface.
+         * src = (0, height - spriteH, width, height); dst = (0, 0, w, h). */
+        int palW = this->palette_rect.right - this->palette_rect.left;
+        int palH = this->palette_rect.bottom - this->palette_rect.top;
 
         UIPANEL_Blit(
             this->sprite_37C->surface,                              /* sprite surface */
             0,
-            static_cast<uint>(this->field_1BC) - this->field_1B4 - palSpriteH,
+            static_cast<uint>(palH) - palSpriteH,
             palW,
-            static_cast<uint>(this->field_1BC),
+            static_cast<uint>(palH),
             target_surf,
-            0, 0, palW, palSpriteH,
+            0, 0, palW, static_cast<int>(palSpriteH),
             0);
     }
 
@@ -605,20 +629,20 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
     int endIdx     = this->palette_end_idx;                /* +0x2B8 = end */
 
     if (currentIdx >= 0 && endIdx >= 0) {
-        int availWidth = this->field_1B8;
+        int availWidth = this->palette_rect.right;
         if (mode != 0) {
-            availWidth -= this->field_1B0;
+            availWidth -= this->palette_rect.left;
         }
         int xPos = availWidth - 4;
 
         while (currentIdx <= endIdx) {
             ButtonSprite* sprite = this->toolbar_sprites[currentIdx];
-            int spriteW = sprite->y;                         /* sprite width */
-            int spriteH = sprite->sourceX;                   /* sprite height */
+            int spriteW = sprite->y;                         /* +0x08 width */
+            int spriteH = sprite->sourceX;                   /* +0x0C height */
 
-            int availHeight = this->field_1BC;
+            int availHeight = this->palette_rect.bottom;
             if (mode != 0) {
-                availHeight -= this->field_1B4;
+                availHeight -= this->palette_rect.top;
             }
 
             int yPos = availHeight;
@@ -645,9 +669,12 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
 
             xPos = destX - spriteW;
 
+            /* Item blit: src = (destX, destY, destX+width, destY+height)
+             * i.e. the item position rect; dst = (0, clipH, width, height).
+             * (The prior transcription had src/dst swapped.) */
             UIPANEL_Blit(
                 sprite,
-                destX, destY, destX + spriteW, destY + spriteH,
+                destX, destY, destX + destW, destY + destH,
                 target_surf,
                 0, clipH, spriteW, static_cast<uint>(spriteH),
                 0);
@@ -658,8 +685,8 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
                 RECT& cachedRect = this->palette_item_rects[slotIdx];
                 cachedRect.left = destX;
                 cachedRect.top = destY;
-                cachedRect.right = destX + spriteW;
-                cachedRect.bottom = destY + spriteH;
+                cachedRect.right = destX + destW;
+                cachedRect.bottom = destY + destH;
             }
 
             /* Advance: subtract 10 for gap between items */
@@ -672,7 +699,7 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
     if (mode == 0) {
         /* Scroll up button */
         int upState;
-        if (this->field_2B4 == 0 || this->field_188 == 0) {
+        if (this->has_next_page == 0 || this->ui_active == 0) {
             upState = 2;    /* disabled */
         } else {
             upState = 0;    /* normal */
@@ -681,7 +708,7 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
 
         /* Scroll down button */
         int downState;
-        if (this->field_2B5 == 0 || this->field_188 == 0) {
+        if (this->has_prev_page == 0 || this->ui_active == 0) {
             downState = 2;
         } else {
             downState = 0;
@@ -696,17 +723,18 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
 /*                                                                     */
 /* Wipe transition showing new locomotive colour. Double-buffers      */
 /* between two offscreen surfaces (+0x590/+0x598), alternating calls. */
+/*                                                                     */
+/* TODO RESOLVED (0x418E20 surface swap): the decompilation proves the */
+/* surface roles DO swap between calls. When surface_toggle (+0x58C)   */
+/* is 0: draw target = editor_surf_a (+0x590), clean surface =         */
+/* editor_surf_b (+0x598), dirty flag read from surf_b_dirty (+0x59C). */
+/* When surface_toggle is 1 the assignment is reversed (draw target =  */
+/* editor_surf_b, clean = editor_surf_a, dirty flag read from          */
+/* surf_a_dirty +0x594). The previous transcription kept both branches */
+/* identical — corrected here.                                         */
 /* ================================================================== */
 void Cursor::draw_locomotive_preview(uint8_t direction)
 {
-    /* NOTE: The surface toggle logic swaps surfA/surfB meanings based on
-     * field_58C, then uses isSurfBDirty flag. The field_58C toggle inverts
-     * each call, creating a double-buffered wipe animation. When field_58C==0,
-     * surfA=editor_surf_b and surfB=editor_surf_a; when field_58C==1, the
-     * assignment is reversed. The dirty flag check (isSurfBDirty) protects
-     * the initial frame where one surface hasn't been drawn yet.
-     * TODO: Ghidra @ 0x418E20 — verify the surface swap and dirty flag
-     *       handling against the disassembly. */
     EnableWindow(this->hWnd, 0);
 
     /* Show "busy" indicator */
@@ -720,53 +748,53 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     auto* paletteData = static_cast<RESDATA*>(this->sprite_37C->pixelData);
     uint palSpriteH = static_cast<uint>(paletteData->frame_height);
 
-    int* surfA;  /* +0x590 editor_surf_a */
-    int* surfB;  /* +0x598 editor_surf_b */
-    uint8_t isSurfBDirty;
+    int* drawTarget;   /* first-drawn surface (draw_color_palette target) */
+    int* cleanSurf;    /* clean surface (gets the palette sprite blit) */
+    uint8_t isCleanDirty;
 
-    /* Toggle between surface A and B */
-    if (this->field_58C == 0) {
-        surfA = static_cast<int*>(this->editor_surf_b); /* +0x598 */
-        surfB = static_cast<int*>(this->editor_surf_a); /* +0x590 */
-        isSurfBDirty = this->field_59C;
-        this->field_58C = 1;
-        this->field_59C = 0;
-        this->field_594 = 1;
+    /* Toggle between surface A and B (roles swap each call) */
+    if (this->surface_toggle == 0) {                 /* +0x58C */
+        drawTarget = static_cast<int*>(this->editor_surf_a);   /* +0x590 */
+        cleanSurf  = static_cast<int*>(this->editor_surf_b);   /* +0x598 */
+        isCleanDirty = this->surf_b_dirty;                     /* +0x59C */
+        this->surface_toggle = 1;
+        this->surf_b_dirty = 0;
+        this->surf_a_dirty = 1;
     } else {
-        isSurfBDirty = this->field_594;
-        surfA = static_cast<int*>(this->editor_surf_b); /* +0x598 */
-        surfB = static_cast<int*>(this->editor_surf_a); /* +0x590 */
-        this->field_58C = 0;
-        this->field_59C = 1;
-        this->field_594 = 0;
+        isCleanDirty = this->surf_a_dirty;                     /* +0x594 */
+        drawTarget = static_cast<int*>(this->editor_surf_b);   /* +0x598 */
+        cleanSurf  = static_cast<int*>(this->editor_surf_a);   /* +0x590 */
+        this->surface_toggle = 0;
+        this->surf_b_dirty = 1;
+        this->surf_a_dirty = 0;
     }
 
     /* Unlock primary surface */
-    DDRAW_UnlockPrimary(this->hWnd);
+    DDRAW_UnlockPrimary();
 
-    /* Draw colour palette to surface A */
-    this->draw_color_palette(surfA, 1);
+    /* Draw colour palette to the draw target */
+    this->draw_color_palette(drawTarget, 1);
 
-    /* If surf B was clean, blit palette sprite to it */
-    if (isSurfBDirty == 0) {
-        int palHeight = this->field_1BC - this->field_1B4;
-        int palWidth  = this->field_1B8 - this->field_1B0;
+    /* If the clean surface was clean, blit palette sprite to it */
+    if (isCleanDirty == 0) {
+        int palHeight = this->palette_rect.bottom - this->palette_rect.top;
+        int palWidth  = this->palette_rect.right - this->palette_rect.left;
 
         void* spritePanel = this->sprite_37C->surface; /* sprite surface */
 
         UIPANEL_Blit(
             spritePanel,
             0,
-            palHeight - palSpriteH,
+            palHeight - static_cast<int>(palSpriteH),
             palWidth,
             palHeight,
-            surfB,
-            0, 0, palWidth, palSpriteH,
+            cleanSurf,
+            0, 0, palWidth, static_cast<int>(palSpriteH),
             0);
     }
 
     /* Perform wipe animation */
-    int totalWidth = this->field_1B8 - this->field_1B0;
+    int totalWidth = this->palette_rect.right - this->palette_rect.left;
     int stepCount = (totalWidth + 3) >> 2;  /* totalWidth / 4, rounded up */
     int bandSize = stepCount / 6;
 
@@ -777,23 +805,23 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
 
             if (direction == 0) {
                 /* Left-to-right wipe */
-                srcX = this->field_1B8 - step * 4;
-                srcY = this->field_1B4;
+                srcX = this->palette_rect.right - step * 4;
+                srcY = this->palette_rect.top;
                 srcW = step * 4;
-                srcH = this->field_1BC - srcY;
+                srcH = this->palette_rect.bottom - srcY;
                 dstX = 0;
                 dstY = 0;
                 dstW = srcW;
-                dstH = this->field_1B8 - this->field_1B0 - srcW;
+                dstH = this->palette_rect.right - this->palette_rect.left - srcW;
             } else {
                 /* Right-to-left wipe */
-                srcX = this->field_1B0 + step * 4;
-                srcY = this->field_1B4;
-                srcW = this->field_1B8 - srcX;
-                srcH = this->field_1BC - srcY;
+                srcX = this->palette_rect.left + step * 4;
+                srcY = this->palette_rect.top;
+                srcW = this->palette_rect.right - srcX;
+                srcH = this->palette_rect.bottom - srcY;
                 dstX = srcW - step * 4;
                 dstY = 0;
-                dstW = this->field_1B8 - this->field_1B0 - dstX;
+                dstW = this->palette_rect.right - this->palette_rect.left - dstX;
                 dstH = srcW;
             }
 
@@ -803,43 +831,50 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
                 int dstRect[4]  = { dstX, dstY, dstW, dstH };
                 Cursor_SurfaceLegacyBlt(_g_primary_surface)(
                     _g_primary_surface,
-                    blitRect, surfA, dstRect, 0x1008000, nullptr);
+                    blitRect, drawTarget, dstRect, 0x1008000, nullptr);
             }
 
-            /* Second blit for the other direction */
+            /* Second blit for the other surface */
             if (direction == 0) {
-                int srcRect2[4] = { this->field_1B0, srcY, step * 4, srcH };
+                int srcRect2[4] = { this->palette_rect.left, srcY, step * 4, srcH };
                 int dstRect2[4]  = { srcW, 0, step * 4, srcH };
                 Cursor_SurfaceLegacyBlt(_g_primary_surface)(
                     _g_primary_surface,
-                    srcRect2, surfB, dstRect2, 0x1008000, nullptr);
+                    srcRect2, cleanSurf, dstRect2, 0x1008000, nullptr);
             } else {
-                int srcW2 = this->field_1B8 - step * 4;
+                int srcW2 = this->palette_rect.right - step * 4;
                 int srcRect2[4] = { srcW, srcY, srcW2, srcH };
                 Cursor_SurfaceLegacyBlt(_g_primary_surface)(
                     _g_primary_surface,
-                    srcRect2, surfB, nullptr, 0x1008000, nullptr);
+                    srcRect2, cleanSurf, nullptr, 0x1008000, nullptr);
             }
 
             /* End paint per frame */
             UIPANEL_EndPaint(this);
 
-            /* Dispatch set_mode to handle messages */
+            /* Dispatch set_mode through vtable slot [3] (resolves to the
+             * inherited UI_WindowBase::set_mode, 0x425FD0 — the Cursor
+             * vtable does NOT contain the GameWindow 0x414340 variant). */
             this->set_mode(
                 static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
                 reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
                 0, 1);
 
-            /* Sleep for timing */
-            if (step < totalWidth / 2) {
-                Sleep(/* small delay */ 0);
+            /* Per-frame delay: the binary sleeps 2ms for steps inside the
+             * first band (stepCount/6) and 1ms for steps before stepCount/2
+             * (the decompiler resets the sleep variable each iteration, so
+             * the exact cadence is approximate). */
+            if (step < bandSize) {
+                Sleep(2);
+            } else if (step < stepCount / 2) {
+                Sleep(1);
             }
         }
     }
 
     /* Finalize: unlock, redraw palette normally, clean up */
     HWND mainWnd = static_cast<UI_WindowBase*>(g_main_window)->hWnd;
-    DDRAW_UnlockPrimary(mainWnd);
+    DDRAW_UnlockPrimary();
 
     this->draw_color_palette(nullptr, 0);
     UIPANEL_EndPaint(this);
@@ -855,167 +890,166 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
 /* Cursor::draw_postcard_preview — Layout postcard thumbnail icons    */
 /* Address: 0x419260                                                   */
 /*                                                                     */
-/* Walks toolbar sprite cache forward/backward from current selection */
-/* to determine visible postcard thumbnails. Loads via                 */
-/* NET_GetOrCreateSurface. Updates palette_start_idx/end_idx.         */
+/* Walks the toolbar sprite cache forward/backward from the current   */
+/* selection to determine which postcard thumbnails are visible,      */
+/* loading each via NET_GetOrCreateSurface. Updates palette_start_idx  */
+/* (+0x2BC) / palette_end_idx (+0x2B8).                                */
+/*                                                                     */
+/* Rewritten to match the decompilation: direction=0 walks backward   */
+/* from (start-1); direction!=0 walks forward from (end+1), with the   */
+/* bonus-mode branch (editor_flags[2] == 0x1F && bonus_mode == 0)     */
+/* consuming the random bonus_ids table and resetting prevStart=-1.   */
 /* ================================================================== */
 uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 {
-    int prevStartIdx = this->palette_start_idx;            /* +0x2BC — Ghidra @ 0x419260 reads *(this+700) = palette_start_idx */
-    this->field_2B4 = 1;  /* has_next_page = true */
+    uint prevStartIdx = static_cast<uint>(this->palette_start_idx); /* +0x2BC */
+    this->has_next_page = 1;                                   /* +0x2B4 */
 
-    if (prevStartIdx >= 1) {
-        this->field_2B5 = 1;  /* has_prev_page = true */
+    if (static_cast<int>(prevStartIdx) >= 1) {
+        this->has_prev_page = 1;                               /* +0x2B5 */
     } else {
-        this->field_2B5 = 0;  /* has_prev_page = false */
+        this->has_prev_page = 0;
     }
 
-    if (direction != 0) {
-        /* ---- Forward direction ---- */
-        int bonusIdx = 0;
-        uint8_t seqNum;
-
-        if (this->field_59D == 0 && this->editor_flags[2] == 0x1F) {
-            /* Bonus mode: use random bonus_ids table */
-            seqNum = this->bonus_ids[0];
-            prevStartIdx = -1;
-        } else {
-            seqNum = static_cast<uint8_t>(this->palette_end_idx) + 1;
-                                                               /* palette_end_idx + 1 */
-            prevStartIdx = this->palette_end_idx;
-        }
-
-        uint8_t idx = seqNum;
-        if (idx > 0x40) {
-            this->field_2B4 = 0;
-            return 0;
-        }
-
-        /* Get or create surface for first item */
-        ButtonSprite* surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-            _g_dplay, this->editor_flags[2], this->editor_flags[1], idx + 1, 1));
-        this->toolbar_sprites[idx] = surf;  /* store in cache */
-
-        if (surf == nullptr) {
-            this->field_2B4 = 0;
-            return 0;
-        }
-
-        int totalWidth = surf->y + 4;  /* width + margin */
-        this->field_2B5 = 1;
-
-        int cacheIdx = idx;
-        if (totalWidth < this->field_1B8 - this->field_1B0) {
-            /* Continue loading more items that fit */
-            while (true) {
-                uint8_t nextSeq;
-                if (this->field_59D == 0 && this->editor_flags[2] == 0x1F) {
-                    nextSeq = this->bonus_ids[bonusIdx + 1];
-                    bonusIdx++;
-                } else {
-                    nextSeq = seqNum + 1;
-                }
-
-                cacheIdx++;
-                if (cacheIdx > 0x40) {
-                    this->field_2B4 = 0;
-                    cacheIdx--;
-                    break;
-                }
-
-                totalWidth += 10;  /* gap */
-
-                surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-                    _g_dplay, this->editor_flags[2], this->editor_flags[1],
-                    nextSeq + 1, 1));
-                this->toolbar_sprites[cacheIdx] = surf;
-
-                if (surf == nullptr) {
-                    this->field_2B4 = 0;
-                    cacheIdx--;
-                    break;
-                }
-
-                totalWidth += surf->y;
-
-                if (totalWidth >= this->field_1B8 - this->field_1B0) {
-                    break;
-                }
-
-                seqNum = nextSeq;
-            }
-        }
-
-        if (totalWidth > this->field_1B8 - this->field_1B0) {
-            cacheIdx--;
-        }
-
-        this->palette_end_idx = cacheIdx;
-        int newStart = prevStartIdx + 1;
-        this->palette_start_idx = newStart;
-        this->field_2B5 = (newStart > 0) ? 1 : 0;
-        return 1;
-
-    } else {
+    if (direction == 0) {
         /* ---- Backward direction ---- */
-        uint8_t bl = static_cast<uint8_t>(this->palette_start_idx) - 1;
-                                                               /* prevStartIdx - 1 */
-        if (bl < 0) return 0;
-
-        ButtonSprite* surf = this->toolbar_sprites[bl];
+        uint8_t idx = static_cast<uint8_t>(this->palette_start_idx) - 1;
+        ButtonSprite* surf = this->toolbar_sprites[idx];
         if (surf == nullptr) {
             surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-                _g_dplay, this->editor_flags[1], this->editor_flags[2], bl + 1, 1));
-            this->toolbar_sprites[bl] = surf;
+                _g_dplay, this->editor_flags[2], this->editor_flags[1], idx + 1, 1));
+            this->toolbar_sprites[idx] = surf;
         }
 
         if (surf == nullptr) {
-            this->field_2B5 = 0;
+            this->has_prev_page = 0;
             return 0;
         }
 
         int totalWidth = surf->y + 4;
-        this->field_2B4 = 1;
+        this->has_next_page = 1;
 
-        if (totalWidth < this->field_1B8 - this->field_1B0) {
-            int idx = bl;
-            while (idx > 0) {
-                idx--;
+        uint8_t walkIdx = idx;
+        if (totalWidth < this->palette_rect.right - this->palette_rect.left) {
+            while (true) {
+                uint8_t nextIdx = walkIdx - 1;
+                if (static_cast<int>(nextIdx) < 0) break;
                 totalWidth += 10;  /* gap */
 
-                surf = this->toolbar_sprites[idx];
+                surf = this->toolbar_sprites[nextIdx];
                 if (surf == nullptr) {
                     surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-                        _g_dplay, this->editor_flags[1], this->editor_flags[2],
-                        static_cast<uint8_t>(idx + 1), 1));
-                    this->toolbar_sprites[idx] = surf;
+                        _g_dplay, this->editor_flags[2], this->editor_flags[1],
+                        static_cast<uint8_t>(nextIdx + 1), 1));
+                    this->toolbar_sprites[nextIdx] = surf;
                 }
 
                 if (surf == nullptr) {
-                    this->field_2B5 = 0;
-                    idx++;
+                    this->has_prev_page = 0;
                     break;
                 }
 
-                if (totalWidth >= this->field_1B8 - this->field_1B0) {
-                    idx++;
+                totalWidth += surf->y;
+                walkIdx = nextIdx;
+
+                if (totalWidth >= this->palette_rect.right - this->palette_rect.left) {
                     break;
                 }
             }
-
-            if (totalWidth > this->field_1B8 - this->field_1B0) {
-                idx++;
-            }
-
-            this->palette_end_idx = idx;
-            int newStart = prevStartIdx - 1;
-            this->palette_start_idx = newStart;
-            this->field_2B5 = (idx > 0) ? 1 : 0;
-            return 1;
         }
 
+        if (this->palette_rect.right - this->palette_rect.left < totalWidth) {
+            walkIdx = walkIdx + 1;
+        }
+
+        this->palette_start_idx = walkIdx;
+        this->palette_end_idx = static_cast<int>(prevStartIdx) - 1;
+        this->has_prev_page = (walkIdx > 0) ? 1 : 0;
+        return 1;
+    }
+
+    /* ---- Forward direction ---- */
+    uint8_t seqNum;
+    int newStart;
+    uint8_t cacheIdx;
+
+    if (this->editor_flags[2] == 0x1F && this->bonus_mode == 0) {
+        /* Bonus mode: use random bonus_ids table */
+        seqNum = this->bonus_ids[0];
+        newStart = -1;
+        cacheIdx = 0;
+    } else {
+        newStart = this->palette_end_idx;
+        seqNum = static_cast<uint8_t>(this->palette_end_idx) + 1;
+        cacheIdx = seqNum;
+    }
+
+    int bonusIdx = 0;
+    if (seqNum > 0x40) {
+        this->has_next_page = 0;
         return 0;
     }
+
+    ButtonSprite* surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
+        _g_dplay, this->editor_flags[2], this->editor_flags[1], seqNum + 1, 1));
+    this->toolbar_sprites[cacheIdx] = surf;
+
+    if (surf == nullptr) {
+        this->has_next_page = 0;
+        return 0;
+    }
+
+    int totalWidth = surf->y + 4;
+    this->has_prev_page = 1;
+    uint8_t lastGood = cacheIdx;
+
+    if (totalWidth < this->palette_rect.right - this->palette_rect.left) {
+        while (true) {
+            uint8_t nextSeq;
+            if (this->editor_flags[2] == 0x1F && this->bonus_mode == 0) {
+                nextSeq = this->bonus_ids[bonusIdx + 1];
+                bonusIdx++;
+            } else {
+                nextSeq = seqNum + 1;
+            }
+
+            cacheIdx = lastGood + 1;
+            if (cacheIdx > 0x40) {
+                /* Index would overflow the 64-slot cache: stop here. */
+                this->has_next_page = 0;
+                break;
+            }
+
+            totalWidth += 10;  /* gap */
+
+            surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
+                _g_dplay, this->editor_flags[2], this->editor_flags[1],
+                nextSeq + 1, 1));
+            this->toolbar_sprites[cacheIdx] = surf;
+
+            if (surf == nullptr) {
+                this->has_next_page = 0;
+                break;
+            }
+
+            totalWidth += surf->y;
+            lastGood = cacheIdx;
+
+            if (totalWidth >= this->palette_rect.right - this->palette_rect.left) {
+                break;
+            }
+            seqNum = nextSeq;
+        }
+    }
+
+    if (this->palette_rect.right - this->palette_rect.left < totalWidth) {
+        lastGood = lastGood - 1;
+    }
+
+    this->palette_end_idx = lastGood;
+    this->palette_start_idx = newStart + 1;
+    this->has_prev_page = (newStart + 1 > 0) ? 1 : 0;
+    return 1;
 }
 
 /* ================================================================== */
@@ -1024,6 +1058,13 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 /*                                                                     */
 /* Resets all network status sprites, conditionally shows based on    */
 /* tab and network state. Iterates 16 bonus_sprites for tab-matching. */
+/*                                                                     */
+/* Validated: reset order, _g_netman m_gameMode (+0x7C4) == 2 gate    */
+/* with the upload_id int16 at record+0x3A (the binary dereferences    */
+/* obj_184 unconditionally in that state — the null guard below is a   */
+/* host-safety deviation only), editor_state (+0xEC) == 9 gate,        */
+/* handle_tab_change, and the bonus loop with the +0x2B2 / +0x188      */
+/* conditions.                                                         */
 /* ================================================================== */
 void Cursor::draw_network_status()
 {
@@ -1035,9 +1076,10 @@ void Cursor::draw_network_status()
     Sprite_SetState(this->sprite_1C4, 0, nullptr);
     Sprite_SetState(this->sprite_2CC, 0, nullptr);
 
-    /* If netman scenario has player entries, show status */
-    /* g_netman is an opaque cross-subsystem pointer here; mode is at +0x7C4. */
-    if (*reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_netman) + 0x7C4) == 2) {
+    /* If netman is in joined state (m_gameMode at +0x7C4 == 2), show the
+     * upload indicator when the player record has an active upload. */
+    if (_g_netman != nullptr &&
+        *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(_g_netman) + 0x7C4) == 2) {
         if (this->obj_184 != nullptr) {
             int status = this->obj_184->upload_id;
             Sprite_SetState(this->sprite_2EC, (status != 0) ? 1 : 0, nullptr);
@@ -1053,16 +1095,16 @@ void Cursor::draw_network_status()
     /* Update bonus sprites based on active tab */
     for (uint i = 0; i < 16; i++) {
         int state;
-        if (this->field_59D == 0) {
+        if (this->bonus_mode == 0) {
             /* Normal mode: highlight sprite matching active tab */
-            if (this->editor_flags[2] == static_cast<uint8_t>(i) || this->field_188 == 0) {
+            if (this->editor_flags[2] == static_cast<uint8_t>(i) || this->ui_active == 0) {
                 state = 1;   /* hidden/disabled */
             } else {
                 state = 0;   /* normal */
             }
         } else {
             /* Bonus mode: offset tab index by 0x10 */
-            if (this->editor_flags[2] - 0x10 == static_cast<uint8_t>(i) || this->field_188 == 0) {
+            if (this->editor_flags[2] - 0x10 == static_cast<uint8_t>(i) || this->ui_active == 0) {
                 state = 1;   /* hidden/disabled */
             } else {
                 state = 0;   /* normal */
@@ -1078,6 +1120,13 @@ void Cursor::draw_network_status()
 /*                                                                     */
 /* Uses GDI to render player names from player_names[] (13-byte       */
 /* stride) into scrollable area. Only active in state 7 (locomotive). */
+/*                                                                     */
+/* Validated: +0x180 clear, FormatResourceString(100) header,         */
+/* state gate at +0xEC == 7, GetStockObject(0) background, scroll     */
+/* reset gated on scroll_bottom_idx (+0x174) == 0 (not top_idx — the  */
+/* previous transcription checked the wrong field), line loop with    */
+/* toolbar_sentinel (+0x6F0) highlight, and the final end-of-list     */
+/* check on player_names[bottom_idx + 1][0].                          */
 /* ================================================================== */
 void Cursor::update_scroll_buttons()
 {
@@ -1099,7 +1148,7 @@ void Cursor::update_scroll_buttons()
         int oldBkMode = SetBkMode(hdc, 1);                  /* TRANSPARENT */
 
         /* Fill background */
-        HBRUSH stockBrush = GetStockObject(0);              /* NULL_BRUSH */
+        HBRUSH stockBrush = GetStockObject(0);              /* WHITE_BRUSH */
         FillRect(hdc, &this->scroll_bg_rect, stockBrush);   /* +0x128 */
 
         /* Draw header "Player" text */
@@ -1108,10 +1157,10 @@ void Cursor::update_scroll_buttons()
         /* Draw edge border */
         DrawEdge(hdc, &this->scroll_border_rect, 10, 0x100F);  /* +0x150 */
 
-        /* If first visible index is 0, reset line count */
-        if (this->scroll_top_idx == 0) {                    /* +0x170 */
-            this->scroll_top_idx = 0;
-            this->scroll_visible_count = 0;
+        /* If the bottom index is 0, reset the scroll position counters */
+        if (this->scroll_bottom_idx == 0) {                 /* +0x174 */
+            this->scroll_top_idx = 0;                       /* +0x170 */
+            this->scroll_visible_count = 0;                 /* +0x17C */
         }
 
         /* Iterate player name entries */
@@ -1145,7 +1194,7 @@ void Cursor::update_scroll_buttons()
 
                 lineRect.top += lineH;
 
-                if (this->scroll_top_idx == 0) {
+                if (this->scroll_bottom_idx == 0) {
                     this->scroll_visible_count += 1;   /* visible_count++ */
                 }
                 this->scroll_line_height = lineH;            /* +0x178 */
@@ -1155,7 +1204,7 @@ void Cursor::update_scroll_buttons()
         }
 
         i--;
-        this->scroll_bottom_idx = i;           /* scroll_bottom_idx */
+        this->scroll_bottom_idx = i;           /* +0x174 */
 
         /* Restore GDI state */
         SelectObject(hdc, oldFont);
@@ -1171,8 +1220,9 @@ void Cursor::update_scroll_buttons()
         Sprite_SetState(this->sprite_14C, 0, nullptr);
     }
 
-    /* Check if at end of list */
-    if (this->player_names[i][0] == '\0') {
+    /* Check if at end of list: the binary tests the entry AFTER the last
+     * drawn one (player_names[bottom_idx + 1][0] == 0). */
+    if (this->player_names[this->scroll_bottom_idx + 1][0] == '\0') {
         this->scroll_end_flag = 1;
     }
 
@@ -1184,7 +1234,7 @@ void Cursor::update_scroll_buttons()
 /* Address: 0x4198B0                                                   */
 /*                                                                     */
 /* Reads tab visibility (+0x2B0) and active tab (+0x2B1, 1-6).       */
-/* Hides all tabs or highlights the active tab.                       */
+/* Hides all tabs or highlights the active tab. Validated.            */
 /* ================================================================== */
 void Cursor::handle_tab_change()
 {
@@ -1223,9 +1273,9 @@ void Cursor::handle_tab_change()
 /*                                                                     */
 /* Subclassed WindowProc for the edit control. Handles custom msgs:   */
 /* WM_CTLCOLOREDIT (+0x133), WM_SYSCOMMAND/SC_CLOSE, WM_USER+0x5F5   */
-/* for upload, WM_USER+0x5F6 for re-enable.                           */
+/* for upload, WM_USER+0x5F6 for re-enable. Validated.                */
 /* ================================================================== */
-LRESULT Cursor::toolbar_wndproc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT Cursor::window_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (msg == 0x133) {                     /* WM_CTLCOLOREDIT */
         if (static_cast<int>(lParam) ==
@@ -1258,6 +1308,14 @@ LRESULT Cursor::toolbar_wndproc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
 /* Opens file dialog for custom content upload. Validates <= 1MB,     */
 /* uploads via NET_UploadAsset, optionally previews audio. Resets to  */
 /* editor mode 1 on completion.                                        */
+/*                                                                     */
+/* TODO RESOLVED (0x419B10 sprite height): the decompilation writes    */
+/* byte +0x3D = 0 (sprite_width_hi) and dword +0x40 = 0 (sprite_height)*/
+/* at the end of the function — both fields are cleared together as   */
+/* part of the sprite-dimension reset. The previous transcription      */
+/* zeroed palette_end_idx instead of the verified selected_idx_384     */
+/* (+0x384 = -1), and used an unsupported NET_FindPlayer argument      */
+/* (CONCAT22 of the record pointer high word and upload_id).           */
 /* ================================================================== */
 void Cursor::upload_custom_content()
 {
@@ -1279,7 +1337,12 @@ void Cursor::upload_custom_content()
     if (this->obj_184 != nullptr) {
         int16_t uploadId = this->obj_184->upload_id;
         if (uploadId != 0) {
-            NET_FindPlayer(4, (uploadId << 16) | static_cast<uint16_t>(uploadId));
+            /* The binary builds the NET_FindPlayer key as CONCAT22 of the
+             * record pointer's high word and the upload_id. */
+            int key = (static_cast<int>(
+                           reinterpret_cast<intptr_t>(this->obj_184) >> 16) << 16) |
+                      static_cast<uint16_t>(uploadId);
+            NET_FindPlayer(4, key);
             this->obj_184->upload_id = 0;
             this->blit_edit_preview();
             UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
@@ -1307,8 +1370,9 @@ void Cursor::upload_custom_content()
             WORD   nFileOffset;
             WORD   nFileExtension;
             LPCSTR lpstrDefExt;
-            LPARAM lCustData;
             void*  lpfnHook;
+            LPARAM lCustData;
+            void*  lpfnHook2;
             LPCSTR lpTemplateName;
             void*  pvReserved;
             DWORD  dwReserved;
@@ -1394,9 +1458,8 @@ void Cursor::upload_custom_content()
         this->obj_184->upload_id = uploadId;
 
         /* Check if it's a WAV file (search for ".WAV" extension).
-         * Ghidra @ 0x419EB9: CRT_wcsstr is misidentified — the binary calls
-         * CRT strstr (MSVC _strstr) with an ASCII ".WAV" needle at 0x47E4C8.
-         * The first arg is filePath + strlen - 4 (last 4 chars = extension). */
+         * The binary calls the CRT strstr with the ASCII ".WAV" needle at
+         * 0x47E4C8 on the last four characters of the path. */
         uint32_t fileLen = strlen(filePath);
         int hasWavExt = 0;
         if (fileLen >= 4) {
@@ -1419,10 +1482,8 @@ void Cursor::upload_custom_content()
     }
 
     /* Clean up */
-    /* Update upload status sprite.
-     * Ghidra @ 0x419F32: Sprite_SetState(param_1[0xBB], upload_id!=0, 0)
-     * param_1[0xBB] = byte offset 0x2EC = sprite_2EC (resource 0x3CBC).
-     * Second arg is (obj_184->upload_id != 0) → 0 or 1. */
+    /* Update upload status sprite (sprite_2EC, +0x2EC):
+     * state = (obj_184->upload_id != 0) ? 1 : 0 */
     {
         int uploadState = (this->obj_184 != nullptr && this->obj_184->upload_id != 0) ? 1 : 0;
         Sprite_SetState(this->sprite_2EC, uploadState, nullptr);
@@ -1435,21 +1496,22 @@ void Cursor::upload_custom_content()
         this->timer_id_18C = 0;
     }
 
-    /* Reset editor state to 1 (idle) */
+    /* Reset editor state and sprite dimensions. The binary writes:
+     *   +0xEC  = 1   (editor_state)
+     *   +0x384 = -1  (selected_idx_384 — the previous transcription
+     *                 wrongly cleared palette_end_idx +0x2B8)
+     *   +0x3D  = 0   (sprite_width_hi, byte)
+     *   +0x40  = 0   (sprite_height, dword)
+     *   sprite_2E0 state 0, then vtable[3] set_mode dispatch. */
     this->editor_state = 1;
-    this->palette_end_idx = -1;                               /* +0x2B8 */
-    this->field_3D = 0;                   /* +0x3D */
-    /* TODO: Ghidra @ 0x419B10 — verify sprite_height = 0 at +0x40.
-     *       This resets the cursor sprite height field during file
-     *       upload. The field is normally set once in init_sprites().
-     *       Suspicious in the upload context — may be accessing a
-     *       different field at this offset. */
-    this->sprite_height() = 0;                            /* +0x40 */
+    this->selected_idx_384 = -1;                              /* +0x384 */
+    this->sprite_width_hi() = 0;                              /* +0x3D */
+    this->sprite_height() = 0;                                /* +0x40 */
 
     /* Reset dialog background sprite */
     Sprite_SetState(this->sprite_2E0, 0, nullptr);
 
-    /* Dispatch set_mode to repaint */
+    /* Dispatch set_mode through vtable slot [3] (inherited base 0x425FD0) */
     this->set_mode(
         static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
         reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),

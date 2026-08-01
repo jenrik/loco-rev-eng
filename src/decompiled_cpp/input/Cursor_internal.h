@@ -1,4 +1,4 @@
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 /* Cursor_internal.h — Shared internals for Cursor implementation files */
 #pragma once
 
@@ -87,7 +87,11 @@ void CRT_free(void*);
 extern "C" {
 size_t strlen(const char*);
 void* memcpy(void*, const void*, size_t);
-void DDRAW_UnlockPrimary(HWND);
+/* The binary calls DDRAW_UnlockPrimary() with NO arguments everywhere
+ * (e.g. 0x414EF0, 0x414290, 0x414C20, 0x414BB0); graphics/DDRAW.h also
+ * declares `void __cdecl DDRAW_UnlockPrimary(void)`. The previous
+ * HWND-parameter form was an unsupported transcription. */
+void DDRAW_UnlockPrimary(void);
 int DDRAW_SetSurfaceFormat(void*, int);
 int DDRAW_RestoreSurfaces(void*, void*);
 void DDRAW_GetSurfaceWidthHeight(void*);
@@ -132,6 +136,15 @@ int WIN32_StreamRead(void*, void*, int);
 void Game_SetScreenMode(void*, uint8_t, uint8_t, uint8_t);
 void CGWND_PumpMessages(void*);
 int DPLAY_CreatePlayer(void* record);
+/* NOTE on DPLAY_RenderPlayer (NetworkPlayerList::RenderPlayer, 0x4437C0):
+ * the binary call site at 0x418A9C pushes NINE stack args (hdc, player,
+ * surface, left, top, right, bottom, hWnd, this+0x138) and the callee
+ * does RET 0x24 (9 dwords). The host stub ABI (shared/link_stubs.cpp,
+ * shared/stubs_impl.cpp) and the other reconstructed call sites
+ * (Town, PostcardAlbum, LOCOBITMAP) use the 8-argument form below; a
+ * 9-arg declaration would not link against those stubs. Keeping the
+ * 8-arg form preserves the shared boundary; exact 9-arg fidelity is
+ * owned by the network-subsystem agent (NetworkPlayerList.h). */
 void DPLAY_RenderPlayer(void* dplay, int hdcVal, void* player,
                          void* surface, int x, int y, int w, RECT* rect);
 void* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
@@ -151,10 +164,20 @@ extern char    g_install_path[];
 extern void*   g_ddraw;         /* IDirectDraw4* — COM platform object */
 extern void*   _g_backbuffer;   /* IDirectDrawSurface4* — COM platform object */
 extern void*   _g_primary_surface; /* IDirectDrawSurface4* — COM platform object */
-extern void*   _g_dplay;        /* IDirectPlay4* — COM platform object */
+extern void*   _g_dplay;        /* NetworkPlayerList* at 0x4FD3B0 (not IDirectPlay4) */
 extern int     _g_cursor_refcount;
 extern void*   _g_cursor_back;  /* IDirectDrawSurface4* — COM platform object */
-extern void*   g_netman;        /* NetMan* */
+
+/* The real binary global at 0x4FD3AC is the Netman singleton, declared
+ * `extern Netman* _g_netman;` in network/Netman.h. The legacy `g_netman`
+ * name was a host-stub symbol (shared/stubs_impl.cpp) that never aliased
+ * the real object; Cursor code now uses _g_netman directly.
+ *
+ * Forward declaration only — Cursor reads Netman's m_gameMode (+0x7C4),
+ * m_mySlotIndex (+0x7D0) and m_slots[9] (+0x518) through verified raw
+ * offsets (see Cursor_impls.cpp update_network_names). */
+class Netman;
+extern Netman* _g_netman;        /* 0x4FD3AC — Netman singleton pointer */
 extern char    g_empty_string[];
 extern void*   g_game;          /* Game* */
 extern void*   g_player_config; /* PlayerConfig* */
@@ -175,10 +198,20 @@ extern void*   g_audio_mgr;     /* AudioMgr* */
 /* Shared internal functions */
 void Cursor_UnlockAllSurfaces(void);
 
+/* COM IUnknown::Release() via vtable slot [2] on an opaque DirectDraw
+ * surface. DirectDraw surfaces are platform COM objects, not decompiled
+ * classes — literal vtable dispatch is the documented ABI (AGENTS.md
+ * permits this for opaque COM surfaces). */
+static inline void Cursor_ComSurfaceRelease(void* surface) {
+    void** vtbl = *reinterpret_cast<void***>(surface);
+    using ReleaseSurface = void (*)(void*);
+    reinterpret_cast<ReleaseSurface>(vtbl[2])(surface);
+}
+
 /* Surface vtable function pointer types (DirectDraw ABI — __stdcall convention) */
 typedef int (__stdcall *SurfaceBlt_t)(void*, RECT*, void*, RECT*, uint32_t, void*);
 typedef int (__stdcall *SurfacePollBlit_t)(void*, void*);
-using SurfaceLock_t = void (*)(void*, void*);
+using SurfaceReleaseDc_t = void (*)(void*, void*);
 using SurfaceFill_t = int (*)(void*, int, int, int, int, int*);
 using SurfaceLegacyBlt_t = int (*)(void*, int*, void*, int*, int, void*);
 
@@ -187,9 +220,13 @@ static inline SurfaceBlt_t Cursor_SurfaceBlt(void* surface) {
     return reinterpret_cast<SurfaceBlt_t>(vtbl[0x14 / 4]);
 }
 
-static inline SurfaceLock_t Cursor_SurfaceLock(void* surface) {
+/* vtable slot 26 (byte offset 0x68). In the IDirectDrawSurface4 ABI this
+ * is ReleaseDC(surface, hdc) — the pre-render call in Cursor::render
+ * (0x414C28) passes the hdc argument. (The previous transcription named
+ * it "Lock"; the documented interface slot table says ReleaseDC.) */
+static inline SurfaceReleaseDc_t Cursor_SurfaceReleaseDC(void* surface) {
     void** vtbl = *reinterpret_cast<void***>(surface);
-    return reinterpret_cast<SurfaceLock_t>(vtbl[0x68 / 4]);
+    return reinterpret_cast<SurfaceReleaseDc_t>(vtbl[0x68 / 4]);
 }
 
 static inline SurfaceFill_t Cursor_SurfaceFill(void* surface) {

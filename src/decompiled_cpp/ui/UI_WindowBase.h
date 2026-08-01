@@ -32,21 +32,46 @@
  *     ├─ NameEntryPanel            (vtable 0x4781D0, name-entry/multiplayer lobby)
  *     └─ GameSetupPanel            (vtable 0x4774D0, city-selection/game-setup lobby)
  *
- * Vtable layout (0x477C30, 12 slots):
- *   [0] +0x00: scalar deleting destructor  (UI_WindowBase_Dtor,      0x4258F0)
- *   [1] +0x04: Hide                        (UI_WindowBase_Hide,      0x425990)
- *   [2] +0x08: Show                        (UI_WindowBase_Show,      0x4259C0)
- *   [3] +0x0C: SetMode                     (UI_WindowBase_SetMode, 0x425FD0)
- *   [4] +0x10: SetRenderSurface            (UI_WindowBase_SetRenderSurface, 0x426020)
- *   [5] +0x14: OnAsyncTaskFailure           (UI_WindowBase_OnAsyncTaskFailure, 0x426130)
- *   [6] +0x18: CreateFullWindow            (UI_CreateFullWindow,     0x425B70)
- *   [7] +0x1C: OnCreate                    (UI_WindowBase_OnCreate,  0x425D30)
- *   [8] +0x20: virtual method (unknown)    (default impl at 0x426130, same as [5])
- *   [9] +0x24: virtual method (unknown)    (default no-op at 0x4661A0, just `ret`)
- *   [10]+0x28: virtual method (unknown)    (default impl at 0x426140)
- *   [11]+0x2C: WindowProc                  (UI_DefWndProc,           0x422EA0)
+ * Vtable layout (0x477C30, 37 slots - full binary layout):
+ *   [0]  +0x00: scalar deleting destructor  (UI_WindowBase_Dtor, 0x4258F0)
+ *   [1]  +0x04: Hide                        (UI_WindowBase_Hide, 0x425990)
+ *   [2]  +0x08: Show                        (UI_WindowBase_Show, 0x4259C0)
+ *   [3]  +0x0C: SetMode                     (UI_WindowBase_SetMode, 0x425FD0)
+ *   [4]  +0x10: SetRenderSurface            (UI_WindowBase_SetRenderSurface, 0x426020)
+ *   [5]  +0x14: OnAsyncTaskFailure          (0x426130, RET 4 no-op)
+ *   [6]  +0x18: CreateFullWindow            (UI_CreateFullWindow, 0x425B70)
+ *   [7]  +0x1C: OnCreate                    (UI_WindowBase_OnCreate, 0x425D30)
+ *   [8]  +0x20: on_update (1 stack arg)     (default 0x426130, RET 4 no-op)
+ *   [9]  +0x24: on_noop                     (default 0x4661A0, bare RET)
+ *   [10] +0x28: dispatch_message            (0x426140 - WM_* router)
+ *   [11] +0x2C: window_proc                 (UI_DefWndProc, 0x422EA0)
+ *   [12] +0x30: on_timer   (WM_TIMER 0x113)  (default 0x422EA0)
+ *   [13] +0x34: on_create_msg (WM_CREATE 1)  (default 0x422EA0)
+ *   [14] +0x38: on_lbutton_down (WM_LBUTTONDOWN 0x201)  (default 0x422EA0)
+ *   [15] +0x3C: on_lbutton_up   (WM_LBUTTONUP 0x202)    (default 0x422EA0)
+ *   [16] +0x40: on_rbutton_down (WM_RBUTTONDOWN 0x204)  (default 0x422EA0)
+ *   [17] +0x44: on_rbutton_up   (WM_RBUTTONUP 0x205)    (default 0x422EA0)
+ *   [18] +0x48: on_lbutton_dblclk (WM_LBUTTONDBLCLK 0x203) (default 0x422EA0)
+ *   [19] +0x4C: on_rbutton_dblclk (WM_RBUTTONDBLCLK 0x206) (default 0x422EA0)
+ *   [20] +0x50: on_mouse_move (WM_MOUSEMOVE 0x200)  (default 0x426900 UIPANEL_WindowProc)
+ *   [21] +0x54: on_key_down  (WM_KEYDOWN 0x100)      (default 0x422EA0)
+ *   [22] +0x58: on_key_up    (WM_KEYUP 0x101)        (default 0x422EA0)
+ *   [23] +0x5C: on_mouse_activate (WM_MOUSEACTIVATE 0x21) (default 0x426950, returns 0)
+ *   [24] +0x60: on_set_focus (WM_SETFOCUS 7)         (default 0x422EA0)
+ *   [25] +0x64: on_kill_focus (WM_KILLFOCUS 8)       (default 0x422EA0)
+ *   [26] +0x68: on_size     (WM_SIZE 5)              (default 0x426960, re-runs on_create)
+ *   [27] +0x6C: on_paint    (WM_PAINT 0xF)           (default 0x426980)
+ *   [28] +0x70: on_set_cursor (WM_SETCURSOR 0x20)    (default 0x426A60)
+ *   [29] +0x74: on_show_window (WM_SHOWWINDOW 0x18)  (default 0x422EA0)
+ *   [30] +0x78: on_erase_bkgnd (WM_ERASEBKGND 0x14)  (default 0x426AC0, returns 1)
+ *   [31] +0x7C: on_destroy  (WM_DESTROY 2)           (default 0x426AD0)
+ *   [32] +0x80: on_close    (WM_CLOSE 0x10)          (default 0x426A90 UIPANEL_OnDestroy)
+ *   [33] +0x84: on_notify   (WM_NOTIFY 0x4E)         (default 0x422EA0)
+ *   [34] +0x88: on_command  (WM_COMMAND 0x111)       (default 0x422EA0)
+ *   [35] +0x8C: on_msg_312  (0x312)                  (default 0x422EA0)
+ *   [36] +0x90: on_activate_app (WM_ACTIVATEAPP 0x1C)(default 0x422EA0)
  *
- * For subclasses, vtable slots [3] through [11] are inherited; subclasses
+ * For subclasses, vtable slots [3] through [36] are inherited; subclasses
  * may override any of them. For instance, Cursor overrides [1], [7], [8],
  * [11] and adds Cursor-specific slots beyond [11]; EditWindow overrides
  * [1], [2], [7], [8], [9], [11] and adds its own slots beyond [11];
@@ -226,16 +251,18 @@ public:
      * disables the window (EnableWindow(FALSE)), and calls
      * ShowWindow(SW_SHOW). Sets visible flag.
      */
-    virtual void show();
+    virtual void hide();
 
     /**
-     * Hide the window.
-     * Address: 0x425990 (vtable[1])
+     * Show the window (pseudo-modal).
+     * Address: 0x4259C0 (vtable[2])
      *
-     * Calls ShowWindow(SW_HIDE), kills the window timer,
-     * clears visible and active flags.
+     * Creates a 120ms timer (ID 0x43), captures mouse input,
+     * hides the OS cursor, renders the window via UIPANEL_Render,
+     * disables the window (EnableWindow(FALSE)), and calls
+     * ShowWindow(SW_SHOW). Sets visible flag.
      */
-    virtual void hide();
+    virtual void show();
 
     /**
      * Set the active UI animation mode (vtable[3]).
@@ -271,7 +298,7 @@ public:
      * Computes window width/height and working rect. Only executes
      * when windowCreated flag (+0xAB) is non-zero.
      */
-    void on_create();
+    virtual void on_create();
 
     /* ================================================================ */
     /* Static / Non-member helper                                         */
@@ -300,9 +327,189 @@ public:
      * @param classStyle  WNDCLASS.style override (0 = default CS_HREDRAW|CS_VREDRAW)
      * @return            BOOL: 1 on success, 0 on failure
      */
-    static int create_full_window(UI_WindowBase* self, int nCmdShow, HWND hParent,
+    virtual int create_full_window(int nCmdShow, HWND hParent,
                                    int x, int y, int nWidth, int nHeight,
                                    HMENU hMenu, HICON hIcon, UINT classStyle);
+
+    /* ================================================================ */
+    /* Message-handler slots [8]-[36] - binary vtable 0x477C30          */
+    /* ================================================================ */
+
+    /**
+     * Update/render callback (vtable[8]).
+     * Address: 0x426130 - a three-byte RET 4 no-op in the original.
+     * Subclasses override this slot for their per-frame update/render.
+     */
+    virtual void on_update(int32_t param);
+
+    /**
+     * No-op callback (vtable[9]).
+     * Address: 0x4661A0 - bare RET in the original.
+     */
+    virtual void on_noop();
+
+    /**
+     * Message dispatcher (vtable[10]).
+     * Address: 0x426140 - routes WM_* messages to slots [12]-[36].
+     * Base implementation is the recovered dispatcher.
+     */
+    virtual LRESULT dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * Default window proc (vtable[11]).
+     * Address: 0x422EA0 (UI_DefWndProc) - passthrough to DefWindowProcA.
+     */
+    virtual LRESULT window_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_TIMER handler (vtable[12]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_CREATE handler (vtable[13]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_create_msg(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_LBUTTONDOWN handler (vtable[14]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_LBUTTONUP handler (vtable[15]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_lbutton_up(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_RBUTTONDOWN handler (vtable[16]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_rbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_RBUTTONUP handler (vtable[17]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_rbutton_up(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_LBUTTONDBLCLK handler (vtable[18]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_lbutton_dblclk(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_RBUTTONDBLCLK handler (vtable[19]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_rbutton_dblclk(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_MOUSEMOVE handler (vtable[20]).
+     * Default: 0x426900 (UIPANEL_WindowProc - render on this window).
+     */
+    virtual LRESULT on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_KEYDOWN handler (vtable[21]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_key_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_KEYUP handler (vtable[22]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_key_up(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_MOUSEACTIVATE handler (vtable[23]).
+     * Default: 0x426950 (returns 0).
+     */
+    virtual LRESULT on_mouse_activate(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_SETFOCUS handler (vtable[24]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_set_focus(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_KILLFOCUS handler (vtable[25]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_kill_focus(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_SIZE handler (vtable[26]).
+     * Default: 0x426960 - re-runs on_create when windowCreated (+0xAB).
+     */
+    virtual LRESULT on_size(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_PAINT handler (vtable[27]).
+     * Default: 0x426980 (unlock, update rect, begin/end paint).
+     */
+    virtual LRESULT on_paint(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_SETCURSOR handler (vtable[28]).
+     * Default: 0x426A60 (returns 1 when hwnd matches this->hWnd).
+     */
+    virtual LRESULT on_set_cursor(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_SHOWWINDOW handler (vtable[29]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_show_window(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_ERASEBKGND handler (vtable[30]).
+     * Default: 0x426AC0 (returns 1).
+     */
+    virtual LRESULT on_erase_bkgnd(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_DESTROY handler (vtable[31]).
+     * Default: 0x426AD0 (clears hWnd, DefWindowProcA).
+     */
+    virtual LRESULT on_destroy(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_CLOSE handler (vtable[32]).
+     * Default: 0x426A90 (UIPANEL_OnDestroy).
+     */
+    virtual LRESULT on_close(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_NOTIFY handler (vtable[33]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_notify(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_COMMAND handler (vtable[34]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_command(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * Custom message 0x312 handler (vtable[35]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_msg_312(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /**
+     * WM_ACTIVATEAPP handler (vtable[36]).
+     * Default: 0x422EA0 (UI_DefWndProc passthrough).
+     */
+    virtual LRESULT on_activate_app(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 };
 
 /* ================================================================== */

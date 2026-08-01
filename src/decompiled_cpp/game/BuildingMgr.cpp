@@ -1,7 +1,8 @@
-/** BuildingMgr non-vtable operations, validated against loco_v8. */
+/** BuildingMgr non-vtable operations, validated against Ghidra locon. */
 #include "BuildingMgr.h"
 #include "Building.h"
 #include "Train.h"
+#include <cstring>
 #include <new>
 
 extern void* operator_new(size_t);                              // 0x465ce0
@@ -36,24 +37,30 @@ extern void* g_ddraw_building;      // 0x4a9ef0
 
 namespace {
 
+/* RESDATA factory fields read by CreateFromResource (0x4349D0):
+ * dependency_id +0x40, exclusion_id +0x44, enabled (uint16) +0x158. */
 struct ResourceFactoryFields {
-    uint8_t prefix_00_3f[0x40];
-    int32_t dependency_id;
-    int32_t exclusion_id;
-    uint8_t prefix_48_157[0x110];
-    uint16_t enabled;
+    uint8_t prefix_00_3f[0x40];     // 0x00..0x3F
+    int32_t dependency_id;          // 0x40
+    int32_t exclusion_id;           // 0x44
+    uint8_t prefix_48_157[0x110];   // 0x48..0x157
+    uint16_t enabled;               // 0x158
 };
 
+/* RESDATA (resource) layout viewed as a building's parent. Offsets verified:
+ * resource_id +0x04 (0x435580), type +0x08 (0x434B60), surface +0x10
+ * (0x435020/0x435200), z_limit +0x16A (0x43524A), removable +0x16C
+ * (0x4349AA). */
 struct BuildingParentFields {
-    uint8_t prefix_00_03[4];
-    int32_t resource_id;
-    uint8_t type;
-    uint8_t prefix_09_0f[7];
-    void* surface;
-    uint8_t prefix_18_169[0x152];
-    uint8_t z_limit;
-    uint8_t prefix_16b[1];
-    uint8_t removable;
+    uint8_t prefix_00_03[4];        // 0x00..0x03
+    int32_t resource_id;            // 0x04
+    uint8_t type;                   // 0x08
+    uint8_t prefix_09_0f[7];        // 0x09..0x0F
+    void* surface;                  // 0x10
+    uint8_t prefix_14_169[0x156];   // 0x14..0x169
+    uint8_t z_limit;                // 0x16A
+    uint8_t prefix_16b[1];          // 0x16B
+    uint8_t removable;              // 0x16C
 };
 
 static const ResourceFactoryFields* resource_factory_fields(const void* resource)
@@ -66,29 +73,16 @@ static const BuildingParentFields* building_parent_fields(const Entity* parent)
     return reinterpret_cast<const BuildingParentFields*>(parent);
 }
 
-void add_to_collection(BuildingCollection& collection, Building* object)
-{
-    if (collection.count == collection.capacity) {
-        collection.Resize(collection.capacity == 0 ? 100 : collection.capacity * 2);
-    }
-    collection.items[collection.count++] = object;
-    collection.Sort();
-}
-
-int find_in_collection(const BuildingCollection& collection, const Building* object)
-{
-    for (uint32_t i = 0; i < collection.count; ++i) {
-        if (collection.items[i] == object) return static_cast<int>(i);
-    }
-    return -1;
-}
-
+/* Surface pointer at parent+0x10 (0x435020, 0x435200). */
 void* entity_surface(const Building* object)
 {
     return object->parent == nullptr
         ? nullptr : building_parent_fields(object->parent)->surface;
 }
 
+/* Shared body of InvalidateRects (0x435020): intersect clip with each visible
+ * item's screen rect, translate to item-local coordinates, then test tile
+ * occupancy. Returns result_code on first occupied tile. */
 int collection_occupancy(BuildingCollection& collection, const RECT& clip,
                          int result_code)
 {
@@ -113,19 +107,23 @@ void BuildingMgr::CompactCollections()
 {
     if (building_count <= 1) return;
     RESDATA_Lock(&building_lock);
-    buildings.Sort();
+    buildings.Sort();                // collection vtable[20] = 0x4244D0
     RESDATA_Unlock(&building_lock);
 }
 
 /**
  * Factory body. Address: 0x4349d0.
  * 0x434af7 is the call to Building::Building, not the function entry.
+ * Validates dependency/exclusion resources, allocates Building (type 7,
+ * 0xF4) or TrainEntity (type 8, 0xF0), inserts via collection vtable[13]
+ * (InsertSorted, 0x4362B0) and bumps the manager's own count (+0x3C/+0x40).
  */
 Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
                                           int world_x, int world_y)
 {
     void* resource = ResourceManager_GetById(g_resmgr, resource_id);
-    /* The binary assumes this primary lookup succeeds. */
+    /* Host-safety: the binary dereferences the resource unconditionally
+     * (iVar1 + 0x40); a null primary lookup would crash the original. */
     if (resource == nullptr) return nullptr;
 
     const ResourceFactoryFields* resource_fields = resource_factory_fields(resource);
@@ -159,16 +157,22 @@ Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
     object->occupant_a = reinterpret_cast<Entity*>(static_cast<intptr_t>(owner_slot)); // +0x8c
     object->MoveTo(world_x, world_y);                               // vtable [3]
     if (type == 7) {
-        add_to_collection(buildings, object);                       // +0x4c
-        ++building_count;
+        buildings.InsertSorted(object);                             // +0x4C, vtable[13]
+        ++building_count;                                           // +0x3C
     } else {
-        add_to_collection(secondary_buildings, object);             // +0x64
-        ++secondary_count;
+        secondary_buildings.InsertSorted(object);                   // +0x64, vtable[13]
+        ++secondary_count;                                          // +0x40
     }
     return object;
 }
 
-/** Remove unused removable buildings. Address: 0x434970. */
+/**
+ * Re-parent removable, empty buildings. Address: 0x434970.
+ * For each building with occupant_b == 0 and the parent's removable flag
+ * (+0x16C) set, the binary calls Building vtable[20] = PostMoveDispatch
+ * (0x433CA0), which detaches from the scene-graph parent and re-attaches to
+ * a compatible host — it does NOT delete the object.
+ */
 void BuildingMgr::RemoveEmpty()
 {
     if (g_game_mode != 3) return;
@@ -176,16 +180,21 @@ void BuildingMgr::RemoveEmpty()
         Building* object = buildings.GetItem(i);
         if (object != nullptr && object->occupant_b == nullptr &&
             building_parent_fields(object->parent)->removable != 0) {
-            RemoveObject(object, false);
+            object->PostMoveDispatch();            // vtable [20] = 0x433CA0
         }
     }
 }
 
-/** Remove one managed Building/Train. Address: 0x434b60. */
+/**
+ * Remove one managed Building/Train. Address: 0x434b60.
+ * Finds the object via collection vtable[14] (FindIndex, 0x4244B0), removes
+ * it via vtable[3] (RemoveElement, 0x4241E0 — shift + --count), then deletes
+ * it only if the removed slot was the requested object.
+ */
 void BuildingMgr::RemoveObject(Building* object, bool show_message)
 {
     if (object == nullptr || object->parent == nullptr) return;
-    uint8_t type = building_parent_fields(object->parent)->type;
+    uint8_t type = building_parent_fields(object->parent)->type;   // +0x08
     BuildingCollection* collection;
     BuildingCollectionLock* lock;
     int32_t* managed_count;
@@ -196,19 +205,23 @@ void BuildingMgr::RemoveObject(Building* object, bool show_message)
     } else return;
 
     RESDATA_Lock(lock);
-    int index = find_in_collection(*collection, object);
-    if (index >= 0) {
-        collection->items[index] = nullptr;
+    uint32_t index = collection->FindIndex(object);          // vtable[14] = 0x4244B0
+    Building* found = collection->RemoveElement(index);      // vtable[3]  = 0x4241E0
+    if (found == object) {
         --*managed_count;
         if (g_game_mode == 3 && show_message)
             UI_CreateMessageBox(&g_tooltip_mgr, 0x3860, 0, 'W',
                                 object->world_x, object->world_y, 1);
-        delete object;
+        delete object;                                       // vtable[0](1)
     }
     RESDATA_Unlock(lock);
 }
 
-/** Select the first object hit at a world position. Address: 0x434c50. */
+/**
+ * Select the first object hit at a world position. Address: 0x434c50.
+ * Buildings require visible == 1 and are not gated by g_disable_input;
+ * trains have no visibility requirement but honour g_disable_input.
+ */
 bool BuildingMgr::FindAndNotify(int world_x, int world_y)
 {
     if (g_game_mode != 3) return false;
@@ -217,7 +230,7 @@ bool BuildingMgr::FindAndNotify(int world_x, int world_y)
         for (uint32_t i = 0; i < collection.GetCount(); ++i) {
             Building* object = collection.GetItem(i);
             if (object == nullptr || (require_visible && object->visible != 1)) continue;
-            if (!object->PtInRect(world_x, world_y)) continue;
+            if (!object->PtInRect(world_x, world_y)) continue;   // vtable [2]
             if (g_click_on_building && (!respect_disable || !g_disable_input))
                 Game_SelectGameObject(g_game, object);
             if (g_click_on_town) Town_SelectBuilding(g_town_view, object);
@@ -229,14 +242,30 @@ bool BuildingMgr::FindAndNotify(int world_x, int world_y)
            find(secondary_buildings, false, true);
 }
 
-/** Tile occupancy query. Address: 0x435020. */
+/**
+ * Tile occupancy query. Address: 0x435020.
+ * Returns 7 when a building tile is occupied, 8 for a train tile, else 0.
+ * The binary accumulates the result at a stack slot (7 at 0x4350F1, 8 at
+ * 0x4351CF) and short-circuits the second collection.
+ */
 int BuildingMgr::InvalidateRects(RECT rect)
 {
     int result = collection_occupancy(buildings, rect, 7);
     return result != 0 ? result : collection_occupancy(secondary_buildings, rect, 8);
 }
 
-/** Overlap query. Address: 0x435200. */
+/**
+ * Overlap query. Address: 0x435200.
+ * With a null target, forwards to InvalidateRects. Otherwise tests every
+ * visible object (except the target) within the parent's z_limit (+0x16A):
+ * buildings via Town_CheckOccupied on both rects (returns 7), trains via
+ * UIPANEL_BlitSurface pixel overlap (returns 8).
+ *
+ * NOTE: the binary's UIPANEL_BlitSurface call passes a by-value target RECT
+ * plus the object surface as a __thiscall this-argument (0x43550B..0x435538);
+ * the host shim is declared as a 6-arg free function (shared stub), so the
+ * call below passes the same meaningful values in that form.
+ */
 int BuildingMgr::BlitOverlaps(int left, int top, int right, int bottom,
                               Building* target)
 {
@@ -285,19 +314,23 @@ int BuildingMgr::BlitOverlaps(int left, int top, int right, int bottom,
     return 0;
 }
 
-/** Command hit-test loop. Address: 0x435580. */
-void BuildingMgr::HandleClick(void* command, int left, int top,
-                              int right, int bottom)
+/**
+ * Command hit-test loop. Address: 0x435580.
+ * Each building whose parent resource id matches the command filter (or
+ * filter == -1) and whose screen_rect top-left is inside the click rect is
+ * dispatched: action 0 plays a sound via StopSound (vtable[7], 0x405A20);
+ * other actions reload the animation via InitBase (vtable[6], 0x405900).
+ * action_cooldown_time (+0x68) suppresses re-dispatch until delay ticks pass.
+ */
+void BuildingMgr::HandleClick(const BuildingClickCommand* command, int left,
+                              int top, int right, int bottom)
 {
     if (command == nullptr) return;
     RECT hit = {left, top, right, bottom};
-    const uint8_t* command_bytes = static_cast<const uint8_t*>(command);
-    const int* const* filter_ref =
-        reinterpret_cast<const int* const*>(command_bytes + 8);
-    const int filter = **filter_ref;
-    const int action = *reinterpret_cast<const int*>(command_bytes + 0x14);
-    const int16_t argument = *reinterpret_cast<const int16_t*>(command_bytes + 0x18);
-    const uint32_t delay = *reinterpret_cast<const uint32_t*>(command_bytes + 0x1c);
+    const int filter = *command->filter;                 // +0x08, dereferenced
+    const int action = command->action;                  // +0x14
+    const int argument = command->argument;              // +0x18, sign-extended
+    const uint32_t delay = static_cast<uint32_t>(command->delay);  // +0x1C
     for (uint32_t i = 0; i < buildings.GetCount(); ++i) {
         Building* object = buildings.GetItem(i);
         if (object == nullptr) continue;
@@ -305,24 +338,22 @@ void BuildingMgr::HandleClick(void* command, int left, int top,
         if ((filter != -1 && filter != resource_id) ||
             !g_PtInRect(&hit, object->screen_rect.left,
                         object->screen_rect.top) ||
-            object->field_68 != 0 || action == -1) continue;
+            object->action_cooldown_time != 0 || action == -1) continue;
 
         if (action == 0) {
-            object->StopSound(argument);                 // binary vtable +0x1c
-            object->field_68 = delay + g_game_time;
+            object->StopSound(argument);                 // vtable [7] = 0x405A20
+            object->action_cooldown_time = delay + g_game_time;
         } else {
-            object->InitBase(action, argument, false);   // binary vtable +0x18
+            object->InitBase(action, argument, false);   // vtable [6] = 0x405900
             if (object->initialized == 1)
-                object->field_68 = delay + g_game_time;
+                object->action_cooldown_time = delay + g_game_time;
             else
-                object->InitBase(static_cast<int>(object->field_64), -1, false);
+                object->InitBase(static_cast<int>(object->stored_resource_id), -1, false);
         }
         if (!g_is_town_mode &&
             !(g_ddraw_active == 1 && g_game_difficulty == 3)) {
             PlaySound(0x571e);
-            DDRAW_SelectBuilding(g_ddraw_building, object);
+            DDRAW_SelectBuilding(&g_ddraw_building, object);
         }
     }
 }
-
-
