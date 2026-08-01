@@ -84,6 +84,24 @@ void BootstrapMode3Core()
             std::memset(gm, 0, sizeof(Game));
             g_game = ::new (gm) Game;
         }
+
+        /* Host-only deviation — Game has no animation resource.
+         *
+         * Assembly: Game_Update (0x410840) calls GameObject_Update
+         * (0x405C40) on the Game object every frame while visible. That
+         * function returns only when +0x18 (initialized) != 1, then reads
+         * [resource+0x20]. The Game's resource (+0x40) is NULL forever
+         * (verified: no code ever writes g_game+0x40) while the generic
+         * GameObject ctor (0x4369D0) leaves initialized = 1, so the
+         * original binary dereferences [0x20] and page-faults at 0x405C57
+         * (mov 0x20(%ecx),%edx, ECX=0) on the first mode-3 frame — this
+         * was reproduced live under Wine and is exactly the crash the SDL
+         * host hits in Entity::Update. The Game has no animation frames,
+         * so initialized must be 0: Entity::Update's guard then returns
+         * early, the same state Entity::InitBase (0x405900) produces for a
+         * failed resource load. Revisit if a host world-file load ever
+         * gives the Game a resource. */
+        static_cast<Game*>(g_game)->initialized = 0;
         std::fprintf(stderr, "[HOST] BootstrapMode3Core: Game constructed (%p)\n", g_game);
         std::fflush(stderr);
     }
