@@ -33,13 +33,36 @@
  */
 
 #include "InputMgr.h"
+#include "PersistenceAdapter.h"
 #include "../core/Game.h"
 #include "../core/Entity.h"
+#include "../core/BuildingMgrObjectGroup.h"
+#include "../core/VehicleEditor.h"
+#include "../game/World.h"
+#include "../game/Vehicle.h"
+#include "../game/Building.h"
+#include "../game/GameVehicle.h"
+#include "../game/ResdataGameVehicle.h"
+#include "../network/Netman.h"
+#include "../ui/HelpPageNode.h"
+#include "../world/tilemap.h"
+#include "../resources/ResourceManager.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+/* Typed save-record names used by the load/save path (host adapter). */
+using loco::host::ChildRecord;
+using loco::host::EntityRecord;
+using loco::host::VehicleRecord;
+
+/* RESDATA_IsBuildingTile (0x44BD30) — tile-state byte in {7,8,9,0xA}. */
+extern int RESDATA_IsBuildingTile(intptr_t ptr);
+
+/* 0x4A99C8 — install/res-dir path buffer ("<data>/art-res/" on the host). */
+extern char g_install_path[];
 
 /* ================================================================== */
 /* External references                                                 */
@@ -48,8 +71,45 @@
 extern void* operator_new(size_t size);            /* 0x465CE0 */
 extern void  GLOBAL_free(void* ptr);               /* 0x465CD0 */
 extern void* g_game;                               /* 0x4854C8 */
+extern void* g_world;                              /* 0x4A98B0 */
+extern void* g_netman;                             /* 0x4FD3AC */
+extern void* g_tooltip_mgr;                        /* 0x4FD220 */
 extern int32_t g_player_id;                        /* 0x4AAD46 */
-extern int32_t g_player_color;                     /* 0x4AAD48 */
+extern int32_t g_in_build_mode;                    /* 0x4FD199 */
+extern uint8_t g_allow_building_placement;         /* 0x4FD3DC */
+extern char  g_current_save_path[0x108];           /* 0x4AA8F8 */
+extern int32_t DAT_004a98b4;                       /* 0x4A98B4 — g_world vehicle count */
+extern int32_t DAT_004a98b8[4];                    /* 0x4A98B8 — level-table entries */
+/* g_tilemap (TileMap*), g_resmgr (ResourceManager), g_player_color and
+ * g_install_path are canonically declared by tilemap.h / ResourceManager.h
+ * (included above). */
+
+/* Host stream helper (resources/ResDataSave.cpp) and placement gate. */
+#ifndef _WIN32
+extern size_t host_stream_bytes_remaining(void* stream);
+#endif
+
+/* UI tooltip entry points (0x423D00 / 0x423D70); host-gated because the
+ * tooltip manager object is not reconstructed. */
+extern void UI_CleanupTooltips(void* mgr);         /* 0x423D00 */
+extern void UI_HideTooltip(void* mgr);             /* 0x423D70 */
+
+/* Typed field accessor for documented binary offsets that have no named
+ * C++ member on the shared types (used only where the original reads a
+ * raw dword; each use carries a precise comment). */
+template <typename T>
+T& field_at(void* object, size_t offset)
+{
+    return *reinterpret_cast<T*>(
+        reinterpret_cast<uint8_t*>(object) + offset);
+}
+
+template <typename T>
+const T& field_at(const void* object, size_t offset)
+{
+    return *reinterpret_cast<const T*>(
+        reinterpret_cast<const uint8_t*>(object) + offset);
+}
 
 /* ================================================================== */
 /* g_input_mgr — static object at 0x4A9990                             */
@@ -253,114 +313,1015 @@ void INPUT_GetSaveFileName(InputMgr* self)
 /* the x86 loads.  Used by Netman (0x43E2E0/0x43E500/0x43F140) for     */
 /* tunnel-angle to neighbour-tile conversion.                          */
 /* ================================================================== */
-void INPUT_DirToOffset_Up(int* output)      /* 0x41D8F0 */
+int32_t INPUT_DirToOffset_Up(int32_t* output)      /* 0x41D8F0 */
 {
     const int16_t id = static_cast<int16_t>(g_player_id);
     const int16_t color = static_cast<int16_t>(g_player_color);
     const uint16_t x = static_cast<uint16_t>(id - 3);             /* sub $0x3, %ax */
     const uint16_t y = static_cast<uint16_t>((color >> 1) - 1);   /* sar $1, %cx; dec */
     *output = (static_cast<int32_t>(y) << 16) | static_cast<int32_t>(x);
+    /* The binary leaves EAX = the output pointer (callers dereference
+     * it, 0x43E252); the C++ model returns the stored value so the
+     * Netman.cpp callers (`off = INPUT_DirToOffset_Left(&off)`) keep the
+     * packed offset (ABI note in InputMgr.h). */
+    return *output;
 }
 
-void INPUT_DirToOffset_Left(int* output)    /* 0x41D920 */
+int32_t INPUT_DirToOffset_Left(int32_t* output)    /* 0x41D920 */
 {
     const int16_t color = static_cast<int16_t>(g_player_color);
     const uint16_t y = static_cast<uint16_t>((color >> 1) - 1);   /* sar $1, %ax; dec */
     *output = static_cast<int32_t>(y) << 16;                      /* X = 0 */
+    return *output;
 }
 
-void INPUT_DirToOffset_Down(int* output)    /* 0x41D950 */
+int32_t INPUT_DirToOffset_Down(int32_t* output)    /* 0x41D950 */
 {
     const int16_t id = static_cast<int16_t>(g_player_id);
     const int16_t color = static_cast<int16_t>(g_player_color);
     const uint16_t x = static_cast<uint16_t>((id >> 1) - 1);      /* sar $1, %ax; dec */
     const uint16_t y = static_cast<uint16_t>(color - 2);          /* add $0xFFFFFFFE, %ecx */
     *output = (static_cast<int32_t>(y) << 16) | static_cast<int32_t>(x);
+    return *output;
 }
 
-void INPUT_DirToOffset_Right(int* output)   /* 0x41D980 */
+int32_t INPUT_DirToOffset_Right(int32_t* output)   /* 0x41D980 */
 {
     const int16_t id = static_cast<int16_t>(g_player_id);
     const uint16_t x = static_cast<uint16_t>((id >> 1) - 1);      /* sar $1, %ax; dec */
     *output = static_cast<int32_t>(x);                            /* Y = 0 */
+    return *output;
 }
 
 /* ================================================================== */
-/* Deferred InputMgr entry points                                      */
+/* World new/load/save and editor placement (this milestone)           */
 /*                                                                      */
-/* World new/load/save and the editor placement helpers are later       */
-/* milestones (tracked in PROGRESS.md).  These stubs log a clear        */
-/* warning and abort instead of silently succeeding — the previous      */
-/* no-op stubs masked the missing decompilation.                        */
+/* Addresses (all verified with objdump on the shipped PE):            */
+/*   INPUT_NewWorld        0x41E120                                    */
+/*   INPUT_LoadWorld       0x41D320                                    */
+/*   INPUT_LoadSaveFile    0x41D5C0                                    */
+/*   INPUT_SaveCurrentWorld 0x41D9B0                                   */
+/*   INPUT_PlaceObject     0x41DD80                                    */
+/*   INPUT_FindObjectAt    0x41E1F0                                    */
+/*                                                                      */
+/* INPUT_RemoveObject (0x41DEF0) stays a loud deferred stub — it is    */
+/* editor-only (not on the load/save path) and its caller graph is a   */
+/* later milestone.                                                    */
 /* ================================================================== */
 
-namespace {
-
-[[noreturn]] void inputmgr_deferred(const char* name, uint32_t address)
+/* ================================================================== */
+/* Host placement capability                                           */
+/*                                                                      */
+/* On the SDL host the resource objects ResourceManager_GetById returns */
+/* (loco::assets::SpriteResource) do not carry the original x86 RESDATA */
+/* layout that the typed entity constructors read (object type +0x08,  */
+/* animation table +0x20, member limit +0x522, tile-state byte +0x63A, */
+/* ...), so invoking them would be out-of-bounds reads.  The host      */
+/* therefore gates in-world placement behind this flag (default false) */
+/* and carries save records instead — see PersistenceAdapter.h for the */
+/* explicit limitation and the milestone that removes it.  Component   */
+/* tests that supply proper-layout resource objects set it to true.    */
+/* ================================================================== */
+#ifndef _WIN32
+static bool s_host_placement_available = false;
+bool loco::host::host_placement_available() { return s_host_placement_available; }
+void loco::host::set_host_placement_available(bool available)
 {
+    s_host_placement_available = available;
+}
+#endif
+
+/* ================================================================== */
+/* Typed dual-view helpers                                             */
+/*                                                                      */
+/* The placed objects are simultaneously Entity* (InputMgr collection,  */
+/* Entity::SetName/SetAnimState dispatch) and TileMapObject* (the       */
+/* tilemap grid's placement view, is_moving at +0xC0).  The original    */
+/* passes the same pointer through both roles; these helpers document   */
+/* the cross-cast at the two call boundaries (same pattern as           */
+/* TileMap::FindObject / World.cpp).                                   */
+/* ================================================================== */
+
+static Entity* as_entity(TileMapObject* obj)
+{
+    return reinterpret_cast<Entity*>(reinterpret_cast<void*>(obj));
+}
+
+static TileMapObject* as_tilemap_object(Entity* entity)
+{
+    return reinterpret_cast<TileMapObject*>(reinterpret_cast<void*>(entity));
+}
+
+/* ================================================================== */
+/* ListResize/ListInsert (collection vtable[0] 0x435D10 / vtable[13]   */
+/* 0x412440) are NOT reconstructed in this milestone — the only        */
+/* binary caller is INPUT_PlaceObject (0x41DD80), which is editor-only */
+/* and stays a loud deferred stub below.                              */
+/* ================================================================== */
+
+/* ================================================================== */
+/* INPUT_NewWorld                                                     */
+/* Address: 0x41E120                                                   */
+/*                                                                      */
+/* See InputMgr.h for the full flow.  Host deviations (#ifndef         */
+/* _WIN32): the tooltip manager (g_tooltip_mgr 0x4FD220) is not        */
+/* reconstructed, so UI_CleanupTooltips (0x423D00) and UI_HideTooltip  */
+/* (0x423D70) are loud no-ops; g_tilemap is constructed by             */
+/* BootstrapMode3Core before the loading worker runs, but component    */
+/* tests may leave it null (then the scroll block is a loud no-op).    */
+/* ================================================================== */
+void INPUT_NewWorld(InputMgr* self)
+{
+    /* g_in_build_mode (0x4FD199) = 1 */
+    g_in_build_mode = 1;
+
+    /* PlaySound(0x5026) — new-game jingle (PlaySound 0x447930 on
+     * g_resmgr). */
+#ifdef _WIN32
+    PlaySound(0x5026);
+#else
+    /* Host: the sound-resource loading chain behind PlaySound
+     * (0x448990 RESMGR_AllocResourceEntry -> RESMGR_OpenResourceFile)
+     * is not reconstructed (see PROGRESS: "Complete ResourceManager
+     * consumers"); invoking the real PlaySound would run the empty
+     * host stub and crash in create_string_resource.  The jingle is
+     * logged loudly instead (documented deviation). */
     std::fprintf(stderr,
-        "[InputMgr] %s (0x%08X) is a deferred stub: not yet decompiled "
-        "(world new/load/save and placement helpers are later milestones)\n",
-        name, address);
+        "[HOST] INPUT_NewWorld: new-game jingle 0x5026 skipped "
+        "(PlaySound 0x447930 sound-loading chain not reconstructed)\n");
     std::fflush(stderr);
-    std::abort();
+#endif
+
+#ifndef _WIN32
+    if (g_tooltip_mgr != nullptr) {
+        UI_CleanupTooltips(g_tooltip_mgr);       /* 0x423D00 */
+    } else {
+        std::fprintf(stderr,
+            "[HOST] INPUT_NewWorld: tooltip cleanup skipped "
+            "(g_tooltip_mgr 0x4FD220 not reconstructed)\n");
+        std::fflush(stderr);
+    }
+#else
+    UI_CleanupTooltips(g_tooltip_mgr);           /* 0x423D00 */
+#endif
+
+    /* World_Init (0x44D9B0) — fresh terrain. */
+#ifndef _WIN32
+    if (g_world == nullptr) {
+        std::fprintf(stderr, "[HOST] INPUT_NewWorld: World_Init skipped (g_world null)\n");
+        std::fflush(stderr);
+        return;
+    }
+#endif
+    static_cast<World*>(g_world)->Init();
+
+    /* Scroll the viewport to every entity (every 10th uses animated   */
+    /* scroll + tooltip hide + dirty-rect invalidation).  The index    */
+    /* increments on failed scrolls; the count is re-read each pass.   */
+    if (self->entity_count == 0) {
+        return;
+    }
+#ifndef _WIN32
+    if (g_game == nullptr || g_tilemap == nullptr) {
+        std::fprintf(stderr,
+            "[HOST] INPUT_NewWorld: viewport scroll skipped "
+            "(g_game/g_tilemap not constructed)\n");
+        std::fflush(stderr);
+        return;
+    }
+#endif
+
+    static_cast<Game*>(g_game)->SetScreenMode(1, 1, 1);  /* 0x411DC0 */
+    int32_t index = 0;
+    while (index < self->entity_count) {
+        Entity* entity = self->ListGetItem(index);
+        if (self->entity_count % 10 == 0) {
+            if (static_cast<TileMap*>(g_tilemap)->ScrollTo(
+                    as_tilemap_object(entity), 1) == nullptr) {
+                index++;
+            }
+#ifndef _WIN32
+            if (g_tooltip_mgr != nullptr) {
+                UI_HideTooltip(g_tooltip_mgr);      /* 0x423D70 */
+            }
+#else
+            UI_HideTooltip(g_tooltip_mgr);          /* 0x423D70 */
+#endif
+            static_cast<TileMap*>(g_tilemap)->InvalidateDirtyRects(0); /* 0x456150 */
+        } else {
+            if (static_cast<TileMap*>(g_tilemap)->ScrollTo(
+                    as_tilemap_object(entity), 0) == nullptr) {
+                index++;
+            }
+        }
+    }
+    static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0);  /* 0x411DC0 */
 }
 
-} // namespace
-
-/* ---- World new/load/save (deferred; NOT this milestone) ----------- */
-
-void INPUT_NewWorld(InputMgr* self)              /* 0x41E120 */
-{
-    (void)self;
-    inputmgr_deferred("INPUT_NewWorld", 0x41E120);
-}
-
-char INPUT_LoadWorld(InputMgr* self, const char* path)   /* 0x41D320 */
-{
-    (void)self;
-    (void)path;
-    inputmgr_deferred("INPUT_LoadWorld", 0x41D320);
-}
-
-char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2) /* 0x41D5C0 */
-{
-    (void)self;
-    (void)path;
-    (void)flags;
-    (void)flags2;
-    inputmgr_deferred("INPUT_LoadSaveFile", 0x41D5C0);
-}
-
-void INPUT_SaveCurrentWorld(InputMgr* self, const char* name)  /* 0x41D9B0 */
-{
-    (void)self;
-    (void)name;
-    inputmgr_deferred("INPUT_SaveCurrentWorld", 0x41D9B0);
-}
-
-/* ---- Editor placement helpers (deferred) --------------------------- */
+/* ================================================================== */
+/* INPUT_PlaceObject (editor-only, deferred; loud)                    */
+/* Address: 0x41DD80                                                   */
+/*                                                                      */
+/* Creates a typed placed object for a resource id and registers it in */
+/* the collection.  Not on the load/save path (INPUT_NewWorld/Load/    */
+/* Save never call it — the persistence path finds existing objects    */
+/* through TileMap_FindObject and INPUT_FindObjectAt); it is editor-   */
+/* only and stays a loud deferred stub until the editor milestone.    */
+/* ================================================================== */
 
 void* INPUT_PlaceObject(InputMgr* self, unsigned int resource_id)  /* 0x41DD80 */
 {
     (void)self;
     (void)resource_id;
-    inputmgr_deferred("INPUT_PlaceObject", 0x41DD80);
+    std::fprintf(stderr,
+        "[InputMgr] INPUT_PlaceObject (0x41DD80) is a deferred stub: "
+        "editor-only, not on the load/save path\n");
+    std::fflush(stderr);
+    std::abort();
 }
+
+/* ================================================================== */
+/* INPUT_FindObjectAt                                                 */
+/* Address: 0x41E1F0                                                   */
+/*                                                                      */
+/* Jump table at 0x41E550 on (mode+1).  Modes:                        */
+/*   -1: random entity: GetItem(rand() % entity_count)                */
+/*   0/1/4: random entity with resource type 3, +0x10C == 3 and       */
+/*          (+0x120 == mode || mode == 4)                             */
+/*   2:   random entity with resource +0x62C byte != 0 (special);     */
+/*        the pick range is special_count (+0x18), not a first-pass   */
+/*        count (there is no first pass in the binary)                */
+/*   3:   random entity with resource type 3 + IsBuildingTile         */
+/*   default: random entity whose resource id (+0x04) == mode         */
+/* Each pick is rand() % range + 1 (0x41E29C) and the second pass     */
+/* returns the pick-th match (match counter checked at the top of     */
+/* every scan step, 0x41E2D5); if the scan ends first, the last       */
+/* match is returned.  rand is CRT_rand (0x466150).                  */
+/* ================================================================== */
+
+namespace {
+
+/* +0x10C / +0x120 — documented on the ResourceGameObject family:
+ * RESDATA_GameVehicle::vehicle_kind (+0x10C), HelpPageNode::overlay_flag
+ * (+0x120) and GameVehicle::current_vehicle (+0x120).  The original
+ * reads the raw dwords on every collection entity and compares them to
+ * the mode int (0x41E268/0x41E27A: cmp [eax+0x10c],3; cmp [eax+0x120],
+ * ecx).  Base RESDATA_GameVehicle is 0x11C bytes, so +0x120 is past the
+ * object there — the typed model returns false instead of reading OOB
+ * (documented deviation; no collection entity of that base class exists
+ * on the placement path). */
+static int32_t entity_kind(Entity* e)
+{
+    if (RESDATA_GameVehicle* rv = dynamic_cast<RESDATA_GameVehicle*>(e)) {
+        return rv->vehicle_kind;                     /* +0x10C */
+    }
+    return -1;
+}
+
+static int32_t entity_mode_flag(Entity* e, int32_t mode)
+{
+    if (HelpPageNode* h = dynamic_cast<HelpPageNode*>(e)) {
+        return h->overlay_flag;                      /* +0x120 */
+    }
+    if (GameVehicle* g = dynamic_cast<GameVehicle*>(e)) {
+        /* The binary compares the raw +0x120 dword (a pointer for
+         * GameVehicle) to the mode int — mode 0 matches only nullptr. */
+        return (reinterpret_cast<uintptr_t>(g->current_vehicle) ==
+                static_cast<uintptr_t>(mode)) ? mode : -1;
+    }
+    return -1;
+}
+
+bool entity_matches(Entity* e, int32_t mode)
+{
+    if (e == nullptr) {
+        return false;
+    }
+    uint8_t type = 0;
+    if (e->resource != nullptr) {
+        type = *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(e->resource) + 0x08);
+    }
+    switch (mode) {
+    case 0:
+    case 1:
+    case 4:
+        if (type != 3) return false;
+        if (entity_kind(e) != 3) return false;      /* +0x10C == 3 */
+        if (mode != 4 && entity_mode_flag(e, mode) != mode) return false;
+        return true;
+    case 2:
+        if (e->resource == nullptr) return false;
+        return *reinterpret_cast<uint8_t*>(
+                   static_cast<uint8_t*>(e->resource) + 0x62C) != 0;
+    case 3:
+        if (type != 3) return false;
+        return RESDATA_IsBuildingTile(reinterpret_cast<intptr_t>(e->resource)) != 0;
+    default:
+        if (e->resource == nullptr) return false;
+        return field_at<int32_t>(e->resource, 0x04) == mode;
+    }
+}
+
+/* CRT_rand (0x466150) — declared in Netman.h (included above). */
+
+/* Second pass: scan the collection and return the pick-th match.     */
+/* The binary checks the match counter at the top of each scan step   */
+/* (0x41E2D5) and returns the candidate stored by the previous step,  */
+/* so the pick-th match is returned; if the collection ends first the */
+/* last match is returned (0x41E323).                                 */
+Entity* find_pick(InputMgr* self, int32_t mode, int32_t pick)
+{
+    Entity* candidate = nullptr;
+    int32_t found = 0;
+    const int32_t count = self->ListGetCount();
+    int32_t index = 0;
+    while (index < count) {
+        if (found == pick) {
+            return candidate;
+        }
+        Entity* e = self->ListGetItem(index);
+        if (entity_matches(e, mode)) {
+            found++;
+            candidate = e;
+        }
+        index++;
+    }
+    return candidate;
+}
+
+}  // namespace
+
+void* INPUT_FindObjectAt(InputMgr* self, int mode)
+{
+    /* ---- mode -1: random entity ---------------------------------- */
+    if (mode == -1) {
+        if (self->entity_count == 0) {
+            return nullptr;
+        }
+        return self->ListGetItem(CRT_rand() % self->entity_count);
+    }
+
+    /* ---- pick range ---------------------------------------------- */
+    int32_t range;
+    if (mode == 2) {
+        /* Mode 2 (0x41E404): the pick range is the special sub-count
+         * (+0x18, 0x41E404..0x41E445) — the binary has no first pass
+         * for this mode. */
+        if (self->special_count == 0) {
+            return nullptr;
+        }
+        range = self->special_count;
+    } else {
+        /* First pass: count matches. */
+        int32_t matches = 0;
+        const int32_t count = self->ListGetCount();
+        for (int32_t i = 0; i < count; i++) {
+            if (entity_matches(self->ListGetItem(i), mode)) {
+                matches++;
+            }
+        }
+        if (matches == 0) {
+            return nullptr;
+        }
+        range = matches;
+    }
+
+    /* ---- random pick: rand() % range + 1 (0x41E29C/0x41E385/0x41E420).
+     * The binary also carries an unreachable branch (0x41E2A9, entered
+     * only when the range < 1, which cannot happen here) that would pick
+     * the fixed second match for a range of 2; it is dead code. */
+    int32_t pick = CRT_rand() % range + 1;
+    return find_pick(self, mode, pick);
+}
+
+/* ================================================================== */
+/* INPUT_LoadSaveFile                                                 */
+/* Address: 0x41D5C0                                                   */
+/*                                                                      */
+/* See InputMgr.h.  Host deviations (#ifndef _WIN32):                 */
+/*   - the "curr" backdrop window call (0x429EF0 on the 0x4AA818      */
+/*     backdrop window) records the save name in the host current-save */
+/*     global instead (the backdrop window object is not reconstructed); */
+/*   - placement is gated (PersistenceAdapter): records are carried    */
+/*     into the adapter document instead of placed; the placement      */
+/*     block below runs only when loco::host::host_placement_available */
+/*     is true (tests provide proper-layout resources);               */
+/*   - a truncated/oversized file fails explicitly (the original       */
+/*     silently skips short records).                                 */
+/* ================================================================== */
+char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
+{
+#ifndef _WIN32
+    /* Host hardening: reject save names that would escape the save
+     * directory (the original concatenates caller strings verbatim). */
+    if (loco::host::PersistenceAdapter::name_escapes(path)) {
+        std::fprintf(stderr,
+            "[HOST] INPUT_LoadSaveFile: refused path '%s' (escape)\n", path);
+        std::fflush(stderr);
+        return 0;
+    }
+#endif
+
+    RESDATA resdata;
+    RESMGR_ResourceData_Init(&resdata);            /* 0x447B20 */
+
+    /* Build "<resdir><path>" (0x4A99C8 buffer + name) exactly like the
+     * original's rep movs sequence. */
+    char path_buf[0x108];
+    std::snprintf(path_buf, sizeof(path_buf), "%s%s", g_install_path, path);
+
+    /* Open + read header + preview (0x447BA0). */
+    if (RESMGR_LoadResource(&resdata, path_buf) == 0) {
+        RESMGR_RemoveResource(&resdata);
+        RESMGR_ReleaseResource(&resdata);
+        return 0;
+    }
+    if (!RESMGR_IsSaveHeader(&resdata)) {          /* 0x448030 */
+        RESMGR_RemoveResource(&resdata);
+        RESMGR_ReleaseResource(&resdata);
+        return 0;
+    }
+
+    /* Placement offset: ((player - saved)/2, (color - saved)/2) with
+     * the saved fields read as the 16-bit header words at +0x02/+0x04
+     * (preview dimensions on designer saves). */
+    int32_t offset_x = (static_cast<int16_t>(g_player_id) -
+                        static_cast<int16_t>(resdata.save.player_id)) / 2;
+    int32_t offset_y = (static_cast<int16_t>(g_player_color) -
+                        static_cast<int16_t>(resdata.save.player_color)) / 2;
+
+    /* flags != 0: TileMap::FullReset (0x454FE0) first. */
+    if (flags != 0) {
+        if (g_tilemap != nullptr) {
+            static_cast<TileMap*>(g_tilemap)->FullReset();
+        } else {
+            std::fprintf(stderr,
+                "[HOST] INPUT_LoadSaveFile: FullReset skipped (g_tilemap null)\n");
+            std::fflush(stderr);
+        }
+    }
+
+    /* "curr" marker: original string 0x47E2A0 is "~curr"; the SDL host
+     * deliberately uses "curr" (documented host deviation — see
+     * InputMgr.h and PROGRESS.md).  The original then feeds the header
+     * name to the 0x4AA818 panel via UIPANEL_Hide (0x429EF0 — the
+     * GameLoop.cpp-documented name for that slot); the host records the
+     * name in the current-save global instead. */
+#ifndef _WIN32
+    const char* curr_marker = "curr";
+#else
+    const char* curr_marker = "~curr";
+#endif
+    if (std::strstr(path, curr_marker) != nullptr) {
+#ifndef _WIN32
+        std::snprintf(g_current_save_path, sizeof(g_current_save_path), "%s", path);
+#else
+        extern void UIPANEL_Hide(void* panel, void* str);  /* 0x429EF0 */
+        UIPANEL_Hide(reinterpret_cast<void*>(0x4AA818),
+                     resdata.save.name);
+#endif
+    }
+
+    /* Entity loop. */
+    const char saved_placement = static_cast<char>(g_allow_building_placement);
+    g_allow_building_placement = 1;
+
+    int32_t index = 0;
+    const int32_t entity_count = static_cast<int32_t>(resdata.save.entity_count);
+    const uint16_t vehicle_count = resdata.save.vehicle_count;
+    bool truncation = false;
+
+#ifndef _WIN32
+    /* Host: validate the declared record layout against the stream so a
+     * corrupt entity/vehicle count cannot spin the loops (host
+     * hardening; the original trusts the header). */
+    {
+        size_t remaining = host_stream_bytes_remaining(resdata.primary_stream);
+        size_t expected = static_cast<size_t>(entity_count) * 0x80u +
+                          static_cast<size_t>(vehicle_count) * 0x2Cu;
+        if (remaining < expected) {
+            truncation = true;
+        }
+    }
+#endif
+
+    while (!truncation && index < entity_count) {
+        /* One 0x80 record (0x447DB0). */
+        EntityRecord* record = static_cast<EntityRecord*>(
+            RESMGR_LockResource(&resdata));
+        if (record == nullptr) {
+#ifndef _WIN32
+            /* Short read before entity_count records: explicit failure
+             * (host hardening — the original skips silently). */
+            truncation = true;
+            break;
+#else
+            /* Original: the short record is skipped and the loop
+             * continues to entity_count iterations (0x41D776). */
+            index++;
+            continue;
+#endif
+        }
+
+#ifndef _WIN32
+        if (!loco::host::host_placement_available()) {
+            /* Placement gate closed: carry the typed record. */
+            loco::host::PersistenceAdapter::instance().document().entities.push_back(*record);
+            index++;
+            continue;
+        }
+#endif
+
+        /* ---- Original placement path ---- */
+        Entity* entity = nullptr;
+#ifndef _WIN32
+        if (g_tilemap == nullptr) {
+            std::fprintf(stderr,
+                "[HOST] INPUT_LoadSaveFile: placement block skipped "
+                "(g_tilemap null)\n");
+            std::fflush(stderr);
+            index++;
+            continue;
+        }
+#endif
+        {
+            int* found = TileMap_FindObject(
+                static_cast<TileMap*>(g_tilemap),
+                static_cast<unsigned int>(record->resource_id),
+                static_cast<short>(static_cast<int>(record->x) + offset_x),
+                static_cast<short>(static_cast<int>(record->y) + offset_y),
+                1, 1);
+            entity = as_entity(reinterpret_cast<TileMapObject*>(found));
+        }
+        if (entity == nullptr) {
+            index++;
+            continue;
+        }
+
+        if (flags2 == 0) {
+            as_tilemap_object(entity)->is_moving = 0;   /* +0xC0 */
+        }
+
+        /* vtable[13]: SetName (0x405E20) / Building::SetCustomName
+         * (0x4344A0) with the record name at +0x10. */
+        entity->SetName(record->name);
+
+        /* vtable[7] SetAnimState (+0x08) unless the record is 0x852 or
+         * a building tile. */
+        if (record->resource_id != 0x852) {
+            uint8_t res_type = static_cast<uint8_t>(
+                GetResourceType(record->resource_id));
+            bool building_tile = false;
+#ifndef _WIN32
+            if (res_type == 3 && entity->resource != nullptr) {
+                building_tile = RESDATA_IsBuildingTile(
+                    reinterpret_cast<intptr_t>(entity->resource)) != 0;
+            }
+#else
+            if (res_type == 3) {
+                building_tile = RESDATA_IsBuildingTile(
+                    reinterpret_cast<intptr_t>(entity->resource)) != 0;
+            }
+#endif
+            if (res_type != 3 || !building_tile) {
+                entity->SetAnimState(static_cast<int>(record->anim_state));
+            }
+        }
+
+        /* dest -> +0xBC (typed field; Building::track_y / ResourceGameObject::field_bc). */
+        if (Building* b = dynamic_cast<Building*>(entity)) {
+            b->track_y = static_cast<int32_t>(record->dest);
+        } else if (ResourceGameObject* r = dynamic_cast<ResourceGameObject*>(entity)) {
+            r->field_bc = static_cast<int32_t>(record->dest);
+        }
+
+        /* Children: 5 x 0x14 records at +0x1C.  vtable[15] on the
+         * ResourceGameObject family is CreateMember (0x458430). */
+        for (int child_index = 0; child_index < 5; child_index++) {
+            const ChildRecord& child_data = record->children[child_index];
+            if (child_data.resource_id == 0) {
+                continue;
+            }
+            ResourceGameObject* parent =
+                dynamic_cast<ResourceGameObject*>(entity);
+            if (parent == nullptr) {
+                continue;
+            }
+            Building* child = parent->CreateMember(child_data.resource_id);
+            if (child == nullptr) {
+                continue;
+            }
+            if (std::strstr(child_data.name, "PARTY") != nullptr) {
+                child->SetName(child_data.name);
+            }
+            child->create_time = child_data.value;   /* +0x94 */
+        }
+        index++;
+    }
+
+    /* Vehicle loop. */
+    for (int veh_index = 0;
+         !truncation && veh_index < static_cast<int>(vehicle_count);
+         veh_index++) {
+        VehicleRecord* veh_data = static_cast<VehicleRecord*>(
+            RESMGR_UnlockResource(&resdata));
+        if (veh_data == nullptr) {
+#ifndef _WIN32
+            /* Explicit failure (host hardening — the original skips). */
+            truncation = true;
+            break;
+#else
+            continue;
+#endif
+        }
+#ifndef _WIN32
+        if (!loco::host::host_placement_available()) {
+            loco::host::PersistenceAdapter::instance().document().vehicles.push_back(*veh_data);
+            continue;
+        }
+#endif
+        void* building = INPUT_FindObjectAt(self, 3);
+        if (building == nullptr) {
+            continue;
+        }
+        if (g_world == nullptr) {
+            continue;
+        }
+        Vehicle* vehicle = static_cast<World*>(g_world)->LoadFromFile(
+            reinterpret_cast<int*>(building),
+            reinterpret_cast<int*>(veh_data));
+        if (vehicle == nullptr) {
+            continue;
+        }
+        vehicle->UpdatePosition(0);                  /* 0x44D500 */
+        if (vehicle->editors[0] != nullptr) {
+            vehicle->editors[0]->SetName(veh_data->name);
+        }
+    }
+
+#ifndef _WIN32
+    if (truncation) {
+        RESMGR_RemoveResource(&resdata);
+        RESMGR_ReleaseResource(&resdata);
+        g_allow_building_placement = static_cast<uint8_t>(saved_placement);
+        std::fprintf(stderr,
+            "[HOST] INPUT_LoadSaveFile: '%s' truncated/oversized — load "
+            "failed explicitly (no partial success)\n", path);
+        std::fflush(stderr);
+        return 0;
+    }
+#endif
+
+    /* Cleanup + global state, exactly like the original tail. */
+    RESMGR_RemoveResource(&resdata);                /* 0x447FB0 */
+    g_in_build_mode = 1;                            /* 0x4FD199 */
+    g_allow_building_placement = static_cast<uint8_t>(saved_placement);
+    RESMGR_ReleaseResource(&resdata);               /* 0x447B90 */
+    return 1;
+}
+
+/* ================================================================== */
+/* INPUT_LoadWorld                                                    */
+/* Address: 0x41D320                                                   */
+/*                                                                      */
+/* See InputMgr.h.  Host deviations (#ifndef _WIN32):                 */
+/*   - the current-save marker is "curr" (original "~curr", 0x47E2A0); */
+/*   - the ".sav" companion path is derived from the recorded          */
+/*     current-save name (the original reads the backdrop window       */
+/*     object's path buffer at [0x4FD3C8]+0x48+strlen(resdir) — the    */
+/*     backdrop window class is not reconstructed on the host);        */
+/*   - the Netman scenario-2 block is a guarded loud no-op when        */
+/*     g_netman is null (component tests do not construct Netman).     */
+/* ================================================================== */
+char INPUT_LoadWorld(InputMgr* self, const char* path)
+{
+    /* Step 1: LoadSaveFile(path, 1, 1). */
+    char result = INPUT_LoadSaveFile(self, path, 1, 1);
+
+    /* Step 2: on success with the current-save marker, record the path
+     * in the current-save global (0x4AA8F8). */
+#ifndef _WIN32
+    const char* curr_marker = "curr";
+#else
+    const char* curr_marker = "~curr";
+#endif
+    if (result != 0 && std::strstr(path, curr_marker) != nullptr) {
+        std::snprintf(g_current_save_path, sizeof(g_current_save_path), "%s", path);
+    }
+
+    /* Step 3: always attempt the ".sav" companion (result discarded). */
+    {
+        char sav_path[0x108];
+#ifndef _WIN32
+        /* Host: derive from the recorded current-save name (falling
+         * back to the caller's path when none is recorded).  The
+         * original reads the 0x4FD3C8 object's save-name buffer at
+         * +0x48+strlen(resdir); that object is not reconstructed on the
+         * host, so the recorded name is the documented deviation. */
+        const char* base = (g_current_save_path[0] != '\0')
+            ? g_current_save_path : path;
+        std::snprintf(sav_path, sizeof(sav_path), "%s.sav", base);
+#else
+        /* Original (0x41D379..0x41D3EE): copy the 0x4FD3C8 object's
+         * save-name buffer ([obj]+0x48+strlen(resdir), a C string) to a
+         * stack buffer and append ".sav" (0x47E4F4), then
+         * LoadSaveFile(buffer, 0, 0).  The 0x4FD3C8 slot is the
+         * tilemap.h g_cursor_surface pointer; the string read is the
+         * documented raw-offset access (TODO: typed backdrop/surface
+         * class during integration). */
+        extern void* g_cursor_surface;   /* tilemap.h, 0x4FD3C8 */
+        const char* base = static_cast<const char*>(
+            static_cast<char*>(g_cursor_surface) + 0x48 +
+            std::strlen(g_install_path));
+        std::snprintf(sav_path, sizeof(sav_path), "%s.sav", base);
+#endif
+        INPUT_LoadSaveFile(self, sav_path, 0, 0);
+    }
+
+    /* Step 4: multiplayer scenario 2 — scroll to player buildings and
+     * clear the edge-building placement flags. */
+#ifndef _WIN32
+    if (g_netman == nullptr) {
+        std::fprintf(stderr,
+            "[HOST] INPUT_LoadWorld: Netman scenario-2 edge checks "
+            "skipped (g_netman null)\n");
+        std::fflush(stderr);
+    } else
+#endif
+    if (static_cast<Netman*>(g_netman)->m_gameMode == 2) {
+        /* Scroll to each placed player building (resource type 3,
+         * +0x10C == 3, +0x120 == 1). */
+        const int32_t count = self->ListGetCount();
+        for (int32_t i = 0; i < count; i++) {
+            Entity* entity = self->ListGetItem(i);
+            if (entity == nullptr) {
+                continue;
+            }
+            uint8_t type = 0;
+            if (entity->resource != nullptr) {
+                type = *reinterpret_cast<uint8_t*>(
+                    static_cast<uint8_t*>(entity->resource) + 0x08);
+            }
+            if (type == 3 && entity_kind(entity) == 3 &&
+                entity_mode_flag(entity, 1) == 1) {
+#ifndef _WIN32
+                if (g_tilemap == nullptr) {
+                    continue;
+                }
+#endif
+                static_cast<TileMap*>(g_tilemap)->ScrollTo(
+                    as_tilemap_object(entity), 1);
+            }
+        }
+
+        const uint8_t saved_placement = g_allow_building_placement;
+        g_allow_building_placement = 1;
+
+        Netman* netman = static_cast<Netman*>(g_netman);
+        const int16_t player_id = static_cast<int16_t>(g_player_id);
+        const int16_t player_color = static_cast<int16_t>(g_player_color);
+
+#ifndef _WIN32
+        if (g_tilemap == nullptr) {
+            std::fprintf(stderr,
+                "[HOST] INPUT_LoadWorld: edge placement-flag clear "
+                "skipped (g_tilemap null)\n");
+            std::fflush(stderr);
+        } else
+#endif
+        {
+            TileMap* tilemap = static_cast<TileMap*>(g_tilemap);
+            if (netman->CheckUpEdge() != 0) {
+                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                    TileMap_FindObject(tilemap, 0xC46, 0,
+                        static_cast<short>((player_id >> 1) - 1), 0, 1));
+                if (obj != nullptr) obj->is_moving = 0;
+            }
+            if (netman->CheckDownEdge() != 0) {
+                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                    TileMap_FindObject(tilemap, 0xC48,
+                        static_cast<short>((player_id >> 1) - 1),
+                        static_cast<short>(player_color - 2), 0, 1));
+                if (obj != nullptr) obj->is_moving = 0;
+            }
+            if (netman->CheckRightEdge() != 0) {
+                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                    TileMap_FindObject(tilemap, 0xC42,
+                        static_cast<short>(player_id - 3),
+                        static_cast<short>((player_color >> 1) - 1), 0, 1));
+                if (obj != nullptr) obj->is_moving = 0;
+            }
+            if (netman->CheckLeftEdge() != 0) {
+                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                    TileMap_FindObject(tilemap, 0xC44, 0,
+                        static_cast<short>((player_color >> 1) - 1), 0, 1));
+                if (obj != nullptr) obj->is_moving = 0;
+            }
+        }
+
+        g_allow_building_placement = saved_placement;
+    }
+
+    return result;
+}
+
+/* ================================================================== */
+/* INPUT_SaveCurrentWorld                                             */
+/* Address: 0x41D9B0                                                   */
+/*                                                                      */
+/* See InputMgr.h.  Host deviations (#ifndef _WIN32):                 */
+/*   - the entity/vehicle counts come from the PersistenceAdapter's    */
+/*     recovered record set (the collection placement is gated);       */
+/*   - the preview written by RESMGR_LoadResourceData is a zeroed      */
+/*     player_id*player_color buffer (the original renders a TileMap   */
+/*     overlay surface);                                               */
+/*   - the current-save marker is "curr" (original "~curr").          */
+/* ================================================================== */
+char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
+{
+    RESDATA resdata;
+    RESMGR_ResourceData_Init(&resdata);            /* 0x447B20 */
+
+    /* Build "<resdir><name>". */
+    char path_buf[0x108];
+    std::snprintf(path_buf, sizeof(path_buf), "%s%s", g_install_path, name);
+
+    /* ---- 0x114-byte header (RESDATA.save at +0xB0) ---- */
+    std::memset(&resdata.save, 0, sizeof(SaveRegion));   /* rep stosd 0x45 */
+    resdata.save.type = 8;                               /* +0x00 */
+    resdata.save.player_id = static_cast<uint16_t>(g_player_id);    /* +0x02 */
+    resdata.save.player_color = static_cast<uint16_t>(g_player_color); /* +0x04 */
+
+#ifndef _WIN32
+    /* Host: entity/vehicle counts from the recovered record set (the
+     * collection placement is gated — see PersistenceAdapter.h). */
+    const loco::host::SaveDocument& doc =
+        loco::host::PersistenceAdapter::instance().document();
+    resdata.save.entity_count =
+        static_cast<uint32_t>(doc.entities.size());      /* +0x08 */
+    resdata.save.vehicle_count =
+        static_cast<uint16_t>(doc.vehicles.size());      /* +0x0C */
+#else
+    /* Original: entity count from this->entity_count (+0x14,
+     * 0x41DA3F) and vehicle count from the 16-bit g_world vehicle
+     * count at 0x4A98B4 (0x41DA6A). */
+    resdata.save.entity_count = static_cast<uint32_t>(self->entity_count); /* +0x08 */
+    resdata.save.vehicle_count = static_cast<uint16_t>(DAT_004a98b4);      /* +0x0C */
+#endif
+    /* +0x0E name: the original copies the BSS string at 0x4AA9FD, which
+     * is never written and therefore empty. */
+    resdata.save.name[0] = '\0';
+
+    /* Open the output stream and write header + preview (0x447E30). */
+#ifndef _WIN32
+    /* Host preview: zeroed player_id*player_color buffer (no tilemap
+     * overlay is rendered on the SDL host — documented deviation). */
+    {
+        uint32_t w = resdata.save.player_id;
+        uint32_t h = resdata.save.player_color;
+        if (w > 0 && h > 0 && w <= 0x10000u / h) {
+            size_t bytes = static_cast<size_t>(w) * h;
+            void* preview = operator_new(bytes);
+            if (preview != nullptr) {
+                std::memset(preview, 0, bytes);
+                resdata.save_pixels = preview;
+            }
+        }
+    }
+#endif
+    if (RESMGR_LoadResourceData(&resdata, path_buf) == 0) {
+        RESMGR_ReleaseResource(&resdata);
+        return 0;
+    }
+
+#ifndef _WIN32
+    /* Host: write the recovered records (collection placement gated). */
+    for (const loco::host::EntityRecord& record : doc.entities) {
+        RESMGR_WriteSaveRecord(&resdata, &record);       /* 0x447F50 */
+    }
+    for (const loco::host::VehicleRecord& record : doc.vehicles) {
+        RESMGR_WriteTableRecord(&resdata, &record);      /* 0x447F80 */
+    }
+#else
+    /* Original: enumerate the collection (members with +0xC0 == 1) and
+     * the level-table entries (0x4A98B8..0x4A98C8). */
+    const int32_t count = self->ListGetCount();
+    for (int32_t i = 0; i < count; i++) {
+        Entity* entity = self->ListGetItem(i);
+        if (entity == nullptr || as_tilemap_object(entity)->is_moving != 1) {
+            continue;
+        }
+        EntityRecord record;
+        std::memset(&record, 0, sizeof(record));   /* rep stosd 0x20 */
+        /* Original field reads (0x41DB3D..0x41DB91): the 16-bit resource
+         * id from entity->resource(+0x40)->+0x04 goes to record+0x00; the
+         * FULL dword at entity+0x88 goes to record+0x02 (x = low 16,
+         * y = high 16 — the writer never stores y separately); entity+0x28
+         * (dword) -> record+0x08 (anim_state); entity+0xBC (dword) ->
+         * record+0x0C (dest); entity+0x7C name -> record+0x10. */
+        if (entity->resource != nullptr) {
+            record.resource_id = *reinterpret_cast<uint16_t*>(
+                static_cast<uint8_t*>(entity->resource) + 0x04);
+        }
+        const uint32_t pos = field_at<uint32_t>(entity, 0x88);
+        record.x = static_cast<uint16_t>(pos);
+        record.y = static_cast<uint16_t>(pos >> 16);
+        record.anim_state = field_at<uint32_t>(entity, 0x28);
+        record.dest = field_at<uint32_t>(entity, 0xBC);
+        std::strncpy(record.name, entity->name, sizeof(record.name));
+        /* 5 child slots at +0x90 (occupied pointers): resource id from
+         * child->resource(+0x40)->+0x04, value from child->+0x94, name
+         * from child->+0x7C (0x41DB93..0x41DBE1). */
+        for (int c = 0; c < 5; c++) {
+            void* child = field_at<void*>(entity, 0x90 + c * sizeof(void*));
+            if (child == nullptr) {
+                continue;
+            }
+            void* resource = field_at<void*>(child, 0x40);
+            if (resource != nullptr) {
+                record.children[c].resource_id = *reinterpret_cast<uint16_t*>(
+                    static_cast<uint8_t*>(resource) + 0x04);
+            }
+            record.children[c].value = field_at<uint32_t>(child, 0x94);
+            std::strncpy(record.children[c].name,
+                         field_at<const char*>(child, 0x7C),
+                         sizeof(record.children[c].name));
+        }
+        RESMGR_WriteSaveRecord(&resdata, &record);
+    }
+    /* Level-table entries 0x4A98B8..0x4A98C8 (4 slots).  The original
+     * (0x41DC10..0x41DCAA) writes, for each non-null entry object, a
+     * 0x2C vehicle record: the 4 sub-slots at obj+0x10..0x1C each
+     * contribute their resource id (sub-slot->resource(+0x40)->+0x04,
+     * 16-bit) to record+0x00..0x0C and their +0x42C dword to
+     * record+0x10..0x1C; the name is a strlen+1 copy of
+     * *(obj+0x20)->+0x7C into record+0x20 (0x41DC78..0x41DC9C). */
+    for (int32_t* entry = DAT_004a98b8; entry < DAT_004a98b8 + 4; entry++) {
+        if (*entry == 0) {
+            continue;
+        }
+        VehicleRecord record;
+        std::memset(&record, 0, sizeof(record));   /* rep stosd 0x0B */
+        void* obj = reinterpret_cast<void*>(*entry);
+        for (int slot_index = 0; slot_index < 4; slot_index++) {
+            void* slot = field_at<void*>(obj, 0x10 + slot_index * sizeof(void*));
+            if (slot == nullptr) {
+                continue;
+            }
+            void* resource = field_at<void*>(slot, 0x40);
+            if (resource != nullptr) {
+                *reinterpret_cast<uint32_t*>(
+                    reinterpret_cast<uint8_t*>(&record) + slot_index * 4) =
+                    *reinterpret_cast<uint16_t*>(
+                        static_cast<uint8_t*>(resource) + 0x04);
+            }
+            *reinterpret_cast<uint32_t*>(
+                reinterpret_cast<uint8_t*>(&record) + 0x10 + slot_index * 4) =
+                field_at<uint32_t>(slot, 0x42C);
+        }
+        void* name_owner = field_at<void*>(obj, 0x20);
+        std::strncpy(record.name,
+                     field_at<const char*>(name_owner, 0x7C),
+                     sizeof(record.name));
+        RESMGR_WriteTableRecord(&resdata, &record);
+    }
+#endif
+
+    /* "curr" marker: record the save path in the current-save global. */
+#ifndef _WIN32
+    const char* curr_marker = "curr";
+#else
+    const char* curr_marker = "~curr";
+#endif
+    if (std::strstr(name, curr_marker) != nullptr) {
+        std::snprintf(g_current_save_path, sizeof(g_current_save_path), "%s", name);
+    }
+
+    /* Finalize: RemoveResource + ReleaseResource, return 1 (0x41DCC5..
+     * 0x41DD21 — the binary leaves AL = 1 after the same tail). */
+    RESMGR_RemoveResource(&resdata);
+    RESMGR_ReleaseResource(&resdata);
+    return 1;
+}
+
+/* ================================================================== */
+/* INPUT_RemoveObject (editor-only, deferred; loud)                   */
+/* Address: 0x41DEF0                                                   */
+/*                                                                      */
+/* The editor placement helper is not on the load/save path; it stays  */
+/* a loud deferred stub until the editor milestone.                   */
+/* ================================================================== */
 
 uintptr_t INPUT_RemoveObject(InputMgr* self, void* obj, unsigned int param) /* 0x41DEF0 */
 {
     (void)self;
     (void)obj;
     (void)param;
-    inputmgr_deferred("INPUT_RemoveObject", 0x41DEF0);
-}
-
-void* INPUT_FindObjectAt(InputMgr* self, int mode)   /* 0x41E1F0 */
-{
-    (void)self;
-    (void)mode;
-    inputmgr_deferred("INPUT_FindObjectAt", 0x41E1F0);
+    std::fprintf(stderr,
+        "[InputMgr] INPUT_RemoveObject (0x41DEF0) is a deferred stub: "
+        "editor-only, not on the load/save path\n");
+    std::fflush(stderr);
+    std::abort();
 }
 
 /* ================================================================== */

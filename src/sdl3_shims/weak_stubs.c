@@ -131,7 +131,6 @@ void __attribute__((weak)) RESMGR_AllocResourceEntry(ResourceEntry*, int, int)()
 void __attribute__((weak)) RESMGR_GetById(void*, unsigned int)() {}
 void __attribute__((weak)) RESMGR_LoadSoundResource() {}
 void __attribute__((weak)) RESMGR_ReleaseSoundResource() {}
-void __attribute__((weak)) RESMGR_RemoveResource(RESDATA*)() {}
 void __attribute__((weak)) ResourceManager_GetById() {}
 void __attribute__((weak)) ResourceManager_GetStringById(void*, unsigned int)() {}
 void __attribute__((weak)) ResourceManager_Init(void*)() {}

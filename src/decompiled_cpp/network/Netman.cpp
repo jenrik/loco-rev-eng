@@ -826,11 +826,13 @@ int32_t Netman::CheckTrackConnection(int32_t angle, int32_t position)
     return 0;
 }
 
-/* 15-18. Edge wrappers */
-void Netman::CheckRightEdge() { this->CheckTrackConnection(0x5A, -1); }
-void Netman::CheckLeftEdge()  { this->CheckTrackConnection(0x10E, -1); }
-void Netman::CheckUpEdge()    { this->CheckTrackConnection(0, -1); }
-void Netman::CheckDownEdge()  { this->CheckTrackConnection(0xB4, -1); }
+/* 15-18. Edge wrappers — the binary leaves CheckTrackConnection's
+ * return in AL (0x43DE10: push -1; push 0; call 0x43DE30; ret), so the
+ * wrappers return the edge-check result (INPUT_LoadWorld tests it). */
+int32_t Netman::CheckRightEdge() { return this->CheckTrackConnection(0x5A, -1); }
+int32_t Netman::CheckLeftEdge()  { return this->CheckTrackConnection(0x10E, -1); }
+int32_t Netman::CheckUpEdge()    { return this->CheckTrackConnection(0, -1); }
+int32_t Netman::CheckDownEdge()  { return this->CheckTrackConnection(0xB4, -1); }
 
 /* ================================================================== */
 /* 20. SendPlayerName - 0x43DED0                                      */

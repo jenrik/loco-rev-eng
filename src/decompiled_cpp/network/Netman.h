@@ -396,26 +396,29 @@ public:
     /**
      * CheckLeftEdge — Wrapper: check angle 0x10E (left)
      * Address: 0x43DE00
-     */
-    void CheckLeftEdge();
+     *
+     * The binary leaves CheckTrackConnection's return in AL (0x43DE10:
+     * push -1; push 0; call 0x43DE30; ret), so the wrappers return the
+     * edge-check result.  INPUT_LoadWorld (0x41D3FC..) tests it. */
+    int32_t CheckLeftEdge();
 
     /**
      * CheckUpEdge — Wrapper: check angle 0 (up)
      * Address: 0x43DE10
      */
-    void CheckUpEdge();
+    int32_t CheckUpEdge();
 
     /**
      * CheckDownEdge — Wrapper: check angle 0xB4 (down)
      * Address: 0x43DE20
      */
-    void CheckDownEdge();
+    int32_t CheckDownEdge();
 
     /**
      * CheckRightEdge — Wrapper: check angle 0x5A (right)
      * Address: 0x43DDF0
      */
-    void CheckRightEdge();
+    int32_t CheckRightEdge();
 
     /* ================================================================ */
     /* Player Name Send/Receive (periodic presence broadcast)            */
@@ -850,7 +853,10 @@ extern "C" {
     int32_t __stdcall MessageBoxA(void* hWnd, const char* lpText,
                                    const char* lpCaption, uint32_t uType);
     void    __stdcall OutputDebugStringA(const char* lpOutputString);
-    int32_t __stdcall Sleep(uint32_t dwMilliseconds);
+    /* void (matches tilemap.h's extern void Sleep(uint32_t) — InputMgr.cpp
+     * includes both headers, and the Win32 Sleep return value is never
+     * used; tilemap.cpp calls it without checking a result). */
+    void    __stdcall Sleep(uint32_t dwMilliseconds);
 }
 
 /* ================================================================== */
@@ -859,12 +865,15 @@ extern "C" {
 /* ================================================================== */
 
 /* -- Globals -- */
+class TileMap;   /* forward decl for g_tilemap below (tilemap.h) */
 extern int32_t  g_game_mode;          /* 0x4851F4 — global game mode   */
 extern char     g_install_path[];     /* 0x4A99C8 — installation path  */
-extern uint16_t g_player_id;          /* 0x4AAD46 — global player ID   */
-extern uint16_t g_player_color;       /* 0x4AAD48 — global player color*/
-extern void*    g_tilemap;            /* 0x4AAD08 — tilemap object     */
-extern AssetMgr* g_asset_mgr;          /* 0x485600 — asset manager ptr  */
+extern int32_t  g_player_id;          /* 0x4AAD46 — global player ID   */
+extern int32_t  g_player_color;       /* 0x4AAD48 — host-declared 32-bit for
+                                          *   uniformity (16-bit storage + 16-bit
+                                          *   loads in the binary) */
+extern TileMap* g_tilemap;            /* 0x4AAD08 — tilemap object     */
+extern void*    g_asset_mgr;          /* 0x485600 — asset manager ptr  */
 extern void*    g_net_host_info;      /* 0x4FD3A8 — net host info struct */
 extern void*    g_ui_main;            /* 0x4A8860 — main UI window ptr */
 extern void*    g_listener_x;         /* 0x486BBC — listener position x */
@@ -912,8 +921,13 @@ void  UIPANEL_EndPaint(void* panel);
 void  UI_MainMenu_SetState(void* ui_main, int32_t state);
 
 /* -- Audio -- */
-void    PlaySound(int32_t soundId);
-void    PlaySoundAt(int32_t soundId, int32_t x, int32_t y, int32_t flags);
+/* Canonical signature (ResourceManager.h, 0x447930).  The old int32_t
+ * forms hijacked overload resolution in TUs including both headers,
+ * binding calls to the never-defined _Z9PlaySoundi /
+ * _Z11PlaySoundAtiiii instead of the real _Z9PlaySoundj (runtime
+ * crash with the ignore-all link). */
+void    PlaySound(unsigned int soundId);
+void    PlaySoundAt(unsigned int soundId, int32_t x, int32_t y, int32_t flags);
 int32_t PlaySoundFile(const char* path, void* x, void* y, int32_t flags);
 
 /* -- Network helpers -- */

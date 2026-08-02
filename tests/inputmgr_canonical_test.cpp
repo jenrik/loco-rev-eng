@@ -26,39 +26,20 @@
  *   5. DtorBody (0x41D2D0) frees the buffer and resets count/capacity
  *
  * The link is honest: NO --unresolved-symbols=ignore-all.  Every symbol
- * InputMgr.o references is either provided below (g_game, operator_new,
- * GLOBAL_free, Game::DeselectGameObject as a fail-loud fixture) or comes
- * from the C/C++ runtime (operator delete, libc, libstdc++).  If a future
- * change makes InputMgr.o reference anything else, this test will fail to
- * link instead of silently resolving to zero.
+ * InputMgr.o references is either provided by persistence_fixtures.h
+ * (canonical globals + fail-loud fixtures for the gated host paths) or
+ * comes from the C/C++ runtime.  If a future change makes InputMgr.o
+ * reference anything else, this test will fail to link instead of
+ * silently resolving to zero.
  */
 #include "input/InputMgr.h"
-#include "core/Game.h"     /* Game::DeselectGameObject fixture */
-#include "core/Entity.h"   /* Entity element type of the collection */
+#include "persistence_fixtures.h"   /* canonical globals + fail-loud fixtures */
+#include "core/Game.h"              /* Game::DeselectGameObject fixture */
+#include "core/Entity.h"            /* Entity element type of the collection */
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
-/* ---- Minimal globals the exercised InputMgr paths touch ---- */
-void* operator_new(size_t size) { return std::malloc(size); }
-void  GLOBAL_free(void* ptr) { std::free(ptr); }
-void* g_game = nullptr;   /* host: BootstrapMode3Core constructs this later */
-/* INPUT_DirToOffset_* (0x41D8F0..0x41D980) read these 16-bit globals. */
-int32_t g_player_id = 0;     /* 0x4AAD46 */
-int32_t g_player_color = 0;  /* 0x4AAD48 */
-
-/* ---- Test fixture: Game::DeselectGameObject (0x411580) ----
- * The exercised paths never reach it (g_game == nullptr), so a fail-loud
- * body proves ResetWorldState's guard is doing its job: if a future change
- * makes the guard unconditional (or the test sets g_game), this fires. */
-void Game::DeselectGameObject()
-{
-    std::fprintf(stderr,
-        "FAIL: Game::DeselectGameObject reached (g_game must stay null in "
-        "this test)\n");
-    std::abort();
-}
 
 static int failures = 0;
 

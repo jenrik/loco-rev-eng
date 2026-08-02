@@ -56,8 +56,7 @@ void UIPANEL_StretchBlit(void*, char const*, int, int, int) {}
 /* FormatResourceString — Address: referenced from UI_WindowBase ctor */
 void FormatResourceString(void*, unsigned int, char*, unsigned int) {}
 
-/* RESMGR_RemoveResource */
-void RESMGR_RemoveResource(RESDATA*) {}
+/* RESMGR_RemoveResource is real code in resources/ResDataSave.cpp */
 
 /* GameAudio_UpdateVolume — two overloads, Address: 0x4135B0 */
 void GameAudio_UpdateVolume(void*, char) {}

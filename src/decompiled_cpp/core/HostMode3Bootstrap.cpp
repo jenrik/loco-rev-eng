@@ -23,6 +23,8 @@
 
 #ifndef _WIN32
 
+#include "../input/InputMgr.h"
+#include "../input/PersistenceAdapter.h"
 #include "../core/Game.h"
 #include "../core/CGWND.h"
 #include "../game/World.h"
@@ -30,7 +32,6 @@
 #include "../world/scriptengine.h"
 #include "../world/tilemap.h"
 #include "../audio/GameAudio.h"
-#include "../input/InputMgr.h"
 
 #include <cstdio>
 #include <cstring>
@@ -214,17 +215,34 @@ void RunPendingAsyncTask()
 /* Original: init Game state, load/create the world, init TileMap/      */
 /* ScriptedObject/DDRAW building/town, then wait for mode 1 to change.  */
 /* Host: the cone is constructed in BootstrapMode3Core (g_input_mgr is  */
-/* the typed static object); the world-file load (INPUT_NewWorld /      */
-/* INPUT_LoadWorld) is deferred until the .loco save parsing milestone   */
-/* — the INPUT_* world new/load/save stubs in InputMgr.cpp log and      */
-/* abort rather than silently succeeding.  Finishes by entering mode 3.  */
+/* the typed static object).  A fresh single-player world is started    */
+/* through the real INPUT_NewWorld (0x41E120), seeded from a shipped    */
+/* scenario fixture and persisted to "curr" via INPUT_SaveCurrentWorld  */
+/* (0x41D9B0) — see loco::host::seed_fresh_world_from_fixture (the      */
+/* typed PersistenceAdapter; the record-set model and its explicit      */
+/* placement limitation are documented in PersistenceAdapter.h).        */
 /* ================================================================== */
 void HostLoadingSequence(void* /*param*/)
 {
-    std::fprintf(stderr,
-        "[HOST] LoadingSequence: world-file load deferred (InputMgr/.loco "
-        "parsing not yet host-wired); entering mode 3 with an empty world\n");
-    std::fflush(stderr);
+    /* A fresh single-player host world: INPUT_NewWorld (real game init),
+     * then seed the typed record set from a shipped fixture and persist
+     * it to "curr" through the real save machinery.  INPUT_LoadWorld is
+     * the global declared by InputMgr.h — no local extern here: a block
+     * extern inside namespace loco::host would declare the undefined
+     * loco::host::INPUT_LoadWorld instead. */
+    bool seeded = loco::host::seed_fresh_world_from_fixture(&g_input_mgr);
+
+    /* The host then loads "curr" back through the real INPUT_LoadWorld
+     * (0x41D320) so the persisted world is the one the mode-3 loop
+     * operates on. */
+    if (seeded) {
+        char loaded = INPUT_LoadWorld(&g_input_mgr, "curr");
+        std::fprintf(stderr,
+            "[HOST] LoadingSequence: fresh world seeded + persisted to "
+            "curr (load-back result %d); entering mode 3\n",
+            static_cast<int>(loaded));
+        std::fflush(stderr);
+    }
 
     CGWND_SetMode(3);
 }

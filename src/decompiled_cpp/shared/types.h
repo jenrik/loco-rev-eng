@@ -11,6 +11,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 /* Prevent stubs/windows.h from redefining types already declared here */
 #define LOCO_TYPES_DEFINED
@@ -192,11 +193,43 @@ struct FrameData {
 /*                                                                     */
 /* WARNING: This struct serves dual purposes:                           */
 /*  - Sprite metadata mode (+0x04..+0x34): frame/animation fields      */
-/*  - Save/load buffer mode (+0x04..+0xAF): entity+vehicle buffers     */
-/*    (accessed via ResourceManager.cpp which #undefs RESDATA_DEFINED  */
-/*     and provides its own layout with entity_buffer, vehicle_buffer,  */
-/*     pixels, primary_stream, etc. at documented offsets.)            */
+/*  - Save/load buffer mode:                                           */
+/*      entity record buffer  at +0x04 (RESMGR_LockResource, 0x447DB0) */
+/*      vehicle record buffer at +0x84 (RESMGR_UnlockResource, 0x447DF0)*/
+/*      save header region    at +0xB0 (SaveRegion, 0x114 bytes)       */
+/*      pixels/streams        at +0x1C4..+0x1D7                        */
 /* ================================================================== */
+
+/* ================================================================== */
+/* SaveRegion — the 0x114-byte .loco save header (file bytes +0x00..)  */
+/*                                                                      */
+/* Overlaid at RESDATA + 0xB0: RESMGR_LoadResource (0x447BA0) reads    */
+/* exactly 0x114 file bytes there, and RESMGR_LoadResourceData         */
+/* (0x447E30) writes the same region back out.  Field names follow the */
+/* file layout (evidence: shipped art-res/SAVEGAME saves and ~curr):   */
+/*   +0x00 uint16 type          — always 8 (RESMGR_IsSaveHeader)       */
+/*   +0x02 uint16 player_id     — INPUT_SaveCurrentWorld writes        */
+/*                                g_player_id; designer saves store the */
+/*                                preview width/16 there instead       */
+/*   +0x04 uint16 player_color  — same dual use (preview height/16)    */
+/*   +0x06 uint16 pad           — always 0 in shipped saves            */
+/*   +0x08 uint32 entity_count  — number of 0x80-byte entity records   */
+/*   +0x0C uint16 vehicle_count — number of 0x2C-byte vehicle records  */
+/*   +0x0E char  name[0x106]    — backdrop/save name ("BACKDROP" in    */
+/*                                ~curr; INPUT_SaveCurrentWorld writes */
+/*                                the empty BSS string at 0x4AA9FD)    */
+/* ================================================================== */
+struct SaveRegion {
+    uint16_t type;              /* +0x00 */
+    uint16_t player_id;         /* +0x02 */
+    uint16_t player_color;      /* +0x04 */
+    uint16_t pad_06;            /* +0x06 */
+    uint32_t entity_count;      /* +0x08 */
+    uint16_t vehicle_count;     /* +0x0C */
+    char     name[0x106];       /* +0x0E */
+};
+static_assert(sizeof(SaveRegion) == 0x114, "SaveRegion must be exactly 0x114 bytes");
+
 struct RESDATA {
     void     *vtable;           /* +0x00  vtable[1]=Lock/GetSurface         */
     int32_t   resource_id;      /* +0x04  numeric resource ID               */
@@ -214,30 +247,49 @@ struct RESDATA {
     uint8_t   _pad_24[14];      /* +0x24..+0x31  padding                    */
     int16_t   offset_x;         /* +0x32  world X offset (added in SetPos)  */
     int16_t   offset_y;         /* +0x34  world Y offset                    */
-    /* +0x36..+0x163: unknown fields — padding to reach default_delay     */
-    /* Fields below carved out of this padding range; exact offsets TBD,  */
-    /* consumers reference them by name only (see TrackPiece.cpp).        */
-    uint16_t  frame_count;       /* +0x?? total frame count (entity_buffer +0x28) */
-    uint16_t  frame_w;           /* +0x?? frame width (entity_buffer +0x24) */
-    uint16_t  frame_h;           /* +0x?? frame height (entity_buffer +0x26) */
-    int16_t   world_x;           /* +0x?? world X (entity_buffer +0x2a)     */
-    int16_t   world_y;           /* +0x?? world Y (entity_buffer +0x2c)     */
-    uint8_t   entity_buffer[0x24]; /* +0x?? raw entity save/load buffer     */
-    uint8_t   _pad_36[0x100];   /* +0x36..+0x163 (reduced by fields above)  */
-    uint32_t  default_delay;    /* +0x164 timing/delay copied to GameObject */
-    /* +0x168..+0x1C3: padding — resource manager save/load fields        */
-    uint8_t   _pad_168[0x5C];   /* +0x168..+0x1C3                           */
-    /* The following fields are documented for ResourceManager save/load
-     * operations. They live at +0x1C4..+0x1D7 in the full 0x1D8-byte
-     * layout. ResourceManager.cpp #undefs RESDATA_DEFINED and provides
-     * its own definition with these fields at the correct offsets.       */
-    /* +0x1C4: pixels (void*)                                              */
-    /* +0x1C8: primary_stream (void*)                                      */
-    /* +0x1CC: secondary_stream (void*)                                    */
-    /* +0x1D0: asset_data (void*)                                          */
-    /* +0x1D4: asset_size (int32_t)                                        */
-    uint8_t   _pad_1C4[0x14];   /* +0x1C4..+0x1D7                           */
+    /* +0x36..+0x163: unknown fields — padding to reach the save region.  */
+    /* Fields below are the legacy carved names TrackPiece.cpp reads      */
+    /* (offsets preserved from the pre-save-region layout; the Ghidra     */
+    /* comments reference the record-buffer view at +0x04 + 0x24..0x30).  */
+    uint16_t  frame_count;       /* +0x36 total frame count (entity_buffer +0x28) */
+    uint16_t  frame_w;           /* +0x38 frame width (entity_buffer +0x24) */
+    uint16_t  frame_h;           /* +0x3A frame height (entity_buffer +0x26) */
+    int16_t   world_x;           /* +0x3C world X (entity_buffer +0x2a)     */
+    int16_t   world_y;           /* +0x3E world Y (entity_buffer +0x2c)     */
+    uint8_t   entity_buffer[0x24]; /* +0x40 raw entity save/load buffer     */
+    uint8_t   _pad_64[0x4C];    /* +0x64..+0xAF                           */
+
+    /* ---- Resource-manager save/load region (+0xB0..+0x1D7) ---------- */
+    /* The entity/vehicle record buffers at +0x04/+0x84 live in the      */
+    /* sprite-metadata padding above; RESMGR_LockResource (0x447DB0)     */
+    /* reads 0x80 bytes into +0x04 and RESMGR_UnlockResource (0x447DF0)  */
+    /* reads 0x2C bytes into +0x84.                                     */
+    SaveRegion save;            /* +0xB0..+0x1C3  (0x114 bytes)           */
+    void*     save_pixels;      /* +0x1C4  preview pixel buffer           */
+    void*     primary_stream;   /* +0x1C8  entity/vehicle record stream   */
+    void*     secondary_stream; /* +0x1CC  output stream (save writing)   */
+    void*     asset_data;       /* +0x1D0  AssetMgr_LoadFile result       */
+    int32_t   asset_size;       /* +0x1D4  asset_data byte count          */
+    /* +0x1D8..0x1DB: tail — sizeof(RESDATA) is exactly 0x1D8 (i686).   */
 };
+/* x86-layout assertions only — the shared struct carries native-width
+ * pointers (vtable/anim_table), so 64-bit hosts have different sizes.
+ * The save region itself (SaveRegion) is pure LE uint16/32 + char, so
+ * its own size assertion is unconditional. */
+#if UINTPTR_MAX == 0xffffffffu
+static_assert(sizeof(RESDATA) == 0x1D8, "RESDATA size mismatch (expected 0x1D8)");
+static_assert(offsetof(RESDATA, save) == 0xB0, "RESDATA save region offset mismatch");
+static_assert(offsetof(RESDATA, save_pixels) == 0x1C4,
+              "RESDATA save_pixels offset mismatch");
+static_assert(offsetof(RESDATA, primary_stream) == 0x1C8,
+              "RESDATA primary_stream offset mismatch");
+static_assert(offsetof(RESDATA, secondary_stream) == 0x1CC,
+              "RESDATA secondary_stream offset mismatch");
+static_assert(offsetof(RESDATA, asset_data) == 0x1D0,
+              "RESDATA asset_data offset mismatch");
+static_assert(offsetof(RESDATA, asset_size) == 0x1D4,
+              "RESDATA asset_size offset mismatch");
+#endif
 #endif /* RESDATA_DEFINED */
 
 /* ================================================================== */

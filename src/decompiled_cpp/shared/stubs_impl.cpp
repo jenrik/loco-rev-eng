@@ -55,6 +55,13 @@ uint32_t g_game_time = 0;
 int32_t  g_game_mode = 0;  /* 0x4851F4: dword, read/written by CGWND_SetMode */
 char     g_empty_string = 0;
 char     g_install_path[256] = ".";
+char     g_current_save_path[0x108] = "";  /* 0x4AA8F8 — current save name */
+/* g_sound_cache — 0x49161C, indexed by sound ID (PlaySound 0x447930
+ * bounds-checks to 0x5000..0x605F; sized to 0x6060 so the direct
+ * g_sound_cache[soundId] read is always in bounds).  The old
+ * link_stubs.cpp definition was a single void* — an OOB read for every
+ * sound ID. */
+int32_t  g_sound_cache[0x6060] = {0};
 void*    g_main_window = nullptr;
 void*    g_building_mgr = nullptr;
 void*    g_resmgr = nullptr;
@@ -180,6 +187,11 @@ int g_drag_start_x = 0;
 int g_drag_start_y = 0;
 int g_town_mode = 0;
 int g_player_id = 0;
+int32_t g_player_color = 0;   /* 0x4AAD48 — host-declared 32-bit for uniformity;
+                               *   the binary stores the 16-bit player words
+                               *   adjacently (id 0x4AAD46 / color 0x4AAD48) and
+                               *   every use loads 16 bits (was void* in
+                               *   defsym_stubs.cpp) */
 int32_t g_demo_mode = 0;
 uint8_t g_ddraw_active = 1;
 uint8_t g_disable_input = 0;
@@ -238,11 +250,8 @@ void DDRAW_SpriteDataCtor(void*, int) {}
 void DDRAW_SpriteDataDtor(void*) {}
 void DDRAW_SelectBuilding(void*, int) {}
 
-/* RESOURCE stubs */
-void RESMGR_IsSaveHeader(void*) {}
-void RESMGR_LoadResource(void*, void*) {}
-void RESMGR_ReleaseResource(void*) {}
-void RESMGR_ResourceData_Init(void*) {}
+/* RESOURCE stubs (RESMGR_IsSaveHeader/LoadResource/ReleaseResource/
+ * ResourceData_Init are real code in resources/ResDataSave.cpp) */
 void RESDATA_SetPosition(void*, int, int) {}
 void RESDATA_BaseInit(void*) {}
 void RESDATA_DtorBase(void*) {}

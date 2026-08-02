@@ -828,7 +828,6 @@ BOOL ResourceManager::LoadStringTable(UINT startId, int32_t endId)
     }
 
     int32_t id = static_cast<int32_t>(startId);
-    int32_t idTimes4 = static_cast<int32_t>(startId) * 4;  /* pre-multiplied offset */
 
     if (id > endId) {
         return (id == endId + 1) ? 1 : 0;
@@ -854,12 +853,19 @@ BOOL ResourceManager::LoadStringTable(UINT startId, int32_t endId)
         void* hInstance = GetModuleHandleA(nullptr);
         int32_t result = LoadStringA(hInstance, adjustedId, stringBuf, 0x104);
 
+        /* The original stores the loaded string resource at
+         * this + 0xC034 + id*4 (0x446E02/0x446E2C); the C++ model's
+         * string_cache sits at +0x20034 = 0xC034 + 0x5000*4, so the
+         * index is (id - STRING_ID_MIN).  (The old string_cache[id]
+         * indexing wrote out of bounds for every sound ID.) */
+        const int32_t cache_index = id - STRING_ID_MIN;
+
         if (adjustedId == static_cast<uint32_t>(id)) {
             /* No language offset — direct load */
             if (result == 0) {
-                this->string_cache[idTimes4/4] = -1;
+                this->string_cache[cache_index] = -1;
             } else {
-                this->string_cache[idTimes4 / 4] =
+                this->string_cache[cache_index] =
                     create_string_resource(id, stringBuf);
             }
         } else {
@@ -870,20 +876,19 @@ BOOL ResourceManager::LoadStringTable(UINT startId, int32_t endId)
                 result = LoadStringA(hInstance, static_cast<UINT>(id), stringBuf, 0x104);
 
                 if (result == 0) {
-                    this->string_cache[idTimes4/4] = -1;
+                    this->string_cache[cache_index] = -1;
                 } else {
-                    this->string_cache[idTimes4 / 4] =
+                    this->string_cache[cache_index] =
                         create_string_resource(id, stringBuf);
                 }
             } else {
                 /* Translation loaded successfully */
-                this->string_cache[idTimes4 / 4] =
+                this->string_cache[cache_index] =
                     create_string_resource(id, stringBuf);
             }
         }
 
         id++;
-        idTimes4 += 4;
     }
 
     return (id == endId + 1) ? 1 : 0;
@@ -1353,25 +1358,9 @@ check_audio:
 /* Address: 0x447B60                                                   */
 /* ================================================================== */
 /* The original slot is emitted by the MSVC destructor machinery. The
- * user cleanup is performed by RESMGR_RemoveResource below; no free
- * function or literal vtable write is needed in the C++ reconstruction. */
-
-/* ================================================================== */
-/* RESMGR_ResourceData_Init                                            */
-/* Address: 0x447B20                                                   */
-/* ================================================================== */
-void RESMGR_ResourceData_Init(RESDATA* resdata)
-{
-    /* Save/load fields accessed via offset (not in the sprite-metadata RESDATA layout) */
-    field_at<void*>(resdata, 0x1C4) = nullptr;   /* pixels          */
-    field_at<void*>(resdata, 0x1C8) = nullptr;   /* primary_stream  */
-    field_at<void*>(resdata, 0x1CC) = nullptr;   /* secondary_stream*/
-    field_at<void*>(resdata, 0x1D0) = nullptr;   /* asset_data      */
-    field_at<int32_t>(resdata, 0x1D4) = 0;       /* asset_size      */
-    field_at<uint16_t>(resdata, 0xB0) = 0;       /* resource_type   */
-    field_at<uint16_t>(resdata, 0xB2) = 0;       /* height          */
-    field_at<uint16_t>(resdata, 0xB4) = 0;       /* width           */
-}
+ * user cleanup is performed by RESMGR_RemoveResource; no free function
+ * or literal vtable write is needed in the C++ reconstruction.  The
+ * save/load primitives themselves live in resources/ResDataSave.cpp. */
 
 /** SoundObject::SoundObject — compiler-managed construction body
  * Address: 0x448F30 */

@@ -178,7 +178,6 @@ void Sprite_UnlockAll(int32_t){}
 void RESMGR_PlaySound(int32_t){}
 void RESMGR_GetResourceType(void*,uint32_t){}
 void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t){}
-void RESMGR_RemoveResource(RESDATA*){}
 void RESMGR_SelectScreensaver(char*){}
 void ResourceManager_GetStringById(void*,uint32_t){}
 void Train_QueueMessage(void*,void*){}
@@ -493,7 +492,7 @@ struct IDirectDrawSurface4_C {
 extern "C" {
 void* g_object_count = nullptr; void* g_cursor_back = nullptr; int32_t g_cursor_refcount = 0;
 void* g_font_normal = nullptr; int32_t g_is_fullscreen = 0; void* g_primary_surface = nullptr;
-void* g_sound_cache = nullptr; int32_t g_surface_bpp = 0; int32_t g_surface_bshift = 0;
+int32_t g_surface_bpp = 0; int32_t g_surface_bshift = 0;
 int32_t g_surface_channel1 = 0; int32_t g_surface_channel2 = 0; int32_t g_surface_lost = 0;
 int32_t g_pixel_format_mask = 0; int32_t g_viewport_rect_left = 0; int32_t g_viewport_rect_top = 0;
 int32_t g_viewport_rect_right = 800; int32_t g_viewport_rect_bottom = 600;

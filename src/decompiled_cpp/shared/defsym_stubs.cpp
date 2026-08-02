@@ -103,7 +103,6 @@ void* g_clipper_surf = nullptr;
 void* _g_cursor_back = nullptr;
 int32_t _g_cursor_refcount = 0;
 void* g_net_host_info = nullptr;
-void* g_player_color = nullptr;
 void* _g_primary_surface = nullptr;
 void* g_remote_res_path = nullptr;
 void* s_Configuration_0047e734 = nullptr;
@@ -124,8 +123,6 @@ void NET_UploadAsset() {}
 void PlaySoundFile() {}
 void TileMap_CreateOverlay() {}
 void FMT_LAYOUT_PATH() {}
-void RESMGR_ResourceData_Init() {}
-void RESMGR_LoadResource() {}
 void GAMESTATE_StartGameTimer() {}
 void* _g_netman = nullptr;
 } /* extern "C" */
@@ -136,7 +133,6 @@ void* STR_LEGO_LOCO = nullptr;
 void CGWND_QuitToMenu() {}
 void* MessageBeep = nullptr;
 void IsWindowVisible() {}
-void* RESMGR_ReleaseResource = nullptr;
 void* World_FinalizeLoad = nullptr;
 void* World_GetObjectAt = nullptr;
 void* GAMESTATE_SelectLayout = nullptr;

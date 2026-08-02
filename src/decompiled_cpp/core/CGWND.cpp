@@ -211,7 +211,8 @@ extern void*    g_async_task_queue;     /* 0x4A9AD0 */
 extern void*    g_tooltip_mgr;          /* 0x4FD220 */
 extern "C" void UI_ProcessObjectTimers(void);         /* 0x420000, __cdecl */
 extern "C" void Game_DispatchCursorFeedback(void* game);  /* 0x411760, __cdecl */
-extern void*    g_tilemap;              /* 0x4AAD08 */
+class TileMap;
+extern TileMap*   g_tilemap;              /* 0x4AAD08 */
 extern void*    g_building_mgr;         /* 0x485448 */
 extern World*   g_world;                /* 0x4A98B0 */
 extern uint8_t  g_in_build_mode;
@@ -755,8 +756,9 @@ void CGWND_EnterMode3(int old_mode)
     extern void  NETMAN_SendMapData(void* net, int flags);    /* 0x43D350 */
     /* TileMap_UpdateAll / TileMap_InvalidateRect bind to out-of-line
      * emissions of the tilemap.h inline wrappers (HostMode3Bootstrap.cpp);
-     * g_tilemap is the TileMap* singleton stored in the void* slot. */
-    class TileMap;
+     * g_tilemap is the TileMap* singleton (file-scope decl at line 214).
+     * (The old function-local `class TileMap;` was removed — it shadowed
+     * the file-scope declaration and broke static_cast below.) */
     extern void TileMap_UpdateAll(TileMap* tm);
     extern void TileMap_InvalidateRect(TileMap* tm, int left, int top,
                                        int right, int bottom);

@@ -82,7 +82,8 @@ extern Netman*    g_netman;                   /* 0x004FD3AC */
 extern void*      g_town_view;                /* 0x004852A0 */
 extern void*      g_ddraw_building;           /* 0x004A9EF0 */
 extern InputMgr  g_input_mgr;                /* 0x004A9990 — static InputMgr object (input/InputMgr.h) */
-extern void*      g_tilemap;                  /* 0x004AAD08 */
+class TileMap;
+extern TileMap*     g_tilemap;                  /* 0x004AAD08 */
 extern void*      g_tooltip_mgr;              /* 0x004FD220  UI/tooltip manager */
 extern uint8_t    g_click_on_town;            /* 0x0048557C */
 extern Entity*    g_selected_building;        /* binary slot 0x00485380 — never written in

@@ -125,7 +125,12 @@ int NET_FindPlayer(int, int);
 uint16_t NET_UploadAsset(int, char*);
 void WIN32_FatalError(void);
 void WIN32_PostQuit(void);
-void PlaySound(int);
+/* Canonical signature (ResourceManager.h, 0x447930).  The old `int`
+ * form hijacked overload resolution in TUs including both headers,
+ * binding calls to the never-defined _Z9PlaySoundi instead of the
+ * real _Z9PlaySoundj (undefined-symbol runtime crash with the
+ * ignore-all link). */
+void PlaySound(unsigned int);
 void INPUT_SwitchToLocomotiveTab(void*, int);
 void PlaySoundAt(int, int, int, int);
 void PlaySoundFile(char*, int, int, int);

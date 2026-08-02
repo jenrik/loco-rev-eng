@@ -583,7 +583,7 @@ void RESMGR_LoadCompressedResource();
  * Calling convention: __cdecl
  *
  * Reads [ScreenSaver] Layout/Random config. If Random!=0, enumerates
- * ScrSaver/*.sav files, picks one randomly via CRT_rand(), formats
+ * ScrSaver/"*.sav" files, picks one randomly via CRT_rand(), formats
  * as "ScrSaver\\<name>" into the output buffer.
  *
  * @param outPath  Output buffer for formatted path string
@@ -732,6 +732,17 @@ int32_t RESMGR_RemoveResource(RESDATA* resdata);
  * @return  true if resource_type == 8 (save header)
  */
 bool RESMGR_IsSaveHeader(RESDATA* resdata);
+
+/**
+ * host_stream_bytes_remaining — host-only helper (res/ResDataSave.cpp).
+ *
+ * Unread byte count left in a RESDATA primary/secondary save stream.
+ * INPUT_LoadSaveFile (0x41D5C0) uses it to validate the declared record
+ * layout before spinning its loops (host hardening; the original trusts
+ * the header).  Defined only under #ifndef _WIN32. */
+#ifndef _WIN32
+size_t host_stream_bytes_remaining(void* stream);
+#endif
 
 /* ================================================================== */
 /* ResourceEntry methods (operate on ResourceEntry struct)             */

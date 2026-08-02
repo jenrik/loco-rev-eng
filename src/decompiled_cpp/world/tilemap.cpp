@@ -71,7 +71,10 @@ extern int32_t  g_viewport_rect_right;   /* 0x4AAD1C */
 extern int32_t  g_viewport_rect_bottom;  /* 0x4AAD20 */
 extern uint8_t  g_allow_building_placement; /* 0x485328 */
 extern int32_t  g_player_id;             /* 0x4AAD46 (TileMap.tile_count_x) */
-extern uint8_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) */
+extern int32_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) —
+                                    *   host-declared 32-bit; the binary stores
+                                    *   the 16-bit player words adjacently and
+                                    *   loads 16 bits everywhere */
 extern void*    g_cursor_surface;        /* 0x4FD3C8 */
 extern void*    g_primary_surface;       /* 0x4FD3C4 */
 extern void*    g_tile_occupied_bitmap;  /* 0x4FD18C */

@@ -404,7 +404,11 @@ extern int32_t  g_player_id;            /* 0x4AAD46 (TileMap.tile_count_x) */
 extern int32_t  g_viewport_x;           /* 0x4AAD24 (TileMap.viewport_x) */
 extern uint8_t  g_lock_update_flag;     /* 0x4851F0 */
 extern uint8_t  g_allow_building_placement;  /* 0x485328 */
-extern uint8_t  g_player_color;
+extern int32_t  g_player_color;          /* 0x4AAD48 — host-declared 32-bit for
+                                          *   uniform declarations; the binary
+                                          *   stores the 16-bit player words
+                                          *   adjacently (id 0x4AAD46) and every
+                                          *   use loads 16 bits */
 extern HWND     g_main_window;          /* from types.h */
 
 /* ================================================================== */

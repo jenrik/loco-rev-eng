@@ -59,7 +59,8 @@ extern "C" {
  * view below aliases it. */
 extern Netman* g_netman;              /* 0x4FD3AC — Network manager */
 extern void*   g_main_window;         /* 0x4AA4A0 — Main CGWND window pointer */
-extern void*   g_tilemap;             /* 0x4AAD08 — Tile map pointer */
+class TileMap;
+extern TileMap*  g_tilemap;             /* 0x4AAD08 — Tile map pointer */
 extern int     g_viewport_rect_left;  /* 0x4AAD14 — Viewport left */
 extern int     g_viewport_rect_top;   /* 0x4AAD18 — Viewport top */
 extern int     g_viewport_rect_right; /* 0x4AAD1C — Viewport right */

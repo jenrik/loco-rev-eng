@@ -138,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -146,7 +146,7 @@ build: $(BINARY)
 
 # Deterministic component and host-boundary suite. GUI interaction is kept in
 # test-integration so agents can run the fast layer independently when needed.
-test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical \
+test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
@@ -367,13 +367,35 @@ test-cgwnd-entermode3: $(CGWND_ENTERMODE3_TEST)
 # link fails loudly if InputMgr.o references any symbol the test does not
 # truthfully provide.
 INPUTMGR_CANONICAL_TEST := $(BUILD_DIR)/inputmgr_canonical_test
+PERSISTENCE_CONE := $(BUILD_DIR)/dcp/core/GameObject.o $(BUILD_DIR)/dcp/core/Entity.o $(BUILD_DIR)/dcp/core/BuildingMgrObjectGroup.o $(BUILD_DIR)/dcp/game/ResdataGameVehicle.o $(BUILD_DIR)/dcp/game/GameVehicle.o $(BUILD_DIR)/dcp/ui/HelpPageNode.o $(BUILD_DIR)/dcp/game/Building.o
+PERSISTENCE_OBJS := $(BUILD_DIR)/dcp/input/InputMgr.o $(BUILD_DIR)/dcp/resources/ResDataSave.o $(BUILD_DIR)/dcp/input/PersistenceAdapter.o
 
-$(INPUTMGR_CANONICAL_TEST): $(BUILD_DIR)/dcp/input/InputMgr.o tests/inputmgr_canonical_test.cpp | dirs
+$(INPUTMGR_CANONICAL_TEST): $(PERSISTENCE_OBJS) $(PERSISTENCE_CONE) tests/inputmgr_canonical_test.cpp tests/persistence_fixtures.h | dirs
 	@echo "=== Testing canonical InputMgr (0x41D250/0x41D2D0/0x41E100) ==="
-	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs $(FORCE_INC) tests/inputmgr_canonical_test.cpp $(BUILD_DIR)/dcp/input/InputMgr.o -o $@
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs -Itests $(FORCE_INC) tests/inputmgr_canonical_test.cpp $(PERSISTENCE_OBJS) $(PERSISTENCE_CONE) -o $@
 
 test-inputmgr-canonical: $(INPUTMGR_CANONICAL_TEST)
 	@$(INPUTMGR_CANONICAL_TEST)
+
+# Persistence adapter strict parse/write regressions (shipped fixtures).
+PERSISTENCE_ADAPTER_TEST := $(BUILD_DIR)/persistence_adapter_test
+
+$(PERSISTENCE_ADAPTER_TEST): $(BUILD_DIR)/dcp/input/PersistenceAdapter.o tests/persistence_adapter_test.cpp tests/persistence_fixtures.h | dirs
+	@echo "=== Testing persistence adapter (strict .loco parse/write) ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs -Itests $(FORCE_INC) tests/persistence_adapter_test.cpp $(BUILD_DIR)/dcp/input/PersistenceAdapter.o -o $@
+
+test-persistence-adapter: $(PERSISTENCE_ADAPTER_TEST)
+	@cd $(PROJECT_ROOT) && $(PERSISTENCE_ADAPTER_TEST)
+
+# INPUT_* world new/load/save + typed callees regressions (shipped fixtures).
+INPUT_WORLD_TEST := $(BUILD_DIR)/input_world_test
+
+$(INPUT_WORLD_TEST): $(PERSISTENCE_OBJS) $(PERSISTENCE_CONE) tests/input_world_test.cpp tests/persistence_fixtures.h | dirs
+	@echo "=== Testing INPUT_NewWorld/LoadWorld/LoadSaveFile/SaveCurrentWorld ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs -Itests $(FORCE_INC) tests/input_world_test.cpp $(PERSISTENCE_OBJS) $(PERSISTENCE_CONE) -o $@
+
+test-input-world: $(INPUT_WORLD_TEST)
+	@cd $(PROJECT_ROOT) && $(INPUT_WORLD_TEST)
 
 # Original MCI launch order recovered from 0x421EB0 / 0x420F7F.
 INTRO_VIDEO_SEQUENCE_TEST := $(BUILD_DIR)/intro_video_sequence_test
