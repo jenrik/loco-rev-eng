@@ -117,18 +117,24 @@ const T& field_at(const void* object, size_t offset)
 }
 
 /* ================================================================== */
-/* floor_div2 — the binary's signed division-by-2 idiom                */
+/* trunc_div2 — the binary's signed division-by-2 idiom                */
 /*                                                                      */
 /* INPUT_LoadSaveFile (0x41D5C0) computes the placement offset         */
-/* ((player - saved)/2) with the cltd/sub/sar idiom                     */
-/* (0x41D6A9..0x41D6D2): for negative odd deltas that is FLOOR         */
-/* division (e.g. -3/2 = -2), while C++ / truncates toward zero        */
-/* (-3/2 = -1).  This helper reproduces the exact x86 semantics        */
-/* (v - sign(v)) >> 1.  Deltas are 16-bit differences, so no overflow  */
-/* is possible.                                                        */
-static int32_t floor_div2(int32_t v)
+/* ((player - saved)/2) with the MSVC signed divide-by-2 idiom         */
+/* cltd/sub/sar (0x41D6A9..0x41D6D2):                                 */
+/*     eax = delta; cltd; sub %edx,%eax; sar $1                        */
+/* which is (delta - sign(delta)) >> 1 — TRUNCATION TOWARD ZERO       */
+/* (e.g. -3/2 = -1), exactly C++ integer division.  (The earlier       */
+/* "floor division" reading of this idiom was wrong: for delta = -3   */
+/* the sequence yields -1, not -2 — verified against the raw bytes.    */
+/* The saved header words are read as 16-bit UNSIGNED — and $0xffff   */
+/* at 0x41D6A1/0x41D6B5 — while the player globals are sign-extended  */
+/* 16-bit loads (movswl 0x4aad46/0x4aad48); the caller below mirrors   */
+/* both widths.  Deltas are 16-bit differences, so no overflow is      */
+/* possible.                                                          */
+static int32_t trunc_div2(int32_t v)
 {
-    return (v - (v < 0 ? 1 : 0)) / 2;
+    return v / 2;
 }
 
 /* ================================================================== */
@@ -432,6 +438,7 @@ void loco::host::set_host_placement_available(bool available)
  * (host NUL-safety — the binary would keep scanning past the field). */
 static bool child_name_has_party(const char name[12])
 {
+#ifndef _WIN32
     size_t len = 0;
     while (len < 12 && name[len] != '\0') {
         len++;
@@ -443,6 +450,11 @@ static bool child_name_has_party(const char name[12])
         }
     }
     return false;
+#else
+    /* Original (0x41D7FC..0x41D80A): CRT_wcsstr(name, "PARTY"
+     * 0x47E4FC) — NUL-terminated substring search on the name field. */
+    return std::strstr(name, "PARTY") != nullptr;
+#endif
 }
 
 static Entity* as_entity(TileMapObject* obj)
@@ -630,14 +642,24 @@ namespace {
  * on the placement path). */
 static int32_t entity_kind(Entity* e)
 {
+#ifndef _WIN32
+    /* Host: typed dynamic_cast (the original reads the raw +0x10C dword
+     * on every entity — see the _WIN32 branch). */
     if (RESDATA_GameVehicle* rv = dynamic_cast<RESDATA_GameVehicle*>(e)) {
         return rv->vehicle_kind;                     /* +0x10C */
     }
     return -1;
+#else
+    /* Original (0x41E268): raw dword read on the entity. */
+    return field_at<int32_t>(e, 0x10C);
+#endif
 }
 
 static int32_t entity_mode_flag(Entity* e, int32_t mode)
 {
+#ifndef _WIN32
+    /* Host: typed dynamic_cast (the original reads the raw +0x120 dword
+     * — see the _WIN32 branch). */
     if (HelpPageNode* h = dynamic_cast<HelpPageNode*>(e)) {
         return h->overlay_flag;                      /* +0x120 */
     }
@@ -648,14 +670,27 @@ static int32_t entity_mode_flag(Entity* e, int32_t mode)
                 static_cast<uintptr_t>(mode)) ? mode : -1;
     }
     return -1;
+#else
+    /* Original (0x41E27A): the raw +0x120 dword compared to the mode
+     * int. */
+    int32_t value = field_at<int32_t>(e, 0x120);
+    return (value == mode) ? mode : -1;
+#endif
 }
 
 bool entity_matches(Entity* e, int32_t mode)
 {
+#ifndef _WIN32
+    /* Host hardening: the binary dereferences the item unconditionally
+     * (0x41E255/0x41E2E5 GetItem result is used directly). */
     if (e == nullptr) {
         return false;
     }
+#endif
     uint8_t type = 0;
+    /* The +0x08 type read IS null-guarded in the binary (0x41E258..
+     * 0x41E260: test %ecx,%ecx; xor %cl,%cl), so the resource null
+     * guard below is not a deviation — it is the original flow. */
     if (e->resource != nullptr) {
         type = *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(e->resource) + 0x08);
     }
@@ -668,7 +703,11 @@ bool entity_matches(Entity* e, int32_t mode)
         if (mode != 4 && entity_mode_flag(e, mode) != mode) return false;
         return true;
     case 2:
+#ifndef _WIN32
+        /* Host hardening: the binary reads +0x62C without a null check
+         * on the resource pointer (0x41E46E..0x41E471). */
         if (e->resource == nullptr) return false;
+#endif
         return *reinterpret_cast<uint8_t*>(
                    static_cast<uint8_t*>(e->resource) + 0x62C) != 0;
     case 3:
@@ -676,7 +715,12 @@ bool entity_matches(Entity* e, int32_t mode)
         return RESDATA_IsBuildingTile(static_cast<int32_t>(
             reinterpret_cast<intptr_t>(e->resource))) != 0;
     default:
+#ifndef _WIN32
+        /* Host hardening: the binary compares resource+0x04 with the
+         * mode without a null check on the resource pointer
+         * (0x41E526..0x41E52D). */
         if (e->resource == nullptr) return false;
+#endif
         return field_at<int32_t>(e->resource, 0x04) == mode;
     }
 }
@@ -738,13 +782,21 @@ void* INPUT_FindObjectAt(InputMgr* self, int mode)
         /* The pick range is the 16-bit count at resource+0x158 of
          * g_resmgr.GetById(mode) — a TYPED ResourceManager lookup
          * (0x446EA0), NOT a collection scan.  The binary checks only
-         * == 0 (0x41E4B4 cmp %bx,%ax) and reads +0x158; a -1 (error)
-         * lookup would read 0x157 and fault, so the host returns
-         * nullptr for non-positive lookups (documented hardening). */
+         * == 0 (0x41E4A5 cmp %ebx,%ebp) and reads +0x158; a -1 (error)
+         * lookup would read 0x157 and fault. */
         const int32_t res = g_resmgr.GetById(mode);      /* 0x446EA0 */
+#ifndef _WIN32
+        /* Host hardening: return nullptr for a non-positive lookup
+         * (documented deviation — the binary would fault on -1). */
         if (res <= 0) {
             return nullptr;
         }
+#else
+        /* Original (0x41E4A5): res == 0 only. */
+        if (res == 0) {
+            return nullptr;
+        }
+#endif
         void* resource = reinterpret_cast<void*>(
             static_cast<uintptr_t>(static_cast<int32_t>(res)));
         const uint16_t range = field_at<uint16_t>(resource, 0x158);
@@ -827,13 +879,18 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
     /* Placement offset: ((player - saved)/2, (color - saved)/2) with
      * the saved fields read as the 16-bit header words at +0x02/+0x04
      * (preview dimensions on designer saves).  The binary computes this
-     * with the cltd/sub/sar idiom (0x41D693..0x41D6D2), which is FLOOR
-     * division for negative odd deltas (-3/2 = -2), NOT C++ truncation
-     * (-3/2 = -1); floor_div2 reproduces the exact x86 semantics. */
-    int32_t offset_x = floor_div2(static_cast<int16_t>(g_player_id) -
-                                  static_cast<int16_t>(resdata.save.player_id));
-    int32_t offset_y = floor_div2(static_cast<int16_t>(g_player_color) -
-                                  static_cast<int16_t>(resdata.save.player_color));
+     * with the cltd/sub/sar idiom (0x41D693..0x41D6D2): the player
+     * globals are SIGN-EXTENDED 16-bit loads (movswl 0x4aad46/0x4aad48
+     * at 0x41D69A/0x41D6BB) and the saved words are masked to 16-bit
+     * UNSIGNED (and $0xffff at 0x41D6A1/0x41D6B5) before the
+     * subtraction; the idiom itself is TRUNCATION TOWARD ZERO
+     * (cltd/sub/sar — for a negative odd delta, -3/2 = -1, NOT floor
+     * division -2), exactly C++ integer division.  trunc_div2
+     * reproduces the exact x86 semantics with both operand widths. */
+    int32_t offset_x = trunc_div2(static_cast<int16_t>(g_player_id) -
+                                  static_cast<int32_t>(resdata.save.player_id));
+    int32_t offset_y = trunc_div2(static_cast<int16_t>(g_player_color) -
+                                  static_cast<int32_t>(resdata.save.player_color));
 
     /* flags != 0: TileMap::FullReset (0x454FE0) first. */
     if (flags != 0) {
@@ -976,11 +1033,18 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
         }
 
         /* dest -> +0xBC (typed field; Building::track_y / ResourceGameObject::field_bc). */
+#ifndef _WIN32
         if (Building* b = dynamic_cast<Building*>(entity)) {
             b->track_y = static_cast<int32_t>(record->dest);
         } else if (ResourceGameObject* r = dynamic_cast<ResourceGameObject*>(entity)) {
             r->field_bc = static_cast<int32_t>(record->dest);
         }
+#else
+        /* Original (0x41D7CF..0x41D7D5): the +0xBC dword is written on
+         * the entity unconditionally (the dest field lives at +0xBC on
+         * both the Building and ResourceGameObject families). */
+        field_at<int32_t>(entity, 0xBC) = static_cast<int32_t>(record->dest);
+#endif
 
         /* Children: 5 x 0x14 records at +0x1C.  vtable[15] on the
          * ResourceGameObject family is CreateMember (0x458430). */
@@ -989,12 +1053,15 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
             if (child_data.resource_id == 0) {
                 continue;
             }
+            /* Original (0x41D7F3): vtable[15] CreateMember is dispatched
+             * on the entity and the RESULT is null-checked (0x41D7F8);
+             * the C++ model expresses the same typed virtual dispatch
+             * through the ResourceGameObject family's CreateMember. */
             ResourceGameObject* parent =
                 dynamic_cast<ResourceGameObject*>(entity);
-            if (parent == nullptr) {
-                continue;
-            }
-            Building* child = parent->CreateMember(child_data.resource_id);
+            Building* child = (parent != nullptr)
+                ? parent->CreateMember(child_data.resource_id)
+                : nullptr;
             if (child == nullptr) {
                 continue;
             }
@@ -1031,9 +1098,15 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
         if (building == nullptr) {
             continue;
         }
+#ifndef _WIN32
+        /* Host hardening: g_world (0x4A98B0) is constructed by
+         * BootstrapMode3Core at runtime and may be null in host tests;
+         * the original calls World_LoadFromFile (0x44DC10) on it
+         * unconditionally. */
         if (g_world == nullptr) {
             continue;
         }
+#endif
         Vehicle* vehicle = static_cast<World*>(g_world)->LoadFromFile(
             reinterpret_cast<int*>(building),
             reinterpret_cast<int*>(veh_data));
@@ -1041,9 +1114,16 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
             continue;
         }
         vehicle->UpdatePosition(0);                  /* 0x44D500 */
+#ifndef _WIN32
+        /* Host hardening: the original dereferences editors[0] (+0x10)
+         * and dispatches SetName on it unconditionally (0x41D888..
+         * 0x41D891). */
         if (vehicle->editors[0] != nullptr) {
             vehicle->editors[0]->SetName(veh_data->name);
         }
+#else
+        vehicle->editors[0]->SetName(veh_data->name);
+#endif
     }
 
 #ifndef _WIN32
@@ -1195,8 +1275,8 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
             TileMap* tilemap = static_cast<TileMap*>(g_tilemap);
             if (netman->CheckUpEdge() != 0) {
                 TileMapObject* obj = reinterpret_cast<TileMapObject*>(
-                    TileMap_FindObject(tilemap, 0xC46, 0,
-                        static_cast<short>((player_id >> 1) - 1), 0, 1));
+                    TileMap_FindObject(tilemap, 0xC46,
+                        static_cast<short>((player_id >> 1) - 1), 0, 0, 1));
                 if (obj != nullptr) obj->is_moving = 0;
             }
             if (netman->CheckDownEdge() != 0) {

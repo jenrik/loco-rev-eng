@@ -44,7 +44,12 @@
  * Host hardening (documented deviation, #ifndef _WIN32 only): a missing
  * file, short header/preview read, or corrupt preview dimensions fails
  * explicitly (returns 0 / nullptr) instead of the original's silent
- * skip-on-short-read behaviour.
+ * skip-on-short-read behaviour.  The _WIN32 branch restores the
+ * original's explicit byte-count checks too ([stream+8] after the
+ * header and preview reads, and the vtable-relative state word before
+ * them) and — unlike the binary, which error-reports through 0x466CE0
+ * and continues returning 1 — fails explicitly (return 0) on a short
+ * read, matching the host path's explicit-failure contract.
  */
 
 #include "../shared/types.h"
@@ -286,16 +291,34 @@ WIN32_StreamDestroyImmediate(stream);
 }
 
 #ifdef _WIN32
-/* The binary reads the stream's last-read byte count / state-flags word
- * at stream + vtable[1] + 8 (0x447DCB / 0x447EAC); vtable[1] is the
- * child-area offset documented in native/win32_stream.c.  Typed stream
- * reconstruction is deferred (TODO: WIN32_Stream class during the
- * stream-integration milestone); this reproduces the exact raw read. */
-static int32_t stream_word8(void* stream)
+/* The binary's WIN32_Stream* layer exposes TWO distinct dwords on the
+ * stream object that the RESDATA primitives read (verified against
+ * objdump):
+ *
+ *   1. the last-read/written BYTE COUNT at the FIXED offset stream+8
+ *      (0x447DD1 cmpl $0x80,0x8(%ecx) in RESMGR_LockResource;
+ *      0x447E11 cmpl $0x2c,0x8(%ecx) in RESMGR_UnlockResource;
+ *      0x447CE0 cmpl $0x114,0x8(%ecx) and 0x447D54 cmp %edi,0x8(%eax)
+ *      in RESMGR_LoadResource),
+ *   2. the STATE-FLAGS word at the VTABLE-RELATIVE offset
+ *      stream + [vtable+4] + 8 (0x447CAC mov 0x8(%edx,%eax,1) in
+ *      RESMGR_LoadResource; 0x447EAC testb $0x4,0x8(%edx,%eax,1) in
+ *      RESMGR_LoadResourceData — [vtable+4] is the child-area offset
+ *      documented in native/win32_stream.c).
+ *
+ * The two are DIFFERENT words at DIFFERENT offsets and must not be
+ * conflated.  Typed stream reconstruction is deferred (TODO: WIN32_Stream
+ * class during the stream-integration milestone); these helpers
+ * reproduce the exact raw reads. */
+static int32_t stream_byte_count(void* stream)
+{
+    return *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(stream) + 8);
+}
+
+static int32_t stream_state_word(void* stream)
 {
     void* vtable = *reinterpret_cast<void**>(stream);
-    int32_t child_offset = *reinterpret_cast<int32_t*>(
-        static_cast<uint8_t*>(vtable) + 4);
+    int32_t child_offset = *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(vtable) + 4);
     return *reinterpret_cast<int32_t*>(
         static_cast<uint8_t*>(stream) + child_offset + 8);
 }
@@ -523,13 +546,37 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
     if (resdata->primary_stream == nullptr) {
         return 0;
     }
+    /* Original (0x447CA7..0x447CB2): a non-zero VTABLE-RELATIVE state
+     * word means the stream failed to open/read — return 0 without
+     * touching the header (the word is at stream + [vtable+4] + 8, NOT
+     * the fixed [stream+8] byte count). */
+    if (stream_state_word(resdata->primary_stream) != 0) {
+        return 0;
+    }
     WIN32_StreamRead(resdata->primary_stream, &resdata->save, sizeof(SaveRegion));
+    /* Original (0x447CE0): explicit header short-read check — the
+     * last-read BYTE COUNT at the fixed offset [stream+8] must equal
+     * 0x114.  The binary error-reports through 0x466CE0 and continues
+     * (returning 1 with a short header); the reconstruction fails
+     * explicitly (return 0) — the same explicit-failure semantics the
+     * host branch applies (a short header can only mean a truncated or
+     * corrupt file). */
+    if (stream_byte_count(resdata->primary_stream) != sizeof(SaveRegion)) {
+        return 0;
+    }
     uint32_t preview_w = resdata->save.player_id;
     uint32_t preview_h = resdata->save.player_color;
     size_t preview_bytes = static_cast<size_t>(preview_w) * preview_h;
     resdata->save_pixels = operator_new(preview_bytes);
     if (resdata->save_pixels != nullptr) {
         WIN32_StreamRead(resdata->primary_stream, resdata->save_pixels, preview_bytes);
+        /* Original (0x447D54): explicit preview short-read check — the
+         * byte count at [stream+8] must equal the requested size.  Same
+         * error-report-then-continue original behaviour; the
+         * reconstruction fails explicitly (see above). */
+        if (stream_byte_count(resdata->primary_stream) != preview_bytes) {
+            return 0;
+        }
     }
     return 1;
 #endif
@@ -566,10 +613,13 @@ void* RESMGR_LockResource(RESDATA* resdata)
 #else
     /* Original (0x447DB3..0x447DE2): with a null stream the record
      * buffer is returned as-is (0x447DDE); a short read returns null
-     * (0x447DDA) — the caller's null check gates progress. */
+     * (0x447DDA) — the caller's null check gates progress.  The
+     * short-read test compares the stream's last-read BYTE COUNT at the
+     * fixed offset [stream+8] (0x447DD1), not the vtable-relative
+     * state word. */
     if (resdata->primary_stream != nullptr) {
         WIN32_StreamRead(resdata->primary_stream, buffer, 0x80);
-        if (stream_word8(resdata->primary_stream) != 0x80) {
+        if (stream_byte_count(resdata->primary_stream) != 0x80) {
             return nullptr;
         }
     }
@@ -602,10 +652,12 @@ void* RESMGR_UnlockResource(RESDATA* resdata)
     }
     return buffer;
 #else
-    /* Original (0x447DF3..0x447E22): same contract as LockResource. */
+    /* Original (0x447DF3..0x447E22): same contract as LockResource —
+     * the byte count at the fixed offset [stream+8] gates the short
+     * read (0x447E11). */
     if (resdata->primary_stream != nullptr) {
         WIN32_StreamRead(resdata->primary_stream, buffer, 0x2C);
-        if (stream_word8(resdata->primary_stream) != 0x2C) {
+        if (stream_byte_count(resdata->primary_stream) != 0x2C) {
             return nullptr;
         }
     }
@@ -697,14 +749,15 @@ int32_t RESMGR_LoadResourceData(RESDATA* resdata, const char* filename)
     if (resdata->secondary_stream == nullptr) {
         return 0;
     }
-    /* Original (0x447EA7..0x447EB1): when the stream's state word has
-     * bit 0x4 set (non-writable) the save is refused with 0.  The ctor
-     * above is the WRITE-stream ctor (0x465090): it ORs the open mode
-     * with 2 (0x447e8f passes mode 0x92) and attaches the write child
-     * vtable 0x479244 — the OR'd flag is the value-vs-address
-     * discriminator that makes the child stream writable.  (The read
-     * ctor 0x463970 used by LoadResource ORs mode with 1 instead.) */
-    if ((stream_word8(resdata->secondary_stream) & 0x4) != 0) {
+    /* Original (0x447EA7..0x447EB1): when the stream's vtable-relative
+     * STATE word has bit 0x4 set (non-writable) the save is refused
+     * with 0.  The ctor above is the WRITE-stream ctor (0x465090): it
+     * ORs the open mode with 2 (0x447e8f passes mode 0x92) and attaches
+     * the write child vtable 0x479244 — the OR'd flag is the
+     * value-vs-address discriminator that makes the child stream
+     * writable.  (The read ctor 0x463970 used by LoadResource ORs mode
+     * with 1 instead.) */
+    if ((stream_state_word(resdata->secondary_stream) & 0x4) != 0) {
         return 0;
     }
     /* Original (0x447EB3..0x447EC4): the preview pixels come from

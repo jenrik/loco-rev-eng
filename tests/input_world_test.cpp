@@ -75,6 +75,11 @@ int main()
 
         InputMgr mgr;
         PersistenceAdapter::instance().clear_document();
+        /* The original 0x4FD3DC global is BSS (zero) at startup; the
+         * loader saves and restores it around its work.  Set the
+         * caller-visible value explicitly so the restore is asserted
+         * against a known pre-load state. */
+        g_allow_building_placement = 1;
 
         char result = INPUT_LoadSaveFile(&mgr, "Wildwest.sav", 1, 1);
         CHECK(result == 1, "LoadSaveFile loads Wildwest.sav");
@@ -423,6 +428,155 @@ int main()
             unsetenv("LEGO_LOCO_SAVE_SEED");
             fmgr.DtorBody();
         }
+    }
+
+    /* ---- 10. Placement-offset semantics (0x41D693..0x41D6D2): the
+     * binary divides ((player - saved)/2) with the cltd/sub/sar idiom —
+     * TRUNCATION TOWARD ZERO (-3/2 = -1, not floor division -2) — and
+     * reads the saved header words as 16-bit UNSIGNED (and $0xffff)
+     * while the player globals are sign-extended 16-bit loads.  The
+     * recording TileMap fixture captures the coordinates the placement
+     * block passes to FindObject. ---- */
+    {
+        std::string dir = make_temp_dir();
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir.c_str());
+
+        /* (a) delta -3: the offset must be -1 (truncation toward zero),
+         * never -2 (floor).  Preview dims 3x3 = 9 bytes; one entity at
+         * (0,0). */
+        loco::host::SaveDocument doc = loco::host::SaveDocument();
+        doc.header.type = 8;
+        doc.header.player_id = 3;
+        doc.header.player_color = 3;
+        doc.header.entity_count = 1;
+        doc.preview.assign(3u * 3u, 0);
+        loco::host::EntityRecord rec;
+        std::memset(&rec, 0, sizeof(rec));
+        rec.resource_id = 0x1;
+        rec.x = 0;
+        rec.y = 0;
+        doc.entities.push_back(rec);
+        std::string err;
+        CHECK(loco::host::PersistenceAdapter::write_save(dir + "/off.loco", doc, &err),
+              "offset test: write crafted save");
+
+        InputMgr mgr;
+        PersistenceAdapter::instance().clear_document();
+        g_player_id = 0;
+        g_player_color = 0;
+        g_tilemap = &g_fixture_tilemap;
+        g_fixture_record_tilemap = true;
+        g_fixture_find_count = 0;
+        loco::host::set_host_placement_available(true);
+        CHECK(INPUT_LoadSaveFile(&mgr, "off.loco", 0, 0) == 1,
+              "offset test: load crafted save");
+        loco::host::set_host_placement_available(false);
+        g_fixture_record_tilemap = false;
+        g_tilemap = nullptr;
+        CHECK(g_fixture_find_count >= 1,
+              "offset test: placement FindObject ran");
+        if (g_fixture_find_count >= 1) {
+            CHECK(g_fixture_find_id[0] == 0x1, "offset test: resource id");
+            CHECK(g_fixture_find_x[0] == -1,
+                  "offset (0-3)/2 == -1 (truncation toward zero, not floor -2)");
+            CHECK(g_fixture_find_y[0] == -1,
+                  "offset (0-3)/2 == -1 (color, truncation)");
+        }
+        mgr.DtorBody();
+
+        /* (b) unsigned saved-u16 semantics: saved player_id = 0x8000
+         * (read as the UNSIGNED 16-bit value 32768) with a 32-KiB
+         * preview (0x8000 x 1, under the 16 MiB cap): with g_player_id
+         * = 0 the offset is -16384, NOT +16384 (which a sign-extended
+         * read of the saved word would produce). */
+        loco::host::SaveDocument doc2 = loco::host::SaveDocument();
+        doc2.header.type = 8;
+        doc2.header.player_id = 0x8000;
+        doc2.header.player_color = 1;
+        doc2.header.entity_count = 1;
+        doc2.preview.assign(0x8000u * 1u, 0);
+        loco::host::EntityRecord rec2;
+        std::memset(&rec2, 0, sizeof(rec2));
+        rec2.resource_id = 0x2;
+        rec2.x = 0;
+        rec2.y = 0;
+        doc2.entities.push_back(rec2);
+        CHECK(loco::host::PersistenceAdapter::write_save(dir + "/u16.loco", doc2, &err),
+              "u16 test: write crafted save");
+
+        InputMgr mgr2;
+        PersistenceAdapter::instance().clear_document();
+        g_player_id = 0;
+        g_player_color = 0;
+        g_tilemap = &g_fixture_tilemap;
+        g_fixture_record_tilemap = true;
+        g_fixture_find_count = 0;
+        loco::host::set_host_placement_available(true);
+        CHECK(INPUT_LoadSaveFile(&mgr2, "u16.loco", 0, 0) == 1,
+              "u16 test: load crafted save");
+        loco::host::set_host_placement_available(false);
+        g_fixture_record_tilemap = false;
+        g_tilemap = nullptr;
+        if (g_fixture_find_count >= 1) {
+            CHECK(g_fixture_find_x[0] == -16384,
+                  "saved player_id read as unsigned u16: (0 - 0x8000)/2 = -16384");
+        } else {
+            CHECK(false, "u16 test: placement FindObject ran");
+        }
+        mgr2.DtorBody();
+    }
+
+    /* ---- 11. Scenario-2 edge coordinates (INPUT_LoadWorld 0x41D320):
+     * the four TileMap_FindObject calls gated by the Netman edge checks
+     * use the exact x/y pairs from the binary (0x41D482..0x41D596):
+     *   up:    (0xC46, x=(player_id>>1)-1, y=0)
+     *   down:  (0xC48, x=(player_id>>1)-1, y=player_color-2)
+     *   right: (0xC42, x=player_id-3,      y=(player_color>>1)-1)
+     *   left:  (0xC44, x=0,                y=(player_color>>1)-1)
+     * (the up-edge x/y were previously swapped).  A missing-file load
+     * still runs the scenario-2 block (result is discarded there), and
+     * an empty collection means the only FindObject calls are the four
+     * edge checks. ---- */
+    {
+        std::string dir = make_temp_dir();
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir.c_str());
+
+        InputMgr mgr;
+        PersistenceAdapter::instance().clear_document();
+        g_player_id = 5;
+        g_player_color = 7;
+        g_tilemap = &g_fixture_tilemap;
+        g_netman = &g_fixture_netman;   /* fixture ctor sets m_gameMode == 2 */
+        g_fixture_record_tilemap = true;
+        g_fixture_record_netman = true;
+        g_fixture_edge_result = 1;      /* every edge check succeeds */
+        g_fixture_find_count = 0;
+        CHECK(INPUT_LoadWorld(&mgr, "empty.loco") == 0,
+              "edge test: LoadWorld of a missing file returns 0");
+        g_fixture_record_tilemap = false;
+        g_fixture_record_netman = false;
+        g_fixture_edge_result = 0;
+        g_tilemap = nullptr;
+        g_netman = nullptr;
+        CHECK(g_fixture_find_count == 4,
+              "edge test: exactly four edge FindObject calls");
+        if (g_fixture_find_count >= 4) {
+            CHECK(g_fixture_find_id[0] == 0xC46 && g_fixture_find_x[0] == 1 &&
+                      g_fixture_find_y[0] == 0,
+                  "CheckUpEdge: (0xC46, x=(5>>1)-1=1, y=0)");
+            CHECK(g_fixture_find_id[1] == 0xC48 && g_fixture_find_x[1] == 1 &&
+                      g_fixture_find_y[1] == 5,
+                  "CheckDownEdge: (0xC48, x=1, y=7-2=5)");
+            CHECK(g_fixture_find_id[2] == 0xC42 && g_fixture_find_x[2] == 2 &&
+                      g_fixture_find_y[2] == 2,
+                  "CheckRightEdge: (0xC42, x=5-3=2, y=(7>>1)-1=2)");
+            CHECK(g_fixture_find_id[3] == 0xC44 && g_fixture_find_x[3] == 0 &&
+                      g_fixture_find_y[3] == 2,
+                  "CheckLeftEdge: (0xC44, x=0, y=(7>>1)-1=2)");
+        } else {
+            CHECK(false, "edge test: expected exactly four FindObject calls");
+        }
+        mgr.DtorBody();
     }
 
     if (failures == 0) {

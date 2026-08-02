@@ -196,8 +196,14 @@ The main FUNCTION_MAP.md's CRT section should be updated with these entries.
 |---|---|---|---|---|
 | 0x464EF0 | `CRT_fmod` | `fmod` | XMATH.OBJ | Floating-point remainder |
 | 0x464F70 | `CRT_fabs` | `fabs` | XMATH.OBJ | Absolute value |
-| 0x465010 | `CRT_ceil` | `ceil` | XMATH.OBJ | Smallest integer >= x |
-| 0x465090 | `CRT_floor` | `floor` | XMATH.OBJ | Largest integer <= x |
+| 0x465010 | `WIN32_StreamWrite` | *(game: stream write)* | — | thiscall stream-write (`ret $0x8`); flushes, dispatches the child write
+  slot and sets the vtable-relative state word (`or $0x6`) on a short
+  write (see resources/ResDataSave.cpp — the old `CRT_ceil` label was
+  fabricated) |
+| 0x465090 | `WIN32_StreamOpenWriteFile` | *(game: write-stream ctor)* | — | the WRITE-stream constructor (SEH prologue, `ret $0x10`); ORs the open
+  mode with 2 (value-vs-address discriminator, child vtable 0x479244).
+  Used by RESMGR_LoadResourceData (0x447E8F).  (The old `CRT_floor`
+  label was fabricated.) |
 | 0x465180 | `CRT_log10` | `log10` | XMATH.OBJ | Base-10 logarithm (thunk to log) |
 | 0x4651A0 | `CRT_log` | `log` | XMATH.OBJ | Natural logarithm |
 | 0x465200 | `CRT_cos` | `cos` | XMATH.OBJ | Cosine |

@@ -294,9 +294,12 @@ char  INPUT_LoadWorld(InputMgr* self, const char* path);       /* 0x41D320 */
  *  computes the placement offset ((player_id - saved_id)/2,
  *  (player_color - saved_color)/2 where the saved fields are the
  *  header words at +0x02/+0x04 — preview dimensions on designer saves)
- *  with FLOOR division for negative odd deltas (the binary's
- *  cltd/sub/sar idiom at 0x41D6A9..0x41D6D2, not C++ truncation),
- *  then places every 0x80-byte entity record (TileMap_FindObject
+ *  with the binary's exact cltd/sub/sar divide-by-2 idiom at
+ *  0x41D6A9..0x41D6D2 — TRUNCATION TOWARD ZERO (a negative odd delta
+ *  divides like -3/2 = -1, exactly C++ integer division; the earlier
+ *  "FLOOR division" reading was wrong).  The player globals are
+ *  sign-extended 16-bit loads and the saved header words are read as
+ *  16-bit UNSIGNED (and $0xffff), then every 0x80-byte entity record (TileMap_FindObject
  *  0x4550C0, entity vtable[13] SetName on record+0x10, vtable[7]
  *  SetAnimState on +0x08 unless 0x852 or a building tile, dest to
  *  +0xBC, up to 5 child records at +0x1C: vtable[15] lookup,
@@ -375,6 +378,8 @@ uintptr_t  INPUT_RemoveObject(InputMgr* self, void* obj,
  *  g_resmgr.GetById(mode) (0x446EA0) — a TYPED ResourceManager lookup,
  *  NOT a collection scan — and the second pass returns the pick-th
  *  entity whose resource id (+0x04) equals mode.  The host returns
- *  nullptr for a non-positive lookup (the binary checks only ==0 and
- *  would read 0x157 for a -1 error result; documented hardening). */
+ *  nullptr for a NON-POSITIVE lookup (res <= 0); the binary checks only
+ *  == 0 (0x41E4A5) and would read +0x157 for a -1 error result, so the
+ *  stricter host comparison is a guarded #ifndef _WIN32 hardening (the
+ *  _WIN32 branch keeps the original == 0 check). */
 void*      INPUT_FindObjectAt(InputMgr* self, int mode);      /* 0x41E1F0 */

@@ -75,10 +75,12 @@ int32_t  g_selected_building = 0;        /* 0x4855B0 (tilemap.h) */
 int32_t  g_player_id = 0;                 /* 0x4AAD46 */
 int32_t  g_player_color = 0;              /* 0x4AAD48 */
 int32_t  g_in_build_mode = 0;             /* 0x4FD199 */
-uint8_t  g_allow_building_placement = 1;  /* 0x4FD3DC — loader/building placement
+uint8_t  g_allow_building_placement = 0;  /* 0x4FD3DC — loader/building placement
                                              flag (DISTINCT from g_is_town_mode
                                              0x485328; the two were once conflated
-                                             under one C++ symbol) */
+                                             under one C++ symbol).  The original
+                                             is a BSS global — zero-initialized; the
+                                             loader saves and restores it. */
 uint8_t  g_is_town_mode = 0;              /* 0x485328 — town/tilemap flag */
 int32_t  g_demo_mode = 0;                 /* 0x4A9918 */
 int32_t  g_is_game_active = 0;            /* 0x4854C4 */
@@ -139,20 +141,86 @@ TileMap* g_tilemap = nullptr;
 
 /* ---- Fail-loud singletons (abort when reached) ---- */
 
+/* Recording mode for the offset/edge persistence tests.  When FALSE
+ * (default) the TileMap/Netman fixture methods below abort if reached
+ * (the guarded host paths must never reach them in the regular tests).
+ * The offset/edge regressions set it TRUE so INPUT_LoadSaveFile /
+ * INPUT_LoadWorld can drive the real placement and scenario-2 edge
+ * blocks against a fake TileMap/Netman that CAPTURES the calls.
+ *
+ * g_fixture_edge_result is returned by every Netman::Check*Edge when
+ * recording (the scenario-2 block runs the four edge checks in the
+ * order Up, Down, Right, Left). */
+bool   g_fixture_record_tilemap = false;
+bool   g_fixture_record_netman  = false;
+int32_t g_fixture_edge_result   = 0;
+int    g_fixture_find_count     = 0;
+int    g_fixture_find_id[16];
+short  g_fixture_find_x[16];
+short  g_fixture_find_y[16];
+int    g_fixture_full_reset_count = 0;
+int    g_fixture_scroll_count   = 0;
+
 /* TileMap methods — only reached when host_placement_available() is true
- * or a guarded singleton check regresses. */
+ * or a guarded singleton check regresses.  In recording mode the calls
+ * are captured instead (the fixture bodies never touch `this`). */
 LOUD_FIXTURE(TileMap_FindObject)
 LOUD_FIXTURE(TileMap_FullReset)
 LOUD_FIXTURE(TileMap_ScrollTo)
 LOUD_FIXTURE(TileMap_InvalidateDirtyRects)
-int* TileMap::FindObject(unsigned int, short, short, char, unsigned int)
-{ fixture_reached_TileMap_FindObject(); return nullptr; }
+int* TileMap::FindObject(unsigned int id, short x, short y, char u, unsigned int m)
+{
+    (void)u; (void)m;
+    if (!g_fixture_record_tilemap) {
+        fixture_reached_TileMap_FindObject();
+        return nullptr;
+    }
+    if (g_fixture_find_count < 16) {
+        g_fixture_find_id[g_fixture_find_count] = static_cast<int>(id);
+        g_fixture_find_x[g_fixture_find_count] = x;
+        g_fixture_find_y[g_fixture_find_count] = y;
+        g_fixture_find_count++;
+    }
+    return nullptr;
+}
 void TileMap::FullReset()
-{ fixture_reached_TileMap_FullReset(); }
+{
+    if (!g_fixture_record_tilemap) {
+        fixture_reached_TileMap_FullReset();
+        return;
+    }
+    g_fixture_full_reset_count++;
+}
 void* TileMap::ScrollTo(TileMapObject*, int)
-{ fixture_reached_TileMap_ScrollTo(); return nullptr; }
+{
+    if (!g_fixture_record_tilemap) {
+        fixture_reached_TileMap_ScrollTo();
+        return nullptr;
+    }
+    g_fixture_scroll_count++;
+    return nullptr;
+}
 void TileMap::InvalidateDirtyRects(char)
-{ fixture_reached_TileMap_InvalidateDirtyRects(); }
+{
+    if (!g_fixture_record_tilemap) {
+        fixture_reached_TileMap_InvalidateDirtyRects();
+    }
+}
+
+/* Fake TileMap/Netman storage for the recording tests: a zeroed
+ * instance is a safe stand-in because every fixture method above never
+ * touches `this`.  g_fixture_netman is pre-set to m_gameMode == 2 so
+ * INPUT_LoadWorld's scenario-2 block runs. */
+TileMap::TileMap() { std::memset(static_cast<void*>(this), 0, sizeof(TileMap)); }
+TileMap::~TileMap() {}
+Netman::Netman()
+{
+    std::memset(static_cast<void*>(this), 0, sizeof(Netman));
+    m_gameMode = 2;   /* scenario 2 — joined game */
+}
+Netman::~Netman() {}
+static TileMap g_fixture_tilemap;   /* construct via the ctor fixture above */
+static Netman  g_fixture_netman;
 
 /* World / Game / Netman / Vehicle — reached only by the gated placement
  * path or the unconstructed-singleton guards. */
@@ -173,13 +241,25 @@ void Game::SetScreenMode(uint8_t, uint8_t, uint8_t)
 void Game::DeselectGameObject()
 { fixture_reached_Game_DeselectGameObject(); }
 int32_t Netman::CheckUpEdge()
-{ fixture_reached_Netman_CheckUpEdge(); return 0; }
+{
+    if (!g_fixture_record_netman) { fixture_reached_Netman_CheckUpEdge(); }
+    return g_fixture_edge_result;
+}
 int32_t Netman::CheckDownEdge()
-{ fixture_reached_Netman_CheckDownEdge(); return 0; }
+{
+    if (!g_fixture_record_netman) { fixture_reached_Netman_CheckDownEdge(); }
+    return g_fixture_edge_result;
+}
 int32_t Netman::CheckLeftEdge()
-{ fixture_reached_Netman_CheckLeftEdge(); return 0; }
+{
+    if (!g_fixture_record_netman) { fixture_reached_Netman_CheckLeftEdge(); }
+    return g_fixture_edge_result;
+}
 int32_t Netman::CheckRightEdge()
-{ fixture_reached_Netman_CheckRightEdge(); return 0; }
+{
+    if (!g_fixture_record_netman) { fixture_reached_Netman_CheckRightEdge(); }
+    return g_fixture_edge_result;
+}
 
 /* Vehicle methods referenced by the class cone (Building.o / World.o) —
  * not exercised by the persistence tests. */

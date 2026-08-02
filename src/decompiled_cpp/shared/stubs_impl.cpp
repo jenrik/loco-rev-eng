@@ -195,7 +195,11 @@ int32_t g_player_color = 0;   /* 0x4AAD48 — host-declared 32-bit for uniformit
 int32_t g_demo_mode = 0;
 uint8_t g_ddraw_active = 1;
 uint8_t g_disable_input = 0;
-uint8_t g_allow_building_placement = 1;
+uint8_t g_allow_building_placement = 0;   /* 0x4FD3DC — loader/building placement
+                                             flag.  The original is a BSS global
+                                             (zero-initialized; the gap between
+                                             .data and .rsrc); the loader saves
+                                             and restores it around its work. */
 void* g_town_view = nullptr;
 void* g_tile_occupied_bitmap = nullptr;
 int ATTR_0047f108 = 0;
