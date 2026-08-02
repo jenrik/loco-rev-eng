@@ -33,6 +33,22 @@ Override the destination when an agent or CI job needs a known path:
 python3 -m pytest tests/integration --gui-artifacts-dir /tmp/lego-loco-gui
 ```
 
+Every GUI test runs its own headless `gui-sandbox` compositor by default. For a
+human to watch a run live, opt into the sandbox's visible nested-window mode
+with `--gui-visible` (or `LEGO_LOCO_GUI_VISIBLE=1`, which also works with
+`make test-integration` since it inherits into the recipe's shell):
+
+```bash
+python3 -m pytest tests/integration --gui-visible -k test_name
+LEGO_LOCO_GUI_VISIBLE=1 make test-integration
+```
+
+This requires an active Wayland session (`WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`),
+per the `wayland-gui-sandbox` skill's `--visible` mode. Headless stays the
+default for CI and unattended agent runs; the sandbox closes immediately when
+each test finishes either way, so review the retained screenshots/JSONL
+artifacts for anything missed live.
+
 Screenshots are evidence and debugging artifacts, not golden-image assertions.
 The driver moves the compositor cursor to the top-left before capture to reduce
 obstruction, but no test depends on cursor pixels. State transitions are

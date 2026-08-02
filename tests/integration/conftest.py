@@ -14,12 +14,24 @@ from gui_sandbox import GameSession
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "") not in ("", "0")
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(
         "--gui-artifacts-dir",
         action="store",
         default=None,
         help="directory for persistent GUI screenshots, logs, and event streams",
+    )
+    parser.addoption(
+        "--gui-visible",
+        action="store_true",
+        default=_env_flag("LEGO_LOCO_GUI_VISIBLE"),
+        help="run the sandbox compositor in a visible nested window instead of "
+             "headless, so a human can watch the run live (also settable via "
+             "LEGO_LOCO_GUI_VISIBLE=1, e.g. for `make test-integration`)",
     )
 
 
@@ -83,7 +95,8 @@ def game(request: pytest.FixtureRequest, gui_artifacts_root: Path,
     environment = {"LEGO_LOCO_SKIP_INTRO": "1"}
     environment.update(getattr(request, "param", None) or {})
     session = GameSession(ROOT, artifact_dir, environment=environment,
-                          data_dir=game_data_dir)
+                          data_dir=game_data_dir,
+                          visible=request.config.getoption("--gui-visible"))
     try:
         session.start()
         yield session

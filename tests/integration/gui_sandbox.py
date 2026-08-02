@@ -33,12 +33,14 @@ class GameSession:
         self, root: Path, artifact_dir: Path, timeout: float = 20.0,
         environment: Mapping[str, str] | None = None,
         data_dir: Path | None = None,
+        visible: bool = False,
     ):
         self.root = root
         self.artifact_dir = artifact_dir
         self.timeout = timeout
         self.environment = dict(environment or {})
         self.data_dir = data_dir
+        self.visible = visible
         self.events_path = artifact_dir / "events.jsonl"
         self.stdout_path = artifact_dir / "stdout.log"
         self.stderr_path = artifact_dir / "stderr.log"
@@ -61,7 +63,10 @@ class GameSession:
         if self.data_dir is not None and not (self.data_dir / "art-res").is_dir():
             raise AssertionError(f"isolated game data missing: {self.data_dir}")
 
-        started = self._run(["gui-sandbox", "start"], timeout=30)
+        started = self._run(
+            ["gui-sandbox", "start"] + (["--visible"] if self.visible else []),
+            timeout=30,
+        )
         (self.artifact_dir / "sandbox-start.log").write_text(
             started.stdout + started.stderr, encoding="utf-8"
         )
