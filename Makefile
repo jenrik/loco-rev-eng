@@ -144,9 +144,18 @@ all: build
 
 build: $(BINARY)
 
+test: test-integration test-unit
+
 # Deterministic component and host-boundary suite. GUI interaction is kept in
 # test-integration so agents can run the fast layer independently when needed.
-test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world \
+test-unit: test-sdl3-net-protocol test-sdl3-net-transport \
+      test-sdl3-net-runtime test-sdl3-net-discovery-transport \
+      test-network-discovery test-discovery-runtime \
+      test-avahi-dbus-discovery test-embedded-mdns-discovery \
+      test-resource-archive test-resource-manager-sdl3 \
+      test-dplay-config test-postbag-cleanup \
+      test-cgwnd-entermode3 test-inputmgr-canonical \
+      test-persistence-adapter test-input-world \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
