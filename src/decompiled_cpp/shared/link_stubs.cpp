@@ -245,7 +245,6 @@ void UI_OnMouseLeave(void*,int32_t){}
 void UI_PaintWindow(void*,void*,void*){}
 void UIPANEL_CreateSurface__UIPANEL_Surface(UIPANEL_Surface*){}
 void UIPANEL_EndPaint(void*){}
-void UIPANEL_InitSurface(UIPANEL_Surface*,int32_t,int32_t,int32_t,int32_t,int32_t){}
 int32_t UIPANEL_UnlockSurface(void*,uint32_t){return 0;}
 void UI_WindowBase_Hide(void*){}
 void UI_WindowBase_Show(void*){}

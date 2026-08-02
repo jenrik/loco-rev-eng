@@ -19,6 +19,7 @@
  */
 
 #include "BuildingPanel.h"
+#include "../ui/UIPANEL_Surface.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
 namespace {
@@ -91,7 +92,6 @@ extern "C" {
     int    UIPANEL_BeginPaint(void* panel);                  /* 0x42B0C0 — returns HDC */
     void   UIPANEL_EndPaintEx(void* panel, HWND hWnd, int hdc, byte flag, RECT* rect);
     void*  UIPANEL_CreateSurface(void* obj);                  /* 0x42A110 */
-    void   UIPANEL_InitSurface(void* surface, int w, int h, byte mode, int unk1, int unk2);
     void   UIPANEL_Blit(void* src_surface, uint32_t src_x, uint32_t src_y,
                         int32_t src_w, uint32_t src_h,
                         void* dest_surface, uint32_t dest_x, uint32_t dest_y,

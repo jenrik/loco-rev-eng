@@ -491,8 +491,6 @@ extern int      Math_DistSquared(int x1, int y1, int x2, int y2);
 extern void*    Entity_GetSubObjectPosition(void* obj, int* out_xy, int direction);
 extern void     GameObject_GetSubObjectWorldPos(void* obj, int* out_packed);
 extern void*    ResourceManager_GetById(void** resmgr, UINT id);
-extern void     UIPANEL_InitSurface(void* surface, int w, int h,
-                                     int a, int b, byte c);
 extern void     OutputDebugStringA(const char* str);
 extern void     Sleep(uint32_t ms);
 extern BOOL     InvalidateRect(HWND hWnd, const RECT* lpRect, BOOL bErase);

@@ -297,7 +297,6 @@ void UIPANEL_Blit(void*, int, int, int, int, void*, int, int, int, int, int) {}
 void UIPANEL_BeginPaint(void*) {}
 void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) {}
 void UIPANEL_CreateSurface(void*) {}
-void UIPANEL_InitSurface(void*, int, int, int, int, int) {}
 void UIPANEL_StretchBlit(void*, void*, int, int, int) {}
 void UIPANEL_SetClipRect(void*, int, int) {}
 void UIPANEL_ScrollPanel_HandleDrag(void*, int, int) {}

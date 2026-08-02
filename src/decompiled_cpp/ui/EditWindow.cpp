@@ -7,6 +7,7 @@
  */
 
 #include "EditWindow.h"
+#include "UIPANEL_Surface.h"
 #include "UI_Utils.h"
 #include "NameEntryPanel.h"
 #include "GameSetupPanel.h"
@@ -142,8 +143,6 @@ void    __fastcall Town_BlitElement(void* src, int sx, int sy,
                                     int dx, int dy, int dw, int dh,
                                     int flags);                    /* 0x42B050 */
 
-void    __thiscall UIPANEL_InitSurface(void* surf, int w, int h,
-                                       int a, int b, int c);    /* 0x426E40 */
 void*   __thiscall UIPANEL_CreateSurface(void* buf);             /* 0x426E10 */
 void*   UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* 0x42A140 */
 

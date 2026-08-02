@@ -105,6 +105,8 @@ void Sprite_Destroy(void*);  /* declared extern "C" in ButtonSprite.h */
 /*   NOTE: These are transitional bridge declarations. The eventual  */
 /*   intent is to replace them with direct C++ method calls.         */
 /* ================================================================ */
+#include "../ui/UIPANEL_Surface.h"
+
 void* ResourceManager_GetById(void*, int);
 void Sprite_Init(void*);
 void Sprite_SetState(void*, int, int*);
@@ -115,7 +117,6 @@ HDC UIPANEL_BeginPaint(void*);
 void UIPANEL_EndPaint(void*);
 void UIPANEL_EndPaintEx(void*, HWND, int, uint8_t, RECT*);
 void* UIPANEL_CreateSurface(void*);
-void UIPANEL_InitSurface(void*, int, int, int, uint32_t, uint8_t);
 void UIPANEL_UnlockSurface(void*);
 void FormatResourceString(void*, UINT, LPSTR, int);
 void DPLAY_EnumeratePlayers(void);

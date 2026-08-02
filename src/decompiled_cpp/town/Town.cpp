@@ -29,6 +29,7 @@
 #include "../game/PlayerConfig.h"
 #include "../network/DPlayManager.h"
 #include "../ui/PostcardAlbum.h"
+#include "../ui/UIPANEL_Surface.h"
 #ifndef _WIN32
 #include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
 #endif
@@ -79,8 +80,6 @@ extern "C" {
                         void* dest_surface, uint32_t dest_x, uint32_t dest_y,
                         int32_t dest_w, uint32_t dest_h, uint32_t flags); /* 0x42B050 */
     void*  UIPANEL_CreateSurface(void* obj);                         /* 0x42AF30 */
-    void   UIPANEL_InitSurface(void* surface, int w, int h,
-                               byte mode, int unk1, int unk2);     /* 0x42AF70 */
 
     /* Tile map */
     void   TileMap_InvalidateRect(void* tilemap, int left, int top,

@@ -15,6 +15,7 @@
  */
 
 #include "tilemap.h"
+#include "../ui/UIPANEL_Surface.h"
 
 #include "../core/Entity.h"
 #include "../input/InputMgr.h"
@@ -152,8 +153,6 @@ extern void     Sleep(uint32_t ms);
 extern BOOL     InvalidateRect(HWND hWnd, const RECT* lpRect, BOOL bErase);
 extern BOOL     UpdateWindow(HWND hWnd);
 extern void*    ResourceManager_GetById(void** resmgr, UINT id);
-extern void     UIPANEL_InitSurface(void* surface, int w, int h,
-                                     int a, int b, byte c);
 
 /* ================================================================== */
 /* TileMapResource::IsEditorSprite — 0x41F430                          */

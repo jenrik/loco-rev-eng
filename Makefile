@@ -138,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -151,7 +151,7 @@ test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
       test-host-multiplayer-menu-input test-sdl3-game-audio test-intro-video-sequence \
-      test-sdl3-timer-stress \
+      test-sdl3-timer-stress test-uipanel-surface-linkage \
       test-menu-sprite-viewer
 
 # SDL3 timer safety regression: rapid SetTimer/KillTimer cycles under thread contention.
@@ -163,6 +163,9 @@ $(SDL3_TIMER_STRESS_TEST): $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_window
 
 test-sdl3-timer-stress: $(SDL3_TIMER_STRESS_TEST)
 	@SDL3_LIB="$(SDL3_LIB)"; if [ -n "$$SDL3_LIB" ]; then export LD_LIBRARY_PATH="$$SDL3_LIB:$$LD_LIBRARY_PATH"; fi; SDL_VIDEODRIVER=dummy $(SDL3_TIMER_STRESS_TEST)
+
+test-uipanel-surface-linkage: $(BINARY) tests/uipanel_surface_linkage_test.sh
+	@bash tests/uipanel_surface_linkage_test.sh $(BINARY)
 
 test-integration: $(BINARY) $(BUILD_DIR)/sdl3_net_transport_test
 	@python3 -m pytest -v -m "integration and gui" tests/integration

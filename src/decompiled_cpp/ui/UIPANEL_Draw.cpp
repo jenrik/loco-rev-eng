@@ -10,6 +10,7 @@
  */
 
 #include "UIPANEL.h"
+#include "UIPANEL_Surface.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -34,7 +35,6 @@ extern "C" {
     /* UIPANEL internal functions */
     void   UIPANEL_SetClipRect(void* surf, int x, int y);
     void   UIPANEL_DrawButton(int param_1);
-    void   UIPANEL_InitSurface(void* surf, int a, int b, int c, int d, int e);
     void   UIPANEL_StretchBlit(void* dst, void* src, int a, int b, int c);
     void   UIPANEL_FillRect(void* surf, int w, int h);
 

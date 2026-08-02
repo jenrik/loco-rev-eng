@@ -24,6 +24,7 @@
  */
 
 #include "UIPANEL.h"
+#include "UIPANEL_Surface.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
