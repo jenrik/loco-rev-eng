@@ -107,6 +107,28 @@ def test_singleplayer_go_plays_click_sound_and_leaves_main_menu(game):
 @pytest.mark.parametrize(
     "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
 )
+def test_singleplayer_accept_reaches_mode3_without_crashing(game):
+    """Regression for 3d0533a: Game::Update dereferenced the Game object's
+    resource field (+0x40, never written by any code) on the first mode-3
+    frame (0x405C57). BootstrapMode3Core now clears the host Game's
+    initialized flag so Entity::Update's early-return guard applies; hold in
+    mode 3 long enough to catch a frame-loop regression, matching the manual
+    soak used to verify the original fix."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    game.click_logical(600, 550, "select single player")
+    game.click_logical(600, 720, "player-name field")
+    game.clear_text()
+    game.type_text("test")
+    game.click_logical(925, 700, "main-menu accept/ok")
+    game.wait_for_event("mode_changed", new_mode=3, timeout=10)
+    time.sleep(2)
+    assert game.is_alive(), game._failure("game crashed after entering mode 3")
+    game.screenshot("singleplayer-mode3-stable")
+
+
+@pytest.mark.parametrize(
+    "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
+)
 def test_multiplayer_empty_entry_defaults_os_name_and_opens_grid(game):
     """Scenario 3: untouched entry keeps PlayerRecord's OS-name fallback."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
