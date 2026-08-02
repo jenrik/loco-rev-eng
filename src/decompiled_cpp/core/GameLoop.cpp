@@ -263,10 +263,7 @@ extern "C" int GameLoop_Setup(void* cgwnd)
      * SDL host does it here, after ResourceManager_Init, in the same order
      * (Game, World, BuildingMgr, ScriptedObject, TileMap, GameAudio). */
     loco::host::BootstrapMode3Core();
-    /* FIXME: BootstrapTownMode3Objects temporarily disabled. */
-    // loco::host::BootstrapTownMode3Objects();
-    // std::fprintf(stderr, "[TRACE] GameLoop_Setup: BootstrapTownMode3Objects done\n");
-    // std::fflush(stderr);
+    loco::host::BootstrapTownMode3Objects();
 #endif
 
     trace_setup_stage("step 9: UI subsystems");
