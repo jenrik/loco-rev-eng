@@ -263,30 +263,33 @@ extern "C" int GameLoop_Setup(void* cgwnd)
      * SDL host does it here, after ResourceManager_Init, in the same order
      * (Game, World, BuildingMgr, ScriptedObject, TileMap, GameAudio). */
     loco::host::BootstrapMode3Core();
-    /* Construct the town view and DDRAW building singletons for mode-3
-     * rendering.  These are BSS-embedded objects in the original; on the
-     * host we allocate them on the heap and assign to the legacy void*
-     * slots so the per-frame callbacks (Town_TrackBuilding,
-     * DDRAW_UpdateBuilding) have real objects to operate on. */
-    loco::host::BootstrapTownMode3Objects();
+    /* FIXME: BootstrapTownMode3Objects temporarily disabled. */
+    // loco::host::BootstrapTownMode3Objects();
+    // std::fprintf(stderr, "[TRACE] GameLoop_Setup: BootstrapTownMode3Objects done\n");
+    // std::fflush(stderr);
 #endif
 
     trace_setup_stage("step 9: UI subsystems");
+    std::fprintf(stderr, "[TRACE] GameLoop_Setup: calling InitAllSubsystems...\n"); std::fflush(stderr);
     /* Step 9: Initialize all subsystems */
     if (((CGWND*)cgwnd)->InitAllSubsystems() != 0) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 9\n"); std::fflush(stderr);
         return -1;
     }
+    std::fprintf(stderr, "[TRACE] GameLoop_Setup: InitAllSubsystems done\n"); std::fflush(stderr);
 
     /* Step 10: Hide second overlay, init DDRAW */
+    std::fprintf(stderr, "[TRACE] GameLoop_Setup: calling DDRAW_Init...\n"); std::fflush(stderr);
     UIPANEL_Hide(g_second_overlay, &g_empty_string);
 
     if (!DDRAW_Init()) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 10 (DDRAW_Init)\n"); std::fflush(stderr);
         return -1;
     }
+    std::fprintf(stderr, "[TRACE] GameLoop_Setup: DDRAW_Init done\n"); std::fflush(stderr);
 
     /* Step 11: Create named event */
+    std::fprintf(stderr, "[TRACE] GameLoop_Setup: creating named event...\n"); std::fflush(stderr);
     void* hEvent = CreateEventA(nullptr, 1, 0, S_GAMELOOP);
     DAT_004a990c = (int)(intptr_t)hEvent;
     if (!hEvent) {

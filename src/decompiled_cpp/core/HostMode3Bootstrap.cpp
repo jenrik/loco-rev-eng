@@ -182,15 +182,21 @@ void BootstrapMode3Core()
 
     /* g_tilemap was constructed first (see above). */
 
+    std::fprintf(stderr, "[HOST] BootstrapMode3Core: about to construct GameAudio\n");
+    std::fflush(stderr);
     if (g_audio == nullptr) {
         /* GameAudio::Init() talks to DirectSound ordinals; the SDL host
          * substitutes SDL3_GameAudio, so construct the object (field init)
          * without the DSound device bootstrap. */
         g_audio = new GameAudio;
+        std::fprintf(stderr, "[HOST] BootstrapMode3Core: GameAudio new done\n");
+        std::fflush(stderr);
         std::fprintf(stderr, "[HOST] BootstrapMode3Core: GameAudio constructed (%p) "
                      "(DSound Init deferred to SDL3_GameAudio)\n", g_audio);
         std::fflush(stderr);
     }
+    std::fprintf(stderr, "[HOST] BootstrapMode3Core: returning\n");
+    std::fflush(stderr);
 }
 
 /* ================================================================== */
