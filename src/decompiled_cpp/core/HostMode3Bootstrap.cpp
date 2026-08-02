@@ -234,13 +234,22 @@ void HostLoadingSequence(void* /*param*/)
 
     /* The host then loads "curr" back through the real INPUT_LoadWorld
      * (0x41D320) so the persisted world is the one the mode-3 loop
-     * operates on. */
+     * operates on.  seed_fresh_world_from_fixture returns false when the
+     * fixture parse OR the durable "curr" save failed (atomic host
+     * save — see PersistenceAdapter.cpp); the load-back is then skipped
+     * and the failure is logged loudly, so a fresh seed NEVER reports
+     * success without a durable curr. */
     if (seeded) {
         char loaded = INPUT_LoadWorld(&g_input_mgr, "curr");
         std::fprintf(stderr,
             "[HOST] LoadingSequence: fresh world seeded + persisted to "
             "curr (load-back result %d); entering mode 3\n",
             static_cast<int>(loaded));
+        std::fflush(stderr);
+    } else {
+        std::fprintf(stderr,
+            "[HOST] LoadingSequence: fresh-world seed FAILED (no durable "
+            "curr) — entering mode 3 with the empty fresh world\n");
         std::fflush(stderr);
     }
 

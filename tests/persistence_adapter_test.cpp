@@ -159,6 +159,28 @@ int main()
         identical = std::memcmp(doc.preview.data(), back.preview.data(),
                                 doc.preview.size()) == 0;
         CHECK(identical, "round-trip preview identical");
+
+        /* Atomic-write contract: write_save stages "<path>.tmp" and
+         * renames it over the target, so no temp file is left behind
+         * after a successful write. */
+        CHECK(access((path + ".tmp").c_str(), F_OK) != 0,
+              "write_save leaves no temp file after success");
+
+        /* Atomic-write failure: an unwritable directory fails the stage
+         * without touching the target and leaves no temp. */
+        {
+            std::string ro = make_temp_dir();
+            std::string ropath = ro + "/ro.loco";
+            ::chmod(ro.c_str(), 0555);
+            std::string err;
+            CHECK(!PersistenceAdapter::write_save(ropath, doc, &err),
+                  "write_save fails on an unwritable directory");
+            CHECK(access(ropath.c_str(), F_OK) != 0,
+                  "failed atomic write leaves no target file");
+            CHECK(access((ropath + ".tmp").c_str(), F_OK) != 0,
+                  "failed atomic write leaves no temp file");
+            ::chmod(ro.c_str(), 0755);
+        }
     }
 
     /* ---- 3. malformed inputs fail explicitly ---- */

@@ -976,11 +976,11 @@ uint8_t Netman::SendChatMessage(InboundTrainNode* node)
     int32_t dir, off;
     if (this->m_gameMode == 1) { dir = 0; off = 0; goto fin; }
     if (ang < 0x5B) {
-        if (ang == 0x5A)      { dir = 1; off = INPUT_DirToOffset_Left(&off); }
-        else if (ang == 0)    { dir = 4; off = INPUT_DirToOffset_Down(&off); }
+        if (ang == 0x5A)      { dir = 1; off = *INPUT_DirToOffset_Left(&off); }
+        else if (ang == 0)    { dir = 4; off = *INPUT_DirToOffset_Down(&off); }
         else                  { dir = 0; off = 0; }
-    } else if (ang == 0xB4)   { dir = 3; off = INPUT_DirToOffset_Right(&off); }
-    else if (ang == 0x10E)    { dir = 2; off = INPUT_DirToOffset_Up(&off); }
+    } else if (ang == 0xB4)   { dir = 3; off = *INPUT_DirToOffset_Right(&off); }
+    else if (ang == 0x10E)    { dir = 2; off = *INPUT_DirToOffset_Up(&off); }
     else                      { dir = 0; off = 0; }
 fin:
     return World_FinalizeLoad((void*)0x4A98B0, node, (void*)(intptr_t)off, (uint8_t)dir);
@@ -1042,11 +1042,11 @@ void Netman::SendGameStart(TrainMessage* msg)
     int32_t off = 0, dir;
     uint16_t ang = node->tunnel_angle;
     if (ang < 0x5B) {
-        if (ang == 0x5A)      { off = INPUT_DirToOffset_Left(&off);  dir = 1; }
-        else if (ang == 0)    { off = INPUT_DirToOffset_Down(&off);  dir = 4; }
+        if (ang == 0x5A)      { off = *INPUT_DirToOffset_Left(&off);  dir = 1; }
+        else if (ang == 0)    { off = *INPUT_DirToOffset_Down(&off);  dir = 4; }
         else                  { dir = 0; }
-    } else if (ang == 0xB4)   { off = INPUT_DirToOffset_Right(&off); dir = 3; }
-    else if (ang == 0x10E)    { off = INPUT_DirToOffset_Up(&off);    dir = 2; }
+    } else if (ang == 0xB4)   { off = *INPUT_DirToOffset_Right(&off); dir = 3; }
+    else if (ang == 0x10E)    { off = *INPUT_DirToOffset_Up(&off);    dir = 2; }
     else                      { dir = 0; }
 
     this->ReceivePing(node->network_id, node->slot_index, node->peer_index, off, dir);
@@ -2054,16 +2054,16 @@ void Netman::SendFileTransfer(TrainMessage* msg)
     int32_t packed_offset = 0;
     const int32_t angle = msg->data_len;
     if (angle == 0x5A) {
-        packed_offset = INPUT_DirToOffset_Left(&packed_offset);
+        packed_offset = *INPUT_DirToOffset_Left(&packed_offset);
         packed_offset += 0x10000;
     } else if (angle == 0) {
-        packed_offset = INPUT_DirToOffset_Down(&packed_offset);
+        packed_offset = *INPUT_DirToOffset_Down(&packed_offset);
         packed_offset += 1;
     } else if (angle == 0xB4) {
-        packed_offset = INPUT_DirToOffset_Right(&packed_offset);
+        packed_offset = *INPUT_DirToOffset_Right(&packed_offset);
         packed_offset += 1;
     } else if (angle == 0x10E) {
-        packed_offset = INPUT_DirToOffset_Up(&packed_offset);
+        packed_offset = *INPUT_DirToOffset_Up(&packed_offset);
         packed_offset += 0x10000;
     }
     ReceivePing(msg->flags, msg->metadata0(), msg->metadata1(),

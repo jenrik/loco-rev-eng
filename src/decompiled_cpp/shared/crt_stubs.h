@@ -146,8 +146,11 @@ wint_t towlower(wint_t ch);                                              /* 0x46
 
 double fmod(double x, double y);                                        /* 0x464EF0 */
 double fabs(double x);                                                  /* 0x464F70 */
-double ceil(double x);                                                  /* 0x465010 */
-double floor(double x);                                                 /* 0x465090 */
+/* 0x465010 is the WIN32 stream WRITE function (WIN32_StreamWrite,
+ * ResDataSave.cpp) and 0x465090 is the WIN32 WRITE-stream constructor
+ * (WIN32_StreamOpenWriteFile) — neither is CRT ceil/floor (the old
+ * labels were decompiler misidentifications; corrected in
+ * crt_stubs.cpp / ResourceManager.cpp). */
 double log10(double x);                                                 /* 0x465180 */
 double log(double x);                                                   /* 0x4651A0 */
 double cos(double x);                                                   /* 0x465200 */

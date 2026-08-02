@@ -30,6 +30,7 @@
 #include <ctime>
 #include <string>
 #include <sys/stat.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 /* Complete class definitions needed by the fixtures below. */
@@ -74,7 +75,11 @@ int32_t  g_selected_building = 0;        /* 0x4855B0 (tilemap.h) */
 int32_t  g_player_id = 0;                 /* 0x4AAD46 */
 int32_t  g_player_color = 0;              /* 0x4AAD48 */
 int32_t  g_in_build_mode = 0;             /* 0x4FD199 */
-uint8_t  g_allow_building_placement = 1;  /* 0x4FD3DC */
+uint8_t  g_allow_building_placement = 1;  /* 0x4FD3DC — loader/building placement
+                                             flag (DISTINCT from g_is_town_mode
+                                             0x485328; the two were once conflated
+                                             under one C++ symbol) */
+uint8_t  g_is_town_mode = 0;              /* 0x485328 — town/tilemap flag */
 int32_t  g_demo_mode = 0;                 /* 0x4A9918 */
 int32_t  g_is_game_active = 0;            /* 0x4854C4 */
 uint8_t  g_is_party_mode = 0;             /* 0x48548C */
@@ -89,8 +94,45 @@ int32_t  DAT_004a98b8[4] = {0, 0, 0, 0};  /* 0x4A98B8 */
 double   _DAT_00481170 = 0.0;             /* 0x481170 — FPS threshold (GameObject.cpp) */
 
 /* g_resmgr — the canonical static object (0x4855E8); never initialized
- * in these tests (GetById below returns nullptr). */
+ * in these tests.  GetById below returns nullptr (a fresh manager), so
+ * INPUT_FindObjectAt's default mode (0x41E498) resolves its +0x158 pick
+ * range only against the test hook g_fixture_getbyid_count.  On x86_64
+ * the binary's int32 pointer return only round-trips for addresses
+ * below 2^31; the hook therefore maps the fake resource with MAP_32BIT
+ * (Linux x86_64) when a range test is requested. */
 ResourceManager g_resmgr;
+uint16_t g_fixture_getbyid_count = 0;      /* test hook: +0x158 count of the fake
+                                             GetById result (0 = not found) */
+static uint8_t* fixture_fake_resource()
+{
+    static uint8_t* s_fake = nullptr;
+    if (s_fake != nullptr) {
+        return s_fake;
+    }
+#ifdef __linux__
+    void* p = ::mmap(nullptr, 0x4000, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    if (p != MAP_FAILED) {
+        s_fake = static_cast<uint8_t*>(p);
+    }
+#else
+    (void)0;
+#endif
+    return s_fake;
+}
+int32_t ResourceManager::GetById(int32_t resId)
+{
+    (void)resId;
+    if (g_fixture_getbyid_count == 0) {
+        return 0;
+    }
+    uint8_t* fake = fixture_fake_resource();
+    if (fake == nullptr) {
+        return 0;   /* 32-bit region unavailable: behave as not-found */
+    }
+    *reinterpret_cast<uint16_t*>(fake + 0x158) = g_fixture_getbyid_count;
+    return static_cast<int32_t>(reinterpret_cast<intptr_t>(fake));
+}
 
 /* g_tilemap — typed TileMap* (tilemap.h); kept null in these tests. */
 TileMap* g_tilemap = nullptr;
@@ -203,10 +245,13 @@ unsigned int GetResourceType(int id)
     return GetResourceType(static_cast<unsigned int>(id));
 }
 
-/* RESDATA tile predicates — reached only by the gated placement path. */
+/* RESDATA tile predicates — reached only by the gated placement path
+ * (host_placement_available) or the typed entity scan.  InputMgr.o now
+ * references the canonical int32_t __fastcall form (0x44BD30); a fresh
+ * manager never reaches it, so it stays fail-loud. */
 LOUD_FIXTURE(RESDATA_IsBuildingTile)
 LOUD_FIXTURE(RESDATA_IsRoadTile)
-int RESDATA_IsBuildingTile(intptr_t)
+uint8_t __fastcall RESDATA_IsBuildingTile(int32_t)
 { fixture_reached_RESDATA_IsBuildingTile(); return 0; }
 int RESDATA_IsRoadTile(int)
 { fixture_reached_RESDATA_IsRoadTile(); return 0; }

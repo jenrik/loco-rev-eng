@@ -17,12 +17,20 @@
  *   RESMGR_LockResource        0x447DB0  read one 0x80 entity record
  *   RESMGR_UnlockResource      0x447DF0  read one 0x2C vehicle record
  *   RESMGR_LoadResourceData    0x447E30  open output stream, write header +
- *                                        preview (save path)
+ *                                        preview (save path; the binary
+ *                                        uses the WRITE-stream ctor
+ *                                        0x465090 — mode|2, not the read
+ *                                        ctor 0x463970 — mode|1)
  *   RESMGR_WriteSaveRecord     0x447F50  write one 0x80 entity record
  *   RESMGR_WriteTableRecord    0x447F80  write one 0x2C vehicle record
  *   RESMGR_RemoveResource      0x447FB0  release streams, asset data,
  *                                        preview pixels
  *   RESMGR_IsSaveHeader        0x448030  (save.type == 8)
+ *
+ * On 64-bit hosts the record buffers are the host-native typed members
+ * (RESDATA::host_record_entity/vehicle) — the x86 record-buffer offsets
+ * +0x04/+0x84 are only valid in the 32-bit layout and are never written
+ * into host RESDATA members.
  *
  * All field accesses are typed through the RESDATA struct (shared/types.h,
  * SaveRegion at +0xB0, streams/pixels at +0x1C4..+0x1D7).  No raw vtable
@@ -45,6 +53,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -55,6 +64,13 @@ extern void  GLOBAL_free(void* ptr);                 /* 0x465CD0 */
 extern void* g_asset_mgr;                            /* 0x485600 */
 extern char  g_install_path[];                       /* 0x4A99C8 */
 
+/* Strict sane preview cap (16 MiB) shared by the host load/write
+ * paths — same bound as PersistenceAdapter::kMaxPreviewBytes.  The
+ * largest shipped fixture preview is 80*64 = 5120 bytes. */
+#ifndef _WIN32
+static constexpr size_t kHostMaxPreviewBytes = 16u * 1024u * 1024u;
+#endif
+
 #ifndef _WIN32
 /* The original checks [0x485600] (g_asset_mgr) and, when present, loads
  * the file through AssetMgr_LoadFile (0x45CD00) + a memory stream.  On
@@ -63,8 +79,13 @@ extern char  g_install_path[];                       /* 0x4A99C8 */
  * fallback below is the path the original takes in that state too. */
 #else
 /* Win32 stream layer (native/win32_stream.c — original ABI). */
+/* Read-stream ctor 0x463970 (mode|1, child vtable 0x479184); write-stream
+ * ctor 0x465090 (mode|2, child vtable 0x479244 — the OR'd mode bit is the
+ * value-vs-address discriminator the write path needs). */
 extern void* WIN32_StreamOpenFile(void* stream, const char* path,
                                   uint32_t mode, uint32_t flags, int32_t param4); /* 0x463970 */
+extern void* WIN32_StreamOpenWriteFile(void* stream, const char* path,
+                                       uint32_t mode, uint32_t flags, int32_t param4); /* 0x465090 */
 extern void* WIN32_StreamRead(void* stream, void* buf, uint32_t size);   /* 0x463810 */
 extern void* WIN32_StreamWrite(void* stream, const void* buf, uint32_t size); /* 0x465010 */
 extern void* WNDPROC_StreamFromMemory(void* stream, const void* data,
@@ -90,6 +111,13 @@ extern TileMap* g_tilemap;
 /*     (the original sets the same bit in the stream +0x08 flags when  */
 /*     an operation fails; WriteSaveRecord/WriteTableRecord refuse to  */
 /*     write when it is set).                                          */
+/*                                                                      */
+/* Write streams are ATOMIC on the host: OpenWrite opens "<path>.tmp"  */
+/* (same directory, so the final rename is atomic on POSIX) and        */
+/* Commit() flushes + renames the temp over the target.  An uncommitted */
+/* write stream removes its temp file on destruction, so a failed save */
+/* never leaves a partial "curr" behind (host deviation — the         */
+/* original writes in place; documented in PersistenceAdapter.h).      */
 /* ================================================================== */
 #ifndef _WIN32
 namespace {
@@ -104,6 +132,7 @@ public:
     static HostSaveStream* OpenRead(const char* path)
     {
         HostSaveStream* s = new HostSaveStream();
+        s->path_ = path;
         s->file_ = std::fopen(path, "rb");
         if (s->file_ == nullptr) {
             s->flags_ |= kStateError;
@@ -114,7 +143,9 @@ public:
     static HostSaveStream* OpenWrite(const char* path)
     {
         HostSaveStream* s = new HostSaveStream();
-        s->file_ = std::fopen(path, "wb");
+        s->path_ = path;
+        s->temp_path_ = std::string(path) + ".tmp";
+        s->file_ = std::fopen(s->temp_path_.c_str(), "wb");
         if (s->file_ == nullptr) {
             s->flags_ |= kStateError;
         }
@@ -152,6 +183,27 @@ public:
             return std::fwrite(src, 1, size, file_);
         }
         return 0;   /* memory streams are read-only */
+    }
+
+    /* Flush + atomically publish the temp file over the target path. */
+    bool Commit()
+    {
+        if (file_ == nullptr || temp_path_.empty()) {
+            return false;
+        }
+        if (std::fflush(file_) != 0) {
+            close();
+            std::remove(temp_path_.c_str());
+            return false;
+        }
+        std::fclose(file_);
+        file_ = nullptr;
+        if (std::rename(temp_path_.c_str(), path_.c_str()) != 0) {
+            std::remove(temp_path_.c_str());
+            return false;
+        }
+        committed_ = true;
+        return true;
     }
 
     /* Unread bytes: used by the host truncation guard in
@@ -192,6 +244,11 @@ private:
             std::fclose(file_);
             file_ = nullptr;
         }
+        /* An uncommitted write stream must never leave a partial file
+         * behind (atomic-save contract). */
+        if (!temp_path_.empty() && !committed_) {
+            std::remove(temp_path_.c_str());
+        }
     }
 
     FILE*           file_ = nullptr;
@@ -199,6 +256,9 @@ private:
     size_t          mem_size_ = 0;
     size_t          mem_pos_ = 0;
     uint32_t        flags_ = 0;
+    std::string     path_;       /* final target path (write mode)      */
+    std::string     temp_path_;  /* "<path>.tmp" (write mode, atomic)   */
+    bool            committed_ = false;
 };
 
 }  // namespace
@@ -259,6 +319,31 @@ size_t host_stream_bytes_remaining(void* stream)
     }
     return s->bytes_remaining();
 }
+#endif
+
+#ifndef _WIN32
+/* Host atomic-save commit: flush + rename the secondary (write) stream's
+ * temp file over its target path.  INPUT_SaveCurrentWorld (0x41D9B0)
+ * calls this after every record write succeeds; the save is only
+ * durable when it returns true (and the caller then returns 1).  An
+ * uncommitted write stream removes its temp on destruction, so a failed
+ * save never leaves a partial file.  Host-only deviation — the original
+ * writes in place.  Declared in PersistenceAdapter.h. */
+namespace loco {
+namespace host {
+bool host_save_commit(RESDATA* resdata)
+{
+    if (resdata == nullptr || resdata->secondary_stream == nullptr) {
+        return false;
+    }
+    HostSaveStream* s = host_stream(resdata->secondary_stream);
+    if (s->StateFlag(HostSaveStream::kStateError)) {
+        return false;
+    }
+    return s->Commit();
+}
+}  // namespace host
+}  // namespace loco
 #endif
 
 /* ================================================================== */
@@ -378,15 +463,15 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
      * shipped saves (e.g. 64x48 = 1024x768/16).  A game-saved file
      * stores the player id/color there, so the preview can be tiny or
      * empty (player 0,0 -> 0 bytes); zero dimensions are legal.  Bounds:
-     * the product is capped so a corrupt header cannot ask for a huge
-     * allocation. */
+     * a strict sane cap (16 MiB, same as PersistenceAdapter's
+     * kMaxPreviewBytes) rejects corrupt headers before any allocation
+     * (host hardening — the original computes the unchecked product). */
     uint32_t preview_w = resdata->save.player_id;    /* +0xB2 */
     uint32_t preview_h = resdata->save.player_color; /* +0xB4 */
     size_t preview_bytes = 0;
     if (preview_w != 0 && preview_h != 0) {
-        if (preview_w > 0x10000u / preview_h) {
-            /* Corrupt dimensions — fail explicitly (host hardening; the
-             * original would compute the unchecked product). */
+        if (preview_w > kHostMaxPreviewBytes / preview_h) {
+            /* Corrupt dimensions — fail explicitly. */
             return 0;
         }
         preview_bytes = static_cast<size_t>(preview_w) * preview_h;
@@ -455,13 +540,20 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
 /* Address: 0x447DB0                                                   */
 /*                                                                      */
 /* Reads one 0x80-byte entity record from primary_stream into the      */
-/* record buffer at RESDATA+0x04.  Returns the buffer pointer, or      */
-/* nullptr when the stream is missing or the read is short (no         */
-/* partial records).                                                   */
+/* record buffer at RESDATA+0x04 (x86 layout).  Returns the buffer     */
+/* pointer, or nullptr when the stream is missing or the read is short */
+/* (no partial records).  On 64-bit hosts the record is read into the  */
+/* host-native typed buffer (types.h) instead — the +0x04 offset would */
+/* land inside the pointer-width vtable member there (safe native      */
+/* layout; no x86 offsets written into host RESDATA members).          */
 /* ================================================================== */
 void* RESMGR_LockResource(RESDATA* resdata)
 {
-    uint8_t* buffer = reinterpret_cast<uint8_t*>(resdata) + 0x04;
+#if UINTPTR_MAX == 0xffffffffu
+    uint8_t* buffer = reinterpret_cast<uint8_t*>(resdata) + 0x04;  /* x86 record buffer */
+#else
+    uint8_t* buffer = resdata->host_record_entity;                 /* safe native buffer */
+#endif
 #ifndef _WIN32
     if (resdata->primary_stream == nullptr) {
         return nullptr;
@@ -490,12 +582,16 @@ void* RESMGR_LockResource(RESDATA* resdata)
 /* Address: 0x447DF0                                                   */
 /*                                                                      */
 /* Reads one 0x2C-byte vehicle record from primary_stream into the     */
-/* record buffer at RESDATA+0x84.  Same short-read contract as         */
-/* LockResource.                                                       */
+/* record buffer at RESDATA+0x84 (x86 layout).  Same short-read        */
+/* contract as LockResource; same host-native buffer rule.             */
 /* ================================================================== */
 void* RESMGR_UnlockResource(RESDATA* resdata)
 {
-    uint8_t* buffer = reinterpret_cast<uint8_t*>(resdata) + 0x84;
+#if UINTPTR_MAX == 0xffffffffu
+    uint8_t* buffer = reinterpret_cast<uint8_t*>(resdata) + 0x84;  /* x86 record buffer */
+#else
+    uint8_t* buffer = resdata->host_record_vehicle;                /* safe native buffer */
+#endif
 #ifndef _WIN32
     if (resdata->primary_stream == nullptr) {
         return nullptr;
@@ -535,7 +631,11 @@ int32_t RESMGR_LoadResourceData(RESDATA* resdata, const char* filename)
 #ifndef _WIN32
     RESMGR_RemoveResource(resdata);
     /* Host path: the filename is the caller-built "<resdir><name>"
-     * path, opened verbatim like the original's stream-open (0x447E80). */
+     * path, opened verbatim like the original's stream-open (0x447E80).
+     * Atomic-save contract: OpenWrite stages into "<path>.tmp" and the
+     * caller publishes it with loco::host::host_save_commit() after all
+     * record writes succeed; an uncommitted stream removes the temp on
+     * destruction (no partial save ever becomes visible). */
     HostSaveStream* stream = HostSaveStream::OpenWrite(filename);
     resdata->secondary_stream = stream;
     if (stream->StateFlag(HostSaveStream::kStateError)) {
@@ -552,12 +652,13 @@ int32_t RESMGR_LoadResourceData(RESDATA* resdata, const char* filename)
      * buffer of save.player_id*player_color bytes; see
      * INPUT_SaveCurrentWorld for the documented deviation).  A game-saved
      * header stores player id/color here, so the preview may be tiny or
-     * empty — zero dimensions write nothing. */
+     * empty — zero dimensions write nothing.  A strict sane cap (16 MiB)
+     * rejects absurd header dims before any allocation (host hardening). */
     uint32_t preview_w = resdata->save.player_id;
     uint32_t preview_h = resdata->save.player_color;
     size_t preview_bytes = 0;
     if (preview_w != 0 && preview_h != 0) {
-        if (preview_w > 0x10000u / preview_h) {
+        if (preview_w > kHostMaxPreviewBytes / preview_h) {
             return 0;
         }
         preview_bytes = static_cast<size_t>(preview_w) * preview_h;
@@ -592,12 +693,17 @@ int32_t RESMGR_LoadResourceData(RESDATA* resdata, const char* filename)
         return 0;
     }
     resdata->secondary_stream =
-        WIN32_StreamOpenFile(mem, filename, 0x92, 0x479190, 1);
+        WIN32_StreamOpenWriteFile(mem, filename, 0x92, 0x479190, 1);
     if (resdata->secondary_stream == nullptr) {
         return 0;
     }
     /* Original (0x447EA7..0x447EB1): when the stream's state word has
-     * bit 0x4 set (non-writable) the save is refused with 0. */
+     * bit 0x4 set (non-writable) the save is refused with 0.  The ctor
+     * above is the WRITE-stream ctor (0x465090): it ORs the open mode
+     * with 2 (0x447e8f passes mode 0x92) and attaches the write child
+     * vtable 0x479244 — the OR'd flag is the value-vs-address
+     * discriminator that makes the child stream writable.  (The read
+     * ctor 0x463970 used by LoadResource ORs mode with 1 instead.) */
     if ((stream_word8(resdata->secondary_stream) & 0x4) != 0) {
         return 0;
     }

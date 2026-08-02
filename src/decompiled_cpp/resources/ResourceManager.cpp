@@ -71,8 +71,14 @@ void CRT_srand(uint32_t seed);       /* @ 0x004682B0 */
 uint32_t CRT_timeGetTime(int32_t*);  /* @ 0x00466AF0 */
 void CRT_sprintf_buf(void* buf, const char* format, ...); /* @ 0x00467F60 */
 int32_t CRT_strupr(char* str);       /* @ 0x00467D00 */
-void* CRT_ceil(void* stream, void* buf, uint32_t size);   /* @ 0x00465010 */
-void* CRT_floor(void* stream, const char* path, uint32_t mode, void* param, int32_t flag); /* @ 0x00465090 */
+void* CRT_ceil(void* stream, void* buf, uint32_t size);   /* @ 0x00465010 — this is the
+                                                             *   WIN32 stream WRITE function
+                                                             *   (WIN32_StreamWrite in
+                                                             *   ResDataSave.cpp), NOT CRT
+                                                             *   ceil (mislabel fixed) */
+/* @ 0x00465090 is the WIN32 WRITE-stream constructor (mode|2,
+ * WIN32_StreamOpenWriteFile in ResDataSave.cpp) — NOT CRT floor
+ * (mislabel fixed; no callers remain). */
 
 } /* extern "C" */
 

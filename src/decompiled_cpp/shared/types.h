@@ -271,6 +271,21 @@ struct RESDATA {
     void*     asset_data;       /* +0x1D0  AssetMgr_LoadFile result       */
     int32_t   asset_size;       /* +0x1D4  asset_data byte count          */
     /* +0x1D8..0x1DB: tail — sizeof(RESDATA) is exactly 0x1D8 (i686).   */
+#if UINTPTR_MAX != 0xffffffffu
+    /* ---- Host-native record buffers (64-bit hosts only) ------------
+     * The x86 RESDATA layout carries the entity/vehicle record buffers
+     * at +0x04/+0x84 (RESMGR_LockResource 0x447DB0 / RESMGR_UnlockResource
+     * 0x447DF0 read one 0x80/0x2C record there).  Those offsets are only
+     * valid in the 32-bit layout: on a 64-bit host +0x04 lands inside the
+     * pointer-width vtable member and +0x84 inside the sprite-metadata
+     * fields, so writing them would corrupt host members.  The native
+     * primitives (ResDataSave.cpp host branch) therefore read into these
+     * typed-width buffers instead — no x86 offsets are ever written into
+     * host RESDATA members (safe native layout, AGENTS.md).  The buffers
+     * are not part of the x86 layout (guarded out on 32-bit). */
+    alignas(8) uint8_t host_record_entity[0x80];   /* 0x80-byte entity record */
+    alignas(8) uint8_t host_record_vehicle[0x2C];  /* 0x2C-byte vehicle record */
+#endif
 };
 /* x86-layout assertions only — the shared struct carries native-width
  * pointers (vtable/anim_table), so 64-bit hosts have different sizes.

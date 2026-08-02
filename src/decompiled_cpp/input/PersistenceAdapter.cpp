@@ -209,7 +209,13 @@ bool PersistenceAdapter::write_save(const std::string& path,
         out.insert(out.end(), v, v + vehicles_bytes);
     }
 
-    FILE* f = std::fopen(path.c_str(), "wb");
+    /* Atomic write: stage into "<path>.tmp" in the same directory, then
+     * rename over the target (POSIX atomic).  A failed stage leaves no
+     * file at all; a failed rename removes the temp — a partial save is
+     * never visible.  (The documented atomic contract in
+     * PersistenceAdapter.h is implemented here for real.) */
+    const std::string tmp = path + ".tmp";
+    FILE* f = std::fopen(tmp.c_str(), "wb");
     if (f == nullptr) {
         if (error) *error = "cannot create file";
         return false;
@@ -218,8 +224,13 @@ bool PersistenceAdapter::write_save(const std::string& path,
     bool flush_ok = (std::fflush(f) == 0);
     std::fclose(f);
     if (written != out.size() || !flush_ok) {
-        std::remove(path.c_str());   /* never leave a partial save */
+        std::remove(tmp.c_str());   /* never leave a partial save */
         if (error) *error = "write failed";
+        return false;
+    }
+    if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+        std::remove(tmp.c_str());
+        if (error) *error = "rename failed";
         return false;
     }
     return true;
@@ -291,8 +302,19 @@ bool seed_fresh_world_from_fixture(InputMgr* mgr)
     std::fflush(stderr);
 
     /* 3. Persist the recovered records to "curr" through the real save
-     *    machinery (INPUT_SaveCurrentWorld, 0x41D9B0). */
-    INPUT_SaveCurrentWorld(mgr, "curr");
+     *    machinery (INPUT_SaveCurrentWorld, 0x41D9B0 — atomic temp+
+     *    rename on the host, so a durable curr exists iff this succeeds).
+     *    The save result is PROPAGATED: a fresh seed must never report
+     *    success without a durable curr (the loading worker then skips
+     *    the load-back and the host logs the failure loudly). */
+    if (INPUT_SaveCurrentWorld(mgr, "curr") == 0) {
+        std::fprintf(stderr,
+            "[HOST] seed_fresh_world: INPUT_SaveCurrentWorld(\"curr\") "
+            "failed — fresh world NOT persisted (no durable curr); "
+            "continuing with the empty fresh world\n");
+        std::fflush(stderr);
+        return false;
+    }
     return true;
 }
 

@@ -41,7 +41,7 @@ extern int32_t  g_client_width;          /* 0x00485220 */
 extern int32_t  g_client_height;         /* 0x00485224 */
 extern uint8_t  g_is_fullscreen;         /* 0x00485210 */
 extern int32_t  g_world_width;           /* 0x004AAD0C */
-extern uint8_t  g_is_town_mode;
+extern uint8_t  g_is_town_mode;         /* 0x485328 — town/tilemap flag */
 extern int32_t  g_town_overlay_rect;     /* 0x48538C */
 extern int32_t  g_town_overlay_left;     /* 0x485390 */
 extern int32_t  g_town_overlay_top;      /* 0x485394 */
@@ -69,7 +69,10 @@ extern int32_t  g_viewport_rect_left;    /* 0x4AAD14 (TileMap.viewport_rect.left
 extern int32_t  g_viewport_rect_top;     /* 0x4AAD18 */
 extern int32_t  g_viewport_rect_right;   /* 0x4AAD1C */
 extern int32_t  g_viewport_rect_bottom;  /* 0x4AAD20 */
-extern uint8_t  g_allow_building_placement; /* 0x485328 */
+extern uint8_t  g_allow_building_placement; /* 0x4FD3DC — loader/building placement
+                                            flag.  DISTINCT from g_is_town_mode
+                                            (0x485328); the two were once conflated
+                                            under this name (see tilemap.h). */
 extern int32_t  g_player_id;             /* 0x4AAD46 (TileMap.tile_count_x) */
 extern int32_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) —
                                     *   host-declared 32-bit; the binary stores
@@ -803,6 +806,30 @@ int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b)
     }
 
     return -1;
+}
+
+/* ================================================================== */
+/* RESDATA_IsBuildingTile                                             */
+/* Address: 0x44BD30                                                   */
+/*                                                                      */
+/* Returns 1 when the resource's tile-state byte at +0x63A is in       */
+/* {7, 8, 9, 0xA} (mov 0x63a(%ecx),%al; cmp 7/9/8/0xA), else 0.       */
+/* Binary ABI: __thiscall, ECX = the resource pointer (callers:        */
+/* INPUT_LoadSaveFile 0x41D7BB, INPUT_FindObjectAt 0x41E35A — the      */
+/* __fastcall annotation reproduces that on 32-bit Windows and expands */
+/* to the native ABI on hosts).  The binary dereferences +0x63A        */
+/* unconditionally; the host guards a null object (documented          */
+/* hardening — the binary would fault).                                */
+/* ================================================================== */
+uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj)
+{
+    if (tile_obj == 0) {
+        return 0;
+    }
+    const uint8_t state = *reinterpret_cast<const uint8_t*>(
+        static_cast<uintptr_t>(static_cast<intptr_t>(tile_obj)) + 0x63A);
+    return (state == 0x07 || state == 0x08 || state == 0x09 || state == 0x0A)
+        ? 1 : 0;
 }
 
 /* ================================================================== */
@@ -1598,7 +1625,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
         if (end_y < tile_count_y) end_y = static_cast<short>(end_y + 1);
 
         /* Town-mode clamp: restrict the scan to the town overlay rect. */
-        if (g_allow_building_placement != 0) {
+        if (g_is_town_mode != 0) {
             int ov;
             int nx;
 
@@ -1902,7 +1929,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                                    pixel_x + 16, pixel_y + 16,
                                                    reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
                         Town_RenderSelection(g_town_view);
-                        if (g_allow_building_placement == 0) {
+                        if (g_is_town_mode == 0) {
                             Game_SetCursorByResourceId(g_game, pixel_x, pixel_y,
                                                        pixel_x + 16, pixel_y + 16, 1);
                         }
@@ -1931,7 +1958,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
     RECT town_overlay = { g_town_overlay_rect, g_town_overlay_left,
                           g_town_overlay_top, g_town_overlay_right };
     if (IntersectRect(&local_10, &town_overlay, &param_rect)) {
-        if (g_allow_building_placement != 0) {
+        if (g_is_town_mode != 0) {
             if (surface_locked != 0 &&
                 TileMap_UnlockPrimarySurface() == 0) {
                 surface_locked = 0;
@@ -1950,7 +1977,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
         }
     }
 
-    if (g_allow_building_placement != 0) {
+    if (g_is_town_mode != 0) {
         RECT town_selection = { g_town_selection_rect_left,
                                g_town_selection_rect_top,
                                g_town_selection_rect_right,

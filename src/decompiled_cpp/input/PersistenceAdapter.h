@@ -164,6 +164,13 @@ private:
 #ifndef _WIN32
 bool host_placement_available();
 void set_host_placement_available(bool available);
+
+/** Host atomic-save commit (defined in resources/ResDataSave.cpp).
+ *  Flushes and renames the RESDATA secondary (write) stream's temp file
+ *  over its target path; INPUT_SaveCurrentWorld (0x41D9B0) calls this
+ *  after every record write succeeds and only reports success when it
+ *  returns true, so a failed save never leaves a partial "curr". */
+bool host_save_commit(RESDATA* resdata);
 #endif
 
 /* ================================================================== */
@@ -189,9 +196,11 @@ void set_host_placement_available(bool available);
  *  mode-3 world is gated by the RESDATA-metadata limitation (see the
  *  file header) and tracked in PROGRESS.md.
  *
- *  Returns true on success; on failure the reason is logged loudly and
- *  false is returned (the host still enters mode 3 with the empty fresh
- *  world state INPUT_NewWorld produced). */
+ *  Returns true only when the fixture parsed AND INPUT_SaveCurrentWorld
+ *  durably persisted "curr" (atomic host save); on any failure the
+ *  reason is logged loudly and false is returned (the host still enters
+ *  mode 3 with the empty fresh world state INPUT_NewWorld produced, but
+ *  never reports a seeded world that was not durably saved). */
 bool seed_fresh_world_from_fixture(InputMgr* mgr);
 
 }  // namespace host

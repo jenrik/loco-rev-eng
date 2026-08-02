@@ -223,6 +223,61 @@ int main()
         mgr.DtorBody();
     }
 
+    /* ---- 5b. FindObjectAt default mode (0x41E498): the pick range is
+     * the +0x158 count of the typed g_resmgr.GetById(mode) lookup, NOT a
+     * collection scan (review-corrected semantics). ---- */
+    {
+        InputMgr mgr;
+        g_fixture_getbyid_count = 0;
+        CHECK(INPUT_FindObjectAt(&mgr, 5) == nullptr,
+              "FindObjectAt(5) not-found via GetById (count 0)");
+        CHECK(INPUT_FindObjectAt(&mgr, -2) == nullptr,
+              "FindObjectAt(-2) default path (mode < -1)");
+
+        /* Populated: with a fake resource whose +0x158 count is 2, the
+         * pick range comes from the lookup and the result is one of the
+         * two entities whose resource id (+0x04) equals the mode.  The
+         * fixture maps the fake resource with MAP_32BIT so the binary's
+         * int32 pointer return round-trips on x86_64; when the 32-bit
+         * region is unavailable GetById returns 0 (not-found) and the
+         * range check degrades to the null assertions below. */
+        g_fixture_getbyid_count = 2;
+        if (INPUT_FindObjectAt(&mgr, 7) == nullptr) {
+            /* 32-bit fake unavailable: the not-found path must still be
+             * null (no collection dereference on the default path). */
+            CHECK(INPUT_FindObjectAt(&mgr, 7) == nullptr,
+                  "FindObjectAt(7) null when the fake lookup is unavailable");
+        } else {
+            /* Two fake entities with fake resources whose +0x04 == 7. */
+            struct FakeEntity { uint8_t pad[0x40]; void* resource; };
+            FakeEntity* e0 = new FakeEntity();
+            FakeEntity* e1 = new FakeEntity();
+            int32_t* r0 = new int32_t[4];
+            int32_t* r1 = new int32_t[4];
+            std::memset(e0, 0, sizeof(*e0));
+            std::memset(e1, 0, sizeof(*e1));
+            std::memset(r0, 0, 4 * sizeof(int32_t));
+            std::memset(r1, 0, 4 * sizeof(int32_t));
+            r0[1] = 7;   /* resource +0x04 == mode */
+            r1[1] = 7;
+            e0->resource = r0;
+            e1->resource = r1;
+            mgr.count = 2;
+            mgr.buffer[0] = reinterpret_cast<Entity*>(e0);
+            mgr.buffer[1] = reinterpret_cast<Entity*>(e1);
+            Entity* found = static_cast<Entity*>(INPUT_FindObjectAt(&mgr, 7));
+            CHECK(found == reinterpret_cast<Entity*>(e0) ||
+                      found == reinterpret_cast<Entity*>(e1),
+                  "FindObjectAt(7) returns one of the +0x04==7 members");
+            delete[] r0;
+            delete[] r1;
+            delete e0;
+            delete e1;
+        }
+        g_fixture_getbyid_count = 0;
+        mgr.DtorBody();
+    }
+
     /* ---- 6. INPUT_SaveCurrentWorld failure path ---- */
     {
         /* An unwritable/absent output directory makes LoadResourceData
@@ -235,7 +290,139 @@ int main()
         PersistenceAdapter::instance().clear_document();
         CHECK(INPUT_SaveCurrentWorld(&mgr, "curr") == 0,
               "SaveCurrentWorld fails explicitly when the output cannot be opened");
+        CHECK(access((missing_dir + "/curr").c_str(), F_OK) != 0,
+              "failed save leaves no partial curr");
         mgr.DtorBody();
+    }
+
+    /* ---- 7. Atomic-save contract: read-only dir + failed rename ---- */
+    {
+        /* (a) read-only data dir: fopen of the temp fails -> 0, and no
+         * "curr" (or temp) is created. */
+        std::string dir = make_temp_dir();
+        std::string wild = dir + "/Wildwest.sav";
+        copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", wild);
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir.c_str());
+        InputMgr mgr;
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadSaveFile(&mgr, "Wildwest.sav", 1, 1) == 1,
+              "read-only-dir case: load first");
+        ::chmod(dir.c_str(), 0555);
+        CHECK(INPUT_SaveCurrentWorld(&mgr, "curr") == 0,
+              "read-only dir -> SaveCurrentWorld fails explicitly (atomic)");
+        CHECK(access((dir + "/curr").c_str(), F_OK) != 0,
+              "read-only failure leaves no partial curr");
+        CHECK(access((dir + "/curr.tmp").c_str(), F_OK) != 0,
+              "read-only failure leaves no temp file");
+        ::chmod(dir.c_str(), 0755);
+        mgr.DtorBody();
+
+        /* (b) failed commit (target exists as a DIRECTORY): the temp
+         * writes succeed but the rename cannot publish over a directory,
+         * so the save returns 0 and removes the temp. */
+        std::string dir2 = make_temp_dir();
+        std::string wild2 = dir2 + "/Wildwest.sav";
+        copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", wild2);
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir2.c_str());
+        InputMgr mgr2;
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadSaveFile(&mgr2, "Wildwest.sav", 1, 1) == 1,
+              "failed-rename case: load first");
+        ::mkdir((dir2 + "/curr").c_str(), 0755);   /* directory blocks rename */
+        CHECK(INPUT_SaveCurrentWorld(&mgr2, "curr") == 0,
+              "failed atomic rename -> SaveCurrentWorld returns 0");
+        struct stat st;
+        CHECK(::stat((dir2 + "/curr").c_str(), &st) == 0 && S_ISDIR(st.st_mode),
+              "failed rename leaves the pre-existing directory untouched");
+        CHECK(access((dir2 + "/curr.tmp").c_str(), F_OK) != 0,
+              "failed rename removes the temp (no partial save)");
+        mgr2.DtorBody();
+    }
+
+    /* ---- 8. "curr.sav" must not clobber the host current-name ----
+     * ----    bookkeeping (LoadWorld step 3 companion) ------------ */
+    {
+        std::string dir = make_temp_dir();
+        std::string wild = dir + "/Wildwest.sav";
+        std::string sav = dir + "/curr.sav";
+        copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", wild);
+        copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", sav);
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir.c_str());
+
+        InputMgr mgr;
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadSaveFile(&mgr, "Wildwest.sav", 1, 1) == 1,
+              "curr.sav case: load fixture first");
+        CHECK(INPUT_SaveCurrentWorld(&mgr, "curr") == 1,
+              "curr.sav case: persist curr");
+
+        g_current_save_path[0] = '\0';
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadWorld(&mgr, "curr") == 1, "LoadWorld loads curr");
+        /* The companion load of "curr.sav" (marker match) must not
+         * overwrite the primary load's recorded name with "curr.sav". */
+        CHECK(std::strcmp(g_current_save_path, "curr") == 0,
+              "curr.sav companion load does not clobber the current-save path");
+        mgr.DtorBody();
+    }
+
+    /* ---- 9. SaveCurrentWorld symmetric path-escape guard + seed ----
+     * ----    failure propagation (fresh seed never reports success --
+     * ----    without a durable curr) ------------------------------ */
+    {
+        std::string dir = make_temp_dir();
+        std::string wild = dir + "/Wildwest.sav";
+        copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", wild);
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir.c_str());
+        InputMgr mgr;
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadSaveFile(&mgr, "Wildwest.sav", 1, 1) == 1,
+              "escape case: load fixture");
+        CHECK(INPUT_SaveCurrentWorld(&mgr, "../evil") == 0,
+              "SaveCurrentWorld refuses an escaping name (symmetric guard)");
+        CHECK(INPUT_SaveCurrentWorld(&mgr, "/tmp/evil") == 0,
+              "SaveCurrentWorld refuses an absolute name");
+        mgr.DtorBody();
+
+        /* Seed success path: fixture parses + curr persists durably. */
+        {
+            std::string sdir = make_temp_dir();
+            std::string swild = sdir + "/Wildwest.sav";
+            copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", swild);
+            std::snprintf(g_install_path, sizeof(g_install_path), "%s/", sdir.c_str());
+            InputMgr smgr;
+            PersistenceAdapter::instance().clear_document();
+            setenv("LEGO_LOCO_SAVE_SEED", "Wildwest.sav", 1);
+            CHECK(loco::host::seed_fresh_world_from_fixture(&smgr),
+                  "seed succeeds with a durable curr");
+            CHECK(access((sdir + "/curr").c_str(), F_OK) == 0,
+                  "seed leaves a durable curr file");
+            CHECK(access((sdir + "/curr.tmp").c_str(), F_OK) != 0,
+                  "seed leaves no temp file");
+            unsetenv("LEGO_LOCO_SAVE_SEED");
+            smgr.DtorBody();
+        }
+
+        /* Seed failure path: read-only dir -> save fails -> seed returns
+         * false (the fresh world must never report success without a
+         * durable curr). */
+        {
+            std::string fdir = make_temp_dir();
+            std::string fwild = fdir + "/Wildwest.sav";
+            copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", fwild);
+            std::snprintf(g_install_path, sizeof(g_install_path), "%s/", fdir.c_str());
+            InputMgr fmgr;
+            PersistenceAdapter::instance().clear_document();
+            setenv("LEGO_LOCO_SAVE_SEED", "Wildwest.sav", 1);
+            ::chmod(fdir.c_str(), 0555);
+            CHECK(!loco::host::seed_fresh_world_from_fixture(&fmgr),
+                  "seed FAILS when the durable curr save fails (no false success)");
+            CHECK(access((fdir + "/curr").c_str(), F_OK) != 0,
+                  "failed seed leaves no durable curr");
+            ::chmod(fdir.c_str(), 0755);
+            unsetenv("LEGO_LOCO_SAVE_SEED");
+            fmgr.DtorBody();
+        }
     }
 
     if (failures == 0) {

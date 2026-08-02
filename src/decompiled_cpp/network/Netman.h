@@ -968,11 +968,12 @@ void*   UIPANEL_CopySurface(void* dst, int32_t src);
 void    Config_GetIniInt(void* ini, const char* section, const char* key, int32_t def);
 void    Config_WriteInt(void* ini, const char* section, const char* key, int32_t val);
 
-/* -- Direction mapping -- */
-int32_t INPUT_DirToOffset_Up(int32_t* param);
-int32_t INPUT_DirToOffset_Down(int32_t* param);
-int32_t INPUT_DirToOffset_Left(int32_t* param);
-int32_t INPUT_DirToOffset_Right(int32_t* param);
+/* -- Direction mapping (binary ABI: return the output pointer, EAX;  --
+ * -- callers dereference it — 0x43E252 mov (%eax),%ecx)             -- */
+int32_t* INPUT_DirToOffset_Up(int32_t* param);
+int32_t* INPUT_DirToOffset_Down(int32_t* param);
+int32_t* INPUT_DirToOffset_Left(int32_t* param);
+int32_t* INPUT_DirToOffset_Right(int32_t* param);
 
 /* -- DPLAY helper functions -- */
 void*   DPLAY_CreatePlayer(void* slot);

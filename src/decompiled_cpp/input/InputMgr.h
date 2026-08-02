@@ -245,11 +245,17 @@ void INPUT_GetSaveFileName(InputMgr* self);
  *  (UI_CleanupTooltips 0x423D00 on g_tooltip_mgr 0x4FD220), runs
  *  World_Init (0x44D9B0 on g_world 0x4A98B0) to generate fresh terrain,
  *  then — while any entity exists — enables Game screen-tracking
- *  (Game::SetScreenMode 0x411DC0, 1,1,1), scrolls the viewport to each
- *  entity (TileMap_ScrollTo 0x455AB0; every 10th entity uses animated
- *  scroll + UI_HideTooltip 0x423D70 + TileMap_InvalidateDirtyRects
- *  0x456150) and disables tracking again (1,1,0).  The index increments
- *  on failed scrolls; the count is re-read every iteration. */
+ *  (Game::SetScreenMode 0x411DC0, 1,1,1) and scrolls the viewport to
+ *  each entity (TileMap_ScrollTo 0x455AB0) and disables tracking again
+ *  (1,1,0).  The index increments on failed scrolls; the count is
+ *  re-read every iteration.
+ *
+ *  Scroll-loop quirk (verified 0x41E181..0x41E1D0): the binary divides
+ *  the re-read entity_count by 10, not the loop index — so the
+ *  animated-branch condition (entity_count % 10 == 0) is CONSTANT for
+ *  the whole loop: either every iteration runs the animated scroll +
+ *  UI_HideTooltip 0x423D70 + TileMap_InvalidateDirtyRects 0x456150
+ *  path, or none does.  (The old "every 10th entity" doc was wrong.) */
 void  INPUT_NewWorld(InputMgr* self);                          /* 0x41E120 */
 
 /** Load a saved world. Address: 0x41D320.  Returns the first
@@ -262,7 +268,12 @@ void  INPUT_NewWorld(InputMgr* self);                          /* 0x41E120 */
  *     the current-save global (0x4AA8F8).
  *  3. Always attempt the ".sav" companion: the backdrop window's
  *     (0x4FD3C8) save name + ".sav" via LoadSaveFile(..., 0, 0); the
- *     result is discarded.
+ *     result is discarded.  On the host the companion's "curr.sav"
+ *     marker match must not overwrite the primary load's recorded
+ *     current-save name, so the host snapshots/restores the global
+ *     around the companion load (the original never writes that global
+ *     from LoadSaveFile — it calls UIPANEL_Hide on the backdrop
+ *     window).
  *  4. When Netman (0x4FD3AC) scenario == 2: scroll to each placed
  *     player building (resource type 3 with +0x10C == 3 and
  *     +0x120 == 1) and clear the edge buildings' +0xC0 placement flag
@@ -282,7 +293,9 @@ char  INPUT_LoadWorld(InputMgr* self, const char* path);       /* 0x41D320 */
  *  Reads the 0x114 header via the RESMGR primitives (ResDataSave.cpp),
  *  computes the placement offset ((player_id - saved_id)/2,
  *  (player_color - saved_color)/2 where the saved fields are the
- *  header words at +0x02/+0x04 — preview dimensions on designer saves),
+ *  header words at +0x02/+0x04 — preview dimensions on designer saves)
+ *  with FLOOR division for negative odd deltas (the binary's
+ *  cltd/sub/sar idiom at 0x41D6A9..0x41D6D2, not C++ truncation),
  *  then places every 0x80-byte entity record (TileMap_FindObject
  *  0x4550C0, entity vtable[13] SetName on record+0x10, vtable[7]
  *  SetAnimState on +0x08 unless 0x852 or a building tile, dest to
@@ -306,16 +319,26 @@ char  INPUT_LoadSaveFile(InputMgr* self, const char* path,
  *  empty name from the BSS string at 0x4AA9FD), opens the output via
  *  RESMGR_LoadResourceData (0x447E30) and writes every placed entity
  *  (collection member with +0xC0 == 1) as a 0x80 record + every level
- *  table entry (0x4A98B8..0x4A98C8) as a 0x2C record.  When the name
- *  contains the current-save marker, the path is recorded in the
- *  current-save global (0x4AA8F8).  Returns 1 on success, 0 when the
- *  output stream cannot be opened.
+ *  table entry (0x4A98B8..0x4A98C8) as a 0x2C record — the level-table
+ *  record name is a strlen+1 copy of the FIRST sub-slot's
+ *  (*(obj+0x10)) +0x7C name (the name owner is sub-slot[0] at
+ *  obj+0x10, 0x41DC78, not *(obj+0x20)).  When the name contains the
+ *  current-save marker, the path is recorded in the current-save
+ *  global (0x4AA8F8).  Returns 1 on success, 0 when the output stream
+ *  cannot be opened.
  *
  *  Host (#ifndef _WIN32): the entity enumeration is fed by the typed
  *  PersistenceAdapter's recovered record set (the placement gate in
  *  INPUT_LoadSaveFile — see PersistenceAdapter.h); the preview written
  *  by RESMGR_LoadResourceData is the caller-prepared typed preview
- *  buffer (the original renders a TileMap overlay). */
+ *  buffer (the original renders a TileMap overlay), capped at 16 MiB;
+ *  the save is ATOMIC (temp + rename via host_save_commit) — every
+ *  record write is checked and a failed write/commit returns 0 with no
+ *  partial file, so the fresh seed never reports success without a
+ *  durable curr; the current-save marker is "curr" (original
+ *  "~curr") and is recorded only for a durable save; save names that
+ *  escape the save directory are refused (symmetric with
+ *  INPUT_LoadSaveFile). */
 char  INPUT_SaveCurrentWorld(InputMgr* self, const char* name);/* 0x41D9B0 */
 
 /* ---- Neighbour-tile offsets (packed (Y<<16)|X; real, verified) ----- */
@@ -326,15 +349,15 @@ char  INPUT_SaveCurrentWorld(InputMgr* self, const char* name);/* 0x41D9B0 */
  *  globals g_player_id (0x4AAD46) and g_player_color (0x4AAD48); used
  *  by Netman for tunnel-angle to neighbour-tile conversion.
  *
- *  ABI note: the binary leaves EAX = the output pointer and the original
- *  callers dereference it (0x43E252: mov (%eax),%ecx).  The C++
- *  reconstruction returns the stored packed value instead (Netman.cpp
- *  assigns `off = INPUT_DirToOffset_Left(&off)`), which is behaviourally
- *  equivalent for those call sites; Netman.h declares the same shape. */
-int32_t INPUT_DirToOffset_Up(int32_t* output);      /* 0x41D8F0 */
-int32_t INPUT_DirToOffset_Left(int32_t* output);    /* 0x41D920 */
-int32_t INPUT_DirToOffset_Down(int32_t* output);    /* 0x41D950 */
-int32_t INPUT_DirToOffset_Right(int32_t* output);   /* 0x41D980 */
+ *  ABI (preserved exactly): the binary leaves EAX = the output pointer
+ *  and the original callers dereference it (0x43E252 mov (%eax),%ecx).
+ *  The C++ reconstruction returns the output pointer too; Netman.cpp
+ *  callers write `off = *INPUT_DirToOffset_Left(&off)` — the same
+ *  dereference the binary performs at every call site. */
+int32_t* INPUT_DirToOffset_Up(int32_t* output);      /* 0x41D8F0 */
+int32_t* INPUT_DirToOffset_Left(int32_t* output);    /* 0x41D920 */
+int32_t* INPUT_DirToOffset_Down(int32_t* output);    /* 0x41D950 */
+int32_t* INPUT_DirToOffset_Right(int32_t* output);   /* 0x41D980 */
 
 /* ---- Editor placement (INPUT_FindObjectAt 0x41E1F0 is implemented in
  * ---- InputMgr.cpp — it is the callee INPUT_LoadSaveFile's vehicle loop
@@ -344,4 +367,14 @@ int32_t INPUT_DirToOffset_Right(int32_t* output);   /* 0x41D980 */
 void*      INPUT_PlaceObject(InputMgr* self, unsigned int resource_id); /* 0x41DD80 */
 uintptr_t  INPUT_RemoveObject(InputMgr* self, void* obj,
                               unsigned int param);            /* 0x41DEF0 */
+/** Find a placed object by mode. Address: 0x41E1F0.
+ *
+ *  Jump table at 0x41E550 on (mode+1), unsigned; modes -1..4 are table
+ *  cases, everything else (mode > 4 or mode < -1) falls to the default
+ *  path (0x41E498): the pick range is the 16-bit count at +0x158 of
+ *  g_resmgr.GetById(mode) (0x446EA0) — a TYPED ResourceManager lookup,
+ *  NOT a collection scan — and the second pass returns the pick-th
+ *  entity whose resource id (+0x04) equals mode.  The host returns
+ *  nullptr for a non-positive lookup (the binary checks only ==0 and
+ *  would read 0x157 for a -1 error result; documented hardening). */
 void*      INPUT_FindObjectAt(InputMgr* self, int mode);      /* 0x41E1F0 */

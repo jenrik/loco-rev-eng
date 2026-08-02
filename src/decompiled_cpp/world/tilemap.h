@@ -361,6 +361,16 @@ void TileMap_FreeDirtyRects(RECT* rect_list);
  */
 void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags);
 
+/* RESDATA tile-state predicates (canonical declarations).  Binary ABI:
+ * __thiscall with ECX = the resource pointer (0x41D7BB / 0x41E35A call
+ * 0x44BD30 with ECX = entity->resource); the __fastcall annotation keeps
+ * that convention on 32-bit Windows and expands to the native ABI on
+ * hosts (compat.h).  Implemented in world/tilemap.cpp.  (The sibling
+ * predicates 0x44BD50/0x44BD70 are still declared below as the legacy
+ * int IsWaterTile/IsTrackTile forms — same ABI defect class, tracked in
+ * PROGRESS.) */
+uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj);  /* 0x44BD30 */
+
 /* ================================================================== */
 /* External globals referenced by TileMap                              */
 /* ================================================================== */
@@ -373,7 +383,11 @@ extern int32_t  g_client_width;         /* 0x00485220 */
 extern int32_t  g_client_height;        /* 0x00485224 */
 extern uint8_t  g_is_fullscreen;        /* 0x00485210 */
 extern int32_t  g_world_width;          /* 0x004AAD0C (TileMap.width) */
-extern uint8_t  g_is_town_mode;
+extern uint8_t  g_is_town_mode;         /* 0x00485328  1 = in-game town mode
+                                           (tilemap/town flag — DISTINCT from
+                                           g_allow_building_placement 0x4FD3DC;
+                                           the two were once conflated under one
+                                           C++ symbol) */
 extern int32_t  g_town_overlay_rect;    /* 0x48538C */
 extern int32_t  g_town_overlay_left;    /* 0x485390 */
 extern int32_t  g_town_overlay_top;     /* 0x485394 */
@@ -403,7 +417,12 @@ extern void*    g_tile_occupied_bitmap; /* 0x4FD18C */
 extern int32_t  g_player_id;            /* 0x4AAD46 (TileMap.tile_count_x) */
 extern int32_t  g_viewport_x;           /* 0x4AAD24 (TileMap.viewport_x) */
 extern uint8_t  g_lock_update_flag;     /* 0x4851F0 */
-extern uint8_t  g_allow_building_placement;  /* 0x485328 */
+extern uint8_t  g_allow_building_placement;  /* 0x4FD3DC — loader/building
+                                           placement flag (Game, InputMgr,
+                                           ScriptedObject, TileMap find/scroll
+                                           gates).  DISTINCT from g_is_town_mode
+                                           (0x485328); the two were once
+                                           conflated under this name. */
 extern int32_t  g_player_color;          /* 0x4AAD48 — host-declared 32-bit for
                                           *   uniform declarations; the binary
                                           *   stores the 16-bit player words

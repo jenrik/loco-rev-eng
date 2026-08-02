@@ -501,7 +501,7 @@ void* _g_train = nullptr; void* DAT_004a97a0 = nullptr; void* DAT_004a9994 = nul
 void* g_click_on_town = nullptr; void* g_click_on_building = nullptr; void* g_cgwnd = nullptr;
 int32_t g_clean_exit = 0; void* g_client_rect = nullptr; void* _g_cursor_surface = nullptr;
 void* g_frame_event = nullptr; void* g_fullscreen_rect = nullptr; void* g_game_config = nullptr;
-int32_t g_game_difficulty = 0; int32_t g_in_build_mode = 0; int32_t g_is_town_mode = 0;
+int32_t g_game_difficulty = 0; int32_t g_in_build_mode = 0; uint8_t g_is_town_mode = 0;
 void* g_nameEntryPanel = nullptr; void* g_netSettings = nullptr; void* _g_network_queue = nullptr;
 void* g_network_queue = nullptr; void* _g_network_thread = nullptr; void* g_network_thread = nullptr;
 void* g_pixel_data_cache = nullptr; int32_t g_placement_resource_id = 0; int32_t g_ref_count = 0;

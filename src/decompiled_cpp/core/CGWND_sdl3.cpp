@@ -74,6 +74,17 @@ static void PumpMessages_SDL3(uint8_t filter)
             }
             if (event.key.key == SDLK_ESCAPE) {
                 stop_text_input();
+                /* Host-only event-stream consistency: this raw ESC exit
+                 * IS the mode-10 quit path (the same contract the
+                 * focused-edit 0x420C19 branch satisfies via
+                 * CGWND_SetMode(10)); the pump just skips the SetMode
+                 * switch.  Emit the mode change so the test observer sees
+                 * the same quit transition whether or not the edit field
+                 * had focus (pre-existing Sway content-rect y-offset race
+                 * could land the click 25px above the field and miss
+                 * focus — the game still quit through mode 10). */
+                extern int g_game_mode;
+                loco::host_test::emit_mode_changed(g_game_mode, 10);
                 return;  /* Escape to quit */
             }
             break;

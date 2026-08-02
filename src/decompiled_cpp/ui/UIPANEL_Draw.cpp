@@ -96,8 +96,12 @@ extern "C" {
     extern InputMgr g_input_mgr;            /* 0x4A9990 — static InputMgr object */
 
     /* EditWindow references */
-    extern int    g_world_width;           /* 0x4FD3D8 */
-    extern int    g_world_height;          /* 0x4FD3DC */
+    extern int    g_world_width;           /* 0x4AAD0C (TileMap.width; the old
+                                             0x4FD3D8 comment was a mislabel) */
+    extern int    g_world_height;          /* 0x4AAD10 (TileMap.height; the old
+                                             0x4FD3DC comment was a mislabel —
+                                             that address is
+                                             g_allow_building_placement) */
 
     /* TrackPiece helpers */
     /* CGWND_TrackPiece_SetZoom already declared elsewhere */

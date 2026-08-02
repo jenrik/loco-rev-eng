@@ -16,11 +16,12 @@
  *   INPUT_GetSaveFileName() 0x41DD40  per-frame entity tick (misnomer)
  *
  * World new/load/save (INPUT_NewWorld 0x41E120, INPUT_LoadWorld 0x41D320,
- * INPUT_LoadSaveFile 0x41D5C0, INPUT_SaveCurrentWorld 0x41D9B0) and the
- * editor placement helpers (INPUT_PlaceObject 0x41DD80, INPUT_RemoveObject
- * 0x41DEF0, INPUT_FindObjectAt 0x41E1F0) are NOT part of this milestone:
- * they live here as deferred stubs that log loudly and abort, replacing the
- * previous silent no-op stubs.  Tracked in PROGRESS.md.
+ * INPUT_LoadSaveFile 0x41D5C0, INPUT_SaveCurrentWorld 0x41D9B0) are
+ * implemented over the canonical InputMgr (see the persistence-milestone
+ * notes in PROGRESS.md); the editor placement helpers (INPUT_PlaceObject
+ * 0x41DD80, INPUT_RemoveObject 0x41DEF0) are NOT on the load/save path
+ * and live here as deferred stubs that log loudly and abort, replacing
+ * the previous silent no-op stubs.  Tracked in PROGRESS.md.
  *
  * Also implemented here: the verified neighbour-tile offset helpers
  * INPUT_DirToOffset_Up/Left/Down/Right (0x41D8F0/0x41D920/0x41D950/
@@ -58,8 +59,12 @@ using loco::host::ChildRecord;
 using loco::host::EntityRecord;
 using loco::host::VehicleRecord;
 
-/* RESDATA_IsBuildingTile (0x44BD30) — tile-state byte in {7,8,9,0xA}. */
-extern int RESDATA_IsBuildingTile(intptr_t ptr);
+/* RESDATA_IsBuildingTile (0x44BD30) / RESDATA_IsRoadTile (0x44BD50) are
+ * canonically declared in world/tilemap.h (this file includes it):
+ * uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj) — the
+ * binary ABI is __thiscall (ECX = resource, 0x41D7BB/0x41E35A); the
+ * __fastcall annotation keeps that convention on 32-bit Windows and
+ * expands to the native ABI elsewhere (compat.h). */
 
 /* 0x4A99C8 — install/res-dir path buffer ("<data>/art-res/" on the host). */
 extern char g_install_path[];
@@ -109,6 +114,21 @@ const T& field_at(const void* object, size_t offset)
 {
     return *reinterpret_cast<const T*>(
         reinterpret_cast<const uint8_t*>(object) + offset);
+}
+
+/* ================================================================== */
+/* floor_div2 — the binary's signed division-by-2 idiom                */
+/*                                                                      */
+/* INPUT_LoadSaveFile (0x41D5C0) computes the placement offset         */
+/* ((player - saved)/2) with the cltd/sub/sar idiom                     */
+/* (0x41D6A9..0x41D6D2): for negative odd deltas that is FLOOR         */
+/* division (e.g. -3/2 = -2), while C++ / truncates toward zero        */
+/* (-3/2 = -1).  This helper reproduces the exact x86 semantics        */
+/* (v - sign(v)) >> 1.  Deltas are 16-bit differences, so no overflow  */
+/* is possible.                                                        */
+static int32_t floor_div2(int32_t v)
+{
+    return (v - (v < 0 ? 1 : 0)) / 2;
 }
 
 /* ================================================================== */
@@ -312,45 +332,48 @@ void INPUT_GetSaveFileName(InputMgr* self)
 /* host versions truncate the 32-bit globals to 16 bits exactly like   */
 /* the x86 loads.  Used by Netman (0x43E2E0/0x43E500/0x43F140) for     */
 /* tunnel-angle to neighbour-tile conversion.                          */
+/*                                                                      */
+/* ABI (preserved exactly): the binary leaves EAX = the OUTPUT POINTER */
+/* and the original callers dereference it (0x43E252 mov (%eax),%ecx;  */
+/* 0x43E27C mov (%eax),%eax).  The C++ reconstruction returns the      */
+/* output pointer too; Netman.cpp callers write `off =                 */
+/* *INPUT_DirToOffset_Left(&off)` — the same dereference the binary    */
+/* performs at every call site (no decompiler-intent value ABI).       */
 /* ================================================================== */
-int32_t INPUT_DirToOffset_Up(int32_t* output)      /* 0x41D8F0 */
+int32_t* INPUT_DirToOffset_Up(int32_t* output)      /* 0x41D8F0 */
 {
     const int16_t id = static_cast<int16_t>(g_player_id);
     const int16_t color = static_cast<int16_t>(g_player_color);
     const uint16_t x = static_cast<uint16_t>(id - 3);             /* sub $0x3, %ax */
     const uint16_t y = static_cast<uint16_t>((color >> 1) - 1);   /* sar $1, %cx; dec */
     *output = (static_cast<int32_t>(y) << 16) | static_cast<int32_t>(x);
-    /* The binary leaves EAX = the output pointer (callers dereference
-     * it, 0x43E252); the C++ model returns the stored value so the
-     * Netman.cpp callers (`off = INPUT_DirToOffset_Left(&off)`) keep the
-     * packed offset (ABI note in InputMgr.h). */
-    return *output;
+    return output;      /* EAX = the output pointer (0x41D914) */
 }
 
-int32_t INPUT_DirToOffset_Left(int32_t* output)    /* 0x41D920 */
+int32_t* INPUT_DirToOffset_Left(int32_t* output)    /* 0x41D920 */
 {
     const int16_t color = static_cast<int16_t>(g_player_color);
     const uint16_t y = static_cast<uint16_t>((color >> 1) - 1);   /* sar $1, %ax; dec */
     *output = static_cast<int32_t>(y) << 16;                      /* X = 0 */
-    return *output;
+    return output;      /* EAX = the output pointer (0x41D937) */
 }
 
-int32_t INPUT_DirToOffset_Down(int32_t* output)    /* 0x41D950 */
+int32_t* INPUT_DirToOffset_Down(int32_t* output)    /* 0x41D950 */
 {
     const int16_t id = static_cast<int16_t>(g_player_id);
     const int16_t color = static_cast<int16_t>(g_player_color);
     const uint16_t x = static_cast<uint16_t>((id >> 1) - 1);      /* sar $1, %ax; dec */
     const uint16_t y = static_cast<uint16_t>(color - 2);          /* add $0xFFFFFFFE, %ecx */
     *output = (static_cast<int32_t>(y) << 16) | static_cast<int32_t>(x);
-    return *output;
+    return output;      /* EAX = the output pointer (0x41D969) */
 }
 
-int32_t INPUT_DirToOffset_Right(int32_t* output)   /* 0x41D980 */
+int32_t* INPUT_DirToOffset_Right(int32_t* output)   /* 0x41D980 */
 {
     const int16_t id = static_cast<int16_t>(g_player_id);
     const uint16_t x = static_cast<uint16_t>((id >> 1) - 1);      /* sar $1, %ax; dec */
     *output = static_cast<int32_t>(x);                            /* Y = 0 */
-    return *output;
+    return output;      /* EAX = the output pointer (0x41D997) */
 }
 
 /* ================================================================== */
@@ -402,6 +425,26 @@ void loco::host::set_host_placement_available(bool available)
 /* TileMap::FindObject / World.cpp).                                   */
 /* ================================================================== */
 
+/* Bounded "PARTY" name probe for child records.  The binary scans the
+ * 12-byte name field with CRT_wcsstr (0x471480, NUL-terminated) at
+ * 0x41D7FC; a malformed record can carry a non-NUL-terminated field, so
+ * the host probe is bounded to the field and honours the first NUL
+ * (host NUL-safety — the binary would keep scanning past the field). */
+static bool child_name_has_party(const char name[12])
+{
+    size_t len = 0;
+    while (len < 12 && name[len] != '\0') {
+        len++;
+    }
+    static const char kParty[5] = {'P', 'A', 'R', 'T', 'Y'};
+    for (size_t i = 0; i + 5 <= len; i++) {
+        if (std::memcmp(name + i, kParty, 5) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static Entity* as_entity(TileMapObject* obj)
 {
     return reinterpret_cast<Entity*>(reinterpret_cast<void*>(obj));
@@ -429,6 +472,15 @@ static TileMapObject* as_tilemap_object(Entity* entity)
 /* (0x423D70) are loud no-ops; g_tilemap is constructed by             */
 /* BootstrapMode3Core before the loading worker runs, but component    */
 /* tests may leave it null (then the scroll block is a loud no-op).    */
+/*                                                                      */
+/* Scroll-loop quirk (verified at 0x41E181..0x41E1D0): the binary      */
+/* divides the RE-READ entity_count by 10 (div %ebp after             */
+/* mov 0x14(%edi),%eax) — NOT the loop index — so the animated-branch */
+/* condition (entity_count % 10 == 0) is CONSTANT for the whole loop: */
+/* either every iteration uses the animated path (tooltip hide +      */
+/* dirty-rect invalidation) or none does.  The old "every 10th entity" */
+/* comment was wrong.  The index increments on failed scrolls; the    */
+/* count is re-read every iteration. */
 /* ================================================================== */
 void INPUT_NewWorld(InputMgr* self)
 {
@@ -544,7 +596,9 @@ void* INPUT_PlaceObject(InputMgr* self, unsigned int resource_id)  /* 0x41DD80 *
 /* INPUT_FindObjectAt                                                 */
 /* Address: 0x41E1F0                                                   */
 /*                                                                      */
-/* Jump table at 0x41E550 on (mode+1).  Modes:                        */
+/* Jump table at 0x41E550 on (mode+1), unsigned — modes -1..4 are table
+ * cases, everything else (mode > 4 or mode < -1) falls to the DEFAULT
+ * path (0x41E498).  Modes:                                          */
 /*   -1: random entity: GetItem(rand() % entity_count)                */
 /*   0/1/4: random entity with resource type 3, +0x10C == 3 and       */
 /*          (+0x120 == mode || mode == 4)                             */
@@ -552,7 +606,11 @@ void* INPUT_PlaceObject(InputMgr* self, unsigned int resource_id)  /* 0x41DD80 *
 /*        the pick range is special_count (+0x18), not a first-pass   */
 /*        count (there is no first pass in the binary)                */
 /*   3:   random entity with resource type 3 + IsBuildingTile         */
-/*   default: random entity whose resource id (+0x04) == mode         */
+/*   default: the pick range is the 16-bit count at resource+0x158 of */
+/*        g_resmgr.GetById(mode) (typed ResourceManager lookup,       */
+/*        0x446EA0 — NOT a collection scan) and the second pass       */
+/*        returns the pick-th entity whose resource id (+0x04) ==     */
+/*        mode                                                       */
 /* Each pick is rand() % range + 1 (0x41E29C) and the second pass     */
 /* returns the pick-th match (match counter checked at the top of     */
 /* every scan step, 0x41E2D5); if the scan ends first, the last       */
@@ -615,7 +673,8 @@ bool entity_matches(Entity* e, int32_t mode)
                    static_cast<uint8_t*>(e->resource) + 0x62C) != 0;
     case 3:
         if (type != 3) return false;
-        return RESDATA_IsBuildingTile(reinterpret_cast<intptr_t>(e->resource)) != 0;
+        return RESDATA_IsBuildingTile(static_cast<int32_t>(
+            reinterpret_cast<intptr_t>(e->resource))) != 0;
     default:
         if (e->resource == nullptr) return false;
         return field_at<int32_t>(e->resource, 0x04) == mode;
@@ -653,7 +712,7 @@ Entity* find_pick(InputMgr* self, int32_t mode, int32_t pick)
 
 void* INPUT_FindObjectAt(InputMgr* self, int mode)
 {
-    /* ---- mode -1: random entity ---------------------------------- */
+    /* ---- mode -1: random entity (jump-table[0], 0x41E214) -------- */
     if (mode == -1) {
         if (self->entity_count == 0) {
             return nullptr;
@@ -661,8 +720,7 @@ void* INPUT_FindObjectAt(InputMgr* self, int mode)
         return self->ListGetItem(CRT_rand() % self->entity_count);
     }
 
-    /* ---- pick range ---------------------------------------------- */
-    int32_t range;
+    /* ---- mode 2: special sub-count pick (0x41E404) ---------------- */
     if (mode == 2) {
         /* Mode 2 (0x41E404): the pick range is the special sub-count
          * (+0x18, 0x41E404..0x41E445) — the binary has no first pass
@@ -670,27 +728,51 @@ void* INPUT_FindObjectAt(InputMgr* self, int mode)
         if (self->special_count == 0) {
             return nullptr;
         }
-        range = self->special_count;
-    } else {
-        /* First pass: count matches. */
-        int32_t matches = 0;
-        const int32_t count = self->ListGetCount();
-        for (int32_t i = 0; i < count; i++) {
-            if (entity_matches(self->ListGetItem(i), mode)) {
-                matches++;
-            }
-        }
-        if (matches == 0) {
-            return nullptr;
-        }
-        range = matches;
+        int32_t pick = CRT_rand() % self->special_count + 1;
+        return find_pick(self, mode, pick);
     }
 
-    /* ---- random pick: rand() % range + 1 (0x41E29C/0x41E385/0x41E420).
+    /* ---- default (jump-table default, 0x41E498): modes > 4 and     */
+    /* ---- mode < -1 (the unsigned (mode+1) > 5 test at 0x41E204)  -- */
+    if (mode < -1 || mode > 4) {
+        /* The pick range is the 16-bit count at resource+0x158 of
+         * g_resmgr.GetById(mode) — a TYPED ResourceManager lookup
+         * (0x446EA0), NOT a collection scan.  The binary checks only
+         * == 0 (0x41E4B4 cmp %bx,%ax) and reads +0x158; a -1 (error)
+         * lookup would read 0x157 and fault, so the host returns
+         * nullptr for non-positive lookups (documented hardening). */
+        const int32_t res = g_resmgr.GetById(mode);      /* 0x446EA0 */
+        if (res <= 0) {
+            return nullptr;
+        }
+        void* resource = reinterpret_cast<void*>(
+            static_cast<uintptr_t>(static_cast<int32_t>(res)));
+        const uint16_t range = field_at<uint16_t>(resource, 0x158);
+        if (range == 0) {
+            return nullptr;
+        }
+        int32_t pick = CRT_rand() % range + 1;
+        return find_pick(self, mode, pick);
+    }
+
+    /* ---- modes 0/1/3/4: first-pass collection scan (0x41E23C/      */
+    /* ---- 0x41E32F) ------------------------------------------------ */
+    int32_t matches = 0;
+    const int32_t count = self->ListGetCount();
+    for (int32_t i = 0; i < count; i++) {
+        if (entity_matches(self->ListGetItem(i), mode)) {
+            matches++;
+        }
+    }
+    if (matches == 0) {
+        return nullptr;
+    }
+
+    /* ---- random pick: rand() % range + 1 (0x41E29C/0x41E385).
      * The binary also carries an unreachable branch (0x41E2A9, entered
      * only when the range < 1, which cannot happen here) that would pick
      * the fixed second match for a range of 2; it is dead code. */
-    int32_t pick = CRT_rand() % range + 1;
+    int32_t pick = CRT_rand() % matches + 1;
     return find_pick(self, mode, pick);
 }
 
@@ -744,11 +826,14 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
 
     /* Placement offset: ((player - saved)/2, (color - saved)/2) with
      * the saved fields read as the 16-bit header words at +0x02/+0x04
-     * (preview dimensions on designer saves). */
-    int32_t offset_x = (static_cast<int16_t>(g_player_id) -
-                        static_cast<int16_t>(resdata.save.player_id)) / 2;
-    int32_t offset_y = (static_cast<int16_t>(g_player_color) -
-                        static_cast<int16_t>(resdata.save.player_color)) / 2;
+     * (preview dimensions on designer saves).  The binary computes this
+     * with the cltd/sub/sar idiom (0x41D693..0x41D6D2), which is FLOOR
+     * division for negative odd deltas (-3/2 = -2), NOT C++ truncation
+     * (-3/2 = -1); floor_div2 reproduces the exact x86 semantics. */
+    int32_t offset_x = floor_div2(static_cast<int16_t>(g_player_id) -
+                                  static_cast<int16_t>(resdata.save.player_id));
+    int32_t offset_y = floor_div2(static_cast<int16_t>(g_player_color) -
+                                  static_cast<int16_t>(resdata.save.player_color));
 
     /* flags != 0: TileMap::FullReset (0x454FE0) first. */
     if (flags != 0) {
@@ -875,12 +960,14 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
 #ifndef _WIN32
             if (res_type == 3 && entity->resource != nullptr) {
                 building_tile = RESDATA_IsBuildingTile(
-                    reinterpret_cast<intptr_t>(entity->resource)) != 0;
+                    static_cast<int32_t>(
+                        reinterpret_cast<intptr_t>(entity->resource))) != 0;
             }
 #else
             if (res_type == 3) {
                 building_tile = RESDATA_IsBuildingTile(
-                    reinterpret_cast<intptr_t>(entity->resource)) != 0;
+                    static_cast<int32_t>(
+                        reinterpret_cast<intptr_t>(entity->resource))) != 0;
             }
 #endif
             if (res_type != 3 || !building_tile) {
@@ -911,7 +998,7 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
             if (child == nullptr) {
                 continue;
             }
-            if (std::strstr(child_data.name, "PARTY") != nullptr) {
+            if (child_name_has_party(child_data.name)) {
                 child->SetName(child_data.name);
             }
             child->create_time = child_data.value;   /* +0x94 */
@@ -1035,7 +1122,22 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
             std::strlen(g_install_path));
         std::snprintf(sav_path, sizeof(sav_path), "%s.sav", base);
 #endif
+#ifndef _WIN32
+        /* Host: the companion's marker branch must not clobber the
+         * primary load's current-name bookkeeping.  "curr" -> "curr.sav"
+         * contains the "curr" marker, so INPUT_LoadSaveFile's host marker
+         * branch would overwrite g_current_save_path with "curr.sav" (the
+         * original never writes that global from LoadSaveFile at all — it
+         * calls UIPANEL_Hide on the backdrop window instead).  The host
+         * therefore snapshots the recorded name around the companion load
+         * and restores it (documented deviation). */
+        char saved_current[0x108];
+        std::memcpy(saved_current, g_current_save_path, sizeof(saved_current));
         INPUT_LoadSaveFile(self, sav_path, 0, 0);
+        std::memcpy(g_current_save_path, saved_current, sizeof(saved_current));
+#else
+        INPUT_LoadSaveFile(self, sav_path, 0, 0);
+#endif
     }
 
     /* Step 4: multiplayer scenario 2 — scroll to player buildings and
@@ -1134,11 +1236,29 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
 /*     recovered record set (the collection placement is gated);       */
 /*   - the preview written by RESMGR_LoadResourceData is a zeroed      */
 /*     player_id*player_color buffer (the original renders a TileMap   */
-/*     overlay surface);                                               */
-/*   - the current-save marker is "curr" (original "~curr").          */
+/*     overlay surface), capped at 16 MiB (strict sane preview cap);   */
+/*   - the save is ATOMIC (temp + rename via host_save_commit) and a   */
+/*     write failure or failed commit returns 0 — the fresh seed then  */
+/*     never reports success without a durable curr;                  */
+/*   - the current-save marker is "curr" (original "~curr") and is     */
+/*     recorded only after a durable save;                            */
+/*   - save names that escape the save directory are refused (the      */
+/*     same guard INPUT_LoadSaveFile applies — symmetric protection). */
 /* ================================================================== */
 char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
 {
+#ifndef _WIN32
+    /* Host hardening: symmetric with INPUT_LoadSaveFile — refuse save
+     * names that would escape the save directory. */
+    if (loco::host::PersistenceAdapter::name_escapes(name)) {
+        std::fprintf(stderr,
+            "[HOST] INPUT_SaveCurrentWorld: refused name '%s' (escape)\n",
+            name);
+        std::fflush(stderr);
+        return 0;
+    }
+#endif
+
     RESDATA resdata;
     RESMGR_ResourceData_Init(&resdata);            /* 0x447B20 */
 
@@ -1175,16 +1295,22 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
     /* Open the output stream and write header + preview (0x447E30). */
 #ifndef _WIN32
     /* Host preview: zeroed player_id*player_color buffer (no tilemap
-     * overlay is rendered on the SDL host — documented deviation). */
+     * overlay is rendered on the SDL host — documented deviation),
+     * capped at 16 MiB (strict sane preview cap — g_player_id/color are
+     * 16-bit map coordinates, so a real save is far below the cap; an
+     * absurd pair fails the save instead of allocating gigabytes). */
     {
         uint32_t w = resdata.save.player_id;
         uint32_t h = resdata.save.player_color;
-        if (w > 0 && h > 0 && w <= 0x10000u / h) {
-            size_t bytes = static_cast<size_t>(w) * h;
-            void* preview = operator_new(bytes);
-            if (preview != nullptr) {
-                std::memset(preview, 0, bytes);
-                resdata.save_pixels = preview;
+        if (w > 0 && h > 0) {
+            constexpr size_t kMaxPreview = 16u * 1024u * 1024u;
+            if (static_cast<size_t>(w) <= kMaxPreview / h) {
+                size_t bytes = static_cast<size_t>(w) * h;
+                void* preview = operator_new(bytes);
+                if (preview != nullptr) {
+                    std::memset(preview, 0, bytes);
+                    resdata.save_pixels = preview;
+                }
             }
         }
     }
@@ -1195,12 +1321,33 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
     }
 
 #ifndef _WIN32
-    /* Host: write the recovered records (collection placement gated). */
+    /* Host: write the recovered records (collection placement gated).
+     * Every write result is checked: a failed write must not report a
+     * successful save (the stream's error flag then fails the commit
+     * below and the temp is removed — no partial curr). */
+    bool writes_ok = true;
     for (const loco::host::EntityRecord& record : doc.entities) {
-        RESMGR_WriteSaveRecord(&resdata, &record);       /* 0x447F50 */
+        if (RESMGR_WriteSaveRecord(&resdata, &record) == 0) {  /* 0x447F50 */
+            writes_ok = false;
+            break;
+        }
     }
     for (const loco::host::VehicleRecord& record : doc.vehicles) {
-        RESMGR_WriteTableRecord(&resdata, &record);      /* 0x447F80 */
+        if (RESMGR_WriteTableRecord(&resdata, &record) == 0) {  /* 0x447F80 */
+            writes_ok = false;
+            break;
+        }
+    }
+    if (!writes_ok || !loco::host::host_save_commit(&resdata)) {
+        /* Uncommitted write stream: RESMGR_RemoveResource below removes
+         * the temp file — the target path is never touched. */
+        std::fprintf(stderr,
+            "[HOST] INPUT_SaveCurrentWorld: save of '%s' failed — "
+            "no durable file written (atomic save)\n", name);
+        std::fflush(stderr);
+        RESMGR_RemoveResource(&resdata);
+        RESMGR_ReleaseResource(&resdata);
+        return 0;
     }
 #else
     /* Original: enumerate the collection (members with +0xC0 == 1) and
@@ -1254,8 +1401,10 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
      * 0x2C vehicle record: the 4 sub-slots at obj+0x10..0x1C each
      * contribute their resource id (sub-slot->resource(+0x40)->+0x04,
      * 16-bit) to record+0x00..0x0C and their +0x42C dword to
-     * record+0x10..0x1C; the name is a strlen+1 copy of
-     * *(obj+0x20)->+0x7C into record+0x20 (0x41DC78..0x41DC9C). */
+     * record+0x10..0x1C; the name is a strlen+1 copy of the FIRST
+     * sub-slot's (*(obj+0x10)) +0x7C name into record+0x20 — the name
+     * owner is sub-slot[0] at obj+0x10 (0x41DC78 mov (%ebx),%edi with
+     * ebx = obj+0x10), NOT *(obj+0x20) (0x41DC78..0x41DC9C). */
     for (int32_t* entry = DAT_004a98b8; entry < DAT_004a98b8 + 4; entry++) {
         if (*entry == 0) {
             continue;
@@ -1279,13 +1428,25 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
                 reinterpret_cast<uint8_t*>(&record) + 0x10 + slot_index * 4) =
                 field_at<uint32_t>(slot, 0x42C);
         }
-        void* name_owner = field_at<void*>(obj, 0x20);
-        std::strncpy(record.name,
-                     field_at<const char*>(name_owner, 0x7C),
-                     sizeof(record.name));
+        /* Name owner: *(obj+0x10) = sub-slot[0] (0x41DC78).  The binary
+         * dereferences it unconditionally; the host guards a null
+         * sub-slot[0] and leaves the zeroed name (host hardening — the
+         * binary would read +0x7C of null). */
+        void* name_owner = field_at<void*>(obj, 0x10);
+        if (name_owner != nullptr) {
+            std::strncpy(record.name,
+                         field_at<const char*>(name_owner, 0x7C),
+                         sizeof(record.name));
+        }
         RESMGR_WriteTableRecord(&resdata, &record);
     }
 #endif
+
+    /* Finalize: RemoveResource, then — exactly like the binary tail
+     * (0x41DCC5..0x41DD21: RemoveResource at 0x41DCCC, then the
+     * "~curr" strstr at 0x41DCD8, then ReleaseResource, AL = 1) —
+     * record the current-save path only for a durable save. */
+    RESMGR_RemoveResource(&resdata);
 
     /* "curr" marker: record the save path in the current-save global. */
 #ifndef _WIN32
@@ -1297,9 +1458,6 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
         std::snprintf(g_current_save_path, sizeof(g_current_save_path), "%s", name);
     }
 
-    /* Finalize: RemoveResource + ReleaseResource, return 1 (0x41DCC5..
-     * 0x41DD21 — the binary leaves AL = 1 after the same tail). */
-    RESMGR_RemoveResource(&resdata);
     RESMGR_ReleaseResource(&resdata);
     return 1;
 }

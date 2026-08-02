@@ -103,20 +103,22 @@
  */
 
 /* ================================================================== */
-/*  0x465010 — ceil                                                    */
+/*  0x465010 — WIN32 stream write (NOT ceil)                           */
 /* ================================================================== */
-/*  Standard C ceil(x) — smallest integer >= x.
- *  Address: 0x465010, size: 73 bytes
- *  Calling convention: __cdecl
- */
+/*  See the 0x465010/0x465090 note below: this address is the WIN32    */
+/*  stream WRITE function, not CRT ceil (mislabel corrected).          */
 
 /* ================================================================== */
-/*  0x465090 — floor                                                   */
+/*  0x465010 / 0x465090 — WIN32 stream functions, NOT CRT ceil/floor   */
 /* ================================================================== */
-/*  Standard C floor(x) — largest integer <= x.
- *  Address: 0x465090, size: 236 bytes
- *  Calling convention: __cdecl
- */
+/*  objdump of loco.exe proves these addresses are the WIN32 stream    */
+/*  WRITE function (0x465010: thiscall(buf, size), ret $0x8, called    */
+/*  from RESMGR_LoadResourceData 0x447ED6/0x447EFC) and the WRITE-     */
+/*  stream constructor (0x465090: thiscall(path, mode, flags, flag),   */
+/*  mode|2, called from 0x447E8F).  The "ceil"/"floor" labels were     */
+/*  decompiler misidentifications; the real stream functions are       */
+/*  declared in resources/ResDataSave.cpp (WIN32_StreamWrite /         */
+/*  WIN32_StreamOpenWriteFile). */
 
 /* ================================================================== */
 /*  0x465180 — log10                                                   */
