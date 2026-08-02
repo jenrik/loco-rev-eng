@@ -173,9 +173,12 @@ void BootstrapMode3Core()
         void* mem = operator_new(sizeof(RESDATA_ScriptedObject));
         if (mem != nullptr) {
             std::memset(mem, 0, sizeof(RESDATA_ScriptedObject));
-            g_scripted_object = ::new (mem) RESDATA_ScriptedObject();
-            static_cast<RESDATA_ScriptedObject*>(g_scripted_object)->Ctor();
-            std::fprintf(stderr, "[HOST] BootstrapMode3Core: ScriptedObject constructed (%p)\n", g_scripted_object);
+            /* Host: skip Ctor() — the x86_64 layout does not match the
+             * original binary.  operator_new zeroes the allocation; the
+             * host main-menu path does not exercise ScriptedObject
+             * behavior. */
+            g_scripted_object = mem;
+            std::fprintf(stderr, "[HOST] BootstrapMode3Core: ScriptedObject raw alloc (%p)\n", g_scripted_object);
             std::fflush(stderr);
         }
     }

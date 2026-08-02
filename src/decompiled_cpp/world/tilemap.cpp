@@ -536,6 +536,17 @@ set_center:
 
     int tile_count = static_cast<int>(tile_count_x) * static_cast<int>(tile_count_y);
     int bitmap_size = ((tile_count + (tile_count >> 31 & 7)) >> 3) + 1;
+#ifndef _WIN32
+    /* Host: cap the bitmap size.  If screen dimensions are not yet
+     * configured, g_screen_width/g_screen_height may be 0, producing
+     * garbage tile counts and a multi-MB allocation that corrupts the
+     * heap.  The host does not use the occupancy bitmap for rendering
+     * (SDL presents the entire frame), so a small dummy allocation
+     * suffices. */
+    if (bitmap_size > 65536 || bitmap_size < 0) {
+        bitmap_size = 64;
+    }
+#endif
     occupancy_bitmap = operator_new(bitmap_size);
 
     if (occupancy_bitmap) {

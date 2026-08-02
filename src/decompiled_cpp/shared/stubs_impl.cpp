@@ -24,9 +24,19 @@ class Entity;
 
 /* ---- Allocation ---- */
 void* operator_new(size_t size) {
+    static int call_count = 0;
+    call_count++;
+    if (call_count <= 60) {
+        fprintf(stderr, "[ALLOC] operator_new(%zu) call #%d\n", size, call_count);
+        fflush(stderr);
+    }
     void* p = malloc(size);
     if (!p) { fprintf(stderr, "FATAL: operator_new(%zu) failed\n", size); abort(); }
     memset(p, 0, size);
+    if (call_count <= 60) {
+        fprintf(stderr, "[ALLOC] operator_new(%zu) returned %p\n", size, p);
+        fflush(stderr);
+    }
     return p;
 }
 void GLOBAL_free(void* ptr) { free(ptr); }
