@@ -71,5 +71,8 @@ asserted through passive JSONL events emitted only when
 `gui-sandbox`, so the tests exercise the real Wayland-to-SDL event path.
 
 A missing sandbox mapping, premature process exit, signal/crash, absent render
-state, or timeout fails the test. GUI tests require the unpacked game assets at
-`lego-loco-unpacked/art-res` and never fall back to the ambient desktop.
+state, or timeout fails the test. GUI tests share the unpacked game assets at
+`lego-loco-unpacked/` (including `art-res` and `Exe/loco.exe`) instead of
+copying them into artifacts. Host-only `curr`/`curr.sav` writes are redirected
+to the session artifact directory with `LEGO_LOCO_SAVE_DIR`; the shared assets
+are never modified. Tests never fall back to the ambient desktop.

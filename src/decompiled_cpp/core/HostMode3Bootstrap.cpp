@@ -32,6 +32,7 @@
 #include "../world/scriptengine.h"
 #include "../world/tilemap.h"
 #include "../audio/GameAudio.h"
+#include "../../sdl3_shims/sdl3_town_mode3.h"
 
 #include <cstdio>
 #include <cstring>

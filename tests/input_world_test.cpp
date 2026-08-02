@@ -146,7 +146,41 @@ int main()
         mgr.DtorBody();
     }
 
-    /* ---- 4. Failure modes fail explicitly ---- */
+    /* ---- 4. Shared assets with redirected host current saves ---- */
+    {
+        std::string asset_dir = make_temp_dir();
+        std::string save_dir = make_temp_dir();
+        std::string wild = asset_dir + "/Wildwest.sav";
+        CHECK(copy_fixture(fixture_root() + "/SAVEGAME/Wildwest.sav", wild),
+              "copy fixture for shared-asset save redirect");
+        std::snprintf(g_install_path, sizeof(g_install_path), "%s/",
+                      asset_dir.c_str());
+        CHECK(::setenv("LEGO_LOCO_SAVE_DIR", save_dir.c_str(), 1) == 0,
+              "set isolated host save directory");
+
+        InputMgr mgr;
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadSaveFile(&mgr, "Wildwest.sav", 1, 1) == 1,
+              "load asset fixture before redirected save");
+        CHECK(INPUT_SaveCurrentWorld(&mgr, "curr") == 1,
+              "save current world through redirected host path");
+
+        FILE* redirected = std::fopen((save_dir + "/curr").c_str(), "rb");
+        CHECK(redirected != nullptr, "curr is written to isolated save directory");
+        if (redirected != nullptr) std::fclose(redirected);
+        FILE* shared = std::fopen((asset_dir + "/curr").c_str(), "rb");
+        CHECK(shared == nullptr, "shared asset directory is not written");
+        if (shared != nullptr) std::fclose(shared);
+
+        PersistenceAdapter::instance().clear_document();
+        CHECK(INPUT_LoadWorld(&mgr, "curr") == 1,
+              "LoadWorld reads curr from isolated save directory");
+        CHECK(::unsetenv("LEGO_LOCO_SAVE_DIR") == 0,
+              "clear isolated host save directory");
+        mgr.DtorBody();
+    }
+
+    /* ---- 5. Failure modes fail explicitly ---- */
     {
         std::string dir = make_temp_dir();
         std::string wild = dir + "/Wildwest.sav";
@@ -204,7 +238,7 @@ int main()
         mgr.DtorBody();
     }
 
-    /* ---- 5. INPUT_FindObjectAt (0x41E1F0) on the collection ---- */
+    /* ---- 6. INPUT_FindObjectAt (0x41E1F0) on the collection ---- */
     {
         InputMgr mgr;
         CHECK(INPUT_FindObjectAt(&mgr, -1) == nullptr, "FindObjectAt(-1) empty");
@@ -283,7 +317,7 @@ int main()
         mgr.DtorBody();
     }
 
-    /* ---- 6. INPUT_SaveCurrentWorld failure path ---- */
+    /* ---- 7. INPUT_SaveCurrentWorld failure path ---- */
     {
         /* An unwritable/absent output directory makes LoadResourceData
          * fail explicitly; the function must return 0 (not silently
@@ -300,7 +334,7 @@ int main()
         mgr.DtorBody();
     }
 
-    /* ---- 7. Atomic-save contract: read-only dir + failed rename ---- */
+    /* ---- 8. Atomic-save contract: read-only dir + failed rename ---- */
     {
         /* (a) read-only data dir: fopen of the temp fails -> 0, and no
          * "curr" (or temp) is created. */
@@ -344,7 +378,7 @@ int main()
         mgr2.DtorBody();
     }
 
-    /* ---- 8. "curr.sav" must not clobber the host current-name ----
+    /* ---- 9. "curr.sav" must not clobber the host current-name ----
      * ----    bookkeeping (LoadWorld step 3 companion) ------------ */
     {
         std::string dir = make_temp_dir();
@@ -371,7 +405,7 @@ int main()
         mgr.DtorBody();
     }
 
-    /* ---- 9. SaveCurrentWorld symmetric path-escape guard + seed ----
+    /* ---- 10. SaveCurrentWorld symmetric path-escape guard + seed ----
      * ----    failure propagation (fresh seed never reports success --
      * ----    without a durable curr) ------------------------------ */
     {

@@ -18,6 +18,7 @@
 #include "../shared/types.h"
 #ifndef _WIN32
 #include "../../sdl3_shims/sdl3_net_game_bridge.h"
+#include "../../sdl3_shims/sdl3_town_mode3.h"
 namespace loco { namespace host { void BootstrapMode3Core(); } }
 #endif
 #include <cstdio>
@@ -262,6 +263,12 @@ extern "C" int GameLoop_Setup(void* cgwnd)
      * SDL host does it here, after ResourceManager_Init, in the same order
      * (Game, World, BuildingMgr, ScriptedObject, TileMap, GameAudio). */
     loco::host::BootstrapMode3Core();
+    /* Construct the town view and DDRAW building singletons for mode-3
+     * rendering.  These are BSS-embedded objects in the original; on the
+     * host we allocate them on the heap and assign to the legacy void*
+     * slots so the per-frame callbacks (Town_TrackBuilding,
+     * DDRAW_UpdateBuilding) have real objects to operate on. */
+    loco::host::BootstrapTownMode3Objects();
 #endif
 
     trace_setup_stage("step 9: UI subsystems");
@@ -373,34 +380,11 @@ extern "C" void GameLoop_FrameUpdate(void)
 
     /* Step 10: Town mode updates */
     if (game_mode == 3 || game_mode == 9) {
-#ifndef _WIN32
-        /* Host mode-3 cone: g_town_view / g_ddraw_building are still
-         * unconstructed on SDL; keep the original calls for the Win32
-         * build and log the host skips rather than dereferencing
-         * nullptr.  g_input_mgr is a typed static object and is always
-         * constructed (InputMgr ctor 0x41D250 via static init). */
-        if (g_town_view != nullptr) {
-            Town_TrackBuilding(g_town_view);
-        } else {
-            static int warned_town_view = 0;
-            if (!warned_town_view) {
-                std::fprintf(stderr, "[HOST] FrameUpdate: Town_TrackBuilding skipped (g_town_view unconstructed)\n");
-                warned_town_view = 1;
-            }
-        }
-        if (g_ddraw_building != nullptr) {
-            DDRAW_UpdateBuilding(g_ddraw_building);
-        } else {
-            static int warned_ddraw_building = 0;
-            if (!warned_ddraw_building) {
-                std::fprintf(stderr, "[HOST] FrameUpdate: DDRAW_UpdateBuilding skipped (g_ddraw_building unconstructed)\n");
-                warned_ddraw_building = 1;
-            }
-        }
-#else
+        /* Host mode-3 cone: g_town_view and g_ddraw_building are now
+         * constructed by BootstrapTownMode3Objects() during GameLoop_Setup.
+         * Both the _WIN32 and non-_WIN32 paths call the real implementations. */
         Town_TrackBuilding(g_town_view);
         DDRAW_UpdateBuilding(g_ddraw_building);
-#endif
         INPUT_GetSaveFileName(&g_input_mgr);
         BuildingMgr_UpdateAll(g_building_mgr);
     }

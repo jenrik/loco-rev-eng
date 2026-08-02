@@ -69,6 +69,47 @@ using loco::host::VehicleRecord;
 /* 0x4A99C8 — install/res-dir path buffer ("<data>/art-res/" on the host). */
 extern char g_install_path[];
 
+/* Host-only persistence isolation: integration runs share the immutable
+ * asset tree but may redirect the host-only current-save pair (curr and
+ * curr.sav) to LEGO_LOCO_SAVE_DIR. All other paths remain rooted at
+ * g_install_path, matching the original asset lookup. */
+#ifndef _WIN32
+namespace {
+
+bool is_host_current_save_path(const char* path)
+{
+    return std::strcmp(path, "curr") == 0 ||
+           std::strcmp(path, "curr.sav") == 0;
+}
+
+bool build_host_resource_path(char* destination, size_t destination_size,
+                              const char* path)
+{
+    const char* root = g_install_path;
+    if (is_host_current_save_path(path)) {
+        const char* save_root = std::getenv("LEGO_LOCO_SAVE_DIR");
+        if (save_root != nullptr && *save_root != '\0') {
+            root = save_root;
+        }
+    }
+
+    const size_t root_length = std::strlen(root);
+    const bool has_separator = root_length != 0 &&
+        (root[root_length - 1] == '/' || root[root_length - 1] == '\\');
+    const int written = std::snprintf(destination, destination_size, "%s%s%s",
+                                      root, has_separator ? "" : "/", path);
+    if (written < 0 || static_cast<size_t>(written) >= destination_size) {
+        std::fprintf(stderr,
+            "[HOST] persistence path is too long for '%s'\n", path);
+        std::fflush(stderr);
+        return false;
+    }
+    return true;
+}
+
+}  // namespace
+#endif
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -862,7 +903,15 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
     /* Build "<resdir><path>" (0x4A99C8 buffer + name) exactly like the
      * original's rep movs sequence. */
     char path_buf[0x108];
+#ifndef _WIN32
+    if (!build_host_resource_path(path_buf, sizeof(path_buf), path)) {
+        RESMGR_RemoveResource(&resdata);
+        RESMGR_ReleaseResource(&resdata);
+        return 0;
+    }
+#else
     std::snprintf(path_buf, sizeof(path_buf), "%s%s", g_install_path, path);
+#endif
 
     /* Open + read header + preview (0x447BA0). */
     if (RESMGR_LoadResource(&resdata, path_buf) == 0) {
@@ -1390,7 +1439,15 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
 
     /* Build "<resdir><name>". */
     char path_buf[0x108];
+#ifndef _WIN32
+    if (!build_host_resource_path(path_buf, sizeof(path_buf), name)) {
+        RESMGR_RemoveResource(&resdata);
+        RESMGR_ReleaseResource(&resdata);
+        return 0;
+    }
+#else
     std::snprintf(path_buf, sizeof(path_buf), "%s%s", g_install_path, name);
+#endif
 
     /* ---- 0x114-byte header (RESDATA.save at +0xB0) ---- */
     std::memset(&resdata.save, 0, sizeof(SaveRegion));   /* rep stosd 0x45 */

@@ -364,8 +364,11 @@ void  RESMGR_VehicleAnimationTick(void*) {}
 void  World_UpdateTick(void*) {}
 void  UI_HideTooltip(void*) {}
 void  RESDATA_ScriptedObject_Update(void*) {}
-void  Town_TrackBuilding(void*) {}
-void  DDRAW_UpdateBuilding(void*) {}
+/* Town_TrackBuilding (0x42D1A0) and DDRAW_UpdateBuilding (0x459DA0) are
+ * implemented in src/sdl3_shims/sdl3_town_mode3.cpp for the host build.
+ * The Win32 build links the original binary implementations. */
+extern void Town_TrackBuilding(void*);
+extern void DDRAW_UpdateBuilding(void*);
 /* INPUT_GetSaveFileName / INPUT_SaveCurrentWorld / INPUT_FindObjectAt /
  * INPUT_PlaceObject / INPUT_RemoveObject: canonical definitions moved to
  * input/InputMgr.cpp (0x41DD40 real, the rest loud deferred stubs). */

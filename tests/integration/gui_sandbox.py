@@ -20,13 +20,9 @@ CANVAS_HEIGHT = 1024
 class GameSession:
     """Own one game process and one throwaway gui-sandbox compositor.
 
-    data_dir points the game at a WRITABLE copy of the game data (a
-    session temp dir under build/test-artifacts): the SDL host writes
-    its current-save marker ("curr") and the ".sav" companion into
-    g_install_path (the LEGO_LOCO_DATA data dir, mirroring the
-    original's "~curr" write into its install dir), so a session pointed
-    at the repository's source art-res would pollute the repo's
-    untracked assets.  The source tree is only ever read.
+    data_dir points at the shared unpacked game-data root. The fixture sets
+    LEGO_LOCO_SAVE_DIR to an artifact-local directory, so the host-only curr
+    and curr.sav writes stay isolated while assets remain shared and read-only.
     """
 
     def __init__(
@@ -89,9 +85,8 @@ class GameSession:
                     f"export {key}={shlex.quote(value)}"
                     for key, value in self.environment.items()
                 ],
-                # Writable per-session copy (conftest game_data_dir); the
-                # host writes "curr"/"curr.sav" into this data dir, never
-                # the repository's source art-res.
+                # Shared read-only asset root. The fixture separately sets
+                # LEGO_LOCO_SAVE_DIR for host-only curr/curr.sav writes.
                 f"export LEGO_LOCO_DATA={shlex.quote(str(self.data_dir or (self.root / 'lego-loco-unpacked')))}",
                 f"export LEGO_LOCO_TEST_EVENTS={shlex.quote(str(self.events_path))}",
                 f"exec {shlex.quote(str(binary))} >>{shlex.quote(str(self.stdout_path))} 2>>{shlex.quote(str(self.stderr_path))}",

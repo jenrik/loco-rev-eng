@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import os
-import shutil
 import subprocess
 
 import pytest
@@ -62,46 +61,39 @@ def gui_artifacts_root(request: pytest.FixtureRequest) -> Path:
 
 
 @pytest.fixture(scope="session")
-def game_data_dir(gui_artifacts_root: Path) -> Path:
-    """Writable per-session copy of the shipped game data.
+def game_data_dir() -> Path:
+    """The shared, read-only-in-practice unpacked game-data root.
 
-    The SDL host writes its current-save marker ("curr") and the ".sav"
-    companion into g_install_path (the LEGO_LOCO_DATA data dir — the
-    documented host deviation mirroring the original's "~curr" write into
-    its install dir).  A session pointed at the repository's source
-    art-res would write into the repo's untracked assets, so every GUI
-    flow runs against a fresh temp copy under build/test-artifacts; the
-    source art-res is only ever read (the C++ persistence fixtures follow
-    the same rule with their own make_temp_dir()).
+    Resource lookup needs both art-res/ and Exe/loco.exe. Current-save writes
+    are redirected by LEGO_LOCO_SAVE_DIR to the per-session save directory
+    below, so GUI runs never copy or modify these shipped assets.
     """
-    data_dir = gui_artifacts_root / "game-data"
-    target = data_dir / "art-res"
-    if not target.exists():
-        source = ROOT / "lego-loco-unpacked"
-        if not (source / "art-res").is_dir():
-            raise AssertionError(f"source game assets missing: {source}")
-        # The whole data root: the host resource bridge also opens
-        # <LEGO_LOCO_DATA>/Exe/loco.exe for the PE string table
-        # (ResourceManager_Init), and art-res/ for the RFH/RFD archives.
-        # The Ghidra project database is never read by the game and is
-        # excluded to keep the isolated data copy lean.
-        shutil.copytree(
-            source, data_dir,
-            ignore=shutil.ignore_patterns("ghidra_projects"),
-        )
-    print(f"Isolated game data: {data_dir}")
-    return data_dir
+    source = ROOT / "lego-loco-unpacked"
+    if not (source / "art-res").is_dir() or not (source / "Exe" / "loco.exe").is_file():
+        raise AssertionError(f"source game assets missing or incomplete: {source}")
+    print(f"Shared game data: {source}")
+    return source
+
+
+@pytest.fixture(scope="session")
+def game_save_dir(gui_artifacts_root: Path) -> Path:
+    """Writable host-only current-save location for this GUI test session."""
+    path = gui_artifacts_root / "game-saves"
+    path.mkdir(parents=True, exist_ok=True)
+    print(f"Isolated game saves: {path}")
+    return path
 
 
 @pytest.fixture
 def game(request: pytest.FixtureRequest, gui_artifacts_root: Path,
-          game_data_dir: Path):
+          game_data_dir: Path, game_save_dir: Path):
     artifact_dir = gui_artifacts_root / request.node.name
     # Most menu regressions start at mode 2. The dedicated intro test opts
     # out so the normal SDL host launch remains fully covered without making
     # every menu scenario wait through three videos.
     environment = {"LEGO_LOCO_SKIP_INTRO": "1"}
     environment.update(getattr(request, "param", None) or {})
+    environment["LEGO_LOCO_SAVE_DIR"] = str(game_save_dir)
     session = GameSession(ROOT, artifact_dir, environment=environment,
                           data_dir=game_data_dir,
                           visible=request.config.getoption("--gui-visible"),
