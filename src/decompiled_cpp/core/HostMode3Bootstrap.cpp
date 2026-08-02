@@ -276,7 +276,12 @@ void HostLoadingSequence(void* /*param*/)
         std::fflush(stderr);
     }
 
+    /* Host: after mode-3 is established, immediately transition to mode 5
+     * to show the town UI.  The original game posts a WM_USER+0x406
+     * message from CGWND_EnterMode3, which the WndProc handles by
+     * calling CGWND_SetMode(5).  The SDL host does it directly. */
     CGWND_SetMode(3);
+    CGWND_SetMode(5);
 }
 
 /* ================================================================== */

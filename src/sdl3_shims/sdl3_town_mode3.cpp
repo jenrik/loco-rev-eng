@@ -93,6 +93,9 @@ void BootstrapTownMode3Objects()
                 static_cast<void*>(g_ddraw_building));
         }
     }
+
+    /* The mode-5 (town UI show) transition happens in HostLoadingSequence
+     * after the world has been loaded.  See HostMode3Bootstrap.cpp. */
 }
 
 } // namespace host
