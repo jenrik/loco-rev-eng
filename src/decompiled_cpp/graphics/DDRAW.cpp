@@ -224,6 +224,19 @@ DDRAW_Building* DDRAW_Building::Create(void* mem)
  */
 DDRAW_Building::DDRAW_Building()
 {
+#ifndef _WIN32
+    /* Host: the x86_64 layout of DDRAW_Building does not match the
+     * original x86 binary layout.  The Ghidra decomp (0x4589B0) shows
+     * embedded GameObjects at +0x38, +0xE8, +0x10A, +0x12C and pattern
+     * sprites at +0x5A, but the C++ class uses native pointer-sized
+     * fields and different padding.  Until the class is properly
+     * ported with layout-correct inheritance (RESDATA base), we skip
+     * the binary-emulating construction and just zero-initialize.
+     * operator_new already zeroes the allocation. */
+    type = 0xD;
+    selected_entity = nullptr;
+    station_list_offset = 0;
+#else
     RESDATA_BaseInit(this);
 
     GameObject_BaseCtor(reinterpret_cast<void*>(&sub_object_1), -1, -1, 0, 0);
@@ -248,6 +261,7 @@ DDRAW_Building::DDRAW_Building()
     selected_entity     = nullptr;
     station_list_offset = 0;
     type = 0xD;
+#endif
 }
 
 /* ================================================================== */
