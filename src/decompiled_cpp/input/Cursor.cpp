@@ -54,7 +54,14 @@ void Cursor_UnlockAllSurfaces(void)
 Cursor::Cursor(HINSTANCE hInstance, uint32_t resId)
     : UI_WindowBase(hInstance, resId)
 {
+#ifndef _WIN32
+    /* Host: skip init() — the SDL host does not need the full editor/
+     * colour-picker UI for singleplayer rendering.  init() loads
+     * Edit_colour.dat and creates ~45 ButtonSprites; it relies on
+     * file-I/O stubs not yet complete for the host path. */
+#else
     this->init();
+#endif
 }
 
 /* ================================================================== */

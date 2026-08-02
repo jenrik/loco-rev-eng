@@ -15,13 +15,7 @@
 // The host menu bootstrap intentionally stops after EditWindow. The remaining
 // original startup chain is retained for the Windows/binary-faithful build.
 #ifdef _WIN32
-#include "../town/Town.h"
-#include "../ui/PostcardPreviewWindow.h"
-#include "../ui/TrainStationWindow.h"
 #include "../graphics/LOCOBITMAP.h"
-#include "../input/Cursor.h"
-#include "../ui/HelpWnd.h"
-#include "../ui/AboutDialog.h"
 #endif
 
 /* Typed subsystem headers — needed by CGWND_EnterMode3 (0x4086F0) and
@@ -32,9 +26,11 @@
 #include "../town/Town.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/PostcardPreviewWindow.h"
+#include "../ui/TrainStationWindow.h"
 #include "../input/Cursor.h"
 #include "../input/InputMgr.h"
 #include "../ui/HelpWnd.h"
+#include "../ui/AboutDialog.h"
 #include "../core/Game.h"
 // Netman: forward-declared below (Netman.h conflicts with Config_GetIniInt)
 class Netman;
@@ -1299,18 +1295,75 @@ int CGWND::InitAllSubsystems()
     HINSTANCE hInst      = this->hInstance;     /* +0x0C */
 
 #ifndef _WIN32
-    // Capability milestone: mode 2 needs only the original first subsystem,
-    // EditWindow. Do not fabricate unavailable world/town/cursor objects.
-    std::fprintf(stderr, "[TRACE] InitAllSubsystems: construct EditWindow\n");
-    auto* menu = new EditWindow(hInst, 0x1F8);
-    if (!menu) return -2;
-    std::fprintf(stderr, "[TRACE] InitAllSubsystems: create EditWindow\n");
-    if (!menu->create(hWndParent)) {
-        delete menu;
-        return -3;
-    }
-    std::fprintf(stderr, "[TRACE] InitAllSubsystems: EditWindow ready\n");
-    g_ui_main = menu;
+    /* Host path: construct all 8 original subsystems.  The C++
+     * constructors initialise fields and create ButtonSprites without
+     * HWND dependencies.  HWND-dependent create() / init_sprites() /
+     * InitWindow() calls are handled by the incremental initMode1 PATH A
+     * sequence (Town::init_overlay_sprite, Cursor::init_background,
+     * PostcardAlbum::InitWindowSurface, PostcardPreviewWindow::
+     * init_background), which only need ResourceManager_GetById — already
+     * live on the host.
+     *
+     * Construction order and resource IDs match the original
+     * CGWND_InitAllSubsystems (0x406F90).  Error codes -2..-10 mirror
+     * the Win32 path's -2..-17 range so GameLoop_Setup receives a
+     * non-zero failure indicator. */
+
+    /* 1. UI_MainMenu — EditWindow, res 0x1F8. Ctor: 0x420310 */
+    g_ui_main = new EditWindow(hInst, 0x1F8);
+    if (g_ui_main == nullptr) return -2;
+    if (!static_cast<EditWindow*>(g_ui_main)->create(hWndParent))
+        { destroy_subsystem(g_ui_main); return -3; }
+
+    /* 2. Town — 0x6E0 bytes, res 0x1F5. Ctor: 0x42E900 */
+    g_town = new Town(hInst, 0x1F5);
+    if (g_town == nullptr)
+        { destroy_subsystem(g_ui_main); return -4; }
+
+    /* 3. PostcardPreviewWindow — 0x2C4 bytes, res 0x1F7. Ctor: 0x430A90 */
+    g_postcard_send = new PostcardPreviewWindow(hInst, 0x1F7);
+    if (g_postcard_send == nullptr)
+        { destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -5; }
+
+    /* 4. TrainStationWindow — 0x1D4 bytes, res 0x1FC. Ctor: 0x436B20 */
+    g_trainstation_window = new TrainStationWindow(hInst, 0x1FC);
+    if (g_trainstation_window == nullptr)
+        { destroy_subsystem(g_postcard_send); destroy_subsystem(g_town);
+          destroy_subsystem(g_ui_main); return -6; }
+
+    /* 5. PostcardAlbum — 0x254 bytes, res 0x1FB. Ctor: 0x401F50 */
+    g_postcard = new PostcardAlbum(hInst, 0x1FB);
+    if (g_postcard == nullptr)
+        { destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send);
+          destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -7; }
+
+    /* 6. Cursor — 0x740 bytes, res 0x1FA. Ctor: 0x415980
+     * Host: Cursor::init() is guarded by #ifdef _WIN32 (the editor/
+     * colour-picker UI loads Edit_colour.dat via file-I/O stubs not
+     * yet complete for the host path). */
+    g_cursor = new Cursor(hInst, 0x1FA);
+    if (g_cursor == nullptr)
+        { destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window);
+          destroy_subsystem(g_postcard_send); destroy_subsystem(g_town);
+          destroy_subsystem(g_ui_main); return -8; }
+
+    /* 7. AudioMgr (IS HelpWnd) — 0x3078 bytes, res 0x1FE. Ctor: 0x44F490
+     * Host: HelpWnd::init() is guarded by #ifdef _WIN32 (tutorial/
+     * help-window file I/O not yet complete for the host path). */
+    g_audio_mgr = new HelpWnd(hInst, 0x1FE);
+    if (g_audio_mgr == nullptr)
+        { destroy_subsystem(g_cursor); destroy_subsystem(g_postcard);
+          destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send);
+          destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -9; }
+
+    /* 8. AboutDialog — 0x1184 bytes, res 0x1FD. Ctor: 0x40F1C0 */
+    g_about = new AboutDialog(hInst, 0x1FD);
+    if (g_about == nullptr)
+        { destroy_subsystem(g_audio_mgr); destroy_subsystem(g_cursor);
+          destroy_subsystem(g_postcard); destroy_subsystem(g_trainstation_window);
+          destroy_subsystem(g_postcard_send); destroy_subsystem(g_town);
+          destroy_subsystem(g_ui_main); return -10; }
+
     return 0;
 #else
     /* 1. UI_MainMenu — EditWindow, 0x224 bytes, res 0x1F8. Ctor: 0x420310 */

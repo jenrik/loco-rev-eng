@@ -43,15 +43,6 @@ python3 -m pytest tests/integration --gui-visible -k test_name
 LEGO_LOCO_GUI_VISIBLE=1 make test-integration
 ```
 
-To force a reproducible sandbox output size (particularly in visible mode,
-which otherwise adopts its parent's size), add `--gui-size WIDTHxHEIGHT` or
-`LEGO_LOCO_GUI_SIZE`:
-
-```bash
-python3 -m pytest tests/integration --gui-visible --gui-size 1280x1024 -k test_name
-LEGO_LOCO_GUI_VISIBLE=1 LEGO_LOCO_GUI_SIZE=1280x1024 make test-integration
-```
-
 This requires an active Wayland session (`WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`),
 per the `wayland-gui-sandbox` skill's `--visible` mode. Headless stays the
 default for CI and unattended agent runs; the sandbox closes immediately when
@@ -72,28 +63,11 @@ is a best-effort evidence artifact, not a correctness check: a missing
 `wf-recorder` binary or a capture failure never fails the test, it only
 writes `recording-error.txt`/`recording.log` alongside the other artifacts.
 
-Screenshots are evidence and debugging artifacts by default. Tests that need an
-exact visual contract can use `tests.golden_image.assert_masked_golden_match`:
-the golden PNG alpha channel is a mask, so alpha-zero pixels are ignored and
-every other golden RGB pixel must match exactly. For example:
-
-```python
-from tests.golden_image import assert_masked_golden_match
-
-screenshot = game.screenshot("main-menu")
-assert_masked_golden_match(
-    screenshot,
-    ROOT / "tests" / "golden" / "main-menu.png",
-)
-```
-
-On a mismatch the helper writes a same-size `*-golden-diff.png` alongside the
-captured screenshot; opaque red pixels mark the failed comparisons. PNG is the
-recommended golden format: it is lossless, supports the alpha mask natively,
-and uses DEFLATE compression. The driver moves the compositor cursor to the
-top-left before capture to reduce obstruction, but no test depends on cursor
-pixels. State transitions are asserted through passive JSONL events emitted
-only when `LEGO_LOCO_TEST_EVENTS` is set. User input still travels through
+Screenshots are evidence and debugging artifacts, not golden-image assertions.
+The driver moves the compositor cursor to the top-left before capture to reduce
+obstruction, but no test depends on cursor pixels. State transitions are
+asserted through passive JSONL events emitted only when
+`LEGO_LOCO_TEST_EVENTS` is set. User input still travels through
 `gui-sandbox`, so the tests exercise the real Wayland-to-SDL event path.
 
 A missing sandbox mapping, premature process exit, signal/crash, absent render

@@ -67,10 +67,10 @@ void UI_WindowBase_BaseDtor() {}
 void UI_WindowBase_Ctor() {}
 void VehicleEditor_CheckEditBounds1() {}
 void WIN32_StreamOpen() {}
-void WIN32_StreamOpenFile() {}
+void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t) { return nullptr; }
 void WNDPROC_EnterCriticalSection() {}
 void WNDPROC_LeaveCriticalSection() {}
-void WNDPROC_StreamFromMemory() {}
+void* WNDPROC_StreamFromMemory(void*, const char*, int, int) { return nullptr; }
 void RESDATA_DtorBase() {}
 void ScriptEngine_Init() {}
 void UIPANEL_InitScrollPanel() {}

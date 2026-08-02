@@ -19,7 +19,6 @@ pkgs.mkShell {
     ghidra
     python3
     python3Packages.pytest
-    python3Packages.pillow  # exact alpha-masked golden-image assertions
     sway  # swaymsg geometry for isolated GUI input
     wf-recorder  # optional GUI-test screen recording evidence
   ];

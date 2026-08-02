@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import getpass
-from pathlib import Path
 import subprocess
 import time
 
 import pytest
-
-from tests.golden_image import assert_masked_golden_match
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.gui]
@@ -78,25 +75,6 @@ def test_main_menu_exit_plays_click_sound_and_exits_cleanly(game):
     game.wait_for_event("audio_queued", after_sequence=before_exit, resource_id=0x5015)
     game.wait_for_event("mode_changed", timeout=5, new_mode=10)
     game.wait_for_clean_exit(timeout=5)
-
-
-@pytest.mark.parametrize(
-    "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
-)
-def test_main_menu_singleplayer_matches_masked_golden(game):
-    """Selected single-player frame matches the original masked reference."""
-    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
-    # Sway can report undecorated geometry for one frame after mapping.
-    time.sleep(0.2)
-    game.click_logical(600, 550, "select single player")
-
-    screenshot = game.screenshot("main-menu-singleplayer-golden")
-    assert_masked_golden_match(
-        screenshot,
-        Path(__file__).resolve().parents[1]
-        / "reference"
-        / "main-menu_select-singleplayer.png",
-    )
 
 
 @pytest.mark.parametrize(

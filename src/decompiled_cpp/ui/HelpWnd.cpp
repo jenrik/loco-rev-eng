@@ -200,7 +200,14 @@ HelpWnd::HelpWnd(HINSTANCE hInstance, UINT resId)
      * the constructor, and once via vtable[6] during create(). The second
      * call re-creates the ButtonSprites, leaking those from the first call.
      * This matches the original binary behavior. */
+#ifndef _WIN32
+    /* Host: skip init() — the SDL host does not need the full tutorial/
+     * help-window subsystem for singleplayer rendering.  init() does
+     * heavy Win32 file I/O and sprite loading that relies on stubs not
+     * yet complete for the host path. */
+#else
     this->init();
+#endif
 }
 
 /* ================================================================== */
