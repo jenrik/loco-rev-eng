@@ -86,14 +86,29 @@ void BootstrapMode3Core()
     std::fflush(stderr);
 
     /* TileMap first: Game::Game() calls SetScreenMode → TileMap_InvalidateRect,
-     * which needs a non-null TileMap.  The TileMap ctor itself only touches
-     * empty host stubs (Game_DeselectGameObject/World_Init/tooltips), so it is
-     * safe ahead of Game. */
+     * which needs a non-null TileMap.  The original TileMap was a BSS object,
+     * so its dimensions and occupancy pointer were zero before its constructor
+     * called FullReset().  Host operator_new storage is indeterminate: zero it
+     * before placement construction or FullReset can treat garbage dimensions
+     * as an allocated occupancy bitmap.  The ctor otherwise only touches empty
+     * host stubs (Game_DeselectGameObject/World_Init/tooltips), so it is safe
+     * ahead of Game. */
     if (g_tilemap == nullptr) {
-        g_tilemap = new TileMap;
-        static_cast<TileMap*>(g_tilemap)->Init(0);
-        std::fprintf(stderr, "[HOST] BootstrapMode3Core: TileMap constructed+Init (%p)\n", g_tilemap);
-        std::fflush(stderr);
+        void* tilemap_storage = operator_new(sizeof(TileMap));
+        if (tilemap_storage != nullptr) {
+            std::memset(tilemap_storage, 0, sizeof(TileMap));
+            g_tilemap = ::new (tilemap_storage) TileMap;
+            static_cast<TileMap*>(g_tilemap)->Init(0);
+            std::fprintf(stderr,
+                "[HOST] BootstrapMode3Core: TileMap constructed+Init (%p)\n",
+                g_tilemap);
+            std::fflush(stderr);
+        } else {
+            std::fprintf(stderr,
+                "[HOST] BootstrapMode3Core: TileMap allocation failed; "
+                "mode-3 bootstrap cannot continue\n");
+            std::fflush(stderr);
+        }
     }
 
     if (g_game == nullptr) {
@@ -265,18 +280,22 @@ void HostLoadingSequence(void* /*param*/)
 /* ================================================================== */
 void HostPostLoadWorker(void* /*param*/)
 {
-    extern void World_EnumeratePostLoadAssets(void* tilemap);   /* 0x457380 */
-
-    TileMap* tilemap = static_cast<TileMap*>(g_tilemap);
-    if (tilemap != nullptr) {
-        World_EnumeratePostLoadAssets(tilemap);
+    /* Host-only deviation: World_EnumeratePostLoadAssets (0x457380)
+     * consumes the unported TileMap asset-loader results.  The SDL
+     * persistence adapter deliberately carries records without native
+     * placement, so do not dispatch that original worker until typed tile
+     * metadata and object placement are available. */
+    if (g_tilemap != nullptr) {
+        std::fprintf(stderr,
+            "[HOST] PostLoadWorker: tile asset enumeration deferred "
+            "(SDL tile metadata adapter unavailable)\n");
     }
     if (g_building_mgr != nullptr) {
         BuildingMgr* mgr = static_cast<BuildingMgr*>(g_building_mgr);
         mgr->UpdateStoredTargets();
         mgr->RemoveEmpty();
     }
-    std::fprintf(stderr, "[HOST] PostLoadWorker: asset enumeration complete\n");
+    std::fprintf(stderr, "[HOST] PostLoadWorker: completed supported cleanup\n");
     std::fflush(stderr);
 }
 

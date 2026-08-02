@@ -34,6 +34,11 @@
 #include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
 #endif
 
+/* ResourceManager_GetById is an internal C++ symbol (0x446EA0), not a
+ * Win32 ABI import.  Keep C++ linkage so it resolves to the typed SDL bridge
+ * on the host rather than an unresolved C name. */
+void* ResourceManager_GetById(void* resmgr, int id);
+
 /* ================================================================== */
 /* External references (Win32 / cross-module C ABI)                    */
 /* ================================================================== */
@@ -44,7 +49,6 @@ extern "C" {
     void   GLOBAL_free(const void* ptr);            /* 0x465CD0 */
 
     /* Resource management */
-    void*  ResourceManager_GetById(void* resmgr, int id);           /* 0x446EA0 */
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
     void   Sprite_Destroy(void* sprite);                             /* 0x454BC0 */
     void   Sprite_Init(void* sprite);                                /* 0x454BF0 */

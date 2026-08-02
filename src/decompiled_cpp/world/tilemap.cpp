@@ -2159,6 +2159,15 @@ void TileMap::UpdateAll()
 {
     update_complete = 0;
 
+#ifndef _WIN32
+    /* Host-only deviation: the x86 worker at 0x4A9AD0 loads TileMap
+     * asset metadata into DirectDraw-backed objects.  No such worker or
+     * typed metadata adapter exists in the SDL path, so polling it and
+     * invoking AssetMgr_LoadFileEx/AssetMgr_EnumFiles would call unresolved
+     * original entry points.  The host persistence adapter carries world
+     * records without placement until that renderer cone is reconstructed. */
+    return;
+#else
     /* Wait for async thread result */
     int thread_result = WIN32_GetThreadResult(0x4A9AD0);
     while (thread_result != 0) {
@@ -2173,6 +2182,7 @@ void TileMap::UpdateAll()
     if (asset_enum_ptr != NULL) {
         AssetMgr_EnumFiles(reinterpret_cast<uint*>(asset_enum_ptr));
     }
+#endif
 }
 
 /* ================================================================== */

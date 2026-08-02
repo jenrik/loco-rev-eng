@@ -149,50 +149,50 @@ void CGWND::initMode1()
         /* Pump messages once to render the initial loading frame */
         CGWND_PumpMessages(1);
 
+        /* The Windows path initializes the four full-screen overlays here.
+         * Their original ResourceObject::Lock surfaces are not yet represented
+         * by the SDL resource bridge; invoking those paths would dispatch an
+         * x86 resource slot against a host sprite.  The objects are still
+         * constructed for the mode-3 dependency cone, but their presentation
+         * setup stays explicitly deferred until typed SDL surface adapters
+         * exist. */
+#ifndef _WIN32
+        if (g_demo_mode != 1) {
+            std::fprintf(stderr,
+                "[HOST] initMode1 PATH A: Town/Cursor/Postcard overlay setup "
+                "deferred (SDL ResourceObject surface adapter unavailable)\n");
+            std::fflush(stderr);
+        }
+#else
         if (g_demo_mode != 1) {
             /* --- Incremental subsystem initialization ---
              * Each step initializes a subsystem then presents + pumps
              * to update the loading screen progress. */
 
             /* Town overlay sprite (0x42FDF0) */
-            if (g_town != nullptr) {
-                static_cast<Town*>(g_town)->init_overlay_sprite();
-            } else {
-                std::fprintf(stderr, "[HOST] initMode1 PATH A: Town overlay sprite skipped (g_town unconstructed)\n");
-            }
+            static_cast<Town*>(g_town)->init_overlay_sprite();
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Cursor background surface (0x416460) */
-            if (g_cursor != nullptr) {
-                static_cast<Cursor*>(g_cursor)->init_background();
-            } else {
-                std::fprintf(stderr, "[HOST] initMode1 PATH A: Cursor background skipped (g_cursor unconstructed)\n");
-            }
+            static_cast<Cursor*>(g_cursor)->init_background();
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Postcard album window surface (0x404720) */
-            if (g_postcard != nullptr) {
-                static_cast<PostcardAlbum*>(g_postcard)->InitWindowSurface();
-            } else {
-                std::fprintf(stderr, "[HOST] initMode1 PATH A: PostcardAlbum surface skipped (g_postcard unconstructed)\n");
-            }
+            static_cast<PostcardAlbum*>(g_postcard)->InitWindowSurface();
             CGWND_Present(0);
             CGWND_PumpMessages(1);
 
             /* Postcard preview window — only when hosting/joined.
              * Netman::m_gameMode at +0x7C4: 0=waiting,1=hosting,2=joined */
             if (static_cast<Netman*>(g_netman)->m_gameMode == 2) {
-                if (g_postcard_send != nullptr) {
-                    static_cast<PostcardPreviewWindow*>(g_postcard_send)->init_background();
-                } else {
-                    std::fprintf(stderr, "[HOST] initMode1 PATH A: PostcardPreview background skipped (g_postcard_send unconstructed)\n");
-                }
+                static_cast<PostcardPreviewWindow*>(g_postcard_send)->init_background();
                 CGWND_Present(0);
                 CGWND_PumpMessages(1);
             }
         }
+#endif
 
         /* Start async background task for loading/intro playback.
          * Callback at 0x45DE40 handles the loading sequence; the SDL host
