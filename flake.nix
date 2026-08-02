@@ -57,9 +57,11 @@
               gst_all_1.gst-libav         # Cinepak decoder for launch videos
               gst_all_1.gst-plugins-bad  # DVI ADPCM decoder for launch videos (legospin.avi)
 
-              # ---- Reverse engineering tools ----
+              # ---- Reverse engineering and debugging tools ----
               ghidra                 # NSA's software reverse engineering suite
               binwalk                # firmware / binary analysis
+              gdb                    # inspect live processes and ELF core dumps
+              valgrind               # native memory and concurrency diagnostics
               python3                # scripts in tools/ directory
               python3Packages.pytest  # component/integration test runner
               sway                    # swaymsg geometry for isolated GUI input
