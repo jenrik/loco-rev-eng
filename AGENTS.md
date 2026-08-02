@@ -1,4 +1,4 @@
-# AGENTS.md — Lego Loco Reverse Engineering
+# Lego Loco Reverse Engineering
 
 ## Source of truth
 
