@@ -34,6 +34,7 @@ class GameSession:
         environment: Mapping[str, str] | None = None,
         data_dir: Path | None = None,
         visible: bool = False,
+        record: bool = False,
     ):
         self.root = root
         self.artifact_dir = artifact_dir
@@ -41,15 +42,18 @@ class GameSession:
         self.environment = dict(environment or {})
         self.data_dir = data_dir
         self.visible = visible
+        self.record = record
         self.events_path = artifact_dir / "events.jsonl"
         self.stdout_path = artifact_dir / "stdout.log"
         self.stderr_path = artifact_dir / "stderr.log"
         self.interactions_path = artifact_dir / "interactions.jsonl"
         self.wrapper_path = artifact_dir / "launch-game.sh"
+        self.recording_path = artifact_dir / "recording.mp4"
         self.tag: str | None = None
         self.pid: int | None = None
         self.screenshot_size: tuple[int, int] | None = None
         self.content_rect: tuple[int, int, int, int] | None = None
+        self._recording_process: subprocess.Popen | None = None
         self._started_at = time.monotonic()
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
@@ -108,11 +112,14 @@ class GameSession:
         self._record(
             "launch", pid=self.pid, tag=self.tag, content_rect=self.content_rect
         )
+        if self.record:
+            self._start_recording()
         return self
 
     def close(self) -> None:
         if self.tag is None:
             return
+        self._stop_recording()
         if self.is_alive() and self.pid is not None:
             try:
                 os.kill(self.pid, signal.SIGTERM)
@@ -252,6 +259,66 @@ class GameSession:
                 f"{type(exc).__name__}: {exc}\n", encoding="utf-8"
             )
 
+    def _start_recording(self) -> None:
+        # wf-recorder is an optional evidence artifact, not part of the game's
+        # observable behavior: a missing binary or capture failure must never
+        # fail the test, only leave a note explaining the gap.
+        assert self.tag is not None
+        display_file = self._runtime_dir() / f"{self.tag}.display"
+        try:
+            display = display_file.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            self._note_recording_failure(f"missing sandbox display file: {display_file}")
+            return
+
+        log_path = self.artifact_dir / "recording.log"
+        try:
+            self._recording_process = subprocess.Popen(
+                ["wf-recorder", "-f", str(self.recording_path)],
+                env={
+                    **os.environ,
+                    "WAYLAND_DISPLAY": display,
+                    "XDG_RUNTIME_DIR": str(self._runtime_dir()),
+                },
+                stdout=log_path.open("w", encoding="utf-8"),
+                stderr=subprocess.STDOUT,
+            )
+        except FileNotFoundError:
+            self._note_recording_failure("wf-recorder is not installed")
+            return
+
+        time.sleep(0.3)
+        if self._recording_process.poll() is not None:
+            self._note_recording_failure(f"wf-recorder exited immediately (see {log_path})")
+            self._recording_process = None
+            return
+        self._record("recording_started", path=str(self.recording_path))
+
+    def _stop_recording(self) -> None:
+        process = self._recording_process
+        self._recording_process = None
+        if process is None or process.poll() is not None:
+            return
+        # SIGINT lets wf-recorder finalize the container (moov atom etc.)
+        # instead of leaving a truncated, unplayable file; escalate only if
+        # it doesn't exit on its own.
+        for sig, timeout in (
+            (signal.SIGINT, 5), (signal.SIGTERM, 5), (signal.SIGKILL, 5)
+        ):
+            process.send_signal(sig)
+            try:
+                process.wait(timeout=timeout)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        self._record("recording_stopped", path=str(self.recording_path))
+
+    def _note_recording_failure(self, reason: str) -> None:
+        (self.artifact_dir / "recording-error.txt").write_text(
+            reason + "\n", encoding="utf-8"
+        )
+        self._record("recording_failed", reason=reason)
+
     def _run(
         self, argv: list[str], timeout: float = 15.0
     ) -> subprocess.CompletedProcess[str]:
@@ -295,12 +362,15 @@ class GameSession:
                 return line[len(prefix):].strip()
         raise AssertionError(f"missing {key}=... in output:\n{output}")
 
-    def _query_content_rect(self) -> tuple[int, int, int, int]:
-        assert self.tag is not None and self.pid is not None
-        runtime_dir = Path(
+    @staticmethod
+    def _runtime_dir() -> Path:
+        return Path(
             os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/gsbx-runtime-{os.getuid()}"
         )
-        socket = runtime_dir / f"{self.tag}.sock"
+
+    def _query_content_rect(self) -> tuple[int, int, int, int]:
+        assert self.tag is not None and self.pid is not None
+        socket = self._runtime_dir() / f"{self.tag}.sock"
         result = self._run(
             ["swaymsg", "-s", str(socket), "-t", "get_tree", "-r"], timeout=10
         )

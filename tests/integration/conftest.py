@@ -33,6 +33,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
              "headless, so a human can watch the run live (also settable via "
              "LEGO_LOCO_GUI_VISIBLE=1, e.g. for `make test-integration`)",
     )
+    parser.addoption(
+        "--gui-record",
+        action="store_true",
+        default=_env_flag("LEGO_LOCO_GUI_RECORD"),
+        help="record each test's sandbox output to recording.mp4 in its "
+             "artifact directory via wf-recorder, best-effort (also settable "
+             "via LEGO_LOCO_GUI_RECORD=1, e.g. for `make test-integration`)",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -96,7 +104,8 @@ def game(request: pytest.FixtureRequest, gui_artifacts_root: Path,
     environment.update(getattr(request, "param", None) or {})
     session = GameSession(ROOT, artifact_dir, environment=environment,
                           data_dir=game_data_dir,
-                          visible=request.config.getoption("--gui-visible"))
+                          visible=request.config.getoption("--gui-visible"),
+                          record=request.config.getoption("--gui-record"))
     try:
         session.start()
         yield session

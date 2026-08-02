@@ -49,6 +49,20 @@ default for CI and unattended agent runs; the sandbox closes immediately when
 each test finishes either way, so review the retained screenshots/JSONL
 artifacts for anything missed live.
 
+For a persistent video artifact of the whole run (headless or visible), opt
+into `--gui-record` (or `LEGO_LOCO_GUI_RECORD=1`):
+
+```bash
+python3 -m pytest tests/integration --gui-record -k test_name
+LEGO_LOCO_GUI_RECORD=1 make test-integration
+```
+
+This captures the sandbox's compositor output to `recording.mp4` in the
+test's artifact directory via `wf-recorder` (added to `shell.nix`). Recording
+is a best-effort evidence artifact, not a correctness check: a missing
+`wf-recorder` binary or a capture failure never fails the test, it only
+writes `recording-error.txt`/`recording.log` alongside the other artifacts.
+
 Screenshots are evidence and debugging artifacts, not golden-image assertions.
 The driver moves the compositor cursor to the top-left before capture to reduce
 obstruction, but no test depends on cursor pixels. State transitions are

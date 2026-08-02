@@ -20,5 +20,6 @@ pkgs.mkShell {
     python3
     python3Packages.pytest
     sway  # swaymsg geometry for isolated GUI input
+    wf-recorder  # optional GUI-test screen recording evidence
   ];
 }
