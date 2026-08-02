@@ -1046,22 +1046,49 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
         field_at<int32_t>(entity, 0xBC) = static_cast<int32_t>(record->dest);
 #endif
 
-        /* Children: 5 x 0x14 records at +0x1C.  vtable[15] on the
-         * ResourceGameObject family is CreateMember (0x458430). */
+        /* Children: 5 x 0x14 records at +0x1C.  Binary slot-15 dispatch
+         * (0x41D7F3: call *0x3c(%edx) with this=entity, arg = the
+         * unsigned-16 resource id; the RESULT is null-checked at
+         * 0x41D7F8):
+         *   - ResourceGameObject vtable slot [15] = CreateMember
+         *     (0x458430): creates and attaches one member Building.
+         *   - Building vtable slot [15] = Update(void*) (0x4327B0): the
+         *     AI dispatch — NOT a child-creation operation.  Its return
+         *     is void and EAX at return is this->field_dc (+0xDC,
+         *     0x43291E), so the binary's result null-check would treat a
+         *     non-zero field_dc as a bogus child pointer and then write
+         *     +0x94 through it (a binary defect; a freshly placed
+         *     building's field_dc is 0, so the null path is the
+         *     invariant behaviour on the load path).
+         * The typed model dispatches the same per-class slot-15 member:
+         * the ResourceGameObject family's CreateMember for the group
+         * parents; the Building family's Update(void*) semantics are
+         * documented above and produce no child (the loop's null-check
+         * path is taken — no garbage child is fabricated).  No raw
+         * vtable access; the RTTI dynamic_cast is host-only. */
         for (int child_index = 0; child_index < 5; child_index++) {
             const ChildRecord& child_data = record->children[child_index];
             if (child_data.resource_id == 0) {
                 continue;
             }
-            /* Original (0x41D7F3): vtable[15] CreateMember is dispatched
-             * on the entity and the RESULT is null-checked (0x41D7F8);
-             * the C++ model expresses the same typed virtual dispatch
-             * through the ResourceGameObject family's CreateMember. */
-            ResourceGameObject* parent =
-                dynamic_cast<ResourceGameObject*>(entity);
-            Building* child = (parent != nullptr)
-                ? parent->CreateMember(child_data.resource_id)
-                : nullptr;
+            Building* child = nullptr;
+#ifndef _WIN32
+            if (ResourceGameObject* parent =
+                    dynamic_cast<ResourceGameObject*>(entity)) {
+                child = parent->CreateMember(child_data.resource_id);
+            }
+#else
+            /* _WIN32 (no RTTI): the canonical type tag reproduces the
+             * same typed dispatch — ResourceGameObject's ctor writes
+             * type = 3 (0x4580A0..0x4580A6); the Building/Train family
+             * keeps the Entity type=2 tag, and its slot-15 is the
+             * Update(void*) AI dispatch (documented above), so only the
+             * type-3 family can yield a member child here. */
+            if (entity->type == 3) {
+                child = static_cast<ResourceGameObject*>(entity)
+                            ->CreateMember(child_data.resource_id);
+            }
+#endif
             if (child == nullptr) {
                 continue;
             }
@@ -1191,16 +1218,30 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
 #else
         /* Original (0x41D379..0x41D3EE): copy the 0x4FD3C8 object's
          * save-name buffer ([obj]+0x48+strlen(resdir), a C string) to a
-         * stack buffer and append ".sav" (0x47E4F4), then
-         * LoadSaveFile(buffer, 0, 0).  The 0x4FD3C8 slot is the
-         * tilemap.h g_cursor_surface pointer; the string read is the
-         * documented raw-offset access (TODO: typed backdrop/surface
-         * class during integration). */
+         * stack buffer, then REPLACE ITS LAST FOUR CHARACTERS with ".sav"
+         * (0x47E4F4) — the binary writes ".sav" over
+         * sav_path + strlen(sav_path) - 4 (0x41D3C9 sub $0x4,%eax;
+         * 0x41D3CC add %eax,%edx), NOT appending.  A base shorter than
+         * four characters would make the binary write before its buffer;
+         * the reconstruction clamps to appending in that pathological
+         * case (host-safe; the real backdrop save-name always carries the
+         * res-dir prefix).  The 0x4FD3C8 slot is the tilemap.h
+         * g_cursor_surface pointer; the string read is the documented
+         * raw-offset access (TODO: typed backdrop/surface class during
+         * integration). */
         extern void* g_cursor_surface;   /* tilemap.h, 0x4FD3C8 */
         const char* base = static_cast<const char*>(
             static_cast<char*>(g_cursor_surface) + 0x48 +
             std::strlen(g_install_path));
-        std::snprintf(sav_path, sizeof(sav_path), "%s.sav", base);
+        std::snprintf(sav_path, sizeof(sav_path), "%s", base);
+        const size_t base_len = std::strlen(sav_path);
+        if (base_len >= 4) {
+            std::snprintf(sav_path + base_len - 4,
+                          sizeof(sav_path) - (base_len - 4), "%s", ".sav");
+        } else {
+            std::snprintf(sav_path + base_len,
+                          sizeof(sav_path) - base_len, "%s", ".sav");
+        }
 #endif
 #ifndef _WIN32
         /* Host: the companion's marker branch must not clobber the
@@ -1236,9 +1277,14 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
         const int32_t count = self->ListGetCount();
         for (int32_t i = 0; i < count; i++) {
             Entity* entity = self->ListGetItem(i);
+#ifndef _WIN32
+            /* Host hardening: the binary dereferences the GetItem result
+             * unconditionally (0x41D428 mov 0x40(%eax),%ecx — item->resource
+             * read with no item null check). */
             if (entity == nullptr) {
                 continue;
             }
+#endif
             uint8_t type = 0;
             if (entity->resource != nullptr) {
                 type = *reinterpret_cast<uint8_t*>(
@@ -1445,11 +1491,11 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
          * FULL dword at entity+0x88 goes to record+0x02 (x = low 16,
          * y = high 16 — the writer never stores y separately); entity+0x28
          * (dword) -> record+0x08 (anim_state); entity+0xBC (dword) ->
-         * record+0x0C (dest); entity+0x7C name -> record+0x10. */
-        if (entity->resource != nullptr) {
-            record.resource_id = *reinterpret_cast<uint16_t*>(
-                static_cast<uint8_t*>(entity->resource) + 0x04);
-        }
+         * record+0x0C (dest); entity+0x7C name -> record+0x10.  The
+         * binary dereferences entity->resource(+0x40) unconditionally
+         * (0x41DB47 mov 0x4(%ecx),%ax — no resource null check). */
+        record.resource_id = *reinterpret_cast<uint16_t*>(
+            static_cast<uint8_t*>(entity->resource) + 0x04);
         const uint32_t pos = field_at<uint32_t>(entity, 0x88);
         record.x = static_cast<uint16_t>(pos);
         record.y = static_cast<uint16_t>(pos >> 16);
@@ -1458,17 +1504,17 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
         std::strncpy(record.name, entity->name, sizeof(record.name));
         /* 5 child slots at +0x90 (occupied pointers): resource id from
          * child->resource(+0x40)->+0x04, value from child->+0x94, name
-         * from child->+0x7C (0x41DB93..0x41DBE1). */
+         * from child->+0x7C (0x41DB93..0x41DBE1).  The child POINTER null
+         * check IS in the binary (0x41DB95 test %eax,%eax; je 0x41DBDA);
+         * child->resource(+0x40) is then dereferenced unconditionally
+         * (0x41DB99 mov 0x40(%eax),%ecx; 0x41DBA3 mov 0x4(%ecx),%ax). */
         for (int c = 0; c < 5; c++) {
             void* child = field_at<void*>(entity, 0x90 + c * sizeof(void*));
             if (child == nullptr) {
                 continue;
             }
-            void* resource = field_at<void*>(child, 0x40);
-            if (resource != nullptr) {
-                record.children[c].resource_id = *reinterpret_cast<uint16_t*>(
-                    static_cast<uint8_t*>(resource) + 0x04);
-            }
+            record.children[c].resource_id = *reinterpret_cast<uint16_t*>(
+                static_cast<uint8_t*>(field_at<void*>(child, 0x40)) + 0x04);
             record.children[c].value = field_at<uint32_t>(child, 0x94);
             std::strncpy(record.children[c].name,
                          field_at<const char*>(child, 0x7C),
@@ -1509,15 +1555,11 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
                 field_at<uint32_t>(slot, 0x42C);
         }
         /* Name owner: *(obj+0x10) = sub-slot[0] (0x41DC78).  The binary
-         * dereferences it unconditionally; the host guards a null
-         * sub-slot[0] and leaves the zeroed name (host hardening — the
-         * binary would read +0x7C of null). */
-        void* name_owner = field_at<void*>(obj, 0x10);
-        if (name_owner != nullptr) {
-            std::strncpy(record.name,
-                         field_at<const char*>(name_owner, 0x7C),
-                         sizeof(record.name));
-        }
+         * dereferences it unconditionally (0x41DC78 mov (%ebx),%edi;
+         * 0x41DC7D add $0x7c,%edi — no null check). */
+        std::strncpy(record.name,
+                     field_at<const char*>(field_at<void*>(obj, 0x10), 0x7C),
+                     sizeof(record.name));
         RESMGR_WriteTableRecord(&resdata, &record);
     }
 #endif

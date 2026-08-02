@@ -18,16 +18,27 @@ CANVAS_HEIGHT = 1024
 
 
 class GameSession:
-    """Own one game process and one throwaway gui-sandbox compositor."""
+    """Own one game process and one throwaway gui-sandbox compositor.
+
+    data_dir points the game at a WRITABLE copy of the game data (a
+    session temp dir under build/test-artifacts): the SDL host writes
+    its current-save marker ("curr") and the ".sav" companion into
+    g_install_path (the LEGO_LOCO_DATA data dir, mirroring the
+    original's "~curr" write into its install dir), so a session pointed
+    at the repository's source art-res would pollute the repo's
+    untracked assets.  The source tree is only ever read.
+    """
 
     def __init__(
         self, root: Path, artifact_dir: Path, timeout: float = 20.0,
         environment: Mapping[str, str] | None = None,
+        data_dir: Path | None = None,
     ):
         self.root = root
         self.artifact_dir = artifact_dir
         self.timeout = timeout
         self.environment = dict(environment or {})
+        self.data_dir = data_dir
         self.events_path = artifact_dir / "events.jsonl"
         self.stdout_path = artifact_dir / "stdout.log"
         self.stderr_path = artifact_dir / "stderr.log"
@@ -47,6 +58,8 @@ class GameSession:
             raise AssertionError(f"game binary missing: {binary}")
         if not assets.is_dir():
             raise AssertionError(f"game assets missing: {assets}")
+        if self.data_dir is not None and not (self.data_dir / "art-res").is_dir():
+            raise AssertionError(f"isolated game data missing: {self.data_dir}")
 
         started = self._run(["gui-sandbox", "start"], timeout=30)
         (self.artifact_dir / "sandbox-start.log").write_text(
@@ -67,7 +80,10 @@ class GameSession:
                     f"export {key}={shlex.quote(value)}"
                     for key, value in self.environment.items()
                 ],
-                f"export LEGO_LOCO_DATA={shlex.quote(str(self.root / 'lego-loco-unpacked'))}",
+                # Writable per-session copy (conftest game_data_dir); the
+                # host writes "curr"/"curr.sav" into this data dir, never
+                # the repository's source art-res.
+                f"export LEGO_LOCO_DATA={shlex.quote(str(self.data_dir or (self.root / 'lego-loco-unpacked')))}",
                 f"export LEGO_LOCO_TEST_EVENTS={shlex.quote(str(self.events_path))}",
                 f"exec {shlex.quote(str(binary))} >>{shlex.quote(str(self.stdout_path))} 2>>{shlex.quote(str(self.stderr_path))}",
                 "",

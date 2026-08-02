@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -40,15 +41,49 @@ def gui_artifacts_root(request: pytest.FixtureRequest) -> Path:
     return path
 
 
+@pytest.fixture(scope="session")
+def game_data_dir(gui_artifacts_root: Path) -> Path:
+    """Writable per-session copy of the shipped game data.
+
+    The SDL host writes its current-save marker ("curr") and the ".sav"
+    companion into g_install_path (the LEGO_LOCO_DATA data dir — the
+    documented host deviation mirroring the original's "~curr" write into
+    its install dir).  A session pointed at the repository's source
+    art-res would write into the repo's untracked assets, so every GUI
+    flow runs against a fresh temp copy under build/test-artifacts; the
+    source art-res is only ever read (the C++ persistence fixtures follow
+    the same rule with their own make_temp_dir()).
+    """
+    data_dir = gui_artifacts_root / "game-data"
+    target = data_dir / "art-res"
+    if not target.exists():
+        source = ROOT / "lego-loco-unpacked"
+        if not (source / "art-res").is_dir():
+            raise AssertionError(f"source game assets missing: {source}")
+        # The whole data root: the host resource bridge also opens
+        # <LEGO_LOCO_DATA>/Exe/loco.exe for the PE string table
+        # (ResourceManager_Init), and art-res/ for the RFH/RFD archives.
+        # The Ghidra project database is never read by the game and is
+        # excluded to keep the isolated data copy lean.
+        shutil.copytree(
+            source, data_dir,
+            ignore=shutil.ignore_patterns("ghidra_projects"),
+        )
+    print(f"Isolated game data: {data_dir}")
+    return data_dir
+
+
 @pytest.fixture
-def game(request: pytest.FixtureRequest, gui_artifacts_root: Path):
+def game(request: pytest.FixtureRequest, gui_artifacts_root: Path,
+          game_data_dir: Path):
     artifact_dir = gui_artifacts_root / request.node.name
     # Most menu regressions start at mode 2. The dedicated intro test opts
     # out so the normal SDL host launch remains fully covered without making
     # every menu scenario wait through three videos.
     environment = {"LEGO_LOCO_SKIP_INTRO": "1"}
     environment.update(getattr(request, "param", None) or {})
-    session = GameSession(ROOT, artifact_dir, environment=environment)
+    session = GameSession(ROOT, artifact_dir, environment=environment,
+                          data_dir=game_data_dir)
     try:
         session.start()
         yield session

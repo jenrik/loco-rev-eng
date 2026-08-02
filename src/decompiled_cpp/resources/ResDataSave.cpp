@@ -310,9 +310,15 @@ WIN32_StreamDestroyImmediate(stream);
  * conflated.  Typed stream reconstruction is deferred (TODO: WIN32_Stream
  * class during the stream-integration milestone); these helpers
  * reproduce the exact raw reads. */
-static int32_t stream_byte_count(void* stream)
+static uint32_t stream_byte_count(void* stream)
 {
-    return *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(stream) + 8);
+    /* The last-read/written byte count is a signed dword in the binary
+     * (0x447DD1 cmpl $0x80,0x8(%ecx) — signed 32-bit compare); the
+     * count is never negative in practice.  Return it as uint32_t so
+     * the short-read comparisons against sizeof/preview sizes below
+     * are unsigned-to-unsigned (no -Wsign-compare on 64-bit hosts). */
+    return static_cast<uint32_t>(
+        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(stream) + 8));
 }
 
 static int32_t stream_state_word(void* stream)
