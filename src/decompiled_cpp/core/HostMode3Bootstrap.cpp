@@ -33,6 +33,7 @@
 #include "../world/tilemap.h"
 #include "../audio/GameAudio.h"
 #include "../../sdl3_shims/sdl3_town_mode3.h"
+/* sdl3_tile_placement.h: host placement helpers (see that file) */
 
 #include <cstdio>
 #include <cstring>
@@ -262,6 +263,12 @@ void HostLoadingSequence(void* /*param*/)
             "curr (load-back result %d); entering mode 3\n",
             static_cast<int>(loaded));
         std::fflush(stderr);
+
+        /* Host: the existing INPUT_LoadWorld → INPUT_LoadSaveFile path
+         * already places records when host_placement_available() returns
+         * true.  Enable that gate now that TileMap, ResourceManager, and
+         * tile predicates are available. */
+        loco::host::set_host_placement_available(true);
     } else {
         std::fprintf(stderr,
             "[HOST] LoadingSequence: fresh-world seed FAILED (no durable "

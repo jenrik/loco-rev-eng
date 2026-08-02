@@ -259,11 +259,88 @@ void DDRAW_SelectBuilding(void*, int) {}
 void RESDATA_SetPosition(void*, int, int) {}
 void RESDATA_BaseInit(void*) {}
 void RESDATA_DtorBase(void*) {}
-void RESDATA_IsSceneryTile(int) {}
-void RESDATA_IsWaterTile(int) {}
-void RESDATA_IsTrackTile(int) {}
-void RESDATA_IsRoadTile(int) {}
-void RESDATA_GetTileCategory(void*, short, unsigned short) {}
+/* RESDATA tile-type predicates — verified from Ghidra disassembly.
+ * Each checks byte at resource+0x63A against known type ranges.
+ * Addresses: IsBuildingTile 0x44BD30, IsRoadTile 0x44BD10,
+ *            IsWaterTile 0x44BD50, IsTrackTile 0x44BD70,
+ *            IsSceneryTile 0x44BD90, GetTileCategory 0x44BDB0.
+ *
+ * Tile type byte at RESDATA+0x63A values:
+ *   0x01-0x04 = road, 0x07-0x0A = building (7,8,9,10),
+ *   0x0E-0x0F = water, 0x10-0x11 = track/rail,
+ *   0x12-0x13 = scenery.
+ *
+ * On the host, the resource pointer may be a raw int32_t cast (from
+ * ResourceManager_GetById bridge) or a real RESDATA pointer.  Both paths
+ * read the same +0x63A byte. */
+
+#ifndef _WIN32
+#include <cstdint>
+#endif
+
+uint8_t RESDATA_IsBuildingTile(int32_t tile_obj)
+{
+    /* 0x44BD30: check byte at +0x63A for {0x07,0x08,0x09,0x0A} */
+    if (tile_obj == 0) return 0;
+    uint8_t b = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    return (b == 0x07 || b == 0x08 || b == 0x09 || b == 0x0A) ? 1 : 0;
+}
+
+uint8_t RESDATA_IsRoadTile(int32_t tile_obj)
+{
+    /* 0x44BD10: check byte at +0x63A for {0x01,0x02,0x03,0x04} */
+    if (tile_obj == 0) return 0;
+    uint8_t b = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    return (b == 0x01 || b == 0x02 || b == 0x03 || b == 0x04) ? 1 : 0;
+}
+
+uint8_t RESDATA_IsWaterTile(int32_t tile_obj)
+{
+    /* 0x44BD50: check byte at +0x63A for {0x0E,0x0F} */
+    if (tile_obj == 0) return 0;
+    uint8_t b = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    return (b == 0x0E || b == 0x0F) ? 1 : 0;
+}
+
+uint8_t RESDATA_IsTrackTile(int32_t tile_obj)
+{
+    /* 0x44BD70: check byte at +0x63A for {0x10,0x11} */
+    if (tile_obj == 0) return 0;
+    uint8_t b = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    return (b == 0x10 || b == 0x11) ? 1 : 0;
+}
+
+uint8_t RESDATA_IsSceneryTile(int32_t tile_obj)
+{
+    /* 0x44BD90: check byte at +0x63A for {0x12,0x13} */
+    if (tile_obj == 0) return 0;
+    uint8_t b = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    return (b == 0x12 || b == 0x13) ? 1 : 0;
+}
+
+uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
+{
+    /* 0x44BDB0: dispatches on type byte at +0x63A.
+     * Returns 0x100 | something on match, 0x??00 on no-match.
+     * Host stub: return 0 (no category match) — the original logic
+     * requires full RESDATA resource objects with player/color fields. */
+    if (ptr == nullptr) return 0;
+    uint8_t typeByte = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(ptr) + 0x63A);
+    (void)a; (void)b;
+    /* For now, return 0 for everything.  The full implementation needs
+     * the +0x169, +0x16B, +0x16C fields which are only available on
+     * native RESDATA objects, not the SDL bridge's lightweight structs. */
+    if (typeByte == 0x01 || typeByte == 0x02 || typeByte == 0x03 || typeByte == 0x04) {
+        return 0; // player/color-dependent; deferred
+    }
+    return 0;
+}
 void RESDATA_CreateChildSprite(void*, int, int, int) {}
 void RESDATA_HitTestChildren(void*, int, int) {}
 void Panel_DtorBody(void*) {}
