@@ -8,49 +8,56 @@
 #include "core/GameView.h"
 #include "graphics/DDRAW.h"
 
+#include <array>
 #include <cstddef>
-#include <cstdio>
-#include <new>
+#include <cstdint>
+#include <cstring>
 
 extern void* g_town_view;
-extern void* operator_new(size_t size);
+
+namespace {
+
+/* The original instances are BSS-backed.  These host-only backing stores are
+ * deliberately zero-initialized and remain alive for the process lifetime.
+ * Constructors cannot be run: their recovered x86 layouts write through
+ * incompatible host offsets. */
+alignas(GameView) std::array<std::byte, sizeof(GameView)> s_game_view_storage{};
+
+struct HostDdrawBuildingStorage {
+    alignas(DDRAW_Building) std::array<std::byte, sizeof(DDRAW_Building)> bytes{};
+
+    HostDdrawBuildingStorage()
+    {
+        constexpr std::size_t kOriginalTypeOffset = 0x04;
+        const std::int32_t type = 0x0D;
+        std::memcpy(bytes.data() + kOriginalTypeOffset, &type, sizeof(type));
+    }
+};
+
+HostDdrawBuildingStorage s_ddraw_building_storage;
+
+} // namespace
 
 namespace loco {
 namespace host {
 
+bool Mode3FrameDependenciesReady()
+{
+    return g_town_view != nullptr && g_ddraw_building != nullptr;
+}
+
 void BootstrapTownMode3Objects()
 {
-    std::fprintf(stderr, "[HOST] BTO: entered\n");
-    std::fflush(stderr);
-
-    std::fprintf(stderr, "[HOST] BTO: g_town_view=%p\n", g_town_view);
-    std::fflush(stderr);
-
-    /* g_ddraw_building is DDRAW_Building* from DDRAW.h.
-     * Avoid calling operator_new (which hangs after ScriptedObject
-     * allocation).  Use a static local dummy object. */
-    static char ddraw_dummy[864] = {};
-    *reinterpret_cast<int*>(ddraw_dummy + 4) = 0xD;
-    g_ddraw_building = reinterpret_cast<DDRAW_Building*>(ddraw_dummy);
-    std::fprintf(stderr, "[HOST] BTO: g_ddraw_building set to dummy %p\n",
-                 static_cast<void*>(ddraw_dummy));
-    std::fflush(stderr);
-
+    /* This is the required host-only mode-3 frame dependency boundary.
+     * The first GameLoop_FrameUpdate after the menu transition dispatches
+     * both objects unconditionally (0x45C4E1/0x45C4E6). */
     if (g_town_view == nullptr) {
-        std::fprintf(stderr, "[HOST] BTO: allocating GameView (%zu bytes)\n", sizeof(GameView));
-        std::fflush(stderr);
-        void* mem = operator_new(sizeof(GameView));
-        std::fprintf(stderr, "[HOST] BTO: GameView mem=%p\n", mem);
-        std::fflush(stderr);
-        if (mem) {
-            g_town_view = mem;
-            std::fprintf(stderr, "[HOST] BTO: GameView stored\n");
-            std::fflush(stderr);
-        }
+        g_town_view = s_game_view_storage.data();
     }
-
-    std::fprintf(stderr, "[HOST] BTO: returning\n");
-    std::fflush(stderr);
+    if (g_ddraw_building == nullptr) {
+        g_ddraw_building = reinterpret_cast<DDRAW_Building*>(
+            s_ddraw_building_storage.bytes.data());
+    }
 }
 
 } // namespace host

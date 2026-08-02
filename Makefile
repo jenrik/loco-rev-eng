@@ -138,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-host-mode3-bootstrap test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -154,7 +154,7 @@ test-unit: test-sdl3-net-protocol test-sdl3-net-transport \
       test-avahi-dbus-discovery test-embedded-mdns-discovery \
       test-resource-archive test-resource-manager-sdl3 \
       test-dplay-config test-postbag-cleanup \
-      test-cgwnd-entermode3 test-inputmgr-canonical \
+      test-cgwnd-entermode3 test-host-mode3-bootstrap test-inputmgr-canonical \
       test-persistence-adapter test-input-world \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
@@ -368,6 +368,18 @@ $(CGWND_ENTERMODE3_TEST): $(BUILD_DIR)/dcp/core/CGWND.o tests/cgwnd_entermode3_t
 
 test-cgwnd-entermode3: $(CGWND_ENTERMODE3_TEST)
 	@$(CGWND_ENTERMODE3_TEST)
+
+
+# Regression for lego_loco-3.core: GameLoop_Setup must create both host
+# mode-3 frame dependencies before their unconditional first-frame dispatch.
+HOST_MODE3_BOOTSTRAP_TEST := $(BUILD_DIR)/host_mode3_bootstrap_test
+
+$(HOST_MODE3_BOOTSTRAP_TEST): $(BUILD_DIR)/shims/sdl3_town_mode3.o $(SHIMS_DIR)/sdl3_town_mode3.h tests/host_mode3_bootstrap_test.cpp | dirs
+	@echo "=== Testing mode-3 frame dependency bootstrap ==="
+	@$(CXX) -std=c++17 -Wall -Wextra -Werror -no-pie -I$(DCP_DIR) -I$(DCP_DIR)/shared -I$(DCP_DIR)/stubs -I$(SHIMS_DIR) $(FORCE_INC) tests/host_mode3_bootstrap_test.cpp $(BUILD_DIR)/shims/sdl3_town_mode3.o -Wl,--unresolved-symbols=ignore-all -o $@
+
+test-host-mode3-bootstrap: $(HOST_MODE3_BOOTSTRAP_TEST)
+	@$(HOST_MODE3_BOOTSTRAP_TEST)
 
 # Canonical InputMgr regression: ctor 0x41D250 / dtor body 0x41D2D0 / embedded
 # entity-collection ops (vtable family 0x477798/0x477758) / ResetWorldState

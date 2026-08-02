@@ -22,6 +22,7 @@
 namespace loco { namespace host { void BootstrapMode3Core(); } }
 #endif
 #include <cstdio>
+#include <cstdlib>
 #include <new>
 
 /* ================================================================== */
@@ -264,6 +265,10 @@ extern "C" int GameLoop_Setup(void* cgwnd)
      * (Game, World, BuildingMgr, ScriptedObject, TileMap, GameAudio). */
     loco::host::BootstrapMode3Core();
     loco::host::BootstrapTownMode3Objects();
+    if (!loco::host::Mode3FrameDependenciesReady()) {
+        std::fputs("FATAL: mode-3 frame dependencies were not initialized\n", stderr);
+        std::abort();
+    }
 #endif
 
     trace_setup_stage("step 9: UI subsystems");

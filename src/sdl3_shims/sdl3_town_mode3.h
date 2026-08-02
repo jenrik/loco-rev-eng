@@ -11,6 +11,9 @@ namespace host {
     /** Construct GameView and DDRAW_Building singletons, assign to the
      *  legacy void* globals.  Must be called after ResourceManager_Init
      *  and before the first mode-3 frame tick. */
+    /* True after both unconditional GameLoop_FrameUpdate dependencies
+     * have host backing storage. */
+    bool Mode3FrameDependenciesReady();
     void BootstrapTownMode3Objects();
 } // namespace host
 } // namespace loco
