@@ -197,49 +197,49 @@ void PostcardAlbum::InitFromResource()
 
     /* btn_close  — res 0x3C04 (+0x148) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_close = mem ? new (mem) ButtonSprite(0x3C04) : nullptr;
     }
 
     /* btn_delete — res 0x3C09 (+0x14C) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_delete = mem ? new (mem) ButtonSprite(0x3C09) : nullptr;
     }
 
     /* btn_save   — res 0x3C05 (+0x150) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_save = mem ? new (mem) ButtonSprite(0x3C05) : nullptr;
     }
 
     /* btn_rotate — res 0x3C08 (+0x154) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_rotate = mem ? new (mem) ButtonSprite(0x3C08) : nullptr;
     }
 
     /* btn_print  — res 0x3C0F (+0x158) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_print = mem ? new (mem) ButtonSprite(0x3C0F) : nullptr;
     }
 
     /* btn_prev   — res 0x3C06 (+0x15C) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_prev = mem ? new (mem) ButtonSprite(0x3C06) : nullptr;
     }
 
     /* btn_next   — res 0x3C07 (+0x160) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btn_next = mem ? new (mem) ButtonSprite(0x3C07) : nullptr;
     }
 
     /* btn_scrollwheel — res 0x3C0C (low-res) or 0x3C0D (high-res) (+0x164) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         if (this->is_high_res == 0) {
             this->btn_scrollwheel = mem ? new (mem) ButtonSprite(0x3C0C) : nullptr;
         } else {

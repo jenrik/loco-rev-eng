@@ -859,37 +859,37 @@ void PostcardAlbum::InitFromResource()
     }
 
     /* Create 8 individual UI sprites (resources 0x3C04-0x3C0F) */
-    this->sprite_main       = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C04);
-    this->sprite_toggle_a   = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C09);
-    this->sprite_button_b   = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C05);
-    this->sprite_toggle_b   = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C08);
-    this->sprite_help       = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C0F);
-    this->sprite_toggle_c   = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C06);
-    this->sprite_toggle_d   = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C07);
+    this->sprite_main       = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C04);
+    this->sprite_toggle_a   = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C09);
+    this->sprite_button_b   = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C05);
+    this->sprite_toggle_b   = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C08);
+    this->sprite_help       = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C0F);
+    this->sprite_toggle_c   = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C06);
+    this->sprite_toggle_d   = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C07);
 
     /* 8th sprite — resource varies by resolution */
     if (this->high_res == 0) {
-        this->sprite_indicator = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C0C);
+        this->sprite_indicator = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C0C);
     } else {
-        this->sprite_indicator = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C0D);
+        this->sprite_indicator = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C0D);
     }
 
     /* Create 6 rows of 3 sprites each (18 sprites total) */
     /* Interleaved storage at +0x168 (tile_left), +0x180 (tile_mid), +0x198 (tile_right) */
     for (int row = 0; row < 6; row++) {
         /* tile_left (surface_type 8) */
-        this->tile_left[row] = RESDATA_CreateSpriteObject(operator_new(0x24), 0);
+        this->tile_left[row] = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0);
         /* tile_mid (background for name text) */
-        this->tile_mid[row]  = RESDATA_CreateSpriteObject(operator_new(0x24), 0x3C0E);
+        this->tile_mid[row]  = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0x3C0E);
         /* tile_right (surface_type 10) */
-        this->tile_right[row] = RESDATA_CreateSpriteObject(operator_new(0x24), 0);
+        this->tile_right[row] = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0);
         /* Initialize text buffer byte to 0 (at +0x1DA + row*0x14) */
         this->tile_text_buf[row][0] = 0;
     }
 
     /* Create 9 thumbnail sprites (at +0x1B0..+0x1CC) */
     for (int i = 0; i < 9; i++) {
-        this->thumb_sprites[i] = RESDATA_CreateSpriteObject(operator_new(0x24), 0);
+        this->thumb_sprites[i] = RESDATA_CreateSpriteObject(operator_new(sizeof(ButtonSprite)), 0);
     }
 
     /* Set all toggle flags to 1 (enabled by default) */

@@ -121,16 +121,16 @@ void PostcardPreviewWindow::draw_sprites()
     this->background_surface = nullptr;          /* +0x280 */
 
     /* Create close button sprite (res 0x3d89) */
-    void* mem = operator_new(0x24);
+    void* mem = operator_new(sizeof(ButtonSprite));
     this->sprite_close = mem ? new (mem) ButtonSprite(0x3d89) : nullptr; /* +0x298 */
 
     /* Create options button sprite (res 0x3d8b) */
-    mem = operator_new(0x24);
+    mem = operator_new(sizeof(ButtonSprite));
     this->sprite_options = mem ? new (mem) ButtonSprite(0x3d8b) : nullptr; /* +0x2C0 */
 
     /* Create 9 status/indicator sprites (res 0x3da4..0x3dac) */
     for (int i = 0; i < 9; i++) {
-        mem = operator_new(0x24);
+        mem = operator_new(sizeof(ButtonSprite));
         this->sprite_status[i] = mem ? new (mem) ButtonSprite(0x3DA4 + i) : nullptr; /* +0x29C+i*4 */
     }
 }
