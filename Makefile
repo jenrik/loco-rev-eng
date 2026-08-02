@@ -138,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-golden-image test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -146,13 +146,17 @@ build: $(BINARY)
 
 # Deterministic component and host-boundary suite. GUI interaction is kept in
 # test-integration so agents can run the fast layer independently when needed.
-test: test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world \
+test: test-golden-image test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-inputmgr-canonical test-persistence-adapter test-input-world \
       test-sdl3-primary-present test-mode2-menu-backdrop \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
       test-host-multiplayer-menu-input test-sdl3-game-audio test-intro-video-sequence \
       test-sdl3-timer-stress test-uipanel-surface-linkage \
       test-menu-sprite-viewer
+
+# Exact alpha-masked golden-image helper regression.
+test-golden-image:
+	@python3 -m pytest -q tests/test_golden_image.py
 
 # SDL3 timer safety regression: rapid SetTimer/KillTimer cycles under thread contention.
 SDL3_TIMER_STRESS_TEST := $(BUILD_DIR)/sdl3_timer_stress_test
@@ -527,6 +531,7 @@ help:
 	@echo "  make          Build everything"
 	@echo "  make run              Build and run"
 	@echo "  make test             Run deterministic regressions"
+	@echo "  make test-golden-image Run alpha-masked golden-image helper regressions"
 	@echo "  make test-integration Run isolated Wayland GUI tests"
 	@echo "  make test-all         Run every test layer"
 	@echo "  make diagnostic-census Clean/-k full build in a temporary tree and count diagnostics"

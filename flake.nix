@@ -64,6 +64,7 @@
               valgrind               # native memory and concurrency diagnostics
               python3                # scripts in tools/ directory
               python3Packages.pytest  # component/integration test runner
+              python3Packages.pillow  # exact alpha-masked golden-image assertions
               sway                    # swaymsg geometry for isolated GUI input
               python3Packages.fastapi # local autonomous RE dashboard API
               python3Packages.uvicorn # ASGI server for the dashboard daemon

@@ -63,11 +63,28 @@ is a best-effort evidence artifact, not a correctness check: a missing
 `wf-recorder` binary or a capture failure never fails the test, it only
 writes `recording-error.txt`/`recording.log` alongside the other artifacts.
 
-Screenshots are evidence and debugging artifacts, not golden-image assertions.
-The driver moves the compositor cursor to the top-left before capture to reduce
-obstruction, but no test depends on cursor pixels. State transitions are
-asserted through passive JSONL events emitted only when
-`LEGO_LOCO_TEST_EVENTS` is set. User input still travels through
+Screenshots are evidence and debugging artifacts by default. Tests that need an
+exact visual contract can use `tests.golden_image.assert_masked_golden_match`:
+the golden PNG alpha channel is a mask, so alpha-zero pixels are ignored and
+every other golden RGB pixel must match exactly. For example:
+
+```python
+from tests.golden_image import assert_masked_golden_match
+
+screenshot = game.screenshot("main-menu")
+assert_masked_golden_match(
+    screenshot,
+    ROOT / "tests" / "golden" / "main-menu.png",
+)
+```
+
+On a mismatch the helper writes a same-size `*-golden-diff.png` alongside the
+captured screenshot; opaque red pixels mark the failed comparisons. PNG is the
+recommended golden format: it is lossless, supports the alpha mask natively,
+and uses DEFLATE compression. The driver moves the compositor cursor to the
+top-left before capture to reduce obstruction, but no test depends on cursor
+pixels. State transitions are asserted through passive JSONL events emitted
+only when `LEGO_LOCO_TEST_EVENTS` is set. User input still travels through
 `gui-sandbox`, so the tests exercise the real Wayland-to-SDL event path.
 
 A missing sandbox mapping, premature process exit, signal/crash, absent render
