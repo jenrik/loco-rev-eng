@@ -43,6 +43,15 @@ python3 -m pytest tests/integration --gui-visible -k test_name
 LEGO_LOCO_GUI_VISIBLE=1 make test-integration
 ```
 
+To force a reproducible sandbox output size (particularly in visible mode,
+which otherwise adopts its parent's size), add `--gui-size WIDTHxHEIGHT` or
+`LEGO_LOCO_GUI_SIZE`:
+
+```bash
+python3 -m pytest tests/integration --gui-visible --gui-size 1280x1024 -k test_name
+LEGO_LOCO_GUI_VISIBLE=1 LEGO_LOCO_GUI_SIZE=1280x1024 make test-integration
+```
+
 This requires an active Wayland session (`WAYLAND_DISPLAY`/`XDG_RUNTIME_DIR`),
 per the `wayland-gui-sandbox` skill's `--visible` mode. Headless stays the
 default for CI and unattended agent runs; the sandbox closes immediately when

@@ -34,6 +34,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
              "LEGO_LOCO_GUI_VISIBLE=1, e.g. for `make test-integration`)",
     )
     parser.addoption(
+        "--gui-size",
+        action="store",
+        default=os.environ.get("LEGO_LOCO_GUI_SIZE"),
+        metavar="WIDTHxHEIGHT",
+        help="force the sandbox output size (also settable via "
+             "LEGO_LOCO_GUI_SIZE; especially useful with --gui-visible)",
+    )
+    parser.addoption(
         "--gui-record",
         action="store_true",
         default=_env_flag("LEGO_LOCO_GUI_RECORD"),
@@ -105,6 +113,7 @@ def game(request: pytest.FixtureRequest, gui_artifacts_root: Path,
     session = GameSession(ROOT, artifact_dir, environment=environment,
                           data_dir=game_data_dir,
                           visible=request.config.getoption("--gui-visible"),
+                          screen_size=request.config.getoption("--gui-size"),
                           record=request.config.getoption("--gui-record"))
     try:
         session.start()

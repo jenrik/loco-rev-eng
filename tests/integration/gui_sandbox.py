@@ -34,6 +34,7 @@ class GameSession:
         environment: Mapping[str, str] | None = None,
         data_dir: Path | None = None,
         visible: bool = False,
+        screen_size: str | None = None,
         record: bool = False,
     ):
         self.root = root
@@ -42,6 +43,7 @@ class GameSession:
         self.environment = dict(environment or {})
         self.data_dir = data_dir
         self.visible = visible
+        self.screen_size = screen_size
         self.record = record
         self.events_path = artifact_dir / "events.jsonl"
         self.stdout_path = artifact_dir / "stdout.log"
@@ -67,10 +69,12 @@ class GameSession:
         if self.data_dir is not None and not (self.data_dir / "art-res").is_dir():
             raise AssertionError(f"isolated game data missing: {self.data_dir}")
 
-        started = self._run(
-            ["gui-sandbox", "start"] + (["--visible"] if self.visible else []),
-            timeout=30,
-        )
+        start_argv = ["gui-sandbox", "start"]
+        if self.visible:
+            start_argv.append("--visible")
+        if self.screen_size is not None:
+            start_argv.extend(["--size", self.screen_size])
+        started = self._run(start_argv, timeout=30)
         (self.artifact_dir / "sandbox-start.log").write_text(
             started.stdout + started.stderr, encoding="utf-8"
         )
@@ -110,7 +114,8 @@ class GameSession:
         self.pid = int(self._parse_assignment(launched.stdout, "PID"))
         self.content_rect = self._query_content_rect()
         self._record(
-            "launch", pid=self.pid, tag=self.tag, content_rect=self.content_rect
+            "launch", pid=self.pid, tag=self.tag, content_rect=self.content_rect,
+            screen_size=self.screen_size
         )
         if self.record:
             self._start_recording()
