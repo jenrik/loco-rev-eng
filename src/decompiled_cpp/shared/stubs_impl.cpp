@@ -399,7 +399,9 @@ void Panel_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __
 /* Game stubs */
 void Game_SetScreenMode(void*, char, char, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Game_CheckScreensaverTimeout(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Game_DeselectGameObject(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/** Game_DeselectGameObject — Host no-op (no selection state to clear).
+ *  Binary sets selected building to null. */
+void Game_DeselectGameObject(int) { /* host no-op */ }
 void Game_SelectGameObject(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_StopSound(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_Update(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
@@ -413,50 +415,50 @@ void Entity_GetSubObjectPosition(void*, int*, int) { fprintf(stderr, "STUB: %s a
 void UI_WindowBase_Ctor(void*, void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UI_WindowBase_BaseDtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UI_WindowBase_Hide(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_CreateChildWindow(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_CleanupTooltips(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_DestroyTooltip(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_CreateTooltip(void*, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int) { /* host no-op */ }
+void UI_CreateChildWindow(void*, int, int) { /* host no-op */ }
+void UI_CleanupTooltips(void* self) { (void)self; }
+void UI_DestroyTooltip(void* self, int i) { (void)self; (void)i; }
+void UI_CreateTooltip(void* self, int a, int b, int c, int d) { (void)self; (void)a; (void)b; (void)c; (void)d; }
 void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_Window_UpdateScroll(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIEntity_Ctor(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_Blit(void*, int, int, int, int, void*, int, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_BeginPaint(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_CreateSurface(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_StretchBlit(void*, void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_SetClipRect(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_ScrollPanel_HandleDrag(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_ScrollPanel_Dtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_InitScrollPanel(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_FillRect(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UI_Window_UpdateScroll(int* p) { (void)p; }
+void UIEntity_Ctor(void) { /* host no-op */ }
+void UIPANEL_Blit(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
+void UIPANEL_BeginPaint(void* self) { (void)self; }
+void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { /* host no-op */ }
+void UIPANEL_CreateSurface(void* self) { (void)self; }
+void UIPANEL_StretchBlit(void*, void*, int, int, int) { /* host no-op */ }
+void UIPANEL_SetClipRect(void* self, int a, int b) { (void)self; (void)a; (void)b; }
+void UIPANEL_ScrollPanel_HandleDrag(void*, int, int) { /* host no-op */ }
+void UIPANEL_ScrollPanel_Dtor(void* self) { (void)self; }
+void UIPANEL_InitScrollPanel(void* self) { (void)self; }
+void UIPANEL_FillRect(void* self, int a, int b) { (void)self; (void)a; (void)b; }
 
 /* Various other stubs */
-void Sprite_Init(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_SetState(void*, int, int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_Destroy(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ButtonSprite_Ctor(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void HelpWnd_PlayNarration(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_SelectBuilding(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_InvalidateDirtyRects(void*, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_InvalidateRect(void*, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ScriptEngine_Call(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ScriptEngine_Init(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_SetMode(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_SetPause(void*, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_SetBuildMode(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void World_Init(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PixelDataCache_LookupAsset(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PixelDataCache_GetEntryCount(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PixelDataCache_Unlock(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DPLAY_RenderPlayer(void*, void*, int, void*, int, int, unsigned int, RECT*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlaySoundAt(int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Collection_Resize(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Collection_GetAt(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void SortedCollection_Compare(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void SortedCollection_SortRange(int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Sprite_Init(void* self) { (void)self; }
+void Sprite_SetState(void*, int, int*) { /* host no-op */ }
+void Sprite_Destroy(void) { }
+void ButtonSprite_Ctor(void* self, int i) { (void)self; (void)i; }
+void HelpWnd_PlayNarration(void*, int, int) { /* host no-op */ }
+void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int) { /* host no-op */ }
+void Town_SelectBuilding(void* self, int i) { (void)self; (void)i; }
+void TileMap_InvalidateDirtyRects(void*, char) { /* host no-op */ }
+void TileMap_InvalidateRect(void*, int, int, int, int) { /* host no-op */ }
+void ScriptEngine_Call(void* self) { (void)self; }
+void ScriptEngine_Init(void* self) { (void)self; }
+void CGWND_SetMode(void* self) { (void)self; }
+void CGWND_SetPause(void* self, char c) { (void)self; (void)c; }
+void CGWND_SetBuildMode(int i) { (void)i; }
+void World_Init(void* self) { (void)self; /* host no-op */ }
+void PixelDataCache_LookupAsset(void* self, int a, int b) { (void)self; (void)a; (void)b; }
+void PixelDataCache_GetEntryCount(void* self) { (void)self; }
+void PixelDataCache_Unlock(void* self, int i) { (void)self; (void)i; }
+void DPLAY_RenderPlayer(void*, void*, int, void*, int, int, unsigned int, RECT*) { /* host no-op */ }
+void PlaySoundAt(int, int, int, int) { /* host no-op */ }
+void Collection_Resize(int) { /* host no-op */ }
+void Collection_GetAt(int) { /* host no-op */ }
+void SortedCollection_Compare(void*, void*) { /* host no-op */ }
+void SortedCollection_SortRange(int, int) { /* host no-op */ }
 
 /* ================================================================== */
 /* GameLoop.cpp dependency stubs (added 2026-07-25)                    */
@@ -479,19 +481,25 @@ void* GameConfig_constructor(void* memory)
 }
 void* NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
-void* PixelDataCache_Ctor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+// PixelDataCache_Ctor now implemented in defsym_stubs.cpp (address: 0x401620)
 
 /* Subsystem init */
 int   DDRAW_Init(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return 1; }
-void  TileMap_Init(void*, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  UIPANEL_Hide(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/** TileMap_Init — Host no-op (SDL3 tilemap handles its own init).
+ *  Address: 0x454E70. Binary zeroes occupancy bitmap, sets dimensions.
+ *  The host path uses sdl3_tilemap; this stub satisfies the linker. */
+void  TileMap_Init(void* self, char mode) {
+    (void)self; (void)mode;
+    /* Host: tilemap already initialized by sdl3_tilemap/TileMap_Create */
+}
+void  UIPANEL_Hide(void*, void*) { /* host no-op */ }
 
 /* Per-frame updates */
-void  NETMAN_Update(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  RESMGR_VehicleAnimationTick(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  World_UpdateTick(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  UI_HideTooltip(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  RESDATA_ScriptedObject_Update(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  NETMAN_Update(void* self) { (void)self; }
+void  RESMGR_VehicleAnimationTick(void* self) { (void)self; }
+void  World_UpdateTick(void* self) { (void)self; }
+void  UI_HideTooltip(void* self) { (void)self; }
+void  RESDATA_ScriptedObject_Update(void* self) { (void)self; }
 /* Town_TrackBuilding (0x42D1A0) and DDRAW_UpdateBuilding (0x459DA0) are
  * implemented in src/sdl3_shims/sdl3_town_mode3.cpp for the host build.
  * The Win32 build links the original binary implementations. */
@@ -500,10 +508,10 @@ extern void DDRAW_UpdateBuilding(void*);
 /* INPUT_GetSaveFileName / INPUT_SaveCurrentWorld / INPUT_FindObjectAt /
  * INPUT_PlaceObject / INPUT_RemoveObject: canonical definitions moved to
  * input/InputMgr.cpp (0x41DD40 real, the rest loud deferred stubs). */
-void  BuildingMgr_UpdateAll(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  BuildingMgr_UpdateAll(void* self) { (void)self; }
 
 /* Asset enumeration */
-void  AssetMgr_EnumerateCategory(unsigned int**) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  AssetMgr_EnumerateCategory(unsigned int** p) { (void)p; }
 
 /* Timer callback */
 extern "C" void LAB_0045c520(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached — LAB_0045c520"); }

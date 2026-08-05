@@ -298,7 +298,16 @@ void GameObject_GetRelPos(void*, int*, int, int) { fprintf(stderr, "STUB: %s at 
  *  Address: 0x452DB0. __thiscall (ECX=config, stack=section,key,value).
  *  Converts int to string via CRT_itoa(10), writes via WritePrivateProfileStringA.
  *  INI path is at config+4. */
-extern int WritePrivateProfileStringA(const char*, const char*, const char*, const char*);
+/** WritePrivateProfileStringA — Win32 INI file write.
+ *  Host stub: logs and returns success (non-zero).
+ *  TODO: implement actual INI file persistence. */
+extern "C" int WritePrivateProfileStringA(const char* section, const char* key,
+                                           const char* value, const char* filename) {
+    fprintf(stderr, "HOST: WritePrivateProfileStringA(%s, %s, %s, %s) — stub\n",
+            section ? section : "(null)", key ? key : "(null)",
+            value ? value : "(null)", filename ? filename : "(null)");
+    return 1; /* non-zero = success */
+}
 void __thiscall Config_WriteInt(void* config, const char* section, const char* key, int value) {
     char buf[100];
     CRT_itoa(value, buf, 10);
@@ -365,7 +374,24 @@ void CGWND_AboutDialog_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d
 void CGWND_RegisterWindowClass(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void DirectPlay_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PixelDataCache_Ctor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/** PixelDataCache_Ctor — PixelDataCache constructor (address: 0x401620)
+ *  Sets vtable=0x4773E8, album_index=-1, buffer=NULL, calls Load(1). */
+void* PixelDataCache_Ctor(void* self) {
+    extern void PixelDataCache_Load(void*, int);
+    extern const void* PTR_PixelDataCache_Dtor_004773e8;
+    *(const void**)self = &PTR_PixelDataCache_Dtor_004773e8;
+    ((int*)self)[1] = -1;  /* current_album_index */
+    ((int*)self)[2] = 0;   /* buffer NULL */
+    ((int*)self)[4] = -1;
+    ((int*)self)[5] = -1;
+    PixelDataCache_Load(self, 1);
+    return self;
+}
+/** PixelDataCache_Load — Host stub: no-op (cache initialized empty).
+ *  TODO: decompile 0x401650 for real implementation. */
+void PixelDataCache_Load(void* self, int mode) {
+    (void)self; (void)mode;
+}
 void TileMap_Init(void*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameAudio_StopFinished(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void DDRAW_GetDsoundErrorString(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }

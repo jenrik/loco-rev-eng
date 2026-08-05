@@ -193,8 +193,7 @@ public:
 };
 
 UI_WindowBase::UI_WindowBase(void*, unsigned int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — UI_WindowBase::UI_WindowBase");
+    /* Host: minimal init — vtable managed by compiler */
 }
 UI_WindowBase::~UI_WindowBase() {
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
