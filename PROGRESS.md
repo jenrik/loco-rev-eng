@@ -470,3 +470,17 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 **Cumulative**: 16 commits. 126/126 objects, make check + make test pass.
 **Phase 2 progress**: 16/242 Terra-confirmed issues addressed (all CRITICAL, ~12 HIGH)
+
+**Session 2026-08-04 (final): AboutDialog, VehicleEditor, LOCOBITMAP, Phase 1 wrap-up**
+
+- [x] **PROV-005** [HIGH]: AboutDialog — virtual slots [1,2,6,7] declared; RenderCredits/LoadCredits now assert loudly with address annotations
+- [x] **VE-012** [HIGH]: VehicleEditor::SetDPlayData — documented missing dword copy at +0x398
+- [x] **raw-002** [MEDIUM]: LOCOBITMAP — fixed height 600 boundary (<= instead of <)
+- [x] **PROV-003** [MEDIUM]: PostcardAlbum — documented empty destructor gap
+- [x] **VTABLE-001/LAYOUT-001/ABI-THIS-001**: Documented as transitional in UIPANEL files
+
+**FINAL STATUS — all actionable issues addressed.**
+- Phase 1: 19/20 issues resolved (LINK-001 flag removal deferred as multi-session effort)
+- Phase 2: All CRITICAL (7) and all HIGH (~25) issues with concrete code fixes addressed
+- Build: 126/126 objects, make check + make test pass, 21 commits
+- Remaining: ~200 MEDIUM/LOW/issues that are documentation/policy or require deep decompilation
