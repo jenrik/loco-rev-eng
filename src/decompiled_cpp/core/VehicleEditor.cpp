@@ -767,6 +767,8 @@ int VehicleEditor::SetDPlayData(const DPlayManager* data)
 #endif
     if (destination == nullptr) return 0;
     destination->CopyLogicalStateFrom(*data);
+    /* TODO VE-012: binary copies an additional dword at +0x398 after
+     * CopyLogicalStateFrom. Decompile 0x40D770 for exact semantics. */
     this->dplay_initialized = 1;
     return 1;
 }
