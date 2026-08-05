@@ -12,8 +12,8 @@ extern void* ResourceManager_GetById(void*, int);               // 0x446ea0
 extern uint8_t GetResourceType(int);                            // 0x446030
 extern void RESDATA_Lock(void*);                                // 0x449410
 extern void RESDATA_Unlock(void*);                              // 0x449420
-extern void UI_CreateMessageBox(void*, int, int, char, int, int, int); // 0x423ab0
-extern int Town_CheckOccupied(void*, int, int, int, int);       // 0x42c950
+extern void __thiscall UI_CreateMessageBox(void* self, int, int, char, int, int, int); // 0x423ab0, thiscall + 6 stack
+extern int __thiscall Town_CheckOccupied(void* self, int, int, int, int);       // 0x42c950, thiscall + 4 stack
 extern int UIPANEL_BlitSurface(void*, int, int, void*, int, int); // 0x42a540
 extern void Game_SelectGameObject(void*, void*);                // 0x4113a0
 extern void Town_SelectBuilding(void*, void*);                  // 0x42d040
@@ -107,7 +107,9 @@ int collection_occupancy(BuildingCollection& collection, const RECT& clip,
 /** Compact the primary keyed collection. Address: 0x434870. */
 void BuildingMgr::CompactCollections()
 {
-    if (building_count <= 1) return;
+    /* Binary uses carry-based (unsigned) branch, not signed comparison.
+     * Cast to unsigned to match raw semantics for 0x80000000..0xFFFFFFFF. */
+    if (static_cast<uint32_t>(building_count) <= 1) return;
     RESDATA_Lock(&building_lock);
     buildings.Sort();                // collection vtable[20] = 0x4244D0
     RESDATA_Unlock(&building_lock);
