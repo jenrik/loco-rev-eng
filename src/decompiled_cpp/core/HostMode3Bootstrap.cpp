@@ -285,12 +285,11 @@ void HostLoadingSequence(void* /*param*/)
         std::fflush(stderr);
     }
 
-    /* Host: after mode-3 is established, immediately transition to mode 5
-     * to show the town UI.  The original game posts a WM_USER+0x406
-     * message from CGWND_EnterMode3, which the WndProc handles by
-     * calling CGWND_SetMode(5).  The SDL host does it directly. */
+    /* The original queues WM_USER+0x406 after mode 3 and reaches Town::show
+     * only after its post-load worker completes.  The SDL host has no typed
+     * Town presentation/resource-object adapter yet, so preserve the stable
+     * mode-3 world rather than synchronously entering the x86 town UI path. */
     CGWND_SetMode(3);
-    CGWND_SetMode(5);
 }
 
 /* ================================================================== */
@@ -313,9 +312,15 @@ void HostPostLoadWorker(void* /*param*/)
             "(SDL tile metadata adapter unavailable)\n");
     }
     if (g_building_mgr != nullptr) {
-        BuildingMgr* mgr = static_cast<BuildingMgr*>(g_building_mgr);
-        mgr->UpdateStoredTargets();
-        mgr->RemoveEmpty();
+        /* The host persistence adapter carries records but does not create
+         * native Building instances until ResourceObject tile metadata is
+         * reconstructed.  The recovered cleanup traverses those x86-managed
+         * collections, so dispatching it against the empty host adapter is
+         * neither useful nor safe.  Keep it deferred rather than executing
+         * an x86 vtable walk over host state. */
+        std::fprintf(stderr,
+            "[HOST] PostLoadWorker: BuildingMgr cleanup deferred "
+            "(no native placed Building instances)\n");
     }
     std::fprintf(stderr, "[HOST] PostLoadWorker: completed supported cleanup\n");
     std::fflush(stderr);

@@ -123,7 +123,7 @@ NATIVE_ALL := $(wildcard $(DCP_DIR)/native/*.c)
 NATIVE_BROKEN := $(DCP_DIR)/native/buildingpanel_wndproc.c $(DCP_DIR)/native/config_ini.c $(DCP_DIR)/native/DDRAW_BlitHBITMAPToSurface.c $(DCP_DIR)/native/ddraw_building_sprites.c $(DCP_DIR)/native/ddraw_helpers.c $(DCP_DIR)/native/DDRAW_LoadBmpToSurface.c $(DCP_DIR)/native/game_loop_setup.c $(DCP_DIR)/native/gamestate_handlers.c $(DCP_DIR)/native/helpwnd_support.c $(DCP_DIR)/native/input_place.c $(DCP_DIR)/native/input_world.c $(DCP_DIR)/native/input_manager.c $(DCP_DIR)/native/ui_childwindow.c $(DCP_DIR)/native/UI_DefWndProc.c $(DCP_DIR)/native/ui_manager.c $(DCP_DIR)/native/ui_position.c $(DCP_DIR)/native/UI_ProcessObjectTimers.c $(DCP_DIR)/native/ui_window_class.c $(DCP_DIR)/native/win32_network.c $(DCP_DIR)/native/win32_stream.c $(DCP_DIR)/native/winmain.c $(DCP_DIR)/native/world_enumerate_assets.c $(DCP_DIR)/native/ui_scroll_list.c $(DCP_DIR)/native/sprite_tilemap.c $(DCP_DIR)/native/math_huf_helpers.c $(DCP_DIR)/native/huf_decode.c $(DCP_DIR)/native/math_helpers.c $(DCP_DIR)/native/DDRAW_PresentRect.c $(DCP_DIR)/native/cgwnd_present.c $(DCP_DIR)/native/ui_window_update.c $(DCP_DIR)/native/win32_postquit.c $(DCP_DIR)/native/win32_thread.c $(DCP_DIR)/native/stream_lock.c
 NATIVE_SRCS := $(filter-out $(NATIVE_BROKEN), $(NATIVE_ALL))
 
-SHIM_SRCS := $(SHIMS_DIR)/sdl3_town_mode3.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_net_stubs.cpp $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c $(SHIMS_DIR)/host_test_events.cpp
+SHIM_SRCS := $(SHIMS_DIR)/sdl3_town_mode3.cpp $(SHIMS_DIR)/sdl3_ddraw.cpp $(SHIMS_DIR)/sdl3_dsound.cpp $(SHIMS_DIR)/sdl3_window.cpp $(SHIMS_DIR)/sdl3_game_audio.cpp $(SHIMS_DIR)/sdl3_net_stubs.cpp $(SHIMS_DIR)/resource_archive.cpp $(SHIMS_DIR)/pe_string_table.cpp $(SHIMS_DIR)/resource_manager_sdl3.cpp $(SHIMS_DIR)/sdl3_intro_video.cpp $(SHIMS_DIR)/main.cpp $(SHIMS_DIR)/stub_func.c $(SHIMS_DIR)/host_test_events.cpp
 
 # Derived objects
 DCP_OBJS    := $(patsubst $(DCP_DIR)/%.cpp, $(BUILD_DIR)/dcp/%.o, $(DCP_CPP_SRCS))
@@ -138,7 +138,7 @@ BINARY      := $(BUILD_DIR)/lego_loco
 # Targets
 # ============================================================================
 
-.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-host-mode3-bootstrap test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
+.PHONY: all build run clean distclean check help dirs diagnostic-census test test-integration test-all test-sdl3-net-protocol test-sdl3-net-transport test-sdl3-net-runtime test-sdl3-net-discovery-transport test-network-discovery test-discovery-runtime test-avahi-dbus-discovery test-embedded-mdns-discovery test-resource-archive test-resource-manager-sdl3 test-sdl3-primary-present test-mode2-menu-backdrop test-mode2-multiplayer-menu test-host-menu-renderer-linkage test-host-main-menu-accept test-host-multiplayer-selector test-host-multiplayer-menu-input test-sdl3-game-audio test-dplay-config test-postbag-cleanup test-cgwnd-entermode3 test-host-mode3-bootstrap test-inputmgr-canonical test-persistence-adapter test-input-world test-intro-video-sequence test-host-intro-video-linkage test-sdl3-timer-stress test-uipanel-surface-linkage menu-sprite-viewer run-menu-sprite-viewer test-menu-sprite-viewer
 
 all: build
 
@@ -160,7 +160,7 @@ test-unit: test-sdl3-net-protocol test-sdl3-net-transport \
       test-mode2-multiplayer-menu test-host-menu-renderer-linkage \
       test-host-main-menu-accept test-host-multiplayer-selector \
       test-host-multiplayer-menu-input test-sdl3-game-audio test-intro-video-sequence \
-      test-sdl3-timer-stress test-uipanel-surface-linkage \
+      test-host-intro-video-linkage test-sdl3-timer-stress test-uipanel-surface-linkage \
       test-menu-sprite-viewer
 
 # SDL3 timer safety regression: rapid SetTimer/KillTimer cycles under thread contention.
@@ -430,6 +430,13 @@ $(INTRO_VIDEO_SEQUENCE_TEST): $(SHIMS_DIR)/sdl3_intro_video.h tests/intro_video_
 
 test-intro-video-sequence: $(INTRO_VIDEO_SEQUENCE_TEST)
 	@$(INTRO_VIDEO_SEQUENCE_TEST)
+
+
+# Link regression: a missing intro-player object leaves startLaunchSequence()
+# unresolved, and --unresolved-symbols=ignore-all turns the main.cpp call into
+# a RIP-0 crash immediately after GameLoop_Setup (lego_loco-4.core).
+test-host-intro-video-linkage: $(BINARY) tests/host_intro_video_linkage_test.sh
+	@bash tests/host_intro_video_linkage_test.sh $(BINARY)
 
 # SDL primary-target regression: validates the CGWND frame source reaches the window.
 SDL3_PRIMARY_PRESENT_TEST := $(BUILD_DIR)/sdl3_primary_present_test
