@@ -87,8 +87,8 @@ extern void FormatResourceString(void* resmgr, int string_id,
 
 /* DDraw surface helpers (defined in native/ddraw_helpers.c) */
 extern void __cdecl DDRAW_GetSurfaceWidthHeight(void* surf,
-                                                uint16_t* out_w,
-                                                uint16_t* out_h);          /* 0x4014E0 */
+                                                uint16_t* out_height,
+                                                uint16_t* out_width);      /* 0x4014E0 */
 extern int  __cdecl DDRAW_SetSurfaceFormat(void* surf, void* desc);        /* 0x45B9B0 */
 extern int  __cdecl DDRAW_RestoreSurfaces(void* surf, void* desc);         /* 0x45BA50 */
 
@@ -638,7 +638,7 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
         {
             uint16_t surfWidth, surfHeight;
             DDRAW_GetSurfaceWidthHeight(this->backbufferSurface,
-                                        &surfWidth, &surfHeight);
+                                        &surfHeight, &surfWidth);
             /* surfWidth/surfHeight are informational only */
         }
 

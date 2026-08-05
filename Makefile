@@ -120,6 +120,13 @@ BROKEN_SRCS :=
 DCP_CPP_SRCS := $(filter-out $(BROKEN_SRCS), $(DCP_CPP_ALL))
 
 NATIVE_ALL := $(wildcard $(DCP_DIR)/native/*.c)
+# NATIVE_BROKEN — 33 of 51 native C sources excluded from build.
+# Each is either: (a) replaced by a typed C++ reconstruction in
+# src/decompiled_cpp/, (b) waiting on decompilation of its original
+# address, or (c) a Win32-only entry point not needed on the host.
+# Tracked in PROGRESS.md under "Remaining work — native C sources."
+# When any file is decompiled and integrated, remove it from this list
+# and add a - [x] entry in PROGRESS.md.
 NATIVE_BROKEN := $(DCP_DIR)/native/buildingpanel_wndproc.c $(DCP_DIR)/native/config_ini.c $(DCP_DIR)/native/DDRAW_BlitHBITMAPToSurface.c $(DCP_DIR)/native/ddraw_building_sprites.c $(DCP_DIR)/native/ddraw_helpers.c $(DCP_DIR)/native/DDRAW_LoadBmpToSurface.c $(DCP_DIR)/native/game_loop_setup.c $(DCP_DIR)/native/gamestate_handlers.c $(DCP_DIR)/native/helpwnd_support.c $(DCP_DIR)/native/input_place.c $(DCP_DIR)/native/input_world.c $(DCP_DIR)/native/input_manager.c $(DCP_DIR)/native/ui_childwindow.c $(DCP_DIR)/native/UI_DefWndProc.c $(DCP_DIR)/native/ui_manager.c $(DCP_DIR)/native/ui_position.c $(DCP_DIR)/native/UI_ProcessObjectTimers.c $(DCP_DIR)/native/ui_window_class.c $(DCP_DIR)/native/win32_network.c $(DCP_DIR)/native/win32_stream.c $(DCP_DIR)/native/winmain.c $(DCP_DIR)/native/world_enumerate_assets.c $(DCP_DIR)/native/ui_scroll_list.c $(DCP_DIR)/native/sprite_tilemap.c $(DCP_DIR)/native/math_huf_helpers.c $(DCP_DIR)/native/huf_decode.c $(DCP_DIR)/native/math_helpers.c $(DCP_DIR)/native/DDRAW_PresentRect.c $(DCP_DIR)/native/cgwnd_present.c $(DCP_DIR)/native/ui_window_update.c $(DCP_DIR)/native/win32_postquit.c $(DCP_DIR)/native/win32_thread.c $(DCP_DIR)/native/stream_lock.c
 NATIVE_SRCS := $(filter-out $(NATIVE_BROKEN), $(NATIVE_ALL))
 
@@ -293,6 +300,9 @@ test-sdl3-net-discovery-transport: $(SDL3_NET_DISCOVERY_TRANSPORT_TEST)
 	  tests/sdl3_net_discovery_transport_test.sh "$(SDL3_NET_DISCOVERY_TRANSPORT_TEST)"'
 
 # Link
+# TODO (LINK-001): Remove --allow-multiple-definition and
+# --unresolved-symbols=ignore-all. These mask duplicate-symbol bugs
+# and missing-implementation defects. Tracked in PROGRESS.md.
 $(BINARY): $(ALL_OBJS) | dirs
 	$(CXX) -std=c++17 -no-pie $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) $(DBUS_LIBS) -pthread -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 

@@ -517,7 +517,9 @@ void Cursor::init_sprites()
         reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
             g_ddraw, desc, &_g_cursor_back, 0);
 
-        DDRAW_GetSurfaceWidthHeight(_g_cursor_back);
+        uint16_t cur_w, cur_h;
+        DDRAW_GetSurfaceWidthHeight(_g_cursor_back, &cur_h, &cur_w);
+        (void)cur_w; (void)cur_h;
         auto* formatStorage = desc - 0x8C;
         DDRAW_SetSurfaceFormat(
             _g_cursor_back,

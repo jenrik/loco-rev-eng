@@ -94,7 +94,7 @@ void* memcpy(void*, const void*, size_t);
 void DDRAW_UnlockPrimary(void);
 int DDRAW_SetSurfaceFormat(void*, int);
 int DDRAW_RestoreSurfaces(void*, void*);
-void DDRAW_GetSurfaceWidthHeight(void*);
+void DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
 void* CRT_wcsstr(const uint8_t*, const uint16_t*);
 void Sprite_Destroy(void*);  /* declared extern "C" in ButtonSprite.h */
 }

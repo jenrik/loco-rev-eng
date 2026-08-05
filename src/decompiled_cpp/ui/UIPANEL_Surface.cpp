@@ -129,7 +129,7 @@ extern "C" {
     int   DDRAW_RestoreSurfaces(int* surf, void* desc);
     void* DDRAW_GetDdrawErrorString(int code);
     HDC   DDRAW_LoadBmpToSurface(LPCSTR path, int bpp, int unk1, int unk2, char unk3);
-    void  DDRAW_GetSurfaceWidthHeight(int* out_w, int* out_h);
+    void  DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
 
     /* Town tile rendering functions */
     bool __thiscall Town_InitTileCache(
@@ -445,10 +445,10 @@ extern "C" {
         s->mode = 1;
 
         /* Get surface dimensions */
-        uint32_t surf_w, surf_h;
-        DDRAW_GetSurfaceWidthHeight(&surf_w, &surf_h);
-        s->width  = (int32_t)(surf_w & 0xFFFF);
-        s->height = (int32_t)(surf_h & 0xFFFF);
+        uint16_t surf_w, surf_h;
+        DDRAW_GetSurfaceWidthHeight(new_surf, &surf_h, &surf_w);
+        s->width  = (int32_t)surf_w;
+        s->height = (int32_t)surf_h;
     }
 
 cleanup:
