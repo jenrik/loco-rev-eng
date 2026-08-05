@@ -24,7 +24,7 @@
  * 2. SessionSnapshot (vtable 0x478268, size 0x390 bytes)
  *    A serialized snapshot of a player slot, used for network
  *    transmission. Contains the same logical data in a different
- *    field layout. Created by GetPlayerData, consumed by DestroyPlayer.
+ *    field layout. Created by GetPlayerData, consumed by InitPlayerFromSession.
  *
  * === Vtable 0x478264 (DPlayManager / Player Slot) ===
  *   [0] +0x00: scalar deleting destructor (DPLAY_CleanupPlayer, 0x442A00)
@@ -80,10 +80,10 @@ public:
     /* +0x0C: Player config ID — parsed from PlayerConfig_SaveToFile string */
     int32_t     m_configId;
 
-    /* +0x10 (21 bytes): Session data block 1 — overwritten via DestroyPlayer */
+    /* +0x10 (21 bytes): Session data block 1 — overwritten via InitPlayerFromSession */
     uint8_t     m_sessionBlk1[21];
 
-    /* +0x25 (20 bytes): Session data block 2 — overwritten via DestroyPlayer */
+    /* +0x25 (20 bytes): Session data block 2 — overwritten via InitPlayerFromSession */
     uint8_t     m_sessionBlk2[20];
 
     /* +0x39: Flag byte — from session */
@@ -138,7 +138,7 @@ public:
     void CreatePlayer();
 
     /**
-     * DestroyPlayer — Deserialize a session snapshot into this slot.
+     * InitPlayerFromSession — Deserialize a session snapshot into this slot.
      * Address: 0x4428E0
      *
      * Reads a DPLAY_SessionData and fills in the DPlayManager fields.
@@ -149,10 +149,10 @@ public:
      * @param session  Source session snapshot to deserialize
      * @return         Pointer to this (the populated player slot)
      */
-    DPlayManager* DestroyPlayer(const DPLAY_SessionData* session);
+    DPlayManager* InitPlayerFromSession(const DPLAY_SessionData* session);
 #ifndef _WIN32
     /** Host wire adapter for one original 0x390-byte DPLAY_SessionData.
-     *  Layout evidence: DPlayManager::DestroyPlayer, address 0x4428E0. */
+     *  Layout evidence: DPlayManager::InitPlayerFromSession, address 0x4428E0. */
     bool LoadLegacySessionWire(const uint8_t* session, size_t size);
 #endif
 
@@ -360,7 +360,7 @@ public:
      * Address: 0x442FA0
      *
      * Allocates a new DPLAY_PlayerSlot (0x39C bytes via operator_new),
-     * calls DestroyPlayer to populate it from the session snapshot, and
+     * calls InitPlayerFromSession to populate it from the session snapshot, and
      * returns the new slot. Returns NULL on allocation failure.
      *
      * Uses SEH (__try/__except) for allocation failure recovery.

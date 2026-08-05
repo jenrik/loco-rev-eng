@@ -162,7 +162,8 @@ void CopyPlayerSlotText(char* destination, std::size_t capacity,
  *  Address: 0x4426D0 */
 void DPLAY_CopyPlayerData(void* destination, const void* compact_packet)
 {
-    if (destination == nullptr || compact_packet == nullptr) return;
+    /* Binary dereferences destination and compact_packet immediately
+     * with no null guard. Callers guarantee non-null pointers. */
     auto* slot = static_cast<PlayerSlot*>(destination);
     const auto* packet = static_cast<const uint8_t*>(compact_packet);
     std::memcpy(&slot->dpId, packet, sizeof(slot->dpId));
@@ -181,7 +182,8 @@ void DPLAY_CopyPlayerData(void* destination, const void* compact_packet)
  *  Address: 0x442750 */
 void DPLAY_InitPlayerSlot(void* destination, const void* source)
 {
-    if (destination == nullptr || source == nullptr) return;
+    /* Binary dereferences both pointers immediately with no null guard.
+     * Callers guarantee non-null arguments. */
     auto* output = static_cast<PlayerSlot*>(destination);
     const auto* input = static_cast<const PlayerSlot*>(source);
     output->dpId = input->dpId;
@@ -202,7 +204,8 @@ void* DPLAY_DecodePlayerSlots(const void* first_compact_slot)
     if (first_compact_slot == nullptr) return nullptr;
     auto* slots = static_cast<PlayerSlot*>(operator_new(sizeof(PlayerSlot) * 9));
     if (slots == nullptr) return nullptr;
-    std::memset(slots, 0, sizeof(PlayerSlot) * 9);
+    /* Binary does not memset the slot array. XOR AL,AL at 0x4427EA
+     * supplies zero for SCASB string-scan, not a buffer clear. */
     const auto* compact = static_cast<const uint8_t*>(first_compact_slot);
     for (int32_t index = 0; index < 9; ++index)
         DPLAY_CopyPlayerData(&slots[index], compact + index * 0x3C);

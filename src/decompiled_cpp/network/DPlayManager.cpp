@@ -91,7 +91,7 @@ extern void* g_primary_surface;  /* 0x4FD3C4 — primary DDraw surface  */
  * Not a member of DPlayManager; called by GetPlayerData.
  * Address: 0x442EC0                                                  */
 /* ================================================================== */
-static void DestroySessionInternal(DPLAY_SessionData* session, const DPlayManager* slot)
+static void InitSessionDataSnapshot(DPLAY_SessionData* session, const DPlayManager* slot)
 {
     session->data_blk1[0] = 0;
     session->data_blk1[20] = 0;
@@ -282,11 +282,11 @@ void DPlayManager::CreatePlayer()
 }
 
 /* ================================================================== */
-/* DestroyPlayer — 0x4428E0                                           */
+/* InitPlayerFromSession — 0x4428E0                                           */
 /*                                                                     */
 /* Called by: DPLAY_EnumerateSessions (0x442FD9)                      */
 /* ================================================================== */
-DPlayManager* DPlayManager::DestroyPlayer(const DPLAY_SessionData* session)
+DPlayManager* DPlayManager::InitPlayerFromSession(const DPLAY_SessionData* session)
 {
     int32_t i;
     int32_t entry_count;
@@ -324,7 +324,7 @@ DPlayManager* DPlayManager::DestroyPlayer(const DPLAY_SessionData* session)
 }
 
 #ifndef _WIN32
-/** Host wire adapter corresponding to DPlayManager::DestroyPlayer (0x4428E0).
+/** Host wire adapter corresponding to DPlayManager::InitPlayerFromSession (0x4428E0).
  * Native vptr width makes reinterpret_cast<DPLAY_SessionData*> invalid. */
 bool DPlayManager::LoadLegacySessionWire(const uint8_t* session, size_t size)
 {
@@ -475,7 +475,7 @@ void* DPlayManager::GetPlayerData()
     void* storage = operator_new(sizeof(DPLAY_SessionData));
     if (storage != nullptr) {
         session = ::new (storage) DPLAY_SessionData;
-        DestroySessionInternal(session, this);
+        InitSessionDataSnapshot(session, this);
         result = session;
     } else {
         result = nullptr;
@@ -823,7 +823,7 @@ DPlayManager* __fastcall DPlayManager::EnumerateSessions(
     void* new_slot = operator_new(sizeof(DPlayManager));
     if (new_slot != nullptr) {
         DPlayManager* slot = ::new (new_slot) DPlayManager;
-        return slot->DestroyPlayer(session);
+        return slot->InitPlayerFromSession(session);
     }
     return nullptr;
 }
