@@ -115,7 +115,7 @@ override CXXFLAGS := $(CFLAGS) $(WARNFLAGS) -pthread $(INCLUDES) $(FORCE_INC) $(
 # Source discovery
 DCP_CPP_ALL := $(filter-out $(DCP_DIR)/stubs/%, $(filter-out $(DCP_DIR)/native/%, $(wildcard $(DCP_DIR)/*/*.cpp $(DCP_DIR)/*/*/*.cpp)))
 
-BROKEN_SRCS :=
+BROKEN_SRCS := $(DCP_DIR)/ui/PostcardAlbum.cpp  # duplicate of graphics/LOCOBITMAP.cpp (PROV-003-002) $(DCP_DIR)/ui/PostcardAlbum.cpp  # duplicate of graphics/LOCOBITMAP.cpp (PROV-003-002)
 
 DCP_CPP_SRCS := $(filter-out $(BROKEN_SRCS), $(DCP_CPP_ALL))
 
