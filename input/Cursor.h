@@ -92,13 +92,29 @@ class ButtonSprite;   /* ui/ButtonSprite.h — UI button sprite, 0x24 bytes */
 class UIPANEL;          /* ui/UIPANEL.h — UI panel surface, 0x20 bytes */
 
 struct CursorEditorRecord {
-    uint8_t  _pad_00[0x3A];            // +0x00
+    uint8_t  _pad_00[0x10];             // +0x00
+    /* Selected locomotive-list entry name, copied from Cursor::player_names[]
+     * by handle_locomotive_list_click() (0x41A650). Exact width beyond the
+     * copied bytes is unconfirmed; +0x24 is the next known field so this is
+     * an upper bound, not a verified string-buffer size. */
+    char     name[0x14];                // +0x10
+    /* Byte flag set by handle_locomotive_list_click(): 0 if the selected
+     * list index is < Cursor::player_count (+0x6F4), 1 otherwise. Exact
+     * semantic meaning beyond that observed write is not evidenced. */
+    uint8_t  field_24;                   // +0x24
+    uint8_t  _pad_25[0x15];              // +0x25
     int16_t  upload_id;                 // +0x3A  active custom-content upload
     int32_t  is_audio_preview;          // +0x3C  preview content type flag
     uint8_t  color_r;                   // +0x40
     uint8_t  color_g;                   // +0x41
     uint8_t  color_b;                   // +0x42
+    uint8_t  _pad_43[0x50];              // +0x43
+    /* Bonus prize ID, written by handle_locomotive_select() (0x41A360) as
+     * Cursor::bonus_ids[index] (+0x370) + 1. */
+    uint8_t  bonus_prize_id;             // +0x93
 };
+static_assert(sizeof(CursorEditorRecord) == 0x94,
+              "CursorEditorRecord layout must match observed field offsets");
 
 /* ================================================================== */
 /* Cursor class                                                        */
@@ -805,6 +821,71 @@ public:
      * Called by: Cursor::draw_network_status()
      */
     void handle_tab_change();
+
+    /**
+     * Show the custom-content file-open dialog (editor state 9).
+     * Address: 0x41A050 (Ghidra label "INPUT_ShowFileDialog").
+     *
+     * No-op if already in state 9 (editor_state, +0xEC). Starts a 200ms
+     * timer (+0x18C) if not already running, sets selected_idx_384 (+0x384)
+     * to -1, sets editor_state to 9, highlights sprite_2E0, dispatches
+     * set_mode through the base vtable slot [3] with (childCount2,
+     * childObj2) — the same base-overlay fields Cursor's other set_mode
+     * dispatches use — clears sprite_height (+0x40), sets sprite_width_hi
+     * (+0x3D), and repaints.
+     */
+    void show_file_dialog();
+
+    /**
+     * Handle a locomotive-list selection.
+     * Address: 0x41A360 (Ghidra label "INPUT_HandleLocomotiveSelect").
+     *
+     * ui_active (+0x188) selects one of two behaviors:
+     *   - Non-zero (network mode): if in state 9, cancels the file-dialog
+     *     timer and resets to state 1; then unconditionally sets state 2,
+     *     records the selection in selected_idx_384 (+0x384), and dispatches
+     *     set_render_surface (base vtable slot [4]) on the corresponding
+     *     toolbar_sprites[] entry with an origin derived from its
+     *     y/width fields.
+     *   - Zero (editor mode): writes bonus_ids[index] (+0x370) + 1 into
+     *     the player record's (obj_184, +0x184) bonus_prize_id (+0x93),
+     *     then blits the edit preview.
+     *
+     * @param index  Selected locomotive index (also a bonus_ids[] index
+     *               in the editor-mode branch — bytes 0-255, no bounds
+     *               check against the 12-byte bonus_ids array; preserved
+     *               faithfully as a possible original out-of-bounds read).
+     */
+    void handle_locomotive_select(uint32_t index);
+
+    /**
+     * Hit-test the 6 toolbar tab sprites and handle a tab change.
+     * Address: 0x41A460 (Ghidra label "INPUT_HandleToolbarHover").
+     *
+     * Hit-tests sprite_308.._31C (+0x308..+0x31C) against (x, y), updating
+     * editor_flags[1] (+0x2B1, active tab 1-6) on a match. If the active
+     * tab changed: releases all 64 toolbar_sprites, cancels the active
+     * timer, resets editor_state to 1, dispatches set_mode through the
+     * base vtable, then calls handle_tab_change(), draw_postcard_preview(1),
+     * and draw_locomotive_preview(1).
+     */
+    void handle_toolbar_hover(LONG x, LONG y);
+
+    /**
+     * Handle a click in the network-player scroll list.
+     * Address: 0x41A650 (Ghidra label "INPUT_HandleLocomotiveListClick").
+     *
+     * Hit-tests the up/down scroll buttons (sprite_148/sprite_14C) and the
+     * list body (scroll_border_rect, +0x150). On a body click: computes
+     * the clicked row index from scroll_line_height/scroll_top_idx, reads
+     * the row's player_names[] entry (+0x59E, 13-byte stride), and if
+     * non-empty records the index in toolbar_sentinel (+0x6F0), sets the
+     * player record's (obj_184, +0x184) field_24 flag depending on whether
+     * the index is below player_count (+0x6F4), copies the name into the
+     * record's name buffer, dispatches set_mode with (editor_surface,
+     * editor_resdata), sets editor_state to 6, and blits the edit preview.
+     */
+    void handle_locomotive_list_click(LONG x, LONG y);
 
     /**
      * Toolbar edit control window procedure (subclassed).

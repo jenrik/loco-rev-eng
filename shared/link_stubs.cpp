@@ -32,6 +32,20 @@ typedef const char*LPCSTR;typedef char*LPSTR;
 /* Kernel32 */
 void Sleep(DWORD){}HANDLE GetProcessHeap(void){return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));}
 int32_t HeapFree(HANDLE,DWORD,void*){return 1;}int32_t CloseHandle(HANDLE){return 1;}
+/* WaitForSingleObject/ResumeThread: host substitutes for
+ * network/WIN32Thread.cpp's WIN32_WaitForThread/WIN32_CloseThreadHandle,
+ * which declare these extern "C" (like CloseHandle above) so they must be
+ * defined extern "C" too, not with default C++ (mangled) linkage. The SDL
+ * host never creates a real OS thread for the network worker
+ * (WIN32_QueueAsyncTask's host path is the single-threaded pump in
+ * core/HostMode3Bootstrap.cpp), so these are only ever called with a null
+ * handle in practice; provided so the assembly-faithful bodies of those
+ * two functions still link and, if ever reached, behave sanely:
+ * WaitForSingleObject reports "signaled" (never WAIT_TIMEOUT), so a real
+ * handle would not be treated as still-running; ResumeThread reports
+ * success. */
+DWORD WaitForSingleObject(HANDLE,DWORD){return 0;}
+DWORD ResumeThread(HANDLE){return 0;}
 HINSTANCE GetModuleHandleA(LPCSTR){return reinterpret_cast<HINSTANCE>(static_cast<uintptr_t>(1));}DWORD GetLastError(void){return 0;}
 DWORD FormatMessageA(DWORD,void*,DWORD,DWORD,char*,DWORD,void*){return 0;}
 void*LocalFree(void*){return nullptr;}DWORD GetSystemDefaultLCID(void){return 0x0409;}
@@ -155,7 +169,15 @@ void*CRT_localtime(unsigned int*){static int32_t t=0;return&t;}
 int32_t CRT_exit(const char**,const char**){exit(0);return 0;}int32_t CRT_mkdir(const char*){return 0;}
 void CRT_memset_pattern(void*,int32_t,int32_t,void*,void*){}
 void CRT_free_pattern(void*,int32_t,int32_t,void*){}
-void CRT_0x470650(void){}void CRT_strncpy(void*,void*,int32_t){}
+void CRT_0x470650(void){}
+/* CRT_strncpy (0x466EA0) was a no-op stub, but the address is not really
+ * strncpy: decompilation shows an overlap-aware memmove (no NUL check, no
+ * NUL padding) — renamed to CRT_memmove in the Ghidra DB. Kept under the
+ * original (misleading) symbol name here because ui/UI_ScrollBar.cpp
+ * already links against it; implemented for real via memmove so both that
+ * caller and any future one get correct behavior instead of silent no-op
+ * data loss. */
+void CRT_strncpy(void*dst,void*src,int32_t n){if(dst&&src&&n>0)memmove(dst,src,static_cast<size_t>(n));}
 void _strncpy(char*d,const char*s,size_t n){if(d&&s)strncpy(d,s,n);}
 void InitializeCriticalSection(void*){}void EnterCriticalSection(void*){}
 void LeaveCriticalSection(void*){}void DeleteCriticalSection(void*){}
@@ -183,22 +205,52 @@ void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t){}
 void RESMGR_SelectScreensaver(char*){}
 void ResourceManager_GetStringById(void*,uint32_t){}
 void Train_QueueMessage(void*,void*){}
-void Train_ConnectToServer(void*,void*){}
 void Train_HandleTrackBuild(void*,void*,int32_t){}
-void Train_RemoveAllTracks(void*,int32_t){}
 void Train_SendPlayerInfo(void*,int32_t){}
 void Train_StartMultiplayer(void*,int32_t){}
 void Train_StopMultiplayer(void*,void*){}
 void TrackPiece_SetZoom(void*,int16_t){}
 void WIN32_FatalError(const char*){fprintf(stderr,"FATAL\n");exit(1);}
-void WIN32_GetSystemMetrics(void*,int32_t*){}
 void*WIN32_GetThreadResult(void*){return nullptr;}
-void WIN32_PeekMessageLoop(void*,int32_t){}
-void WIN32_PostQuit(void){}
-void WIN32_QueueAsyncTask(void*,void*,uint32_t){}
-void WIN32_RecvNetworkData(void*,uint32_t,const char*){}
+/* WIN32_QueueAsyncTask: real implementation now in
+ * network/WIN32Thread.cpp (host path: core/HostMode3Bootstrap.cpp). */
 void WIN32_Sleep(uint32_t){}
-void WIN32_SendNetworkData(void*,void*,uint32_t){}
+/* WIN32_PeekMessageLoop (0x460F10) / WIN32_SendNetworkData (0x460FD0):
+ * these extern "C" names (see game/Train_network.cpp's declarations,
+ * both __thiscall/unmangled) are DISTINCT linker symbols from the
+ * similarly-named C++-mangled overloads network/DirectPlay.cpp declares
+ * for its own internal use (WIN32_RecvNetworkData/WIN32_GetSystemMetrics,
+ * stubbed in shared/defsym_stubs.cpp) — DirectPlay.cpp never defines a
+ * body for either of these two, and its forward declarations are unused
+ * within that file. A prior pass removed the no-op stubs that used to
+ * satisfy these two names under the false belief that DirectPlay.cpp's
+ * (differently-linked) declarations already provided real bodies; with
+ * -Wl,--unresolved-symbols=ignore-all (LINK-001) that turned a
+ * link-time gap into a runtime null-pointer call the first time
+ * TrainSubsystem::DownloadMissingAssets tried to send a missing-asset
+ * request (confirmed via `segfault at 0 ip 0000000000000000`). Neither
+ * is implemented; both are proven reachable from ordinary multiplayer
+ * hosting, so — per CLAUDE.md's stub policy — this warns once instead
+ * of a bare assert(0), which would abort the process on the same path.
+ * TODO: decompile 0x460F10 / 0x460FD0 for real SDL_net-backed bodies. */
+void* WIN32_PeekMessageLoop(void*) {
+    static bool warned = false;
+    if (!warned) {
+        fprintf(stderr, "STUB: WIN32_PeekMessageLoop not implemented "
+                         "(TODO: decompile 0x460F10) — no message polled\n");
+        warned = true;
+    }
+    return nullptr;
+}
+int WIN32_SendNetworkData(void*, int, void*, int, int) {
+    static bool warned = false;
+    if (!warned) {
+        fprintf(stderr, "STUB: WIN32_SendNetworkData not implemented "
+                         "(TODO: decompile 0x460FD0) — network send dropped\n");
+        warned = true;
+    }
+    return 0;
+}
 void WIN32_StreamOpenPath(void*,const char*,int32_t,int32_t){}
 void WIN32_StreamDestroy(void*){}
 void WIN32_StreamDestroyImmediate(void*){}
@@ -238,13 +290,8 @@ void GAMESTATE_UpdateVehiclePlacement(void*,int32_t,void*){}
 void Cursor_CleanupEditorSprites(void*,int32_t){}
 void Cursor_InitEditorSprites(void*,int32_t,void*){}
 void Cursor_InitNetworkPlayer(void*,int32_t){}
-void UI_CalcDialogCoords(void*,void*,int32_t){}
-void UI_ChildWindow_Dtor(void*){}
-void UI_ChildWindow_Render(void*,void*){}
 void UI_CreateFullWindow(void*,int32_t,void*,int32_t,int32_t,int32_t,int32_t,void*,void*,uint32_t){}
 void UI_CreateTooltip(void*,int32_t,int16_t,int32_t,int32_t){}
-void UI_OnMouseLeave(void*,int32_t){}
-void UI_PaintWindow(void*,void*,void*){}
 void UIPANEL_CreateSurface__UIPANEL_Surface(UIPANEL_Surface*){}
 void UIPANEL_EndPaint(void*){}
 int32_t UIPANEL_UnlockSurface(void*,uint32_t){return 0;}
@@ -368,9 +415,9 @@ void UIPANEL_Blit(void*,uint32_t,uint32_t,int32_t,uint32_t,void*,uint32_t,uint32
 void UIPANEL_EndPaintEx(void*,int32_t,int32_t,uint8_t,void*){}        /* _Z18UIPANEL_EndPaintExPviihS_ */
 void UIPANEL_EndPaintEx(void*,void*,void*,uint8_t,void*){}            /* _Z18UIPANEL_EndPaintExPvS_S_hS_ */
 
-/* UI_CreateChildWindow — C++ overloads */
-void UI_CreateChildWindow(void*,int32_t,int32_t){}     /* _Z20UI_CreateChildWindowPvii */
-void UI_CreateChildWindow(void*,uint32_t,int32_t){}    /* _Z20UI_CreateChildWindowPvji */
+/* UI_CreateChildWindow — real implementation now in ui/UI_ChildWindow.cpp
+ * (0x424AF0, extern "C"). The C++-mangled overloads that used to shadow
+ * it here are gone; all callers now include ui/UI_ChildWindow.h. */
 
 /* UI_CreateMessageBox — C++ overloads */
 void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,int32_t){return nullptr;} /* _Z19UI_CreateMessageBoxPviiciii */

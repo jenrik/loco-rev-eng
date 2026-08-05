@@ -30,6 +30,7 @@
 #include "../network/DPlayManager.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
+#include "../ui/UI_ChildWindow.h"
 #ifndef _WIN32
 #include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
 #endif
@@ -53,7 +54,6 @@ extern "C" {
     void   Sprite_Destroy(void* sprite);                             /* 0x454BC0 */
     void   Sprite_Init(void* sprite);                                /* 0x454BF0 */
     void   Sprite_SetState(void* sprite, int state, int* unk);      /* 0x454C30 */
-    char   UI_IsBitmapReady(int res);                                /* 0x4255F0 */
 
     /* GameObject */
     void   GameObject_GetRelPos(void* obj, int* out, int x, int y);  /* 0x436A40 */

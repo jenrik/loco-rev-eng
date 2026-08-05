@@ -794,3 +794,65 @@ LRESULT UI_WindowBase::on_activate_app(HWND hWnd, UINT msg, WPARAM wParam, LPARA
     DefWindowProcA(hWnd, msg, wParam, lParam);
     return 0;
 }
+
+/* ================================================================== */
+/* UI_SetWindowVisible                                                  */
+/* Address: 0x425F20                                                    */
+/*                                                                     */
+/* NOT a UI_WindowBase vtable slot — a free function called directly on */
+/* a UI_WindowBase-derived receiver by ui/EditWindow.cpp (this->show()) */
+/* and ui/HelpWnd.cpp (g_town/g_postcard/g_cursor, all UI_WindowBase    */
+/* subclasses: Town, PostcardAlbum, Cursor). Confirmed by disassembly:  */
+/* the receiver's +0x08 (SetCapture argument) and +0x3C (stored flag)   */
+/* match UI_WindowBase::hWnd and UI_WindowBase::captureFlag exactly.    */
+/*                                                                     */
+/* visible == 0: captures the mouse and hides the OS cursor (the same  */
+/*   capture step UI_WindowBase::show() performs).                     */
+/* visible != 0: releases capture and restores the OS cursor.          */
+/* Either way, re-renders the panel.                                    */
+/*                                                                     */
+/* One canonical `char` overload — see UI_WindowBase.h for why a second */
+/* `unsigned char` overload cannot coexist with it.                     */
+/* ================================================================== */
+namespace {
+void SetWindowVisibleImpl(UI_WindowBase* self, bool visible)
+{
+    self->captureFlag = visible ? 1 : 0;   /* +0x3C */
+
+#ifdef _WIN32
+    if (!visible) {
+        SetCapture(self->hWnd);
+        int cursorVis = ShowCursor(FALSE);
+        while (cursorVis >= 0) {
+            cursorVis = ShowCursor(FALSE);
+        }
+    } else {
+        ReleaseCapture();
+        int cursorVis = ShowCursor(TRUE);
+        while (cursorVis < 0) {
+            cursorVis = ShowCursor(TRUE);
+        }
+    }
+#else
+    // SDL routes input capture and cursor visibility through its own
+    // event queue and window API; there is no Win32 capture/ShowCursor
+    // import to call on the host (see UI_WindowBase::show() above).
+#endif
+
+    DDRAW_UnlockPrimary();
+#ifdef _WIN32
+    UIPANEL_Render(self, 1);
+#else
+    // UIPANEL_Render (0x426EB0) follows the packed x86 UIPANEL layout,
+    // which does not apply to this widened UI_WindowBase object; the SDL
+    // compositor presents the already-composed primary surface instead.
+    SDL3_PresentPrimarySurface();
+#endif
+    DDRAW_UnlockPrimary();
+}
+} // namespace
+
+void UI_SetWindowVisible(void* self, char visible)
+{
+    SetWindowVisibleImpl(static_cast<UI_WindowBase*>(self), visible != 0);
+}

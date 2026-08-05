@@ -228,7 +228,7 @@ host_mode3_bootstrap_test = executable('host_mode3_bootstrap_test',
 test('host-mode3-bootstrap', host_mode3_bootstrap_test)
 
 persistence_objs = [obj_input_mgr, obj_resdata_save, obj_persistence_adapt]
-persistence_cone = [obj_game_object, obj_entity, obj_building_mgr_grp,
+persistence_cone = [obj_track_pos, obj_game_object, obj_entity, obj_building_mgr_grp,
                      obj_resdata_vehicle, obj_game_vehicle, obj_help_page_node, obj_building]
 
 # Canonical InputMgr regression: ctor 0x41D250 / dtor body 0x41D2D0 / embedded

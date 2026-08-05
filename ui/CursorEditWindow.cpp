@@ -13,6 +13,7 @@
 // Status: TRANSCRIBED
 
 #include "CursorEditWindow.h"
+#include "UI_ChildWindow.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -44,12 +45,6 @@ extern "C" {
     /* Asset manager */
     extern int*   __thiscall AssetMgr_LoadFile(void* mgr, const char* path,
                                                 int* outSize);                 /* 0x45CD00 */
-
-    /* ChildWindow base class */
-    extern void   __thiscall UI_CreateChildWindow(void* self, uint32_t resId,
-                                                   int nameParam);              /* 0x424AF0 */
-    extern void   __fastcall UI_ChildWindow_Dtor(void* self);                  /* 0x424BA0 */
-    extern byte   __thiscall UI_ChildWindow_Render(void* self, void* stream);  /* 0x424E00 */
 
 namespace {
 using StreamDestructor = void (__fastcall *)(void*);

@@ -207,11 +207,14 @@ extern uint8_t g_input_events[];
 void INPUT_LoadEvents(void* self, const char* suffix);  /* 0x41F5E0 */
 
 /** Free both event lists (LoadEvents head +0x08 with next at node+0x30,
- *  TimeEvents head +0x0C with next at node+0x44), destroying every
- *  entry (0x41F540/0x41F590) and freeing the node.  Address: 0x41F4E0.
- *  Called by CGWND_Cleanup (0x407AB4).  The legacy "INPUT_Shutdown"
- *  label was a misnomer — this is the event-list teardown, not an
- *  input-system shutdown. */
+ *  TimeEvents head +0x0C with next at node+0x44).  CORRECTION: neither
+ *  0x41F540 nor 0x41F590 frees anything or destroys an entry — each is a
+ *  two-call TrackPos_BaseInit reset (see INPUT_ResetLoadEventNode /
+ *  INPUT_ResetTimeEventNode below, verified by direct decompile). This
+ *  function itself does free each node via GLOBAL_free after resetting
+ *  it. Address: 0x41F4E0. Called by CGWND_Cleanup (0x407AB4). The legacy
+ *  "INPUT_Shutdown" label was a misnomer — this is the event-list
+ *  teardown, not an input-system shutdown. */
 void INPUT_FreeEvents(void* self);                     /* 0x41F4E0 */
 
 /** Load the [EasterEggs] section (0x47E640) from LOCO.INI with "%ld"
@@ -223,12 +226,77 @@ void INPUT_SetKeyboard(void* self);                    /* 0x41F7E0 */
  *  Deferred loud stub in InputMgr.cpp. */
 void INPUT_SetMouse(void* self);                       /* 0x41F970 */
 
-/** Ctor of the 0x630-byte event-list window class (vtable 0x4779E0;
- *  chains to UI_CreateChildWindow 0x424AF0).  Address: 0x41E570.
- *  Used by ResourceManager::AddString (0x446840) for resource types
- *  0/2 odd ids and 12/13.  "INPUT_ExitGame" is a legacy misnomer.
- *  Deferred loud stub in InputMgr.cpp. */
-void* INPUT_ExitGame(void* self, int32_t resId, int32_t strPtr); /* 0x41E570 */
+/** Reset a LoadEvents-list node's two embedded TrackPos sub-objects
+ *  (at node+0x00 and node+0x14) via TrackPos_BaseInit. Ghidra's
+ *  auto-generated name ("INPUT_FreeEditControl") is a misnomer verified
+ *  by direct decompile: the body performs no free() and touches no
+ *  "edit control" — it is a small standalone helper, not a method of
+ *  the 0x4779E0-vtabled class in BuildingDescriptorEditor.h despite the
+ *  similar name. Its only caller is INPUT_FreeEvents's first loop
+ *  (LoadEvents list). Address: 0x41F540. */
+void INPUT_ResetLoadEventNode(void* node);             /* 0x41F540 */
+
+/** Reset a TimeEvents-list node's two embedded TrackPos sub-objects.
+ *  Identical body to INPUT_ResetLoadEventNode aside from its own SEH
+ *  handler table entry; Ghidra's "INPUT_AllocEditControl" name is
+ *  likewise a misnomer (no allocation occurs). Its only caller is
+ *  INPUT_FreeEvents's second loop (TimeEvents list). Address: 0x41F590. */
+void INPUT_ResetTimeEventNode(void* node);             /* 0x41F590 */
+
+/** Load the [TimeEvents] section from LOCO.INI, calling
+ *  INPUT_AddTimeEvent for each entry. Structurally identical to
+ *  INPUT_LoadEvents above (same PlayerConfig_Ctor/Config_GetIniString
+ *  pattern, "%03ld" keys). Ghidra's auto-generated name
+ *  ("INPUT_EditMouseHandler") is a misnomer verified by direct
+ *  decompile — this has nothing to do with mouse input. Address:
+ *  0x41F6E0. */
+void INPUT_LoadTimeEvents(void* self);                 /* 0x41F6E0 */
+
+/** Easter-egg discovery-on-hover: if the resource at `resId` has not
+ *  yet been marked discovered (+0x163), writes a "%ld" entry to the
+ *  [EasterEggs] section of LOCO.INI and marks it discovered. Ghidra's
+ *  auto-generated name ("INPUT_EditScrollHandler") is a misnomer
+ *  verified by direct decompile. Address: 0x41F8E0. */
+uint32_t INPUT_DiscoverEasterEgg(void* self, uint32_t resId); /* 0x41F8E0 */
+
+/** Allocate and prepend a new LoadEvents node parsed from a
+ *  "x y w h seg1 seg2" string, linking it at self+0x08. Called from
+ *  INPUT_LoadEvents for each parsed [LoadEvents] INI entry. Ghidra's
+ *  auto-generated name ("INPUT_EditPaintSelection") is a misnomer
+ *  verified by direct decompile — this performs no painting. Address:
+ *  0x41FB20. */
+void* INPUT_AddLoadEvent(void* self, const char* fields);     /* 0x41FB20 */
+
+/** Allocate and prepend a new scheduled TimeEvents node parsed from an
+ *  8-integer format string, linking it at self+0x0C with a computed
+ *  trigger time. Called from INPUT_LoadTimeEvents for each parsed
+ *  [TimeEvents] INI entry. Ghidra's auto-generated name
+ *  ("INPUT_EditTimerHandler") is a misnomer verified by direct
+ *  decompile. Address: 0x41FBE0. */
+void* INPUT_AddTimeEvent(void* self, const char* fields);     /* 0x41FBE0 */
+
+/** Scan the TimeEvents list at self+0x0C for an entry whose window
+ *  (see Game_IsPositionBetween) contains the current local time and
+ *  whose trigger_time has elapsed; show it via UI_CreateMessageBox and
+ *  reschedule (random/fixed/immediate per its repeat-mode field).
+ *  Ghidra's auto-generated name ("INPUT_EditSetFocus") is a misnomer
+ *  verified by direct decompile. Address: 0x41FF20. */
+uint8_t INPUT_CheckScheduledEvents(void* self);        /* 0x41FF20 */
+
+/** Periodic per-tick dispatcher: at wParam%10==0 (mode 3 only) calls
+ *  INPUT_CheckScheduledEvents and posts per-entity update messages; at
+ *  wParam%20==0 posts per-building/vehicle update messages; at
+ *  wParam%60==0 posts a tick-broadcast message. Receiver evidence is
+ *  thin — the decompile reads only `self+4` as a tick count (passed
+ *  straight through to INPUT_CheckScheduledEvents) and otherwise drives
+ *  the global g_object_count/g_building_list/g_vehicle_list state, not
+ *  any InputMgr/event-list field, so this is NOT asserted to be a
+ *  method of either the InputMgr or 0x4A99B0 event-list object — it
+ *  is documented here only because it shares a receiver pointer with
+ *  INPUT_CheckScheduledEvents. Ghidra's auto-generated name
+ *  ("INPUT_EditCommandHandler") is a misnomer verified by direct
+ *  decompile. Address: 0x41FD00. */
+int32_t INPUT_PeriodicTickDispatch(void* self);        /* 0x41FD00 */
 
 /** Per-frame entity tick. Address: 0x41DD40.  Iterates the embedded
  *  collection and calls Entity::Update (vtable[10], 0x405C40) on each

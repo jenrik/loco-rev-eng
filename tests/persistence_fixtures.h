@@ -95,6 +95,14 @@ int32_t  DAT_004a98b4 = 0;                /* 0x4A98B4 */
 int32_t  DAT_004a98b8[4] = {0, 0, 0, 0};  /* 0x4A98B8 */
 double   _DAT_00481170 = 0.0;             /* 0x481170 — FPS threshold (GameObject.cpp) */
 
+/* g_trackSegmentOffsets (0x47E410) — 12-entry circular-track segment
+ * offset table, read only by TrackPos_IsObjectBetween (game/TrackPos.cpp).
+ * This test cone links the real TrackPos.o for TrackPos_Init/BaseInit
+ * (needed by input/InputMgr.cpp's INPUT_ResetLoadEventNode/
+ * INPUT_ResetTimeEventNode); IsObjectBetween itself is unreachable from
+ * anything this test exercises, so a zeroed fixture is sufficient. */
+uint16_t g_trackSegmentOffsets[12] = {0};
+
 /* g_resmgr — the canonical static object (0x4855E8); never initialized
  * in these tests.  GetById below returns nullptr (a fresh manager), so
  * INPUT_FindObjectAt's default mode (0x41E498) resolves its +0x158 pick

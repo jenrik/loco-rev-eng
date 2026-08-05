@@ -213,6 +213,7 @@ else
   obj_help_page_node    = lego_loco.extract_objects('ui/HelpPageNode.cpp')
   obj_building          = lego_loco.extract_objects('game/Building.cpp')
   obj_input_mgr         = lego_loco.extract_objects('input/InputMgr.cpp')
+  obj_track_pos         = lego_loco.extract_objects('game/TrackPos.cpp')
   obj_resdata_save      = lego_loco.extract_objects('resources/ResDataSave.cpp')
   obj_persistence_adapt = lego_loco.extract_objects('input/PersistenceAdapter.cpp')
   obj_postbag_cleanup   = lego_loco.extract_objects('network/PostBagCleanup.cpp')

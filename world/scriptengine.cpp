@@ -25,6 +25,7 @@
 #include "scriptengine.h"
 #include "../resources/ResourceManager.h"  /* for PlaySoundAt, etc. */
 #include "../core/Entity.h"                /* embedded resource-backed entity fields */
+#include "../ui/UI_ChildWindow.h"
 
 /* ================================================================== */
 /* External CRT / Windows helpers                                      */
@@ -51,7 +52,6 @@ extern "C" {
     char __thiscall RESDATA_HitTestChildren(void* obj, int32_t x, int32_t y); /* @ 0x44E6C0 */
     void __thiscall RESDATA_CreateChildSprite(void* obj, int32_t resId, int32_t param3, int32_t param4); /* @ 0x44E530 */
     int32_t __thiscall ResourceManager_GetById(void* resmgr, int32_t resId); /* @ 0x446EA0 */
-    int32_t __thiscall UI_IsBitmapReady(int32_t resPtr);  /* @ 0x4249D0 */
     void* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int32_t param, int32_t x, int32_t y); /* @ 0x428DA0 */
     void* __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x428E40 */
     int32_t __thiscall CGWND_TrackPiece_SetZoom(void* obj, int32_t zoom); /* @ 0x40DD90 */
@@ -62,7 +62,6 @@ extern "C" {
     void __fastcall INPUT_ExitGame(void* obj, uint32_t resId, int32_t strPtr); /* @ 0x41E570 */
     void __thiscall INPUT_CreateEditControl(void* obj);   /* @ 0x41ED80 */
     uint8_t __fastcall INPUT_EditWndProc(void* obj, void* stream); /* @ 0x41EE50 */
-    uint8_t __thiscall UI_ChildWindow_Render(void* obj, void* stream); /* @ 0x4244D0 */
     uint8_t __thiscall CGWND_TrackPiece_UpdateAnim(void* obj);  /* @ 0x40D2F0 */
 
     /* Globals */

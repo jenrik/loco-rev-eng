@@ -17,6 +17,7 @@
 #include "../graphics/LOCOBITMAP.h"
 #include "resource_manager_sdl3.h"
 #include "sdl3_ddraw.h"
+#include "../network/WIN32Thread.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
 #include <cstdint>
@@ -121,7 +122,8 @@ void  __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 void  __fastcall NETMAN_CreateSession(void* panelA);            /* 0x43C8C0 */
 void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
 void  __thiscall NETMAN_SendPacket(void* netman);               /* 0x43CDF0 */
-void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x466EA0 */
+void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x4616C0 */
+/* (was previously mis-annotated 0x466EA0, which is CRT_strncpy — unrelated) */
 void  __fastcall CGWND_SetMode(void* mode);                     /* 0x408130 */
 #ifndef _WIN32
 // The host calls the reconstructed C++ implementation, not the legacy
@@ -135,7 +137,9 @@ void  __thiscall TileMap_Init(void** tilemap, byte flag);           /* 0x458380 
 int   __thiscall ResourceManager_GetStringById(void** mgr, int id); /* 0x460AA0 */
 void  __thiscall RESMGR_ReleaseSoundResource(int res);              /* 0x44BB90 */
 void  __thiscall RESMGR_LoadSoundResource(int res);                 /* 0x44B8E0 */
-void  __fastcall UI_SetWindowVisible(void* self, byte visible);    /* 0x425F20 */
+/* UI_SetWindowVisible (0x425F20) now declared in ui/UI_WindowBase.h,
+ * included transitively via EditWindow.h (EditWindow : public
+ * UI_WindowBase). */
 void  __stdcall RESDATA_FreeWindow(PopupWindow* window);           /* 0x460B70 */
 
 void    __fastcall Town_BlitElement(void* src, int sx, int sy,
@@ -841,11 +845,9 @@ void EditWindow::netPanelInit()
     return;
 #endif
 
-    /* Create network thread (0x41C bytes) */
-    typedef void* (__thiscall* WIN32CreateThread)(void* buf);
-    extern WIN32CreateThread WIN32_CreateThread;    /* 0x466DC0 */
-
-    void* threadBuf = operator_new(0x41C);
+    /* Create network thread — see network/WIN32Thread.h for
+     * WIN32_CreateThread/WIN32_QueueAsyncTask (0x461610/0x461790). */
+    void* threadBuf = operator_new(sizeof(WIN32Thread));
     if (threadBuf != NULL) {
         _g_network_thread = WIN32_CreateThread(threadBuf);
     } else {
@@ -853,7 +855,6 @@ void EditWindow::netPanelInit()
     }
 
     /* Queue async task: Train_ProcessMessages */
-    extern int __stdcall WIN32_QueueAsyncTask(void* thread, void* func, void* param);
     extern void Train_ProcessMessages(void* train);    /* 0x439240 */
 
     int result = WIN32_QueueAsyncTask(

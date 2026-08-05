@@ -59,7 +59,6 @@ void RESMGR_ReleaseSoundResource() { /* host no-op */ }
 void Sprite_Init() { /* host no-op */ }
 void Sprite_SetState() { /* host no-op */ }
 void TileMap_InvalidateRect() { /* host no-op */ }
-void UI_CreateChildWindow() { /* host no-op */ }
 void UIEntity_Ctor() { /* host no-op */ }
 void UI_MainMenu_SetState() { /* host no-op */ }
 void UIPANEL_BeginPaint() { /* host no-op */ }
@@ -73,6 +72,11 @@ void WIN32_StreamOpen() { /* host no-op */ }
 void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t) { return nullptr; }
 void WNDPROC_EnterCriticalSection() { /* host no-op — single-threaded */ }
 void WNDPROC_LeaveCriticalSection() { /* host no-op — single-threaded */ }
+/* Same family, used by resources/WndProcStreamBuf.cpp's constructor/
+ * destructor (originally thin IAT forwarders to Win32 Initialize/
+ * DeleteCriticalSection at 0x464D70/0x464D80). */
+void WNDPROC_InitializeCriticalSection() { /* host no-op — single-threaded */ }
+void WNDPROC_DeleteCriticalSection() { /* host no-op — single-threaded */ }
 void* WNDPROC_StreamFromMemory(void*, const char*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void RESDATA_DtorBase() { /* host no-op */ }
 void ScriptEngine_Init() { /* host no-op */ }
@@ -150,7 +154,6 @@ void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
 void NETMAN_SendAck(void*) { /* host no-op */ }
 void UI_CreateTooltip(void*, int, short, int, int) { /* host no-op */ }
 void UIPANEL_LockSurface(void*) { /* host no-op */ }
-void UI_IsBitmapReady(void*) { /* host no-op */ }
 void RESDATA_CreateChildSprite(void*, void*, int, int) { /* host no-op */ }
 void UI_DefWndProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
 void Cursor_HandleWindowPaint(void*, int) { /* host no-op */ }
@@ -180,14 +183,66 @@ void GameWindow_BaseDtor(void*) { /* host no-op */ }
 void CGWND_SetFullscreenMode(char) { /* host no-op */ }
 void GameWindow_SetPosition(void*, int, int) { /* host no-op */ }
 void GameWindow_Show(void*) { /* host no-op */ }
-void UI_SetWindowVisible(void*, char) { /* host no-op */ }
 void GameWindow_Hide(void*) { /* host no-op */ }
 void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
 void TileMap_Init(void**, unsigned char) { /* host no-op */ }
 void* TrainSubsystem_Ctor = nullptr;
-void* WIN32_CreateThread = nullptr;
+/* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
+ * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
+ * core/HostMode3Bootstrap.cpp's pending-async-task pump). */
 void Train_ProcessMessages(void*) { /* host no-op */ }
-void WIN32_QueueAsyncTask(void*, void*, void*) { /* host no-op */ }
+/* WIN32_GetSystemMetrics(void*) / WIN32_RecvNetworkData(void*,uint32_t,
+ * const char*) — C++-mangled overloads network/DirectPlay.cpp declares
+ * (deliberately outside its extern "C" block) for its own join/host-
+ * enumeration and DirectPlay-error-reporting paths. Neither has a body
+ * anywhere: a prior pass removed the no-op stubs that used to satisfy
+ * them, under the false belief DirectPlay.cpp itself now defines them
+ * (it only forward-declares). With -Wl,--unresolved-symbols=ignore-all
+ * (LINK-001) that silently turns a link gap into a null-pointer call the
+ * first time either path is exercised (see WIN32_SendNetworkData's
+ * matching note in shared/link_stubs.cpp for the confirmed crash shape).
+ * Both are reachable from ordinary DirectPlay join/host attempts, so this
+ * warns once rather than a bare assert(0).
+ * TODO: decompile 0x460360 (GetSystemMetrics) / 0x460EA0
+ * (RecvNetworkData) for real DirectPlay-backed bodies. */
+uint32_t WIN32_GetSystemMetrics(void*) {
+    static bool warned = false;
+    if (!warned) {
+        fprintf(stderr, "STUB: WIN32_GetSystemMetrics not implemented "
+                         "(TODO: decompile 0x460360)\n");
+        warned = true;
+    }
+    return 0;
+}
+uint32_t WIN32_RecvNetworkData(void*, uint32_t, const char*) {
+    static bool warned = false;
+    if (!warned) {
+        fprintf(stderr, "STUB: WIN32_RecvNetworkData not implemented "
+                         "(TODO: decompile 0x460EA0)\n");
+        warned = true;
+    }
+    return 0;
+}
+/* WIN32_PostQuit() (C++-mangled, no args) — every real caller
+ * (ui/HelpWnd.cpp, game/BuildingPanel.cpp, input/Cursor_new_impls.cpp)
+ * declares this exact overload to break the Win32 message loop on
+ * close/SC_CLOSE/screensaver-mode-switch. A prior pass removed the no-op
+ * stub here believing core/CGWND.cpp already defines it; it does not.
+ * Reachable from ordinary UI actions (closing the Help window, cursor
+ * WM_SYSCOMMAND SC_CLOSE), so this warns once and no-ops rather than
+ * asserting — the host's main loop (CGWND_PumpMessages) has no Win32
+ * message queue to post a WM_QUIT into regardless.
+ * TODO: give this a real host-side quit signal once CGWND_PumpMessages'
+ * exit path is wired for it; address unresolved (no xref target found
+ * shared by all three call sites at removal time). */
+void WIN32_PostQuit() {
+    static bool warned = false;
+    if (!warned) {
+        fprintf(stderr, "STUB: WIN32_PostQuit not implemented — "
+                         "quit-message post dropped\n");
+        warned = true;
+    }
+}
 void EditWindow_render(void*) { /* host no-op */ }
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
 void CRT_exit(char const**, char const**) { /* host no-op */ }
@@ -208,16 +263,13 @@ void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
 void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
-void UI_SetWindowVisible(void*, unsigned char) { /* host no-op */ }
 void NETMAN_CreateSession(void*) { /* host no-op */ }
 void UI_WindowBase_Show(void*) { /* host no-op */ }
 void* BringWindowToTop = nullptr;
 void TrackPiece_Dtor(void*) { /* host no-op */ }
 void __ftol(double) { /* host no-op */ }
-void UI_ChildWindow_Dtor(void*) { /* host no-op */ }
 void WIN32_StreamDestroy(void*) { /* host no-op */ }
 void WNDPROC_StreamCleanup(void*) { /* host no-op */ }
-void UI_ChildWindow_Render(void*, void*) { /* host no-op */ }
 void WIN32_StreamDestroyImmediate(void*) { /* host no-op */ }
 void TileMap_SetViewport(void*, void*) { /* host no-op */ }
 void TileMap_GetTileAt(void*, void*) { /* host no-op */ }
@@ -231,7 +283,6 @@ void* DPLAY_SetPlayerName = nullptr;
 void UIPANEL_CopySurface(void*, int) { /* host no-op */ }
 void NET_ComputeColor(unsigned char, unsigned char, unsigned char) { /* host no-op */ }
 void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
-void NET_GetHostName(int, int) { /* host no-op */ }
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
 void TileMap_GetTileRect(void*, void*) { /* host no-op */ }
 void SetRect(void*, int, int, int, int) { /* host no-op */ }
@@ -259,8 +310,13 @@ void CRT_memset_pattern(void*, int, int, void*, void*) { /* host no-op */ }
 void CRT_free_pattern(void*, int, int, void*) { /* host no-op */ }
 void RESDATA_DtorBody(void*) { /* host no-op */ }
 void DDRAW_PresentRect(void*, void*, int*, unsigned char) { /* host no-op */ }
-void WIN32_RecvNetworkData(void*, unsigned int, char const*) { /* host no-op */ }
-void WIN32_GetSystemMetrics(void*) { /* host no-op */ }
+/* WIN32_RecvNetworkData/WIN32_GetSystemMetrics: these C++-mangled overloads
+ * existed only because network/DirectPlay.cpp declared the two functions
+ * outside its extern "C" block. Both are now real implementations in
+ * network/DirectPlay.cpp (0x460EA0, 0x460360) declared extern "C" there
+ * (matching game/Train_network.cpp's existing extern "C" declarations for
+ * the sibling WIN32_SendNetworkData/WIN32_PeekMessageLoop), so nothing
+ * requests these mangled symbols anymore. */
 void Ordinal_4(void*, void**, void*, void*, void*) { /* host no-op */ }
 void CRT_memcpy(void*, void const*, unsigned long) { /* host no-op */ }
 void CRT_malloc(unsigned long) { /* host no-op */ }
@@ -319,7 +375,7 @@ void Town_CheckOccupied(void*, int, int, int, int) { /* host no-op */ }
 void Town_SelectBuilding(void*, void*) { /* host no-op */ }
 void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { /* host no-op */ }
 void DDRAW_SelectBuilding(void*, void*) { /* host no-op */ }
-void WIN32_PostQuit() { /* host no-op */ }
+/* WIN32_PostQuit: real implementation now in core/CGWND.cpp (0x463670). */
 void RESDATA_GameVehicle_Ctor(void*, int) { /* host no-op */ }
 void RESDATA_GameVehicle_BaseDtor(void*) { /* host no-op */ }
 void Vehicle_InitOccupant(void*, int) { /* host no-op */ }

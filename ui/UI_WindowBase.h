@@ -522,3 +522,17 @@ public:
    Released when the last cursorRefCount holder calls base_destructor. */
 extern void* g_cursor_back;     /* 0x4FD3CC */
 extern int   g_cursor_refcount;  /* 0x4FD3D0 */
+
+/* ================================================================== */
+/* UI_SetWindowVisible — free function, NOT a vtable slot.              */
+/* Address: 0x425F20. See UI_WindowBase.cpp for full documentation.     */
+/*                                                                     */
+/* One canonical `char` overload. ui/HelpWnd.cpp keeps its own separate */
+/* (identical) local `char` declaration rather than including this      */
+/* header. A second `unsigned char` overload was tried and removed:      */
+/* every real call site passes an int literal (0 or 1), which is        */
+/* equally-good-ranked against both `char` and `unsigned char`, so       */
+/* having both simultaneously visible (as happens once ui/EditWindow.h  */
+/* pulls this header in) makes every such call ambiguous.               */
+/* ================================================================== */
+void UI_SetWindowVisible(void* self, char visible);

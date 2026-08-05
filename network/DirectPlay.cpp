@@ -136,8 +136,6 @@ void  DDRAW_PresentRect(void* rect, void* hWnd, int32_t* param, uint8_t flag);
 
 /* DirectPlay game functions (C++ linkage) */
 uint32_t WIN32_RecvNetworkData(void* session, uint32_t resId, const char* msg);
-void     WIN32_SendNetworkData(void* session, uint32_t dpId,
-                                int32_t data, uint32_t size, uint32_t flags);
 uint32_t WIN32_GetSystemMetrics(void* session);
 
 /* ================================================================== */

@@ -3,6 +3,9 @@
 #include "Cursor_internal.h"
 #include "../ui/ButtonSprite.h"
 
+#include <cstdio>
+#include <cstdint>
+
 /* ================================================================== */
 /* Cursor::init_editor_sprites — Init all editor/toolbar sprite objs   */
 /* Address: 0x417F20                                                   */
@@ -1265,6 +1268,214 @@ void Cursor::handle_tab_change()
             case 6: Sprite_SetState(this->sprite_31C, 1, nullptr); break;
         }
     }
+}
+
+/* ================================================================== */
+/* Cursor::show_file_dialog — Show the custom-content file-open dialog */
+/* Address: 0x41A050                                                    */
+/* ================================================================== */
+void Cursor::show_file_dialog()
+{
+    if (this->editor_state == 9) {                          /* +0xEC */
+        return;
+    }
+
+    this->field_190 = 200;                                   /* +0x190 */
+    if (this->timer_id_18C == 0) {                           /* +0x18C */
+        this->timer_id_18C = SetTimer(this->hWnd, 0x44, 200, nullptr);
+    }
+
+    this->selected_idx_384 = -1;                              /* +0x384 */
+    this->editor_state = 9;                                   /* +0xEC */
+    Sprite_SetState(this->sprite_2E0, 1, nullptr);            /* +0x2E0 */
+
+    /* Dispatch set_mode through vtable slot [3] (inherited base 0x425FD0);
+     * matches the (childCount2, childObj2) overlay pair used at this call
+     * site — a different overlay pair than child_obj_60()/curs_pos_x(). */
+    this->set_mode(this->childCount2, this->childObj2, 0, 1);
+
+    this->sprite_width_hi() = 1;                              /* +0x3D */
+    this->sprite_height() = 0;                                /* +0x40 */
+
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+}
+
+/* ================================================================== */
+/* Cursor::handle_locomotive_select — Handle locomotive-list selection */
+/* Address: 0x41A360                                                    */
+/* ================================================================== */
+void Cursor::handle_locomotive_select(uint32_t index)
+{
+    if (this->ui_active) {                                    /* +0x188 */
+        if (this->editor_state == 9) {                         /* +0xEC */
+            if (this->timer_id_18C != 0) {                     /* +0x18C */
+                KillTimer(this->hWnd, this->timer_id_18C);
+                this->timer_id_18C = 0;
+            }
+            this->editor_state = 1;
+            this->sprite_width_hi() = 0;                       /* +0x3D */
+            this->sprite_height() = 0;                         /* +0x40 */
+            Sprite_SetState(this->sprite_2E0, 0, nullptr);     /* +0x2E0 */
+            this->set_mode(
+                static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
+                reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
+                0, 1);
+            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        }
+
+        this->editor_state = 2;
+        this->selected_idx_384 = static_cast<int32_t>(index);  /* +0x384 */
+
+        ButtonSprite* sprite = this->toolbar_sprites[index];   /* +0x48C */
+        /* Decompile: local_8 = sprite->y >> 1; local_4 = sprite->sourceX >> 1;
+         * &local_8 passed as the origin pointer, with local_8 at the lower
+         * stack address (i.e. the first/x field of the {x,y} pair). */
+        UIAnimationOrigin origin{ sprite->y >> 1, sprite->sourceX >> 1 };
+        this->set_render_surface(
+            reinterpret_cast<UIPANEL_Surface*>(sprite), 0, &origin, 0, 1);
+
+        this->field_388 = 0;                                    /* +0x388 */
+        return;
+    }
+
+    /* Editor mode: record a bonus prize ID on the player record. */
+    if (this->obj_184 != nullptr) {
+        this->obj_184->bonus_prize_id =
+            static_cast<uint8_t>(this->bonus_ids[index & 0xFF]) + 1;   /* +0x370, no bounds check */
+    }
+    this->blit_edit_preview();
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+}
+
+/* ================================================================== */
+/* Cursor::handle_toolbar_hover — Hit-test the 6 toolbar tab sprites   */
+/* Address: 0x41A460                                                    */
+/* ================================================================== */
+void Cursor::handle_toolbar_hover(LONG x, LONG y)
+{
+    uint8_t previousTab = this->editor_flags[1];                /* +0x2B1 */
+
+    if (this->editor_flags[0] == 0) {                            /* +0x2B0 */
+        return;
+    }
+
+    POINT pt{ x, y };
+    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_308) + 4), &pt)) {
+        this->editor_flags[1] = 1;
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_30C) + 4), &pt)) {
+        this->editor_flags[1] = 2;
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_310) + 4), &pt)) {
+        this->editor_flags[1] = 3;
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_314) + 4), &pt)) {
+        this->editor_flags[1] = 4;
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_318) + 4), &pt)) {
+        this->editor_flags[1] = 5;
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_31C) + 4), &pt)) {
+        this->editor_flags[1] = 6;
+    }
+
+    if (previousTab == this->editor_flags[1]) {
+        return;
+    }
+
+    this->selected_idx_384 = -1;         /* +0x384 */
+    this->palette_end_idx = -1;          /* +0x2B8 */
+    this->toolbar_sentinel = -1;         /* +0x6F0 */
+
+    for (int i = 0; i < 64; ++i) {
+        if (this->toolbar_sprites[i] != nullptr) {
+            delete this->toolbar_sprites[i];
+            this->toolbar_sprites[i] = nullptr;
+        }
+    }
+
+    if (this->timer_id_18C != 0) {                       /* +0x18C */
+        KillTimer(this->hWnd, this->timer_id_18C);
+        this->timer_id_18C = 0;
+    }
+    this->editor_state = 1;                               /* +0xEC */
+
+    this->sprite_width_hi() = 0;                          /* +0x3D */
+    this->sprite_height() = 0;                            /* +0x40 */
+    Sprite_SetState(this->sprite_2E0, 0, nullptr);        /* +0x2E0 */
+    this->set_mode(
+        static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
+        reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
+        0, 1);
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+
+    this->handle_tab_change();
+    this->draw_postcard_preview(1);
+    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    this->draw_locomotive_preview(1);
+}
+
+/* ================================================================== */
+/* Cursor::handle_locomotive_list_click — Handle a scroll-list click   */
+/* Address: 0x41A650                                                    */
+/* ================================================================== */
+void Cursor::handle_locomotive_list_click(LONG x, LONG y)
+{
+    POINT pt{ x, y };
+
+    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_148) + 4), &pt)) {
+        Sprite_SetState(this->sprite_148, 1, nullptr);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        if (this->scroll_top_idx > 0) {                    /* +0x170 */
+            int32_t next = this->scroll_top_idx - this->scroll_visible_count; /* +0x17C */
+            this->scroll_top_idx = (next < 0) ? 0 : next;
+            this->update_scroll_buttons();
+        }
+        Sleep(0x32);
+        Sprite_SetState(this->sprite_148, 0, nullptr);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        return;
+    }
+
+    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_14C) + 4), &pt)) {
+        Sprite_SetState(this->sprite_14C, 1, nullptr);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        if (this->scroll_end_flag == 0) {                   /* +0x180 */
+            this->scroll_top_idx = this->scroll_bottom_idx + 1; /* +0x170 = +0x174 + 1 */
+            this->update_scroll_buttons();
+        }
+        Sleep(0x32);
+        Sprite_SetState(this->sprite_14C, 0, nullptr);
+        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        return;
+    }
+
+    if (!PtInRect(&this->scroll_border_rect, &pt)) {         /* +0x150 */
+        return;
+    }
+    if (this->scroll_line_height == 0) {                     /* +0x178 */
+        return;
+    }
+
+    int32_t rowIndex = (y - this->scroll_border_rect.top) / this->scroll_line_height
+                        + this->scroll_top_idx;
+    if (rowIndex < 0 || rowIndex >= static_cast<int32_t>(
+            sizeof(this->player_names) / sizeof(this->player_names[0]))) {
+        return;
+    }
+
+    const char* rowName = this->player_names[rowIndex];       /* +0x59E, 13-byte stride */
+    if (rowName[0] == '\0') {
+        return;
+    }
+
+    this->toolbar_sentinel = rowIndex;                         /* +0x6F0 */
+    if (this->obj_184 != nullptr) {                            /* +0x184 */
+        this->obj_184->field_24 = (rowIndex < this->player_count) ? 0 : 1; /* +0x6F4 */
+        std::snprintf(this->obj_184->name, sizeof(this->obj_184->name), "%s", rowName);
+    }
+
+    this->set_mode(
+        static_cast<int32_t>(reinterpret_cast<intptr_t>(this->editor_surface)),
+        this->editor_resdata, 0, 1);
+    this->editor_state = 6;                                     /* +0xEC */
+    this->blit_edit_preview();
+    UIPANEL_EndPaint(this);
 }
 
 /* ================================================================== */

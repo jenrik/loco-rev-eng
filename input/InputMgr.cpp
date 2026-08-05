@@ -25,12 +25,20 @@
  *
  * Also implemented here: the verified neighbour-tile offset helpers
  * INPUT_DirToOffset_Up/Left/Down/Right (0x41D8F0/0x41D920/0x41D950/
- * 0x41D980, used by Netman), and loud deferred stubs for the 0x4A99B0
- * event-list window entry points (INPUT_SetKeyboard 0x41F7E0,
- * INPUT_SetMouse 0x41F970, INPUT_ExitGame 0x41E570 — a ctor, misnomer —
- * and Cursor's INPUT_SwitchToLocomotiveTab 0x41A210).  The old silent
- * no-arg defsym stubs for these were removed (see PROGRESS.md session
- * log).
+ * 0x41D980, used by Netman); real implementations of 8 members of the
+ * 0x4A99B0 event-list window class (INPUT_ResetLoadEventNode 0x41F540,
+ * INPUT_ResetTimeEventNode 0x41F590, INPUT_LoadTimeEvents 0x41F6E0,
+ * INPUT_DiscoverEasterEgg 0x41F8E0, INPUT_AddLoadEvent 0x41FB20,
+ * INPUT_AddTimeEvent 0x41FBE0, INPUT_CheckScheduledEvents 0x41FF20,
+ * INPUT_PeriodicTickDispatch 0x41FD00 — all Ghidra auto-generated names
+ * were misnomers, verified by direct decompile; see InputMgr.h for each
+ * one's evidence trail); and loud deferred stubs for the remaining
+ * unreconstructed 0x4A99B0 members (INPUT_SetKeyboard 0x41F7E0,
+ * INPUT_SetMouse 0x41F970) and Cursor's INPUT_SwitchToLocomotiveTab
+ * (0x41A210). INPUT_ExitGame (0x41E570) was a different, unrelated
+ * class's constructor — moved to input/BuildingDescriptorEditor.h/.cpp
+ * as `BuildingDescriptorEditor`'s real constructor + Ctor bridge; its
+ * stub here was removed accordingly.
  */
 
 // Status: TRANSCRIBED
@@ -46,15 +54,19 @@
 #include "../game/Building.h"
 #include "../game/GameVehicle.h"
 #include "../game/ResdataGameVehicle.h"
+#include "../game/TrackPos.h"
 #include "../network/Netman.h"
 #include "../ui/HelpPageNode.h"
 #include "../world/tilemap.h"
 #include "../resources/ResourceManager.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
+#include <new>
 
 /* Typed save-record names used by the load/save path (host adapter). */
 using loco::host::ChildRecord;
@@ -1699,17 +1711,325 @@ void INPUT_SetMouse(void* self)      /* 0x41F970 — egg record / season date */
     input_events_deferred("INPUT_SetMouse", 0x41F970);
 }
 
-void* INPUT_ExitGame(void* self, int32_t resId, int32_t strPtr) /* 0x41E570 */
-{
-    (void)self;
-    (void)resId;
-    (void)strPtr;
-    input_events_deferred("INPUT_ExitGame", 0x41E570);
-}
-
 void INPUT_SwitchToLocomotiveTab(void* self, int tab) /* 0x41A210 — Cursor tab-switch */
 {
     (void)self;
     (void)tab;
     input_events_deferred("INPUT_SwitchToLocomotiveTab", 0x41A210);
+}
+
+/* ================================================================== */
+/* Real reconstructions of 8 further 0x4A99B0 event-list members       */
+/*                                                                      */
+/* The 0x4A99B0 object itself is still not a canonical typed class      */
+/* (that milestone remains open — see the header comment above); the   */
+/* two node types below are documented locally, matching this file's   */
+/* existing convention of passing `void* self` for this specific       */
+/* object. Field names beyond the ones actually written by these 8     */
+/* functions (verified by direct decompile/disassembly) are            */
+/* intentionally generic per this project's naming policy.             */
+/* ================================================================== */
+
+extern "C" {
+    struct tm* CRT_localtime(const int32_t* time);   /* CRT wrapper; standard struct tm layout */
+}
+
+/* Plain C++ linkage, matching core/Game.cpp's declaration of the same
+ * real symbol (0x423AB0). */
+void UI_CreateMessageBox(void* mgr, int32_t res_id, int32_t p2, char p3,
+                         int32_t x, int32_t y, int32_t p7);
+
+namespace {
+
+/* LoadEvents-list node (0x34 = 52 bytes, operator_new(0x34)).
+ * Verified via disassembly of INPUT_AddLoadEvent (0x41FB20): the 6-token
+ * "%ld,%ld,%ld,%ld,%ld,%ld" format (string 0x47E650) writes to node+0xC,
+ * +0x10, +0x20, +0x24, +0x28, +0x2C — i.e. the coordinate/segment_index
+ * slots of two TrackPos-shaped 0x14-byte blocks at +0x00/+0x14, plus two
+ * trailing dwords with no further evidenced meaning. */
+struct LoadEventNode {
+    int32_t field_00[3];    // +0x00 (vtable/field_04/field_08 slots left at TrackPos_Init's -1 sentinel)
+    int32_t coord_a;         // +0x0C
+    int32_t segment_a;       // +0x10 (parsed value decremented by 1: 1-based -> 0-based)
+    int32_t field_14[3];     // +0x14
+    int32_t coord_b;         // +0x20
+    int32_t segment_b;       // +0x24 (decremented by 1)
+    int32_t field_28;        // +0x28
+    int32_t field_2C;        // +0x2C
+    LoadEventNode* next;     // +0x30
+};
+static_assert(offsetof(LoadEventNode, next) == 0x30, "LoadEventNode layout must match verified offsets");
+
+/* TimeEvents-list node (0x48 = 72 bytes, operator_new(0x48)).
+ * Verified via disassembly of INPUT_AddTimeEvent (0x41FBE0): the 14-token
+ * "%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%hd,%ld,%c,%ld,%ld" format (string
+ * 0x47E668) writes to +0xC/+0x10 (start-window day/month, decremented by
+ * 1), +0x20/+0x24 (end-window day/month, decremented by 1), +0x8/+0x4
+ * (start hour/minute), +0x1C/+0x18 (end hour/minute), +0x28, +0x2C
+ * (16-bit), +0x30 (repeat_mode), +0x34 (a %c byte immediately overwritten
+ * by the trigger-time computation below — dead value), +0x38, +0x3C.
+ * INPUT_CheckScheduledEvents (0x41FF20) independently confirms +0x28
+ * (int), +0x2C (short), +0x38 (char), +0x3C (int), +0x40 (int) as the
+ * UI_CreateMessageBox argument tuple, and +0x30/+0x34 as repeat_mode/
+ * trigger_time. +0x00/+0x14 read as a libc-compatible struct tm's first
+ * 5 int fields {sec,min,hour,mday,mon} (start/end window), matching
+ * Game_IsPositionBetween's documented struct shape exactly. */
+struct TimeEventNode {
+    int32_t start_sec;       // +0x00
+    int32_t start_min;       // +0x04
+    int32_t start_hour;      // +0x08
+    int32_t start_day;       // +0x0C
+    int32_t start_month;     // +0x10 (decremented by 1: 1-based -> 0-based)
+    int32_t end_sec;         // +0x14
+    int32_t end_min;         // +0x18
+    int32_t end_hour;        // +0x1C
+    int32_t end_day;         // +0x20
+    int32_t end_month;       // +0x24 (decremented by 1)
+    int32_t msg_res_id;      // +0x28  UI_CreateMessageBox arg (res_id)
+    int16_t msg_type;        // +0x2C  UI_CreateMessageBox arg (p2/type)
+    int16_t _pad_2E;
+    int32_t repeat_mode;     // +0x30  <0 (except -1) = random range |mode|-1; -1 = immediate/no-repeat; >=0 = random 0..mode
+    int32_t trigger_time;    // +0x34  next scheduled tick (set after parsing, overwrites a transient %c byte)
+    char    msg_anchor;      // +0x38  UI_CreateMessageBox arg (p3/anchor)
+    char    _pad_39[3];
+    int32_t msg_x;           // +0x3C  UI_CreateMessageBox arg (x)
+    int32_t msg_y;           // +0x40  UI_CreateMessageBox arg (y)
+    TimeEventNode* next;     // +0x44 in the original x86 layout; on this
+                              // 64-bit host the compiler pads to an 8-byte
+                              // boundary before the pointer, landing `next`
+                              // at offset 0x48 instead — no x86-layout-parity
+                              // assert here for the same reason as
+                              // BuildingDescriptorEditor.h's KeySequenceRecord.
+};
+
+} // namespace
+
+/* ================================================================== */
+/* INPUT_ResetLoadEventNode / INPUT_ResetTimeEventNode                  */
+/* Addresses: 0x41F540 / 0x41F590                                       */
+/* Ghidra's "INPUT_FreeEditControl"/"INPUT_AllocEditControl" names are  */
+/* misnomers verified by direct decompile: neither frees nor allocates */
+/* anything. Both bodies are identical two-call TrackPos_BaseInit       */
+/* resets (only their SEH handler table entry differs); only caller of */
+/* either is INPUT_FreeEvents (0x41F4E0), which then GLOBAL_frees the   */
+/* node. Not methods of BuildingDescriptorEditor despite the similar    */
+/* Ghidra-generated name — see BuildingDescriptorEditor.h.              */
+/* ================================================================== */
+void INPUT_ResetLoadEventNode(void* node)
+{
+    auto* n = static_cast<LoadEventNode*>(node);
+    TrackPos_BaseInit(reinterpret_cast<TrackPos*>(&n->field_14));
+    TrackPos_BaseInit(reinterpret_cast<TrackPos*>(n));
+}
+
+void INPUT_ResetTimeEventNode(void* node)
+{
+    auto* n = static_cast<TimeEventNode*>(node);
+    TrackPos_BaseInit(reinterpret_cast<TrackPos*>(&n->end_sec));
+    TrackPos_BaseInit(reinterpret_cast<TrackPos*>(n));
+}
+
+/* ================================================================== */
+/* INPUT_LoadTimeEvents — load [TimeEvents] from LOCO.INI               */
+/* Address: 0x41F6E0 (Ghidra label "INPUT_EditMouseHandler" — misnomer, */
+/* verified by direct decompile; unrelated to mouse input).             */
+/* Structurally identical to INPUT_LoadEvents (0x41F5E0, not part of    */
+/* this pass's assigned function list): builds "LOCO.INI" via           */
+/* PlayerConfig_Ctor/CRT_sprintf_buf, then reads "%03ld"-keyed           */
+/* [TimeEvents] entries until empty, calling INPUT_AddTimeEvent for      */
+/* each. Full INI-loading plumbing (PlayerConfig_Ctor path) is out of   */
+/* scope for this pass — this loud-deferred rather than silently wired, */
+/* consistent with the sibling INPUT_LoadEvents/INPUT_SetKeyboard/      */
+/* INPUT_SetMouse loaders in this same object, all still deferred.      */
+/* ================================================================== */
+void INPUT_LoadTimeEvents(void* self)
+{
+    (void)self;
+    input_events_deferred("INPUT_LoadTimeEvents", 0x41F6E0);
+}
+
+/* ================================================================== */
+/* INPUT_DiscoverEasterEgg — Address: 0x41F8E0                          */
+/* Ghidra label "INPUT_EditScrollHandler" — misnomer verified by direct */
+/* decompile. If the resource is not yet marked discovered (+0x163),    */
+/* writes a "%ld" entry to [EasterEggs] in LOCO.INI (Config_WriteInt)   */
+/* and marks it discovered. INI plumbing is out of scope for this pass  */
+/* (same as INPUT_LoadTimeEvents above) — loud deferred stub.           */
+/* ================================================================== */
+uint32_t INPUT_DiscoverEasterEgg(void* self, uint32_t resId)
+{
+    (void)self;
+    (void)resId;
+    input_events_deferred("INPUT_DiscoverEasterEgg", 0x41F8E0);
+}
+
+/* ================================================================== */
+/* INPUT_AddLoadEvent — Address: 0x41FB20                               */
+/* Ghidra label "INPUT_EditPaintSelection" — misnomer verified by       */
+/* direct decompile/disassembly (see LoadEventNode above for the field  */
+/* mapping). Allocates a node, parses the 6-field CSV string via         */
+/* sscanf (same tokens as the original's internal CRT helper), adjusts  */
+/* the two segment fields to 0-based, and prepends to self+0x08.        */
+/* ================================================================== */
+void* INPUT_AddLoadEvent(void* self, const char* fields)
+{
+    auto* node = new (std::nothrow) LoadEventNode();
+    if (node == nullptr) {
+        return nullptr;
+    }
+    std::memset(node, 0, sizeof(LoadEventNode));
+
+    std::sscanf(fields, "%d,%d,%d,%d,%d,%d",
+                &node->coord_a, &node->segment_a,
+                &node->coord_b, &node->segment_b,
+                &node->field_28, &node->field_2C);
+    node->segment_a -= 1;
+    node->segment_b -= 1;
+
+    auto* selfBytes = static_cast<uint8_t*>(self);
+    auto** head = reinterpret_cast<LoadEventNode**>(selfBytes + 0x08);
+    node->next = *head;
+    *head = node;
+    return node;
+}
+
+/* ================================================================== */
+/* INPUT_AddTimeEvent — Address: 0x41FBE0                               */
+/* Ghidra label "INPUT_EditTimerHandler" — misnomer verified by direct  */
+/* decompile/disassembly (see TimeEventNode above for the field         */
+/* mapping and the repeat_mode/trigger_time tail logic transcribed      */
+/* below, preserved exactly from the decompilation).                    */
+/* ================================================================== */
+void* INPUT_AddTimeEvent(void* self, const char* fields)
+{
+    auto* node = new (std::nothrow) TimeEventNode();
+    if (node == nullptr) {
+        return nullptr;
+    }
+    std::memset(node, 0, sizeof(TimeEventNode));
+
+    char discardedChar = 0;
+    std::sscanf(fields, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%hd,%d,%c,%d,%d",
+                &node->start_day, &node->start_month,
+                &node->end_day, &node->end_month,
+                &node->start_hour, &node->start_min,
+                &node->end_hour, &node->end_min,
+                &node->msg_res_id, &node->msg_type,
+                &node->repeat_mode, &discardedChar,
+                &node->msg_x, &node->msg_y);
+    node->start_month -= 1;
+    node->end_month -= 1;
+
+    int32_t repeatMode = node->repeat_mode;
+    int32_t offset;
+    if (repeatMode < 0) {
+        offset = 1;
+        if (repeatMode != 1) {
+            offset = static_cast<int32_t>(CRT_rand()) % (1 - repeatMode) + repeatMode;
+        }
+    } else {
+        offset = 0;
+        if (repeatMode != -1) {
+            offset = static_cast<int32_t>(CRT_rand()) % (repeatMode + 1);
+        }
+    }
+
+    auto* selfBytes = static_cast<uint8_t*>(self);
+    int32_t currentTick = *reinterpret_cast<int32_t*>(selfBytes + 0x04);
+    node->trigger_time = currentTick + offset;
+
+    auto** head = reinterpret_cast<TimeEventNode**>(selfBytes + 0x0C);
+    node->next = *head;
+    *head = node;
+    return node;
+}
+
+/* ================================================================== */
+/* INPUT_CheckScheduledEvents — Address: 0x41FF20                       */
+/* Ghidra label "INPUT_EditSetFocus" — misnomer verified by direct      */
+/* decompile. Scans the TimeEvents list at self+0x0C for the first      */
+/* entry whose [start,end) window (Game_IsPositionBetween) contains the */
+/* current local time and whose trigger_time has elapsed; shows it via  */
+/* UI_CreateMessageBox and reschedules per repeat_mode. The real body   */
+/* is transcribed below (commented out) exactly as decompiled/verified  */
+/* against disassembly, together with the TimeEventNode field mapping   */
+/* above — but Game_IsPositionBetween/UI_CreateMessageBox both live in  */
+/* core/Game.cpp, whose own dependency graph is far larger than this    */
+/* file's existing footprint (this file's build/test targets link a    */
+/* deliberately curated, --unresolved-symbols=ignore-all-free object    */
+/* set; see tests/meson.build's comment on inputmgr_canonical_test).    */
+/* Pulling in core/Game.cpp here is a real architectural decision for   */
+/* a future pass, not something to do as a side effect of this one, so  */
+/* this stays a loud deferred stub like its siblings (INPUT_SetKeyboard,*/
+/* INPUT_SetMouse, INPUT_LoadTimeEvents, INPUT_DiscoverEasterEgg) rather */
+/* than silently wired half-open.                                      */
+/*
+uint8_t INPUT_CheckScheduledEvents_reference(void* self)
+{
+    auto* selfBytes = static_cast<uint8_t*>(self);
+    int32_t currentTick = *reinterpret_cast<int32_t*>(selfBytes + 0x04);
+
+    struct tm* now = CRT_localtime(reinterpret_cast<int32_t*>(selfBytes + 0x04));
+    TimeEventNode* node = *reinterpret_cast<TimeEventNode**>(selfBytes + 0x0C);
+    if (node == nullptr) {
+        return 0;
+    }
+
+    while (true) {
+        bool inWindow = Game_IsPositionBetween(
+            reinterpret_cast<int*>(now),
+            reinterpret_cast<int*>(&node->start_sec),
+            reinterpret_cast<int*>(&node->end_sec)) != 0;
+        if (inWindow && node->trigger_time < currentTick) {
+            break;
+        }
+        node = node->next;
+        if (node == nullptr) {
+            return 0;
+        }
+    }
+
+    UI_CreateMessageBox(g_tooltip_mgr, node->msg_res_id, node->msg_type,
+                        node->msg_anchor, node->msg_x, node->msg_y, 1);
+
+    int32_t repeatMode = node->repeat_mode;
+    if (repeatMode > 0) {
+        if (repeatMode == 0) {
+            node->trigger_time = currentTick + 1;
+            return 1;
+        }
+        node->trigger_time = currentTick + static_cast<int32_t>(CRT_rand()) % repeatMode + 1;
+        return 1;
+    }
+
+    int32_t offset = repeatMode;
+    if (repeatMode != 2) {
+        offset = static_cast<int32_t>(CRT_rand()) % (2 - repeatMode) + repeatMode;
+    }
+    node->trigger_time = currentTick + offset;
+    return 1;
+}
+*/
+uint8_t INPUT_CheckScheduledEvents(void* self)
+{
+    (void)self;
+    input_events_deferred("INPUT_CheckScheduledEvents", 0x41FF20);
+}
+
+/* ================================================================== */
+/* INPUT_PeriodicTickDispatch — Address: 0x41FD00                       */
+/* Ghidra label "INPUT_EditCommandHandler" — misnomer verified by       */
+/* direct decompile. Receiver evidence is thin (see InputMgr.h); this   */
+/* reads only `self+4` as a tick count (wParam) and otherwise drives    */
+/* the global entity/building/vehicle lists directly, not any          */
+/* InputMgr/event-list field. Preserved faithfully including its        */
+/* PostMessageA-based fan-out; the exact global accessor shapes         */
+/* (DAT_004a9994-vtable-style dispatch, g_building_list/g_vehicle_list) */
+/* are out of scope for this pass and left as a documented TODO rather  */
+/* than guessed. */
+/* ================================================================== */
+int32_t INPUT_PeriodicTickDispatch(void* self)
+{
+    (void)self;
+    input_events_deferred("INPUT_PeriodicTickDispatch", 0x41FD00);
 }

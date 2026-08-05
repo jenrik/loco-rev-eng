@@ -16,6 +16,7 @@
 // Status: TRANSCRIBED
 
 #include "TrainStation.h"
+#include "../ui/UI_ChildWindow.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External functions and globals                                      */
@@ -34,13 +35,6 @@ void   __cdecl CRT_sprintf_buf(void* buf, const char* fmt); /* va_list wrapper *
 void*  __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id); /* 0x4472B0 */
 int    __thiscall RESMGR_LoadSoundResource(void* res_handle);            /* 0x448D60 */
 void   __thiscall RESMGR_ReleaseSoundResource(void* res_handle);         /* 0x448EE0 */
-
-/* UI Window base functions */
-void*  __thiscall UI_CreateChildWindow(void* window, int param1, int param2); /* 0x425nnn */
-void   __thiscall UI_ChildWindow_Dtor(void* window);                          /* 0x424nnn */
-int    __thiscall UI_ChildWindow_Render(void* window, void* stream);          /* 0x424nnn */
-void   __thiscall UI_PaintWindow(void* window, int param1, int param2);       /* 0x425670 */
-void   __fastcall UI_OnMouseLeave(void* window);                              /* 0x4257F0 */
 
 /* Win32 stream helpers */
 int    __fastcall WIN32_StreamOpen(int* stream, int mode);                    /* 0x461nnn */

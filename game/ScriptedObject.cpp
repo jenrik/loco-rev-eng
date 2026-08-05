@@ -592,7 +592,7 @@ void ScriptedObject::RemoveChild()
     }
 
     /* Call base destructor (ScriptedObject_InitBase with 0,0) */
-    ScriptedObject_InitBase(0, 0);                              /* 0x41E620 (via 0x4203E0) */
+    ScriptedObject_InitBase(0, 0);                               /* 0x4203E0 */
 }
 
 /* ================================================================== */
