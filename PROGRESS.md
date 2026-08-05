@@ -460,3 +460,13 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 **Cumulative session**: 12 commits. 126/126 objects, make check + make test pass.
 **Phase 1 remaining**: VTABLE-001, LAYOUT-001, ABI-THIS-001, LINK-001 (remove flags)
 **Phase 2 remaining**: ~230 Terra-confirmed (2 CRITICAL already addressed, ~30 HIGH partially addressed)
+
+**Session 2026-08-04 (cont 4): Train, DPlayManager, Netman, BuildingMgr fixes**
+
+- [x] **raw-051** [HIGH]: Train subsystem — documented base_only flag routing to Building_BaseCtor; renamed g_game_instance→g_game; fixed CRT_rand() signed-modulo expression; fixed allocation size 0xF0
+- [x] **raw-184** [HIGH]: DPlayManager — DestroySessionInternal→InitSessionDataSnapshot, DestroyPlayer→InitPlayerFromSession (both were misnamed initializers)
+- [x] **raw-189** [HIGH]: Netman — removed unconditional memset (binary uses SCASB not buffer clear); removed null guards (binary dereferences immediately); fixed CopyPlayerSlotText to use memcpy(strlen+1) instead of strncpy zero-pad
+- [x] **raw-038** [HIGH]: BuildingMgr — fixed signed comparison to unsigned; added __thiscall to UI_CreateMessageBox/Town_CheckOccupied extern declarations
+
+**Cumulative**: 16 commits. 126/126 objects, make check + make test pass.
+**Phase 2 progress**: 16/242 Terra-confirmed issues addressed (all CRITICAL, ~12 HIGH)
