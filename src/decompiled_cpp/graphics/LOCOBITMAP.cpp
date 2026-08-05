@@ -853,8 +853,10 @@ void PostcardAlbum::InitFromResource()
     this->window_visible = 0;                /* +0x112 */
     this->destroyed = 0;                     /* +0x110 */
 
-    /* Detect high-resolution mode (>= 800x600, stored at 0x4851D8/0x485214) */
-    if ((g_screen_width < 0x321) && (g_screen_height < 0x258)) {
+    /* Detect high-resolution mode. Binary uses signed JG at height 600:
+     *   height > 600 → high_res=1; height <= 600 → high_res=0.
+     *   Source must use <= to match raw carry-based branch. */
+    if ((g_screen_width < 0x321) && (g_screen_height <= 0x258)) {
         this->high_res = 0;                  /* +0x134 — low resolution */
     } else {
         this->high_res = 1;                  /* +0x134 — high resolution */

@@ -81,7 +81,7 @@ struct RESDATA;  /* Resource data descriptor */
 
 class PostcardAlbum {
 public:
-    virtual ~PostcardAlbum() {}
+    virtual ~PostcardAlbum() {}  /* TODO PROV-003-008: binary does cleanup + conditional free; decompile deleting-dtor */
     /* ================================================================ */
     /* Fields (inherited from GameObject -> Entity -> UI_WindowBase)     */
     /* ================================================================ */
