@@ -440,3 +440,12 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 - HIGH: HelpWnd, Train, AboutDialog, PostcardAlbum, GameView, win32_stream, VehicleEditor, BuildingMgr, ResourceManager, DPlayManager, Netman, and ~30 other confirmed issues
 
 **Remaining Phase 1**: VTABLE-001, LAYOUT-001, ABI-THIS-001, ARTIFACT-001, ADDR-001
+
+**Session 2026-08-04 (cont 2): Continued Phase 1 anti-patterns + Phase 2 CRITICAL**
+
+- [x] **ADDR-001** [high]: Added formal  annotations to GameConfig.cpp (ctor 0x440C60, dtor 0x440CC0) and HelpPageNode.cpp (~HelpPageNode 0x44F2C0, Update vtable[10] 0x44F340)
+- [x] **ARTIFACT-001** [medium]: Renamed DAT_0048524c/50/54 → g_shared_palette_buffer/refcount, g_surface_alloc_counter in UIPANEL_Surface.cpp
+- [x] **raw-071** [CRITICAL]: DDRAW_BlitHBITMAPToSurface at 0x401170 — full rewrite against disassembly. Fixed: 6-param signature (was 5, missing src_x/src_y), vtable slot mapping (Restore at +0x6C, GetDC at +0x44, ReleaseDC at +0x68), StretchBlt as direct GDI call, return value (GetDC HRESULT), DeleteDC cleanup, MOVSX coordinate semantics
+
+**Remaining Phase 1**: VTABLE-001 (6 sites), LAYOUT-001 (14 files), ABI-THIS-001 (3 sites), ARTIFACT-001 (23 more files), LINK-001 (remove flags), SKIP-001 (track 33 files)
+**Remaining Phase 2**: TrackPiece (prov-055), Wave IO (raw-115) CRITICAL; ~30 HIGH; ~200 MEDIUM/LOW
