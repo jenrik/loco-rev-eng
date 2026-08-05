@@ -32,12 +32,30 @@
  * Vtable layout (8 entries):
  *   [0] +0x00: scalar deleting destructor  (CGWND_AboutDialog_Dtor,    0x40F270)
  *   [1] +0x04: Hide                        (CGWND_Screensaver_Hide,    0x40F480)
- *   [2] +0x08: Show                        (CGWND_AboutDialog_Show,    0x40F2A0)
+ *   [2] +0x08: Show                        (CGWND_AboutDialog_Show,    address unverified — Ghidra
+ *                                            has no function at the previously-recorded 0x40F2A0;
+ *                                            likely occupies the gap between CGWND_AboutDialog_BaseDtor's
+ *                                            end (0x40F29B) and AboutDialog_UpdateScreensaver's
+ *                                            start (0x40F3C0), but not re-derived this pass)
  *   [3] +0x0C: set_mode                    (inherited: Cursor_SetMode, 0x414340)
  *   [4] +0x10: method_4                    (inherited: stub,           0x426130)
  *   [5] +0x14: Create                      (inherited: GameWindow_Create, 0x413DE0)
- *   [6] +0x18: Init / update_client_rect   (CGWND_AboutDialog_Init,    0x40F5C0)
- *   [7] +0x1C: method_7                    (CGWND_AboutDialog_m7,      0x40F890)
+ *   [6] +0x18: Init / update_client_rect   (CGWND_AboutDialog_Init,    address unverified — Ghidra
+ *                                            has no function at the previously-recorded 0x40F5C0;
+ *                                            likely in the gap between CGWND_AboutDialog_Create's
+ *                                            end (0x40F5B2) and AboutDialog_InitScreensaver's start
+ *                                            (0x40F6A0), but not re-derived this pass)
+ *   [7] +0x1C: method_7                    (CGWND_AboutDialog_m7,      address unverified — Ghidra
+ *                                            has no function at the previously-recorded 0x40F890;
+ *                                            known only via one xref into AboutDialog_RenderScreensaver
+ *                                            at 0x40F93D, so it exists somewhere near there — not
+ *                                            re-derived this pass)
+ *
+ * NOTE: the three "address unverified" entries above were caught while
+ * implementing Update/InitSprites/RenderScreensaver in this same pass —
+ * Ghidra returned "No function at [address]" for all three when checked.
+ * Left as an honest gap rather than a guessed replacement address; see
+ * PROGRESS.md.
  */
 
 #pragma once
@@ -117,8 +135,10 @@ public:
                                          //         (parsed from '<number>' tag in credits file).
                                          //         Zeroed in ctor, parsed by RenderCredits.
 
-    int32_t    field_1158;              // +0x1158 (unknown; zeroed in ctor, set in InitSprites
-                                         //         to UIPANEL surface handle).
+    void*      screensaver_surface;     // +0x1158 UIPANEL surface handle for the screensaver's
+                                         //         scrolling background sprite. Zeroed in ctor,
+                                         //         allocated+initialized by InitSprites, used as
+                                         //         the blit source in RenderScreensaver.
 
     RECT       scroll_rect;             // +0x115C blit rect for scrolling background.
                                          //         SetRectEmpty in ctor, updated by
@@ -220,7 +240,7 @@ public:
      *      SelectObject(g_font_small), DrawTextA(DT_CENTER|DT_TOP)
      *   8. Restore GDI objects
      *
-     * Called by: CGWND_Screensaver_Update @ 0x40F42E, 0x40F445
+     * Called by: AboutDialog::Update (below) @ 0x40F42E, 0x40F445
      *
      * @param hdc  HDC for GDI text rendering
      * @return     1 if credits rendered, 0 if credits buffer empty
@@ -240,4 +260,72 @@ public:
      * Called by: AboutDialog Show override @ 0x40F311
      */
     void LoadCredits();
+
+    /**
+     * AboutDialog::Update — screensaver animation frame tick.
+     * Address: 0x40F3C0 (Ghidra: AboutDialog_UpdateScreensaver; was
+     * previously referenced elsewhere in this header only by Ghidra's
+     * now-superseded auto-label, CGWND_Screensaver_Update)
+     *
+     * Advances scroll_timer (+0x11C) toward 15 (clamped, +2/call). Once
+     * positive, accumulates it into scroll_accum (+0x120); when scroll_accum
+     * reaches (1000 - scroll_timer), advances frame_counter (+0x128),
+     * resets fade_timer/scroll_timer/scroll_accum for the next cycle, and
+     * calls RenderCredits (re-rendering once more with frame_counter=1 if
+     * the buffer came back empty). Every call recomputes fade_timer as
+     * scroll_accum/10, then renders via RenderScreensaver() and
+     * Cursor_Render (the binary passes this AboutDialog* as a Cursor*,
+     * matching the identical established idiom already used for
+     * ui/HelpWnd.cpp's own Cursor_Render calls).
+     *
+     * Not reachable from anywhere in this tree yet — the idle-timeout →
+     * screensaver dispatch (Game::CheckScreensaverTimeout → AboutDialog)
+     * isn't wired up; tracked separately in PROGRESS.md, out of scope here.
+     */
+    void Update();
+
+    /**
+     * AboutDialog::InitSprites — load screensaver sprite/surface resources.
+     * Address: 0x40F6A0 (Ghidra: AboutDialog_InitScreensaver; superseded
+     * Ghidra auto-label: CGWND_Screensaver_InitSprites)
+     *
+     * One-shot, gated by sprites_initialized (+0x12C): loads resource
+     * 0x3DAF into res_object (+0x134), calls its vtable[1](0, 0) to obtain
+     * res_surface (+0x130), allocates+constructs a UIPANEL surface into
+     * screensaver_surface (+0x1158), inits it to 216x196 (0xD8 x 0xC4), and
+     * clips it. Faithfully preserves an original bug: UIPANEL_InitSurface
+     * is called even when the surface allocation above failed
+     * (screensaver_surface == nullptr).
+     */
+    void InitSprites();
+
+    /**
+     * AboutDialog::RenderScreensaver — render one fade-in/hold/fade-out
+     * screensaver frame.
+     * Address: 0x410280 (superseded Ghidra auto-label:
+     * CGWND_AboutDialog_RenderScreensaver)
+     *
+     * Unconditionally blits the scrolling background (screensaver_surface
+     * -> backbufferSurface, +0x38). Then gates further rendering on
+     * fade_timer (+0x118) being inside the visible fade window via the same
+     * signed-divide-by-3 bounds check the original performs twice (fully
+     * out-of-window frames return early with no further rendering).
+     *
+     * The remainder of the original — two SetRect/OffsetRect blocks plus a
+     * call through backbufferSurface's OWN vtable[5] (0x14 byte offset,
+     * called with backbufferSurface itself as an explicit first argument),
+     * followed by a 1-3 iteration alpha-crossfade UIPANEL_Blit loop — is a
+     * deferred stub: that call shape doesn't match IDirectDrawSurface4's
+     * real COM vtable, so backbufferSurface must be reused here for some
+     * other small-vtable "surface" object specific to the screensaver.
+     * CLAUDE.md forbids hand-rolling vtable dispatch on inadequately-
+     * evidenced objects, and this path is provably unreachable today (its
+     * only callers are Update(), above, and AboutDialog's still-unimplemented
+     * vtable[7]/"method_7" slot — neither is wired into any live call path
+     * in this tree), so it loudly asserts here rather than guessing.
+     *
+     * @return  0 on the early-gated-out path (asserts before returning on
+     *          the fully-rendered path — see above)
+     */
+    int32_t RenderScreensaver();
 };

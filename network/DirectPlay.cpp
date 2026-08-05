@@ -559,7 +559,7 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
     if (s[0] == 0) {
         /* Not hosting: try to join */
         /* Handle messages to create DirectPlay instance */
-        uint32_t hr = DirectPlay_HandleMessages();
+        uint32_t hr = DirectPlay_HandleMessages(0, nullptr, 0);
         if ((uint8_t)hr == 0) {
             DirectPlay_Close((int32_t)self);
             return 0;
@@ -600,7 +600,7 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
         }
     } else {
         /* Hosting: handle messages then enumerate players */
-        uint32_t hr = DirectPlay_HandleMessages();
+        uint32_t hr = DirectPlay_HandleMessages(0, nullptr, 0);
         if ((uint8_t)hr == 0) {
             DirectPlay_Close((int32_t)self);
             return 0;
@@ -941,7 +941,7 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password)
     }
 
     /* Handle messages to create DirectPlay */
-    uint32_t hr = DirectPlay_HandleMessages();
+    uint32_t hr = DirectPlay_HandleMessages(0, nullptr, 0);
     if ((uint8_t)hr == 0) {
         return 0;
     }
@@ -993,7 +993,7 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password)
 /* connections, initializes address. Large state machine (~2076 bytes).*/
 /* Shows connection dialog for interactive provider selection.        */
 /* ================================================================== */
-uint32_t DirectPlay_HandleMessages(void)
+uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_t flags)
 {
     /* This function is a large state machine that:
      * 1. Checks if DirectPlay interface exists, closes if so
@@ -1017,8 +1017,13 @@ uint32_t DirectPlay_HandleMessages(void)
     /* TODO: decompile 0x45F390 — DirectPlay_HandleMessages
      * ~2076-byte state machine. Creates DirectPlay instances, shows
      * connection dialogs, initializes address. Takes 'this' via global
-     * g_dplay_peer. Called by ConnectToSession, SetSessionDesc.
-     */
+     * g_dplay_peer. Called by ConnectToSession, SetSessionDesc, and (with a
+     * real protocol/address override) Train_ConnectToServer. The 3 args
+     * are accepted (signature now matches the real disassembly) but not
+     * yet consumed by this still-deferred body. */
+    (void)protocol;
+    (void)address;
+    (void)flags;
     return 1;  /* stub — TODO: decompile 0x45F390 */
 }
 

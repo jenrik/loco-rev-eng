@@ -46,6 +46,13 @@ int*  __thiscall UI_CreateTooltip(void* tooltipMgr,
                                    int16_t param,
                                    int x, int y);        /* @ 0x423C50 */
 
+/* Tooltip destruction — exact (void*, int) signature matching the one
+ * real definition in shared/stubs_impl.cpp. Several OTHER files declare
+ * this name with different parameter types (e.g. TrainStationWindow.cpp
+ * uses (void*, void*)); those are distinct mangled symbols with no
+ * definition of their own. Match the real one exactly here. */
+void  UI_DestroyTooltip(void* tooltipMgr, int tooltip);  /* @ 0x423D20 */
+
 /* ================================================================== */
 /* Global variables                                                     */
 /* ================================================================== */
@@ -386,5 +393,35 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
             this->field_8A,
             this->screen_rect.left + tooltipXOff,
             this->screen_rect.top + tooltipYOff);
+    }
+}
+
+/* ================================================================== */
+/* UIEntity::~UIEntity — Destructor                                    */
+/* Address: 0x423500 (body; Ghidra auto-named this "UI_Window_Dtor" —  */
+/* a misnomer inherited from the vtable's default label, not a         */
+/* drawing function). Scalar deleting destructor wrapper (vtable[0],   */
+/* 0x477A90): 0x4234E0 ("UI_DtorWrapper" — also a misnomer, not a      */
+/* WndProc wrapper).                                                    */
+/*                                                                      */
+/* Destroys the tooltip child (if any) via UI_DestroyTooltip. The       */
+/* binary's explicit `this->vtbl = VTBL_UIENTITY` reset (defends        */
+/* against re-entrant virtual calls during unwind) and its call to      */
+/* GameObject_DtorBody are compiler-managed base-destructor chaining    */
+/* in real C++ (Entity::~Entity -> GameObject::~GameObject runs         */
+/* automatically after this body).                                     */
+/*                                                                      */
+/* NOTE: a previous, unrelated `class UIEntity { virtual ~UIEntity(); }`*/
+/* shadow definition lived in shared/vtable_stubs.cpp and silently      */
+/* supplied this exact destructor symbol with an assert-stub body       */
+/* (an ODR violation — two same-named classes with the same mangled     */
+/* destructor symbol in different translation units). It has been      */
+/* removed; this is now the one real definition.                       */
+/* ================================================================== */
+UIEntity::~UIEntity()
+{
+    if (this->pTooltip != nullptr) {
+        UI_DestroyTooltip(&g_tooltip_mgr,
+                           static_cast<int>(reinterpret_cast<intptr_t>(this->pTooltip)));
     }
 }

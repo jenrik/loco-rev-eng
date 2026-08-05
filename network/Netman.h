@@ -934,10 +934,13 @@ int32_t PlaySoundFile(const char* path, void* x, void* y, int32_t flags);
 void*   NET_CreateSession(void* dplay, uint8_t param1, uint8_t param2,
                            uint8_t param3, char param4);
 void*   NET_RegisterPlayer(void* dplay, void* playerData, int32_t type, int32_t param);
-void    NET_UnregisterPlayer(void* dplay, const char* name);
 void*   NET_ResolveAddress(void* dplay, const char* path);
-void*   NET_GetHostName(int32_t mode, int32_t param);
-int32_t NET_UpdatePlayerList(void);
+/* NET_GetHostName / NET_UpdatePlayerList / NET_DownloadAsset (real bodies in
+ * network/NetworkPlayerList.cpp, addresses 0x4446F0/0x445170/0x445A40) and
+ * the PostBagFileNode type they share are declared in PostBagFileNode.h —
+ * split out so town/Town.cpp can pull in just that instead of this whole
+ * header (see PostBagFileNode.h's comment for why). */
+#include "PostBagFileNode.h"
 void    NET_GetAttFilePath(uint16_t id, int32_t type, char* outPath);
 void    NET_SendFile(const char* name, uint8_t flag, char* pathBuf);
 

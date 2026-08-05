@@ -72,7 +72,6 @@ extern BOOL    __stdcall IntersectRect(RECT*, const RECT*, const RECT*);
 #ifdef __cplusplus
 }
 #endif
-extern int     __cdecl DDRAW_BlitHBITMAPToSurface(void*, void*, int, int, int);
 
 #ifndef WM_SYSCOMMAND
 #define WM_SYSCOMMAND 0x0112

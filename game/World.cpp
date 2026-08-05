@@ -66,8 +66,11 @@ extern int    __thiscall Town_BlitViewport(void* viewport, int src_x,
                                            int dst_y);               /* @ 0x42CB10 */
 extern void   __thiscall Town_SelectBuilding(void* town_view,
                                              int building);           /* @ 0x42D040 */
-extern void   __thiscall DDRAW_SelectBuilding(void* ddraw_building,
-                                              int building);          /* @ 0x459180 */
+extern int    __thiscall DDRAW_SelectBuilding(void* ddraw_building,
+                                              int building);          /* @ 0x459180 —
+                                              returns uint8_t; corrected from a
+                                              `void` decl (ODR mismatch against
+                                              graphics/DDRAW.cpp's real definition) */
 
 /* Forward-declare free functions implemented below */
 extern void __stdcall World_RenderAll(Vehicle* vehicle);  /* @ 0x44E630 */

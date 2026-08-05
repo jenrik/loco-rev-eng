@@ -14,6 +14,12 @@
 
 /* Subsystem class headers — for InitAllSubsystems and typed dispatch */
 #include "../ui/EditWindow.h"
+/* EditWindow.h only forward-declares NameEntryPanel/GameSetupPanel (its
+ * pPanelA/pPanelB field types); WIN32_PostQuit below needs their complete
+ * types to read GameSetupPanel::field_E8 / the inherited
+ * UI_WindowBase::visible. */
+#include "../ui/NameEntryPanel.h"
+#include "../ui/GameSetupPanel.h"
 // The host menu bootstrap intentionally stops after EditWindow. The remaining
 // original startup chain is retained for the Windows/binary-faithful build.
 #ifdef _WIN32
@@ -1430,5 +1436,117 @@ int CGWND::InitAllSubsystems()
 
     return 0;
 #endif
+}
+
+/* ================================================================== */
+/* WIN32_PostQuit                                                       */
+/* Address: 0x463670                                                    */
+/*                                                                     */
+/* Despite the Ghidra/legacy stub name, this posts no quit message —   */
+/* it minimizes (ShowWindow(..., 7) == SW_SHOWMINNOACTIVE) every        */
+/* constructed UI subsystem window that is currently shown, then the    */
+/* main CGWND window, unconditionally. Called from several WM_SYSCOMMAND/ */
+/* SC_CLOSE-style handlers (ui/HelpWnd.cpp, game/BuildingPanel.cpp,      */
+/* input/Cursor_new_impls.cpp, and — per Ghidra xrefs not previously     */
+/* enumerated — GAMESTATE_WndProc, Town_LoadBackground, and 2 further    */
+/* unnamed call sites) right before/after switching game mode, so the   */
+/* windows get out of the way without being destroyed. Demo-mode builds  */
+/* (g_demo_mode == 1) skip this entirely — verified via the leading      */
+/* CMP/JZ against 0x4a9918 in the disassembly, matching g_demo_mode's    */
+/* documented address everywhere else in the tree. Return value is a     */
+/* bool in AL (true unless the demo-mode early-out is taken); every real  */
+/* caller discards it, so this is declared void here, matching all three  */
+/* existing call sites' `void WIN32_PostQuit(void);` declarations. */
+void WIN32_PostQuit(void)
+{
+    if (g_demo_mode == 1) {
+        return;
+    }
+
+    /* g_about/g_audio_mgr are GameWindow-derived (AboutDialog/HelpWnd):
+     * gated on GameWindow::visible2 (+0x114), per the disassembly's
+     * byte-at-EAX+0x114 check ahead of each ShowWindow call. */
+    if (g_about != nullptr) {
+        AboutDialog* about = static_cast<AboutDialog*>(g_about);
+        if (about->visible2 != 0) {
+            ShowWindow(about->hWnd, 7);
+        }
+    }
+    if (g_audio_mgr != nullptr) {
+        HelpWnd* audioMgr = static_cast<HelpWnd*>(g_audio_mgr);
+        if (audioMgr->visible2 != 0) {
+            ShowWindow(audioMgr->hWnd, 7);
+        }
+    }
+
+    /* g_cursor/g_town/g_postcard/g_postcard_send are UI_WindowBase-derived:
+     * gated on UI_WindowBase::visible (+0xE4). */
+    if (g_cursor != nullptr) {
+        Cursor* cursor = static_cast<Cursor*>(g_cursor);
+        if (cursor->visible != 0) {
+            ShowWindow(cursor->hWnd, 7);
+        }
+    }
+    if (g_town != nullptr) {
+        Town* town = static_cast<Town*>(g_town);
+        if (town->visible != 0) {
+            ShowWindow(town->hWnd, 7);
+        }
+    }
+    if (g_postcard != nullptr) {
+        PostcardAlbum* postcard = static_cast<PostcardAlbum*>(g_postcard);
+        if (postcard->visible != 0) {
+            ShowWindow(postcard->hWnd, 7);
+        }
+    }
+    if (g_postcard_send != nullptr) {
+        PostcardPreviewWindow* postcardSend = static_cast<PostcardPreviewWindow*>(g_postcard_send);
+        if (postcardSend->visible != 0) {
+            ShowWindow(postcardSend->hWnd, 7);
+        }
+    }
+
+    /* g_ui_main (EditWindow) minimizes its two child panels first — each
+     * independently of g_ui_main's own visible flag — then itself. */
+    if (g_ui_main != nullptr) {
+        EditWindow* uiMain = static_cast<EditWindow*>(g_ui_main);
+
+        /* pPanelB (GameSetupPanel, +0x220): gated on its own class-specific
+         * field at +0xE8 (GameSetupPanel::field_E8 in ui/GameSetupPanel.h —
+         * only ever zeroed there today; this is the first evidence it also
+         * doubles as a visible-style flag, mirroring the inherited
+         * UI_WindowBase::visible at +0xE4 that this same class also has but
+         * which the original code does NOT read here). */
+        if (uiMain->pPanelB != nullptr && uiMain->pPanelB->field_E8 != 0) {
+            ShowWindow(uiMain->pPanelB->hWnd, 7);
+        }
+
+        /* pPanelA (NameEntryPanel, +0x21C): gated on inherited
+         * UI_WindowBase::visible (+0xE4). */
+        if (uiMain->pPanelA != nullptr && uiMain->pPanelA->visible != 0) {
+            ShowWindow(uiMain->pPanelA->hWnd, 7);
+        }
+
+        if (uiMain->visible != 0) {
+            if (uiMain->pPopupWindow != nullptr) {
+                uiMain->setState(7);   /* EditWindow::setState, 0x4208F0 */
+            }
+            ShowWindow(uiMain->hWnd, 7);
+        }
+    }
+
+    /* The original dereferences [0x4aa4a0] unguarded here (no CMP/TEST before
+     * the load), matching this file's own pre-existing unguarded uses of
+     * g_main_window elsewhere (e.g. the initMode1()/hWnd reads above) — safe
+     * in the real game because g_main_window is always constructed before
+     * any of this function's WndProc callers can exist. On this host build,
+     * though, `shared/stubs_impl.cpp`/`tests/persistence_fixtures.h` default
+     * it to nullptr, and unit tests can plausibly exercise a WndProc (e.g.
+     * Cursor's SC_CLOSE handler) without having run the full subsystem-init
+     * chain first. Guard defensively — this never changes behavior on the
+     * real init path, only avoids a host-only null deref. */
+    if (g_main_window != nullptr) {
+        ShowWindow(static_cast<CGWND*>(g_main_window)->hWnd, 7);
+    }
 }
 

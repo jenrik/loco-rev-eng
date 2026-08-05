@@ -201,16 +201,21 @@ UI_WindowBase::~UI_WindowBase() {
 }
 
 /* =========================================================== */
-/* UIEntity — dtor for vtable                                  */
+/* UIEntity — REMOVED (CLASS-001).                              */
+/*                                                                */
+/* This block used to be a duplicate `class UIEntity { virtual   */
+/* ~UIEntity(); };` shadow definition providing an assert-stub   */
+/* destructor. It was an ODR violation: ui/UIEntity.h already    */
+/* declares the real, complete `UIEntity : public Entity` class, */
+/* and because C++ name mangling does not encode a class's field */
+/* layout, both definitions produced the exact same mangled      */
+/* `UIEntity::~UIEntity()` symbol — whichever translation unit   */
+/* the linker picked "won" for every caller, regardless of which */
+/* one they meant. The real destructor is now implemented for    */
+/* real in ui/UIEntity.cpp (address 0x423500 body / 0x4234E0     */
+/* scalar-deleting wrapper; see ui/UIEntity.h). Removed rather    */
+/* than left stubbed, per this file's own CLASS-001 policy.      */
 /* =========================================================== */
-class UIEntity {
-public:
-    virtual ~UIEntity();
-};
-UIEntity::~UIEntity() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — UIEntity::~UIEntity");
-}
 
 /* =========================================================== */
 /* ScriptedObject — vtable stubs                                */

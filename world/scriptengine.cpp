@@ -50,7 +50,16 @@ extern "C" {
     void __thiscall UIPANEL_ScrollPanel_HandleDrag(void* panel, int32_t param, int32_t action); /* @ 0x427BD0 */
     void __thiscall RESDATA_SetPosition(void* obj, int32_t x, int32_t y);  /* @ 0x44E700 */
     char __thiscall RESDATA_HitTestChildren(void* obj, int32_t x, int32_t y); /* @ 0x44E6C0 */
-    void __thiscall RESDATA_CreateChildSprite(void* obj, int32_t resId, int32_t param3, int32_t param4); /* @ 0x44E530 */
+    /* Address corrected: 0x44E530 falls inside World_ProcessEvents, not
+     * RESDATA_CreateChildSprite; confirmed via Ghidra at 0x4546D0, which
+     * also confirms the real return type is `void*` (not `void` — an ODR
+     * mismatch against shared/defsym_stubs.cpp's now-corrected definition).
+     * This declaration's second param is really the resource pointer
+     * (passed to UI_IsBitmapReady/TrackPiece_Ctor/RESMGR_SoundObject_Ctor
+     * in the disassembly), not a bare resId int, but that distinction is
+     * left alone here since this whole call path (RESDATA_ScriptedObject::
+     * Start) has zero callers in this tree today. */
+    void* __thiscall RESDATA_CreateChildSprite(void* obj, int32_t resId, int32_t param3, int32_t param4); /* @ 0x4546D0 */
     int32_t __thiscall ResourceManager_GetById(void* resmgr, int32_t resId); /* @ 0x446EA0 */
     void* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int32_t param, int32_t x, int32_t y); /* @ 0x428DA0 */
     void* __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x428E40 */
@@ -577,7 +586,10 @@ void __fastcall RESDATA_ScriptedObject::Update()
             Town_SelectBuilding(g_town_view, 0);
         }
         if (g_ddraw_active != nullptr) {
-            extern void __thiscall DDRAW_SelectBuilding(void* ddraw, int32_t building);
+            /* 0x459180 — returns uint8_t; corrected from a `void` decl,
+             * which was an ODR mismatch against the real definition
+             * (graphics/DDRAW.cpp). Return value unused here either way. */
+            extern int __thiscall DDRAW_SelectBuilding(void* ddraw, int32_t building);
             DDRAW_SelectBuilding(g_ddraw_building, 0);
         }
 

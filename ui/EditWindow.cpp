@@ -140,7 +140,6 @@ void  __thiscall RESMGR_LoadSoundResource(int res);                 /* 0x44B8E0 
 /* UI_SetWindowVisible (0x425F20) now declared in ui/UI_WindowBase.h,
  * included transitively via EditWindow.h (EditWindow : public
  * UI_WindowBase). */
-void  __stdcall RESDATA_FreeWindow(PopupWindow* window);           /* 0x460B70 */
 
 void    __fastcall Town_BlitElement(void* src, int sx, int sy,
                                     int sw, int sh, void* dst,
@@ -208,13 +207,28 @@ EditWindow::EditWindow(HINSTANCE hInstance, UINT resourceId) :
     g_editwindow_ptr = this;
 }
 
+/* ================================================================== */
+/* PopupWindow::DestroyMCIChild                                        */
+/* Address: 0x4544A0                                                    */
+/* ================================================================== */
+void PopupWindow::DestroyMCIChild()
+{
+    if (hWnd != nullptr) {
+        SendMessageA(hWnd, 0x804, 0, 0); /* observed value; not a verified
+                                             named WM_* constant — see the
+                                             class doc comment in EditWindow.h */
+        SendMessageA(hWnd, 0x10 /* WM_CLOSE */, 0, 0);
+        hWnd = nullptr;
+    }
+}
+
 // Repeated binary sequence (base_destructor, hide, setState(7)).
 // PopupWindow models the observed virtual destructor and HWND field.
 static void destroy_popup_window(PopupWindow*& popup, LONG saved_wnd_proc)
 {
     if (!popup) return;
     SetWindowLongA(popup->hWnd, -4, saved_wnd_proc);
-    RESDATA_FreeWindow(popup);
+    popup->DestroyMCIChild();
     delete popup;
     popup = nullptr;
 }

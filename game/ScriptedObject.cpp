@@ -89,7 +89,11 @@ extern void UIPANEL_ScrollPanel_HandleDrag(void* panel, int tool,
 extern void TileMap_InvalidateRect(void* tilemap, int l, int t,
                                    int r, int b);              /* 0x45E240 */
 extern void Town_SelectBuilding(void* town, int index);        /* 0x42EC60 */
-extern void DDRAW_SelectBuilding(void* ddraw, int index);      /* 0x458B20 */
+/* Unused in this file. Address corrected: 0x458B20 disassembles to
+ * DDRAW_CleanupSprites (0x458B00's body), not DDRAW_SelectBuilding;
+ * confirmed via Ghidra at 0x459180 (see graphics/DDRAW.cpp for the real
+ * definition, which returns uint8_t). */
+extern int  DDRAW_SelectBuilding(void* ddraw, int index);      /* 0x459180 */
 
 /* GameObject helpers — now class methods; kept as extern for transition */
 extern void GameObject_PtInRect(void* obj, int x, int y);      /* 0x436A10 */

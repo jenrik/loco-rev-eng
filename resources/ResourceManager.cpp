@@ -1390,8 +1390,13 @@ SoundObject::SoundObject(int32_t text_length, void* town, RESDATA* resource,
     }
 }
 
-/** SoundObject::~SoundObject — compiler-managed destructor body
- * Address: 0x448FE0 */
+/** SoundObject::~SoundObject — user-defined base destructor body
+ * Address: 0x449000 (Ghidra: SoundObject_Dtor)
+ *
+ * Frees text_buf, resets the vtable pointer to VTBL_SOUND_OBJECT (compiler-
+ * managed in this C++ reconstruction), then chains to TrackPiece::~TrackPiece
+ * (0x40D040). This is the real destructor body, not the vtable-slot thunk —
+ * see RESMGR_SoundObject_Ctor below for that distinction. */
 SoundObject::~SoundObject()
 {
     if (text_buf != nullptr) {
@@ -1412,8 +1417,11 @@ void* RESMGR_SoundObject_Ctor(void* self, int32_t strLen, int32_t param2,
         pointer_from_handle<RESDATA>(param3), font, param5);
 }
 
-/* The original scalar-deleting destructor at 0x448FE0 is emitted by
- * SoundObject::~SoundObject; no flag-bearing free-function wrapper is
+/* The original scalar deleting destructor — vtable[0], Ghidra:
+ * SoundObject_ScalarDeletingDtor, address 0x448FE0 (NOT 0x449000, which is
+ * the base destructor body above) — is a 30-byte thunk that calls
+ * SoundObject::~SoundObject then conditionally frees the object if flags&1.
+ * Emitted automatically by the compiler; no free-function wrapper is
  * reimplemented. */
 
 /* ================================================================== */

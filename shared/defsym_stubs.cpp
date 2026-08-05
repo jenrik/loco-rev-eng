@@ -154,7 +154,27 @@ void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
 void NETMAN_SendAck(void*) { /* host no-op */ }
 void UI_CreateTooltip(void*, int, short, int, int) { /* host no-op */ }
 void UIPANEL_LockSurface(void*) { /* host no-op */ }
-void RESDATA_CreateChildSprite(void*, void*, int, int) { /* host no-op */ }
+/* RESDATA_CreateChildSprite(void*, void*, int, int) — 0x4546D0.
+ * Ghidra confirms one real function (`void* __thiscall
+ * RESDATA_CreateChildSprite(void* this, int resource, ushort x, int
+ * type_flag)`) with 41 real xrefs (Town_HandleTileClick,
+ * RESDATA_ScriptedObject_Start, UIPANEL_ScrollPanel_InitSprites,
+ * DDRAW_InitBuildingSprites, ...). This C++ overload's declared callers
+ * (ui/UIPANEL.cpp: tab_sprites[]/content_bg_sprite/list_bg_sprite/
+ * list_text_sprite/sound_btn_sprite/item_sprites[], all via
+ * UIPANEL::InitSprites; town/Town.cpp: cursor sprites via
+ * Town::handle_tile_click) all expect a `void*` back — this stub used to
+ * return `void`, so every caller stored whatever garbage happened to be
+ * in the return register into a sprite-pointer field.
+ *
+ * Verified unreachable today: `grep`-confirmed zero C++ callers of both
+ * UIPANEL::InitSprites() and Town::handle_tile_click() anywhere in this
+ * tree (matches PROGRESS.md's 2026-08-05 finding for the latter, arrived
+ * at independently here). Kept loud rather than silently "fixed" to
+ * return nullptr, per this file's own precedent one entry up
+ * (WNDPROC_StreamFromMemory) and CLAUDE.md's stub policy: a future
+ * caller must fail loudly, not read a plausible-looking null forever. */
+void* RESDATA_CreateChildSprite(void*, void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached — RESDATA_CreateChildSprite(void*, void*, int, int) 0x4546D0, verified unreachable but must not silently return garbage if that changes"); return nullptr; }
 void UI_DefWndProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
 void Cursor_HandleWindowPaint(void*, int) { /* host no-op */ }
 /** CRT_itoa — Convert integer to string in given radix (base 2-36).
@@ -223,26 +243,15 @@ uint32_t WIN32_RecvNetworkData(void*, uint32_t, const char*) {
     }
     return 0;
 }
-/* WIN32_PostQuit() (C++-mangled, no args) — every real caller
- * (ui/HelpWnd.cpp, game/BuildingPanel.cpp, input/Cursor_new_impls.cpp)
- * declares this exact overload to break the Win32 message loop on
- * close/SC_CLOSE/screensaver-mode-switch. A prior pass removed the no-op
- * stub here believing core/CGWND.cpp already defines it; it does not.
- * Reachable from ordinary UI actions (closing the Help window, cursor
- * WM_SYSCOMMAND SC_CLOSE), so this warns once and no-ops rather than
- * asserting — the host's main loop (CGWND_PumpMessages) has no Win32
- * message queue to post a WM_QUIT into regardless.
- * TODO: give this a real host-side quit signal once CGWND_PumpMessages'
- * exit path is wired for it; address unresolved (no xref target found
- * shared by all three call sites at removal time). */
-void WIN32_PostQuit() {
-    static bool warned = false;
-    if (!warned) {
-        fprintf(stderr, "STUB: WIN32_PostQuit not implemented — "
-                         "quit-message post dropped\n");
-        warned = true;
-    }
-}
+/* WIN32_PostQuit: real implementation now in core/CGWND.cpp (verified
+ * address 0x463670 — despite the name, it minimizes every constructed UI
+ * subsystem window then the main window; it posts no quit message). The
+ * previous no-op here was itself wrong on top of being a stub: its own
+ * doc comment's "address unresolved" claim was false (0x463670 was
+ * findable via a direct xref walk from all three real call sites) and its
+ * "quit-message post dropped" framing mischaracterized what the original
+ * function does. See core/CGWND.cpp's WIN32_PostQuit for the real body
+ * and PROGRESS.md for this correction's date-stamped entry. */
 void EditWindow_render(void*) { /* host no-op */ }
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
 void CRT_exit(char const**, char const**) { /* host no-op */ }
@@ -257,7 +266,9 @@ void NETMAN_SendPacket(void*) { /* host no-op */ }
 void* CreateHatchBrush = nullptr;
 void* g_editwindow_ptr = nullptr;
 void EditWindow_cleanupSprites(void*) { /* host no-op */ }
-void RESDATA_FreeWindow(void*) { /* host no-op */ }
+/* RESDATA_FreeWindow removed: its only caller (ui/EditWindow.cpp) now calls
+ * the real PopupWindow::DestroyMCIChild() (0x4544A0) instead — see
+ * PROGRESS.md. This stub was orphaned dead code, not a live no-op. */
 void ResourceManager_GetStringById(void**, int) { /* host no-op */ }
 void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
@@ -370,7 +381,12 @@ void __thiscall Config_WriteInt(void* config, const char* section, const char* k
     WritePrivateProfileStringA(section, key, buf, (const char*)((char*)config + 4));
 }
 void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
-void NET_UpdatePlayerList() { /* host no-op */ }
+/* NET_UpdatePlayerList: real body now in network/NetworkPlayerList.cpp
+ * (0x445170, returns short). This used to be a wrong-signature (void
+ * return) no-op stub that PlayerConfig.cpp's C++-linkage declaration
+ * silently resolved to instead of the (previously nonexistent) real
+ * function; keeping both would now be a duplicate-definition/ODR
+ * violation since C++ mangling does not encode return type. */
 void Town_CheckOccupied(void*, int, int, int, int) { /* host no-op */ }
 void Town_SelectBuilding(void*, void*) { /* host no-op */ }
 void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { /* host no-op */ }

@@ -15,8 +15,10 @@
 // Status: TRANSCRIBED
 
 #include "DDRAW.h"
+#include "../game/Building.h"
 #include <new>
 #include <cassert>
+#include <cstdio>
 
 /* ================================================================== */
 /* Typed slot view — grounded in Ghidra vtable 0x478548                */
@@ -100,8 +102,11 @@ extern void __fastcall RESDATA_UpdateChild(void* self);     /* @ 0x454F80 */
 extern int  __fastcall RESDATA_HitTestChildren(void* self, int x, int y); /* @ 0x44A0C0 */
 extern void __cdecl   RESDATA_Lock(void* ptr);              /* @ 0x449410 */
 extern void __cdecl   RESDATA_Unlock(void* ptr);            /* @ 0x449420 */
+/* Unused in this file. Address corrected: no function exists at 0x454190;
+ * confirmed via Ghidra at 0x4546D0 (see ui/UIPANEL.cpp for the real
+ * (void*, void*, int, int) overload and its verified-dead-code stub). */
 extern void* __fastcall RESDATA_CreateChildSprite(void* parent, int res_id,
-                                                   int a, int b); /* @ 0x454190 */
+                                                   int a, int b); /* @ 0x4546D0 */
 extern void __fastcall RESDATA_DispatchEvent(void* self, int a, int b,
                                               int c, int d, void* e, int f); /* @ 0x454900 */
 extern void __fastcall RESDATA_SoundObject_Init(void* sprite, const char* text); /* @ 0x449070 */
@@ -201,6 +206,18 @@ void* g_tilemap;            /* 0x4AAD08 */
 
 #define TRACK_ENTITY_DATA         0x44c  /* dword: vehicle's track piece ptr (in Building) */
 #define BUILDING_OCCUPANCY        0x120  /* dword: attached entity (in Building) */
+
+/* Selected-entity fields read/written by DDRAW_Building::SelectBuilding
+ * (0x459180) when closing a station name-edit popup. Not yet attributed to
+ * a named Building member (offsets fall past Building.h's currently-mapped
+ * +0xF0 tail); confirmed only by disassembly at 0x4591B1/0x4591BE and
+ * 0x459612/0x459624. Do not confuse STATION_EDIT_ACTIVE_OFFSET (0x128) with
+ * GameVehicle::busy_flag, which happens to share the same byte offset in an
+ * unrelated class hierarchy (game/GameVehicle.h). */
+#define STATION_EDIT_PENDING_OFFSET 0x11c /* dword: station text-edit pending flag */
+#define STATION_EDIT_ACTIVE_OFFSET  0x128 /* byte: station text-edit active flag */
+#define ENTITY_ALIVE_OFFSET         0x18  /* byte: 1 = entity object still alive
+                                              (also read in UpdateBuilding above) */
 
 /* ================================================================== */
 /* DDRAW_Building::Create                                              */
@@ -392,14 +409,171 @@ uint8_t DDRAW_Building::InitBuildingSprites()
 }
 
 /* ================================================================== */
+/* AudioChannel_Release                                                */
+/* Address: 0x40ECA0, __fastcall(AudioChannel* channel)                */
+/*                                                                     */
+/* AudioChannel::Release() — stops playback and releases the DirectSound */
+/* secondary buffer, then resets the channel to idle.                  */
+/*                                                                     */
+/* AudioChannel has no C++ class in this codebase yet (only forward-   */
+/* declared in ui/HelpWnd.h) — it is a DirectSound buffer wrapper that  */
+/* has never been reverse engineered as a type. The field/vtable        */
+/* accesses below are a direct, evidence-backed transcription of the   */
+/* disassembly (dword-indexed: +0x00 back-link, +0x10 state, +0x14      */
+/* ds_buffer ptr, +0x38 resource_id) rather than named-member access,   */
+/* matching this file's existing precedent for as-yet-unmapped structs  */
+/* (see BuildingShowTooltip's raw `desc` offsets below).                */
+/* TODO: model AudioChannel as a real class once its call sites         */
+/* (ui/HelpWnd.cpp, this function) are reconciled; then replace the     */
+/* vtable arithmetic with typed virtual calls (Stop()/Release()).       */
+/* ================================================================== */
+
+static void AudioChannel_Release(void* channel)
+{
+    if (channel == nullptr) {
+        return;
+    }
+    uint32_t* words = reinterpret_cast<uint32_t*>(channel);
+
+    void* ds_buffer = reinterpret_cast<void*>(static_cast<uintptr_t>(words[5])); /* +0x14 */
+    if (ds_buffer != nullptr) {
+        void** vtbl = *reinterpret_cast<void***>(ds_buffer);
+        using StopFn    = long (__stdcall*)(void*);
+        using ReleaseFn = unsigned long (__stdcall*)(void*);
+        reinterpret_cast<StopFn>(vtbl[0x48 / sizeof(void*)])(ds_buffer);    /* vtbl[0x48/4] */
+        reinterpret_cast<ReleaseFn>(vtbl[8 / sizeof(void*)])(ds_buffer);    /* vtbl[8/4]    */
+        words[5] = 0;
+    }
+    if (words[0] != 0) {
+        *reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(words[0])) = 0;
+        words[0] = 0;
+    }
+    words[4]  = 1;   /* +0x10 state = idle */
+    words[0xe] = 0;  /* +0x38 resource_id = 0 */
+}
+
+/* ================================================================== */
 /* DDRAW_Building::SelectBuilding                                     */
 /* Address: 0x459180                                                   */
+/*                                                                     */
+/* Per-building-type selection handler. Only the deselect path         */
+/* (entity == nullptr) is implemented for real: it is the only path    */
+/* reachable from this codebase's callers today — the free-function    */
+/* bridge DDRAW_SelectBuilding(void*, int) below is always called with */
+/* building=0 (world/tilemap.cpp TileMap::HandleClick, world/           */
+/* scriptengine.cpp), and the only in-tree caller of this member        */
+/* method itself is UpdateBuilding()'s SelectBuilding(nullptr).        */
+/*                                                                      */
+/* The entity != nullptr per-building-type switch (road/track/station/  */
+/* vehicle/station-list/pattern/other — cases 2/3/4/6/7/8/0xC) is a      */
+/* substantially larger dispatch (DDRAW_UpdateStationSprites,           */
+/* DDRAW_RefreshStationList, Town_IsValidPlacement, etc. — none of       */
+/* which exist in this tree yet) and is intentionally deferred rather    */
+/* than guessed at; see the loud stub below.                            */
+/*                                                                      */
+/* One sub-step is *not* transcribed even on the taken path: this       */
+/* object's own vtable[1] ("Refresh/Hide/Show", DDRAW.h line ~36) is    */
+/* called with no explicit args at the very top of the real deselect    */
+/* path (0x45965B) and again at the tail (0x459646, shared with the     */
+/* select path). DDRAW_Building does not yet model that slot as a C++   */
+/* virtual method (it isn't part of the class today), and CLAUDE.md     */
+/* forbids hand-rolled vtable arithmetic on known objects — so it is    */
+/* skipped here with this note rather than reimplemented unsafely.      */
+/* Everything else on the deselect path (state writes, popup-panel      */
+/* resource release, invalidate, return value) is a faithful            */
+/* transcription and the return value is unaffected by the missing     */
+/* call (it is always 0 on this path either way).                      */
 /* ================================================================== */
 
 uint8_t DDRAW_Building::SelectBuilding(Building* entity)
 {
-    // See first-pass decompilation or native/ddraw_building_sprites.c
-    return *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(this) + ACTIVE_FLAG_OFFSET);
+    uint8_t* self = reinterpret_cast<uint8_t*>(this);
+
+    /* Pre-check (0x45918F-0x4591CC): if a station popup with an active
+     * text-edit is currently open, close it — regardless of the incoming
+     * `entity`, this operates on the entity already selected. */
+    if (*reinterpret_cast<uint16_t*>(self + BUILDING_TYPE_OFFSET) == 3 &&
+        this->selected_entity != nullptr) {
+        uint8_t* sel = reinterpret_cast<uint8_t*>(this->selected_entity);
+        if (sel[ENTITY_ALIVE_OFFSET] == 1 &&
+            *reinterpret_cast<int32_t*>(sel + BUILDING_OCCUPANCY) == 0) {
+            *reinterpret_cast<int32_t*>(sel + STATION_EDIT_PENDING_OFFSET) = 0;
+            sel[STATION_EDIT_ACTIVE_OFFSET] = 0;
+            /* vtable[7] on the selected entity == Entity::StopSound (see
+             * core/Entity.h, address 0x405A20); Building : public Entity. */
+            static_cast<Building*>(this->selected_entity)->StopSound(0);
+        }
+    }
+
+    if (entity == nullptr) {
+        /* Deselect path (0x45965B-0x459658). See the vtable[1] note above
+         * for the one intentionally-skipped sub-step. */
+        // TODO: decompile 0x459180 vtable[1] dispatch (this->Refresh/Hide/Show)
+        uint8_t old_flag_90 = self[0x90];
+        self[ACTIVE_FLAG_OFFSET] = 0;
+        *reinterpret_cast<uint16_t*>(self + BUILDING_TYPE_OFFSET) = 0;
+        if (old_flag_90 != 0) {
+            self[0x90] = 0;
+        }
+        g_active_panel = (g_is_town_mode != 0) ? g_town_view : nullptr;
+        AudioChannel_Release(this->popup_audio_channel);
+
+        /* popup_panel (embedded sub-object at +0x3A0) vtable[6] ==
+         * "LoadChildResource" per this file's DDRAW_SpriteView adapter
+         * (same slot/args used by InvalidateAll above: load_resource(0,-1,0)
+         * on this exact field). Uses the same typed-vtable-view idiom as
+         * the rest of this file rather than raw vtable arithmetic.
+         *
+         * Host note: unlike the original binary, this file's host-only
+         * constructor (#ifndef _WIN32 branch above) does not run
+         * GameObject_BaseCtor for popup_panel/sub_object_1/pattern_container/
+         * track_sprite, so on this build popup_panel's own value (which
+         * doubles as its vtable pointer in the embedded-object model) is
+         * still the zero from operator_new. The real binary never needs
+         * this guard because construction always ran first; here it is a
+         * required host deviation to avoid dispatching through a null
+         * vtable pointer until that constructor gap is closed. */
+        if (this->popup_panel != nullptr) {
+            sprite_view(static_cast<void*>(&this->popup_panel))->load_resource(0, -1, 0);
+        }
+
+        TileMap_InvalidateRect(&g_tilemap,
+                               *reinterpret_cast<int32_t*>(self + 8),
+                               *reinterpret_cast<int32_t*>(self + 0xc),
+                               *reinterpret_cast<int32_t*>(self + 0x10),
+                               *reinterpret_cast<int32_t*>(self + 0x14));
+        return self[ACTIVE_FLAG_OFFSET];  /* always 0 here */
+    }
+
+    fprintf(stderr, "STUB: %s (entity != nullptr) at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_Building::SelectBuilding 0x459180 "
+                "select-path per-building-type switch not decompiled");
+    return 0;
+}
+
+/* ================================================================== */
+/* DDRAW_SelectBuilding — free-function bridge                         */
+/* Address: 0x459180 (same function as DDRAW_Building::SelectBuilding) */
+/*                                                                     */
+/* Matches world/tilemap.h's declared signature/return type, the only  */
+/* live per-frame caller (TileMap::HandleClick, world/tilemap.cpp).    */
+/* `building` is declared `int` (not a pointer) at every caller of      */
+/* this exact overload, and every one of them passes literal 0 — never */
+/* a real object address. On this host build (64-bit), an `int` cannot  */
+/* carry a valid Building* anyway, so a nonzero `building` is rejected  */
+/* loudly rather than truncated into a bad pointer.                     */
+/* ================================================================== */
+
+int DDRAW_SelectBuilding(void* ddraw_building, int building)
+{
+    if (building == 0) {
+        return static_cast<DDRAW_Building*>(ddraw_building)->SelectBuilding(nullptr);
+    }
+    fprintf(stderr, "STUB: %s (building != 0) at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_SelectBuilding(void*, int) called with a "
+                "nonzero `int` building; no caller does this today and an int "
+                "cannot carry a 64-bit Building* on this host build");
+    return 0;
 }
 
 /* ================================================================== */

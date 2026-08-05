@@ -413,7 +413,11 @@
 /* Used for sound-editor/resource-editor UI elements with text labels.  */
 /* ================================================================== */
 #define VTBL_SOUND_OBJECT              0x00478280  /* SoundObject vtable
-    [0]  +0x00: scalar deleting destructor (RESMGR_SoundObject_Dtor, 0x448FE0) */
+    [0]  +0x00: scalar deleting destructor (Ghidra: SoundObject_ScalarDeletingDtor,
+                0x448FE0 — thin 30-byte thunk; calls the real base destructor
+                body at 0x449000 (Ghidra: SoundObject_Dtor == this codebase's
+                SoundObject::~SoundObject, resources/ResourceManager.cpp), then
+                conditionally frees the object) */
 
 /* ================================================================== */
 /* ScriptEngine / ScriptedObject vtables                                 */

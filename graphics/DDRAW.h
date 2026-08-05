@@ -147,7 +147,13 @@ public:
 
     int32_t     popup_visible;          // +0x3E0  non-zero = popup panel visible
 
-    // +0x3E4 to +0x427: more fields
+    // +0x3E4: more fields
+    void*       popup_audio_channel;    // +0x3E8  AudioChannel* — ambient/name-
+                                        //         edit sound channel; released
+                                        //         in SelectBuilding (0x459180)
+                                        //         via AudioChannel_Release (0x40ECA0)
+                                        //         when non-null
+    // +0x3EC to +0x427: more fields
 
     void*       pattern_container;      // +0x428  Embedded GameObject*
                                         //         pattern container
@@ -809,7 +815,17 @@ extern uint8_t  g_is_town_mode;       /* 0x485328  1 = in-game town mode    */
 extern uint8_t  g_ddraw_active;       /* 0x4A9F78  1 = DDraw active         */
 extern uint16_t g_game_difficulty;    /* 0x4AA288  1=easy, 2=normal, 3=hard*/
 
-extern void* g_active_panel;          /* 0x4852A0  active UI panel          */
+extern void* g_active_panel;          /* 0x4FD3E0  active UI panel override
+                                        * (corrected: disassembly of
+                                        * DDRAW_SelectBuilding/0x459180 stores
+                                        * through [0x4fd3e0]; 0x4852A0 below is
+                                        * g_town_view, not this global)         */
 extern void* g_tooltip_mgr;           /* tooltip manager context            */
-extern void* g_town_view;             /* 0x4A99C8  town view object         */
+extern void* g_town_view;             /* 0x4852A0  town view object
+                                        * (corrected: matches game/World.cpp and
+                                        * world/tilemap.cpp's g_town_view decls,
+                                        * and the literal AND-mask operand read
+                                        * at DDRAW_SelectBuilding/0x459180.
+                                        * 0x4A99C8 was g_active_panel's mistaken
+                                        * address, swapped with this entry.)     */
 extern int    g_demo_mode;            /* demo mode flag                     */

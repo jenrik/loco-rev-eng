@@ -27,8 +27,12 @@
 
 #include "NetworkPlayerList.h"
 #include "../graphics/LOCOBITMAP.h"
+#include "../game/PlayerConfig.h"
 #ifndef _WIN32
 #include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <string>
 #endif
 /* Dispatch-table addresses are documentation only; C++ manages dispatch. */
 /* ================================================================== */
@@ -60,6 +64,22 @@ extern int32_t __stdcall SetBkMode(void* hdc, int32_t mode);
 extern int32_t __stdcall DrawEdge(void* hdc, void* qrc, uint32_t edge,
                                    uint32_t grfFlags);
 
+/* File I/O — real host bodies live in shared/link_stubs.cpp (fopen/fread-
+ * backed); the CRT_Find* trio backs the _WIN32-only NET_GetHostName
+ * enumeration path below (host uses std::filesystem instead — see
+ * NET_GetHostName's #ifndef _WIN32 branch). */
+extern void*   __stdcall CreateFileA(const char* name, uint32_t access, uint32_t share,
+                                      void* security, uint32_t creation,
+                                      uint32_t flags, void* tmpl);
+extern int32_t __stdcall ReadFile(void* file, void* buf, uint32_t n,
+                                   uint32_t* read, void* ovlp);
+extern int32_t __stdcall CloseHandle(void* h);
+#ifdef _WIN32
+extern void*   __stdcall CRT_FindFirstFile(const char* pattern, void* find_data);
+extern int32_t __stdcall CRT_FindNextFile(void* handle, void* find_data);
+extern int32_t __stdcall CRT_FindClose(void* handle);
+#endif
+
 } /* extern "C" */
 
 /* C++ allocation helpers */
@@ -69,7 +89,7 @@ extern void  __cdecl GLOBAL_free(void* ptr);
 /* Game globals */
 extern void* g_resmgr;                  /* 0x4855E8 */
 extern char  g_install_path[];          /* 0x4A99C8 */
-extern void* g_player_config;           /* 0x4AA4A8 */
+extern PlayerConfig* g_player_config;   /* 0x4AA4A8 */
 
 /* UI helpers */
 extern void* __thiscall UIPANEL_BeginPaint(int32_t panel);
@@ -92,7 +112,6 @@ extern void  __cdecl    UI_CenterWindow(void* outer, void* inner);
 
 /* DPlay helpers */
 extern int32_t __thiscall DPLAY_SetPlayerData(void* slot, const char* path);
-extern void*  __cdecl       NET_GetHostName(int32_t param_1, int32_t param_2);
 extern uint32_t __cdecl     NET_ComputeColor(uint8_t param1, uint8_t param2,
                                              uint8_t param3);
 
@@ -113,28 +132,64 @@ extern char  g_empty_string;            /* 0x4851D0 */
 static const char* PostBag_Subdir(int32_t type)
 {
     extern int32_t DAT_004a97a0;
+#ifdef _WIN32
+    /* Windows-faithful path: literal addresses of the original PE string
+     * table (verified via Ghidra get_strings against locoaudit — the raw
+     * bytes at each address are the backslash-prefixed subfolder name).
+     * Documentation only: this branch is never linked, only type-checked
+     * under the MinGW cross build (cross/mingw32-typecheck.txt). */
     switch (type) {
-    case 0: return (const char*)0x0047eba4;
-    case 1: return (const char*)0x0047ebc4;
-    case 2: return (const char*)0x0047ebb8;
-    case 3: return (const char*)0x0047ebac;
-    case 4: return (const char*)0x0047eb90;
-    case 5: return (const char*)0x0047eb9c;
+    case 0: return (const char*)0x0047eba4;   /* "\\Album" */
+    case 1: return (const char*)0x0047ebc4;   /* "\\Sort\\In" */
+    case 2: return (const char*)0x0047ebb8;   /* "\\Sort\\Out" */
+    case 3: return (const char*)0x0047ebac;   /* "\\Sort\\Bag" */
+    case 4: return (const char*)0x0047eb90;   /* "\\Att_Out" */
+    case 5: return (const char*)0x0047eb9c;   /* "\\Att_In" */
     case 6:
         switch (DAT_004a97a0) {
-        default: return (const char*)0x0047ebf8;
-        case 1:  return (const char*)0x0047ec58;
-        case 2:  return (const char*)0x0047ec4c;
-        case 4:  return (const char*)0x0047ec40;
-        case 5:  return (const char*)0x0047ec34;
-        case 6:  return (const char*)0x0047ec28;
-        case 7:  return (const char*)0x0047ec1c;
-        case 8:  return (const char*)0x0047ec10;
-        case 9:  return (const char*)0x0047ec04;
+        default: return (const char*)0x0047ebf8;  /* "\\Easter\\Eng" */
+        case 1:  return (const char*)0x0047ec58;  /* "\\Easter\\Dan" */
+        case 2:  return (const char*)0x0047ec4c;  /* "\\Easter\\Dut" */
+        case 4:  return (const char*)0x0047ec40;  /* "\\Easter\\Fre" */
+        case 5:  return (const char*)0x0047ec34;  /* "\\Easter\\Ger" */
+        case 6:  return (const char*)0x0047ec28;  /* "\\Easter\\Ita" */
+        case 7:  return (const char*)0x0047ec1c;  /* "\\Easter\\Nor" */
+        case 8:  return (const char*)0x0047ec10;  /* "\\Easter\\Spa" */
+        case 9:  return (const char*)0x0047ec04;  /* "\\Easter\\Swe" */
         }
-    case 7: return (const char*)0x0047ed18;
+    case 7: return (const char*)0x0047ed18;   /* "\\Design" */
     default: return (const char*)0x0047eba4;
     }
+#else
+    /* Host addresses do not contain the original PE string literals (see
+     * NetworkPlayerList::NetworkPlayerList's own #ifndef _WIN32 branch for
+     * the established precedent). Real subfolder names, single forward
+     * slash (the original's raw bytes double the backslash separator —
+     * a cosmetic quirk with no behavioral effect once concatenated into a
+     * filesystem path, so it is not reproduced here). */
+    switch (type) {
+    case 0: return "/Album";
+    case 1: return "/Sort/In";
+    case 2: return "/Sort/Out";
+    case 3: return "/Sort/Bag";
+    case 4: return "/Att_Out";
+    case 5: return "/Att_In";
+    case 6:
+        switch (DAT_004a97a0) {
+        default: return "/Easter/Eng";
+        case 1:  return "/Easter/Dan";
+        case 2:  return "/Easter/Dut";
+        case 4:  return "/Easter/Fre";
+        case 5:  return "/Easter/Ger";
+        case 6:  return "/Easter/Ita";
+        case 7:  return "/Easter/Nor";
+        case 8:  return "/Easter/Spa";
+        case 9:  return "/Easter/Swe";
+        }
+    case 7: return "/Design";
+    default: return "/Album";
+    }
+#endif
 }
 
 /* ================================================================== */
@@ -945,6 +1000,25 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
 }
 
 /* ================================================================== */
+/* count_and_free_postbag_list — shared by RegisterPlayer/                */
+/* UnregisterPlayer/GetPlayerAddress (0x444D00/0x444FB0/0x445000) and     */
+/* NET_UpdatePlayerList (0x445170): each walks a NET_GetHostName(2, 0)    */
+/* list, frees every node, and returns the count. The decompiler shows    */
+/* this exact loop inlined at all four addresses. */
+/* ================================================================== */
+static int16_t count_and_free_postbag_list(PostBagFileNode* node)
+{
+    int16_t count = 0;
+    while (node != nullptr) {
+        PostBagFileNode* next = node->next;
+        ++count;
+        GLOBAL_free(node);
+        node = next;
+    }
+    return count;
+}
+
+/* ================================================================== */
 /* RegisterPlayer — 0x444D00                                            */
 /*                                                                      */
 /* Save a DPLAY_PlayerSlot to a .crd file in the specified PostBag     */
@@ -979,20 +1053,7 @@ uint32_t NetworkPlayerList::RegisterPlayer(void* player_slot,
     }
 
     /* Re-count Sort_Out cache */
-    {
-        void* node;
-        void* next;
-        int16_t count = 0;
-
-        node = NET_GetHostName(2, 0);
-        while (node != NULL) {
-            next = *(void**)((int8_t*)node + 0x504);
-            count++;
-            GLOBAL_free(node);
-            node = next;
-        }
-        this->msg_count_cache = count;
-    }
+    this->msg_count_cache = count_and_free_postbag_list(NET_GetHostName(2, 0));
 
     if (type == 0) {
         /* PixelDataCache_Lookup omitted for simplification */
@@ -1009,18 +1070,7 @@ uint32_t NetworkPlayerList::RegisterPlayer(void* player_slot,
 void NetworkPlayerList::UnregisterPlayer(const char* filepath)
 {
     if (DeleteFileA(filepath) != 0) {
-        void* node;
-        void* next;
-        int16_t count = 0;
-
-        node = NET_GetHostName(2, 0);
-        while (node != NULL) {
-            next = *(void**)((int8_t*)node + 0x504);
-            count++;
-            GLOBAL_free(node);
-            node = next;
-        }
-        this->msg_count_cache = count;
+        this->msg_count_cache = count_and_free_postbag_list(NET_GetHostName(2, 0));
     }
 }
 
@@ -1046,17 +1096,182 @@ void NetworkPlayerList::GetPlayerAddress(void* player_slot,
               configId);
 
     if (DeleteFileA(filepath) != 0) {
-        void* node;
-        void* next;
-        int16_t count = 0;
+        this->msg_count_cache = count_and_free_postbag_list(NET_GetHostName(2, 0));
+    }
+}
 
-        node = NET_GetHostName(2, 0);
-        while (node != NULL) {
-            next = *(void**)((int8_t*)node + 0x504);
-            count++;
-            GLOBAL_free(node);
-            node = next;
+/* ================================================================== */
+/* NET_GetHostName — 0x4446F0                                             */
+/*                                                                        */
+/* Enumerate validated PostBag .crd files under a subdirectory selected   */
+/* by `type` (see PostBag_Subdir), matching the local player's numeric    */
+/* id prefix ("%03d*.crd"). A file is "validated" when its first 2 bytes  */
+/* equal PLAYERCONFIG_MAGIC (0x66) — the same postcard-record magic        */
+/* PlayerConfig writes (game/PlayerConfig.h). Returns a caller-owned       */
+/* singly-linked list of full file paths (free with GLOBAL_free, node by   */
+/* node — see PostBagFileNode in NetworkPlayerList.h for why this is a     */
+/* typed struct rather than the original's raw 0x508-byte heap block).     */
+/*                                                                        */
+/* `param2` selects an extra numbered subfolder when non-zero; every real  */
+/* call site recovered in this codebase (Town.cpp, NetworkPlayerList.cpp)  */
+/* always passes 0, so that branch is implemented for fidelity/completeness*/
+/* only and is not exercised by any test.                                  */
+/* ================================================================== */
+PostBagFileNode* NET_GetHostName(int32_t type, int32_t param2)
+{
+#ifdef _WIN32
+    /* Windows-faithful path: mirrors the decompiled 0x4446F0 control flow
+     * with the original PE string-literal addresses. Documentation only —
+     * never linked, only type-checked under the MinGW cross build. */
+    const char* subdir = PostBag_Subdir(type);
+    char wildcard[0x504] = {};
+    char directory[0x504] = {};
+    if (param2 == 0) {
+        wsprintfA(wildcard, (const char*)0x0047ece4, g_install_path,
+                  (const char*)0x0047e0c4, subdir, g_player_config->player_id);
+        wsprintfA(directory, (const char*)0x0047ecdc, g_install_path,
+                  (const char*)0x0047e0c4, subdir);
+    } else {
+        wsprintfA(wildcard, (const char*)0x0047ed04, g_install_path,
+                  (const char*)0x0047e0c4, subdir, param2,
+                  g_player_config->player_id);
+        wsprintfA(directory, (const char*)0x0047ecf8, g_install_path,
+                  (const char*)0x0047e0c4, subdir, param2);
+    }
+
+    PostBagFileNode* head = nullptr;
+    uint8_t find_data[280] = {};   /* CRT _finddata_t-style block (0x467A20) */
+    void* handle = CRT_FindFirstFile(wildcard, find_data);
+    if (handle != reinterpret_cast<void*>(static_cast<intptr_t>(-1))) {
+        const char* filename = reinterpret_cast<const char*>(find_data + 0x14);
+        do {
+            if (filename[0] != '.') {
+                auto* node = static_cast<PostBagFileNode*>(operator_new(sizeof(PostBagFileNode)));
+                node->path[0] = '\0';
+                node->next = nullptr;
+                wsprintfA(node->path, (const char*)0x0047e8a0, directory, filename);
+
+                void* file = CreateFileA(node->path, 0x80000000, 1, nullptr, 3,
+                                          0x8000000, nullptr);
+                uint16_t magic = 0;
+                uint32_t bytes_read = 0;
+                if (file != reinterpret_cast<void*>(static_cast<intptr_t>(-1))) {
+                    if (!ReadFile(file, &magic, 2, &bytes_read, nullptr) || bytes_read != 2) {
+                        magic = 0;
+                    }
+                    CloseHandle(file);
+                }
+                if (magic == PLAYERCONFIG_MAGIC) {
+                    node->next = head;
+                    head = node;
+                } else {
+                    GLOBAL_free(node);
+                }
+            }
+        } while (CRT_FindNextFile(handle, find_data) == 0);
+        CRT_FindClose(handle);
+    }
+    return head;
+#else
+    /* Host path: same algorithm (subdirectory -> numeric-prefix match ->
+     * 2-byte magic check), built on std::filesystem instead of the CRT
+     * _findfirst/_findnext pair (see PostBag_Subdir's #ifndef _WIN32
+     * branch for the sibling precedent of real, non-address strings). */
+    const char* subdir = PostBag_Subdir(type);
+    char directory[0x504] = {};
+    char numeric_prefix[16] = {};
+    if (param2 == 0) {
+        std::snprintf(directory, sizeof(directory), "%s/PostBag%s",
+                      g_install_path, subdir);
+    } else {
+        std::snprintf(directory, sizeof(directory), "%s/PostBag%s/%d",
+                      g_install_path, subdir, param2);
+    }
+    std::snprintf(numeric_prefix, sizeof(numeric_prefix), "%03d",
+                  g_player_config != nullptr ? g_player_config->player_id : 0);
+
+    PostBagFileNode* head = nullptr;
+    std::error_code error;
+    const std::filesystem::path dir_path(directory);
+    for (std::filesystem::directory_iterator it(dir_path, error), end;
+         !error && it != end; it.increment(error)) {
+        const std::string filename = it->path().filename().string();
+        std::error_code type_error;
+        if (filename.empty() || filename.front() == '.' ||
+            it->is_directory(type_error)) {
+            continue;
         }
-        this->msg_count_cache = count;
+        /* "%03d*.crd" — numeric-id prefix + ".crd" suffix. */
+        if (filename.rfind(numeric_prefix, 0) != 0) continue;
+        if (filename.size() < 4 ||
+            filename.compare(filename.size() - 4, 4, ".crd") != 0) {
+            continue;
+        }
+
+        const std::string full_path = (dir_path / filename).string();
+        auto* node = static_cast<PostBagFileNode*>(operator_new(sizeof(PostBagFileNode)));
+        node->next = nullptr;
+        std::strncpy(node->path, full_path.c_str(), sizeof(node->path) - 1);
+        node->path[sizeof(node->path) - 1] = '\0';
+
+        uint16_t magic = 0;
+        void* file = CreateFileA(node->path, 0x80000000, 1, nullptr, 3, 0x8000000, nullptr);
+        if (file != reinterpret_cast<void*>(static_cast<intptr_t>(-1))) {
+            uint32_t bytes_read = 0;
+            if (!ReadFile(file, &magic, 2, &bytes_read, nullptr) || bytes_read != 2) {
+                magic = 0;
+            }
+            CloseHandle(file);
+        }
+        if (magic == PLAYERCONFIG_MAGIC) {
+            node->next = head;
+            head = node;
+        } else {
+            GLOBAL_free(node);
+        }
+    }
+    return head;
+#endif
+}
+
+/* ================================================================== */
+/* NET_UpdatePlayerList — 0x445170                                        */
+/*                                                                        */
+/* Count validated Sort_Out (.crd) entries; frees the whole list as it     */
+/* counts, matching the decompiled loop exactly. */
+/* ================================================================== */
+short NET_UpdatePlayerList(void)
+{
+    return count_and_free_postbag_list(NET_GetHostName(2, 0));
+}
+
+/* ================================================================== */
+/* NET_DownloadAsset — 0x445A40                                          */
+/*                                                                        */
+/* Read up to 0x400 bytes of a PostBag attachment. Album/Sort_In/        */
+/* Sort_Out/Att_In/Att_Out/Easter (language variant)/Design subfolder     */
+/* keyed by `type`, named "<install>/PostBag<subdir>/%08d.dat"           */
+/* (player_id), read into `buf`.                                         */
+/* ================================================================== */
+void NET_DownloadAsset(uint32_t player_id, int32_t type, void* buf)
+{
+    const char* subdir = PostBag_Subdir(type);
+    char path[0x504] = {};
+
+#ifdef _WIN32
+    /* Windows-faithful path: original PE string-literal address for the
+     * "%s%s%s\%08d.dat" format (documentation only, never linked). */
+    wsprintfA(path, (const char*)0x0047ed3c, g_install_path,
+              (const char*)0x0047e0c4, subdir, player_id & 0xffff);
+#else
+    std::snprintf(path, sizeof(path), "%s/PostBag%s/%08u.dat",
+                  g_install_path, subdir, player_id & 0xffffu);
+#endif
+
+    void* file = CreateFileA(path, 0x80000000, 1, nullptr, 3, 0x8000000, nullptr);
+    if (file != reinterpret_cast<void*>(static_cast<intptr_t>(-1))) {
+        uint32_t bytes_read = 0;
+        ReadFile(file, buf, 0x400, &bytes_read, nullptr);
+        CloseHandle(file);
     }
 }

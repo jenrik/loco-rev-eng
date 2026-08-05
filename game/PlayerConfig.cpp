@@ -81,7 +81,10 @@ void Config_WriteInt(void* ini, const char* section, const char* key, int value)
 
 /* Internal helpers (C++ linkage) */
 void LOCOBITMAP_ColorKeyBlit_thunk(void* dplay_cfg);
-void NET_UpdatePlayerList(void);
+short NET_UpdatePlayerList(void);   /* 0x445170 — real body in
+                                      * network/NetworkPlayerList.cpp; return
+                                      * value discarded at both call sites
+                                      * below, matching the original. */
 
 /* Global variables */
 extern char g_install_path[];               /* 0x4A99C8 — install directory path */

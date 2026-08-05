@@ -121,7 +121,10 @@ extern "C" {
                                        char* out, int maxLen);
     extern void   Config_ReadInt(void* config, const char* section,
                                   const char* key, char* out);
-    extern void   WIN32_PostQuit(void);                        /* 0x462560 */
+    extern void   WIN32_PostQuit(void);                        /* 0x463670 —
+                                    real body in core/CGWND.cpp (0x462560,
+                                    this comment's old value, isn't a
+                                    function at all) */
 
 /* ================================================================== */
 /* Global variables                                                     */

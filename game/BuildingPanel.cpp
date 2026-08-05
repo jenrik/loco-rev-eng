@@ -129,7 +129,10 @@ extern void* g_font_normal;             /* 0x4851D8 — Normal GDI font handle *
 
 /* Extern functions from CGWND */
 extern void CGWND_SetMode(void* mode);  /* 0x408350 */
-extern void WIN32_PostQuit(void);       /* 0x419710 */
+extern void WIN32_PostQuit(void);       /* 0x463670 — real body in
+                                            core/CGWND.cpp (0x419710, this
+                                            comment's old value, is actually
+                                            Cursor_UpdateScrollButtons) */
 
 
 /* ================================================================== */

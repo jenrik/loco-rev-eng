@@ -69,7 +69,15 @@ public:
     /* (see UI_WindowBase.h for full layout) */
     /* ---- GameSetupPanel-specific fields (0xE8..0x25F) ---- */
 
-    uint8_t    field_E8;               // +0xE8  (unknown byte, init 0, cleared by cleanup)
+    uint8_t    field_E8;               // +0xE8  read by WIN32_PostQuit (core/CGWND.cpp,
+                                       //        0x463670) as a gate before
+                                       //        ShowWindow(SW_SHOWMINNOACTIVE) on this->hWnd
+                                       //        — likely a visible-style flag distinct from
+                                       //        the inherited UI_WindowBase::visible at
+                                       //        +0xE4 (WIN32_PostQuit reads +0xE8 here, not
+                                       //        +0xE4). No in-tree setter that assigns it 1
+                                       //        has been found yet — only ever zeroed (ctor,
+                                       //        cleanup) — so this is read-side evidence only.
 
     /* Linked list of scenario/layout titles */
     LayoutListNode* titleList;         // +0xEC  Linked list of title entries (scenario names)

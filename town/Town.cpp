@@ -28,11 +28,13 @@
 #include "../game/Train.h"
 #include "../game/PlayerConfig.h"
 #include "../network/DPlayManager.h"
+#include "../network/NetworkPlayerList.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
 #include "../ui/UI_ChildWindow.h"
 #ifndef _WIN32
 #include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
+#include <cstdio>
 #endif
 
 /* ResourceManager_GetById is an internal C++ symbol (0x446EA0), not a
@@ -44,11 +46,16 @@ void* ResourceManager_GetById(void* resmgr, int id);
 /* External references (Win32 / cross-module C ABI)                    */
 /* ================================================================== */
 
-extern "C" {
-    /* CRT memory */
-    void*  operator_new(size_t size);               /* 0x465CE0 */
-    void   GLOBAL_free(const void* ptr);            /* 0x465CD0 */
+/* CRT memory — C++ linkage (real bodies malloc()/free()-based; these used
+ * to sit inside the extern "C" block below with a `const void*` GLOBAL_free
+ * parameter, which is a *different*, always-unresolved C-linkage symbol
+ * from the real C++-mangled `GLOBAL_free(void*)` — every call in this file
+ * was a null-pointer-call crash risk under the project's
+ * --unresolved-symbols=ignore-all link policy). */
+void*  operator_new(size_t size);               /* 0x465CE0 */
+void   GLOBAL_free(void* ptr);                  /* 0x465CD0 */
 
+extern "C" {
     /* Resource management */
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
     void   Sprite_Destroy(void* sprite);                             /* 0x454BC0 */
@@ -90,7 +97,11 @@ extern "C" {
                                   int right, int bottom);            /* 0x416FF0 */
 
     /* DDraw */
-    void   DDRAW_SelectBuilding(void* ddraw, void* building);       /* 0x4412F0 */
+    /* Address corrected: 0x4412F0 disassembles to NameEntryPanel_CreateWindow,
+     * not DDRAW_SelectBuilding; confirmed via Ghidra at 0x459180. This is the
+     * (void*, void*) overload, a different mangled symbol from the
+     * (void*, int) one used by world/tilemap.cpp — see graphics/DDRAW.cpp. */
+    void   DDRAW_SelectBuilding(void* ddraw, void* building);       /* 0x459180 */
     void*  DDRAW_GetDdrawErrorString(int code);                     /* 0x45BBC0 */
 
     /* Audio */
@@ -102,19 +113,14 @@ extern "C" {
     char   RESDATA_HitTestChildren(void* self, int x, int y);        /* 0x44B200 */
 
     /* Network */
-    char*  NET_GetHostName(int type, int index);                     /* 0x449AA0 */
     void*  NET_ResolveAddress(const char* hostname);                 /* 0x444C70 */
     void   NET_RegisterPlayer(void* dplay, void* data, int type, int unk); /* 0x4498E0 */
-    void   NET_UnregisterPlayer(void* dplay, const char* hostname);  /* 0x449C00 */
-    short  NET_UpdatePlayerList(void);                               /* 0x447AB0 */
-    void   NETMAN_CheckTimeout(void* netman, uint32_t active);      /* 0x4415F0 */
     int    DPLAY_GetMessageCount(void* dplay);                       /* 0x4510E0 */
     void   DPLAY_RenderPlayer(void* dplay, int param1, int param2,
                               void* param3, int param4, int param5,
                               uint32_t param6, RECT* param7);        /* 0x4437C0 */
     void   NET_GetFilePath(uint player_id, int type, char* buf);     /* 0x445510 */
     void   NET_GetAttFilePath(uint player_id, int type, char* buf);  /* 0x445400 */
-    void   NET_DownloadAsset(uint player_id, int type, void* buf);   /* 0x445A40 */
     char*  _strrchr(const char* s, int c);                           /* 0x467E60 */
 
     /* Timer */
@@ -169,8 +175,17 @@ extern void* g_resmgr;                  /* 0x4855E8 — resource manager */
 extern void* g_tilemap;                 /* 0x4FD244 — tile map */
 extern void* g_ddraw_building;          /* 0x4A9EF0 — DDraw building selection */
 extern void* g_primary_surface;         /* 0x4FD3C4 — primary DirectDraw surface */
-extern void* g_dplay;                   /* 0x4FD3B0 — DirectPlay interface */
-extern void* g_netman;                  /* 0x4FD33C — network manager */
+/* g_dplay's canonical NetworkPlayerList* declaration comes from
+ * network/NetworkPlayerList.h (included above); Town.cpp used to shadow it
+ * with a weaker `extern void* g_dplay` here, which is why the postcard
+ * paths below used to call a fabricated free-function NET_UnregisterPlayer
+ * instead of the real NetworkPlayerList::UnregisterPlayer method. */
+extern void* g_netman;                  /* 0x4FD3AC — Netman* (see
+                                          * network/Netman.h's canonical
+                                          * _g_netman for the same object;
+                                          * this file's own g_netman keeps
+                                          * the void* storage type actually
+                                          * defined in shared/stubs_impl.cpp). */
 extern void* g_audio_mgr;               /* 0x4FD14C — audio manager */
 extern char   g_ddraw_active;           /* 0x4A9F78 — 1 = DirectDraw building mode active */
 extern int32_t g_demo_mode;             /* 0x4A9918 — 1 = demo mode */
@@ -221,6 +236,16 @@ extern void* g_dplay_peer;               /* 0x48525C */
 extern PlayerConfig* g_player_config;     /* canonical singleton */
 extern void  NETMAN_QueueMessage(TrainMessage* message);             /* 0x43F140 */
 
+/* NETMAN_CheckTimeout — Netman::CheckTimeout (0x440820) call-site adapter,
+ * defined in network/Netman.cpp. Town.cpp can't include Netman.h directly
+ * (its own local Win32-API/global declarations below conflict with
+ * Netman.h's), so this thin forwarder is the only way to reach the one
+ * real implementation from here; it has no logic of its own. Town.cpp's
+ * previous declaration here (a fabricated `NETMAN_CheckTimeout(void*,
+ * uint32_t)` citing address 0x4415F0, which does not exist as a function)
+ * dangled with no body anywhere — a crash risk on every Town::hide(). */
+extern void  NETMAN_CheckTimeout(void* netman, int32_t timeoutVal);  /* 0x440820 */
+
 /* Window-proc helpers used by the postcard window procs: */
 extern void  CGWND_SetMode(int mode);                                 /* 0x408130 */
 extern void  Cursor_Show(void* c);                                    /* 0x4164F0 */
@@ -249,15 +274,6 @@ void release_sprite_resource(void* resource)
         void** vtable = *reinterpret_cast<void***>(resource);
         reinterpret_cast<void (*)(void*)>(vtable[2])(resource);
     }
-}
-
-/* Hostname list node returned by NET_GetHostName: the node is a
- * heap string object whose next link lives at +0x504 (released with
- * GLOBAL_free). */
-const char* hostname_next(const char* node)
-{
-    return *reinterpret_cast<const char* const*>(
-        reinterpret_cast<const uint8_t*>(node) + 0x504);
 }
 
 /* Player/session record (+0x0C player id, +0x3A need-connect flag). */
@@ -475,9 +491,9 @@ void Town::show()
 
     /* Count connected hosts to refresh has_remote_players. */
     short count = 0;
-    const char* host = NET_GetHostName(1, 0);
+    PostBagFileNode* host = NET_GetHostName(1, 0);
     while (host != nullptr) {
-        const char* next = hostname_next(host);
+        PostBagFileNode* next = host->next;
         count++;
         GLOBAL_free(host);
         host = next;
@@ -548,7 +564,7 @@ void Town::hide()
 
     /* update_network label */
     short active_players = NET_UpdatePlayerList();
-    NETMAN_CheckTimeout(g_netman, (uint32_t)(active_players != 0));
+    NETMAN_CheckTimeout(g_netman, active_players != 0 ? 1 : 0);
 
     this->net_update_flag = 0;
 }
@@ -1422,9 +1438,9 @@ void Town::postcard_update_ui(int action_id)
             if (!this->is_host) {
                 msg_count = (int)DPLAY_GetMessageCount(g_dplay);
             } else {
-                const char* host = NET_GetHostName(1, 0);
+                PostBagFileNode* host = NET_GetHostName(1, 0);
                 while (host) {
-                    const char* next = hostname_next(host);
+                    PostBagFileNode* next = host->next;
                     msg_count++;
                     GLOBAL_free(host);
                     host = next;
@@ -1445,9 +1461,9 @@ void Town::postcard_update_ui(int action_id)
             if (!this->is_host) {
                 msg_count = (uint16_t)DPLAY_GetMessageCount(g_dplay);
             } else {
-                const char* host = NET_GetHostName(1, 0);
+                PostBagFileNode* host = NET_GetHostName(1, 0);
                 while (host) {
-                    const char* next = hostname_next(host);
+                    PostBagFileNode* next = host->next;
                     msg_count++;
                     GLOBAL_free(host);
                     host = next;
@@ -1534,9 +1550,9 @@ void Town::postcard_dlg_proc(int action_id)
             if (!this->is_host) {
                 msg_count = (uint16_t)DPLAY_GetMessageCount(g_dplay);
             } else {
-                const char* host = NET_GetHostName(1, 0);
+                PostBagFileNode* host = NET_GetHostName(1, 0);
                 while (host) {
-                    const char* next = hostname_next(host);
+                    PostBagFileNode* next = host->next;
                     msg_count++;
                     GLOBAL_free(host);
                     host = next;
@@ -1986,9 +2002,9 @@ LRESULT Town::on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case 5:
         sVar3 = 0;
         if (this->is_host) {
-            const char* host = NET_GetHostName(1, 0);
+            PostBagFileNode* host = NET_GetHostName(1, 0);
             while (host) {
-                const char* next = hostname_next(host);
+                PostBagFileNode* next = host->next;
                 sVar3++;
                 GLOBAL_free(host);
                 host = next;
@@ -2003,9 +2019,9 @@ LRESULT Town::on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (!this->is_host) {
             sVar3 = DPLAY_GetMessageCount(g_dplay);
         } else {
-            const char* host = NET_GetHostName(1, 0);
+            PostBagFileNode* host = NET_GetHostName(1, 0);
             while (host) {
-                const char* next = hostname_next(host);
+                PostBagFileNode* next = host->next;
                 sVar3++;
                 GLOBAL_free(host);
                 host = next;
@@ -2285,14 +2301,14 @@ void Town::upload_postcard()
     }
 
     int type = this->is_host ? 1 : 2;
-    const char* hostname = NET_GetHostName(type, 0);
+    PostBagFileNode* hostname = NET_GetHostName(type, 0);
 
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname);
+        void* addr = NET_ResolveAddress(hostname->path);
         if (addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
-            NET_UnregisterPlayer(g_dplay, hostname);
-            HANDLE hFile = CreateFileA(hostname,
+            g_dplay->UnregisterPlayer(hostname->path);
+            HANDLE hFile = CreateFileA(hostname->path,
                                        0x40000000,
                                        1,
                                        nullptr,
@@ -2309,7 +2325,7 @@ void Town::upload_postcard()
         if (addr) {
             delete (DPlayManager*)addr;
         }
-        const char* next = hostname_next(hostname);
+        PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
         hostname = next;
     }
@@ -2326,19 +2342,19 @@ void Town::receive_postcard()
     }
 
     int type = this->is_host ? 1 : 2;
-    const char* hostname = NET_GetHostName(type, 0);
+    PostBagFileNode* hostname = NET_GetHostName(type, 0);
 
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname);
+        void* addr = NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
-            NET_UnregisterPlayer(g_dplay, hostname);
+            g_dplay->UnregisterPlayer(hostname->path);
         }
         if (addr) {
             delete (DPlayManager*)addr;
         }
-        const char* next = hostname_next(hostname);
+        PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
         hostname = next;
     }
@@ -2364,9 +2380,9 @@ void Town::receive_postcard()
 
     int count = 0;
     if (this->is_host) {
-        const char* p = NET_GetHostName(1, 0);
+        PostBagFileNode* p = NET_GetHostName(1, 0);
         while (p) {
-            const char* next = hostname_next(p);
+            PostBagFileNode* next = p->next;
             count++;
             GLOBAL_free(p);
             p = next;
@@ -2384,18 +2400,18 @@ void Town::receive_postcard()
 void Town::list_postcards()
 {
     int type = this->is_host ? 1 : 2;
-    const char* first_hostname = NET_GetHostName(type, 0);
+    PostBagFileNode* first_hostname = NET_GetHostName(type, 0);
 
     if (!first_hostname) {
         return;
     }
 
-    void* first_addr = NET_ResolveAddress(first_hostname);
+    void* first_addr = NET_ResolveAddress(first_hostname->path);
     if (!this->selected_player) {
         this->selected_player = first_addr;
-        const char* p = first_hostname;
+        PostBagFileNode* p = first_hostname;
         while (p) {
-            const char* next = hostname_next(p);
+            PostBagFileNode* next = p->next;
             GLOBAL_free(p);
             p = next;
         }
@@ -2403,21 +2419,21 @@ void Town::list_postcards()
     }
 
     void* next_player = nullptr;
-    const char* p = first_hostname;
+    PostBagFileNode* p = first_hostname;
     while (p) {
-        void* addr = NET_ResolveAddress(p);
+        void* addr = NET_ResolveAddress(p->path);
 
         if (!next_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player) &&
-            hostname_next(p)) {
-            next_player = NET_ResolveAddress(hostname_next(p));
+            p->next) {
+            next_player = NET_ResolveAddress(p->next->path);
         }
 
         if (addr) {
             delete (DPlayManager*)addr;
         }
-        const char* next = hostname_next(p);
+        PostBagFileNode* next = p->next;
         GLOBAL_free(p);
         p = next;
     }
@@ -2449,18 +2465,18 @@ void Town::save_postcard()
         return;
     }
 
-    const char* hostname = NET_GetHostName(2, 0);
+    PostBagFileNode* hostname = NET_GetHostName(2, 0);
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname);
+        void* addr = NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
-            NET_UnregisterPlayer(g_dplay, hostname);
+            g_dplay->UnregisterPlayer(hostname->path);
         }
         if (addr) {
             delete (DPlayManager*)addr;
         }
-        const char* next = hostname_next(hostname);
+        PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
         hostname = next;
     }
@@ -2476,9 +2492,9 @@ void Town::save_postcard()
 
     int count = 0;
     if (this->is_host) {
-        const char* p = NET_GetHostName(1, 0);
+        PostBagFileNode* p = NET_GetHostName(1, 0);
         while (p) {
-            const char* next = hostname_next(p);
+            PostBagFileNode* next = p->next;
             count++;
             GLOBAL_free(p);
             p = next;
@@ -2499,18 +2515,18 @@ void Town::load_postcard()
         return;
     }
 
-    const char* hostname = NET_GetHostName(1, 0);
+    PostBagFileNode* hostname = NET_GetHostName(1, 0);
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname);
+        void* addr = NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
-            NET_UnregisterPlayer(g_dplay, hostname);
+            g_dplay->UnregisterPlayer(hostname->path);
         }
         if (addr) {
             delete (DPlayManager*)addr;
         }
-        const char* next = hostname_next(hostname);
+        PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
         hostname = next;
     }
@@ -2526,9 +2542,9 @@ void Town::load_postcard()
 
     int count = 0;
     if (this->is_host) {
-        const char* p = NET_GetHostName(1, 0);
+        PostBagFileNode* p = NET_GetHostName(1, 0);
         while (p) {
-            const char* next = hostname_next(p);
+            PostBagFileNode* next = p->next;
             count++;
             GLOBAL_free(p);
             p = next;
@@ -2550,14 +2566,14 @@ void Town::delete_postcard()
     }
 
     int type = this->is_host ? 1 : 2;
-    const char* hostname = NET_GetHostName(type, 0);
+    PostBagFileNode* hostname = NET_GetHostName(type, 0);
 
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname);
+        void* addr = NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
-            NET_UnregisterPlayer(g_dplay, hostname);
+            g_dplay->UnregisterPlayer(hostname->path);
             if (this->selected_player) {
                 delete (DPlayManager*)this->selected_player;
             }
@@ -2566,16 +2582,16 @@ void Town::delete_postcard()
         if (addr) {
             delete (DPlayManager*)addr;
         }
-        const char* next = hostname_next(hostname);
+        PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
         hostname = next;
     }
 
     int count = 0;
     if (this->is_host) {
-        const char* p = NET_GetHostName(1, 0);
+        PostBagFileNode* p = NET_GetHostName(1, 0);
         while (p) {
-            const char* next = hostname_next(p);
+            PostBagFileNode* next = p->next;
             count++;
             GLOBAL_free(p);
             p = next;

@@ -90,11 +90,24 @@ public:
              int32_t x, int32_t y);
 
     /**
-     * Virtual destructor stub (vtable[0]).
-     * Address: 0x4234A8 (jump table), actual dtor at 0x4234C0
+     * Destructor. Destroys the tooltip child (if any) via
+     * UI_DestroyTooltip; base-class cleanup (Entity/GameObject) runs
+     * automatically through the compiler-generated destructor chain.
+     * Address: 0x423500 (body, Ghidra label "UI_Window_Dtor" — a
+     * misnomer; this is a destructor, not a drawing function). Scalar
+     * deleting destructor wrapper (vtable[0]): 0x4234E0.
      *
-     * Note: The vtable at 0x477A90 has only a scalar deleting destructor
-     * and likely no overridden virtual methods (defaults to GameObject).
+     * Correction: the vtable at 0x477A90 is NOT a bare GameObject-shaped
+     * table with only a destructor — it is a full 15-slot Entity-shaped
+     * table (confirmed via a live slot-by-slot dump) that reuses Entity's
+     * function pointers for every slot except three real overrides:
+     *   [7]  (StopSound slot)  -> UI_ShowWindow   (0x423840)
+     *   [9]  (SetVisible slot) -> UI_EnableWindow  (0x423890)
+     *   [10] (Update slot)     -> UI_HideWindow    (0x423870)
+     * These three overrides are not yet reconstructed as UIEntity
+     * methods (see UI_Window_UpdateScroll's dispatch through the same
+     * slots in ui/UI_Utils.cpp's dead UI_Manager::hideTooltip, and
+     * PROGRESS.md).
      */
-    virtual ~UIEntity();
+    ~UIEntity() override;
 };

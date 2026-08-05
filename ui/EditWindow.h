@@ -75,6 +75,21 @@ class PopupWindow {
 public:
     virtual ~PopupWindow() = default;
     HWND hWnd;
+
+    /** PopupWindow::DestroyMCIChild — __fastcall(this), single implicit-this
+     *  argument in the original (previously mis-declared in EditWindow.cpp as
+     *  a free function `RESDATA_FreeWindow` with a bogus mid-function address,
+     *  0x460B70 — actually inside WIN32_PeekMessageLoop; corrected here).
+     *  Address: 0x4544A0
+     *
+     *  If hWnd is set, sends it message 0x804 (observed value from a prior
+     *  decompiler comment claiming "WM_REALIZE_PALETTE" — not verified against
+     *  any MCI/MCIWnd header, so treated as an opaque MCIWnd-private
+     *  notification rather than a named constant) followed by WM_CLOSE
+     *  (0x10), then clears hWnd. Called from EditWindow::Hide/SetState/
+     *  base_destructor immediately before SetWindowLongA restores the
+     *  popup's saved WNDPROC and the popup object itself is deleted. */
+    void DestroyMCIChild();
 };
 namespace loco::assets {
 class SpriteResource;

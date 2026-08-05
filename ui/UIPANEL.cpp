@@ -50,7 +50,11 @@ extern void* g_backbuffer;                           /* 0x4FD3C0 */
 extern void DDRAW_UnlockPrimary(void);               /* 0x4014CD */
 extern void DDRAW_PresentRect(RECT* rect, HWND hwnd,
     int* unk, uint32_t flag);                        /* 0x401280 */
-extern void DDRAW_SelectBuilding(void* ddraw, void* building); /* 0x4412F0 */
+/* Address corrected: 0x4412F0 disassembles to NameEntryPanel_CreateWindow,
+ * not DDRAW_SelectBuilding; confirmed via Ghidra at 0x459180. This is the
+ * (void*, void*) overload — a different mangled symbol from the
+ * (void*, int) one used by world/tilemap.cpp — see graphics/DDRAW.cpp. */
+extern void DDRAW_SelectBuilding(void* ddraw, void* building); /* 0x459180 */
 
 /* External functions */
 extern void __thiscall RESDATA_BaseInit(void* self);                         /* 0x4544E0 */
@@ -75,8 +79,10 @@ extern int __thiscall GameObject_BaseCtor(void* self, int a, int b,
     int c, int d);                                                           /* 0x405790 */
 extern void __thiscall GameObject_DtorBody(void* self);                      /* 0x405870 */
 extern void __thiscall Panel_DtorBody(void* self);                           /* 0x4545A0 */
+/* Address corrected: 0x449650 disassembles to RESDATA_ScriptedObject_Start,
+ * not RESDATA_CreateChildSprite; confirmed via Ghidra at 0x4546D0. */
 extern void* __thiscall RESDATA_CreateChildSprite(void* parent,
-    void* resource, int x, int y);                                           /* 0x449650 */
+    void* resource, int x, int y);                                           /* 0x4546D0 */
 // REMOVED: duplicate ResourceManager_GetById (see Panel.h)
 extern int __fastcall UI_IsBitmapReady(void* res);                           /* 0x423DB0 */
 extern void __thiscall RESDATA_SoundObject_Init(void* sprite, const char* str); /* 0x44CA90 */

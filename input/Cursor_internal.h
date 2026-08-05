@@ -125,7 +125,8 @@ void* NET_GetOrCreateSurface(void*, uint8_t, uint8_t, uint8_t, uint8_t);
 int NET_FindPlayer(int, int);
 uint16_t NET_UploadAsset(int, char*);
 void WIN32_FatalError(void);
-void WIN32_PostQuit(void);
+void WIN32_PostQuit(void);              /* 0x463670 — real body in
+                                            core/CGWND.cpp */
 /* Canonical signature (ResourceManager.h, 0x447930).  The old `int`
  * form hijacked overload resolution in TUs including both headers,
  * binding calls to the never-defined _Z9PlaySoundi instead of the

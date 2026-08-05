@@ -193,8 +193,18 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password);
  *
  * NOTE: This is a __cdecl function in the binary but takes no explicit
  * 'this' — it accesses g_dplay_peer directly as a global.
+ *
+ * Takes 3 stack args the DB previously hid behind a void(void) signature
+ * (the decompiler drops arguments it doesn't believe exist). Its own two
+ * internal call sites (0x45E88C/0x45E88E and 0x45E987/0x45E989, inside
+ * DirectPlay_ConnectToSession) push (0, 0, 0). game/Train_network.cpp's
+ * Train_ConnectToServer (0x43C8EE-0x43C8F2, 0x43C98D-0x43C991) pushes a
+ * real (protocol, address-string, 0) override when message 0x3EB directs
+ * a reconnect to a specific server. The ~2076-byte body itself remains a
+ * deferred TODO; this signature fix only makes both call sites pass the
+ * real arguments instead of silently dropping them.
  */
-uint32_t DirectPlay_HandleMessages(void);
+uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_t flags);
 
 /**
  * DirectPlay_CreatePlayer — DirectPlay enum callback.

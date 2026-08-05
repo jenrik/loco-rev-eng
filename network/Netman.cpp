@@ -2237,6 +2237,20 @@ void Netman::CheckTimeout(int32_t timeoutVal)
     this->m_timeoutState = timeoutVal;
 }
 
+/** NETMAN_CheckTimeout — call-site adapter for translation units that hold
+ *  g_netman as void* and cannot include Netman.h (town/Town.cpp: its own
+ *  local Win32-API and global declarations conflict with Netman.h's, so
+ *  including it there is a hard compile error, not just extra weight).
+ *  Forwards to the one real implementation, Netman::CheckTimeout (0x440820);
+ *  no behavior of its own beyond the null check Town::hide()'s host build
+ *  needs (g_netman can be null before GameLoop_Setup constructs it). */
+void NETMAN_CheckTimeout(void* netman, int32_t timeoutVal)
+{
+    if (netman != nullptr) {
+        static_cast<Netman*>(netman)->CheckTimeout(timeoutVal);
+    }
+}
+
 /* ================================================================== */
 /* 42. HandleTimeout - 0x4408B0                                       */
 /* ================================================================== */

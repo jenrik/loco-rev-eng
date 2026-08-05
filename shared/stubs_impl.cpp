@@ -301,7 +301,12 @@ void DDRAW_SetSurfaceFormat(void*, int) {}
 void DDRAW_RestoreSurfaces(void*, void*) {}
 void DDRAW_SpriteDataCtor(void*, int) {}
 void DDRAW_SpriteDataDtor(void*) {}
-void DDRAW_SelectBuilding(void*, int) {}
+/* DDRAW_SelectBuilding(void*, int) — real implementation now in
+ * graphics/DDRAW.cpp (0x459180), as a bridge to
+ * DDRAW_Building::SelectBuilding. The wrong-signature `void`-returning
+ * no-op that used to live here caused world/tilemap.cpp's
+ * `DDRAW_SelectBuilding(...) == 0` comparison to read whatever garbage
+ * happened to be in eax on every deselect click. */
 
 /* RESOURCE stubs (RESMGR_IsSaveHeader/LoadResource/ReleaseResource/
  * ResourceData_Init are real code in resources/ResDataSave.cpp) */
@@ -392,7 +397,13 @@ uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — GetTileCategory fallthrough");
 }
-void RESDATA_CreateChildSprite(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/* Real signature returns void* (0x4546D0; see graphics/DDRAW.cpp and
+ * shared/defsym_stubs.cpp for the sibling overload). Corrected from
+ * `void`, which was an ODR mismatch against world/scriptengine.cpp's
+ * (void*, int32_t, int32_t, int32_t) declaration of this same overload.
+ * Already loud (unlike the sibling overload was) and already
+ * unreachable today (RESDATA_ScriptedObject::Start has zero callers). */
+void* RESDATA_CreateChildSprite(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void RESDATA_HitTestChildren(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Panel_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
@@ -421,7 +432,30 @@ void UI_CleanupTooltips(void* self) { (void)self; }
 void UI_DestroyTooltip(void* self, int i) { (void)self; (void)i; }
 void UI_CreateTooltip(void* self, int a, int b, int c, int d) { (void)self; (void)a; (void)b; (void)c; (void)d; }
 void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_Window_UpdateScroll(int* p) { (void)p; }
+/* UI_Window_UpdateScroll — Address: 0x423560. Real function (a UIEntity
+ * per-frame scroll/animation tick method, confirmed via a 15-slot
+ * Entity-shaped vtable dump at 0x477A90 plus field-offset matches
+ * against UIEntity/Entity/GameObject's already-named fields), but NOT
+ * a working implementation here: its only real caller is 0x423D70
+ * (UI_HideTooltip / UI_Manager::hideTooltip in ui/UI_Utils.cpp), which
+ * itself has zero reachable callers today (UI_Manager is never
+ * instantiated; g_tooltip_mgr is permanently nullptr — see
+ * PROGRESS.md). Deferred rather than transcribed: correct behavior
+ * also depends on two more not-yet-reconstructed UIEntity virtual
+ * overrides (UI_ShowWindow 0x423840, UI_HideWindow 0x423870 — see
+ * ui/UIEntity.h). This was previously a *silently* wrong stub: it
+ * returned void while every call site declares/uses a char return
+ * (`if (UI_Window_UpdateScroll(item) == 1)`), which is undefined
+ * behavior (the caller reads garbage out of AL/EAX) — same bug class
+ * as this session's earlier WIN32_SendNetworkData/NET_UpdatePlayerList
+ * fixes. Loud now, and return-type-correct, so if this ever becomes
+ * reachable it fails immediately instead of silently misbehaving. */
+char UI_Window_UpdateScroll(int* p) {
+    (void)p;
+    fprintf(stderr, "STUB: %s at %s:%d (0x423560, not yet ported)\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — UI_Window_UpdateScroll");
+    return 0;
+}
 void UIEntity_Ctor(void) { /* host no-op */ }
 void UIPANEL_Blit(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
 void UIPANEL_BeginPaint(void* self) { (void)self; }

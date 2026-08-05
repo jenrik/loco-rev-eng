@@ -45,6 +45,7 @@
 #pragma once
 
 #include "../shared/types.h"
+#include "PostBagFileNode.h"
 
 // Status: TRANSCRIBED
 /* Dispatch-table addresses are documentation only; C++ manages dispatch. */

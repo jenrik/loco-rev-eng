@@ -8,6 +8,8 @@
 // Status: TRANSCRIBED
 
 #include "AboutDialog.h"
+#include <cassert>
+#include <cstdio>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -92,6 +94,35 @@ extern void __fastcall UIPANEL_Blit(void* srcSurface, int srcX, int srcY,   /* 0
 /* CRT wide-string helper for parsing WVE marker */
 extern void* __thiscall wcsstr(const void* str, const void* substr);        /* 0x471480 */
 
+/* UIPANEL surface helpers — real bodies in ui/UIPANEL_Surface.cpp /
+ * graphics/LOCOBITMAP.cpp. Declared here with `void*` (not the typed
+ * UIPANEL_Surface*) to avoid pulling in graphics/LOCOBITMAP.h's larger,
+ * differently-sized same-named struct — see AboutDialog::InitSprites'
+ * doc comment and PROGRESS.md for that pre-existing conflict. Matches
+ * ui/UIPANEL.cpp's own `void*`-typed local extern for the same address. */
+extern void     __fastcall UIPANEL_CreateSurface(void* surface);            /* 0x42A110 */
+extern uint32_t __thiscall UIPANEL_InitSurface(void* surface, int width,    /* 0x42A850 */
+                                                int height, int mode,
+                                                uint32_t paletteParam,
+                                                uint8_t fillByte);
+extern void     __thiscall UIPANEL_SetClipRect(void* surface,               /* 0x42AA90 */
+                                                uint8_t fillByte,
+                                                uint32_t blitFlags);
+
+/* Cursor_Render — the binary passes AboutDialog's own `this` where a
+ * Cursor* is expected (matching the identical, already-documented idiom
+ * in ui/HelpWnd.cpp's own Cursor_Render calls: "binary passes HelpWnd* as
+ * Cursor*"). Declared with `void*` here rather than pulling in Cursor.h
+ * for a call that never actually dereferences a Cursor field.
+ * Address corrected here to 0x414C20 (verified via Ghidra: real function
+ * `Cursor_Render`, matching signature/param count) — ui/HelpWnd.cpp's own
+ * declaration for this same function still cites 0x416420, which Ghidra
+ * resolves to a mid-body address inside the unrelated `Cursor_Init`; not
+ * fixed there since it's a pre-existing bug outside this pass's scope
+ * (see PROGRESS.md). */
+extern void __fastcall Cursor_Render(void* cursor, uintptr_t hWnd,          /* 0x414C20 */
+                                      int hdc, char flag);
+
 /* ================================================================== */
 /* Global variables referenced                                         */
 /* ================================================================== */
@@ -138,7 +169,7 @@ AboutDialog::AboutDialog(HINSTANCE hInstance, uint32_t resId)
     this->panel               = NULL;                 /* +0x14C */
     this->hIcon               = NULL;                 /* +0x150 */
     this->background_res_id   = 0;                    /* +0x1154 */
-    this->field_1158          = 0;                    /* +0x1158 */
+    this->screensaver_surface = NULL;                 /* +0x1158 */
     this->res_credits_obj     = NULL;                 /* +0x116C */
     this->res_credits_data    = NULL;                 /* +0x1170 */
 
@@ -398,4 +429,130 @@ void AboutDialog::LoadCredits()
          WIN32_StreamDestroyImmediate (0x463B10)
          WIN32_StreamDestroy     (0x463A80)
          WNDPROC_StreamCleanup   (0x464620) */
+}
+
+/* ================================================================== */
+/* AboutDialog::Update                                                  */
+/* Address: 0x40F3C0 (Ghidra: AboutDialog_UpdateScreensaver)            */
+/* See the header doc comment for the full behavior description.       */
+/* ================================================================== */
+void AboutDialog::Update()
+{
+    if (scroll_timer < 15) {
+        scroll_timer += 2;
+    }
+
+    if (scroll_timer > 0) {
+        if (scroll_accum < 1000 - scroll_timer) {
+            scroll_accum += scroll_timer;
+        } else {
+            HDC nextFrame = reinterpret_cast<HDC>(static_cast<intptr_t>(frame_counter + 1));
+            fade_timer    = 0;
+            scroll_timer  = -10;
+            scroll_accum  = 0;
+            frame_counter = static_cast<int32_t>(reinterpret_cast<intptr_t>(nextFrame));
+
+            if (RenderCredits(nextFrame) == 0) {
+                frame_counter = 1;
+                RenderCredits(reinterpret_cast<HDC>(static_cast<intptr_t>(1)));
+            }
+        }
+
+        fade_timer = scroll_accum / 10;
+        RenderScreensaver();
+        Cursor_Render(static_cast<void*>(this), reinterpret_cast<uintptr_t>(this->hWnd), 0, 0);
+    }
+}
+
+/* ================================================================== */
+/* AboutDialog::InitSprites                                            */
+/* Address: 0x40F6A0 (Ghidra: AboutDialog_InitScreensaver)             */
+/* See the header doc comment for the full behavior description.       */
+/* ================================================================== */
+void AboutDialog::InitSprites()
+{
+    if (sprites_initialized == 1) {
+        return;
+    }
+
+    /* &g_resmgr matches every other in-tree ResourceManager_GetById call
+     * site's convention for this exact `void* resmgr` parameter (see e.g.
+     * world/scriptengine.cpp:505, input/Cursor.cpp, game/GameObject.cpp). */
+    void* resource = ResourceManager_GetById(&g_resmgr, 0x3daf);
+    res_object = resource;
+
+    /* resource->vtable[1](0, 0) — resource objects returned by
+     * ResourceManager_GetById are not yet a modeled C++ hierarchy in this
+     * codebase (still void* everywhere they're used), so this is a direct,
+     * evidence-backed vtable-slot call rather than a guessed method name,
+     * matching this file's own AudioChannel_Release-style precedent
+     * elsewhere in the DDRAW.cpp family for similarly unmodeled objects. */
+    using ResourceGetSurfaceFn = void* (__stdcall*)(void*, int, int);
+    void** resourceVtbl = *reinterpret_cast<void***>(resource);
+    res_surface = reinterpret_cast<ResourceGetSurfaceFn>(resourceVtbl[1])(resource, 0, 0);
+
+    /* Allocate the screensaver's own UIPANEL surface. The original
+     * allocates exactly 0x20 bytes (matching ui/UIPANEL_Surface.cpp's
+     * documented real 32-bit layout for this struct — NOT
+     * graphics/LOCOBITMAP.h's differently-sized same-named struct, a
+     * pre-existing conflict tracked in PROGRESS.md) and, faithfully,
+     * proceeds to call UIPANEL_InitSurface below even if this allocation
+     * fails (screensaver_surface stays nullptr) — an original bug,
+     * preserved as-is rather than fixed. */
+    void* surfaceBuf = operator_new(0x20);
+    if (surfaceBuf != nullptr) {
+        UIPANEL_CreateSurface(surfaceBuf);
+    }
+    screensaver_surface = surfaceBuf;
+
+    UIPANEL_InitSurface(screensaver_surface, 0xd8, 0xc4, 0, 0, 0);
+    UIPANEL_SetClipRect(screensaver_surface, 9, 0);
+
+    sprites_initialized = 1;
+}
+
+/* ================================================================== */
+/* AboutDialog::RenderScreensaver                                      */
+/* Address: 0x410280                                                    */
+/* See the header doc comment for the full behavior description.       */
+/* ================================================================== */
+int32_t AboutDialog::RenderScreensaver()
+{
+    int32_t widthDelta  = scroll_rect.right  - scroll_rect.left;
+    int32_t heightDelta = scroll_rect.bottom - scroll_rect.top;
+
+    UIPANEL_Blit(screensaver_surface, scroll_rect.left, scroll_rect.top,
+                 scroll_rect.right, scroll_rect.bottom,
+                 static_cast<void*>(this->backbufferSurface),
+                 0, 0, widthDelta, heightDelta, 1);
+
+    /* Fade-window bounds gate (0x4102EE-0x410350 in the disassembly): two
+     * signed-divide-by-3 checks (C++'s `/` on signed int truncates toward
+     * zero, bit-identical to the original's IMUL-0x55555556 reciprocal
+     * trick) reject frames at the extreme ends of the fade curve. */
+    if (fade_timer < 0x10) {
+        if ((0x10 - fade_timer) / 3 > 3) {
+            return 0;
+        }
+    } else if (fade_timer > 0x54) {
+        if ((fade_timer - 0x54) / 3 > 3) {
+            return 0;
+        }
+    }
+    if ((0x10 - fade_timer) / 3 >= 3) {
+        return 0;
+    }
+
+    /* The remainder of this function (SetRect/OffsetRect + a call through
+     * backbufferSurface's own vtable[5] passing backbufferSurface itself
+     * as an explicit first argument, then a 1-3 iteration alpha-crossfade
+     * UIPANEL_Blit loop) is a deferred stub — see the header doc comment
+     * for why. Provably unreachable today: Update() (this function's only
+     * wired-in caller) has no caller of its own anywhere in this tree yet. */
+    fprintf(stderr, "STUB: %s (post-gate fade-blit tail) at %s:%d\n",
+            __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — AboutDialog::RenderScreensaver 0x410280's "
+                "post-gate SetRect/vtable[5]/crossfade-loop tail is not "
+                "decompiled (ambiguous backbufferSurface vtable shape)");
+    return 0;
 }

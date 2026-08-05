@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cmath>
 #include <ctime>
+#include <cassert>
 #include <unistd.h>
 
 /* Fwd decls for correct type names in mangling */
@@ -97,6 +98,25 @@ int32_t GlobalUnlock(HANDLE){return 1;}HANDLE GlobalHandle(void*p){return reinte
 int32_t GlobalFree(HANDLE h){free(h);return 0;}void timeBeginPeriod(unsigned int){}
 int32_t ExitProcess(unsigned int){exit(0);return 0;}
 int32_t PlaySoundA(LPCSTR,HMODULE,DWORD){return 1;}
+/* ShellExecuteA — used by game/Train_network.cpp's Train_ConnectToServer
+ * (0x3EB browser-open path, decompiled at 0x43C860) to launch a validated
+ * http(s) URL. No established host URL-open helper exists elsewhere in
+ * this tree (no xdg-open/SDL_OpenURL wrapper), and Train_ConnectToServer's
+ * entire caller chain is currently dead code (TrainSubsystem::ProcessMessages
+ * has zero callers), so this is a loud deferred stub rather than a real
+ * implementation: fail loudly if ever actually reached instead of silently
+ * pretending to open a browser. */
+int32_t ShellExecuteA(HWND,LPCSTR operation,LPCSTR file,LPCSTR,LPCSTR,int32_t){
+#ifndef _WIN32
+ fprintf(stderr,"STUB: ShellExecuteA(op=%s, file=%s) at %s:%d — host URL-open not implemented\n",
+         operation?operation:"(null)",file?file:"(null)",__FILE__,__LINE__);
+ assert(0 && "stub reached: ShellExecuteA (host URL-open) — implement a real host opener "
+             "before wiring up a live caller of Train_ConnectToServer's browser-open path");
+ return 0;
+#else
+ static_cast<void>(operation);static_cast<void>(file);return 0;
+#endif
+}
 
 /* User32 */
 int32_t ClientToScreen(HWND,POINT*){return 1;}int32_t SetCursorPos(int32_t,int32_t){return 1;}
@@ -547,7 +567,15 @@ int32_t g_surface_channel1 = 0; int32_t g_surface_channel2 = 0; int32_t g_surfac
 int32_t g_pixel_format_mask = 0; int32_t g_viewport_rect_left = 0; int32_t g_viewport_rect_top = 0;
 int32_t g_viewport_rect_right = 800; int32_t g_viewport_rect_bottom = 600;
 int32_t g_window_left = 0; int32_t g_window_top = 0; int32_t g_listener_x = 0; int32_t g_listener_y = 0;
-void* _g_train = nullptr; void* DAT_004a97a0 = nullptr; void* DAT_004a9994 = nullptr;
+void* _g_train = nullptr;
+/* DAT_004a97a0 — Easter-egg language selector (int32_t; PostBag_Subdir's
+ * `switch (DAT_004a97a0)` in network/NetworkPlayerList.cpp compares it as a
+ * 32-bit int, so the storage must match: on a 64-bit host, defining this as
+ * `void*` let NetworkPlayerList.cpp's `extern int32_t` read only the first
+ * 4 of the pointer's 8 bytes — harmless today only because nothing else
+ * reads/writes it as a pointer, but still a real type mismatch). */
+int32_t DAT_004a97a0 = 0;
+void* DAT_004a9994 = nullptr;
 void* g_click_on_town = nullptr; void* g_click_on_building = nullptr; void* g_cgwnd = nullptr;
 int32_t g_clean_exit = 0; void* g_client_rect = nullptr; void* _g_cursor_surface = nullptr;
 void* g_frame_event = nullptr; void* g_fullscreen_rect = nullptr; void* g_game_config = nullptr;

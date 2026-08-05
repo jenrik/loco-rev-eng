@@ -54,7 +54,14 @@ void   DirectPlay_Close(void* peer);          /* 0x00461990 */
 int    DirectPlay_HostSession(void* peer, int enable, int max_players, int a, int b); /* 0x0045EDE0 */
 int    DirectPlay_ConnectToSession(void* peer, char* player_name, char* session_name, char* pwd); /* 0x0045F050 */
 int    DirectPlay_SetSessionDesc(void* peer, char* desc); /* 0x0045FB70 */
-void   DirectPlay_HandleMessages(void);       /* 0x45F390 */
+/* Real signature has 3 args the DB previously hid (decompiler dropped them
+ * because the function's stored signature said void(void)): disassembly at
+ * 0x43C8EE-0x43C8F2 and 0x43C98D-0x43C991 (both inside Train_ConnectToServer)
+ * push (protocol, address, 0) — matches this function's OWN internal calls
+ * at 0x45E88C-0x45E88E / 0x45E987-0x45E989 in DirectPlay_ConnectToSession,
+ * which use (0, 0, 0). See network/DirectPlay.h/.cpp for the shared
+ * declaration and the still-deferred (~2076 byte) body. */
+uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_t flags); /* 0x45F390 */
 
 /* Win32 I/O */
 int    __stdcall CreateFileA(const char* lpFileName, uint32_t dwDesiredAccess,
@@ -71,6 +78,17 @@ int    __stdcall HeapFree(void* hHeap, uint32_t dwFlags, void* lpMem);
 void   __stdcall Sleep(uint32_t dwMilliseconds);
 int    __stdcall wsprintfA(char* lpOut, const char* lpFmt, ...);
 uint32_t __stdcall GetFileAttributesA(const char* lpFileName);
+/* shell32 — used by Train_ConnectToServer's browser-open (0x3EB, flag
+ * bit0 clear) path to launch a validated http(s) URL. No established
+ * host URL-open helper exists elsewhere in this tree; the host body is a
+ * loud deferred stub in shared/link_stubs.cpp, matching CLAUDE.md's stub
+ * policy. Unreachable today (Train_ConnectToServer's whole caller chain
+ * is dead code), so the stub never fires. */
+int    __stdcall ShellExecuteA(void* hwnd, const char* operation, const char* file,
+                                const char* params, const char* directory, int show_cmd);
+/* CRT import, already declared/stubbed under this exact C name in
+ * core/GameObject.cpp (see shared/link_stubs.cpp); reused as-is. */
+int    IsCharAlphaNumericA(char c);
 
 /* DirectPlay message polling */
 void*  __thiscall WIN32_PeekMessageLoop(void* dplay_peer);  /* 0x00460F10 */
@@ -119,10 +137,15 @@ void*  __thiscall INPUT_DirToOffset_Up(void* param);     /* 0x0041CFD0 */
 void*  __thiscall INPUT_DirToOffset_Down(void* param);   /* 0x0041CFF0 */
 
 /* Internal train functions referenced from ProcessMessages */
-void   __fastcall Train_ConnectToServer(void* subsystem, int data);  /* 0x0043CDD0 */
+/* Train_ConnectToServer is __thiscall (ECX=subsystem, one stack arg),
+ * not __fastcall — see disassembly at 0x43C860 (MOV EDX,[ESP+8] fetches
+ * the single stack argument; ECX is only ever used as `this`). The stack
+ * argument is a payload pointer, not an int — the old `int data` type
+ * only compiled here because of -fpermissive. */
+void   __thiscall Train_ConnectToServer(void* subsystem, void* payload); /* 0x43C860 */
 void   __fastcall Train_HandleTrackBuild(void* subsystem, int data); /* 0x0043CE10 */
 void   __fastcall Train_SendPlayerInfo(void* subsystem);             /* 0x0043CDA0 */
-void   __fastcall Train_RemoveAllTracks(void* subsystem);            /* 0x0043CA50 */
+void   __fastcall Train_RemoveAllTracks(void* subsystem);            /* 0x43CC40 */
 
 /* OutputDebugStringA is available as g_OutputDebugStringA from main file */
 
@@ -834,7 +857,7 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 1: /* 0x3EB — ConnectToServer */
-            Train_ConnectToServer(this, (uint8_t*)payload);
+            Train_ConnectToServer(this, payload);
             break;
 
         case 2: /* 0x3EC — HandleTrackBuild */
@@ -2895,5 +2918,251 @@ void Train_QueueMessage(void* train, TrainMessage* msg)
 {
     if (train != nullptr && msg != nullptr) {
         static_cast<TrainSubsystem*>(train)->QueueMessage(msg);
+    }
+}
+
+/* ================================================================== */
+/* Train_ConnectToServer — network message 0x3EB handler               */
+/* Address: 0x43C860-0x43CBD1 (__thiscall; ECX=subsystem, one stack     */
+/* argument = payload). Previously mis-annotated 0x0043CDD0, which is   */
+/* mid-body of Train_SendPlayerInfo.                                    */
+/*                                                                      */
+/* Declared and called (case 1, message type 0x3EB) inside              */
+/* TrainSubsystem::ProcessMessages, but had no body anywhere in the     */
+/* tree — nm showed it undefined and the real call site compiled to     */
+/* `call 0` (guaranteed crash if ever reached). ProcessMessages'          */
+/* whole caller chain is currently dead on the host build, so this was  */
+/* never exercised, but it is fully decompiled/disassembled here rather */
+/* than stubbed, per this project's practice for evidenced-but-not-yet- */
+/* wired functions.                                                     */
+/*                                                                      */
+/* Bit 0 of the payload's flag byte (payload+8) selects the path:       */
+/*   - set:   close and re-host the local DirectPlay session, then      */
+/*            connect to the server named by the "ServerName" ini key   */
+/*            (default "LEGO International Train Server"), retrying     */
+/*            the host+connect sequence once on failure. On success,    */
+/*            returns immediately — no cleanup runs.                    */
+/*   - clear: builds "http:\\<payload string>" (the literal two          */
+/*            backslashes match the raw bytes of the format string at   */
+/*            0x47EAF8 — not a typo) and, if every non-alphanumeric      */
+/*            character in the result is one of ",-.:;\@_" (per the      */
+/*            signed-byte range checks at 0x43CA06-0x43CA44; the         */
+/*            `c != 0x2f2f` arm can never match a single byte and is     */
+/*            preserved as dead code, matching the binary), opens it     */
+/*            with ShellExecuteA "open". This branch ALWAYS falls        */
+/*            through to the shared cleanup below, even when the URL     */
+/*            opens successfully — there is no early return here.       */
+/*                                                                      */
+/* If the payload's address string (payload+9) is empty, neither branch */
+/* runs at all and control goes straight to cleanup.                    */
+/*                                                                      */
+/* Shared cleanup (both failure paths, and the browser branch           */
+/* unconditionally): tears down the DirectPlay peer, resets              */
+/* player_peer_id, queues an internal message (type 0x1C), constructs   */
+/* a placeholder local DPlayManager player and registers it, then       */
+/* flushes every car queued on sprite_list_1 (type 0x0F RemoveCar        */
+/* messages, matching TrainSubsystem::RemoveAllCars).                    */
+/*                                                                      */
+/* MSVC's SEH frame (the ExceptionList/FS:[0] chain at the top of the   */
+/* real function) is compiler-generated scaffolding, not reimplemented  */
+/* here — see PoolAllocator::Shutdown in network/NetHelpers.cpp for the */
+/* same established omission ("MSVC SEH not supported on GCC").         */
+/* ================================================================== */
+void Train_ConnectToServer(void* subsystem, void* payload)
+{
+    TrainSubsystem* self = static_cast<TrainSubsystem*>(subsystem);
+    char* address = static_cast<char*>(payload) + 9;
+
+    if (strlen(address) != 0) {
+        uint8_t flags = *(static_cast<uint8_t*>(payload) + 8);
+
+        if ((flags & 1) == 1) {
+            /* Host mode: re-host and connect to the configured train server. */
+            DirectPlay_Close(g_dplay_peer);
+            Sleep(10);
+            DirectPlay_HostSession(g_dplay_peer, 0, 0, 0, 0);
+            int32_t protocol = Config_GetIniInt(g_config_ini, "Configuration", "Protocol", 2);
+            DirectPlay_HandleMessages(protocol, address, 0);
+
+            if (*(int32_t*)((uint8_t*)g_dplay_peer + 0x1588) != 0) {
+                char server_name[0x4B4];
+                Config_GetIniString(g_config_ini, "Configuration", "ServerName",
+                                     "LEGO International Train Server",
+                                     server_name, 0x4B4);
+                DirectPlay_ConnectToSession(g_dplay_peer,
+                                             (char*)((uint8_t*)g_player_config + 6),
+                                             server_name, NULL);
+
+                if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) == 0) {
+                    /* Retry once: close, wait, re-host, reconnect. Reuses
+                     * the same protocol/address values (never recomputed). */
+                    DirectPlay_Close(g_dplay_peer);
+                    Sleep(1000);
+                    DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
+                    DirectPlay_HandleMessages(protocol, address, 0);
+                    DirectPlay_ConnectToSession(g_dplay_peer,
+                                                 (char*)((uint8_t*)g_player_config + 6),
+                                                 server_name, NULL);
+                }
+
+                if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+                    return;  /* connected — no cleanup */
+                }
+            }
+        } else {
+            /* Browser mode: build "http:\\<address>" and open it if every
+             * non-alphanumeric byte in it validates. Always falls through
+             * to cleanup below, even on a successful open. */
+            self->byte_flags = 1;
+
+            char url_buf[0x200];
+            wsprintfA(url_buf, "http:\\\\%s", address);
+
+            bool bad = false;
+            for (char* p = url_buf; *p != '\0'; ++p) {
+                if (IsCharAlphaNumericA(*p)) continue;
+                /* Signed: the real disassembly sign-extends the byte
+                 * (MOVSX) and uses JG/JGE/JL/JLE range checks. */
+                int c = static_cast<signed char>(*p);
+                if (c < 0x3c) {
+                    if (c < 0x3a && (c < 0x2c || c > 0x2e)) bad = true;
+                } else if (c < 0x5d) {
+                    if (c != 0x5c && c != 0x40) bad = true;
+                } else if (c != 0x5f && c != 0x2f2f) {
+                    bad = true;
+                }
+                if (bad) break;
+            }
+            if (!bad) {
+                ShellExecuteA(nullptr, "open", url_buf, nullptr, nullptr, 0);
+            }
+        }
+    }
+
+    /* --- Shared cleanup --- */
+    DirectPlay_Close(g_dplay_peer);
+    self->player_peer_id = 0;
+
+    {
+        NetworkMsg* msg = AllocateNetworkMessage();
+        if (msg) { msg->data = NULL; msg->next = NULL; }
+        /* 0x43CA96/0x43CA9C/0x43CA9F write through msg unconditionally,
+         * matching the binary (null-deref on allocation failure is the
+         * original behavior, preserved as-is — same pattern documented at
+         * RemoveAllCars's 0x43CC0B). */
+        msg->type = 0x1C;
+        msg->next = NULL;
+        msg->data = NULL;
+        NETMAN_QueueMessage(msg);
+    }
+
+    {
+        /* 0x43CACC calls DPlayManager::CreatePlayer (0x442850) — its own
+         * cross-reference list names Train_ConnectToServer as a caller —
+         * not the free function DPLAY_CreatePlayer declared elsewhere in
+         * this file (that extern's own address comment, 0x4429C0, is
+         * itself mid-body of a different function; out of scope here).
+         * Matches the operator_new+placement-new+CreatePlayer() idiom
+         * already established at network/Netman.cpp:2333-2336. */
+        void* storage = operator_new(sizeof(DPlayManager));
+        DPlayManager* player = nullptr;
+        if (storage != nullptr) {
+            player = ::new (storage) DPlayManager();
+            player->CreatePlayer();
+        }
+
+        /* 0x43CAD3 onward writes through `player` unconditionally even if
+         * allocation failed (player stays null) — matches the binary; the
+         * only null guard in the original is on the destroy call below. */
+        FormatResourceString(&g_resmgr, 0xDF, player->m_playerName, 0x50);
+        player->m_flag41 = 0xFF;
+        strcpy(reinterpret_cast<char*>(player->m_sessionBlk1),
+               (char*)((uint8_t*)g_player_config + 6));
+        strcpy(reinterpret_cast<char*>(player->m_sessionBlk2), "LEGO LOCO");
+
+        NET_RegisterPlayer(g_dplay, player, 1, 0);
+
+        if (player != nullptr) {
+            player->~DPlayManager();
+            GLOBAL_free(player);
+        }
+    }
+
+    while (self->sprite_list_1 != NULL) {
+        NetworkMsg* msg = AllocateNetworkMessage();
+        if (msg) { msg->data = NULL; msg->next = NULL; }
+        msg->type = 0x0F;
+        msg->data = self->sprite_list_1;
+        *(uint8_t*)((uint8_t*)self->sprite_list_1 + 0x88) = 0;
+        self->sprite_list_1 = *(void**)((uint8_t*)self->sprite_list_1 + 0x70);
+        *(void**)((uint8_t*)msg->data + 0x70) = NULL;
+        NETMAN_QueueMessage(msg);
+    }
+}
+
+/* ================================================================== */
+/* Train_RemoveAllTracks — free-function bridge, sprite_list_2 drain    */
+/* Address: 0x43CC40-0x43CCB2 (__fastcall; ECX=subsystem, no stack       */
+/* args). Previously mis-annotated 0x0043CA50, which is mid-body of     */
+/* Train_ConnectToServer.                                                */
+/*                                                                      */
+/* Declared and called (3 sites) but had no body anywhere in the tree — */
+/* nm showed it undefined and every call site compiled to `call 0`.     */
+/* Its only reachable ancestor caller, TrainSubsystem::UpdateTrainMovement,   */
+/* has zero callers on the host build today, so this is currently dead  */
+/* code too; implemented fully rather than stubbed, matching the        */
+/* Train_ConnectToServer rationale above.                               */
+/*                                                                      */
+/* Operates on sprite_list_2 (+0x18) — the "dead/orphaned train car      */
+/* list" per Train.h's canonical field layout. Ghidra's own auto-comment*/
+/* at this address calls it "track_list"; the canonical name used here  */
+/* is sprite_list_2, matching TrainSubsystem's documented field table.  */
+/*                                                                      */
+/* For each node still on sprite_list_2: allocates a type-0x11          */
+/* NetworkMsg carrying the node, stamps the node's owner byte (+0x7C)   */
+/* with the low byte of g_netman+0x7D0 (the same idiom used for the     */
+/* sprite_list_2 re-notify block inside                                 */
+/* TrainSubsystem::UpdateTrainMovement, e.g. its line "*(uint8_t*)(cur +  */
+/* 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);"), and queues the    */
+/* message.                                                              */
+/*                                                                      */
+/* PRESERVED ORIGINAL BUG (verified against disassembly, not just the   */
+/* decompiler's own comment): at 0x43CC8D the node's next pointer        */
+/* (+0x70) is cleared to 0 *before* 0x43CC96-0x43CC99 re-reads that same */
+/* field to advance the list head — so `sprite_list_2 = node->next`      */
+/* always observes 0. Only the first node is ever removed per call; the */
+/* rest of the list is silently leaked (never freed, never revisited).  */
+/* Preserved as-is, matching this project's established practice of      */
+/* keeping a verified original bug rather than "fixing" it (see          */
+/* TrainSubsystem::RemoveAllCars's comment on its own unconditional      */
+/* write at 0x43CC0B for the same style of preserved-quirk documentation,*/
+/* though that is a correct function — a different, similarly-named      */
+/* symbol in this same file).                                           */
+/* ================================================================== */
+void Train_RemoveAllTracks(void* subsystem)
+{
+    TrainSubsystem* self = static_cast<TrainSubsystem*>(subsystem);
+
+    while (self->sprite_list_2 != NULL) {
+        NetworkMsg* msg = AllocateNetworkMessage();
+        if (msg != NULL) {
+            msg->data = NULL;
+            msg->next = NULL;
+        }
+        /* 0x43CC65 writes through msg unconditionally, matching the binary. */
+        msg->type = 0x11;
+        msg->data = self->sprite_list_2;
+
+        uint8_t* node = (uint8_t*)self->sprite_list_2;
+        node[0x88] = 0;
+        node[0x7C] = *((uint8_t*)g_netman + 0x7D0);
+
+        /* BUG (0x43CC8D clears +0x70 before 0x43CC96-0x43CC99 re-reads it
+         * to advance the head) — preserved as-is; see doc comment above. */
+        *(void**)(node + 0x70) = NULL;
+        node[0x88] = 0;  /* redundant with the write above; matches the binary. */
+
+        self->sprite_list_2 = *(void**)(node + 0x70);
+        NETMAN_QueueMessage(msg);
     }
 }
