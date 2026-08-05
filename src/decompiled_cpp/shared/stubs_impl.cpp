@@ -104,7 +104,28 @@ void RESMGR_PlaySound(int) {}
 void ScriptEngine_constructor(void*) {}
 void RESDATA_ScriptEngine_Dtor(void*) {}
 int  Vehicle_SetState(void*, int) { return 0; }
-void UI_CenterWindow(int*, int*) {}
+/** UI_CenterWindow — Center inner rect within outer rect
+ *  Address: 0x425A50
+ *  
+ *  Takes two RECT pointers (int[4] arrays: left, top, right, bottom).
+ *  Modifies inner rect in place to be centered within outer rect.
+ *  Preserves inner rect width and height; only adjusts left/top.
+ *  __cdecl, 49 instructions. */
+void UI_CenterWindow(int* outer, int* inner)
+{
+    int inner_w = inner[2] - inner[0];   /* inner width = right - left */
+    int inner_h = inner[3] - inner[1];   /* inner height = bottom - top */
+    int outer_w = outer[2] - outer[0];   /* outer width */
+    int outer_h = outer[3] - outer[1];   /* outer height */
+
+    /* Center horizontally: outer.left + (outer_w - inner_w) / 2 */
+    inner[0] = outer[0] + (outer_w - inner_w) / 2;
+    inner[2] = inner[0] + inner_w;
+
+    /* Center vertically: outer.top + (outer_h - inner_h) / 2 */
+    inner[1] = outer[1] + (outer_h - inner_h) / 2;
+    inner[3] = inner[1] + inner_h;
+}
 void Sprite_Destroy(void*) {}
 void* ButtonSprite_Ctor(void*, int, int, int) { return nullptr; }
 void NETMAN_QueueMessage(void*, int, void*) {}

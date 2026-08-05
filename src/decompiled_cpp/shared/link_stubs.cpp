@@ -377,9 +377,9 @@ void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,int32_t){ret
 void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,char){return nullptr;} /* _Z19UI_CreateMessageBoxPviiciic */
 void*UI_CreateMessageBox(void*,int32_t,int16_t,char,int32_t,int32_t,char){return nullptr;} /* _Z19UI_CreateMessageBoxPvisciic */
 
-/* UI_CenterWindow — C++ overloads */
-void UI_CenterWindow(RECT*,RECT*){}     /* _Z15UI_CenterWindowP4RECTS0_ */
-void UI_CenterWindow(void*,void*){}     /* _Z15UI_CenterWindowPvS_ */
+/* UI_CenterWindow — canonical implementation now in stubs_impl.cpp (0x425A50) */
+// void UI_CenterWindow(RECT*,RECT*){} — removed duplicate
+// void UI_CenterWindow(void*,void*){} — removed duplicate
 
 /* UI_WindowBase_BaseDtor — C++ overloads */
 void UI_WindowBase_BaseDtor(void*){}            /* _Z22UI_WindowBase_BaseDtorPv */
