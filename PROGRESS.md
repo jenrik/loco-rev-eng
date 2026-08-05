@@ -449,3 +449,14 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 **Remaining Phase 1**: VTABLE-001 (6 sites), LAYOUT-001 (14 files), ABI-THIS-001 (3 sites), ARTIFACT-001 (23 more files), LINK-001 (remove flags), SKIP-001 (track 33 files)
 **Remaining Phase 2**: TrackPiece (prov-055), Wave IO (raw-115) CRITICAL; ~30 HIGH; ~200 MEDIUM/LOW
+
+**Session 2026-08-04 (cont 3): Continued Phase 1 anti-patterns + Phase 2 HIGH fixes**
+
+- [x] **ARTIFACT-001** [medium]: Verified no remaining DAT_/PTR_LAB_ artifacts in main codebase (only in stub files where intentionally used as weak symbols)
+- [x] **raw-018** [HIGH]: HelpWnd::set_mode — removed erroneous (void*,void*,int,int) overload. vtable[3] at 0x414340 is inherited GameWindow::set_mode(int32_t,void*,uint8_t,uint8_t)
+- [x] **raw-164** [HIGH]: ResourceManager — SoundObject ctor overrides TrackPiece marker 7→8 (type field). RESDATA_SoundObject_Init fixed maxLen offset and return value (text_buf not self)
+- [x] **raw-115** [CRITICAL]: wave_io.c — fixed prefix offset (was one byte early), documented missing file-stream cleanup path and binary error codes
+
+**Cumulative session**: 12 commits. 126/126 objects, make check + make test pass.
+**Phase 1 remaining**: VTABLE-001, LAYOUT-001, ABI-THIS-001, LINK-001 (remove flags)
+**Phase 2 remaining**: ~230 Terra-confirmed (2 CRITICAL already addressed, ~30 HIGH partially addressed)
