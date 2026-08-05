@@ -124,17 +124,29 @@ layouts and typed adapters inside `#ifndef _WIN32`.
 
 Use this exact boundary, not `LOCO_SDL3` or another feature macro. Never leak
 host behavior into the original path. Preserve the recovered code and put its
-host alternative in a guarded block. Keep SDL3 implementation in
-`src/sdl3_shims/` or small guarded adapters in decompiled classes. SDL3 is the
-non-Windows compatibility/presentation layer, never evidence for original game
-behavior. Guard SDL includes, declarations, fields, and calls when they touch
-decompiled code.
+host alternative in a guarded block. Every host-only file (no original
+Windows counterpart at all — network discovery, resource archive loading,
+SDL3 window/audio/DirectDraw shims, etc.) lives beside the decompiled classes
+of the subsystem it belongs to (e.g. `graphics/sdl3_ddraw.cpp` next to
+`graphics/DDRAW.cpp`) with its **entire body** wrapped in `#ifndef _WIN32`,
+rather than in a separate directory. There is one unified source tree rooted
+at the repository root — no more `decompiled_cpp/` vs `sdl3_shims/` split.
+SDL3 is the non-Windows compatibility/presentation layer, never evidence for
+original game behavior. Guard SDL includes, declarations, fields, and calls
+when they touch decompiled code.
+
+Palette handling: Lego Loco's 8-bit palettized BMPs are converted to 32-bit
+RGBA at load time (`SDL_LoadBMP_IO` → `SDL_ConvertSurface` to XRGB8888) rather
+than via a runtime palette-lookup shader — simpler pipeline, no palette state
+to manage, at the cost of not supporting palette-cycling animations (water/
+sky), since the palette is baked in at load.
 
 ## Stubs
 
 Internal functions must be fully decompiled. Exceptions:
 
-1. OS/hardware APIs may be implemented in `stubs/` or `src/sdl3_shims/`.
+1. OS/hardware APIs may be implemented in `stubs/` or as a host-only,
+   `#ifndef _WIN32`-guarded file beside the subsystem it belongs to.
 2. A temporarily deferred internal function must live in a dedicated stub file,
    say `// TODO: decompile 0xADDRESS`, and be tracked in `PROGRESS.md`.
 3. Compiler-generated deleting destructors, RTTI, EH, and similar helpers are
@@ -142,33 +154,42 @@ Internal functions must be fully decompiled. Exceptions:
 
 Never use linker `--defsym` placeholders as stubs. Every executable temporary
 stub must emit a clear warning to the logs and then fail with an explicit
-assertion. Never return silent success from incomplete internal logic.
+assertion. Never return silent success from incomplete internal logic. Never
+maintain a build-exclusion list (a "known broken, skip it" source-file list)
+as a substitute for this — every file in the tree must compile.
 
 ## Build and tests
 
 Run from the repository root:
 
 ```bash
-make                   # build build/lego_loco
-make check             # per-file compilation status
-make test              # deterministic component/host-boundary regressions
-make test-integration  # isolated Wayland/Sway GUI integration flows
-make test-all          # both test layers
+meson setup build && meson compile -C build       # build build/lego_loco
+meson test -C build                                # deterministic component/host-boundary regressions
+meson test -C build --suite integration            # isolated Wayland/Sway GUI integration flows
+meson test -C build && meson test -C build --suite integration  # both test layers
 ```
 
 Run the smallest relevant tests while iterating and the full affected layer
 before completion. Changes to SDL3, host adapters, runtime/UI flow, input,
-rendering, or audio must run `make test-integration`. It builds and drives the
-real binary in an isolated compositor; artifacts are under
-`build/test-artifacts/`. See `docs/testing.md`.
+rendering, or audio must run `meson test -C build --suite integration`. It
+builds and drives the real binary in an isolated compositor; artifacts are
+under `build/test-artifacts/`.
 
-For isolated decompiled-file checks:
+After adding a new source file to any subsystem directory, reconfigure so the
+auto-discovered source list picks it up:
 
 ```bash
-cd src/decompiled_cpp
-make
-make check
-make all
+meson setup --reconfigure build
+```
+
+For the MinGW cross-compile typecheck build (compiles the decompiled classes —
+not the host-only shim files, which compile down to empty translation units
+under `_WIN32` — against real Windows headers; not linked, not a shippable
+target):
+
+```bash
+meson setup build-mingw --cross-file cross/mingw32-typecheck.txt
+ninja -C build-mingw -k 0   # keep-going: reports a full per-file census, expect failures
 ```
 
 This is NixOS. Use project/Nix dependencies and compatibility headers; never add
@@ -179,5 +200,7 @@ real Windows SDK headers to the native Linux build.
 - Each class/struct has one complete canonical header beside its implementation.
 - Use typed pointers and real inheritance; let the compiler manage vtables.
 - Put cross-cutting declarations in `shared/`, platform APIs in `stubs/`, and
-  host SDL3 implementations in `src/sdl3_shims/`.
+  host SDL3 implementations beside the subsystem directory they belong to
+  (`graphics/`, `audio/`, `network/`, `resources/`, `town/`, `ui/`), each
+  wrapped in `#ifndef _WIN32`.
 - Keep original address annotations on every implementation.

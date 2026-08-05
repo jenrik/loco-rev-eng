@@ -5,9 +5,9 @@
  * Verifies the five resource loads and destinations recovered from
  * EditWindow_render (0x4216F0) reach the SDL primary target.
  */
-#include "../src/sdl3_shims/resource_manager_sdl3.h"
-#include "../src/sdl3_shims/sdl3_ddraw.h"
-#include "../src/sdl3_shims/sdl3_window.h"
+#include "resource_manager_sdl3.h"
+#include "sdl3_ddraw.h"
+#include "sdl3_window.h"
 
 #include <SDL3/SDL.h>
 #include <cstdio>

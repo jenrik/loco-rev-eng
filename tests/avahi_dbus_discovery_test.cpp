@@ -1,4 +1,4 @@
-#include "../src/sdl3_shims/avahi_dbus_discovery.h"
+#include "avahi_dbus_discovery.h"
 
 #ifndef _WIN32
 #if defined(__linux__) && !defined(__ANDROID__)

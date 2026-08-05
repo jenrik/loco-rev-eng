@@ -1,7 +1,7 @@
 // Status: VALIDATED
 /** Host audio regression for mode-2 preload and mode-10 resource playback. */
-#include "../src/sdl3_shims/resource_manager_sdl3.h"
-#include "../src/sdl3_shims/sdl3_game_audio.h"
+#include "resource_manager_sdl3.h"
+#include "sdl3_game_audio.h"
 
 #include <SDL3/SDL.h>
 #include <cstdio>

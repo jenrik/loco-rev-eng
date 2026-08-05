@@ -33,8 +33,8 @@
 
               # ---- C/C++ compilation ----
               gcc                    # native g++ for quick syntax checks
-              gnumake                # Makefile build system
-              cmake                  # CMake-based port build
+              meson                  # build system
+              ninja                  # Meson's backend
               mingwToolchain         # i686-w64-mingw32 cross-compiler
                                      #   Provides: windows.h, ddraw.h, dsound.h, dplay.h
                                      #   Supports: __thiscall, __fastcall, __stdcall
@@ -44,7 +44,7 @@
               freetype                # native 14px Arial-compatible list text
               fontconfig              # resolves the host fallback face
               dejavu_fonts            # deterministic Fontconfig fallback font
-              pkg-config              # Makefile dependency discovery
+              pkg-config              # Meson dependency discovery
 
               # ---- Networking (for Linux port) ----
               dbus                   # Avahi DNS-SD through the system D-Bus
@@ -97,24 +97,27 @@
             # -----------------------------------------------------------------
             shellHook = ''
               echo ""
-              echo "Compile decompiled C++ (object files only, no link):"
-              echo "  make -C src/decompiled_cpp MINGW=1"
-              echo "  make -C src/decompiled_cpp check"
+              echo "Build lego_loco:"
+              echo "  meson setup build && meson compile -C build"
+              echo "MinGW cross-compile typecheck (decompiled classes only, not linked):"
+              echo "  meson setup build-mingw --cross-file cross/mingw32-typecheck.txt"
+              echo "  ninja -C build-mingw -k 0"
               echo ""
             '';
           };
 
-          # Minimal shell — just the cross-compiler + make (no GUI/Wine/Ghidra)
+          # Minimal shell — just the cross-compiler + build tools (no GUI/Wine/Ghidra)
           build-only = pkgs.mkShell {
             name = "lego-loco-build";
             buildInputs = with pkgs; [
-              gnumake
+              meson
+              ninja
               mingwToolchain
               gcc  # for native fallback
             ];
             shellHook = ''
-              echo "Lego Loco build-only shell (MinGW cross-compiler + GNU Make)"
-              echo "  make -C src/decompiled_cpp MINGW=1"
+              echo "Lego Loco build-only shell (MinGW cross-compiler + Meson)"
+              echo "  meson setup build-mingw --cross-file cross/mingw32-typecheck.txt"
             '';
           };
         };

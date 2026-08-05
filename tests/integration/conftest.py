@@ -44,7 +44,18 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def build_game() -> None:
-    subprocess.run(["make", "build"], cwd=ROOT, check=True)
+    # LEGO_LOCO_BUILD_ROOT is set automatically when this suite runs under
+    # `meson test` (see the top-level `integration` test in meson.build);
+    # that's the supported entry point, so the build directory name/location
+    # is never hardcoded here.
+    build_root = os.environ.get("LEGO_LOCO_BUILD_ROOT")
+    if not build_root:
+        raise RuntimeError(
+            "LEGO_LOCO_BUILD_ROOT is not set — run this suite via "
+            "`meson test -C <builddir> --suite integration`, which sets it "
+            "automatically, rather than invoking pytest directly."
+        )
+    subprocess.run(["meson", "compile", "-C", build_root], cwd=ROOT, check=True)
 
 
 @pytest.fixture(scope="session")

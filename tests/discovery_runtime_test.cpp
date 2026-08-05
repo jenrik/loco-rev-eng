@@ -1,4 +1,4 @@
-#include "../src/sdl3_shims/discovery_runtime.h"
+#include "discovery_runtime.h"
 
 #ifndef _WIN32
 

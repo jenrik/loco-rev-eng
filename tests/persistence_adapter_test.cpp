@@ -18,7 +18,7 @@
  */
 
 #include "persistence_fixtures.h"
-#include "../src/decompiled_cpp/input/PersistenceAdapter.h"
+#include "input/PersistenceAdapter.h"
 
 #include <vector>
 

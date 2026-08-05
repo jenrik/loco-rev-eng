@@ -7,9 +7,9 @@
  * aplayer resource (0x43A..0x442). Coordinates derive from show (0x408F70)
  * and the crop/increments from drawGrid (0x409980).
  */
-#include "../src/sdl3_shims/resource_manager_sdl3.h"
-#include "../src/sdl3_shims/sdl3_ddraw.h"
-#include "../src/sdl3_shims/sdl3_window.h"
+#include "resource_manager_sdl3.h"
+#include "sdl3_ddraw.h"
+#include "sdl3_window.h"
 
 #include <SDL3/SDL.h>
 #include <cstdio>

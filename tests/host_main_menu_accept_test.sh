@@ -5,8 +5,8 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-source="$root/src/decompiled_cpp/ui/EditWindow.cpp"
-header="$root/src/decompiled_cpp/ui/EditWindow.h"
+source="$root/ui/EditWindow.cpp"
+header="$root/ui/EditWindow.h"
 
 require() {
     local pattern="$1"

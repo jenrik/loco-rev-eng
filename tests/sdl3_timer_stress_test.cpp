@@ -9,7 +9,7 @@
  * still held a pointer to it.  The callback would read freed memory, get a
  * garbage function pointer, and crash.
  */
-#include "../src/sdl3_shims/sdl3_window.h"
+#include "sdl3_window.h"
 
 #include <SDL3/SDL.h>
 #include <cstdio>

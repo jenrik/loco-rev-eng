@@ -1,7 +1,7 @@
 // Status: VALIDATED
 /** resource_archive_test.cpp — RFH/RFD archive regression test. */
-#include "../src/sdl3_shims/pe_string_table.h"
-#include "../src/sdl3_shims/resource_archive.h"
+#include "pe_string_table.h"
+#include "resource_archive.h"
 
 #include <cstdint>
 #include <cstdio>

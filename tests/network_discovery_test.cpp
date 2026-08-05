@@ -1,4 +1,4 @@
-#include "../src/sdl3_shims/network_discovery.h"
+#include "network_discovery.h"
 
 #ifndef _WIN32
 

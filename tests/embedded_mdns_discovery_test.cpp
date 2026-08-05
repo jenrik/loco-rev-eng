@@ -1,4 +1,4 @@
-#include "../src/sdl3_shims/embedded_mdns_discovery.h"
+#include "embedded_mdns_discovery.h"
 
 #ifndef _WIN32
 

@@ -34,19 +34,19 @@
 #include <unistd.h>
 
 /* Complete class definitions needed by the fixtures below. */
-#include "../src/decompiled_cpp/core/Game.h"
-#include "../src/decompiled_cpp/core/Entity.h"
-#include "../src/decompiled_cpp/core/BuildingMgrObjectGroup.h"
-#include "../src/decompiled_cpp/game/World.h"
-#include "../src/decompiled_cpp/game/Vehicle.h"
-#include "../src/decompiled_cpp/game/Building.h"
-#include "../src/decompiled_cpp/game/BuildingMgr.h"
-#include "../src/decompiled_cpp/game/GameVehicle.h"
-#include "../src/decompiled_cpp/game/ResdataGameVehicle.h"
-#include "../src/decompiled_cpp/ui/HelpPageNode.h"
-#include "../src/decompiled_cpp/network/Netman.h"
-#include "../src/decompiled_cpp/world/tilemap.h"
-#include "../src/decompiled_cpp/resources/ResourceManager.h"
+#include "core/Game.h"
+#include "core/Entity.h"
+#include "core/BuildingMgrObjectGroup.h"
+#include "game/World.h"
+#include "game/Vehicle.h"
+#include "game/Building.h"
+#include "game/BuildingMgr.h"
+#include "game/GameVehicle.h"
+#include "game/ResdataGameVehicle.h"
+#include "ui/HelpPageNode.h"
+#include "network/Netman.h"
+#include "world/tilemap.h"
+#include "resources/ResourceManager.h"
 
 /* ---- Fail-loud macro ---- */
 

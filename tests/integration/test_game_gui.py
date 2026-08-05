@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import getpass
+import os
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.gui]
+
+# Resolved via LEGO_LOCO_BUILD_ROOT (set automatically by `meson test`) rather
+# than a "build/"-relative literal, which only worked because the old
+# Makefile happened to invoke pytest without changing directories.
+_SDL3_NET_TRANSPORT_TEST = str(Path(os.environ["LEGO_LOCO_BUILD_ROOT"]) / "tests" / "sdl3_net_transport_test")
 
 
 @pytest.mark.parametrize(
@@ -161,7 +168,7 @@ def test_multiplayer_host_game_go_back_back_exits_cleanly(game):
     game.wait_for_event("netman_session_ready", player_id=1, hosting=True)
 
     admitted = subprocess.run(
-        ["build/sdl3_net_transport_test", "--admit-client", "23000"],
+        [_SDL3_NET_TRANSPORT_TEST, "--admit-client", "23000"],
         check=True, capture_output=True, text=True, timeout=10,
     )
     assert "ADMITTED id=2" in admitted.stdout
@@ -217,7 +224,7 @@ def test_multiplayer_ready_go_enters_loading_with_adopted_vehicle(game):
     game.wait_for_event("netman_session_ready", player_id=1, hosting=True)
 
     admitted = subprocess.run(
-        ["build/sdl3_net_transport_test", "--admit-client", "23000"],
+        [_SDL3_NET_TRANSPORT_TEST, "--admit-client", "23000"],
         check=True, capture_output=True, text=True, timeout=10,
     )
     assert "ADMITTED id=2" in admitted.stdout
@@ -268,7 +275,7 @@ def test_multiplayer_direct_connect_projects_host_into_netman(game):
     game.wait_for_event("screen_presented", screen="multiplayer_lobby", dialog_state=5)
 
     server = subprocess.Popen(
-        ["build/sdl3_net_transport_test", "--admit-server", "24000"],
+        [_SDL3_NET_TRANSPORT_TEST, "--admit-server", "24000"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     try:

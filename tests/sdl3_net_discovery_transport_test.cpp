@@ -1,5 +1,5 @@
-#include "../src/sdl3_shims/embedded_mdns_discovery.h"
-#include "../src/sdl3_shims/sdl3_net_transport.h"
+#include "embedded_mdns_discovery.h"
+#include "sdl3_net_transport.h"
 
 #ifndef _WIN32
 

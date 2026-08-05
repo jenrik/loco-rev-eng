@@ -1,6 +1,6 @@
 // Status: VALIDATED
 /** resource_manager_sdl3_test.cpp — translated ResourceManager sprite ABI test. */
-#include "../src/sdl3_shims/resource_manager_sdl3.h"
+#include "resource_manager_sdl3.h"
 
 #include <SDL3/SDL.h>
 

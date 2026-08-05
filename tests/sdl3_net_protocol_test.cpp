@@ -1,4 +1,4 @@
-#include "../src/sdl3_shims/sdl3_net_protocol.h"
+#include "sdl3_net_protocol.h"
 
 #ifndef _WIN32
 

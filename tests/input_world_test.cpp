@@ -24,9 +24,9 @@
  */
 
 #include "persistence_fixtures.h"
-#include "../src/decompiled_cpp/input/InputMgr.h"
-#include "../src/decompiled_cpp/input/PersistenceAdapter.h"
-#include "../src/decompiled_cpp/resources/ResourceManager.h"
+#include "input/InputMgr.h"
+#include "input/PersistenceAdapter.h"
+#include "resources/ResourceManager.h"
 
 #include <vector>
 

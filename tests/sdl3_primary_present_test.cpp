@@ -1,7 +1,7 @@
 // Status: VALIDATED
 /** sdl3_primary_present_test.cpp — logical canvas → SDL display regression. */
-#include "../src/sdl3_shims/sdl3_ddraw.h"
-#include "../src/sdl3_shims/sdl3_window.h"
+#include "sdl3_ddraw.h"
+#include "sdl3_window.h"
 
 #include <SDL3/SDL.h>
 #include <cstdio>

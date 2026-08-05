@@ -1,6 +1,6 @@
 // Status: VALIDATED
 /** DPlayConfig defaults — GameConfig_constructor @ 0x440C60. */
-#include "../src/decompiled_cpp/network/DPlayConfig.h"
+#include "network/DPlayConfig.h"
 
 #include <cstdio>
 #include <cstring>

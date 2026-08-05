@@ -6,9 +6,9 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-panel="$root/src/decompiled_cpp/ui/GameSetupPanel.cpp"
-menu="$root/src/decompiled_cpp/ui/EditWindow.cpp"
-header="$root/src/decompiled_cpp/ui/GameSetupPanel.h"
+panel="$root/ui/GameSetupPanel.cpp"
+menu="$root/ui/EditWindow.cpp"
+header="$root/ui/GameSetupPanel.h"
 
 require() {
     local pattern="$1"

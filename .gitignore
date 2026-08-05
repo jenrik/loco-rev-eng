@@ -16,8 +16,7 @@ __pycache__/
 
 # Generated build outputs
 build/
-src/decompiled_cpp/build/
-src/sdl3_shims/build/
+build-mingw/
 *.o
 node_modules/
 .vite/
