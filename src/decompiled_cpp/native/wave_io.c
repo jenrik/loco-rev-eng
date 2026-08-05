@@ -145,7 +145,9 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
  *
  * @param path    Path to the .wav file
  * @param out_buf Pointer to WaveLoadBuf struct (0x20 bytes, output)
- * @return 0 on success, 0xFFFFFFFF on failure, may call CRT_exit on error
+ * @return 0 on success, 0xFFFFFFFF on failure, may call CRT_exit on error.
+ *   Binary error codes: 0xe102 (read/IO error), 0xe101 (format error),
+ *   0xe000 (allocation error). Source uses descriptive strings instead.
  */
 int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 {
@@ -170,10 +172,12 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 
     /* Step 1: Try asset manager first */
     if (g_asset_mgr != NULL) {
-        /* Adjust path to strip install path prefix */
+        /* Adjust path to strip install path prefix.
+         * Binary computes: path + (strlen - 1). The -1 skips the
+         * trailing separator, yielding the relative path within. */
         int prefix_len = 0;
         while (g_install_path[prefix_len]) { prefix_len++; }
-        const char* rel_path = path + (prefix_len - 1);
+        const char* rel_path = path + prefix_len;
 
         asset_data = AssetMgr_LoadFile(&g_asset_mgr, rel_path, &data_size);
 
@@ -277,9 +281,17 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
         }
     }
 
-    /* Step 6: Cleanup */
+    /* Step 6: Cleanup — matches binary tail at 0x41391D.
+     * Binary sequence:
+     *   1. Delete memory stream (local_18) via vtable[0] with flags=1
+     *   2. Free asset buffer (local_1c) via CRT_free
+     *   3. WIN32_StreamDestroyImmediate on file stream (local_20)
+     *   4. Delete file stream (local_20) via vtable[0] with flags=1
+     *
+     * TODO (ISS-raw-115-07): File-stream path (steps 3-4) not yet
+     * tracked separately from memory-stream path. */
     if (stream != NULL) {
-        /* Destroy stream via its vtable */
+        /* Destroy stream via its vtable[0] scalar deleting destructor */
         void* vtable = *(void**)stream;
         void (**dtor)(void*, int) = (void(**)(void*, int))vtable;
         dtor[0](stream, 1);
