@@ -154,7 +154,25 @@ void UI_IsBitmapReady(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, 
 void RESDATA_CreateChildSprite(void*, void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UI_DefWndProc(void*, unsigned int, unsigned int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Cursor_HandleWindowPaint(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_itoa(int, char*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/** CRT_itoa — Convert integer to string in given radix (base 2-36).
+ *  Standard C runtime function. Returns buf. */
+char* CRT_itoa(int value, char* buf, int radix) {
+    if (radix < 2 || radix > 36) { buf[0] = '\0'; return buf; }
+    char tmp[36];
+    int i = 0;
+    unsigned u = (value < 0 && radix == 10) ? -value : (unsigned)value;
+    int neg = (value < 0 && radix == 10);
+    do {
+        int d = u % radix;
+        tmp[i++] = (d < 10) ? '0' + d : 'a' + d - 10;
+        u /= radix;
+    } while (u);
+    int j = 0;
+    if (neg) buf[j++] = '-';
+    while (i > 0) buf[j++] = tmp[--i];
+    buf[j] = '\0';
+    return buf;
+}
 void Cursor_WaitForBlit(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void AudioChannel_IsActive(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GAMESTATE_ConnectToNetworkGame(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
@@ -276,7 +294,16 @@ void TrackPiece_Ctor(void*, int, int, unsigned short) { fprintf(stderr, "STUB: %
 void GameObject_SetWorldPos(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_InvalidateRect(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_GetRelPos(void*, int*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Config_WriteInt(void*, char const*, char const*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/** Config_WriteInt — Write integer to INI file section:key
+ *  Address: 0x452DB0. __thiscall (ECX=config, stack=section,key,value).
+ *  Converts int to string via CRT_itoa(10), writes via WritePrivateProfileStringA.
+ *  INI path is at config+4. */
+extern int WritePrivateProfileStringA(const char*, const char*, const char*, const char*);
+void __thiscall Config_WriteInt(void* config, const char* section, const char* key, int value) {
+    char buf[100];
+    CRT_itoa(value, buf, 10);
+    WritePrivateProfileStringA(section, key, buf, (const char*)((char*)config + 4));
+}
 void LOCOBITMAP_ColorKeyBlit_thunk(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void NET_UpdatePlayerList() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Town_CheckOccupied(void*, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }

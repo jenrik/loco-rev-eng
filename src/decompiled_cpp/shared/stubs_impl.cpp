@@ -101,8 +101,23 @@ void Timer_Resize(void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", 
 void Timer_Resize(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Collection_Sort(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void RESMGR_PlaySound(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ScriptEngine_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_ScriptEngine_Dtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/** ScriptEngine_constructor — ABI bridge (address: 0x4493A0)
+ *  Sets vtable to 0x4782A4, calls InitializeCriticalSection at +0x04.
+ *  Called by: GameLoop_Setup (0x406C26), BuildingComplex_Ctor (0x434523) */
+void* ScriptEngine_constructor(void* self) {
+    extern void InitializeCriticalSection(void*);
+    extern const void* PTR_RESDATA_ScriptEngine_Cleanup_004782a4;
+    *(const void**)self = &PTR_RESDATA_ScriptEngine_Cleanup_004782a4;
+    InitializeCriticalSection(static_cast<char*>(self) + 4);
+    return self;
+}
+/** RESDATA_ScriptEngine_Dtor — ABI bridge to ScriptEngine destructor.
+ *  TODO: decompile full cleanup at 0x4493D0 */
+void RESDATA_ScriptEngine_Dtor(void* self) {
+    (void)self;
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — RESDATA_ScriptEngine_Dtor needs decompilation");
+}
 int  Vehicle_SetState(void*, int) { return 0; }
 /** UI_CenterWindow — Center inner rect within outer rect
  *  Address: 0x425A50
