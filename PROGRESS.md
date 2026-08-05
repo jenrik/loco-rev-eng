@@ -428,3 +428,15 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 **Remaining Phase 1**: SKIP-001, LINK-001, VTABLE-001/LAYOUT-001/ABI-THIS-001/ARTIFACT-001, ADDR-001
 **Build**: 126/126 objects, make check passes, make test (unit) passes under nix develop
+
+**Session 2026-08-04 (cont): Phase 2 assembly-level fixes**
+
+- [x] **raw-073** [critical]: DDRAW_GetSurfaceWidthHeight at 0x4014E0 — verified against disassembly. Fixed: 3-param signature (was 1), vtable slot 22 (byte offset 0x58, not C index), dwWidth/dwHeight ordering (out_height=param2 receives dwHeight from ddsd_buf[3], out_width=param3 receives dwWidth from ddsd_buf[2]). Updated 5 call sites.
+- [x] **raw-046** [high]: ScriptedObject destructor — corrected annotation: 0x4494C0 is scalar-deleting wrapper (vtable[0]), not body-only
+- [x] **raw-000** [moderate]: CRT_memset_pattern at 0x4671E0 — added 5th destructor-callback argument (0x405870). Binary uses RET 0x14 (5 args). Updated declarations.
+
+**Remaining Phase 2** (sampled from 242 Terra-confirmed issues):
+- CRITICAL: DDRAW_BlitHBITMAPToSurface (raw-071), TrackPiece rendering (prov-055), Wave IO (raw-115)
+- HIGH: HelpWnd, Train, AboutDialog, PostcardAlbum, GameView, win32_stream, VehicleEditor, BuildingMgr, ResourceManager, DPlayManager, Netman, and ~30 other confirmed issues
+
+**Remaining Phase 1**: VTABLE-001, LAYOUT-001, ABI-THIS-001, ARTIFACT-001, ADDR-001
