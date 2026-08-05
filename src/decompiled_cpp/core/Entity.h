@@ -22,6 +22,8 @@
 
 #include "GameObject.h"
 
+
+// Status: TRANSCRIBED
 class Entity : public GameObject {
 public:
     uint8_t visible;                    // +0x24

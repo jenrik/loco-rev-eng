@@ -20,6 +20,8 @@
  *   CRT_catch_handler_0042af01  (0x42AF01) — catch handler in input/cursor
  */
 
+// Status: TRANSCRIBED
+
 #include "../shared/types.h"
 
 /* ================================================================== */

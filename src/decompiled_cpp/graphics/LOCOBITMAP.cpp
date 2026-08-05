@@ -17,6 +17,8 @@
  *   C) UIPANEL_Surface management functions
  */
 
+// Status: TRANSCRIBED
+
 #include "LOCOBITMAP.h"
 #include "PixelDataCache.h"
 #include <new>

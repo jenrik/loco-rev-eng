@@ -36,6 +36,8 @@
 #include <stddef.h>
 #include <stdarg.h>
 #include <stdio.h>
+
+// Status: TRANSCRIBED
 #ifdef __cplusplus
 extern "C" {
 #endif

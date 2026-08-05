@@ -45,6 +45,8 @@
 #pragma once
 
 #include "../shared/types.h"
+
+// Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* GameConfig — Network configuration / DPlay settings manager        */
@@ -94,27 +96,22 @@ public:
      * GameConfig constructor.
      * Address: 0x440C60
      *
-     * Sets vtable to VTBL_DPLAY_CONFIG (0x4781CC), initializes all
-     * fields with defaults, then calls LoadSettings() to load existing
-     * NetSettings.dat or create defaults if not found.
+     * Initializes all fields with defaults, then calls LoadSettings()
+     * to load existing NetSettings.dat or create defaults if not found.
      *
      * Called by: GameLoop_Setup @ 0x406C5A
-     *
-     * @return  Pointer to this (the initialized GameConfig instance)
      */
-    void* __fastcall GameConfig_ctor();
+    GameConfig();
 
     /**
-     * Scalar deleting destructor (vtable[0]).
+     * GameConfig destructor (body only).
      * Address: 0x440CC0
      *
-     * Resets vtable, frees the provider linked list at +0x10.
-     * Optionally frees self if (flags & 1).
-     *
-     * @param flags  Delete flag (bit 0 = free heap memory)
-     * @return       Pointer to this (or freed pointer)
+     * Frees the provider linked list at +0x10.
+     * The scalar deleting destructor at vtable[0] wraps this body and
+     * conditionally calls operator delete when flags & 1 (compiler-generated).
      */
-    void* __thiscall GameConfig_dtor(uint8_t flags);
+    ~GameConfig();
 
     /* ================================================================ */
     /* Settings Persistence                                              */

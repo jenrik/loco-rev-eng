@@ -8,6 +8,8 @@
  * and provides persistence via NetSettings.dat.
  */
 
+// Status: TRANSCRIBED
+
 #include "GameConfig.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
@@ -32,10 +34,8 @@ extern char  g_empty_string;           /* 0x4851D0 */
 /*                                                                     */
 /* Called by: GameLoop_Setup @ 0x406C5A                                */
 /* ================================================================== */
-void* __fastcall GameConfig::GameConfig_ctor()
+GameConfig::GameConfig()
 {
-/* In the binary: this->m_vtable = VTBL_*. Compiler-managed in natural C++. */
-
     this->m_clientPlayerCount = 4;                  /* +0x1C */
     this->m_hostPlayerCountAlt = 2;                 /* +0xAC */
 
@@ -55,25 +55,18 @@ void* __fastcall GameConfig::GameConfig_ctor()
 
     /* Load existing settings from NetSettings.dat (or create defaults) */
     NETMAN_FreePacket(static_cast<int32_t>(reinterpret_cast<intptr_t>(this)));
-
-    return this;
 }
 
 /* ================================================================== */
-/* GameConfig destructor — 0x440CC0                                     */
+/* GameConfig destructor (body) — 0x440CC0                              */
 /* (originally NETMAN_FreeProviderList)                                */
 /*                                                                     */
-/* Resets vtable, frees the provider linked list. Optionally frees     */
-/* heap allocation if flags & 1.                                       */
-/*                                                                     */
-/* @param flags  Delete flag (bit 0 = free heap memory)                */
-/* @return       Pointer to this (or freed memory)                     */
+/* Frees the provider linked list at +0x10.                            */
+/* The scalar deleting destructor at vtable[0] wraps this body and     */
+/* conditionally calls operator delete (compiler-generated).           */
 /* ================================================================== */
-void* __thiscall GameConfig::GameConfig_dtor(uint8_t flags)
+GameConfig::~GameConfig()
 {
-    /* Reset vtable for destructor dispatch safety */
-/* In the binary: this->m_vtable = VTBL_*. Compiler-managed in natural C++. */
-
     /* Free the provider linked list */
     void* node = this->m_providerList;              /* +0x10 */
     while (node != nullptr) {
@@ -81,7 +74,4 @@ void* __thiscall GameConfig::GameConfig_dtor(uint8_t flags)
         GLOBAL_free(node);
         node = this->m_providerList;
     }
-
-    /* Optionally free self */
-    return this;
 }

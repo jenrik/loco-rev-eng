@@ -48,6 +48,8 @@
 #pragma once
 
 #include "../shared/types.h"
+
+// Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 struct DPLAY_SessionData;
 
@@ -116,23 +118,6 @@ public:
     /* ================================================================ */
     /* UI Render (operates on a Panel, NOT the player slot)              */
     /* ================================================================ */
-
-    /**
-     * RenderConnectionPanel — Draw the DirectPlay connection panel UI.
-     * Address: 0x4421D0 (originally "DPLAY_Ctor")
-     *
-     * WARNING: This is a UI rendering method, NOT a player slot method.
-     * The `this` pointer must point to a Panel-derived window structure
-     * created by NETMAN_JoinSession. Field offsets referenced:
-     *   +0x08 HWND, +0xD4 scrollX1, +0xD8 scrollY1, +0xE8 dirty flag,
-     *   +0xF0 text buffer, +0x130 text RECT, +0x140 alignment mode,
-     *   +0x18C panel RECT, +0x1AC loaded flag, +0x1B0 sprites, +0x1D0 surface
-     *
-     * Called by:
-     *   NETMAN_JoinSession (0x4419AC)
-     *   0x00442677 (unnamed, within DPLAY creation)
-     */
-    void RenderConnectionPanel();
 
     /* ================================================================ */
     /* Player Slot Lifecycle                                             */
@@ -451,3 +436,22 @@ class PlayerConfig;
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern char  g_empty_string;    /* 0x4851D0 — empty string constant  */
 extern void* g_primary_surface; /* 0x4FD3C4 — primary DDraw surface  */
+
+/**
+ * RenderConnectionPanel — Draw the DirectPlay connection panel UI.
+ * Address: 0x4421D0 (originally "DPLAY_Ctor")
+ *
+ * WARNING: This is a UI rendering method, NOT a player slot method.
+ * The panel pointer must point to a Panel-derived window structure
+ * created by NETMAN_JoinSession. Field offsets referenced:
+ *   +0x08 HWND, +0xD4 scrollX1, +0xD8 scrollY1, +0xE8 dirty flag,
+ *   +0xF0 text buffer, +0x130 text RECT, +0x140 alignment mode,
+ *   +0x18C panel RECT, +0x1AC loaded flag, +0x1B0 sprites, +0x1D0 surface
+ *
+ * TODO: move to ConnectionPanel class when Panel hierarchy is decompiled.
+ *
+ * Called by:
+ *   NETMAN_JoinSession (0x4419AC)
+ *   0x00442677 (unnamed, within DPLAY creation)
+ */
+void RenderConnectionPanel(void* panel);

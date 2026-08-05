@@ -25,6 +25,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 /* ================================================================== */
 /* Arrival Queue Node (internal 8-byte linked list entry)              */
 /* ================================================================== */

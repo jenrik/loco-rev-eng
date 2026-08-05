@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "StreamObject.h"
 
 /* ================================================================== */

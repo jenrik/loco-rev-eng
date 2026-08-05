@@ -12,6 +12,8 @@
  *   body at 0x405870. They are distinct class-level destructors.
  */
 
+// Status: TRANSCRIBED
+
 #include "GameObject.h"
 #include "Entity.h"
 #include <cstring>

@@ -12,8 +12,11 @@
  * All addresses reference loco.exe (MSVC 6.0, x86 32-bit).
  */
 
+// Status: TRANSCRIBED
+
 #include "DDRAW.h"
 #include <new>
+#include <cassert>
 
 /* ================================================================== */
 /* Typed slot view — grounded in Ghidra vtable 0x478548                */
@@ -265,25 +268,13 @@ DDRAW_Building::DDRAW_Building()
 }
 
 /* ================================================================== */
-/* DDRAW_Building::Destroy                                             */
-/* Address: 0x458AD0                                                   */
-/*                                                                     */
-/* Scalar deleting destructor (vtable[0]). Calls CleanupSprites body   */
-/* then optionally frees the heap allocation via GLOBAL_free.          */
-/* ================================================================== */
-
-void* DDRAW_Building::Destroy(uint8_t flags)
-{
-    this->~DDRAW_Building();
-    if ((flags & 1) != 0) {
-        GLOBAL_free(this);
-    }
-    return this;
-}
-
 /**
- * DDRAW_Building::~DDRAW_Building
+ * DDRAW_Building::~DDRAW_Building — body destructor
  * Address: 0x458B00
+ *
+ * The scalar deleting destructor at vtable[0] (0x458AD0) is
+ * compiler-generated; it wraps this body and conditionally calls
+ * operator delete when flags & 1.
  */
 DDRAW_Building::~DDRAW_Building()
 {
@@ -394,8 +385,8 @@ void DDRAW_Building::InvalidateAll()
 
 uint8_t DDRAW_Building::InitBuildingSprites()
 {
-    // Full implementation would load sprites from resource IDs and
-    // set positions via vtable dispatch. See first-pass decompilation.
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_Building::InitBuildingSprites 0x458C90");
     return 1;
 }
 
@@ -417,7 +408,8 @@ uint8_t DDRAW_Building::SelectBuilding(Building* entity)
 
 void DDRAW_Building::ClampToViewport()
 {
-    // See first-pass decompilation
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_Building::ClampToViewport 0x459720");
 }
 
 /* ================================================================== */
@@ -518,6 +510,9 @@ uint8_t DDRAW_Building::HitTestWithDrag(int32_t x, int32_t y)
 
 uint32_t DDRAW_Building::HandleKeyPress(uint32_t key_code)
 {
+    (void)key_code;
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_Building::HandleKeyPress 0x45B3A0");
     return 0;
 }
 
@@ -528,7 +523,9 @@ uint32_t DDRAW_Building::HandleKeyPress(uint32_t key_code)
 
 void DDRAW_Building::BuildingClickHandler(void* desc)
 {
-    // See first-pass decompilation
+    (void)desc;
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_Building::BuildingClickHandler 0x458820");
 }
 
 /* ================================================================== */
@@ -538,7 +535,8 @@ void DDRAW_Building::BuildingClickHandler(void* desc)
 
 void DDRAW_Building::BuildingTimeUpdate()
 {
-    // See first-pass decompilation
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — DDRAW_Building::BuildingTimeUpdate 0x458940");
 }
 
 /* ================================================================== */

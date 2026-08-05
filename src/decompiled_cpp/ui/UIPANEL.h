@@ -44,6 +44,8 @@
 
 #include "../game/Panel.h"
 #include "../graphics/LOCOBITMAP.h"   /* for UIPANEL_Surface struct */
+
+// Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 class UIPANEL : public Panel {
 public:

@@ -1,4 +1,6 @@
 /* link_stubs.cpp — Correct C++ mangling via native overloading */
+
+// Status: TRANSCRIBED
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>

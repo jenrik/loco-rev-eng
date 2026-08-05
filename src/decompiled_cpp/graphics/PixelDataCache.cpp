@@ -21,6 +21,8 @@
  *   LOCOBITMAP_LoadPixelData -> Load
  */
 
+// Status: TRANSCRIBED
+
 #include "PixelDataCache.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <cstring>   /* memcpy, memset, strlen */

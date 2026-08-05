@@ -52,6 +52,8 @@
  * read, matching the host path's explicit-failure contract.
  */
 
+// Status: TRANSCRIBED
+
 #include "../shared/types.h"
 #include "ResourceManager.h"
 

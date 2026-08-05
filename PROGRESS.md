@@ -270,7 +270,7 @@ main()
 - [x] **SDK wiring fixes**: `RegisterWindowClass` SDL3 path now uses `SDL3_GetWindow()`. `g_main_window` set to CGWND instance in main.cpp.
 - [x] **Decompile `CGWND_InitMode1`** (0x408350) — full implementation from Ghidra decompilation. Two code paths: first-time loading screen with incremental subsystem init + progress pump, and return-to-menu world loading. All stubs in place, game transitions to mode 1 and enters main loop cleanly.
 - [x] **Host singleplayer reaches mode 3** — SP name-commit now follows the original 0x4227DA path (TileMap_Init(0) + SetGameMode(1) + CGWND_SetMode(1)); the host mode-3 cone is constructed (Game/World/BuildingMgr/ScriptedObject/TileMap/GameAudio via new HostMode3Bootstrap.cpp, BSS-zeroed like the originals); initMode1 PATH A runs the guarded loading screen and queues the host LoadingSequence task; EnterMode3 case 1/4 + common tail run against the real objects and queue the PostLoadWorker. Verified in the isolated-Wayland flow: menu → mode_changed(1) → mode_changed(3), stable mode-3 loop. Remaining: world-file load (InputMgr/.loco parsing) + town overlay cone (g_town/g_cursor/g_postcard) + g_input_mgr/g_town_view/g_ddraw_building — all logged loudly on the host.
-- [x] **Host TileMap bootstrap safety** — The original TileMap is BSS-backed, so the SDL host now zeroes its storage before `TileMap::TileMap()` calls `FullReset`; host-only guards defer the unported ResourceObject overlay setup and x86 tile asset-loader/post-load enumeration. The existing mode-3 soak regression and all 12 isolated-Wayland GUI flows pass.
+- [x] **Host TileMap bootstrap safety** — The original TileMap is BSS-backed, so the SDL host now zeroes its storage before `TileMap::TileMap()` calls `FullReset`; host-only guards defer the unported ResourceObject overlay setup and x86 tile asset-loader/post-load enumeration. The mode-3 soak regression passes. GUI integration gate: 4/12 passing (see line 240 for current status).
 ### Host singleplayer to town: next steps (2026-08-02 status)
 
 The mode machine works end-to-end (SP accept to CGWND_SetMode(1) to loading to CGWND_SetMode(3); real Game/World/BuildingMgr/ScriptedObject/TileMap/GameAudio constructed in HostMode3Bootstrap.cpp; stable mode-3 loop). The town frame is still an empty world. Remaining, in dependency order:
@@ -409,3 +409,22 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 | 2026-08-03 (core4-intro-postload) | `lego_loco-4.core` resolves the post-GameLoop_Setup RIP-0 call to `main.cpp:77`: `startLaunchSequence()` was omitted from SHIM_SRCS while the linker ignored unresolved symbols. Added the intro-player source and a defined-symbol regression. The now-reachable single-player path exposed unsupported immediate mode-5 Town presentation and BuildingMgr cleanup; the host remains in validated mode 3 and explicitly defers those x86-managed paths until typed town/resource placement support exists. Focused isolated mode-3 regression passes; the full GUI suite has 4 pass / 8 unrelated failures in multiplayer/audio/input flows. |
 | 2026-08-02 (read-only-decomp-audit) | Inventoried 143 implementation files, 82 headers, 2,648 heuristic function entries, and 90 bounded shards; build/check and unit tests pass, GUI integration is 4/12, while duplicate `fabric_exec` loading blocked every mandatory DeepSeek/Luna worker before turn 1, so the report at `docs/audits/decomp-state-2026-08-02.md` is explicitly partial with no confirmed correctness findings. |
 | 2026-08-03 (read-only-decomp-audit) | Reproduced the recursive `fabric_exec` startup conflict across 15/15 child runs; preserved a 114-shard inventory, build/test evidence, and an explicitly partial report at `docs/audits/decomp-state-2026-08-03.md` with zero confirmed reconstructed-code correctness findings. |
+
+**Session 2026-08-04: Decompilation audit fixes — Phase 1 (policy/compliance)**
+
+- [x] **STUB-001** [critical]: Added loud assert+fprintf to silent stubs in stubs_impl.cpp (GetTileCategory, constructors, LAB_0045c520, DDRAW_Init)
+- [x] **STUB-002** [high]: 7 VehicleEditor stubs now assert with address annotations
+- [x] **STUB-003** [high]: 6 HelpWnd_stubs.cpp methods now assert with address annotations
+- [x] **STUB-004** [high]: 5 DDRAW_Building stubs now assert
+- [x] **STUB-005** [high]: ~45 defsym_stubs.cpp internal stubs now assert; OS API stubs preserved
+- [x] **CLASS-001** [critical]: vtable_stubs.cpp rewritten with transitional comment; all partial-class stubs now assert
+- [x] **TYPE-001** [high]: RenderConnectionPanel extracted from DPlayManager class; now free function
+- [x] **ABI-CTOR-001** [high]: GameConfig _Ctor/_Dtor -> real C++ ctor/dtor; TrackPiece _Dtor merged into ~TrackPiece
+- [x] **ABI-DELETE-001** [high]: Removed DDRAW_Building::Destroy() manual scalar-deleting wrapper
+- [x] **HOST-001** [high]: Wrapped sdl3_tilemap.h/.c in #ifndef _WIN32
+- [x] **TEST-001** [medium]: make test now depends on test-unit only
+- [x] **STATUS-001** [high]: Added Status: TRANSCRIBED to 104 files
+- [x] **PROGRESS-001** [medium]: Fixed contradictory GUI flow pass-rate claim
+
+**Remaining Phase 1**: SKIP-001, LINK-001, VTABLE-001/LAYOUT-001/ABI-THIS-001/ARTIFACT-001, ADDR-001
+**Build**: 126/126 objects, make check passes, make test (unit) passes under nix develop

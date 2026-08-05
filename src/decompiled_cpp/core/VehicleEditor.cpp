@@ -13,6 +13,7 @@
 #include "../network/DPlayManager.h"
 #include <cmath>
 #include <new>
+#include <cassert>
 
 namespace {
 
@@ -636,7 +637,8 @@ void VehicleEditor::CalcAngle()
  */
 void VehicleEditor::TriggerSound()
 {
-    /* TODO: decompile 0x40E130 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::TriggerSound 0x40E130");
 }
 
 /**
@@ -647,7 +649,8 @@ void VehicleEditor::TriggerSound()
 uint32_t VehicleEditor::BlitBackground(int clip_x, int clip_y)
 {
     (void)clip_x; (void)clip_y;
-    /* TODO: decompile 0x40E160 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::BlitBackground 0x40E160");
     return 0;
 }
 
@@ -659,7 +662,8 @@ uint32_t VehicleEditor::BlitBackground(int clip_x, int clip_y)
 uint32_t VehicleEditor::IsInBounds(short x, short y, short flag)
 {
     (void)x; (void)y; (void)flag;
-    /* TODO: decompile 0x40E250 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::IsInBounds 0x40E250");
     return 0;
 }
 
@@ -671,7 +675,8 @@ uint32_t VehicleEditor::IsInBounds(short x, short y, short flag)
 uint32_t VehicleEditor::CheckEdgeBounds(Vehicle* vehicle)
 {
     (void)vehicle;
-    /* TODO: decompile 0x40E2A0 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckEdgeBounds 0x40E2A0");
     return 0;
 }
 
@@ -683,7 +688,8 @@ uint32_t VehicleEditor::CheckEdgeBounds(Vehicle* vehicle)
 uint32_t VehicleEditor::CheckVehicleAttach(Vehicle* vehicle)
 {
     (void)vehicle;
-    /* TODO: decompile 0x40E340 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckVehicleAttach 0x40E340");
     return 0;
 }
 
@@ -695,7 +701,8 @@ uint32_t VehicleEditor::CheckVehicleAttach(Vehicle* vehicle)
 uint32_t VehicleEditor::CheckEditBounds1(Vehicle* vehicle)
 {
     (void)vehicle;
-    /* TODO: decompile 0x40E440 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckEditBounds1 0x40E440");
     return 0;
 }
 
@@ -707,7 +714,8 @@ uint32_t VehicleEditor::CheckEditBounds1(Vehicle* vehicle)
 uint32_t VehicleEditor::CheckEditBounds2(Vehicle* vehicle)
 {
     (void)vehicle;
-    /* TODO: decompile 0x40E520 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckEditBounds2 0x40E520");
     return 0;
 }
 

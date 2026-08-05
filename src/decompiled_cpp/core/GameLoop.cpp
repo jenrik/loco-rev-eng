@@ -11,6 +11,8 @@
  *                                    Drives the per-frame tick.
  */
 
+// Status: TRANSCRIBED
+
 #include "CGWND.h"
 #include "Game.h"
 #include "../game/PlayerConfig.h"

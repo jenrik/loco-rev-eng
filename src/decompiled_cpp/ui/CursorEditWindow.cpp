@@ -10,6 +10,8 @@
  * name derived from the resource ID's text string.
  */
 
+// Status: TRANSCRIBED
+
 #include "CursorEditWindow.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */

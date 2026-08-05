@@ -30,6 +30,8 @@
  *     +0x28: direction_byte (byte)
  */
 
+// Status: TRANSCRIBED
+
 #include "AssetMgr.h"
 
 /* ================================================================== */

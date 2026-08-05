@@ -16,6 +16,8 @@
  *      "((TrainSubsystem*)g_train)->FlushMessages()"
  */
 
+// Status: TRANSCRIBED
+
 #include "Train.h"
 #include "../network/TrainMessage.h"
 #include "../network/DPlayManager.h"

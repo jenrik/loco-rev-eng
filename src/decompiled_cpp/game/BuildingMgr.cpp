@@ -1,4 +1,6 @@
 /** BuildingMgr non-vtable operations, validated against Ghidra locon. */
+
+// Status: TRANSCRIBED
 #include "BuildingMgr.h"
 #include "Building.h"
 #include "Train.h"

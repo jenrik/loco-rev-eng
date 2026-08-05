@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "TrackPiece.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
@@ -134,37 +136,23 @@ TrackPiece::TrackPiece(void* town, RESDATA* res, uint16_t flags)
 
 
 /* ================================================================== */
-/* TrackPiece scalar deleting destructor (vtable[0])                   */
-/* Address: 0x40D020                                                   */
-/*                                                                     */
-/* MSVC pattern: calls _Dtor(), frees if (flags & 1).                  */
-/* ================================================================== */
-TrackPiece::~TrackPiece()
-{
-    this->_Dtor();
-}
-
-
-/* ================================================================== */
-/* TrackPiece::_Dtor — Base destructor                                  */
-/* Address: 0x40D040                                                   */
+/* TrackPiece destructor (body) — 0x40D040                              */
 /*                                                                     */
 /* Uses SEH prologue/epilogue (exception handler at 0x4750C8).         */
 /*                                                                     */
-/* 1. Restores vtable to 0x477568 (SEH try level = 0)                  */
-/* 2. Marks object dead via GameObject_MarkDead (0x436A00)             */
-/* 3. If sub_resource (+0x28) is non-null:                             */
+/* 1. Marks object dead via GameObject_MarkDead (0x436A00)              */
+/* 2. If sub_resource (+0x28) is non-null:                             */
 /*    - Calls its scalar deleting destructor (vtable[0]) with flags=1   */
 /*      to free the sub-resource                                       */
 /*    - Sets sub_resource to NULL                                       */
-/* 4. Marks dead again via GameObject_MarkDead (SEH try level = -1)     */
+/* 3. Re-marks dead (SEH cleanup path)                                  */
+/*                                                                     */
+/* The scalar deleting destructor at vtable[0] wraps this body and     */
+/* conditionally calls operator delete (compiler-generated).           */
 /* ================================================================== */
-void TrackPiece::_Dtor()
+TrackPiece::~TrackPiece()
 {
     /* SEH prologue: push -1, push 0x4750C8, push fs:[0], mov fs:[0],esp */
-
-    /* Restore vtable (try level = 0) */
-/* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Mark object dead in manager */
     this->MarkDead();

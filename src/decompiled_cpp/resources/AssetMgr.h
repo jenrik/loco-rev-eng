@@ -52,6 +52,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 /* ================================================================== */
 /* External declarations for functions used by AssetMgr                */
 /* ================================================================== */

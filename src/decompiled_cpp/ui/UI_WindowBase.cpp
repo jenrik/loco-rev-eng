@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "UI_WindowBase.h"
 #include "../graphics/LOCOBITMAP.h"
 #ifndef _WIN32

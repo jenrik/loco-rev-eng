@@ -15,6 +15,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 class GameObject {
 public:
     int32_t type;                       // +0x04

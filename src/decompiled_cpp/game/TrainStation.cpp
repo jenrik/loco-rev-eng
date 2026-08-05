@@ -13,6 +13,8 @@
  * UI popup window showing animated train car sprites.
  */
 
+// Status: TRANSCRIBED
+
 #include "TrainStation.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */

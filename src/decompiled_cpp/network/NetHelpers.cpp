@@ -24,6 +24,8 @@
  *    calls the user destructor, which invokes NET_Shutdown.
  */
 
+// Status: TRANSCRIBED
+
 #include "NetHelpers.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */

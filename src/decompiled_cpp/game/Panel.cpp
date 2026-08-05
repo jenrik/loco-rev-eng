@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "Panel.h"
 #include "TrackPiece.h"
 #include "../resources/ResourceManager.h"

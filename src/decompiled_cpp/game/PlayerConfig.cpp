@@ -10,6 +10,8 @@
  * LOCO.INI [Configuration] section).
  */
 
+// Status: TRANSCRIBED
+
 #include "PlayerConfig.h"
 #include "../shared/types.h"
 #include "../input/Cursor.h"

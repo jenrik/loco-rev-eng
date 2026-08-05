@@ -7,11 +7,14 @@
  * minimal working replacements.
  */
 
+// Status: TRANSCRIBED
+
 #include "types.h"
 #include "../network/DPlayConfig.h"
 #include "../network/NetworkPlayerList.h"
 #include <new>
 #include <cstdlib>
+#include <cassert>
 
 /* Forward-declare Entity for typed pointer globals. */
 class Entity;
@@ -347,9 +350,11 @@ uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
      * the +0x169, +0x16B, +0x16C fields which are only available on
      * native RESDATA objects, not the SDL bridge's lightweight structs. */
     if (typeByte == 0x01 || typeByte == 0x02 || typeByte == 0x03 || typeByte == 0x04) {
-        return 0; // player/color-dependent; deferred
+        fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+        assert(0 && "stub reached — GetTileCategory player/color-dependent path");
     }
-    return 0;
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — GetTileCategory fallthrough");
 }
 void RESDATA_CreateChildSprite(void*, int, int, int) {}
 void RESDATA_HitTestChildren(void*, int, int) {}
@@ -436,12 +441,12 @@ void* GameConfig_constructor(void* memory)
     g_netSettings = config->binary_data();
     return config;
 }
-void* NETMAN_constructor(void*) { return nullptr; }
-void* PlayerRecord_constructor(void*) { return nullptr; }
-void* PixelDataCache_Ctor(void*) { return nullptr; }
+void* NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+void* PixelDataCache_Ctor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 
 /* Subsystem init */
-int   DDRAW_Init(void) { return 1; }
+int   DDRAW_Init(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return 1; }
 void  TileMap_Init(void*, char) {}
 void  UIPANEL_Hide(void*, void*) {}
 
@@ -465,7 +470,7 @@ void  BuildingMgr_UpdateAll(void*) {}
 void  AssetMgr_EnumerateCategory(unsigned int**) {}
 
 /* Timer callback */
-extern "C" void LAB_0045c520(void) {}
+extern "C" void LAB_0045c520(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached — LAB_0045c520"); }
 
 /* Windows API extras */
 extern "C" {

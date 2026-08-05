@@ -8,6 +8,8 @@
 #pragma once
 #include "Entity.h"
 
+
+// Status: TRANSCRIBED
 class Building;
 
 class ResourceGameObject : public Entity {

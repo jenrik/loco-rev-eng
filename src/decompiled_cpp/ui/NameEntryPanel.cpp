@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "NameEntryPanel.h"
 #include "ButtonSprite.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */

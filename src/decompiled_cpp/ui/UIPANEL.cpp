@@ -9,6 +9,8 @@
  * This file contains the UIPANEL class lifecycle and rendering pipeline.
  */
 
+// Status: TRANSCRIBED
+
 #include "UIPANEL.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"

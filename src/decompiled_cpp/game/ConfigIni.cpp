@@ -14,6 +14,8 @@
  *   Config_ReadInt      (0x452DF0) - Write default integer to INI
  */
 
+// Status: TRANSCRIBED
+
 #include "../shared/types.h"
 #include <cstring>
 

@@ -35,6 +35,8 @@
 
 #include "../core/GameObject.h"
 
+
+// Status: TRANSCRIBED
 class TrackPiece : public GameObject {
 public:
     /* ================================================================ */
@@ -89,18 +91,12 @@ public:
     TrackPiece(void* town, RESDATA* res, uint16_t flags);
 
     /**
-     * Base destructor (vtable[0] body).
-     * Address: 0x40D040
+     * Virtual destructor (body at 0x40D040).
      *
-     * Restores vtable, marks object dead, releases sub_resource (+0x28)
-     * via its scalar deleting destructor, then marks dead again.
-     */
-    void _Dtor();
-
-    /**
-     * Virtual destructor (vtable[0]).
-     * In the binary: scalar deleting destructor at 0x40D020
-     * calls _Dtor() then GLOBAL_free if flags & 1.
+     * Marks object dead, releases sub_resource (+0x28) via its scalar
+     * deleting destructor, then marks dead again. The scalar deleting
+     * destructor wrapper (0x40D020) and conditional operator delete
+     * are compiler-generated.
      */
     virtual ~TrackPiece();
 

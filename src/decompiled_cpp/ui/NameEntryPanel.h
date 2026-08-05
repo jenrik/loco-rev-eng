@@ -39,6 +39,8 @@
 #pragma once
 
 #include "UI_WindowBase.h"
+
+// Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* Forward declaration */
 class ButtonSprite;

@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "UI_ScrollBar.h"
 #include "../core/Entity.h"
 #include "../shared/collections.h"

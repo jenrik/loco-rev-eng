@@ -8,6 +8,8 @@
  * circular track position system used by INPUT_* edit functions.
  */
 
+// Status: TRANSCRIBED
+
 #include "TrackPos.h"
 
 /* ================================================================== */

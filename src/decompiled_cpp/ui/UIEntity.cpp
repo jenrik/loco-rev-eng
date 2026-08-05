@@ -19,6 +19,8 @@
  *   'W' (0x57) = West    — place to the left (west) of reference position
  */
 
+// Status: TRANSCRIBED
+
 #include "UIEntity.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>

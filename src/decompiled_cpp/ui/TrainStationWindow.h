@@ -31,6 +31,8 @@
 #include "../shared/types.h"
 #include "GameWindow.h"
 
+
+// Status: TRANSCRIBED
 /* ================================================================== */
 /* TrainStationWindow class                                             */
 /* ================================================================== */

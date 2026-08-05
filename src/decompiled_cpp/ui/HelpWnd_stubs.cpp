@@ -11,6 +11,8 @@
 // Status: STUB — see PROGRESS.md "Remaining work"
 
 #include "HelpWnd.h"
+#include <cassert>
+#include <cstdio>
 
 /**
  * set_mode — vtable[3] cursor dispatch. Inherited from GameWindow.
@@ -20,7 +22,8 @@
  */
 void HelpWnd::set_mode(void*, void*, int, int)
 {
-    /* TODO: decompile 0x414340 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — HelpWnd::set_mode 0x414340");
 }
 
 /**
@@ -31,7 +34,8 @@ void HelpWnd::set_mode(void*, void*, int, int)
  */
 void HelpWnd::render_page(int*)
 {
-    /* TODO: decompile 0x452230 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — HelpWnd::render_page 0x452230");
 }
 
 /**
@@ -42,7 +46,8 @@ void HelpWnd::render_page(int*)
  */
 void HelpWnd::render_scroll_up(int*)
 {
-    /* TODO: decompile 0x452570 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — HelpWnd::render_scroll_up 0x452570");
 }
 
 /**
@@ -53,7 +58,8 @@ void HelpWnd::render_scroll_up(int*)
  */
 void HelpWnd::render_scroll_down(int*)
 {
-    /* TODO: decompile 0x4526B0 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — HelpWnd::render_scroll_down 0x4526B0");
 }
 
 /**
@@ -64,7 +70,8 @@ void HelpWnd::render_scroll_down(int*)
  */
 void HelpWnd::draw_scroll_indicator()
 {
-    /* TODO: decompile 0x452B00 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — HelpWnd::draw_scroll_indicator 0x452B00");
 }
 
 /**
@@ -75,7 +82,8 @@ void HelpWnd::draw_scroll_indicator()
  */
 void HelpWnd::update_anim_sprite(int)
 {
-    /* TODO: decompile 0x452C00 */
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — HelpWnd::update_anim_sprite 0x452C00");
 }
 
 static void stream_vtable_scalar_dtor(int* streamObj)

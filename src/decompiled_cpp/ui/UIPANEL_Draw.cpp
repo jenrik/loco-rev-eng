@@ -9,6 +9,8 @@
  * DtorSprite, CreateSprite, InitSprite, BlitSprite, BlitSpriteEx, Hide).
  */
 
+// Status: TRANSCRIBED
+
 #include "UIPANEL.h"
 #include "UIPANEL_Surface.h"
 #pragma GCC diagnostic push

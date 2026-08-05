@@ -22,6 +22,8 @@
 #include "../shared/types.h"
 #include "AudioChannel.h"
 
+
+// Status: TRANSCRIBED
 class GameAudio {
 public:
     /* ================================================================ */

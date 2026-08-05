@@ -21,6 +21,8 @@
  * from the pump before the per-frame tick (see CGWND_sdl3.cpp).
  */
 
+// Status: TRANSCRIBED
+
 #ifndef _WIN32
 
 #include "../input/InputMgr.h"

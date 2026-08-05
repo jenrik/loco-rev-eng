@@ -33,6 +33,8 @@
  * log).
  */
 
+// Status: TRANSCRIBED
+
 #include "InputMgr.h"
 #include "PersistenceAdapter.h"
 #include "../core/Game.h"

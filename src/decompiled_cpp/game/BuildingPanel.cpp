@@ -18,6 +18,8 @@
  *   BuildingPanel_WndProc            @ 0x4324F0
  */
 
+// Status: TRANSCRIBED
+
 #include "BuildingPanel.h"
 #include "../ui/UIPANEL_Surface.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */

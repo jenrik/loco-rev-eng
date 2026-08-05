@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "UI_ListBox.h"
 #include "UIEntity.h"
 #include "../shared/collections.h"

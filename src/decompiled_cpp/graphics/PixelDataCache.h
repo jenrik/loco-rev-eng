@@ -23,6 +23,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 /* ================================================================ */
 /* PixelFormatEntry -- one record in the album pixel data array      */
 /* Size: 0x18 bytes                                                  */

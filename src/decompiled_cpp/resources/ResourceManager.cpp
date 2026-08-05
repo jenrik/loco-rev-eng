@@ -20,6 +20,8 @@
  *   - ResourceEntry is the file-backed resource entry with DirectSound buffer.
  */
 
+// Status: TRANSCRIBED
+
 #include "ResourceManager.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>

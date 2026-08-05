@@ -1,3 +1,5 @@
+
+// Status: TRANSCRIBED
 #ifndef LOCOBITMAP_H
 #define LOCOBITMAP_H
 

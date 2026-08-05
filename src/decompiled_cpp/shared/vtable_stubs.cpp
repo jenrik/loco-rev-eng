@@ -1,26 +1,24 @@
 /**
- * vtable_stubs.cpp — Out-of-line method definitions for missing vtable entries
+ * vtable_stubs.cpp — Out-of-line stub definitions for missing vtable entries
  *
- * Uses forward declarations with the EXACT class names from the binary
- * to generate correct C++ mangled names. One method per class, defined
- * out-of-line to avoid full class redefinition.
+ * Lego Loco (loco.exe, 1998, MSVC x86)
+ * Reverse engineered via Ghidra decompilation.
  *
- * Win32/DirectX shims excluded — handled by sdl3_shims.
+ * Status: STUB — TRANSITIONAL
+ * Partial class definitions provide vtable entries not yet declared in
+ * canonical headers. Each class will be removed once its canonical header
+ * is complete and the corresponding TU compiles. Tracked in PROGRESS.md.
+ *
+ * TODO (CLASS-001): Remove duplicate partial class definitions when
+ * canonical headers declare all needed virtual methods.
  */
 
 #include <cstdint>
-
-/* Forward declare classes with just enough to define the methods */
-/* These names MUST match the binary / existing headers exactly. */
-
-namespace {
-    /* Placeholder types for method params */
-    typedef void* HWND;
-    struct RECT { int32_t left, top, right, bottom; };
-}
+#include <cstdio>
+#include <cassert>
 
 /* =========================================================== */
-/* VehicleEditor methods                                        */
+/* VehicleEditor — methods not yet in canonical header         */
 /* =========================================================== */
 class VehicleEditor {
 public:
@@ -31,32 +29,42 @@ public:
     void CheckVehicleAttach(void*);
 };
 
-void VehicleEditor::CalcAngle() {}
-void VehicleEditor::CheckEdgeBounds(void*) {}
-void VehicleEditor::CheckEditBounds1(void*) {}
-void VehicleEditor::CheckEditBounds2(void*) {}
-void VehicleEditor::CheckVehicleAttach(void*) {}
+void VehicleEditor::CalcAngle() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CalcAngle");
+}
+void VehicleEditor::CheckEdgeBounds(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckEdgeBounds");
+}
+void VehicleEditor::CheckEditBounds1(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckEditBounds1");
+}
+void VehicleEditor::CheckEditBounds2(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckEditBounds2");
+}
+void VehicleEditor::CheckVehicleAttach(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — VehicleEditor::CheckVehicleAttach");
+}
 
 /* =========================================================== */
-/* GameSetupPanel stubs moved to                               */
-/* stubs/gamesetuppanel_network_stubs.cpp                       */
-/* =========================================================== */
-/* HelpWnd stubs removed — now defined in ui/HelpWnd.cpp       */
-/* with TODO: decompile annotations and address tracking.      */
-/* =========================================================== */
-
-/* =========================================================== */
-/* RESDATA_ScriptedObject method                                */
+/* RESDATA_ScriptedObject — not yet in canonical header        */
 /* =========================================================== */
 class RESDATA_ScriptedObject {
 public:
     void EnterBuildMode(unsigned char);
 };
 
-void RESDATA_ScriptedObject::EnterBuildMode(unsigned char) {}
+void RESDATA_ScriptedObject::EnterBuildMode(unsigned char) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — RESDATA_ScriptedObject::EnterBuildMode");
+}
 
 /* =========================================================== */
-/* Building::Building(int) — constructor                        */
+/* Building — methods not yet in canonical header              */
 /* =========================================================== */
 class Building {
 public:
@@ -75,10 +83,60 @@ public:
     uint32_t FindNearestConnectionNode(void*, unsigned int);
 };
 
-Building::Building(int) {}
+Building::Building(int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::Building(int)");
+}
+void Building::CheckTimeout() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::CheckTimeout");
+}
+void Building::HandleAction(int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::HandleAction");
+}
+void Building::OnOccupantReady(int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::OnOccupantReady");
+}
+void Building::PartyModeUpdate(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::PartyModeUpdate");
+}
+int Building::IsActionComplete() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::IsActionComplete");
+    return 0;
+}
+void Building::StepToward(int, int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::StepToward");
+}
+void Building::TeleportTo(int, int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::TeleportTo");
+}
+void Building::PostMoveDispatch() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::PostMoveDispatch");
+}
+void Building::BaseCleanup() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::BaseCleanup");
+}
+uint8_t Building::CheckPlacementCollision(int, int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::CheckPlacementCollision");
+    return 1;
+}
+uint32_t Building::FindNearestConnectionNode(void*, unsigned int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Building::FindNearestConnectionNode");
+    return 0;
+}
 
 /* =========================================================== */
-/* TrainEntity::TrainEntity(int) — constructor                  */
+/* TrainEntity — constructor                                   */
 /* =========================================================== */
 class TrainEntity {
 public:
@@ -86,10 +144,13 @@ public:
     virtual ~TrainEntity() {}
 };
 
-TrainEntity::TrainEntity(int) {}
+TrainEntity::TrainEntity(int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — TrainEntity::TrainEntity(int)");
+}
 
 /* =========================================================== */
-/* Collection::GetAt(int)                                       */
+/* Collection — GetAt                                          */
 /* =========================================================== */
 class Collection {
 public:
@@ -97,10 +158,14 @@ public:
     virtual void* GetAt(int);
 };
 
-void* Collection::GetAt(int) { return nullptr; }
+void* Collection::GetAt(int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Collection::GetAt");
+    return nullptr;
+}
 
 /* =========================================================== */
-/* SortedCollection::Compare + SortRange                        */
+/* SortedCollection — Compare + SortRange                       */
 /* =========================================================== */
 class SortedCollection : Collection {
 public:
@@ -108,12 +173,18 @@ public:
     virtual void SortRange(int, int);
 };
 
-int SortedCollection::Compare(void*, void*) { return 0; }
-void SortedCollection::SortRange(int, int) {}
+int SortedCollection::Compare(void*, void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — SortedCollection::Compare");
+    return 0;
+}
+void SortedCollection::SortRange(int, int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — SortedCollection::SortRange");
+}
 
 /* =========================================================== */
-/* UI_WindowBase — ctor + dtor + typeinfo + vtable              */
-/*   This MUST be a complete enough class to generate typeinfo   */
+/* UI_WindowBase — ctor + dtor for typeinfo generation         */
 /* =========================================================== */
 class UI_WindowBase {
 public:
@@ -121,29 +192,29 @@ public:
     virtual ~UI_WindowBase();
 };
 
-UI_WindowBase::UI_WindowBase(void*, unsigned int) {}
-UI_WindowBase::~UI_WindowBase() {}
+UI_WindowBase::UI_WindowBase(void*, unsigned int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — UI_WindowBase::UI_WindowBase");
+}
+UI_WindowBase::~UI_WindowBase() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — UI_WindowBase::~UI_WindowBase");
+}
 
 /* =========================================================== */
-/* UIEntity — vtable only                                       */
+/* UIEntity — dtor for vtable                                  */
 /* =========================================================== */
 class UIEntity {
 public:
     virtual ~UIEntity();
 };
-UIEntity::~UIEntity() {}
+UIEntity::~UIEntity() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — UIEntity::~UIEntity");
+}
 
 /* =========================================================== */
-/* IDirectDrawSurface4 — constructor + destructor                */
-/* =========================================================== */
-class IDirectDrawSurface4 {
-public:
-    IDirectDrawSurface4();
-    virtual ~IDirectDrawSurface4();
-};
-
-/* =========================================================== */
-/* ScriptedObject — vtable generation                           */
+/* ScriptedObject — vtable stubs                                */
 /* =========================================================== */
 class ScriptedObject {
 public:
@@ -155,34 +226,22 @@ public:
     void Init(int, int, unsigned char);
     void OnUpdateChild();
 };
-/* =========================================================== */
-/* Building virtual method stubs (Building.cpp is broken)       */
-/* =========================================================== */
-void Building::CheckTimeout() {}
-void Building::HandleAction(int) {}
-void Building::OnOccupantReady(int) {}
-void Building::PartyModeUpdate(void*) {}
-int Building::IsActionComplete() { return 0; }
-void Building::StepToward(int, int) {}
-void Building::TeleportTo(int, int) {}
-void Building::PostMoveDispatch() {}
 
-
-
-IDirectDrawSurface4::IDirectDrawSurface4() {}
-IDirectDrawSurface4::~IDirectDrawSurface4() {}
-/* ScriptedObject */
-void ScriptedObject::LoadFromStream(void*) {}
-
-/* Building (more stubs) */
-void Building::BaseCleanup() {}
-uint8_t Building::CheckPlacementCollision(int, int) { return 1; }
-uint32_t Building::FindNearestConnectionNode(void*, unsigned int) { return 0; }
-
-
+void ScriptedObject::LoadFromStream(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — ScriptedObject::LoadFromStream");
+}
+void ScriptedObject::Init(int, int, unsigned char) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — ScriptedObject::Init");
+}
+void ScriptedObject::OnUpdateChild() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — ScriptedObject::OnUpdateChild");
+}
 
 /* =========================================================== */
-/* Netman stub                                                 */
+/* Netman — stubs                                               */
 /* =========================================================== */
 class Netman {
 public:
@@ -192,16 +251,23 @@ public:
     void HandleTimeout(void*);
     void ResetNetworkState();
 };
-void Netman::ReceivePing(int, unsigned char, unsigned int, int, int) {}
-
-
-void Netman::SendFileTransfer(void*) {}
-
-void Netman::CheckTimeout(int) {}
-
-
-void ScriptedObject::Init(int, int, unsigned char) {}
-void ScriptedObject::OnUpdateChild() {}
-void Netman::HandleTimeout(void*) {}
-
-void Netman::ResetNetworkState() {}
+void Netman::ReceivePing(int, unsigned char, unsigned int, int, int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Netman::ReceivePing");
+}
+void Netman::SendFileTransfer(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Netman::SendFileTransfer");
+}
+void Netman::CheckTimeout(int) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Netman::CheckTimeout");
+}
+void Netman::HandleTimeout(void*) {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Netman::HandleTimeout");
+}
+void Netman::ResetNetworkState() {
+    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
+    assert(0 && "stub reached — Netman::ResetNetworkState");
+}

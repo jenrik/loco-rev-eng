@@ -46,6 +46,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -19,6 +19,8 @@
  * Total: approximately 230 CRT functions across ~120KB of .text.
  */
 
+// Status: TRANSCRIBED
+
 #include "crt_stubs.h"
 
 // clang-format off

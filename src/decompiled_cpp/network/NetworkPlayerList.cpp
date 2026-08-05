@@ -23,6 +23,8 @@
  * across 1855 bytes), some exact parameter mappings are approximated.
  */
 
+// Status: TRANSCRIBED
+
 #include "NetworkPlayerList.h"
 #include "../graphics/LOCOBITMAP.h"
 #ifndef _WIN32

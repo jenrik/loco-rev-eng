@@ -144,10 +144,10 @@ all: build
 
 build: $(BINARY)
 
-test: test-integration test-unit
+test: test-unit
 
-# Deterministic component and host-boundary suite. GUI interaction is kept in
-# test-integration so agents can run the fast layer independently when needed.
+# Deterministic component and host-boundary suite. GUI integration is kept in
+# test-integration. Use `make test-all` to run both layers.
 test-unit: test-sdl3-net-protocol test-sdl3-net-transport \
       test-sdl3-net-runtime test-sdl3-net-discovery-transport \
       test-network-discovery test-discovery-runtime \

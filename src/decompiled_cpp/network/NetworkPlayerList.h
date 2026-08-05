@@ -45,6 +45,8 @@
 #pragma once
 
 #include "../shared/types.h"
+
+// Status: TRANSCRIBED
 /* Dispatch-table addresses are documentation only; C++ manages dispatch. */
 
 struct UIPANEL_Surface;

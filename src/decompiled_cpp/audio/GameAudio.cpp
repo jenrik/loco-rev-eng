@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "GameAudio.h"
 #include "AudioChannel.h"
 #include "../shared/types.h"

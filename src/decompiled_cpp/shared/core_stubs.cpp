@@ -6,6 +6,8 @@
  * Win32/DirectX shim symbols are excluded - handled by sdl3_shims.
  */
 
+// Status: TRANSCRIBED
+
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>

@@ -39,6 +39,8 @@
 #include <string>
 #include <vector>
 
+
+// Status: TRANSCRIBED
 class InputMgr;
 
 namespace loco {

@@ -52,6 +52,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 class VehicleEditor;
 class EditorState;
 class DPlayManager;

@@ -20,6 +20,8 @@
  *   - VehicleEditor (0x450 bytes each, max 4) at +0x10[0..3]
  */
 
+// Status: TRANSCRIBED
+
 #include "Vehicle.h"
 #include "../world/EditorState.h"
 #include "../core/VehicleEditor.h"

@@ -19,6 +19,8 @@
 #pragma once
 
 #include "../shared/types.h"
+
+// Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* Forward declarations                                                */

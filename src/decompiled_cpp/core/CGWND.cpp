@@ -5,6 +5,8 @@
  * Reverse engineered via Ghidra decompilation.
  */
 
+// Status: TRANSCRIBED
+
 #include "CGWND.h"
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
 #include <cstring>

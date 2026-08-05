@@ -13,6 +13,8 @@
  * from compiler-managed dispatch tables.
  */
 
+// Status: TRANSCRIBED
+
 #include "collections.h"
 #include <cstring>          /* memset, memcpy */
 

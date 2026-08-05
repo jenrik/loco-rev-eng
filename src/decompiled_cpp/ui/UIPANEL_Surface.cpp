@@ -23,6 +23,8 @@
  * Global palette scratch: DAT_0048524c + DAT_00485250 for shared palette.
  */
 
+// Status: TRANSCRIBED
+
 #include "UIPANEL.h"
 #include "UIPANEL_Surface.h"
 #pragma GCC diagnostic push

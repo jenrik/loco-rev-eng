@@ -9,6 +9,8 @@
 
 #include "../shared/types.h"
 
+
+// Status: TRANSCRIBED
 uint32_t UIPANEL_InitSurface(void* surface, int width, int height,
                              int mode, uint32_t palette_param,
                              uint8_t fill_byte);

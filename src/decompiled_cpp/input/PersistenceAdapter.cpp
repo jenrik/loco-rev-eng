@@ -7,6 +7,8 @@
  * backs the SDL host's single-player start.
  */
 
+// Status: TRANSCRIBED
+
 #ifndef _WIN32
 
 #include "PersistenceAdapter.h"

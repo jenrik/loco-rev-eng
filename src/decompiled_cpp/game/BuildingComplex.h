@@ -5,4 +5,6 @@
  */
 #pragma once
 #include "BuildingMgr.h"
+
+// Status: TRANSCRIBED
 using BuildingComplex = BuildingMgr;

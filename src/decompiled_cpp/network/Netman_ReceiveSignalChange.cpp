@@ -1,3 +1,5 @@
+
+// Status: TRANSCRIBED
 class PlayerConfig;
 extern PlayerConfig* g_player_config;
 /**

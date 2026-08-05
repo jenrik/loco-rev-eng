@@ -30,6 +30,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+
+// Status: TRANSCRIBED
 /* Opaque collection entries are known from the binary to have a virtual
  * scalar-deleting destructor in their first dispatch slot. */
 struct CollectionElement {

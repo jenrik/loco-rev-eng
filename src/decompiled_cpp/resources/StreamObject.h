@@ -24,6 +24,8 @@
 #pragma once
 
 #include "../shared/types.h"
+
+// Status: TRANSCRIBED
 /* compat.h is force-included for the native build; undefine the three
  * duplicate macro definitions before the stub Win32 header supplies them. */
 #ifdef INVALID_HANDLE_VALUE

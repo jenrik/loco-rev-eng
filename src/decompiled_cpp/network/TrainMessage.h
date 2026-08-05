@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+
+// Status: TRANSCRIBED
 /** TrainPositionAckPacket — legacy 0x3F7 transfer acknowledgment.
  *  Recovered producers/consumers: 0x440410 and 0x43A4B0. */
 struct TrainPositionAckPacket {

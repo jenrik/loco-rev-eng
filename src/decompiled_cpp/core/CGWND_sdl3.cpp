@@ -1,6 +1,8 @@
 /**
  * CGWND_sdl3.cpp — SDL3-specific implementations for CGWND
  */
+
+// Status: TRANSCRIBED
 #ifndef _WIN32
 
 #include "CGWND.h"

@@ -14,6 +14,7 @@
  * from resources later.
  */
 
+#ifndef _WIN32
 #ifndef LOCO_SDL3_TILEMAP_H
 #define LOCO_SDL3_TILEMAP_H
 
@@ -158,3 +159,4 @@ void TileMap_Draw(const TileMap *tm, SDL_Renderer *renderer);
 #endif
 
 #endif /* LOCO_SDL3_TILEMAP_H */
+#endif /* _WIN32 */

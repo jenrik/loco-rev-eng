@@ -6,4 +6,6 @@
  * build manifests, but intentionally emits no second class definition or
  * duplicate method body.
  */
+
+// Status: TRANSCRIBED
 #include "Collection.h"

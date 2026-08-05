@@ -4,6 +4,7 @@
  * Grounded in: original TileMap at 0x4AAD08, TownTileRenderer at 0x42B9C0
  */
 
+#ifndef _WIN32
 #include "sdl3_tilemap.h"
 #include <stdlib.h>
 #include <string.h>
@@ -277,3 +278,5 @@ void TileMap_Draw(const TileMap *tm, SDL_Renderer *renderer)
 
     SDL_RenderTexture(renderer, tm->texture, &src, &dst);
 }
+
+#endif /* _WIN32 */

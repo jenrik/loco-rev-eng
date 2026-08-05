@@ -1,3 +1,5 @@
+
+// Status: TRANSCRIBED
 #include "BuildingMgrObjectGroup.h"
 #include "../game/BuildingMgr.h"
 #include "../game/Building.h"

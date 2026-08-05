@@ -9,6 +9,8 @@
  * math (FYL2X, F2XM1, FSCALE) ported to standard C++ <cmath>.
  */
 
+// Status: TRANSCRIBED
+
 #define _USE_MATH_DEFINES
 
 #include "AudioChannel.h"

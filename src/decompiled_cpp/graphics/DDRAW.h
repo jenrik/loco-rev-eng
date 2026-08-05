@@ -53,6 +53,8 @@
 #include "../shared/types.h"
 #include "../core/GameObject.h"
 
+
+// Status: TRANSCRIBED
 /* ================================================================== */
 /* Forward declarations                                               */
 /* ================================================================== */
@@ -234,16 +236,9 @@ public:
      */
     virtual ~DDRAW_Building();
 
-    /**
-     * Scalar deleting destructor (vtable[0]).
-     * Address: 0x458AD0  (as DDRAW_SpriteScalarDtor)
-     *
-     * Calls CleanupSprites then optionally frees the heap allocation.
-     *
-     * @param flags  bit 0: free heap memory (1 = call GLOBAL_free)
-     * @return       this pointer
-     */
-    void* Destroy(uint8_t flags);
+    /* vtable[0] = scalar deleting destructor (0x458AD0):
+     * compiler-generated; wraps ~DDRAW_Building and conditionally
+     * calls operator delete when flags & 1. */
 
     /* ================================================================ */
     /* Cleanup methods                                                   */

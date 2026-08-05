@@ -5,6 +5,8 @@
  * Validated against Ghidra database locon.
  */
 
+// Status: TRANSCRIBED
+
 #include "BuildingMgr.h"
 #include "Building.h"
 #include <cstring>

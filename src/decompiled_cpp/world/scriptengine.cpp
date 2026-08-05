@@ -20,6 +20,8 @@
  *     ScriptEngine visible flag at +0x200, ScrollPanel visible flag at +0x2E8
  */
 
+// Status: TRANSCRIBED
+
 #include "scriptengine.h"
 #include "../resources/ResourceManager.h"  /* for PlaySoundAt, etc. */
 #include "../core/Entity.h"                /* embedded resource-backed entity fields */
