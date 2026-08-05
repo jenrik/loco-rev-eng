@@ -295,6 +295,9 @@ TrainSubsystem::~TrainSubsystem()
  */
 void TrainSubsystem::BaseDtor()
 {
+    /* TODO NEW-054-THREAD-RESULT-ABI: binary distinguishes timeout
+     * (AL=0, EAX=0) from error (AL=0, upper bits set). Current check
+     * conflates both as non-zero. Decompile 0x460D10 for exact ABI. */
     if (g_network_thread != NULL &&
         (intptr_t)WIN32_GetThreadResult(g_network_thread) != 0) {
         this->FlushMessages();
