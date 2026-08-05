@@ -65,14 +65,14 @@ void UI_MainMenu_SetState() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, _
 void UIPANEL_BeginPaint() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UIPANEL_Blit() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UIPANEL_CreateSurface() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_EndPaintEx() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_WindowBase_BaseDtor() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_WindowBase_Ctor() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UIPANEL_EndPaintEx() { /* host no-op */ }
+void UI_WindowBase_BaseDtor() { /* host no-op */ }
+void UI_WindowBase_Ctor() { /* host no-op */ }
 void VehicleEditor_CheckEditBounds1() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_StreamOpen() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void WIN32_StreamOpen() { /* host no-op */ }
 void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t) { return nullptr; }
-void WNDPROC_EnterCriticalSection() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WNDPROC_LeaveCriticalSection() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void WNDPROC_EnterCriticalSection() { /* host no-op — single-threaded */ }
+void WNDPROC_LeaveCriticalSection() { /* host no-op — single-threaded */ }
 void* WNDPROC_StreamFromMemory(void*, const char*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void RESDATA_DtorBase() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void ScriptEngine_Init() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
