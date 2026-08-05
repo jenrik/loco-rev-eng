@@ -16,7 +16,7 @@ class InputMgr;
 extern void* INPUT_FindObjectAt(InputMgr* mgr, int id);    /* 0x41E1F0 */
 extern InputMgr g_input_mgr;                               /* 0x4A9990 — static object */
 extern void* g_selected_building;                      /* 0x4855B0 */
-extern void* g_game_instance;                          /* 0x4854C8 */
+extern void* g_game;                                 /* 0x4854C8 — Game singleton (binary: &g_game) */
 extern uint32_t g_game_time;                           /* 0x4A99B4 */
 extern "C" uint32_t CRT_rand(void);                    /* 0x466150 */
 
@@ -28,9 +28,11 @@ extern "C" uint32_t CRT_rand(void);                    /* 0x466150 */
  * constructor, not Building's full 0xF4-byte constructor.
  */
 TrainEntity::TrainEntity(int resource_id)
-    : Building(resource_id, true)
+    : Building(resource_id, true)  /* base_only=true → Building_BaseCtor path (0x433A20) */
 {
-    /* 0x4533E8: occupation_level is explicitly restored after BaseCtor. */
+    /* Binary: calls Building_BaseCtor(this, resource_id), sets TrainEntity
+     * vtable (0x4780B8), then occupation_level = 4 at +0x88.
+     * The base_only flag routes to the limited init matching BaseCtor. */
     this->occupation_level = 4;
 }
 
@@ -49,7 +51,7 @@ TrainEntity::~TrainEntity()
 void TrainEntity::BaseDtor()
 {
     if (g_selected_building == this) {
-        Game_SelectGameObject(g_game_instance, nullptr);
+        Game_SelectGameObject(g_game, nullptr);
     }
 
     /* Train bypasses Building::BaseDtor: it has no +0xF0 occupant field. */
@@ -70,7 +72,7 @@ void TrainEntity_DeserializeFactory(GameObject* prototype,
 
     const uint8_t* saved = static_cast<const uint8_t*>(save_data);
     const int resource_id = *reinterpret_cast<const int32_t*>(saved + 0x64);
-    void* storage = operator_new(sizeof(TrainEntity));
+    void* storage = operator_new(0xF0);  /* Binary allocates exactly 0xF0, not sizeof(TrainEntity) */
     TrainEntity* train = nullptr;
 
     if (storage != nullptr) {
@@ -123,7 +125,9 @@ void TrainEntity::Update(void* next_entity)
 
     if (this->next_action_time < g_game_time &&
         g_selected_building != this) {
-        const int object_id = static_cast<int>(CRT_rand() % 0x29) + 0x3400;
+        /* Binary: uVar3 = CRT_rand(); iVar2 = (int)uVar3 % 0x29 + 0x3400.
+         * The cast-to-int BEFORE modulo matches the raw signed division. */
+        const int object_id = ((int)CRT_rand() % 0x29) + 0x3400;
         GameObject* target = static_cast<GameObject*>(
             INPUT_FindObjectAt(&g_input_mgr, object_id));
 
