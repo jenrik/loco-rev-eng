@@ -16,12 +16,15 @@
  *   [0] +0x00: scalar deleting destructor  (0x40D020)
  *   [1] +0x04: InvalidateRect              (inherited: 0x436AB0)
  *   [2] +0x08: PtInRect                    (inherited: 0x436A10)
- *   [3] +0x0C: HitTest dispatch            (TrackPiece_HitTest, 0x43E9A0)
+ *   [3] +0x0C: MoveTo                      (inherited from GameObject)
  *   [4] +0x10: (unknown — inherited)
  *   [5] +0x14: (unknown — inherited)
  *   [6] +0x18: SetFrame                    (TrackPiece_SetFrame, 0x40D2A0)
  *   [7] +0x1C: UpdateAnim                  (TrackPiece_UpdateAnim, 0x40D2F0)
  *   [8] +0x20: Render                      (TrackPiece_Render, 0x40D340)
+ *
+ * Note: 0x43E9A0 was previously misidentified as HitTest; it is actually
+ * NETMAN_ReceiveSignalChange (verified via Ghidra decompilation).
  *
  * Note: Init() at 0x40D0B0 is NOT a virtual method. It is called
  * directly from the constructor only.

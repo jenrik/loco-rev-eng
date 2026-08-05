@@ -316,8 +316,8 @@ void TrackPiece::SetZoom(short zoom)
             /* Recurse: set sub-object zoom to 2 */
             sub_piece->SetZoom(2);
 
-            /* Call UpdateAnim on sub-object */
-            sub_piece->UpdateAnim();
+            /* Dispatch Render on sub-object (vtable[8] at byte offset 0x20) */
+            sub_piece->Render();
         }
         return;
     }
@@ -465,8 +465,14 @@ void TrackPiece::Render()
     int view_right  = town_view->right;
     int view_bottom = town_view->bottom;
 
-    /* Check visibility against viewport */
-    if (onscreen.left + view_left <= view_left ||
+    /* Check visibility against viewport.
+     * Binary gates with four && conditions (all must pass to render):
+     *   view_left <= onscreen.left + view_left  →  onscreen.left >= 0
+     *   view_top <= onscreen.top
+     *   onscreen.right + view_left <= view_right
+     *   onscreen.bottom <= view_bottom
+     * We negate each for early-return (any true = bail). */
+    if (onscreen.left + view_left < view_left ||
         view_top > onscreen.top ||
         onscreen.right + view_left > view_right ||
         view_bottom < onscreen.bottom) {
