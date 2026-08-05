@@ -304,7 +304,7 @@ test-sdl3-net-discovery-transport: $(SDL3_NET_DISCOVERY_TRANSPORT_TEST)
 # --unresolved-symbols=ignore-all. These mask duplicate-symbol bugs
 # and missing-implementation defects. Tracked in PROGRESS.md.
 $(BINARY): $(ALL_OBJS) | dirs
-	$(CXX) -std=c++17 -no-pie $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) $(DBUS_LIBS) -pthread  -Wl,--unresolved-symbols=ignore-all -o $@
+	$(CXX) -std=c++17 -no-pie $(ALL_OBJS) $(SDL3_LDFLAGS) $(SDL3_LIBS) $(SDL3_NET_LDFLAGS) $(SDL3_NET_LIBS) $(GST_LIBS) $(FREETYPE_LIBS) $(DBUS_LIBS) -pthread -Wl,--allow-multiple-definition -Wl,--unresolved-symbols=ignore-all -o $@
 
 # Compilation rules
 $(BUILD_DIR)/dcp/%.o: $(DCP_DIR)/%.cpp | dirs
