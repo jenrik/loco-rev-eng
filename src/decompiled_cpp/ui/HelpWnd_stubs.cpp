@@ -14,17 +14,10 @@
 #include <cassert>
 #include <cstdio>
 
-/**
- * set_mode — vtable[3] cursor dispatch. Inherited from GameWindow.
- * Address: 0x414340
- *
- * TODO: decompile 0x414340
- */
-void HelpWnd::set_mode(void*, void*, int, int)
-{
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — HelpWnd::set_mode 0x414340");
-}
+/* vtable[3] = set_mode (0x414340) — inherited from GameWindow.
+ * GameWindow::set_mode(int32_t stateId, void* resdata, uint8_t resetPos, uint8_t forceRedraw)
+ * is the canonical definition. HelpWnd does not override this slot.
+ * No separate HelpWnd::set_mode stub is needed. */
 
 /**
  * render_page — Render current page text content.

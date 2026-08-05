@@ -1381,6 +1381,10 @@ SoundObject::SoundObject(int32_t text_length, void* town, RESDATA* resource,
       text_buf(static_cast<char*>(operator_new(text_length + 1))),
       font(font_handle)
 {
+    /* Binary overrides TrackPiece marker (7) → 8 for SoundObject type.
+     * Original: MOV dword ptr [this+4], 8 after base ctor returns. */
+    this->type = 8;
+
     if (text_buf != nullptr) {
         strcpy(text_buf, "");
     }
