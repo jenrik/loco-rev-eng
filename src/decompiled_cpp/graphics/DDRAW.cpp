@@ -114,7 +114,7 @@ extern void __fastcall GameObject_BaseCtor(void* obj, int a, int b, int c, int d
 extern void __fastcall GameObject_DtorBody(void* obj);       /* @ 0x405870 */
 extern int  __fastcall GameObject_PtInRect(void* obj, int x, int y); /* @ 0x436A10 */
 extern void __fastcall GameObject_GetRelPos(void* obj, int* out, int x, int y); /* @ 0x436A40 */
-extern void __cdecl   CRT_memset_pattern(void* dst, int size, int count, void* pattern); /* @ 0x4671E0 */
+extern void __cdecl   CRT_memset_pattern(void* dst, int size, int count, void* ctor_callback, void* dtor_callback); /* @ 0x4671E0, RET 0x14 = 5 args */
 extern void __cdecl   CRT_free_pattern(void* dst, int size, int count, void* dtor); /* @ 0x467280 */
 
 /* Panel (RESDATA panel base) */
@@ -244,7 +244,8 @@ DDRAW_Building::DDRAW_Building()
 
     GameObject_BaseCtor(reinterpret_cast<void*>(&sub_object_1), -1, -1, 0, 0);
     CRT_memset_pattern(&pattern_sprites, 0x88, 4,
-                       reinterpret_cast<void*>(0x458AF0));
+                       reinterpret_cast<void*>(0x458AF0),
+                       reinterpret_cast<void*>(0x405870));  /* +0x14: destructor callback for reverse teardown on failure */
     GameObject_BaseCtor(&popup_panel, -1, -1, 0, 0);
     GameObject_BaseCtor(&pattern_container, -1, -1, 0, 0);
     GameObject_BaseCtor(&track_sprite, -1, -1, 0, 0);

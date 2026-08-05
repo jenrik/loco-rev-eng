@@ -153,7 +153,7 @@ int32_t CRT_toupper(int32_t c){return(c>='a'&&c<='z')?c-32:c;}
 char*CRT_itoa(int32_t v,char*buf,int32_t radix){if(buf)snprintf(buf,32,"%d",v);return buf;}
 void*CRT_localtime(unsigned int*){static int32_t t=0;return&t;}
 int32_t CRT_exit(const char**,const char**){exit(0);return 0;}int32_t CRT_mkdir(const char*){return 0;}
-void CRT_memset_pattern(void*,int32_t,int32_t,void*){}
+void CRT_memset_pattern(void*,int32_t,int32_t,void*,void*){}
 void CRT_free_pattern(void*,int32_t,int32_t,void*){}
 void CRT_0x470650(void){}void CRT_strncpy(void*,void*,int32_t){}
 void _strncpy(char*d,const char*s,size_t n){if(d&&s)strncpy(d,s,n);}

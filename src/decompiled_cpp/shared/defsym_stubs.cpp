@@ -237,7 +237,7 @@ void VehicleEditor_RemoveVehicle(void*, int) { fprintf(stderr, "STUB: %s at %s:%
 void ArrivalQueue_RemoveVehicle(void*, unsigned int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameVehicle_RemoveDestination(void*, unsigned int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GAMESTATE_EditorState_Detach(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_memset_pattern(void*, int, int, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void CRT_memset_pattern(void*, int, int, void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void CRT_free_pattern(void*, int, int, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void RESDATA_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void DDRAW_PresentRect(void*, void*, int*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
