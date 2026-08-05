@@ -19,8 +19,8 @@
  *   +0x18  pixels (uint8_t*)            8bpp pixel buffer (mode=0) or NULL (mode=1)
  *   +0x1C  ddraw_surf (IDirectDrawSurface4*)  DDraw surface (mode=1)
  *
- * Global counter: DAT_00485254 tracks number of active surface allocations.
- * Global palette scratch: DAT_0048524c + DAT_00485250 for shared palette.
+ * Global counter: g_surface_alloc_counter tracks number of active surface allocations.
+ * Global palette scratch: g_shared_palette_buffer + g_shared_palette_refcount for shared palette.
  */
 
 // Status: TRANSCRIBED
@@ -112,9 +112,9 @@ extern "C" {
     extern int  g_pixel_format_ch2;                  /* 0x485290 */
 
     /* Global palette scratch area */
-    extern void* DAT_0048524c;                       /* 0x48524C — shared palette buffer */
-    extern int   DAT_00485250;                       /* 0x485250 — shared palette refcount */
-    extern int   DAT_00485254;                       /* 0x485254 — surface allocation counter */
+    extern void* g_shared_palette_buffer;              /* 0x48524C — shared palette buffer */
+    extern int   g_shared_palette_refcount;            /* 0x485250 — shared palette refcount */
+    extern int   g_surface_alloc_counter;              /* 0x485254 — surface allocation counter */
 
     /* Memory stream / file helpers */
     int  WIN32_StreamOpen(void* stream, int mode);
@@ -187,8 +187,8 @@ extern "C" {
         UIPANEL_ClearSurface(surface, width, height);  /* allocates pixel buffer */
 
         /* Share global palette if small enough */
-        if ((palette_param & 0xFFFF) <= (uint32_t)DAT_00485250) {
-            s->palette_ptr = (uint32_t*)DAT_0048524c;
+        if ((palette_param & 0xFFFF) <= (uint32_t)g_shared_palette_refcount) {
+            s->palette_ptr = (uint32_t*)g_shared_palette_buffer;
         }
 
         /* Fill pixel buffer with fill_byte pattern */
@@ -482,24 +482,24 @@ cleanup:
     uint16_t* palette;
     int has_own_palette = 0;
 
-    if (s->has_palette == 0 || DAT_00485250 != 0) {
+    if (s->has_palette == 0 || g_shared_palette_refcount != 0) {
         /* Private palette */
         s->has_palette = 1;
         palette = (uint16_t*)operator_new(0x200);     /* 512 bytes */
         s->palette_ptr = (uint32_t*)palette;
         if (palette == NULL) {
-            GLOBAL_free(DAT_0048524c);
-            DAT_0048524c = NULL;
+            GLOBAL_free(g_shared_palette_buffer);
+            g_shared_palette_buffer = NULL;
             return 0;
         }
     } else {
         /* Shared global palette */
         s->has_palette = 0;
         palette = (uint16_t*)operator_new(0x200);
-        DAT_0048524c = palette;
+        g_shared_palette_buffer = palette;
         if (palette == NULL) return 0;
         s->palette_ptr = (uint32_t*)palette;
-        DAT_00485250++;
+        g_shared_palette_refcount++;
     }
 
     /* Read 256 RGBQUAD entries (1024 bytes) from stream */

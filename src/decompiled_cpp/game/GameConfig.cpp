@@ -26,14 +26,8 @@ extern void  __fastcall NETMAN_FreePacket(int32_t packetPtr);
 /* Game globals */
 extern char  g_empty_string;           /* 0x4851D0 */
 
-/* ================================================================== */
-/* GameConfig constructor — 0x440C60                                   */
-/*                                                                     */
-/* Initializes all fields with defaults, then calls NETMAN_FreePacket  */
-/* (LoadSettings) to load existing NetSettings.dat or create defaults. */
-/*                                                                     */
-/* Called by: GameLoop_Setup @ 0x406C5A                                */
-/* ================================================================== */
+/** GameConfig::GameConfig
+ *  Address: 0x440C60 */
 GameConfig::GameConfig()
 {
     this->m_clientPlayerCount = 4;                  /* +0x1C */
@@ -57,14 +51,8 @@ GameConfig::GameConfig()
     NETMAN_FreePacket(static_cast<int32_t>(reinterpret_cast<intptr_t>(this)));
 }
 
-/* ================================================================== */
-/* GameConfig destructor (body) — 0x440CC0                              */
-/* (originally NETMAN_FreeProviderList)                                */
-/*                                                                     */
-/* Frees the provider linked list at +0x10.                            */
-/* The scalar deleting destructor at vtable[0] wraps this body and     */
-/* conditionally calls operator delete (compiler-generated).           */
-/* ================================================================== */
+/** GameConfig::~GameConfig — vtable[0] body
+ *  Address: 0x440CC0 */
 GameConfig::~GameConfig()
 {
     /* Free the provider linked list */

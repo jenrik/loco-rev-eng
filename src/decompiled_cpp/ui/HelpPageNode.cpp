@@ -75,9 +75,8 @@ HelpPageNode::HelpPageNode(int resource_id)
     }
 }
 
-/* ================================================================== */
-/* HelpPageNode destructor — 0x44F2C0                                  */
-/* ================================================================== */
+/** HelpPageNode::~HelpPageNode
+ *  Address: 0x44F2C0 */
 HelpPageNode::~HelpPageNode()
 {
     /* Free linked list nodes at dest_list_head (+0x124).
@@ -97,9 +96,8 @@ HelpPageNode::~HelpPageNode()
      * by C++'s automatic base-class destruction. */
 }
 
-/* ================================================================== */
-/* HelpPageNode::Update — 0x44F340 (vtable[10] override)               */
-/* ================================================================== */
+/** HelpPageNode::Update — vtable[10]
+ *  Address: 0x44F340 */
 void HelpPageNode::Update()
 {
     /* Update the base GameObject state */
