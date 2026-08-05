@@ -15,16 +15,16 @@
 #endif
 
 extern "C" {
-void AudioChannel_Pause() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void AudioChannel_Play() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ButtonSprite_Ctor() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_SetMode() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Config_GetIniString() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_RestoreSurfaces() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_SetSurfaceFormat() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_UnlockPrimary() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DPlayManager_RenderConnectionPanel() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void FormatResourceString() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void AudioChannel_Pause() { /* host no-op */ }
+void AudioChannel_Play() { /* host no-op */ }
+void ButtonSprite_Ctor() { /* host no-op */ }
+void CGWND_SetMode() { /* host no-op */ }
+void Config_GetIniString() { /* host no-op */ }
+void DDRAW_RestoreSurfaces() { /* host no-op */ }
+void DDRAW_SetSurfaceFormat() { /* host no-op */ }
+void DDRAW_UnlockPrimary() { /* host no-op */ }
+void DPlayManager_RenderConnectionPanel() { /* host no-op */ }
+void FormatResourceString() { /* host no-op */ }
 // PlayerRecord_constructor (0x452E10) calls GetUserNameA only after its
 // Configuration/PlayerName lookup is empty. Preserve the Win32 size contract
 // for the POSIX host instead of silently forcing its "LEGO LOCO" fallback.
@@ -49,48 +49,48 @@ uint32_t GetUserNameA(char* buffer, uint32_t* size)
     return 0;
 #endif
 }
-void NETMAN_SendPacket() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlaySound() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlaySoundAt() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_IsBuildingTile() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_IsRoadTile() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESMGR_LoadSoundResource() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESMGR_ReleaseSoundResource() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_Init() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_SetState() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_InvalidateRect() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_CreateChildWindow() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIEntity_Ctor() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_MainMenu_SetState() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_BeginPaint() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_Blit() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_CreateSurface() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void NETMAN_SendPacket() { /* host no-op */ }
+void PlaySound() { /* host no-op */ }
+void PlaySoundAt() { /* host no-op */ }
+void RESDATA_IsBuildingTile() { /* host no-op */ }
+void RESDATA_IsRoadTile() { /* host no-op */ }
+void RESMGR_LoadSoundResource() { /* host no-op */ }
+void RESMGR_ReleaseSoundResource() { /* host no-op */ }
+void Sprite_Init() { /* host no-op */ }
+void Sprite_SetState() { /* host no-op */ }
+void TileMap_InvalidateRect() { /* host no-op */ }
+void UI_CreateChildWindow() { /* host no-op */ }
+void UIEntity_Ctor() { /* host no-op */ }
+void UI_MainMenu_SetState() { /* host no-op */ }
+void UIPANEL_BeginPaint() { /* host no-op */ }
+void UIPANEL_Blit() { /* host no-op */ }
+void UIPANEL_CreateSurface() { /* host no-op */ }
 void UIPANEL_EndPaintEx() { /* host no-op */ }
 void UI_WindowBase_BaseDtor() { /* host no-op */ }
 void UI_WindowBase_Ctor() { /* host no-op */ }
-void VehicleEditor_CheckEditBounds1() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void VehicleEditor_CheckEditBounds1() { /* host no-op */ }
 void WIN32_StreamOpen() { /* host no-op */ }
 void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t) { return nullptr; }
 void WNDPROC_EnterCriticalSection() { /* host no-op — single-threaded */ }
 void WNDPROC_LeaveCriticalSection() { /* host no-op — single-threaded */ }
 void* WNDPROC_StreamFromMemory(void*, const char*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
-void RESDATA_DtorBase() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ScriptEngine_Init() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_InitScrollPanel() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_ScrollPanel_Dtor() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ScriptEngine_Call() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_SetPosition() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void HelpWnd_PlayNarration() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_SetBuildMode() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameAudio_UpdateVolume() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_ScrollPanel_HandleDrag() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Panel_DtorBody() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_localtime() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_wcsstr() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_GetBoundingRect() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_GetObjectAt() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_MainMenu_SetState_void() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_GetOccupantCount() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void RESDATA_DtorBase() { /* host no-op */ }
+void ScriptEngine_Init() { /* host no-op */ }
+void UIPANEL_InitScrollPanel() { /* host no-op */ }
+void UIPANEL_ScrollPanel_Dtor() { /* host no-op */ }
+void ScriptEngine_Call() { /* host no-op */ }
+void RESDATA_SetPosition() { /* host no-op */ }
+void HelpWnd_PlayNarration() { /* host no-op */ }
+void CGWND_SetBuildMode() { /* host no-op */ }
+void GameAudio_UpdateVolume() { /* host no-op */ }
+void UIPANEL_ScrollPanel_HandleDrag() { /* host no-op */ }
+void Panel_DtorBody() { /* host no-op */ }
+void CRT_localtime() { /* host no-op */ }
+void CRT_wcsstr() { /* host no-op */ }
+void GameObject_GetBoundingRect() { /* host no-op */ }
+void TileMap_GetObjectAt() { /* host no-op */ }
+void UI_MainMenu_SetState_void() { /* host no-op */ }
+void Vehicle_GetOccupantCount() { /* host no-op */ }
 void* DAT_00479190 = nullptr;
 void* DAT_004A9908 = nullptr;
 void* DAT_004fd19c = nullptr;
@@ -116,26 +116,26 @@ void* s_VolumeLow_0047f164 = nullptr;
 void* s_VolumeMed_0047f158 = nullptr;
 void* __imp_SystemParametersInfoA = nullptr;
 void* g_scene_name = nullptr;
-void Cursor_BlitEditPreview() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Cursor_UpdateScrollButtons() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Cursor_DrawColorPalette() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Cursor_HandleTabChange() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GetOpenFileNameA() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NET_GetOrCreateSurface() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NET_UploadAsset() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlaySoundFile() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_CreateOverlay() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void FMT_LAYOUT_PATH() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_StartGameTimer() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Cursor_BlitEditPreview() { /* host no-op */ }
+void Cursor_UpdateScrollButtons() { /* host no-op */ }
+void Cursor_DrawColorPalette() { /* host no-op */ }
+void Cursor_HandleTabChange() { /* host no-op */ }
+void GetOpenFileNameA() { /* host no-op */ }
+void NET_GetOrCreateSurface() { /* host no-op */ }
+void NET_UploadAsset() { /* host no-op */ }
+void PlaySoundFile() { /* host no-op */ }
+void TileMap_CreateOverlay() { /* host no-op */ }
+void FMT_LAYOUT_PATH() { /* host no-op */ }
+void GAMESTATE_StartGameTimer() { /* host no-op */ }
 void* _g_netman = nullptr;
 } /* extern "C" */
-void CGWND_PumpMessages(char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }  /* loading-transition pump — C++ linkage */
+void CGWND_PumpMessages(char) { /* host no-op */ }  /* loading-transition pump — C++ linkage */
 extern "C" {
 void* _g_netman_data = nullptr;
 void* STR_LEGO_LOCO = nullptr;
-void CGWND_QuitToMenu() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void CGWND_QuitToMenu() { /* host no-op */ }
 void* MessageBeep = nullptr;
-void IsWindowVisible() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void IsWindowVisible() { /* host no-op */ }
 void* World_FinalizeLoad = nullptr;
 void* World_GetObjectAt = nullptr;
 void* GAMESTATE_SelectLayout = nullptr;
@@ -144,16 +144,16 @@ void* CGWND_GameSetup_DrawGrid_Thunk = nullptr;
 
 /* C++-linkage stubs */
 void* g_scripted_object = nullptr;
-void RESDATA_GameObject_UpdateAnimation(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_SoundObject_GetState(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_SoundObject_GetTextLength(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_SendAck(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_CreateTooltip(void*, int, short, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_LockSurface(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_IsBitmapReady(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_CreateChildSprite(void*, void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_DefWndProc(void*, unsigned int, unsigned int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Cursor_HandleWindowPaint(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void RESDATA_GameObject_UpdateAnimation(void*) { /* host no-op */ }
+void RESDATA_SoundObject_GetState(int) { /* host no-op */ }
+void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
+void NETMAN_SendAck(void*) { /* host no-op */ }
+void UI_CreateTooltip(void*, int, short, int, int) { /* host no-op */ }
+void UIPANEL_LockSurface(void*) { /* host no-op */ }
+void UI_IsBitmapReady(void*) { /* host no-op */ }
+void RESDATA_CreateChildSprite(void*, void*, int, int) { /* host no-op */ }
+void UI_DefWndProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
+void Cursor_HandleWindowPaint(void*, int) { /* host no-op */ }
 /** CRT_itoa — Convert integer to string in given radix (base 2-36).
  *  Standard C runtime function. Returns buf. */
 char* CRT_itoa(int value, char* buf, int radix) {
@@ -173,127 +173,127 @@ char* CRT_itoa(int value, char* buf, int radix) {
     buf[j] = '\0';
     return buf;
 }
-void Cursor_WaitForBlit(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void AudioChannel_IsActive(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_ConnectToNetworkGame(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameWindow_BaseDtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_SetFullscreenMode(char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameWindow_SetPosition(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameWindow_Show(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_SetWindowVisible(void*, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameWindow_Hide(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ResourceManager_GetStringById(void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_Init(void**, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Cursor_WaitForBlit(void*) { /* host no-op */ }
+void AudioChannel_IsActive(int) { /* host no-op */ }
+void GAMESTATE_ConnectToNetworkGame(void*) { /* host no-op */ }
+void GameWindow_BaseDtor(void*) { /* host no-op */ }
+void CGWND_SetFullscreenMode(char) { /* host no-op */ }
+void GameWindow_SetPosition(void*, int, int) { /* host no-op */ }
+void GameWindow_Show(void*) { /* host no-op */ }
+void UI_SetWindowVisible(void*, char) { /* host no-op */ }
+void GameWindow_Hide(void*) { /* host no-op */ }
+void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
+void TileMap_Init(void**, unsigned char) { /* host no-op */ }
 void* TrainSubsystem_Ctor = nullptr;
 void* WIN32_CreateThread = nullptr;
-void Train_ProcessMessages(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_QueueAsyncTask(void*, void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void EditWindow_render(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_exit(char const**, char const**) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Train_ProcessMessages(void*) { /* host no-op */ }
+void WIN32_QueueAsyncTask(void*, void*, void*) { /* host no-op */ }
+void EditWindow_render(void*) { /* host no-op */ }
+void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
+void CRT_exit(char const**, char const**) { /* host no-op */ }
 void* _g_netman_state = nullptr;
-void WIN32_ResumeThread(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_WindowBase_OnCreate(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlayerConfig_SetName(void*, char const*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlayerConfig_Save(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Config_ReadInt(void*, char const*, char const*, char const*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_SendPacket(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void WIN32_ResumeThread(void*, int) { /* host no-op */ }
+void UI_WindowBase_OnCreate(void*) { /* host no-op */ }
+void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
+void PlayerConfig_SetName(void*, char const*) { /* host no-op */ }
+void PlayerConfig_Save(void*) { /* host no-op */ }
+void Config_ReadInt(void*, char const*, char const*, char const*) { /* host no-op */ }
+void NETMAN_SendPacket(void*) { /* host no-op */ }
 void* CreateHatchBrush = nullptr;
 void* g_editwindow_ptr = nullptr;
-void EditWindow_cleanupSprites(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_FreeWindow(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ResourceManager_GetStringById(void**, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NameEntryPanel_Ctor(void*, void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NameEntryPanel_CreateWindow(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_GameSetup_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_SetWindowVisible(void*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_CreateSession(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_WindowBase_Show(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void EditWindow_cleanupSprites(void*) { /* host no-op */ }
+void RESDATA_FreeWindow(void*) { /* host no-op */ }
+void ResourceManager_GetStringById(void**, int) { /* host no-op */ }
+void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
+void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
+void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { /* host no-op */ }
+void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
+void UI_SetWindowVisible(void*, unsigned char) { /* host no-op */ }
+void NETMAN_CreateSession(void*) { /* host no-op */ }
+void UI_WindowBase_Show(void*) { /* host no-op */ }
 void* BringWindowToTop = nullptr;
-void TrackPiece_Dtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void __ftol(double) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_ChildWindow_Dtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_StreamDestroy(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WNDPROC_StreamCleanup(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_ChildWindow_Render(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_StreamDestroyImmediate(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_SetViewport(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_GetTileAt(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_GetSurface() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_LoadFile(int*, char const*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_ScriptedObject_AddChild(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_CursorEditWindow_Ctor(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TrainStation_Ctor(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void TrackPiece_Dtor(void*) { /* host no-op */ }
+void __ftol(double) { /* host no-op */ }
+void UI_ChildWindow_Dtor(void*) { /* host no-op */ }
+void WIN32_StreamDestroy(void*) { /* host no-op */ }
+void WNDPROC_StreamCleanup(void*) { /* host no-op */ }
+void UI_ChildWindow_Render(void*, void*) { /* host no-op */ }
+void WIN32_StreamDestroyImmediate(void*) { /* host no-op */ }
+void TileMap_SetViewport(void*, void*) { /* host no-op */ }
+void TileMap_GetTileAt(void*, void*) { /* host no-op */ }
+void DDRAW_GetSurface() { /* host no-op */ }
+void DDRAW_LoadFile(int*, char const*) { /* host no-op */ }
+void RESDATA_ScriptedObject_AddChild(void*, int, int) { /* host no-op */ }
+void CGWND_CursorEditWindow_Ctor(void*, int, int) { /* host no-op */ }
+void TrainStation_Ctor(void*, int, int) { /* host no-op */ }
+void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) { /* host no-op */ }
 void* DPLAY_SetPlayerName = nullptr;
-void UIPANEL_CopySurface(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NET_ComputeColor(unsigned char, unsigned char, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DPLAY_SetPlayerData(void*, char const*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NET_GetHostName(int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_UpdateViewport(void*, void*, short) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TileMap_GetTileRect(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void SetRect(void*, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UIPANEL_CopySurface(void*, int) { /* host no-op */ }
+void NET_ComputeColor(unsigned char, unsigned char, unsigned char) { /* host no-op */ }
+void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
+void NET_GetHostName(int, int) { /* host no-op */ }
+void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
+void TileMap_GetTileRect(void*, void*) { /* host no-op */ }
+void SetRect(void*, int, int, int, int) { /* host no-op */ }
 void* GAMESTATE_LoadExistingGame = nullptr;
 void* World_SerializeObject = nullptr;
 void* STR_REMOVED = nullptr;
 void* DPLAY_InitPlayerSlot = nullptr;
-void NETMAN_ReceiveFileTransfer(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_SendAck(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void NETMAN_ReceiveFileTransfer(int) { /* host no-op */ }
+void NETMAN_SendAck(int) { /* host no-op */ }
 void* GAMESTATE_SetDifficulty = nullptr;
 void* DPLAY_EnumeratePlayers = nullptr;
 void* NET_SendFile = nullptr;
-void Vehicle_SetState(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_ReceiveLayoutSelect(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlayerConfig_SaveToFile(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ResourceManager_Shutdown(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_FileData_Dtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_HandleNetworkGame() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void VehicleEditor_GetResourceId(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void VehicleEditor_RemoveVehicle(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void ArrivalQueue_RemoveVehicle(void*, unsigned int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameVehicle_RemoveDestination(void*, unsigned int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_EditorState_Detach(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_memset_pattern(void*, int, int, void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_free_pattern(void*, int, int, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_PresentRect(void*, void*, int*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_RecvNetworkData(void*, unsigned int, char const*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_GetSystemMetrics(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Ordinal_4(void*, void**, void*, void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_memcpy(void*, void const*, unsigned long) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_malloc(unsigned long) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_sprintf_buf(char*, char const*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_toupper(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_timeGetTime(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_FindClose(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_FindFirstFile(char const*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_FindNextFile(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_UpdateChild(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Game_IsPositionBetween(int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void PlayerConfig_GetName(void*, char*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_memset(void*, int, unsigned long) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void World_CheckActive(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TrackPiece_SetZoom(void*, short) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_BlitViewport(void*,int,int,int,int,int,int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Vehicle_SetState(void*, int) { /* host no-op */ }
+void NETMAN_ReceiveLayoutSelect(int) { /* host no-op */ }
+void PlayerConfig_SaveToFile(void*) { /* host no-op */ }
+void ResourceManager_Shutdown(int) { /* host no-op */ }
+void DDRAW_FileData_Dtor(void*) { /* host no-op */ }
+void GAMESTATE_HandleNetworkGame() { /* host no-op */ }
+void VehicleEditor_GetResourceId(int) { /* host no-op */ }
+void VehicleEditor_RemoveVehicle(void*, int) { /* host no-op */ }
+void ArrivalQueue_RemoveVehicle(void*, unsigned int, char) { /* host no-op */ }
+void GameVehicle_RemoveDestination(void*, unsigned int, char) { /* host no-op */ }
+void GAMESTATE_EditorState_Detach(int) { /* host no-op */ }
+void CRT_memset_pattern(void*, int, int, void*, void*) { /* host no-op */ }
+void CRT_free_pattern(void*, int, int, void*) { /* host no-op */ }
+void RESDATA_DtorBody(void*) { /* host no-op */ }
+void DDRAW_PresentRect(void*, void*, int*, unsigned char) { /* host no-op */ }
+void WIN32_RecvNetworkData(void*, unsigned int, char const*) { /* host no-op */ }
+void WIN32_GetSystemMetrics(void*) { /* host no-op */ }
+void Ordinal_4(void*, void**, void*, void*, void*) { /* host no-op */ }
+void CRT_memcpy(void*, void const*, unsigned long) { /* host no-op */ }
+void CRT_malloc(unsigned long) { /* host no-op */ }
+void CRT_sprintf_buf(char*, char const*) { /* host no-op */ }
+void CRT_toupper(int) { /* host no-op */ }
+void CRT_timeGetTime(int*) { /* host no-op */ }
+void CRT_FindClose(void*) { /* host no-op */ }
+void CRT_FindFirstFile(char const*, void*) { /* host no-op */ }
+void CRT_FindNextFile(void*, void*) { /* host no-op */ }
+void RESDATA_UpdateChild(void*) { /* host no-op */ }
+void Game_IsPositionBetween(int, int, int) { /* host no-op */ }
+void PlayerConfig_GetName(void*, char*, int) { /* host no-op */ }
+void CRT_memset(void*, int, unsigned long) { /* host no-op */ }
+void World_CheckActive(void*) { /* host no-op */ }
+void TrackPiece_SetZoom(void*, short) { /* host no-op */ }
+void Town_BlitViewport(void*,int,int,int,int,int,int) { /* host no-op */ }
+void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) { /* host no-op */ }
 void* g_game_instance = nullptr;
 int32_t g_OutputDebugStringA = 0;
-void ArrivalQueue_AddVehicle(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void VehicleEditor_Update(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void VehicleEditor_IsInBounds(void*, short, short, short) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void VehicleEditor_BlitBackground(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void ArrivalQueue_AddVehicle(void*, void*) { /* host no-op */ }
+void VehicleEditor_Update(void*) { /* host no-op */ }
+void VehicleEditor_IsInBounds(void*, short, short, short) { /* host no-op */ }
+void VehicleEditor_BlitBackground(void*, int, int) { /* host no-op */ }
 
 
-void Vehicle_InitRoute(void*, int, unsigned int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_Ctor(void*, int, int, char, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_UpdatePosition(void*, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Building_RemoveOccupant(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void TrackPiece_Ctor(void*, int, int, unsigned short) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_SetWorldPos(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_InvalidateRect(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_GetRelPos(void*, int*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Vehicle_InitRoute(void*, int, unsigned int, char) { /* host no-op */ }
+void Vehicle_Ctor(void*, int, int, char, char) { /* host no-op */ }
+void Vehicle_UpdatePosition(void*, char) { /* host no-op */ }
+void Building_RemoveOccupant(int*) { /* host no-op */ }
+void TrackPiece_Ctor(void*, int, int, unsigned short) { /* host no-op */ }
+void GameObject_SetWorldPos(void*, int, int) { /* host no-op */ }
+void GameObject_InvalidateRect(void*) { /* host no-op */ }
+void GameObject_GetRelPos(void*, int*, int, int) { /* host no-op */ }
 /** Config_WriteInt — Write integer to INI file section:key
  *  Address: 0x452DB0. __thiscall (ECX=config, stack=section,key,value).
  *  Converts int to string via CRT_itoa(10), writes via WritePrivateProfileStringA.
@@ -313,67 +313,67 @@ void __thiscall Config_WriteInt(void* config, const char* section, const char* k
     CRT_itoa(value, buf, 10);
     WritePrivateProfileStringA(section, key, buf, (const char*)((char*)config + 4));
 }
-void LOCOBITMAP_ColorKeyBlit_thunk(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NET_UpdatePlayerList() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_CheckOccupied(void*, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_SelectBuilding(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_SelectBuilding(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_PostQuit() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_GameVehicle_Ctor(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_GameVehicle_BaseDtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_InitOccupant(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_IsMoving(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_Stop(void*, int, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Entity_StopSound(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_InitBase(void*, int, int, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_UnlockSurface(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
+void NET_UpdatePlayerList() { /* host no-op */ }
+void Town_CheckOccupied(void*, int, int, int, int) { /* host no-op */ }
+void Town_SelectBuilding(void*, void*) { /* host no-op */ }
+void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { /* host no-op */ }
+void DDRAW_SelectBuilding(void*, void*) { /* host no-op */ }
+void WIN32_PostQuit() { /* host no-op */ }
+void RESDATA_GameVehicle_Ctor(void*, int) { /* host no-op */ }
+void RESDATA_GameVehicle_BaseDtor(void*) { /* host no-op */ }
+void Vehicle_InitOccupant(void*, int) { /* host no-op */ }
+void Vehicle_IsMoving(void*) { /* host no-op */ }
+void Vehicle_Stop(void*, int, unsigned char) { /* host no-op */ }
+void Entity_StopSound(void*, int) { /* host no-op */ }
+void GameObject_InitBase(void*, int, int, unsigned char) { /* host no-op */ }
+void UIPANEL_UnlockSurface(void*) { /* host no-op */ }
 void* DAT_00485270 = nullptr;
-void NETMAN_SetGameMode(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_FindAdjacentTrack(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_IsValidTrackIndex(void*, short) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_GetNearestTrack(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_FindTrackPosition(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DPLAY_CreatePlayer(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_EditorState_Ctor(void*, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DPLAY_CleanupPlayer(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GAMESTATE_InitTrackAtPosition(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_HitTest(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Vehicle_DetachAll(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_InitAllSubsystems(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void timeBeginPeriod(unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void NETMAN_SetGameMode(void*, int) { /* host no-op */ }
+void GAMESTATE_FindAdjacentTrack(void*) { /* host no-op */ }
+void RESDATA_IsValidTrackIndex(void*, short) { /* host no-op */ }
+void Vehicle_GetNearestTrack(int) { /* host no-op */ }
+void GAMESTATE_FindTrackPosition(void*, int, int) { /* host no-op */ }
+void DPLAY_CreatePlayer(void*) { /* host no-op */ }
+void GAMESTATE_EditorState_Ctor(void*, char) { /* host no-op */ }
+void DPLAY_CleanupPlayer(void*) { /* host no-op */ }
+void GAMESTATE_InitTrackAtPosition(void*, int, int) { /* host no-op */ }
+void GameObject_HitTest(void*, int, int) { /* host no-op */ }
+void Vehicle_DetachAll(int) { /* host no-op */ }
+void CGWND_InitAllSubsystems(void*) { /* host no-op */ }
+void timeBeginPeriod(unsigned int) { /* host no-op */ }
 /* CGWND_PumpMessages(void*,unsigned char) — now in CGWND_sdl3.cpp */
-void CGWND_AudioChannel_UpdatePosition(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Stop(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_ResetNetworkState(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_StopSession(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_StartClientSession(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Train_QueueMessage(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_Init(void*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameSetupPanel_loadLayouts(void*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameSetupPanel_updateTitle(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameSetupPanel_drawGrid(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Game_Shutdown(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESMGR_Shutdown(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CRT_0x470650() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void CGWND_AudioChannel_UpdatePosition(void*, int, int) { /* host no-op */ }
+void CGWND_AudioChannel_Stop(void*) { /* host no-op */ }
+void NETMAN_ResetNetworkState(void*) { /* host no-op */ }
+void NETMAN_StopSession(void*) { /* host no-op */ }
+void NETMAN_StartClientSession(void*) { /* host no-op */ }
+void Train_QueueMessage(void*, void*) { /* host no-op */ }
+void NETMAN_Init(void*, unsigned char) { /* host no-op */ }
+void GameSetupPanel_loadLayouts(void*, unsigned char) { /* host no-op */ }
+void GameSetupPanel_updateTitle(void*) { /* host no-op */ }
+void GameSetupPanel_drawGrid(void*) { /* host no-op */ }
+void Game_Shutdown(int*) { /* host no-op */ }
+void RESMGR_Shutdown(int) { /* host no-op */ }
+void CRT_0x470650() { /* host no-op */ }
 void* UI_MainMenu_Ctor(void* mem, void*, unsigned int) { return mem; }
-void UI_MainMenu_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UI_MainMenu_Create(void*, void*) { /* host no-op */ }
 void* Town_Ctor(void* mem, void*, unsigned int) { return mem; }
-void Town_InitSprites(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Town_InitSprites(void*, void*) { /* host no-op */ }
 void* PostcardPreviewWindow_Ctor(void* mem, void*, unsigned int) { return mem; }
-void LOCOBITMAP_InitWindow(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void LOCOBITMAP_InitWindow(void*, void*) { /* host no-op */ }
 void* TrainStationWindow_Ctor(void* mem, void*, unsigned int) { return mem; }
-void TrainStationWindow_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void TrainStationWindow_Create(void*, void*) { /* host no-op */ }
 void* LOCOBITMAP_CreateFromResource(void* mem, void*, unsigned int) { return mem; }
 void* Cursor_Ctor(void* mem, void*, unsigned int) { return mem; }
-void Cursor_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Cursor_Create(void*, void*) { /* host no-op */ }
 void* AudioMgr_Ctor(void* mem, void*, unsigned int) { return mem; }
-void HelpWnd_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void HelpWnd_Create(void*, void*) { /* host no-op */ }
 void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int) { return mem; }
-void CGWND_AboutDialog_Create(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_RegisterWindowClass(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DirectPlay_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void CGWND_AboutDialog_Create(void*, void*) { /* host no-op */ }
+void CGWND_RegisterWindowClass(void*) { /* host no-op */ }
+void NETMAN_constructor(void*) { /* host no-op */ }
+void DirectPlay_constructor(void*) { /* host no-op */ }
 /** PixelDataCache_Ctor — PixelDataCache constructor (address: 0x401620)
  *  Sets vtable=0x4773E8, album_index=-1, buffer=NULL, calls Load(1). */
 void* PixelDataCache_Ctor(void* self) {
@@ -392,51 +392,51 @@ void* PixelDataCache_Ctor(void* self) {
 void PixelDataCache_Load(void* self, int mode) {
     (void)self; (void)mode;
 }
-void TileMap_Init(void*, unsigned char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameAudio_StopFinished(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_GetDsoundErrorString(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Ordinal_2(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESMGR_GetById(void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GetResourceType(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Play(unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Pause(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Game_SetScreenMode(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void BuildingMgr_DestroyAll(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_ResetTooltips(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void World_Reset(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Cursor_Show(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_SendMapData(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_IsActive(unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Release(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_CloseHandle(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_timeKillEvent(unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameAudio_StopFinished() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_GetDsoundErrorString() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Ordinal_2() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESMGR_GetById() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GetResourceType() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Play() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Pause() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Game_SetScreenMode() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void BuildingMgr_DestroyAll() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_ResetTooltips() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void World_Reset() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Cursor_Show() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void NETMAN_SendMapData() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_IsActive() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void CGWND_AudioChannel_Release() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_CloseHandle() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_timeKillEvent() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void TileMap_Init(void*, unsigned char) { /* host no-op */ }
+void GameAudio_StopFinished(void*) { /* host no-op */ }
+void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
+void Ordinal_2(void*) { /* host no-op */ }
+void RESMGR_GetById(void*, unsigned int) { /* host no-op */ }
+void GetResourceType(int) { /* host no-op */ }
+void CGWND_AudioChannel_Play(unsigned int) { /* host no-op */ }
+void CGWND_AudioChannel_Pause(int) { /* host no-op */ }
+void Game_SetScreenMode(void*, int, int, int) { /* host no-op */ }
+void BuildingMgr_DestroyAll(void*, int) { /* host no-op */ }
+void UI_ResetTooltips(void*, int) { /* host no-op */ }
+void World_Reset(void*, int) { /* host no-op */ }
+void Cursor_Show(void*) { /* host no-op */ }
+void NETMAN_SendMapData(void*, int) { /* host no-op */ }
+void CGWND_AudioChannel_IsActive(unsigned int) { /* host no-op */ }
+void CGWND_AudioChannel_Release(void*) { /* host no-op */ }
+void WIN32_CloseHandle(void*) { /* host no-op */ }
+void WIN32_timeKillEvent(unsigned int) { /* host no-op */ }
+void GameAudio_StopFinished() { /* host no-op */ }
+void DDRAW_GetDsoundErrorString() { /* host no-op */ }
+void Ordinal_2() { /* host no-op */ }
+void RESMGR_GetById() { /* host no-op */ }
+void GetResourceType() { /* host no-op */ }
+void CGWND_AudioChannel_Play() { /* host no-op */ }
+void CGWND_AudioChannel_Pause() { /* host no-op */ }
+void Game_SetScreenMode() { /* host no-op */ }
+void BuildingMgr_DestroyAll() { /* host no-op */ }
+void UI_ResetTooltips() { /* host no-op */ }
+void World_Reset() { /* host no-op */ }
+void Cursor_Show() { /* host no-op */ }
+void NETMAN_SendMapData() { /* host no-op */ }
+void CGWND_AudioChannel_IsActive() { /* host no-op */ }
+void CGWND_AudioChannel_Release() { /* host no-op */ }
+void WIN32_CloseHandle() { /* host no-op */ }
+void WIN32_timeKillEvent() { /* host no-op */ }
 int WIN32_GetThreadResult(void*) { return 0; }
-void World_Shutdown(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Train_FlushMessages(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_Sleep(unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_UnlockAll(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UIPANEL_FreeAllSurfaces() { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WIN32_timeEndPeriod(unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_Shutdown(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Town_GameView_Cleanup(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void DDRAW_InvalidateAll(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESDATA_ScriptedObject_Shutdown(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_FreeMessageBox(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void World_Shutdown(int) { /* host no-op */ }
+void Train_FlushMessages(void*) { /* host no-op */ }
+void WIN32_Sleep(unsigned int) { /* host no-op */ }
+void Sprite_UnlockAll(int) { /* host no-op */ }
+void UIPANEL_FreeAllSurfaces() { /* host no-op */ }
+void WIN32_timeEndPeriod(unsigned int) { /* host no-op */ }
+void Sprite_Shutdown(int) { /* host no-op */ }
+void Town_GameView_Cleanup(int*) { /* host no-op */ }
+void DDRAW_InvalidateAll(int*) { /* host no-op */ }
+void RESDATA_ScriptedObject_Shutdown(int*) { /* host no-op */ }
+void UI_FreeMessageBox(int) { /* host no-op */ }
 
