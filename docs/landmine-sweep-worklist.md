@@ -81,32 +81,24 @@ integration` 12/12).
 | 1 | `GameObject_GetRelPos(void*, int*, int, int)` | Real def: shared/defsym_stubs.cpp:362. Was C-linkage-declared in Town.cpp; fixed. |
 | 1 | `RESDATA_HitTestChildren(void*, int, int)` | Real def: shared/stubs_impl.cpp:424. Was C-linkage-declared in Town.cpp; fixed. |
 | 7 | `DPLAY_GetMessageCount(void*)` | Genuinely missing (0x4510E0 is not a function, zero Ghidra xrefs). Implemented as a loud deferred stub (fprintf+assert) in Town.cpp — confirmed unreachable on host since `g_dplay` is always NULL there. |
+| 42 | `HelpWnd.cpp` near-match cluster | 13×`Cursor_Render`, 11×`Sprite_SetState`, 9×`ResourceManager_GetStringById`, 7×`Cursor_WaitForBlit`, 6×`AudioChannel_Release`, 6×`Sprite_Init`, 4×`GameAudio_PlayResourceEx`, 1×`GameAudio_UpdateVolume`, 1×`AudioChannel_IsActive`, 1×`Cursor_HandleWindowPaint`, 1×`Cursor_SetCapture`, 1×`stream_vtable_scalar_dtor`, 1×`UI_CenterWindow`, 1×`WIN32_StreamOpenPath`. Real defs used `void*` for typed pointer params; HelpWnd had declared with specific types (Cursor*, AudioChannel*, ButtonSprite*, etc.). Also linkage fix: moved C-linkage symbols into `extern "C"` block. Updated call sites with appropriate casts (e.g., `Sprite_SetState(..., reinterpret_cast<int*>(...))` for param type change from `void*` to `int*`). |
 
 ## Near-match (mechanical declaration/linkage fixes) — still open
 
 | Sites | Symbol | Candidate real definition(s) | Callers |
 |---|---|---|---|
-| 13 | `Cursor_Render` | Cursor_Render(void*, int, int, char) | HelpWnd::update_anim(int), HelpWnd::go_next_page(), HelpWnd::handle_click(void*, unsigned int, unsigned int, int), HelpWnd::update_scroll(), HelpWnd::highlight_button(int), HelpWnd::measure_text_height(), HelpWnd::update_button_states(int), AboutDialog::Update() |
-| 11 | `Sprite_SetState` | Sprite_SetState, Sprite_SetState(void*, int), Sprite_SetState(void*, int, int*) | HelpWnd::highlight_button(int), HelpWnd::update_button_states(int) |
 | 10 | `TrackPiece_SetZoom` | TrackPiece_SetZoom, TrackPiece_SetZoom(void*, short) | ScriptedObject::UpdateToolState(TrackPiece*) |
-| 9 | `ResourceManager_GetStringById` | ResourceManager_GetStringById, ResourceManager_GetStringById(void**, int), ResourceManager_GetStringById(void*, unsigned int) | HelpWnd::go_next_page(), HelpWnd::go_prev_page(), HelpWnd::hide() |
 | 8 | `CRT_exit` | CRT_exit, CRT_exit(char const**, char const**) | Game_LoadWaveFile(char const*, void*) |
-| 7 | `Cursor_WaitForBlit` | Cursor_WaitForBlit(void*) | HelpWnd::go_next_page(), HelpWnd::update_scroll(), HelpWnd::highlight_button(int), HelpWnd::measure_text_height(), HelpWnd::update_button_states(int) |
-| 6 | `AudioChannel_Release` | AudioChannel_Release(void*) | HelpWnd::go_next_page(), HelpWnd::go_prev_page(), HelpWnd::hide() |
-| 6 | `Sprite_Init` | Sprite_Init, Sprite_Init(void*), Sprite_Init(void*, int) | HelpWnd::show(int), HelpWnd::load_page(int) |
 | 6 | `UIPANEL_EndPaintEx` | UIPANEL_EndPaintEx, UIPANEL_EndPaintEx(void*, int, int, unsigned char, RECT*), UIPANEL_EndPaintEx(void*, int, int, unsigned char, void*) | GameSetupPanel::drawLayoutList(LayoutListNode*), GameSetupPanel::drawGrid(), GameSetupPanel::drawTitle(), GameSetupPanel::on_update(int), Netman::HandlePlayerJoin(), Netman::RemoveInboundTrain(int) |
 | 5 | `DDRAW_PresentRect` | DDRAW_PresentRect(RECT const*, void*, int*, unsigned char), DDRAW_PresentRect(void*, void*, int*, unsigned char), DDRAW_PresentRect(void*, void*, int*, int) | UIPANEL_EndPaintEx(void*, int, int, unsigned char, RECT*) |
-| 4 | `GameAudio_PlayResourceEx` | GameAudio_PlayResourceEx(void*, int, unsigned int*), GameAudio_PlayResourceEx(void*, unsigned int, int*) | HelpWnd::go_next_page(), HelpWnd::go_prev_page() |
 | 4 | `WIN32_StreamRead` (cluster A) | WIN32_StreamRead | Game_LoadWaveFile(char const*, void*), GameSetupPanel::loadLayouts(bool), Cursor::init() |
 | 4 | `PlaySound` | PlaySound, PlaySound(unsigned int) | BuildingMgr::HandleClick(BuildingClickCommand const*, int, int, int, int), HelpWnd::handle_click(void*, unsigned int, unsigned int, int) |
 | 4 | `IntersectRect` | IntersectRect | UIPANEL_EndPaintEx(void*, int, int, unsigned char, RECT*), Panel::DispatchEvent(RECT*) |
 | 4 | `WIN32_StreamRead` (cluster B) | WIN32_StreamRead | UIPANEL_StretchBlit(void*, char const*, unsigned int, int, int), UIPANEL_ReadPaletteFromBMP(void*, void*) |
-| 4 | `set_mode` | GameWindow::set_mode(int, void*, unsigned char, unsigned char), UI_WindowBase::set_mode(int, void*, unsigned char, unsigned char) | HelpWnd::handle_mouse_move(void*, unsigned int, unsigned int, int) — check what HelpWnd actually derives from before assuming which base method this is |
 | 4 | `NET_GetOrCreateSurface` | NET_GetOrCreateSurface | Cursor::draw_postcard_preview(unsigned char) |
 | 4 | `TileMap_GetObjectAt` (cluster A) | TileMap_GetObjectAt, TileMap_GetObjectAt(TileMap*, short, short, short) | Building::StepToward(int, int), Building::FindNearbyObject(int, int, int) |
 | 3 | `WIN32_StreamRead` (cluster C) | WIN32_StreamRead | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
 | 3 | `CRT_sprintf_buf` | CRT_sprintf_buf, CRT_sprintf_buf(char*, char const*), CRT_sprintf_buf(char*, char const*, ...) | ScriptedObject::HandleEvent(unsigned int, char const*) |
-| 3 | `WIN32_StreamOpenPath` (cluster A) | WIN32_StreamOpenPath | UIPANEL_StretchBlit(void*, char const*, unsigned int, int, int), ScriptedObject::HandleEvent(unsigned int, char const*), HelpWnd::reset_pages() |
 | 3 | `InflateRect` | InflateRect | TileMap_ProcessDirtyRects(RECT*) |
 | 3 | `TileMap_GetObjectAt` (cluster B) | TileMap_GetObjectAt, TileMap_GetObjectAt(TileMap*, short, short, short) | World_RenderAll(Vehicle*), World::FinalizeLoad(Vehicle*, int, char) |
 | 3 | `FormatResourceString` | FormatResourceString, FormatResourceString(void*, int, char*, int), FormatResourceString(void*, unsigned int, char*, int) | GameSetupPanel::updateTitle(), GameSetupPanel::drawLayoutList(LayoutListNode*) |
@@ -118,7 +110,6 @@ integration` 12/12).
 | 2 | `DDRAW_UnlockPrimary` | DDRAW_UnlockPrimary, DDRAW_UnlockPrimary() | GameWindow::show(), GameWindow::set_mode(int, void*, unsigned char, unsigned char) |
 | 2 | `CGWND_GameSetup_DrawGrid_Thunk` | CGWND_GameSetup_DrawGrid_Thunk | Netman::HandlePlayerJoin(), Netman::RemoveInboundTrain(int) |
 | 2 | `RESMGR_IsSaveHeader` | RESMGR_IsSaveHeader(RESDATA*) | UIPANEL_DrawBorder(void*, int), UIPANEL_CreateSprite(void*, void*) |
-| 2 | `UI_CenterWindow` (cluster A) | UI_CenterWindow(int*, int*) | GameSetupPanel::drawTitle(), HelpWnd::create(void*) |
 | 2 | `AssetMgr_ReadPairValue` | AssetMgr_ReadPairValue(AssetMgr*, unsigned int, unsigned int) | Building::StepToward(int, int), Building::FindNearestConnectionNode(void*, unsigned int) |
 | 2 | `Vehicle_GetOccupantCount` | Vehicle_GetOccupantCount | Building::FindPathToTarget() |
 | 1 | `WNDPROC_CriticalSectionLock` | WNDPROC_CriticalSectionLock(int*, char*) | edit_key_handler_parse(void*, KeySequenceRecord*) |
@@ -126,11 +117,8 @@ integration` 12/12).
 | 1 | `WNDPROC_EnterCriticalSection` | WNDPROC_EnterCriticalSection | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
 | 1 | `WNDPROC_LeaveCriticalSection` | WNDPROC_LeaveCriticalSection | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
 | 1 | `WIN32_StreamDestroy` | WIN32_StreamDestroy, WIN32_StreamDestroy(void*) | UIPANEL_StretchBlit(void*, char const*, unsigned int, int, int) |
-| 1 | `GameAudio_UpdateVolume` | GameAudio_UpdateVolume, GameAudio_UpdateVolume(void*, char), GameAudio_UpdateVolume(void*, int) | HelpWnd::show(int) |
 | 1 | `CRT_wcsstr` | CRT_wcsstr, CRT_wcsstr(char const*, char const*) | AssetMgr_LoadFile(void*, unsigned char*, int*) |
 | 1 | `CRT_0x468610` | CRT_0x468610(void*, unsigned int, unsigned int, int) | AssetMgr_LoadFile(void*, unsigned char*, int*) |
-| 1 | `Cursor_HandleWindowPaint` | Cursor_HandleWindowPaint(void*, int) | HelpWnd::handle_mouse_move(void*, unsigned int, unsigned int, int) |
-| 1 | `Cursor_SetCapture` | Cursor_SetCapture(GameWindow*, unsigned char), Cursor_SetCapture(void*, unsigned char), Cursor_SetCapture(void*, int) | HelpWnd::hide() |
 | 1 | `Vehicle_Ctor` | Vehicle_Ctor, Vehicle_Ctor(void*, int, int, char, char) | Train_HandleTrackBuild(void*, int) |
 | 1 | `Vehicle_InitRoute` | Vehicle_InitRoute, Vehicle_InitRoute(void*, int, unsigned int, char) | Train_HandleTrackBuild(void*, int) |
 | 1 | `VehicleEditor_SetDPlayData` | VehicleEditor_SetDPlayData | Train_HandleTrackBuild(void*, int) |
@@ -147,8 +135,6 @@ integration` 12/12).
 | 1 | `DDRAW_GetDdrawErrorString` | DDRAW_GetDdrawErrorString | UIPANEL_ClearSurface(void*, int, int) |
 | 1 | `DDRAW_RestoreSurfaces` | DDRAW_RestoreSurfaces, DDRAW_RestoreSurfaces(IDirectDrawSurface4*, void*), DDRAW_RestoreSurfaces(void*, void*) | UIPANEL_ClearSurface(void*, int, int) |
 | 1 | `RESMGR_LoadResource` | RESMGR_LoadResource(RESDATA*, char const*) | UIPANEL_CreateSprite(void*, void*) |
-| 1 | `AudioChannel_IsActive` | AudioChannel_IsActive(int) | HelpWnd::update_anim(int) |
-| 1 | `stream_vtable_scalar_dtor` | stream_vtable_scalar_dtor(int*) | HelpWnd::reset_pages() |
 | 1 | `AssetMgr_LoadFile` | AssetMgr_LoadFile, AssetMgr_LoadFile(int*, unsigned char*, int*), AssetMgr_LoadFile(void*, unsigned char*, int*) | GameSetupPanel::loadLayouts(bool) |
 | 1 | `WIN32_StreamOpenFile` | WIN32_StreamOpenFile | Cursor::init() |
 | 1 | `Train_StartMultiplayer` | Train_StartMultiplayer | TrainSubsystem::DispatchMessage(void*) |

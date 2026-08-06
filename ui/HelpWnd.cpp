@@ -70,32 +70,55 @@ extern "C" {
     extern UINT_PTR __stdcall SetTimer(HWND, UINT_PTR, UINT, void* proc);
     extern void   __stdcall GetWindowRect(HWND, void* rect);
     extern void   __stdcall Sleep(DWORD ms);
+
+    /* Game functions (C-linkage) */
+    extern void   WIN32_StreamOpen(void* stream, int mode);
+    extern void   WIN32_StreamOpenPath(void* stream, const char* path, int mode, int unknown);
+    extern void   WIN32_StreamDestroy(void* stream);
+    extern void   WIN32_StreamDestroyImmediate(void* stream);
+    extern void   WNDPROC_CriticalSectionLock(int* stream, char* buf);
+    extern void   WNDPROC_StreamCleanup(void* stream);
+    extern void*  WNDPROC_StreamFromMemory(void* self, char* data, int size, int mode);
+    extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
+
+    /* Config_GetIniString/Config_ReadInt are the recovered C-ABI INI
+     * helpers in game/ConfigIni.cpp (extern "C"). Without matching
+     * linkage here, these calls silently bind to unrelated C++-mangled
+     * no-op stubs elsewhere in the tree (or, for the mismatched
+     * Config_ReadInt signature below, to no symbol at all — a null
+     * call that crashed CGWND_EnterMode3(1)'s HelpWnd::play_narration
+     * on the mode-1→mode-3 transition). */
+    extern int Config_GetIniString(void* config, const char* section,
+                                    const char* key, const char* def,
+                                    char* out, int maxLen);
+    extern int Config_ReadInt(void* config, const char* section,
+                               const char* key, const char* value);
 }
 
-    /* Game functions */
-    extern void   Sprite_Init(ButtonSprite* sprite);          /* 0x454BF0 */
+    /* Game functions (C++ linkage or typed APIs) */
+    extern void   Sprite_Init(void* sprite);                /* 0x454BF0 */
     extern void   Sprite_Destroy(void* sprite);             /* 0x454BC0 */
-    extern void   Sprite_SetState(ButtonSprite* sprite, int state, void* surface); /* 0x454C30 */
+    extern void   Sprite_SetState(void* sprite, int state, int* surface); /* 0x454C30 */
     extern BOOL   UIPANEL_Blit(void* sprite, uint dstX, uint dstY,
                                 int dstW, uint dstH, void* surface,
                                 int srcX, int srcY, int srcW, int srcH, int mode); /* 0x42B050 */
-    extern void   FormatResourceString(ResourceManager* resmgr, UINT id,
+    extern void   FormatResourceString(void* resmgr, UINT id,
                                         char* buf, int maxLen); /* 0x447330 */
-    extern int    ResourceManager_GetStringById(ResourceManager* resmgr, UINT id); /* 0x4472B0 */
+    extern int    ResourceManager_GetStringById(void* resmgr, UINT id); /* 0x4472B0 */
     extern void   LoadSoundResource(int handle);             /* loader, see ResourceManager */
     extern void   ReleaseSoundResource(int handle);           /* release refcounted sound */
-    extern void   GameAudio_PlayResourceEx(GameAudio* audio, UINT resId, int* outChannel); /* 0x458DC0 */
-    extern void   AudioChannel_Release(AudioChannel* channel);  /* 0x458F40 */
-    extern void   GameAudio_UpdateVolume(GameAudio* audio, char flag); /* 0x459110 */
-    extern int    AudioChannel_IsActive(AudioChannel* channel); /* 0x458F20 */
-    extern int    Cursor_WaitForBlit(Cursor* self);           /* 0x416380 — returns HDC */
-    extern void   Cursor_Render(Cursor* cursor, uintptr_t hWnd,
-                                 int hdc, char flag);          /* 0x416420 */
-    extern void   Cursor_SetCapture(Cursor* cursor, int captured); /* 0x416B20 */
-    extern void   Cursor_HandleWindowPaint(Cursor* cursor, uintptr_t hWnd); /* 0x416C40 */
+    extern void   GameAudio_PlayResourceEx(void* audio, UINT resId, int* outChannel); /* 0x4131C0 */
+    extern void   AudioChannel_Release(void* channel);  /* 0x40ECA0 */
+    extern void   GameAudio_UpdateVolume(void* audio, char flag); /* 0x4135B0 */
+    extern int    AudioChannel_IsActive(int channel); /* 0x40EEB0 */
+    extern int    Cursor_WaitForBlit(void* self);           /* 0x414BB0 — returns HDC */
+    extern void   Cursor_Render(void* cursor, int hWnd,
+                                 int hdc, char flag);          /* 0x414C20 */
+    extern void   Cursor_SetCapture(void* cursor, int captured); /* 0x414290 */
+    extern int    Cursor_HandleWindowPaint(void* cursor, int hWnd); /* 0x414A80 */
     /* GameWindow method dispatch — now via qualified C++ calls
      * (e.g., this->GameWindow::hide(), this->GameWindow::create(...)) */
-    extern void   UI_CenterWindow(void* outerRect, void* innerRect); /* 0x425A50 */
+    extern void   UI_CenterWindow(int* outerRect, int* innerRect); /* 0x425A50 */
     extern void   UI_SetWindowVisible(void* wnd, char visible); /* 0x425F20 */
     extern LRESULT UI_DefWndProc(HWND, UINT, WPARAM, LPARAM);  /* 0x422EA0 */
     extern void   CGWND_SetFullscreenMode(char flag);          /* 0x40BCF0 */
@@ -105,29 +128,8 @@ extern "C" {
                                           int r, int b);        /* 0x446330 */
     extern void   TileMap_InvalidateDirtyRects(void* tilemap, char flag); /* 0x446680 */
     extern void   PlaySound(int resId);                         /* 0x459930 */
-    extern void   WIN32_StreamOpen(void* stream, int mode);
-    extern void   WIN32_StreamOpenPath(void* stream, const char* path,
-                                        int mode, int unknown);
-    extern void   WIN32_StreamDestroy(void* stream);
-    extern void   WIN32_StreamDestroyImmediate(void* stream);
-    extern void   WNDPROC_CriticalSectionLock(int* stream, char* buf);
-    extern void   WNDPROC_StreamCleanup(void* stream);
-    extern void*  WNDPROC_StreamFromMemory(void* self, char* data, int size, int mode);
-    extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
     /* Vehicle/GameObject methods — extracted to HelpPageNode.cpp */
     extern int    CGWND_TrackPiece_SetZoom(void* obj, int zoom); /* 0x413A30 */
-    /* Config_GetIniString/Config_ReadInt are the recovered C-ABI INI
-     * helpers in game/ConfigIni.cpp (extern "C"). Without matching
-     * linkage here, these calls silently bind to unrelated C++-mangled
-     * no-op stubs elsewhere in the tree (or, for the mismatched
-     * Config_ReadInt signature below, to no symbol at all — a null
-     * call that crashed CGWND_EnterMode3(1)'s HelpWnd::play_narration
-     * on the mode-1→mode-3 transition). */
-    extern "C" int Config_GetIniString(void* config, const char* section,
-                                        const char* key, const char* def,
-                                        char* out, int maxLen);
-    extern "C" int Config_ReadInt(void* config, const char* section,
-                                   const char* key, const char* value);
     extern void   WIN32_PostQuit(void);                        /* 0x463670 —
                                     real body in core/CGWND.cpp (0x462560,
                                     this comment's old value, isn't a
@@ -402,7 +404,7 @@ int HelpWnd::create(HWND hWndParent)
     int winBottom = 0x170;
 
     /* Center on desktop */
-    UI_CenterWindow(&desktopRect, &winLeft);
+    UI_CenterWindow(reinterpret_cast<int*>(&desktopRect), reinterpret_cast<int*>(&winLeft));
 
     /* Offset by -0x30 in both axes */
     OffsetRect(&desktopRect, -0x30, -0x30);
@@ -539,7 +541,7 @@ void HelpWnd::hide()
     this->active = 0;
 
     /* Restore cursor capture */
-    Cursor_SetCapture((Cursor*)this, 1);  /* binary passes HelpWnd* as Cursor* */
+    Cursor_SetCapture((void*)this, 1);  /* binary passes HelpWnd* as Cursor* */
 
     /* Destroy sprite pixel data if initialized */
     if (this->spritesInited != 0) {
@@ -662,11 +664,11 @@ LRESULT HelpWnd::handle_click(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     switch (hitId) {
     case 1: /* Next page */
         this->highlight_button(1);
-        Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, 0, 0);
+        Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, 0, 0);
         Sleep(0x96);  /* 150ms */
         this->update_button_states(1);
         this->go_next_page();
-        Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, 0, 0);
+        Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, 0, 0);
         if (g_audio != NULL) {
             PlaySound(0x5015);
         }
@@ -674,25 +676,25 @@ LRESULT HelpWnd::handle_click(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case 2: /* Prev page */
         this->highlight_button(2);
-        Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, 0, 0);
+        Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, 0, 0);
         Sleep(0x96);
         this->update_button_states(2);
         if (g_audio != NULL) {
             PlaySound(0x5015);
         }
         this->go_prev_page();
-        Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, 0, 0);
+        Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, 0, 0);
         return 0;
 
     case 3: /* Close button */
         this->highlight_button(3);
-        Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, 0, 0);
+        Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, 0, 0);
         Sleep(0x96);
         this->update_button_states(3);
         if (g_audio != NULL) {
             PlaySound(0x5015);
         }
-        Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, 0, 0);
+        Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, 0, 0);
         /* Call vtable[1] = hide() */
         this->hide();
         /* Restore game mode */
@@ -746,7 +748,7 @@ LRESULT HelpWnd::handle_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
     }
 
     /* Let cursor system handle window paint */
-    Cursor_HandleWindowPaint((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)hWnd);
+    Cursor_HandleWindowPaint((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)hWnd);
 
     /* Hit test */
     int x = (short)(lParam & 0xFFFF);
@@ -1275,7 +1277,7 @@ void HelpWnd::update_scroll()
     }
 
     /* Step 2: Measure text lines to determine total line count */
-    int hdc = Cursor_WaitForBlit((Cursor*)this)  /* binary passes HelpWnd* as Cursor* */;
+    int hdc = Cursor_WaitForBlit((void*)this)  /* binary passes HelpWnd* as Cursor* */;
     int lineCount = 0;
 
     if (this->helpDataLoaded == 0) {
@@ -1291,7 +1293,7 @@ void HelpWnd::update_scroll()
         }
     }
 
-    Cursor_Render((Cursor*)this, /* binary passes HelpWnd* as Cursor* */ (uintptr_t)this->hWnd, hdc, 1);
+    Cursor_Render((void*)this, /* binary passes HelpWnd* as Cursor* */ (int)this->hWnd, hdc, 1);
 
     /* Step 3: Determine prevPageIdx based on total lines */
     int curPage = this->currentPageIdx;
@@ -1347,7 +1349,7 @@ void HelpWnd::update_anim(int param)
     if (this->field_3064 == 100) this->field_3064 = 0;
 
     if ((this->field_3064 & 1) == 0) {
-        if (AudioChannel_IsActive(this->audioChannel) == 0) {
+        if (AudioChannel_IsActive((int)this->audioChannel) == 0) {
             void* pd = this->btnAnim->pixelData;
             if (pd != NULL) {
                 short fi = *(short*)((uintptr_t)pd + 0x1E);
@@ -1554,27 +1556,27 @@ void HelpWnd::highlight_button(int buttonId)
     switch (buttonId) {
     case 1:
         if (this->nextBtnEnabled == 1)
-            Sprite_SetState(this->btnNext, 1, this->backbufferSurface);
+            Sprite_SetState(this->btnNext, 1, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 2:
         if (this->prevBtnEnabled == 1)
-            Sprite_SetState(this->btnPrevActual, 1, this->backbufferSurface);
+            Sprite_SetState(this->btnPrevActual, 1, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 3:
         if (this->closeBtnEnabled == 1)
-            Sprite_SetState(this->btnClose, 1, this->backbufferSurface);
+            Sprite_SetState(this->btnClose, 1, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 6:
-        Sprite_SetState(this->btnAnim, 0, this->backbufferSurface);
+        Sprite_SetState(this->btnAnim, 0, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 7: {
         void* pd = this->btnContent->pixelData;
         if (pd != NULL && *(int*)((uintptr_t)pd + 0x14) != 0 && *(int*)((uintptr_t)pd + 0x18) != 0)
-            Sprite_SetState(this->btnContent, 0, this->backbufferSurface);
+            Sprite_SetState(this->btnContent, 0, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     }
     case 8:
-        Sprite_SetState(this->btnScrollBar, 0, this->backbufferSurface);
+        Sprite_SetState(this->btnScrollBar, 0, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 9:
         if (this->scrollDownBtnEnabled == 1) {
@@ -1594,13 +1596,13 @@ void HelpWnd::update_button_states(int buttonId)
 {
     switch (buttonId) {
     case 1:
-        Sprite_SetState(this->btnNext, this->nextBtnEnabled == 1 ? 0 : 2, this->backbufferSurface);
+        Sprite_SetState(this->btnNext, this->nextBtnEnabled == 1 ? 0 : 2, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 2:
-        Sprite_SetState(this->btnPrevActual, this->prevBtnEnabled == 1 ? 0 : 2, this->backbufferSurface);
+        Sprite_SetState(this->btnPrevActual, this->prevBtnEnabled == 1 ? 0 : 2, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 3:
-        Sprite_SetState(this->btnClose, this->closeBtnEnabled == 1 ? 0 : 2, this->backbufferSurface);
+        Sprite_SetState(this->btnClose, this->closeBtnEnabled == 1 ? 0 : 2, reinterpret_cast<int*>(this->backbufferSurface));
         break;
     case 4: {
         int hdc = Cursor_WaitForBlit((Cursor*)this);
@@ -1619,10 +1621,10 @@ void HelpWnd::update_button_states(int buttonId)
     case 7: {
         void* pd = this->btnContent->pixelData;
         if (pd != NULL && *(int*)((uintptr_t)pd + 0x14) != 0 && *(int*)((uintptr_t)pd + 0x18) != 0) {
-            Sprite_SetState(this->btnContent, 0, this->backbufferSurface);
+            Sprite_SetState(this->btnContent, 0, reinterpret_cast<int*>(this->backbufferSurface));
             void* sp = *(void**)((uintptr_t)pd + 0x14);
             if (sp != NULL && *(char*)((uintptr_t)sp + 0x17) == 1)
-                Sprite_SetState(this->btnContent, 1, this->backbufferSurface);
+                Sprite_SetState(this->btnContent, 1, reinterpret_cast<int*>(this->backbufferSurface));
         }
         break;
     }
