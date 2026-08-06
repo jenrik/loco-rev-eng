@@ -31,8 +31,18 @@ typedef uint32_t DWORD;typedef int32_t BOOL;typedef uint32_t UINT;
 typedef const char*LPCSTR;typedef char*LPSTR;
 
 /* Kernel32 */
-void Sleep(DWORD){}HANDLE GetProcessHeap(void){return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));}
-int32_t HeapFree(HANDLE,DWORD,void*){return 1;}int32_t CloseHandle(HANDLE){return 1;}
+/* Sleep/CloseHandle/GetLastError/FormatMessageA/LocalFree/CreateFileA/
+ * GetFileSize/ExitProcess/PlaySoundA/ClientToScreen/GetClientRect/
+ * UpdateWindow/InvalidateRect/DestroyWindow/PostQuitMessage/GetCursorPos/
+ * SetFocus/CopyRect/OffsetRect/SetRect/SetRectEmpty/CreateSolidBrush/
+ * DeleteObject/GetStockObject/DrawEdge/IntersectRect/SetBkColor/
+ * OutputDebugStringA all real-implemented in graphics/sdl3_window.cpp (or,
+ * for ReleaseCapture/SetFocus, ui/GameWindow.cpp / input/Cursor_Editor.cpp).
+ * The no-op copies that used to live here were dead weight that only
+ * surfaced as LINK-001 --allow-multiple-definition collisions because
+ * both sides are extern "C" (same unmangled symbol name). Removed. */
+HANDLE GetProcessHeap(void){return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));}
+int32_t HeapFree(HANDLE,DWORD,void*){return 1;}
 /* WaitForSingleObject/ResumeThread: host substitutes for
  * network/WIN32Thread.cpp's WIN32_WaitForThread/WIN32_CloseThreadHandle,
  * which declare these extern "C" (like CloseHandle above) so they must be
@@ -47,24 +57,12 @@ int32_t HeapFree(HANDLE,DWORD,void*){return 1;}int32_t CloseHandle(HANDLE){retur
  * success. */
 DWORD WaitForSingleObject(HANDLE,DWORD){return 0;}
 DWORD ResumeThread(HANDLE){return 0;}
-HINSTANCE GetModuleHandleA(LPCSTR){return reinterpret_cast<HINSTANCE>(static_cast<uintptr_t>(1));}DWORD GetLastError(void){return 0;}
-DWORD FormatMessageA(DWORD,void*,DWORD,DWORD,char*,DWORD,void*){return 0;}
-void*LocalFree(void*){return nullptr;}DWORD GetSystemDefaultLCID(void){return 0x0409;}
+HINSTANCE GetModuleHandleA(LPCSTR){return reinterpret_cast<HINSTANCE>(static_cast<uintptr_t>(1));}
+DWORD GetSystemDefaultLCID(void){return 0x0409;}
 int32_t CreateDirectoryA(LPCSTR,void*){return 1;}int32_t DeleteFileA(LPCSTR){return 1;}
 DWORD GetFileAttributesA(LPCSTR){return static_cast<DWORD>(-1);}
 void*FindFirstFileA(LPCSTR,void*){return nullptr;}int32_t FindNextFileA(void*,void*){return 0;}
 int32_t FindClose(void*){return 0;}
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
-HANDLE CreateFileA(LPCSTR n,DWORD a,DWORD,DWORD,DWORD,DWORD,HANDLE){
-#ifndef _WIN32
- const char*m=(a&0x40000000)?((a&0x80000000)?"r+b":"wb"):"rb";
- FILE*f=fopen(n,m);return f?reinterpret_cast<HANDLE>(f):reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1));
-#else
- static_cast<void>(n);static_cast<void>(a);return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1));
-#endif
-}
 int32_t ReadFile(HANDLE h,void*b,DWORD n,DWORD*r,void*){
 #ifndef _WIN32
  if(!h||h==reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1)))return 0;
@@ -81,23 +79,12 @@ int32_t WriteFile(HANDLE h,const void*b,DWORD n,DWORD*w,void*){
  static_cast<void>(h);static_cast<void>(b);static_cast<void>(n);static_cast<void>(w);return 0;
 #endif
 }
-DWORD GetFileSize(HANDLE h,DWORD*hi){
-#ifndef _WIN32
- if(hi)*hi=0;if(!h||h==reinterpret_cast<HANDLE>(static_cast<uintptr_t>(-1)))return static_cast<DWORD>(-1);
- FILE*f=reinterpret_cast<FILE*>(h);long p=ftell(f);fseek(f,0,SEEK_END);long s=ftell(f);
- fseek(f,p,SEEK_SET);return static_cast<DWORD>(s);
-#else
- static_cast<void>(h);static_cast<void>(hi);return 0;
-#endif
-}
 int32_t GetModuleFileNameA(HINSTANCE,char*,DWORD){return 0;}
 int32_t SystemParametersInfoA(UINT,UINT,void*,UINT){return 0;}
 HANDLE HeapAlloc(HANDLE,DWORD,size_t){return malloc(1);}
 HANDLE GlobalAlloc(UINT,size_t){return malloc(1);}void*GlobalLock(HANDLE h){return h;}
 int32_t GlobalUnlock(HANDLE){return 1;}HANDLE GlobalHandle(void*p){return reinterpret_cast<HANDLE>(p);}
 int32_t GlobalFree(HANDLE h){free(h);return 0;}void timeBeginPeriod(unsigned int){}
-int32_t ExitProcess(unsigned int){exit(0);return 0;}
-int32_t PlaySoundA(LPCSTR,HMODULE,DWORD){return 1;}
 /* ShellExecuteA — used by game/Train_network.cpp's Train_ConnectToServer
  * (0x3EB browser-open path, decompiled at 0x43C860) to launch a validated
  * http(s) URL. No established host URL-open helper exists elsewhere in
@@ -119,9 +106,17 @@ int32_t ShellExecuteA(HWND,LPCSTR operation,LPCSTR file,LPCSTR,LPCSTR,int32_t){
 }
 
 /* User32 */
-int32_t ClientToScreen(HWND,POINT*){return 1;}int32_t SetCursorPos(int32_t,int32_t){return 1;}
-int32_t GetWindowTextA(HWND,char*,int32_t){return 0;}int32_t GetClientRect(HWND,RECT*){return 0;}
-HWND GetCapture(void){return nullptr;}int32_t ReleaseCapture(void){return 1;}
+int32_t SetCursorPos(int32_t,int32_t){return 1;}
+int32_t GetWindowTextA(HWND,char*,int32_t){return 0;}
+HWND GetCapture(void){return nullptr;}
+/* ReleaseCapture — real provider for core/Game.cpp::SetScreenMode and
+ * ui/GameWindow.cpp (both declare `extern BOOL ReleaseCapture(void);` and
+ * rely on this symbol). A first LINK-001 pass deleted this outright,
+ * reasoning (wrongly) that ui/GameWindow.cpp's `static` copy was the
+ * real one — that copy was internal-linkage-only, so removing both left
+ * zero definitions and a silent unresolved-symbol call (a real crash:
+ * `-Wl,--unresolved-symbols=ignore-all` resolves it to address 0). */
+int32_t ReleaseCapture(void){return 1;}
 /* Win32 cursor/screen APIs used by Game::SetScreenMode and the cursor
  * engine. The SDL host drives the pointer itself; these are no-ops. */
 BOOL ScreenToClient(HWND, void* pt){ (void)pt; return 0; }
@@ -147,27 +142,18 @@ void Game_DispatchCursorFeedback(void*){}
 /* UI_ProcessObjectTimers — original 0x420000 walks UI timer lists; the SDL
  * host drives timers from its own pump. */
 void UI_ProcessObjectTimers(){}
-int32_t UpdateWindow(HWND){return 1;}
-int32_t InvalidateRect(HWND,const RECT*,int32_t){return 1;}
-int32_t GetWindowRect(HWND,RECT*){return 0;}int32_t DestroyWindow(HWND){return 1;}
-int32_t PostQuitMessage(int32_t){return 0;}int32_t GetCursorPos(POINT*){return 0;}
-int32_t SetFocus(HWND){return 0;}int32_t IsCharAlphaNumericA(char){return 1;}
+int32_t GetWindowRect(HWND,RECT*){return 0;}
+int32_t IsCharAlphaNumericA(char){return 1;}
 
 /* GDI32 */
-void CopyRect(RECT*d,const RECT*s){if(d&&s)*d=*s;}
-int32_t OffsetRect(RECT*r,int32_t dx,int32_t dy){if(r){r->l+=dx;r->t+=dy;r->r+=dx;r->b+=dy;}return 1;}
 int32_t InflateRect(RECT*r,int32_t dx,int32_t dy){if(r){r->l-=dx;r->t-=dy;r->r+=dx;r->b+=dy;}return 1;}
-int32_t SetRect(RECT*r,int32_t l,int32_t t,int32_t ri,int32_t b){if(r){r->l=l;r->t=t;r->r=ri;r->b=b;}return 1;}
-int32_t SetRectEmpty(RECT*r){if(r){r->l=r->t=r->r=r->b=0;}return 1;}
-HBRUSH CreateSolidBrush(DWORD){return reinterpret_cast<HBRUSH>(static_cast<uintptr_t>(1));}int32_t DeleteObject(void*){return 1;}
-HBRUSH GetStockObject(int32_t){return reinterpret_cast<HBRUSH>(static_cast<uintptr_t>(1));}HPEN CreatePen(int32_t,int32_t,DWORD){return reinterpret_cast<HPEN>(static_cast<uintptr_t>(1));}
+HPEN CreatePen(int32_t,int32_t,DWORD){return reinterpret_cast<HPEN>(static_cast<uintptr_t>(1));}
 HFONT CreateFontA(int32_t,int32_t,int32_t,int32_t,int32_t,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,LPCSTR){return reinterpret_cast<HFONT>(static_cast<uintptr_t>(1));}
-int32_t DrawEdge(HDC,RECT*,UINT,UINT){return 1;}int32_t FrameRect(HDC,const RECT*,HBRUSH){return 1;}
+int32_t FrameRect(HDC,const RECT*,HBRUSH){return 1;}
 int32_t LineTo(HDC,int32_t,int32_t){return 1;}int32_t MoveToEx(HDC,int32_t,int32_t,POINT*){return 1;}
-int32_t IntersectRect(RECT*,const RECT*,const RECT*){return 0;}int32_t IsRectEmpty(const RECT*){return 1;}
+int32_t IsRectEmpty(const RECT*){return 1;}
 int32_t Ellipse(HDC,int32_t,int32_t,int32_t,int32_t){return 1;}int32_t SetPixel(HDC,int32_t,int32_t,DWORD){return 1;}
-int32_t GetDeviceCaps(HDC,int32_t){return 1;}int32_t SetBkColor(HDC,DWORD){return 1;}
-void OutputDebugStringA(LPCSTR s){if(s)fprintf(stderr,"DEBUG: %s\n",s);}
+int32_t GetDeviceCaps(HDC,int32_t){return 1;}
 
 /* CRT */
 static int32_t crt_errno_val=0;int32_t*CRT_errno(void){return&crt_errno_val;}
@@ -378,8 +364,13 @@ void AudioChannel_Pause(int32_t){}  /* _Z19AudioChannel_Pausei */
 void AudioChannel_Play(){}          /* _Z19AudioChannel_Playv */
 void AudioChannel_Play(int32_t){}   /* _Z19AudioChannel_Playi */
 
-/* CGWND_SetMode — C++ overloads */
-void CGWND_SetMode(int32_t){}       /* _Z13CGWND_SetModei */
+/* CGWND_SetMode(int) — real implementation is core/CGWND.cpp's
+ * CGWND_SetMode(int new_mode) (0x408130); this no-op copy was dead
+ * weight (LINK-001). CGWND_SetMode(void*) stays: several files
+ * (ui/EditWindow.cpp, ui/HelpWnd.cpp, game/ScriptedObject.cpp,
+ * game/BuildingPanel.cpp, world/scriptengine.cpp) declare and call a
+ * void*-mode overload that has no real implementation anywhere — see
+ * PROGRESS.md follow-up note. */
 void CGWND_SetMode(void*){}         /* _Z13CGWND_SetModePv */
 
 /* Collection — these need to be member functions for correct vtable mangling */
@@ -393,8 +384,9 @@ int32_t Config_GetIniString(void*,const char*,const char*,const char*,char*,uint
 void Cursor_SetCapture(void*,int32_t){}        /* _Z17Cursor_SetCapturePvi */
 void Cursor_SetCapture(GameWindow*,uint8_t){}  /* _Z17Cursor_SetCaptureP10GameWindowh */
 
-/* Cursor_UnlockAllSurfaces — C++ overloads */
-void Cursor_UnlockAllSurfaces(){}               /* _Z24Cursor_UnlockAllSurfacesv */
+/* Cursor_UnlockAllSurfaces() — real implementation is input/Cursor.cpp's
+ * 0-arg Cursor_UnlockAllSurfaces (0x414EF0); this no-op copy was dead
+ * weight (LINK-001). */
 void Cursor_UnlockAllSurfaces(GameWindow*){}    /* _Z24Cursor_UnlockAllSurfacesP10GameWindow */
 
 /* Cursor_InitSprites — C++ version with GameWindow* */
@@ -425,23 +417,33 @@ void RESMGR_ReleaseSoundResource(void*){}                  /* _Z27RESMGR_Release
 void Sprite_Init(void*,int32_t){}                          /* _Z11Sprite_InitPvi */
 void Sprite_Init(void*,int32_t,void*){}                    /* _Z11Sprite_InitPviS_ */
 
-/* Sprite_SetState — C++ overloads */
-void Sprite_SetState(void*,int32_t){}                      /* _Z15Sprite_SetStatePvi */
+/* Sprite_SetState(void*,int32_t) — no real caller found (every real
+ * call site passes a 3rd arg, matching the (void*,int32_t,void*)
+ * overload below); duplicated stubs_impl.cpp's loud version of the
+ * same 2-arg overload (LINK-001) — stubs_impl.cpp's survives per
+ * CLAUDE.md's stub policy. */
 void Sprite_SetState(void*,int32_t,void*){}                /* _Z15Sprite_SetStatePviS_ */
 
 /* TileMap_InvalidateRect — C++ overloads */
 void TileMap_InvalidateRect(void*,int32_t,int32_t,int32_t,int32_t){}     /* _Z22TileMap_InvalidateRectPviiii */
 void TileMap_InvalidateRect(TileMap*,int32_t,int32_t,int32_t,int32_t){} /* _Z22TileMap_InvalidateRectP7TileMapiiii */
 
-/* UIPANEL_BeginPaint — C++ overloads */
+/* UIPANEL_BeginPaint(void*) — real implementation is ui/UIPANEL.cpp's
+ * UIPANEL_BeginPaint (0x?, __fastcall); this no-op copy (and the one in
+ * stubs_impl.cpp) were dead weight (LINK-001). */
 void UIPANEL_BeginPaint(int32_t){}       /* _Z18UIPANEL_BeginPainti */
-void UIPANEL_BeginPaint(void*){}         /* _Z18UIPANEL_BeginPaintPv */
 
-/* UIPANEL_Blit — C++ overloads */
+/* UIPANEL_Blit — C++ overloads. The (...,uint32_t) shape is real
+ * (ui/UIPANEL_Surface.cpp); removed the no-op duplicate (LINK-001). The
+ * (...,int32_t) all-int shape has NO real implementation anywhere —
+ * dozens of call sites (ui/AboutDialog.cpp, core/GameObject.cpp,
+ * core/VehicleEditor.cpp, world/tilemap.cpp/.h, network/NetworkPlayerList.cpp,
+ * network/DPlayManager.cpp, input/Cursor_internal.h) declare/call this
+ * exact overload and are all CURRENTLY SILENT NO-OPS on host — see
+ * PROGRESS.md follow-up note; kept as-is (not fixed) to stay in scope. */
 void UIPANEL_Blit(void*,int32_t,int32_t,int32_t,int32_t,void*,int32_t,int32_t,int32_t,int32_t,uint8_t){}   /* _Z12UIPANEL_BlitPviiiiS_iiiih */
 void UIPANEL_Blit(void*,int32_t,int32_t,int32_t,int32_t,void*,int32_t,int32_t,int32_t,int32_t,int32_t){}  /* _Z12UIPANEL_BlitPviiiiS_iiiii */
 void UIPANEL_Blit(void*,int32_t,int32_t,int32_t,int32_t,void*,int32_t,int32_t,int32_t,int32_t,uint32_t){} /* _Z12UIPANEL_BlitPviiiiS_iiiij */
-void UIPANEL_Blit(void*,uint32_t,uint32_t,int32_t,uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t){} /* _Z12UIPANEL_BlitPvjjijPPijjijj */
 
 /* UIPANEL_EndPaintEx — C++ overloads */
 void UIPANEL_EndPaintEx(void*,int32_t,int32_t,uint8_t,void*){}        /* _Z18UIPANEL_EndPaintExPviihS_ */
@@ -460,12 +462,11 @@ void*UI_CreateMessageBox(void*,int32_t,int16_t,char,int32_t,int32_t,char){return
 // void UI_CenterWindow(RECT*,RECT*){} — removed duplicate
 // void UI_CenterWindow(void*,void*){} — removed duplicate
 
-/* UI_WindowBase_BaseDtor — C++ overloads */
-void UI_WindowBase_BaseDtor(void*){}            /* _Z22UI_WindowBase_BaseDtorPv */
+/* UI_WindowBase_BaseDtor(void*)/UI_WindowBase_Ctor(void*,void*,uint32_t) —
+ * duplicated (silent no-op here vs loud stub in stubs_impl.cpp);
+ * stubs_impl.cpp's loud versions survive per CLAUDE.md's stub policy
+ * (LINK-001). */
 void UI_WindowBase_BaseDtor(UI_WindowBase*){}   /* _Z22UI_WindowBase_BaseDtorP13UI_WindowBase */
-
-/* UI_WindowBase_Ctor — C++ overloads */
-void UI_WindowBase_Ctor(void*,void*,uint32_t){}           /* _Z18UI_WindowBase_CtorPvS_j */
 void UI_WindowBase_Ctor(UI_WindowBase*,void*,uint32_t){}  /* _Z18UI_WindowBase_CtorP13UI_WindowBaseS_j */
 
 /* Vehicle_FindPath — C++ overloads */
@@ -618,6 +619,10 @@ int32_t s_StringFileInfo_080904B0_FileVer_0047e0f8=0;
 int32_t s_WINDOW_ATTRIBUTES_0047e1a0=0;
 }
 
-#ifndef _WIN32
-bool DDRAW_Init(void) { return true; }
-#endif
+/* DDRAW_Init — real, Ghidra-verified implementation (address 0x45C8A0,
+ * thumbnail-palette surface init) now lives in native/ddraw_init.c.
+ * This was the flagship LINK-001 example: two no-op copies (here and in
+ * stubs_impl.cpp) plus the real one collided, and --allow-multiple-
+ * definition let whichever won be nondeterministic across rebuilds
+ * (see PROGRESS.md's "Found and fixed a real nondeterminism bug"
+ * entry). Both no-op copies removed. */

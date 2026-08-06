@@ -22,17 +22,14 @@
 /* =========================================================== */
 class VehicleEditor {
 public:
-    void CalcAngle();
+    /* CalcAngle() removed (LINK-001): real body now in
+     * core/VehicleEditor.cpp (0x?), same signature — collided. */
     void CheckEdgeBounds(void*);
     void CheckEditBounds1(void*);
     void CheckEditBounds2(void*);
     void CheckVehicleAttach(void*);
 };
 
-void VehicleEditor::CalcAngle() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — VehicleEditor::CalcAngle");
-}
 void VehicleEditor::CheckEdgeBounds(void*) {
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — VehicleEditor::CheckEdgeBounds");
@@ -64,90 +61,17 @@ void RESDATA_ScriptedObject::EnterBuildMode(unsigned char) {
 }
 
 /* =========================================================== */
-/* Building — methods not yet in canonical header              */
+/* Building / TrainEntity — REMOVED (CLASS-001).                */
+/*                                                                */
+/* These blocks used to be duplicate shadow `class Building {   */
+/* ... };` / `class TrainEntity { ... };` definitions providing  */
+/* assert-stub bodies for the ctor and most methods. Same ODR    */
+/* hazard as UIEntity above: mangled names don't encode field    */
+/* layout, so these collided with the real, complete             */
+/* `Building : public Entity` (game/Building.h/.cpp) and          */
+/* `TrainEntity` (game/Train.h/.cpp) — both fully integrated,      */
+/* every method here now has a real body there (LINK-001).       */
 /* =========================================================== */
-class Building {
-public:
-    Building(int);
-    virtual ~Building() {}
-    void CheckTimeout();
-    void HandleAction(int);
-    void OnOccupantReady(int);
-    void PartyModeUpdate(void*);
-    int IsActionComplete();
-    void StepToward(int, int);
-    void TeleportTo(int, int);
-    void PostMoveDispatch();
-    void BaseCleanup();
-    uint8_t CheckPlacementCollision(int, int);
-    uint32_t FindNearestConnectionNode(void*, unsigned int);
-};
-
-Building::Building(int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::Building(int)");
-}
-void Building::CheckTimeout() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::CheckTimeout");
-}
-void Building::HandleAction(int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::HandleAction");
-}
-void Building::OnOccupantReady(int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::OnOccupantReady");
-}
-void Building::PartyModeUpdate(void*) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::PartyModeUpdate");
-}
-int Building::IsActionComplete() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::IsActionComplete");
-    return 0;
-}
-void Building::StepToward(int, int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::StepToward");
-}
-void Building::TeleportTo(int, int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::TeleportTo");
-}
-void Building::PostMoveDispatch() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::PostMoveDispatch");
-}
-void Building::BaseCleanup() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::BaseCleanup");
-}
-uint8_t Building::CheckPlacementCollision(int, int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::CheckPlacementCollision");
-    return 1;
-}
-uint32_t Building::FindNearestConnectionNode(void*, unsigned int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Building::FindNearestConnectionNode");
-    return 0;
-}
-
-/* =========================================================== */
-/* TrainEntity — constructor                                   */
-/* =========================================================== */
-class TrainEntity {
-public:
-    TrainEntity(int);
-    virtual ~TrainEntity() {}
-};
-
-TrainEntity::TrainEntity(int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — TrainEntity::TrainEntity(int)");
-}
 
 /* =========================================================== */
 /* Collection — GetAt                                          */
@@ -184,21 +108,10 @@ void SortedCollection::SortRange(int, int) {
 }
 
 /* =========================================================== */
-/* UI_WindowBase — ctor + dtor for typeinfo generation         */
+/* UI_WindowBase — REMOVED (CLASS-001), same ODR hazard as       */
+/* UIEntity below: the real ctor/dtor are in ui/UI_WindowBase.cpp */
+/* (LINK-001).                                                    */
 /* =========================================================== */
-class UI_WindowBase {
-public:
-    UI_WindowBase(void*, unsigned int);
-    virtual ~UI_WindowBase();
-};
-
-UI_WindowBase::UI_WindowBase(void*, unsigned int) {
-    /* Host: minimal init — vtable managed by compiler */
-}
-UI_WindowBase::~UI_WindowBase() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — UI_WindowBase::~UI_WindowBase");
-}
 
 /* =========================================================== */
 /* UIEntity — REMOVED (CLASS-001).                              */
@@ -226,22 +139,15 @@ public:
     virtual void InitSubObjects() {}
     virtual void HandleAction(int) {}
     virtual void Update() {}
-    void LoadFromStream(void*);
     void Init(int, int, unsigned char);
-    void OnUpdateChild();
+    /* LoadFromStream(void*)/OnUpdateChild() removed (LINK-001): real
+     * bodies now in game/ScriptedObject.cpp (0-arg OnUpdateChild, and
+     * LoadFromStream(void*) — collided, same ODR hazard as UIEntity). */
 };
 
-void ScriptedObject::LoadFromStream(void*) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — ScriptedObject::LoadFromStream");
-}
 void ScriptedObject::Init(int, int, unsigned char) {
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — ScriptedObject::Init");
-}
-void ScriptedObject::OnUpdateChild() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — ScriptedObject::OnUpdateChild");
 }
 
 /* =========================================================== */
@@ -249,29 +155,20 @@ void ScriptedObject::OnUpdateChild() {
 /* =========================================================== */
 class Netman {
 public:
-    void ReceivePing(int, unsigned char, unsigned int, int, int);
     void SendFileTransfer(void*);
-    void CheckTimeout(int);
     void HandleTimeout(void*);
-    void ResetNetworkState();
+    /* ReceivePing/CheckTimeout/ResetNetworkState removed (LINK-001): real
+     * bodies now in network/Netman.cpp -- collided, same ODR hazard as
+     * UIEntity. SendFileTransfer(void*)/HandleTimeout(void*) below don't
+     * collide (real Netman.cpp takes TrainMessage or InboundTrainNode
+     * pointers, a different mangled overload) but are almost certainly
+     * equally dead; left alone, out of LINK-001's scope. */
 };
-void Netman::ReceivePing(int, unsigned char, unsigned int, int, int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Netman::ReceivePing");
-}
 void Netman::SendFileTransfer(void*) {
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — Netman::SendFileTransfer");
 }
-void Netman::CheckTimeout(int) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Netman::CheckTimeout");
-}
 void Netman::HandleTimeout(void*) {
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — Netman::HandleTimeout");
-}
-void Netman::ResetNetworkState() {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — Netman::ResetNetworkState");
 }

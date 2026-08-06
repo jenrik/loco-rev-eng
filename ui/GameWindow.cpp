@@ -66,9 +66,15 @@ extern DWORD GetLastError();
 extern DWORD FormatMessageA(DWORD flags, const void* source, DWORD message,
                             DWORD language, char* buffer, DWORD size, void* arguments);
 extern void* LocalFree(void* memory);
+/* ReleaseCapture's real global definition lives in shared/link_stubs.cpp —
+ * core/Game.cpp::SetScreenMode links against that same symbol, so this file
+ * must not shadow it with a local copy (LINK-001: a local static with an
+ * identical body was silently ICF-folded into the same symbol, masking the
+ * fact that this declaration, not a real local definition, is what's
+ * actually needed here). */
+extern BOOL ReleaseCapture(void);
 /* Inline stubs for functions not yet covered by sdl3_window.h */
 static inline HWND GetCapture(void) { return NULL; }
-static inline BOOL ReleaseCapture(void) { return TRUE; }
 static inline int GetWindowTextA(HWND, char* buf, int max) {
     if (buf && max > 0) buf[0] = 0;
     return 0;

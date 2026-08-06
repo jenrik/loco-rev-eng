@@ -94,11 +94,13 @@ char     g_current_save_path[0x108] = "";  /* 0x4AA8F8 — current save name */
 int32_t  g_sound_cache[0x6060] = {0};
 void*    g_main_window = nullptr;
 void*    g_building_mgr = nullptr;
-void*    g_resmgr = nullptr;
 void*    g_netman = nullptr;
 /* g_input_mgr: canonical typed static object defined in input/InputMgr.cpp
- * (InputMgr g_input_mgr; — 0x4A9990).  Removed the old void* placeholder. */
-void*    g_tilemap = nullptr;
+ * (InputMgr g_input_mgr; — 0x4A9990).  Removed the old void* placeholder.
+ * g_resmgr/g_tilemap: same pattern — canonical typed objects/pointers are
+ * `ResourceManager g_resmgr;` (resources/ResourceManager.cpp, 0x4855E8)
+ * and `void* g_tilemap;` (graphics/DDRAW.cpp, 0x4AAD08); these void*
+ * placeholders were a real type mismatch masked by LINK-001. */
 void*    g_asset_mgr = nullptr;
 void*    g_audio = nullptr;
 void*    g_cursor = nullptr;
@@ -168,23 +170,18 @@ int  IsRectEmpty(const RECT* r) { return !r || r->left>=r->right || r->top>=r->b
 
 
 /* ---- More globals ---- */
-void* g_primary_surface = nullptr;
+/* g_primary_surface/g_network_thread/g_network_queue/g_train_resources/
+ * g_game_config/g_world/g_timer_event_id: duplicates of the canonical
+ * definitions in shared/link_stubs.cpp. g_scripted_object: duplicate of
+ * shared/defsym_stubs.cpp. g_ddraw_building/g_tooltip_mgr: duplicates of
+ * the real typed globals in graphics/DDRAW.cpp. All removed (LINK-001). */
 void* g_player_config = nullptr;
 void* g_config_ini = nullptr;
 void* g_trainstation_window = nullptr;
 void* g_dplay_peer = nullptr;
 int   g_world_width = 0;
 int   g_world_height = 0;
-void* g_network_thread = nullptr;
-void* g_network_queue = nullptr;
-void* g_train_resources = nullptr;
-void* g_game_config = nullptr;
-void* g_scripted_object = nullptr;
-void* g_ddraw_building = nullptr;
-void* g_tooltip_mgr = nullptr;
 void* g_second_overlay = nullptr;
-void* g_world = nullptr;
-void* g_timer_event_id = nullptr;
 int g_mouse_spi3[3] = {0,0,0};
 int g_mouse_spi4[3] = {0,0,0};
 int g_mouse_spi5[3] = {0,0,0};
@@ -326,9 +323,11 @@ void Cursor_SetCapture(void*, unsigned char) {}
 void DDRAW_UnlockPrimary() {}
 void Cursor_InitSprites(void*) {}
 void Cursor_UnlockAllSurfaces(void*) {}
-void DDRAW_GetSurfaceWidthHeight(void*, unsigned short*, unsigned short*) {}
+/* DDRAW_GetSurfaceWidthHeight/DDRAW_RestoreSurfaces: real, Ghidra-verified
+ * implementations now canonical in native/DDRAW_GetSurfaceWidthHeight.c
+ * (0x4014E0, see PROGRESS.md raw-073) and native/ddraw_surface_ops.c;
+ * these no-op duplicates removed (LINK-001). */
 void DDRAW_SetSurfaceFormat(void*, int) {}
-void DDRAW_RestoreSurfaces(void*, void*) {}
 void DDRAW_SpriteDataCtor(void*, int) {}
 void DDRAW_SpriteDataDtor(void*) {}
 /* DDRAW_SelectBuilding(void*, int) — real implementation now in
@@ -362,14 +361,9 @@ void RESDATA_DtorBase(void*) {}
 #include <cstdint>
 #endif
 
-uint8_t RESDATA_IsBuildingTile(int32_t tile_obj)
-{
-    /* 0x44BD30: check byte at +0x63A for {0x07,0x08,0x09,0x0A} */
-    if (tile_obj == 0) return 0;
-    uint8_t b = *reinterpret_cast<const uint8_t*>(
-        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
-    return (b == 0x07 || b == 0x08 || b == 0x09 || b == 0x0A) ? 1 : 0;
-}
+/* RESDATA_IsBuildingTile — identical Ghidra-verified implementation
+ * (0x44BD30) now canonical in world/tilemap.cpp; this was a duplicate
+ * (LINK-001). */
 
 uint8_t RESDATA_IsRoadTile(int32_t tile_obj)
 {
@@ -503,8 +497,8 @@ char UI_Window_UpdateScroll(int* p) {
     return 0;
 }
 void UIEntity_Ctor(void) { /* host no-op */ }
-void UIPANEL_Blit(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
-void UIPANEL_BeginPaint(void* self) { (void)self; }
+/* UIPANEL_Blit(void*,int...int) and UIPANEL_BeginPaint(void*): duplicates
+ * of shared/link_stubs.cpp / ui/UIPANEL.cpp (LINK-001); removed here. */
 void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { /* host no-op */ }
 void UIPANEL_CreateSurface(void* self) { (void)self; }
 void UIPANEL_StretchBlit(void*, void*, int, int, int) { /* host no-op */ }
@@ -518,15 +512,15 @@ void UIPANEL_FillRect(void* self, int a, int b) { (void)self; (void)a; (void)b; 
 void Sprite_Init(void* self) { (void)self; }
 void Sprite_SetState(void*, int, int*) { /* host no-op */ }
 void Sprite_Destroy(void) { }
-void ButtonSprite_Ctor(void* self, int i) { (void)self; (void)i; }
+/* ButtonSprite_Ctor(void*,int) / TileMap_InvalidateRect(void*,int,int,int,int) /
+ * CGWND_SetMode(void*): duplicates of shared/link_stubs.cpp (LINK-001);
+ * removed here. */
 void HelpWnd_PlayNarration(void*, int, int) { /* host no-op */ }
 void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int) { /* host no-op */ }
 void Town_SelectBuilding(void* self, int i) { (void)self; (void)i; }
 void TileMap_InvalidateDirtyRects(void*, char) { /* host no-op */ }
-void TileMap_InvalidateRect(void*, int, int, int, int) { /* host no-op */ }
 void ScriptEngine_Call(void* self) { (void)self; }
 void ScriptEngine_Init(void* self) { (void)self; }
-void CGWND_SetMode(void* self) { (void)self; }
 void CGWND_SetPause(void* self, char c) { (void)self; (void)c; }
 void CGWND_SetBuildMode(int i) { (void)i; }
 void World_Init(void* self) { (void)self; /* host no-op */ }
@@ -564,7 +558,9 @@ void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", _
 // PixelDataCache_Ctor now implemented in defsym_stubs.cpp (address: 0x401620)
 
 /* Subsystem init */
-int   DDRAW_Init(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return 1; }
+/* DDRAW_Init — real implementation is native/ddraw_init.c (0x45C8A0);
+ * this and link_stubs.cpp's no-op copy were the flagship LINK-001
+ * nondeterminism bug (see PROGRESS.md). Removed. */
 /** TileMap_Init — Host no-op (SDL3 tilemap handles its own init).
  *  Address: 0x454E70. Binary zeroes occupancy bitmap, sets dimensions.
  *  The host path uses sdl3_tilemap; this stub satisfies the linker. */
@@ -599,6 +595,6 @@ extern "C" void LAB_0045c520(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __fu
 /* Windows API extras */
 extern "C" {
 void* CreateEventA(void*, int, int, const char*) { return (void*)1; }
-int   timeBeginPeriod(unsigned int) { return 0; }
+/* timeBeginPeriod: duplicate of shared/link_stubs.cpp (LINK-001); removed. */
 int   timeSetEvent(unsigned int, unsigned int, void*, unsigned int, unsigned int) { return 1; }
 }
