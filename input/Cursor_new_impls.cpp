@@ -245,7 +245,7 @@ void Cursor::handle_color_swatch_click(LONG x, LONG y)
         if (this->editor_sprites[i] != nullptr) {
             RECT* spriteRect = reinterpret_cast<RECT*>(
                 reinterpret_cast<uint8_t*>(this->editor_sprites[i]) + 4);
-            if (PtInRect(spriteRect, &pt)) {
+            if (PtInRect(spriteRect, pt)) {
                 /* Highlight the swatch */
                 Sprite_SetState(this->editor_sprites[i], 1, nullptr);
                 UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
@@ -1360,17 +1360,17 @@ void Cursor::handle_toolbar_hover(LONG x, LONG y)
     }
 
     POINT pt{ x, y };
-    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_308) + 4), &pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_308) + 4), pt)) {
         this->editor_flags[1] = 1;
-    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_30C) + 4), &pt)) {
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_30C) + 4), pt)) {
         this->editor_flags[1] = 2;
-    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_310) + 4), &pt)) {
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_310) + 4), pt)) {
         this->editor_flags[1] = 3;
-    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_314) + 4), &pt)) {
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_314) + 4), pt)) {
         this->editor_flags[1] = 4;
-    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_318) + 4), &pt)) {
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_318) + 4), pt)) {
         this->editor_flags[1] = 5;
-    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_31C) + 4), &pt)) {
+    } else if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_31C) + 4), pt)) {
         this->editor_flags[1] = 6;
     }
 
@@ -1418,7 +1418,7 @@ void Cursor::handle_locomotive_list_click(LONG x, LONG y)
 {
     POINT pt{ x, y };
 
-    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_148) + 4), &pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_148) + 4), pt)) {
         Sprite_SetState(this->sprite_148, 1, nullptr);
         UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
         if (this->scroll_top_idx > 0) {                    /* +0x170 */
@@ -1432,7 +1432,7 @@ void Cursor::handle_locomotive_list_click(LONG x, LONG y)
         return;
     }
 
-    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_14C) + 4), &pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_14C) + 4), pt)) {
         Sprite_SetState(this->sprite_14C, 1, nullptr);
         UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
         if (this->scroll_end_flag == 0) {                   /* +0x180 */
@@ -1445,7 +1445,7 @@ void Cursor::handle_locomotive_list_click(LONG x, LONG y)
         return;
     }
 
-    if (!PtInRect(&this->scroll_border_rect, &pt)) {         /* +0x150 */
+    if (!PtInRect(&this->scroll_border_rect, pt)) {         /* +0x150 */
         return;
     }
     if (this->scroll_line_height == 0) {                     /* +0x178 */

@@ -130,8 +130,10 @@ void Town_TrackBuilding(void* self_ptr)
 /* Address: 0x459DA0                                                   */
 /* ================================================================== */
 
+/* C++ linkage — DDRAW_SelectBuilding has a C++ mangled definition */
+void  DDRAW_SelectBuilding(void* self, void* building);
+
 extern "C" {
-    void  DDRAW_SelectBuilding(void* self, void* building);
     int   CRT_rand(void);
     void  TileMap_InvalidateRect(void* tm, int left, int top, int right, int bottom);
     void  TrackPiece_SetZoom(void* track, int zoom);

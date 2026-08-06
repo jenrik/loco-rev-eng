@@ -74,7 +74,7 @@ extern "C" {
 
     /* Rendering helpers */
     bool  CopyRect(RECT* dst, const RECT* src);                             /* USER32 */
-    BOOL  PtInRect(const RECT* rect, int32_t x, int32_t y);                 /* USER32 */
+    BOOL  PtInRect(const RECT* rect, POINT pt);                             /* USER32 */
     void  OutputDebugStringA(const char* msg);                              /* @0x477090 - indirect */
     void  DrawTextA(void* hdc, const char* str, int32_t count,
                     RECT* rect, uint32_t format);                            /* USER32 */
@@ -193,7 +193,8 @@ static RECT sprite_rect(const ButtonSprite& sprite)
 static bool sprite_contains(const ButtonSprite* sprite, int x, int y)
 {
     RECT rect = sprite_rect(*sprite);
-    return PtInRect(&rect, x, y) != 0;
+    POINT pt{ x, y };
+    return PtInRect(&rect, pt) != 0;
 }
 
 static void destroy_allocated_sprite(ButtonSprite* sprite)

@@ -186,7 +186,7 @@ int   DrawTextA(HDC hdc, LPCSTR lpchText, int cchText,
 int   FillRect(HDC hdc, const RECT* lprc, HBRUSH hbr);
 void  SetRect(RECT* lprc, int left, int top, int right, int bottom);
 void  SetRectEmpty(RECT* lprc);
-BOOL  PtInRect(const RECT* lprc, const void* pt);  /* original code passes POINT* or POINT32* */
+BOOL  PtInRect(const RECT* lprc, POINT pt);
 
 /* =========================================================================
  * Additional window/message functions

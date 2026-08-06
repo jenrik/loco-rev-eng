@@ -58,7 +58,7 @@ extern "C" {
     extern BOOL   __stdcall SetRect(void* rect, int l, int t, int r, int b);
     extern BOOL   __stdcall OffsetRect(void* rect, int dx, int dy);
     extern BOOL   __stdcall CopyRect(void* dst, void* src);
-    extern BOOL   __stdcall PtInRect(const void* rect, int x, int y);
+    extern BOOL   __stdcall PtInRect(const void* rect, POINT pt);
     extern BOOL   __stdcall SetRectEmpty(void* rect);
     extern int    __stdcall SetBkMode(void* hdc, int mode);
     extern int    __stdcall SetTextColor(void* hdc, int color);
@@ -1683,16 +1683,17 @@ int HelpWnd::measure_text_height()
 /* ==================================================================== */
 byte HelpWnd::hit_test(int x, int y)
 {
+    POINT pt{ x, y };
     if (this->nextBtnEnabled != 0 &&
-        PtInRect((RECT*)((uintptr_t)this->btnNext + 4), x, y)) return 1;
+        PtInRect((RECT*)((uintptr_t)this->btnNext + 4), pt)) return 1;
     if (this->prevBtnEnabled != 0 &&
-        PtInRect((RECT*)((uintptr_t)this->btnPrevActual + 4), x, y)) return 2;
-    if (PtInRect((RECT*)((uintptr_t)this->btnClose + 4), x, y)) return 3;
-    if (PtInRect((RECT*)((uintptr_t)this->btnContent + 4), x, y)) return 7;
-    if (PtInRect((RECT*)((uintptr_t)this->btnAnim + 4), x, y)) return 6;
-    if (PtInRect((RECT*)((uintptr_t)this->btnTextArea + 4), x, y)) return 4;
-    if (PtInRect((RECT*)((uintptr_t)this->btnTextArea2 + 4), x, y)) return 5;
-    if (PtInRect((RECT*)((uintptr_t)this->btnScrollBar + 4), x, y)) return 8;
+        PtInRect((RECT*)((uintptr_t)this->btnPrevActual + 4), pt)) return 2;
+    if (PtInRect((RECT*)((uintptr_t)this->btnClose + 4), pt)) return 3;
+    if (PtInRect((RECT*)((uintptr_t)this->btnContent + 4), pt)) return 7;
+    if (PtInRect((RECT*)((uintptr_t)this->btnAnim + 4), pt)) return 6;
+    if (PtInRect((RECT*)((uintptr_t)this->btnTextArea + 4), pt)) return 4;
+    if (PtInRect((RECT*)((uintptr_t)this->btnTextArea2 + 4), pt)) return 5;
+    if (PtInRect((RECT*)((uintptr_t)this->btnScrollBar + 4), pt)) return 8;
     return 0;
 }
 

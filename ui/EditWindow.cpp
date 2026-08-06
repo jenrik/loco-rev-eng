@@ -24,14 +24,6 @@
 #include <cstring>
 
 /* ================================================================== */
-/* POINT structure for GDI hit-testing                                  */
-/* ================================================================== */
-struct POINT32 {
-    int32_t x;
-    int32_t y;
-};
-
-/* ================================================================== */
 /* Windows API declarations                                            */
 /* ================================================================== */
 
@@ -67,7 +59,7 @@ int   __stdcall CallWindowProcA(LONG prevWndFunc, void* hWnd, UINT Msg,
 void  __stdcall DefWindowProcA(void* hWnd, UINT Msg, void* wParam, void* lParam);
 void  __stdcall GetCursorPos(void* lpPoint);
 void* __stdcall WindowFromPoint(void* Point);
-BOOL  __stdcall PtInRect(const void* lprc, void* pt);
+BOOL  __stdcall PtInRect(const void* lprc, POINT pt);
 void  __stdcall CopyRect(void* lprcDst, const void* lprcSrc);
 void  __stdcall OffsetRect(void* lprc, int dx, int dy);
 BOOL  __stdcall GetClientRect(void* hWnd, void* lpRect);
@@ -684,28 +676,28 @@ int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
     int mouseY = (lParam >> 16) & 0xFFFF;
     int mouseX = lParam & 0xFFFF;
 
-    POINT32 pt = { mouseX, mouseY };
+    POINT pt = { mouseX, mouseY };
 
     /* Original hit-test order and state gates (0x422DC6..0x422E4B). */
-    if (PtInRect(&this->btnOption1Rect, &pt))
+    if (PtInRect(&this->btnOption1Rect, pt))
         goto highlight_btn;
-    if (PtInRect(&this->btnOption2Rect, &pt))
+    if (PtInRect(&this->btnOption2Rect, pt))
         goto highlight_btn;
 
     /* Play is active only for single-player. */
-    if (PtInRect(&this->btnPlayRect, &pt) && _g_netman_state[7] == 0)
+    if (PtInRect(&this->btnPlayRect, pt) && _g_netman_state[7] == 0)
         goto highlight_btn;
 
     /* Scenario is active only for multiplayer when scenario data exists. */
-    if (PtInRect(&this->btnScenarioRect, &pt) &&
+    if (PtInRect(&this->btnScenarioRect, pt) &&
         *reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0 &&
         _g_netman_state[7] != 0)
         goto highlight_btn;
 
     /* The two lower controls are mutually exclusive by alternate-menu state. */
-    if (PtInRect(&this->btnExitRect, &pt) && _g_netman_state[8] == 0)
+    if (PtInRect(&this->btnExitRect, pt) && _g_netman_state[8] == 0)
         goto highlight_btn;
-    if (PtInRect(&this->btnTextRect, &pt) && _g_netman_state[8] != 0)
+    if (PtInRect(&this->btnTextRect, pt) && _g_netman_state[8] != 0)
         goto highlight_btn;
 
     /* No button hit -- restore the normal animation through vtable[3]. */

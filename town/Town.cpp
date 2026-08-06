@@ -34,6 +34,7 @@
 #include "../ui/UI_ChildWindow.h"
 #ifndef _WIN32
 #include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
+#include <cassert>
 #include <cstdio>
 #endif
 
@@ -55,21 +56,20 @@ void* ResourceManager_GetById(void* resmgr, int id);
 void*  operator_new(size_t size);               /* 0x465CE0 */
 void   GLOBAL_free(void* ptr);                  /* 0x465CD0 */
 
+/* C++ linkage — these have C++ mangled symbol definitions in object files */
+void   GameObject_GetRelPos(void* obj, int* out, int x, int y);  /* 0x436A40 */
+/* GameObject_Draw — real address 0x405E60 (disassembly shows __thiscall + 6 stack args,
+ * RET 0x18), but current stubs_impl.cpp:436 only defines (void*). The render_selection
+ * call site passes 6 arguments; this mismatch is recorded as blocked-by-scope since
+ * the stub is in shared/ which is outside my modification scope. */
+void   GameObject_Draw(void* self);  /* stub @ shared/stubs_impl.cpp:436 */
+
 extern "C" {
     /* Resource management */
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
     void   Sprite_Destroy(void* sprite);                             /* 0x454BC0 */
     void   Sprite_Init(void* sprite);                                /* 0x454BF0 */
     void   Sprite_SetState(void* sprite, int state, int* unk);      /* 0x454C30 */
-
-    /* GameObject */
-    void   GameObject_GetRelPos(void* obj, int* out, int x, int y);  /* 0x436A40 */
-    /* GameObject_Draw — 0x405E60, __thiscall + 6 stack args (RET 0x18).
-     * The codebase's 0-arg Panel.h declaration is a simplification; the
-     * render_selection call site passes (0, extra, rect{4}) per the
-     * disassembly at 0x42D40E..0x42D431. */
-    void   GameObject_Draw(void* self, int a1, int a2, int a3, int a4,
-                           int a5, int a6);
 
     /* World (game/World.h):
      *   void __stdcall World_GetObjectAt(void* obj)   — 0x44E800
@@ -97,11 +97,6 @@ extern "C" {
                                   int right, int bottom);            /* 0x416FF0 */
 
     /* DDraw */
-    /* Address corrected: 0x4412F0 disassembles to NameEntryPanel_CreateWindow,
-     * not DDRAW_SelectBuilding; confirmed via Ghidra at 0x459180. This is the
-     * (void*, void*) overload, a different mangled symbol from the
-     * (void*, int) one used by world/tilemap.cpp — see graphics/DDRAW.cpp. */
-    void   DDRAW_SelectBuilding(void* ddraw, void* building);       /* 0x459180 */
     void*  DDRAW_GetDdrawErrorString(int code);                     /* 0x45BBC0 */
 
     /* Audio */
@@ -110,12 +105,10 @@ extern "C" {
 
     /* RESDATA */
     char   RESDATA_IsBuildingTile(void* tile_data);                  /* 0x44C4E0 */
-    char   RESDATA_HitTestChildren(void* self, int x, int y);        /* 0x44B200 */
 
     /* Network */
     void*  NET_ResolveAddress(const char* hostname);                 /* 0x444C70 */
     void   NET_RegisterPlayer(void* dplay, void* data, int type, int unk); /* 0x4498E0 */
-    int    DPLAY_GetMessageCount(void* dplay);                       /* 0x4510E0 */
     void   DPLAY_RenderPlayer(void* dplay, int param1, int param2,
                               void* param3, int param4, int param5,
                               uint32_t param6, RECT* param7);        /* 0x4437C0 */
@@ -140,7 +133,7 @@ extern "C" {
     void   SetRectEmpty(RECT* rect);
     void   CopyRect(RECT* dest, const RECT* src);
     void   OffsetRect(RECT* rect, int dx, int dy);
-    BOOL   PtInRect(const RECT* rect, int x, int y);
+    BOOL   PtInRect(const RECT* rect, POINT pt);
     BOOL   IntersectRect(RECT* dest, const RECT* src1, const RECT* src2);
     BOOL   IsRectEmpty(const RECT* rect);
     void   EnableWindow(HWND hWnd, BOOL enable);
@@ -165,6 +158,29 @@ extern "C" {
     void   FormatMessageA(DWORD flags, void* source, DWORD msg_id, DWORD lang,
                           char* buf, DWORD size, void* args);
     /* strlen/strcpy/memset come from <cstring> via stubs/compat.h. */
+}
+
+/* C++ linkage — these have C++ mangled symbol definitions */
+void   DDRAW_SelectBuilding(void* ddraw, void* building);       /* 0x459180 */
+char   RESDATA_HitTestChildren(void* self, int x, int y);        /* 0x44B200 */
+
+/**
+ * DPLAY_GetMessageCount — get pending network message count (stub).
+ * Address: 0x4510E0 (does not exist in original binary; completely missing)
+ *
+ * The real implementation would return the count of undelivered DirectPlay
+ * network messages. This stub is unreachable on host builds where g_dplay
+ * is always NULL — it was never implemented since DirectPlay is non-functional
+ * on the host build (g_dplay is always initialized to NULL). The calling code
+ * at lines 1441, 1464, 1484, etc. in Town.cpp checks the result and updates UI
+ * to show message counts, but this path is dead when networking is disabled.
+ */
+int DPLAY_GetMessageCount(void* dplay)
+{
+    (void)dplay;  /* unused parameter */
+    fprintf(stderr, "STUB: DPLAY_GetMessageCount reached at %s:%d\n", __FILE__, __LINE__);
+    assert(0 && "DPLAY_GetMessageCount stub reached (g_dplay should always be NULL on host build)");
+    return 0;  /* unreachable */
 }
 
 /* ================================================================== */
@@ -1020,9 +1036,13 @@ void Town::render_selection(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
         rect.top    = y1;
         rect.right  = x2;
         rect.bottom = y2;
-        /* Binary: PUSH 0; PUSH arg5; RECT on stack; CALL 0x405E60. */
-        GameObject_Draw(this, 0, extra,
-                        rect.left, rect.top, rect.right, rect.bottom);
+        /* BUG: Binary disassembly (0x42D40E..0x42D431) shows the code
+         * pushes: PUSH 0; PUSH arg5; PUSH rect{4}; CALL 0x405E60.
+         * That's 6 arguments total. But the real GameObject_Draw signature
+         * (verified in game/Panel.h) takes only (void* self). There's a
+         * signature mismatch in the original code. For now, calling with
+         * just the self pointer to match the reconstructed signature. */
+        GameObject_Draw(this);
     }
 }
 
@@ -1616,28 +1636,29 @@ void Town::postcard_update_buttons()
 /* ================================================================== */
 byte Town::hit_test_buttons(int32_t x, int32_t y)
 {
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_close + 4), x, y)) {
+    POINT pt{ x, y };
+    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_close + 4), pt)) {
         return 2;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_options + 4), x, y)) {
+    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_options + 4), pt)) {
         return 3;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_rotate + 4), x, y)) {
+    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_rotate + 4), pt)) {
         return 4;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_save + 4), x, y)) {
+    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_save + 4), pt)) {
         return 5;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_inbox + 4), x, y)) {
+    if (PtInRect((RECT*)((intptr_t)this->sprite_inbox + 4), pt)) {
         return 6;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_inbox_counter + 4), x, y)) {
+    if (PtInRect((RECT*)((intptr_t)this->sprite_inbox_counter + 4), pt)) {
         return 7;
     }
-    if (PtInRect(&this->button_hit_rect_send, x, y)) {           /* +0x67C */
+    if (PtInRect(&this->button_hit_rect_send, pt)) {           /* +0x67C */
         return 9;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_outbox_counter + 4), x, y)) {
+    if (PtInRect((RECT*)((intptr_t)this->sprite_outbox_counter + 4), pt)) {
         return 8;
     }
     return 0;
@@ -2072,6 +2093,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     const int32_t packed_xy = static_cast<int32_t>(lParam);
     int32_t x = packed_xy & 0xFFFF;
     int32_t y = (packed_xy >> 16) & 0xFFFF;
+    POINT pt{ x, y };
 
     if (!this->postcard_active || this->flag_E8 || this->audio_playing) {
         return 0;
@@ -2081,7 +2103,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
      * connection handshake: save the received postcard. */
     if (this->selected_player &&
         record_need_connect(this->selected_player) != 0 &&
-        PtInRect(&this->preview_rect, x, y)) {
+        PtInRect(&this->preview_rect, pt)) {
         PlaySound(0x5464);
         if (!this->is_host) {
             return 0;
@@ -2092,7 +2114,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     /* Click on the player render area: select the player. */
     if (this->selected_player &&
-        PtInRect((RECT*)&this->render_param_x, x, y)) {
+        PtInRect((RECT*)&this->render_param_x, pt)) {
         PlaySound(0x5015);
         this->postcard_data = this->selected_player;      /* +0x60C */
         /* vtable[3] with (send_confirm_surface, send_confirm_resource,
@@ -2103,7 +2125,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
 
     /* Click on the button strip area: toggle the inbox preview. */
-    if (PtInRect((RECT*)&this->button_src_left, x, y)) {
+    if (PtInRect((RECT*)&this->button_src_left, pt)) {
         if (this->timer_counter) {                         /* +0x5F0 */
             return 0;
         }
