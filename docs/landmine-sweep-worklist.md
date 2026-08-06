@@ -472,6 +472,25 @@ nm --print-file-name --defined-only -C build/lego_loco.p/*.o   # + a second pass
 not checked in, regenerate as needed). First run found **43 findings across
 ~25 distinct symbols**; each is tracked below as it's resolved.
 
+**Two limits of this instrument, learned the hard way — check both before
+trusting a census row:**
+
+1. **The census can't see `static`/internal linkage.** `nm -C` lists a
+   `static` function's symbol the same as an exported one. If the "other"
+   signature turns out to be `static`, it is not "the real implementation
+   elsewhere" — it's a same-named-but-unrelated local function, and the
+   actual caller-side symbol may have no real implementation at all (see
+   `FormatResourceString` below). Check linkage with `nm` symbol type (`t`/`T`
+   lowercase = local/static) or grep the declaration before trusting a "real
+   signature / location" cell.
+2. **A "wrong" stub covering a caller may be load-bearing, not a bug.** The
+   census's whole premise — a stub with the caller's wrong signature is
+   masking a real implementation the caller should bind to instead — assumes
+   the real implementation is safe to make reachable. The `DirectPlay_*`
+   cluster (below) is a case where it wasn't: the stub was inadvertently
+   protecting a half-64-bit-ported subsystem from ever executing. A census
+   hit is a candidate for investigation, not an automatic fix.
+
 ### `CGWND_SetMode(void*)` — FIXED (2026-08-06)
 
 See PROGRESS.md's "CGWND_SetMode(void*)" entry (was already a tracked open
@@ -495,7 +514,7 @@ touching):
 | `UIPANEL_CreateSurface` | `input/Cursor.cpp`, `native/ddraw_init.c`, `network/Netman.cpp`, `network/NetworkPlayerList.cpp`, `ui/AboutDialog.cpp`, `game/BuildingPanel.cpp`, `town/Town.cpp` | `(UIPANEL_Surface*)` — `graphics/LOCOBITMAP.cpp` |
 | `UIPANEL_EndPaintEx` | `game/BuildingPanel.cpp`, `native/NETMAN_NetworkUI.c`, `native/NETMAN_SessionSettings.c`, `town/Town.cpp` | `(void*, int, int, uint8_t, RECT*)` — `ui/UIPANEL.cpp` (C++ linkage, not extern "C") |
 | `UIPANEL_BeginPaint` | `game/BuildingPanel.cpp`, `network/DPlayManager.cpp` | `(void*)` — `ui/UIPANEL.cpp` |
-| `FormatResourceString` | `game/Train_network.cpp`, `native/NETMAN_NetworkUI.c`, `town/Town.cpp` | `(void*, unsigned int, char*, int)` — `core/CGWND.cpp` |
+| `FormatResourceString` | `game/Train_network.cpp`, `native/NETMAN_NetworkUI.c`, `town/Town.cpp` | **False positive — not fixable this way.** `core/CGWND.cpp`'s copy is declared `static` (internal linkage), so it cannot be the real definition these callers bind to; both real (non-static) overloads elsewhere are themselves no-ops. The census's same-base-name match found a same-named `static` function and misreported it as "the real implementation elsewhere" — check linkage (`static`/anonymous-namespace) before trusting any census "real signature / location" cell. |
 | `AssetMgr_LoadFile` | `game/TrainStation.cpp`, `input/BuildingDescriptorEditor.cpp`, `ui/HelpWnd.cpp` | `(void*, unsigned char*, int*)` — `native/assetmgr_loadfile.c` |
 | `GetWindowTextA` | `native/NETMAN_NetworkUI.c`, `native/NETMAN_SessionSettings.c`, `ui/UI_WindowBase.cpp` | `(void*, char*, int)` — `shared/stubs_impl.cpp`/`ui/GameWindow.cpp` |
 | `PlaySound` | `native/NETMAN_NetworkUI.c`, `town/Town.cpp` | `(unsigned int)` — canonical form per an earlier session's `PlaySound` fix note (`input/Cursor_internal.h`) |
@@ -516,9 +535,75 @@ touching):
 | `NETMAN_CreateSession` | `ui/EditWindow.cpp` | `(int)` — `native/NETMAN_NetworkUI.c` |
 | `NETMAN_SendPacket` | `ui/EditWindow.cpp`, `native/NETMAN_NetworkUI.c` | `(unsigned char*)` — `native/NETMAN_SessionSettings.c` |
 | `UIPANEL_EndPaint` | `native/NETMAN_NetworkUI.c` | `(void*)` — `ui/UIPANEL.cpp` |
-| `DirectPlay_Close`/`CreatePeer`/`DestroyPeer`/`HostSession`/`EnumConnections`/`ConnectToSession`/`QueryConnection` | `game/Train_network.cpp` (all 7) | Real overloads in `network/DirectPlay.cpp` (and `network/sdl3_directplay_train_bridge.cpp` for some) — verify per-symbol against Ghidra, this file may need a specific overload. |
+| `DirectPlay_Close`/`CreatePeer`/`DestroyPeer`/`HostSession`/`EnumConnections`/`ConnectToSession`/`QueryConnection` | `game/Train_network.cpp` (all 7) | **Investigated and reverted 2026-08-06 — see "DirectPlay_* cluster" section below. Do not attempt a mechanical linkage fix; there is a real prerequisite bug blocking it.** |
 | `Train_HandleTrackBuild` | `game/Train_network.cpp` | `(void*, int)` — `town/Town.cpp` |
 | `RESDATA_SoundObject_GetState`/`GetTextLength` | `ui/UIPANEL.cpp` | `(void*)` — `resources/ResourceManager.cpp` |
+
+### DirectPlay_* cluster in `game/Train_network.cpp` — investigated, reverted, blocked (2026-08-06)
+
+Attempted as a mechanical linkage fix like `UIPANEL_Blit`/`CGWND_SetMode`; it is
+not one. Findings, so a future session doesn't redo this investigation:
+
+**Linkage bugs confirmed real** (via Ghidra decompile/disassemble against
+database `locoaudit`): the `extern "C"` block at `game/Train_network.cpp`
+lines ~45–177 declares 9 symbols with wrong parameter types or a `void*`/`int`
+mismatch against their real signatures. Two address annotations are outright
+bogus: `0x461990`/`0x461A00` (comments claimed `DirectPlay_Close`/
+`DirectPlay_DestroyPeer`) have no function at all in the binary; `0x45EDE0`
+is actually `DirectPlay_EnumConnections`, and `0x45F050` is actually
+`DirectPlay_GetSessionDesc` — both mislabeled in the existing comments.
+
+**Why the mechanical fix doesn't work**: `network/DirectPlay.h`/`.cpp`
+declare `DirectPlay_Close`/`DirectPlay_DestroyPeer`'s session handle as
+`int32_t`, then internally cast it back to a pointer
+(`(uint8_t*)(uintptr_t)session`) to walk a linked list of connection nodes —
+a 32-to-64-bit pointer-truncation bug (same class as documented in
+`landmine_bug_classes.md`), dormant only because every caller into this path
+was call-0 (unreachable). Fixing the `Train_network.cpp` linkage makes
+`TrainSubsystem::TrainSubsystem`'s constructor → `InitNetwork()` →
+`DirectPlay_CreatePeer`/real `DirectPlay.cpp` reachable for the first time,
+which crashes the moment `DirectPlay_Close`/`DirectPlay_DestroyPeer` truncate
+a real 64-bit pointer. **Reproduced.**
+
+Widening `session` to `void*` in both files fixes the crash (verified: 30/30
+`meson test`, all 12/12 GUI integration tests pass on first entry into
+single-player and initial multiplayer-menu navigation) but then a **second,
+distinct regression** appears: re-entering multiplayer mode a second time
+(which calls `InitNetwork()` again, destroying and recreating
+`g_dplay_peer`) hangs — 7 of 12 GUI integration tests time out waiting for the
+`menu_mode_selected` event, with the process alive but non-responsive, not
+crashed. **Reproduced, not root-caused.** Every list node the widened
+`DestroyPeer` walks is still typed `int32_t*` internally with `(uintptr_t)`
+round-trips at each link-traversal step — the pointer-width problem is not
+limited to the two parameters that got widened; it runs through the whole
+connection-list traversal in `network/DirectPlay.cpp`. Widening two
+parameters just moved where the mismatch bites.
+
+**Verdict**: this cluster has a real prerequisite — the DirectPlay session/
+connection-list field widths throughout `network/DirectPlay.h`/`.cpp` need a
+full pointer-width audit (every `int32_t` that ever holds a pointer, not just
+`session`) — before the `Train_network.cpp` linkage can be fixed safely. Do
+not attempt this as a quick mechanical fix; it needs its own dedicated
+session with Ghidra verification of every DirectPlay struct field's real
+width and a test plan that specifically covers multiplayer session
+re-entry (not just first entry), since that's exactly where the second
+regression surfaced.
+
+`network/sdl3_directplay_train_bridge.cpp` deliberately provides host-safe
+no-op `void*`-typed overloads of `DirectPlay_CreatePeer`/`EnumConnections`/
+`QueryConnection` for exactly these 3 of the 7 symbols; `Close`/`DestroyPeer`/
+`HostSession`/`ConnectToSession` have no host-safe counterpart. Any real fix
+must decide per call site whether it wants x86 fidelity (real `DirectPlay.cpp`,
+pointer-width-audited) or host safety (a bridge overload) — and probably
+needs the bridge extended to cover the other four before the real
+implementation is safe to make reachable at all.
+
+The investigation's changes (to `game/Train_network.cpp`,
+`network/DirectPlay.h`, `network/DirectPlay.cpp`) were reverted via
+`git stash` rather than committed — kept on the stash stack, not on a
+branch, as of this writing. A future session picking this up should
+`git stash list` to find it rather than redoing the Ghidra verification work
+described above.
 
 ## Functions excluded from automated alignment (call-count mismatch)
 
