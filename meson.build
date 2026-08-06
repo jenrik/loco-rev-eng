@@ -126,6 +126,13 @@ if strict >= 2
   warnflags += ['-Werror=old-style-cast', '-Weffc++', '-Werror=missing-declarations']
 endif
 
+# Applied project-wide (not per-target) so every target — including test
+# executables added later via subdir('tests') — gets the anti-pattern
+# allowlist by construction. A per-target cpp_args/c_args list can be
+# forgotten on a new target with no error; add_project_arguments() cannot.
+add_project_arguments(warnflags, language: 'cpp')
+add_project_arguments(warnflags, language: 'c')
+
 # ============================================================================
 # Include dirs — every subsystem directory is a global include path so bare
 # filenames (#include "sdl3_ddraw.h") resolve regardless of which directory
@@ -140,7 +147,7 @@ endforeach
 
 compat_h = meson.current_source_dir() / 'stubs' / 'compat.h'
 
-common_cpp_args = warnflags + [
+common_cpp_args = [
   '-fpermissive',
   '-include', compat_h,
   '-DLOCO_HOST_UI_FONT_FILE="' + host_ui_font_file + '"',
@@ -149,7 +156,7 @@ common_cpp_args = warnflags + [
 # original Makefile's use of $(CXX) for .c sources: callers declare these
 # functions with C++ linkage (no `extern "C"`), so both sides must be
 # name-mangled the same way for the link to resolve.
-common_c_args = warnflags + ['-fpermissive', '-x', 'c++', '-include', compat_h]
+common_c_args = ['-fpermissive', '-x', 'c++', '-include', compat_h]
 
 if meson.is_cross_build()
   # ==========================================================================
