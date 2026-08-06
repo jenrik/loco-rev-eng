@@ -19,7 +19,14 @@ void AudioChannel_Pause() { /* host no-op */ }
 void AudioChannel_Play() { /* host no-op */ }
 void ButtonSprite_Ctor() { /* host no-op */ }
 void CGWND_SetMode() { /* host no-op */ }
-void Config_GetIniString() { /* host no-op */ }
+/* Config_GetIniString(): this 0-arg extern "C" landmine placeholder
+ * collided with game/ConfigIni.cpp's real 6-arg extern "C" body
+ * (LINK-001 — extern "C" doesn't mangle by arg count/type, so both are
+ * literally the same symbol). Removed; no evidence any real caller
+ * wants a 0-arg shape. ButtonSprite_Ctor()/CGWND_SetMode() above are
+ * the same 0-arg-landmine pattern but don't currently collide with
+ * anything (untouched — out of LINK-001's scope; tracked separately in
+ * docs/landmine-sweep-worklist.md). */
 void DDRAW_RestoreSurfaces() { /* host no-op */ }
 void DDRAW_SetSurfaceFormat() { /* host no-op */ }
 void DDRAW_UnlockPrimary() { /* host no-op */ }
@@ -89,7 +96,9 @@ void CGWND_SetBuildMode() { /* host no-op */ }
 void GameAudio_UpdateVolume() { /* host no-op */ }
 void UIPANEL_ScrollPanel_HandleDrag() { /* host no-op */ }
 void Panel_DtorBody() { /* host no-op */ }
-void CRT_localtime() { /* host no-op */ }
+/* CRT_localtime(): this 0-arg landmine collided with shared/link_stubs.cpp's
+ * real (unsigned int*) -> void* body (LINK-001); removed — link_stubs.cpp's
+ * survives. */
 void CRT_wcsstr() { /* host no-op */ }
 void GameObject_GetBoundingRect() { /* host no-op */ }
 void TileMap_GetObjectAt() { /* host no-op */ }
@@ -124,7 +133,9 @@ void Cursor_BlitEditPreview() { /* host no-op */ }
 void Cursor_UpdateScrollButtons() { /* host no-op */ }
 void Cursor_DrawColorPalette() { /* host no-op */ }
 void Cursor_HandleTabChange() { /* host no-op */ }
-void GetOpenFileNameA() { /* host no-op */ }
+/* GetOpenFileNameA(): this 0-arg landmine collided with graphics/
+ * sdl3_window.cpp's real (void* lpofn) -> BOOL body (LINK-001); removed —
+ * sdl3_window.cpp's survives. */
 void NET_GetOrCreateSurface() { /* host no-op */ }
 void NET_UploadAsset() { /* host no-op */ }
 void PlaySoundFile() { /* host no-op */ }
@@ -305,7 +316,10 @@ void NETMAN_SendAck(int) { /* host no-op */ }
 void* GAMESTATE_SetDifficulty = nullptr;
 void* DPLAY_EnumeratePlayers = nullptr;
 void* NET_SendFile = nullptr;
-void Vehicle_SetState(void*, int) { /* host no-op */ }
+/* Vehicle_SetState(void*,int): wrong return type (void; real callers in
+ * core/GameLoop.cpp etc. declare `int`) — collided with shared/
+ * stubs_impl.cpp's correctly-typed `int Vehicle_SetState(void*, int)`
+ * (LINK-001). Removed; stubs_impl.cpp's survives. */
 void NETMAN_ReceiveLayoutSelect(int) { /* host no-op */ }
 void PlayerConfig_SaveToFile(void*) { /* host no-op */ }
 void ResourceManager_Shutdown(int) { /* host no-op */ }
@@ -443,7 +457,11 @@ void HelpWnd_Create(void*, void*) { /* host no-op */ }
 void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int) { return mem; }
 void CGWND_AboutDialog_Create(void*, void*) { /* host no-op */ }
 void CGWND_RegisterWindowClass(void*) { /* host no-op */ }
-void NETMAN_constructor(void*) { /* host no-op */ }
+/* NETMAN_constructor(void*): silent no-op returning void, but
+ * core/GameLoop.cpp's caller (`g_netman = NETMAN_constructor(mem)`)
+ * expects and uses a void* return — collided with shared/stubs_impl.cpp's
+ * correctly-typed, loud `void* NETMAN_constructor(void*)` stub
+ * (LINK-001). Removed; stubs_impl.cpp's survives. */
 void DirectPlay_constructor(void*) { /* host no-op */ }
 /** PixelDataCache_Ctor — PixelDataCache constructor (address: 0x401620)
  *  Sets vtable=0x4773E8, album_index=-1, buffer=NULL, calls Load(1). */

@@ -148,12 +148,12 @@ static inline int CRT_exit(const char**, const char**) { exit(0); return 0; }
 static inline void CRT_free_pattern(void*, int, int, void*) {}
 static inline void* GetModuleHandleA(const char*) { return NULL; }
 static inline unsigned int GetModuleFileNameA(void*, char*, unsigned int) { return 0; }
-static inline unsigned int GetFileVersionInfoSizeA(const char*, unsigned int*) { return 0; }
-static inline int GetFileVersionInfoA(const char*, unsigned int, unsigned int, void*) { return 0; }
-static inline int VerQueryValueA(void*, const char*, void**, unsigned int*) { return 0; }
-static inline char* lstrcpyA(char* d, const char* s) { return d?s?strcpy(d,s):d:d; }
-static inline char* lstrcatA(char* d, const char* s) { return d?s?strcat(d,s):d:d; }
-static inline int lstrlenA(const char* s) { return s?strlen(s):0; }
+/* GetFileVersionInfoSizeA/GetFileVersionInfoA/VerQueryValueA/lstrcpyA/
+ * lstrcatA/lstrlenA ARE covered by sdl3_window.h (included above) — the
+ * local static duplicates that used to live here had bodies identical to
+ * sdl3_window.cpp's, which GCC's identical-code-folding silently promoted
+ * into colliding global symbols (LINK-001). Removed; sdl3_window.cpp's
+ * definitions are used directly. */
 /* operator_new / GLOBAL_free are defined in link_stubs / stubs_impl */
 extern void* operator_new(size_t);
 extern void  GLOBAL_free(void*);

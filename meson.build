@@ -24,13 +24,12 @@ subsys_dirs = [
 # matching the previous Makefile's $(wildcard) auto-discovery UX. Run
 # `meson setup --reconfigure build` after adding a new source file.
 #
-# Output is piped through `sort`: filesystem directory-entry order is not
-# guaranteed stable, and several files under shared/ (e.g. link_stubs.cpp and
-# stubs_impl.cpp) define the SAME symbol (a pre-existing ODR violation masked
-# by -Wl,--allow-multiple-definition, tracked as TODO LINK-001) — whichever
-# object file comes first on the link line wins. An unstable source order
-# means the binary's behavior for those symbols is unstable too. Sorting
-# makes link order deterministic and reproducible.
+# Output is piped through `sort` for reproducible link order (LINK-001:
+# a prior --allow-multiple-definition ODR violation between link_stubs.cpp
+# and stubs_impl.cpp made the binary's behavior depend on unstable
+# filesystem directory-entry order; that flag is gone and every duplicate
+# symbol resolved, but sorting the source list stays correct practice
+# regardless).
 find_prog = find_program('find')
 
 dcp_sources = []
@@ -193,16 +192,18 @@ else
   # ============================================================================
   # Main binary
   # ============================================================================
-  # TODO (LINK-001): remove --allow-multiple-definition and
-  # --unresolved-symbols=ignore-all. These mask duplicate-symbol bugs and
-  # missing-implementation defects. Tracked in PROGRESS.md.
+  # --allow-multiple-definition removed (LINK-001): every duplicate-symbol
+  # collision it was masking is resolved (see PROGRESS.md). TODO (LINK-001,
+  # remaining): remove --unresolved-symbols=ignore-all — this still masks
+  # missing-implementation defects (a much larger, separate pass: doing so
+  # requires resolving every currently-dangling undefined symbol first).
 
   lego_loco = executable('lego_loco',
     dcp_sources + native_sources + platform_c_sources,
     include_directories: inc_dirs,
     cpp_args: common_cpp_args,
     c_args: common_c_args,
-    link_args: ['-no-pie', '-Wl,--allow-multiple-definition', '-Wl,--unresolved-symbols=ignore-all'],
+    link_args: ['-no-pie', '-Wl,--unresolved-symbols=ignore-all'],
     dependencies: [sdl3_dep, sdl3_net_dep, gst_app_dep, gst_video_dep, freetype_dep, dbus_dep, threads_dep],
     install: false,
   )

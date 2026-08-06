@@ -16,10 +16,34 @@
  *
  * Symbol ownership: CGWND_EnterMode3 is a C++ free function (mangled
  * _Z16CGWND_EnterMode3i) declared in core/CGWND.h — not extern "C".
+ *
+ * LINK-001 note: this target links only obj_cgwnd, not obj_sdl3_window, so
+ * it does not get the real GetFileVersionInfoSizeA/GetFileVersionInfoA/
+ * VerQueryValueA/lstrcpyA/lstrcatA/lstrlenA from graphics/sdl3_window.cpp.
+ * CGWND.cpp used to carry local static duplicates of these (removed as
+ * part of LINK-001 — they were byte-identical to sdl3_window.cpp's and
+ * GCC's ICF was silently folding them into colliding global symbols).
+ * These 6 functions are called only from CGWND's install-path/version-
+ * dialog code, never from the mode-2 early-return path this test
+ * exercises, so leaving them unresolved would not fail this test — but it
+ * would be a new call-0 landmine in the linked binary. Provide minimal
+ * test-local implementations instead, matching CGWND.cpp's own extern "C"
+ * declarations.
  */
 #include "core/CGWND.h"
 
 #include <cstdio>
+#include <cstring>
+#include <cstdint>
+
+extern "C" {
+uint32_t GetFileVersionInfoSizeA(const char*, uint32_t*) { return 0; }
+int GetFileVersionInfoA(const char*, uint32_t, uint32_t, void*) { return 0; }
+int VerQueryValueA(void*, const char*, void**, uint32_t*) { return 0; }
+char* lstrcpyA(char* dst, const char* src) { return dst && src ? strcpy(dst, src) : dst; }
+char* lstrcatA(char* dst, const char* src) { return dst && src ? strcat(dst, src) : dst; }
+int lstrlenA(const char* s) { return s ? (int)strlen(s) : 0; }
+}
 
 /* ---- The single global touched in the mode-2 early-return path ---- */
 int g_game_mode = 0;
