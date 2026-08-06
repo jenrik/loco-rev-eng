@@ -65,7 +65,6 @@ extern "C" {
     void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
     void* WNDPROC_StreamWrite(void* stream, void* outBuf);
     void  WNDPROC_StreamSeekForward(void* stream, void* buf, int32_t size, int ch);
-    void  WNDPROC_CriticalSectionLock(void* stream, void* buf);
     void  WNDPROC_EnterCriticalSection(void* cs);
     void  WNDPROC_LeaveCriticalSection(void* cs);
     void* _CrtDbg_report_fmt_helper(void* buf, const void* fmt); /* sscanf-shaped; identity unresolved, see TODO above */
@@ -74,6 +73,11 @@ extern "C" {
     void  CRT_fmod(void* stream, void* outByte);                 /* TODO: identity unresolved — likely misdecompiled */
     void* CRT_fabs(void* a, void* b);                            /* TODO: identity unresolved — likely misdecompiled */
 }
+
+/* WNDPROC_CriticalSectionLock has C++ mangled linkage (real def at 0x4647A0:
+ * _Z27WNDPROC_CriticalSectionLockPiPc, i.e. (int*, char*)).
+ * Declared outside extern "C" to match the real definition. */
+extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 
 /* Section-keyword string literals (from the original .rdata; addresses
  * documented for cross-reference, not reproduced here byte-for-byte —
@@ -289,7 +293,7 @@ bool BuildingDescriptorEditor::parse_dat_directive_line(void* stream)
     int minifigsFound = 0;
     char lineBuf[264];
 
-    WNDPROC_CriticalSectionLock(stream, lineBuf);
+    WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
 
     /* Outer loop: process directive lines until the stream's own
      * terminator token is hit (matches the decompiled while loop). The
@@ -402,7 +406,7 @@ bool BuildingDescriptorEditor::parse_dat_directive_line(void* stream)
             break;
         }
 
-        WNDPROC_CriticalSectionLock(stream, lineBuf);
+        WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
     }
 
     if (!dat_stream_state_ok(stream)) {
@@ -552,7 +556,7 @@ uint32_t edit_key_handler_parse(void* stream, KeySequenceRecord* record)
         record->key_count = 0;
     }
 
-    WNDPROC_CriticalSectionLock(stream, lineBuf);
+    WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
     WNDPROC_StreamWrite(stream, &record->field_0C);
     WNDPROC_StreamReadLine(stream, &record->field_10);
     WNDPROC_StreamWrite(stream, &record->resource_id_0);
