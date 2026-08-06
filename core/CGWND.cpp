@@ -854,11 +854,22 @@ void CGWND_EnterMode3(int old_mode)
                     (sound_flag != 0) ? 1 : 0);
             }
             TileMap_UpdateAll(static_cast<TileMap*>(g_tilemap)); /* 0x457320 */
+#ifdef _WIN32
             if (g_audio_mgr != nullptr) {
                 static_cast<HelpWnd*>(g_audio_mgr)->play_narration(5, 0); /* 0x44F560 */
-            } else {
-                std::fprintf(stderr, "[HOST] EnterMode3 case 1: narration skipped (g_audio_mgr unconstructed)\n");
             }
+#else
+            /* Host: HelpWnd's presentation layer is not ported. create() is
+             * never called for g_audio_mgr on this path (see
+             * InitAllSubsystems's #ifndef _WIN32 branch above), six render
+             * methods are stubs (ui/HelpWnd_stubs.cpp), and
+             * play_narration's chain reaches Cursor_WaitForBlit (0x414BB0),
+             * which polls a DirectDraw surface vtable slot the host has no
+             * object for. Skip loudly rather than run an unported
+             * subsystem's presentation path. */
+            std::fprintf(stderr, "[HOST] EnterMode3 case 1: tutorial narration skipped "
+                                  "(HelpWnd presentation layer not ported — see PROGRESS.md)\n");
+#endif
         }
         /* FALLS THROUGH to case 4 */
         [[fallthrough]];

@@ -116,11 +116,18 @@ extern "C" {
     extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
     /* Vehicle/GameObject methods — extracted to HelpPageNode.cpp */
     extern int    CGWND_TrackPiece_SetZoom(void* obj, int zoom); /* 0x413A30 */
-    extern void   Config_GetIniString(void* config, const char* section,
-                                       const char* key, const char* def,
-                                       char* out, int maxLen);
-    extern void   Config_ReadInt(void* config, const char* section,
-                                  const char* key, char* out);
+    /* Config_GetIniString/Config_ReadInt are the recovered C-ABI INI
+     * helpers in game/ConfigIni.cpp (extern "C"). Without matching
+     * linkage here, these calls silently bind to unrelated C++-mangled
+     * no-op stubs elsewhere in the tree (or, for the mismatched
+     * Config_ReadInt signature below, to no symbol at all — a null
+     * call that crashed CGWND_EnterMode3(1)'s HelpWnd::play_narration
+     * on the mode-1→mode-3 transition). */
+    extern "C" int Config_GetIniString(void* config, const char* section,
+                                        const char* key, const char* def,
+                                        char* out, int maxLen);
+    extern "C" int Config_ReadInt(void* config, const char* section,
+                                   const char* key, const char* value);
     extern void   WIN32_PostQuit(void);                        /* 0x463670 —
                                     real body in core/CGWND.cpp (0x462560,
                                     this comment's old value, isn't a
@@ -202,15 +209,21 @@ HelpWnd::HelpWnd(HINSTANCE hInstance, UINT resId)
     /* NOTE: init() is called twice in the binary lifecycle: once here from
      * the constructor, and once via vtable[6] during create(). The second
      * call re-creates the ButtonSprites, leaking those from the first call.
-     * This matches the original binary behavior. */
-#ifndef _WIN32
-    /* Host: skip init() — the SDL host does not need the full tutorial/
-     * help-window subsystem for singleplayer rendering.  init() does
-     * heavy Win32 file I/O and sprite loading that relies on stubs not
-     * yet complete for the host path. */
-#else
+     * This matches the original binary behavior.
+     *
+     * init() itself does no Win32 file I/O — it only allocates nine
+     * ButtonSprite objects (a portable placement-new; ButtonSprite's own
+     * ctor just zeroes pixelData/surface, see ui/ButtonSprite.cpp) and
+     * zeroes index/state fields, including spritesInited. A previous
+     * #ifndef _WIN32 skip here (justified by a "heavy Win32 file I/O"
+     * comment that does not match this function's actual body) left the
+     * host's g_audio_mgr permanently uninitialized: CGWND_EnterMode3(1)'s
+     * unconditional HelpWnd::play_narration(5, 0) call then read garbage
+     * heap memory through this->btnAnim in load_page and crashed. On the
+     * host, create() (which would run init() a second time) is never
+     * called for g_audio_mgr (see CGWND::InitAllSubsystems's #ifndef
+     * _WIN32 branch), so this single call cannot double-leak sprites. */
     this->init();
-#endif
 }
 
 /* ================================================================== */
@@ -262,59 +275,68 @@ void HelpWnd::init()
     this->animTimerId = 0;              /* +0x3058 */
 
     /* Create 9 ButtonSprite objects for the help UI */
-    /* NOTE: Order matches original — operator_new then placement new, stored in field order */
+    /* NOTE: Order matches original — operator_new then placement new, stored in field order.
+     * The original x86 body allocates a literal 0x24 bytes per sprite
+     * (sizeof(ButtonSprite) on 32-bit: vtable ptr + 4 int32_t + 2 pointers +
+     * UINT + int32_t, all 4-byte). On this 64-bit build ButtonSprite is
+     * larger (8-byte vtable ptr and pointer members), so allocating the
+     * literal 0x24 and placement-constructing into it overflowed the
+     * block — corrupting the next heap chunk's header, surfaced later as
+     * "free(): invalid size" when cleanup_sprites() deleted a sprite (or
+     * an unrelated one) at HelpWnd teardown. Use sizeof(ButtonSprite) so
+     * the allocation always matches this platform's real object size. */
 
     /* btnClose (+0x128) — Close button, res 0x3D01 */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnClose = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0x3D01) : NULL);
     }
 
     /* btnNext (+0x118) — Next page, res 0x3CFF */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnNext = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0x3CFF) : NULL);
     }
 
     /* btnPrevActual (+0x120) — Prev page, res 0x3D00 */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnPrevActual = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0x3D00) : NULL);
     }
 
     /* btnAnim (+0x130) — Animation sprite, res 0x3CFD */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnAnim = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0x3CFD) : NULL);
     }
 
     /* btnContent (+0x134) — Content sprite (dynamically set later) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnContent = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0) : NULL);
     }
 
     /* btnScrollBar (+0x148) — Scrollbar handle, res 0x3CFE */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnScrollBar = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0x3CFE) : NULL);
     }
 
     /* btnTextArea (+0x138) — Text area (dynamically set later) */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnTextArea = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0) : NULL);
     }
 
     /* btnTextArea2 (+0x13C) — Secondary text area */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnTextArea2 = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0) : NULL);
     }
 
     /* btnTextArea3 (+0x140) — Tertiary text area */
     {
-        void* mem = operator_new(0x24);
+        void* mem = operator_new(sizeof(ButtonSprite));
         this->btnTextArea3 = (ButtonSprite*)(mem ? new ((void*)mem) ButtonSprite(0) : NULL);
     }
 
@@ -342,14 +364,17 @@ void HelpWnd::init()
     this->animFrameCount = 0;      /* +0x150 */
     this->returnGameMode = 3;      /* +0x3074 — default game mode 3 */
 
-    /* Zero pages array and work buffer (+0x15C to +0x303C, 3000 dwords = 0x2EE0 bytes).
-     * Covers pages[200] (+0x15C..+0x1F5B) and workBuffer (+0x1F5C..+0x303B). */
-    {
-        int32_t* buf = (int32_t*)((uintptr_t)this + 0x15C);
-        for (i = 0; i < 3000; i++) {
-            buf[i] = 0;
-        }
-    }
+    /* Zero pages array and work buffer. The original x86 body does this via
+     * raw `this + 0x15C` dword arithmetic (+0x15C..+0x303C, 3000 dwords);
+     * those literal offsets assume the original 32-bit layout (4-byte
+     * ButtonSprite* members) and do not correspond to any real field on
+     * this 64-bit build (8-byte pointers shift everything after them). A
+     * literal port of that arithmetic silently zeroed btnAnim/btnContent/
+     * btnScrollBar/btnTextArea moments after they were allocated above.
+     * Zero the actual named fields instead — same original effect
+     * (pages[200] and workBuffer both cleared). */
+    std::memset(this->pages, 0, sizeof(this->pages));
+    std::memset(this->workBuffer, 0, sizeof(this->workBuffer));
 
     /* Set page resource type and context window mode to 0 */
     this->pageResourceType = 0;    /* +0x306C */

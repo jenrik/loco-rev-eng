@@ -261,7 +261,6 @@ void UI_WindowBase_OnCreate(void*) { /* host no-op */ }
 void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
 void PlayerConfig_SetName(void*, char const*) { /* host no-op */ }
 void PlayerConfig_Save(void*) { /* host no-op */ }
-void Config_ReadInt(void*, char const*, char const*, char const*) { /* host no-op */ }
 void NETMAN_SendPacket(void*) { /* host no-op */ }
 void* CreateHatchBrush = nullptr;
 void* g_editwindow_ptr = nullptr;

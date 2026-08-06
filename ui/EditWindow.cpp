@@ -131,8 +131,15 @@ void  __fastcall CGWND_SetMode(void* mode);                     /* 0x408130 */
 void  CGWND_SetMode(int mode);                                  /* 0x408130 */
 #endif
 void  __fastcall DDRAW_InitAudio(void);                         /* 0x4014C2 */
-int   __thiscall Config_ReadInt(void* ini, const char* section,
-                                const char* key, const char* def);  /* 0x448D50 */
+/* Config_ReadInt is the recovered C-ABI INI helper in game/ConfigIni.cpp
+ * (extern "C"). Without matching linkage, this silently bound to an
+ * unrelated C++-mangled no-op stub instead of the real implementation.
+ * Address corrected to 0x452DF0 (confirmed via Ghidra xrefs-to: this
+ * call site, EditWindow_OnPlayerNameChanged at 0x4226F6, is one of
+ * exactly two callers — the other is HelpWnd::play_narration). The
+ * previous 0x448D50 annotation named no function at all. */
+extern "C" int Config_ReadInt(void* ini, const char* section,
+                               const char* key, const char* def);  /* 0x452DF0 */
 void  __thiscall TileMap_Init(void** tilemap, byte flag);           /* 0x458380 */
 int   __thiscall ResourceManager_GetStringById(void** mgr, int id); /* 0x460AA0 */
 void  __thiscall RESMGR_ReleaseSoundResource(int res);              /* 0x44BB90 */
