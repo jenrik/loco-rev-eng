@@ -321,6 +321,7 @@ public:
 /* ================================================================== */
 extern TileMap* g_tilemap;              /* 0x4AAD08 — host-constructed singleton pointer */
 
+
 /* ================================================================== */
 /* Free functions (no TileMap* this pointer)                           */
 /* ================================================================== */
@@ -400,7 +401,9 @@ extern int32_t  g_placement_resource_id;/* 0x485550 */
 extern uint8_t  g_disable_input;        /* 0x4855AC */
 extern uint8_t  g_click_on_town;        /* 0x48557C */
 extern void*    g_cursor_surface;       /* 0x4FD3C8 */
-extern void*    g_primary_surface;      /* 0x4FD3C4 */
+/* NOTE: g_primary_surface, g_town_view, g_ddraw_building, g_tilemap are
+ * declared in their respective module headers (graphics/DDRAW.h, etc) to
+ * avoid conflicting type declarations. */
 class InputMgr;
 extern InputMgr  g_input_mgr;            /* 0x4A9990 — static InputMgr object (input/InputMgr.h) */
 extern int32_t  g_town_selection_rect_left;   /* 0x4854D0 */
@@ -413,7 +416,8 @@ extern void*    g_town_view;            /* 0x4852A0 */
 extern void*    g_ddraw_building;       /* 0x4A9EF0 */
 extern void*    g_about;                /* 0x4FD390 */
 extern void*    g_netman;               /* 0x4FD3AC */
-extern void*    g_tile_occupied_bitmap; /* 0x4FD18C */
+/* NOTE: g_tile_occupied_bitmap removed — was misidentified global.
+ * The occupancy bitmap is a member field of TileMap at +0x52484. */
 extern int32_t  g_player_id;            /* 0x4AAD46 (TileMap.tile_count_x) */
 extern int32_t  g_viewport_x;           /* 0x4AAD24 (TileMap.viewport_x) */
 extern uint8_t  g_lock_update_flag;     /* 0x4851F0 */
@@ -440,8 +444,17 @@ extern void     World_Lock(void* world);
 extern void     World_Unlock(void* world);
 extern void     UIPANEL_Blit(void* src, int sx, int sy, int sw, int sh,
                               void* dst, int dx, int dy, int dw, int dh, int flags);
+#ifdef _WIN32
 extern void     DDRAW_PresentRect(RECT* rect, HWND hwnd,
                                    int32_t* viewport_x, char flag);
+#else
+/* Host builds route present through the SDL3 path (graphics/sdl3_ddraw.cpp);
+ * that symbol's real signature uses plain int and void pointers rather
+ * than char, RECT, and HWND, so the declaration must match exactly or the
+ * linker silently binds this call to nothing under this project's
+ * unresolved-symbols=ignore-all flag. */
+extern void     DDRAW_PresentRect(void* rect, void* hwnd, int* viewport_x, int flag);
+#endif
 extern void     GLOBAL_free(void* ptr);
 extern void*    operator_new(size_t size);
 extern void*      INPUT_PlaceObject(InputMgr* mgr, unsigned int resource_id); /* 0x41DD80 */
@@ -451,8 +464,8 @@ extern int      RESDATA_IsWaterTile(int ptr);      /* 0x44BD50 */
 extern int      RESDATA_IsTrackTile(int ptr);      /* 0x44BD70 */
 extern int      RESDATA_IsRoadTile(int ptr);       /* 0x44BD10 */
 extern int      RESDATA_GetTileCategory(void* ptr, short a, unsigned short b); /* 0x44BDB0 */
-extern int      IntersectRect(RECT* dst, RECT* a, RECT* b);
-extern int      UnionRect(RECT* dst, RECT* a, RECT* b);
+extern "C" int  IntersectRect(RECT* dst, const RECT* a, const RECT* b);
+extern "C" int  UnionRect(RECT* dst, const RECT* a, const RECT* b);
 extern int      SetRectEmpty(RECT* rect);
 extern void     SetRect(RECT* rect, int left, int top, int right, int bottom);
 extern void     CopyRect(RECT* dst, RECT* src);
@@ -465,23 +478,22 @@ extern void     PlaySoundAt(int sound_id, int x, int y, int channel); /* 0x4479D
 extern int      Town_SelectBuilding(void* town_view, int building);   /* 0x42D040 */
 extern int      DDRAW_SelectBuilding(void* ddraw_building, int building); /* 0x459180 */
 extern void     CGWND_SetMode(int mode);            /* 0x408130 */
-extern void     Town_RenderSelection(void* town_view);   /* 0x42D400 */
-extern void     Town_DeselectBuilding(void* town_view);  /* 0x42D280 */
-extern void     Town_UpdateSelection(void* town_view);   /* 0x42D3A0 */
-extern void     Game_SetCursorByResourceId(void* game, int x, int y,
-                                            int w, int h, int flag);
-extern void     Game_ResetCursor(void* game);       /* 0x411D10 */
-extern void     UI_SetTooltipText(void* mgr, int x, int y, int w, int h);
-extern void     UI_SetTooltipPos(void* mgr, int x, int y, int w, int h, int flag);
-extern void     UI_UpdateTooltip(void* mgr, int x, int y, int w, int h, int flag);
-extern void     BuildingMgr_DispatchAll(void* mgr, int dispatch_flags,
-                                         int x, int y, int w, int h, int flag);
-extern void     World_InvalidateRect(void* world, int x, int y,
-                                      int w, int h, short type);
-extern void     RESDATA_ScriptedObject_Dispatch(void* obj, int x, int y,
-                                                 int w, int h, int flag);
-extern void     DDRAW_DispatchToSubObjects(void* ddraw, int x, int y,
-                                            int w, int h, void* flag);
+/* Typed method wrappers — implemented beside the class each wraps
+ * (Town.cpp, Game.cpp, UI_Utils.cpp, BuildingMgr.cpp, World.cpp,
+ * scriptengine.cpp, DDRAW.cpp), not in tilemap.cpp, since those headers'
+ * own g_* global declarations conflict with tilemap.cpp's local ones. */
+extern void Town_RenderSelection(int x1, int y1, int x2, int y2, int extra);
+extern void Town_DeselectBuilding(void);
+extern void Town_UpdateSelection(void);
+extern void Game_SetCursorByResourceId(int left, int top, int right, int bottom, int enable_scroll);
+extern void Game_ResetCursor(void);
+extern void UI_SetTooltipText(int x, int y, int w, int h);
+extern void UI_SetTooltipPos(int x, int y, int w, int h, int flag);
+extern void UI_UpdateTooltip(int x, int y, int w, int h, int flag);
+extern void BuildingMgr_DispatchAll(int dispatch_flags, int left, int top, int right, int bottom);
+extern void World_InvalidateRect(int x, int y, int w, int h, short type);
+extern void RESDATA_ScriptedObject_Dispatch(int x, int y, int w, int h, int flag);
+extern void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag);
 extern void     Game_DeselectGameObject(int game);  /* 0x411580 */
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);

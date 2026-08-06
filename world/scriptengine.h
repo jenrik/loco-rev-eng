@@ -340,13 +340,16 @@ public:
     void __fastcall Update();
 
     /**
-     * Dispatch (Draw). 0x449C00.
-     * __thiscall (this, params...).
+     * Dispatch (Draw). 0x449C00 (RET 0x14 — 5 stack args: x1,y1,x2,y2,flag;
+     * verified from the RET immediate, not the 0-arg guess this header
+     * previously made).
+     * __thiscall (this, x1, y1, x2, y2, flag).
      * Draws the ScriptedObject via GameObject_Draw, then conditionally
      * draws sub-objects based on active flags.
      * Vtable slot for rendering dispatch.
      */
-    void __thiscall Dispatch();
+    void __thiscall Dispatch(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
+                             int32_t flag);
 
     /**
      * IsDragging / PtInRect. 0x449CE0.

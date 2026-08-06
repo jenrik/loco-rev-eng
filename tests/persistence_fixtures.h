@@ -412,7 +412,10 @@ int32_t __stdcall OffsetRect(RECT*, int32_t, int32_t)
 { fixture_reached_OffsetRect(); return 0; }
 int IsRectEmpty(const void*)
 { fixture_reached_IsRectEmpty(); return 1; }
-int IntersectRect(void*, const void*, const void*)
+/* Must match world/tilemap.h's extern "C" declaration exactly
+ * (RECT*, const RECT*, const RECT*) — C-linkage functions cannot be
+ * overloaded, and this fixture is linked alongside tilemap.h's callers. */
+int IntersectRect(RECT*, const RECT*, const RECT*)
 { fixture_reached_IntersectRect(); return 0; }
 int IsCharAlphaNumericA(char)
 { fixture_reached_IsCharAlphaNumericA(); return 0; }

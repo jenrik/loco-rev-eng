@@ -81,7 +81,7 @@ extern int32_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) —
                                     *   loads 16 bits everywhere */
 extern void*    g_cursor_surface;        /* 0x4FD3C8 */
 extern void*    g_primary_surface;       /* 0x4FD3C4 */
-extern void*    g_tile_occupied_bitmap;  /* 0x4FD18C */
+/* NOTE: g_tile_occupied_bitmap removed — occupancy bitmap is now a TileMap member field */
 extern void*    g_resmgr;                /* 0x4855E8 */
 extern void*    g_scripted_object;       /* 0x4AA5B8 */
 extern void*    g_building_mgr;          /* 0x485448 */
@@ -107,23 +107,16 @@ extern void     PlaySoundAt(int sound_id, int x, int y, int channel);
 extern int      Town_SelectBuilding(void* town_view, int building);
 extern int      DDRAW_SelectBuilding(void* ddraw_building, int building);
 extern void     CGWND_SetMode(int mode);
-extern void     Town_RenderSelection(void* town_view);
-extern void     Town_DeselectBuilding(void* town_view);
-extern void     Town_UpdateSelection(void* town_view);
-extern void     Game_SetCursorByResourceId(void* game, int x, int y,
-                                            int w, int h, int flag);
-extern void     Game_ResetCursor(void* game);
-extern void     UI_SetTooltipText(void* mgr, int x, int y, int w, int h);
-extern void     UI_SetTooltipPos(void* mgr, int x, int y, int w, int h, int flag);
-extern void     UI_UpdateTooltip(void* mgr, int x, int y, int w, int h, int flag);
-extern void     BuildingMgr_DispatchAll(void* mgr, int dispatch_flags,
-                                         int x, int y, int w, int h, int flag);
-extern void     World_InvalidateRect(void* world, int x, int y,
-                                      int w, int h, short type);
-extern void     RESDATA_ScriptedObject_Dispatch(void* obj, int x, int y,
-                                                 int w, int h, int flag);
-extern void     DDRAW_DispatchToSubObjects(void* ddraw, int x, int y,
-                                            int w, int h, void* flag);
+/* Town_RenderSelection/DeselectBuilding/UpdateSelection, Game_ResetCursor,
+ * Game_SetCursorByResourceId, UI_SetTooltipText/Pos, UI_UpdateTooltip,
+ * BuildingMgr_DispatchAll, World_InvalidateRect,
+ * RESDATA_ScriptedObject_Dispatch, DDRAW_DispatchToSubObjects: declared in
+ * tilemap.h (included above), implemented beside the class each wraps
+ * (Town.cpp, Game.cpp, UI_Utils.cpp, BuildingMgr.cpp, World.cpp,
+ * scriptengine.cpp, DDRAW.cpp) rather than here, since including every one
+ * of those subsystem headers into this file conflicts with their own
+ * pre-existing, differently-typed declarations of the shared g_* globals
+ * this file already declares locally above. */
 extern void     Game_DeselectGameObject(int game);
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
@@ -136,13 +129,13 @@ extern void     World_Lock(void* world);
 extern void     World_Unlock(void* world);
 extern void     UIPANEL_Blit(void* src, int sx, int sy, int sw, int sh,
                               void* dst, int dx, int dy, int dw, int dh, int flags);
-extern void     DDRAW_PresentRect(RECT* rect, HWND hwnd,
-                                   int32_t* viewport_x, char flag);
+/* DDRAW_PresentRect declared in tilemap.h (included above), platform-
+ * guarded there. */
 extern int      WIN32_GetThreadResult(int param);
 extern void     AssetMgr_LoadFileEx(uint* ptr);
 extern void     AssetMgr_EnumFiles(uint* ptr);
-extern int      IntersectRect(RECT* dst, RECT* a, RECT* b);
-extern int      UnionRect(RECT* dst, RECT* a, RECT* b);
+extern "C" int  IntersectRect(RECT* dst, const RECT* a, const RECT* b);
+extern "C" int  UnionRect(RECT* dst, const RECT* a, const RECT* b);
 extern int      SetRectEmpty(RECT* rect);
 extern void     SetRect(RECT* rect, int left, int top, int right, int bottom);
 extern void     CopyRect(RECT* dst, RECT* src);
@@ -870,7 +863,7 @@ void TileMap::InvalidateRect(int left, int top, int right, int bottom)
         for (short x = tile_left; x <= tile_right; x++) {
             uint32_t bit_index = g_player_id * static_cast<int>(y) + static_cast<int>(x);
             uint8_t& bitmap_byte =
-                static_cast<uint8_t*>(g_tile_occupied_bitmap)[bit_index >> 3];
+                static_cast<uint8_t*>(this->occupancy_bitmap)[bit_index >> 3];
             bitmap_byte |= ATTR_0047f108[bit_index & 7];
         }
     }
@@ -1355,7 +1348,7 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
                         uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
                                            static_cast<uint32_t>(x);
                         uint8_t* bitmap_byte =
-                            reinterpret_cast<uint8_t*>(g_tile_occupied_bitmap) + (bit_idx >> 3);
+                            reinterpret_cast<uint8_t*>(this->occupancy_bitmap) + (bit_idx >> 3);
                         *bitmap_byte |= ATTR_0047f108[bit_idx & 7];
                     }
                 }
@@ -1675,7 +1668,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
         for (short x = start_x; x < end_x; x++) {
             uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
                                static_cast<uint32_t>(x);
-            uint8_t* bitmap = reinterpret_cast<uint8_t*>(g_tile_occupied_bitmap);
+            uint8_t* bitmap = reinterpret_cast<uint8_t*>(this->occupancy_bitmap);
             if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
                 /* Dirty tile found — extend pending rect or start one */
                 RECT tile_rect;
@@ -1851,7 +1844,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                 for (short x = tile_left; x < tile_right; x++) {
                     uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
                                        static_cast<uint32_t>(x);
-                    uint8_t* bitmap = reinterpret_cast<uint8_t*>(g_tile_occupied_bitmap);
+                    uint8_t* bitmap = reinterpret_cast<uint8_t*>(this->occupancy_bitmap);
                     if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
                         /* Read active layer count from tile entry */
                         int8_t active = static_cast<int8_t>(
@@ -1890,24 +1883,24 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                     if (static_cast<char>(res_type) != 3) {
                                         /* obj == NULL or non-type-3: BuildingMgr
                                          * dispatch first, then world invalidation. */
-                                        BuildingMgr_DispatchAll(g_building_mgr, layer,
+                                        BuildingMgr_DispatchAll(layer,
                                                                 pixel_x, pixel_y,
-                                                                pixel_x + 16, pixel_y + 16, 0);
-                                        World_InvalidateRect(g_world, pixel_x, pixel_y,
+                                                                pixel_x + 16, pixel_y + 16);
+                                        World_InvalidateRect(pixel_x, pixel_y,
                                                              pixel_x + 16, pixel_y + 16, layer);
                                     } else {
                                         /* obj != NULL && type 3: world invalidation
                                          * first, then BuildingMgr dispatch. */
-                                        World_InvalidateRect(g_world, pixel_x, pixel_y,
+                                        World_InvalidateRect(pixel_x, pixel_y,
                                                              pixel_x + 16, pixel_y + 16, layer);
-                                        BuildingMgr_DispatchAll(g_building_mgr, layer,
+                                        BuildingMgr_DispatchAll(layer,
                                                                 pixel_x, pixel_y,
-                                                                pixel_x + 16, pixel_y + 16, 0);
+                                                                pixel_x + 16, pixel_y + 16);
                                     }
                                 } else if (layer == 1) {
-                                    World_InvalidateRect(g_world, pixel_x, pixel_y,
+                                    World_InvalidateRect(pixel_x, pixel_y,
                                                          pixel_x + 16, pixel_y + 16, layer);
-                                    UI_SetTooltipPos(g_tooltip_mgr, pixel_x, pixel_y,
+                                    UI_SetTooltipPos(pixel_x, pixel_y,
                                                      pixel_x + 16, pixel_y + 16, 1);
                                 }
                             }
@@ -1929,18 +1922,19 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                         }
 
                         /* Per-tile UI/scripted dispatch */
-                        UI_SetTooltipText(g_tooltip_mgr, pixel_x, pixel_y,
+                        UI_SetTooltipText(pixel_x, pixel_y,
                                           pixel_x + 16, pixel_y + 16);
-                        UI_UpdateTooltip(g_tooltip_mgr, pixel_x, pixel_y,
+                        UI_UpdateTooltip(pixel_x, pixel_y,
                                          pixel_x + 16, pixel_y + 16, 1);
-                        RESDATA_ScriptedObject_Dispatch(g_scripted_object, pixel_x, pixel_y,
+                        RESDATA_ScriptedObject_Dispatch(pixel_x, pixel_y,
                                                         pixel_x + 16, pixel_y + 16, 1);
-                        DDRAW_DispatchToSubObjects(g_ddraw_building, pixel_x, pixel_y,
+                        DDRAW_DispatchToSubObjects(pixel_x, pixel_y,
                                                    pixel_x + 16, pixel_y + 16,
                                                    reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
-                        Town_RenderSelection(g_town_view);
+                        Town_RenderSelection(pixel_x, pixel_y,
+                                             pixel_x + 16, pixel_y + 16, 1);
                         if (g_is_town_mode == 0) {
-                            Game_SetCursorByResourceId(g_game, pixel_x, pixel_y,
+                            Game_SetCursorByResourceId(pixel_x, pixel_y,
                                                        pixel_x + 16, pixel_y + 16, 1);
                         }
                     }
@@ -1973,8 +1967,8 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                 TileMap_UnlockPrimarySurface() == 0) {
                 surface_locked = 0;
             }
-            Town_DeselectBuilding(g_town_view);
-            Town_UpdateSelection(g_town_view);
+            Town_DeselectBuilding();
+            Town_UpdateSelection();
             if (surface_locked == 0) {
                 for (int i = 0; i < 0x1F; i++) {
                     reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[i] = 0;
@@ -2003,7 +1997,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
             }
         }
         if (intersects) {
-            Game_ResetCursor(g_game);
+            Game_ResetCursor();
         }
     }
 }
@@ -2322,7 +2316,7 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                         static_cast<uint32_t>(x + sx);
                                     uint8_t* bitmap_byte =
                                         reinterpret_cast<uint8_t*>(
-                                            g_tile_occupied_bitmap) + (bit_idx >> 3);
+                                            this->occupancy_bitmap) + (bit_idx >> 3);
                                     *bitmap_byte |= ATTR_0047f108[bit_idx & 7];
                                 }
                             }

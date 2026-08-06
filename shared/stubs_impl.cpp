@@ -65,8 +65,25 @@ unsigned int CRT_time(unsigned int* t) {
 
 /* ---- Game globals ---- */
 uint32_t g_game_time = 0;
+uint8_t  g_lock_update_flag = 0;  /* 0x4851F0: guards TileMap::InvalidateDirtyRects reentrancy */
 int32_t  g_game_mode = 0;  /* 0x4851F4: dword, read/written by CGWND_SetMode */
 char     g_empty_string = 0;
+/* Town selection/overlay globals — declared extern in world/tilemap.h but
+ * never defined anywhere; reachable only once TileMap::ProcessRect and
+ * TileMap::InvalidateDirtyRects stopped being dormant (2026-08-06 render
+ * path fix), at which point every one of these reads address 0. */
+int32_t  g_town_overlay_rect = 0;          /* 0x48538C */
+int32_t  g_town_overlay_left = 0;          /* 0x485390 */
+int32_t  g_town_overlay_top = 0;           /* 0x485394 */
+int32_t  g_town_overlay_right = 0;         /* 0x485398 */
+void*    g_cursor_surface = nullptr;       /* 0x4FD3C8 */
+int32_t  g_town_selection_rect_left = 0;   /* 0x4854D0 */
+int32_t  g_town_selection_rect_top = 0;    /* 0x4854D4 */
+int32_t  g_town_selection_rect_right = 0;  /* 0x4854D8 */
+int32_t  g_town_selection_rect_bottom = 0; /* 0x4854DC */
+uint8_t  g_has_selection = 0;              /* 0x4854EC */
+uint8_t  g_placement_valid = 0;            /* 0x4AA648 */
+uint8_t  g_placement_blocked = 0;          /* 0x48558C */
 char     g_install_path[256] = ".";
 char     g_current_save_path[0x108] = "";  /* 0x4AA8F8 — current save name */
 /* g_sound_cache — 0x49161C, indexed by sound ID (PlaySound 0x447930

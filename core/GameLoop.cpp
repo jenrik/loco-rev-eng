@@ -18,6 +18,7 @@
 #include "../game/PlayerConfig.h"
 #include "../network/NetworkPlayerList.h"
 #include "../shared/types.h"
+#include "../world/tilemap.h"
 #ifndef _WIN32
 #include "sdl3_net_game_bridge.h"
 #include "sdl3_town_mode3.h"
@@ -46,7 +47,6 @@ void* PixelDataCache_Ctor(void* mem);            /* 0x401620 */
 
 /* Subsystem init/update (C++ linkage) */
 int   Config_GetIniInt(void* cfg, const char* section, const char* key, int def); /* 0x452D60 */
-void  TileMap_Init(void* tilemap, char flags);   /* 0x454E60 */
 int   ResourceManager_Init(void* rmgr);          /* 0x446050 */
 class InputMgr;
 void  INPUT_GetSaveFileName(InputMgr* self);      /* 0x41DD40 — per-frame entity tick */
@@ -60,7 +60,6 @@ void  RESDATA_ScriptedObject_Update(void* obj);  /* 0x4497A0 */
 void  Town_TrackBuilding(void* view);            /* 0x42D1A0 */
 void  DDRAW_UpdateBuilding(void* ddraw);         /* 0x459DA0 */
 void  BuildingMgr_UpdateAll(void* mgr);          /* 0x434720 */
-void  TileMap_InvalidateDirtyRects(void* tm, char); /* 0x456150 */
 int   Vehicle_SetState(void* veh, int state);    /* 0x44D740 */
 
 /* Windows API (C linkage) */
@@ -89,7 +88,6 @@ extern Netman*  _g_netman;           /* stale translated alias of 0x4FD3AC */
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 */
 extern void*    g_dplay_config;      /* 0x4FD3B4 */
 extern void*    g_resmgr;            /* 0x4855E8 */
-extern void*    g_tilemap;           /* 0x4AAD08 */
 extern void*    g_scripted_object;   /* 0x4AA9B0 */
 extern void*    g_town_view;         /* 0x4AA818 */
 extern void*    g_ddraw_building;    /* 0x4851D0 */
@@ -97,7 +95,9 @@ extern void*    g_building_mgr;      /* 0x485448 */
 extern void*    g_tooltip_mgr;       /* 0x4FD220 */
 extern void*    g_second_overlay;    /* 0x4851D0 */
 extern void*    g_world;             /* 0x4A98B0 */
-extern uint8_t  g_game_mode;         /* 0x4851F4 */
+/* g_game_mode declared int32_t in world/tilemap.h (included above) —
+ * matches the real definition in shared/stubs_impl.cpp; the old local
+ * `uint8_t` extern here was itself a type mismatch on the same global. */
 extern void*    g_game;              /* 0x4854C8 */
 extern char     g_empty_string;      /* empty string singleton */
 
@@ -226,7 +226,17 @@ extern "C" int GameLoop_Setup(void* cgwnd)
 
     trace_setup_stage("step 6: tilemap");
     /* Step 6: Initialize tilemap */
+#ifdef _WIN32
     TileMap_Init(g_tilemap, 0);
+#else
+    /* On host, g_tilemap is a lazily-constructed pointer (see
+     * HostMode3Bootstrap.cpp) rather than the static object the original
+     * binary has at this point; it doesn't exist yet here and gets its own
+     * Init() call once constructed. */
+    if (g_tilemap != nullptr) {
+        TileMap_Init(g_tilemap, 0);
+    }
+#endif
 
     trace_setup_stage("step 7: input config");
     /* Step 7: Load events — original (GameLoop_Setup 0x406DA8):
@@ -397,5 +407,14 @@ extern "C" void GameLoop_FrameUpdate(void)
     }
 
     /* Step 11: Flush dirty tile rects to screen */
+#ifdef _WIN32
     TileMap_InvalidateDirtyRects(g_tilemap, 0);
+#else
+    /* g_tilemap is null until HostMode3Bootstrap constructs it on first
+     * entry to mode 3; frames rendered before that (e.g. main menu) must
+     * skip this instead of dereferencing a null TileMap*. */
+    if (g_tilemap != nullptr) {
+        TileMap_InvalidateDirtyRects(g_tilemap, 0);
+    }
+#endif
 }

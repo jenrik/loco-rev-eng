@@ -1253,3 +1253,26 @@ void __stdcall World_GetObjectAt(Vehicle* vehicle)
         }
     }
 }
+
+/* ================================================================== */
+/* Typed wrapper for TileMap::ProcessRect's World dispatch call.       */
+/* Declared in world/tilemap.h; implemented here (not in tilemap.cpp) */
+/* to avoid pulling this file's own headers into that one. Real        */
+/* signature verified against InvalidateRect's own RET immediate.     */
+/* ================================================================== */
+extern void* g_world; /* 0x4A98B0 */
+
+void World_InvalidateRect(int x, int y, int w, int h, short type)
+{
+    static_cast<World*>(g_world)->InvalidateRect(x, y, w, h, type);
+}
+
+void World_Lock(void* world)
+{
+    static_cast<World*>(world)->Lock();
+}
+
+void World_Unlock(void* world)
+{
+    static_cast<World*>(world)->Unlock();
+}

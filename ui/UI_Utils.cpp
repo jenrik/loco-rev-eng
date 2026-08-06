@@ -464,7 +464,7 @@ void UI_Manager::hideTooltip()
 /* UI_Manager::setTooltipText — Iterate text_list, call vtable[11]     */
 /* Address: 0x423E00                                                    */
 /* ================================================================== */
-void UI_Manager::setTooltipText(int a1, int a2, int a3, int a4)
+void UI_Manager::setTooltipText(int a1, int a2, int a3, int a4, int /*unused5*/)
 {
     void** textVtbl = *(void***)&this->text_list;
 
@@ -495,7 +495,7 @@ void UI_Manager::setTooltipText(int a1, int a2, int a3, int a4)
 /* UI_Manager::setTooltipPos — Iterate pos_list, call vtable[11]       */
 /* Address: 0x423E80                                                    */
 /* ================================================================== */
-void UI_Manager::setTooltipPos(int a1, int a2, int a3, int a4)
+void UI_Manager::setTooltipPos(int a1, int a2, int a3, int a4, int /*unused5*/)
 {
     void** posVtbl = *(void***)&this->pos_list;
 
@@ -521,7 +521,7 @@ void UI_Manager::setTooltipPos(int a1, int a2, int a3, int a4)
 /* UI_Manager::updateTooltip — Iterate update_list, call vtable[11]    */
 /* Address: 0x423F00                                                    */
 /* ================================================================== */
-void UI_Manager::updateTooltip(int a1, int a2, int a3, int a4)
+void UI_Manager::updateTooltip(int a1, int a2, int a3, int a4, int /*unused5*/)
 {
     void** updateVtbl = *(void***)&this->update_list;
 
@@ -592,3 +592,27 @@ void UI_Manager::resetTooltips(int param)
 }
 
 #pragma GCC diagnostic pop
+
+/* ================================================================== */
+/* Typed wrappers for TileMap::ProcessRect's tooltip dispatch calls.    */
+/* Declared in world/tilemap.h; implemented here (not in tilemap.cpp)  */
+/* to avoid pulling this file's own headers into that one. Real         */
+/* signatures verified against each callee's RET immediate — all three  */
+/* take a real 5th stack arg this file's own method signatures above    */
+/* previously omitted; every caller passes literal 1 for it and the      */
+/* body never reads it. */
+/* ================================================================== */
+void UI_SetTooltipText(int x, int y, int w, int h)
+{
+    static_cast<UI_Manager*>(g_tooltip_mgr)->setTooltipText(x, y, w, h, 1);
+}
+
+void UI_SetTooltipPos(int x, int y, int w, int h, int flag)
+{
+    static_cast<UI_Manager*>(g_tooltip_mgr)->setTooltipPos(x, y, w, h, flag);
+}
+
+void UI_UpdateTooltip(int x, int y, int w, int h, int flag)
+{
+    static_cast<UI_Manager*>(g_tooltip_mgr)->updateTooltip(x, y, w, h, flag);
+}

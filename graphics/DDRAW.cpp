@@ -1243,3 +1243,15 @@ void DDRAW_Building::UpdateBuilding()
         }
     }
 }
+
+/* ================================================================== */
+/* Typed wrapper for TileMap::ProcessRect's DDRAW_Building dispatch     */
+/* call. Declared in world/tilemap.h; implemented here (not in          */
+/* tilemap.cpp) to avoid pulling this file's own headers into that one. */
+/* g_ddraw_building is already typed DDRAW_Building* above, unlike the  */
+/* other globals this sweep touched. */
+/* ================================================================== */
+void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag)
+{
+    g_ddraw_building->DispatchToSubObjects(x, y, w, h, flag);
+}

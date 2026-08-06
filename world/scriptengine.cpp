@@ -758,27 +758,33 @@ update_children:
 
 /* ==================================================================== */
 /* RESDATA_ScriptedObject::Dispatch (Draw)                               */
-/* Address: 0x449C00                                                   */
-/* __thiscall (this)                                                    */
+/* Address: 0x449C00 (RET 0x14 — 5 real stack args, not the 0 this file  */
+/* previously declared; verified directly from the RET immediate. The   */
+/* sole caller, TileMap::ProcessRect, passes the current tile's screen   */
+/* rect plus a trailing flag.)                                          */
+/* __thiscall (this, x1, y1, x2, y2, flag)                               */
 /*                                                                      */
 /* Draws ScriptedObject and conditionally draws sub-objects.            */
 /* ==================================================================== */
-void __thiscall RESDATA_ScriptedObject::Dispatch()
+void __thiscall RESDATA_ScriptedObject::Dispatch(int32_t x1, int32_t y1,
+                                                  int32_t x2, int32_t y2,
+                                                  int32_t /*flag*/)
 {
-    const RECT empty_clip{};
-    reinterpret_cast<Entity*>(this)->Entity::Draw(empty_clip, 0, 0);
+    const RECT clip{x1, y1, x2, y2};
+    reinterpret_cast<Entity*>(this)->Entity::Draw(clip, 0, 0);
 
-    /* The recovered entry receives a six-word draw argument tuple.  This
-     * translation unit's legacy declaration has no parameters, so preserve
-     * its established zero tuple while using the typed slot-11 calls. */
+    /* The disassembly always pushes a literal 0 for the two int args at
+     * each of these three internal draw sites regardless of the caller's
+     * flag, so that part of the original zero-tuple simplification still
+     * holds — only the rect itself was previously wrong (always empty). */
     if (this->dispatch_state == 3) {                               /* +0x740 */
-        panel_view(this->gameobject)->draw(empty_clip, 0, 0);
+        panel_view(this->gameobject)->draw(clip, 0, 0);
     }
     if (this->scriptengine_visible == 1) {
-        panel_view(this->scriptengine)->draw(empty_clip, 0, 0);
+        panel_view(this->scriptengine)->draw(clip, 0, 0);
     }
     if (this->scrollpanel_visible == 1) {
-        panel_view(this->scrollpanel)->draw(empty_clip, 0, 0);
+        panel_view(this->scrollpanel)->draw(clip, 0, 0);
     }
 }
 
@@ -1128,4 +1134,17 @@ uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(void* toolObj, int32
 
 common_tool_activate:
     return 0;
+}
+
+/* ================================================================== */
+/* Typed wrapper for TileMap::ProcessRect's ScriptedObject dispatch     */
+/* call. Declared in world/tilemap.h; implemented here (not in          */
+/* tilemap.cpp) to avoid pulling this file's own headers into that one. */
+/* g_scripted_object is already typed RESDATA_ScriptedObject* in        */
+/* scriptengine.h (included by this file), unlike the other globals     */
+/* this sweep touched. */
+/* ================================================================== */
+void RESDATA_ScriptedObject_Dispatch(int x, int y, int w, int h, int flag)
+{
+    g_scripted_object->Dispatch(x, y, w, h, flag);
 }

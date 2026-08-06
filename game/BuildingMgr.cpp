@@ -361,3 +361,20 @@ void BuildingMgr::HandleClick(const BuildingClickCommand* command, int left,
         }
     }
 }
+
+/* ================================================================== */
+/* Typed wrapper for TileMap::ProcessRect's BuildingMgr dispatch call.  */
+/* Declared in world/tilemap.h; implemented here (not in tilemap.cpp)  */
+/* to avoid pulling this file's own headers into that one. Real         */
+/* signature verified against DispatchAll's own RET immediate (0x18 —  */
+/* 6 stack dwords; the 6th is always 0 from ProcessRect and never read, */
+/* per the header's own doc comment, so it's dropped here). */
+/* ================================================================== */
+extern void* g_building_mgr; /* 0x485448 */
+
+void BuildingMgr_DispatchAll(int dispatch_flags, int left, int top,
+                             int right, int bottom)
+{
+    static_cast<BuildingMgr*>(g_building_mgr)->DispatchAll(dispatch_flags, left,
+                                                            top, right, bottom);
+}

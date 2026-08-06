@@ -411,21 +411,27 @@ public:
 
     /**
      * deselect_building — Remove the building selection overlay.
-     * Address: 0x42D280
+     * Address: 0x42D280 (RET 0x10 — 4 stack args; the body reads only
+     * `this`-relative fields, never the incoming stack values, matching
+     * the same unused-trailing-args pattern documented on
+     * BuildingMgr::DispatchAll).
      *
      * Computes a clip rect from viewport_inset and overlay dimensions,
      * intersects it with the viewport rect, blits the cached background
      * back to the primary surface, then re-blits the panel overlay.
      */
-    void deselect_building();
+    void deselect_building(int32_t unused1, int32_t unused2,
+                           int32_t unused3, int32_t unused4);
 
     /**
      * update_selection — Blit the selection overlay panel to primary.
-     * Address: 0x42D3A0
+     * Address: 0x42D3A0 (RET 0x10 — 4 stack args, same unused-trailing
+     * pattern as deselect_building above).
      *
      * Source from viewport_inset, dest from overlay_dest, flag 0x40.
      */
-    void update_selection();
+    void update_selection(int32_t unused1, int32_t unused2,
+                          int32_t unused3, int32_t unused4);
 
     /**
      * render_selection — Draw the selection highlight for one tile.

@@ -197,23 +197,24 @@ public:
     /**
      * Set tooltip text — iterate text_list, call vtable[11] on each
      * initialized+visible tooltip with given rect and flags.
-     * Address: 0x423E00
+     * Address: 0x423E00 (RET 0x14 — a real 5th stack arg; every caller
+     * passes literal 1 and the body never reads it).
      */
-    void setTooltipText(int a1, int a2, int a3, int a4);
+    void setTooltipText(int a1, int a2, int a3, int a4, int unused5);
 
     /**
      * Set tooltip position — iterate pos_list, call vtable[11] on each
      * initialized+visible tooltip with given rect and flags.
-     * Address: 0x423E80
+     * Address: 0x423E80 (RET 0x14 — same unused 5th arg as setTooltipText).
      */
-    void setTooltipPos(int a1, int a2, int a3, int a4);
+    void setTooltipPos(int a1, int a2, int a3, int a4, int unused5);
 
     /**
      * Update tooltip — iterate update_list, call vtable[11] on each
      * initialized+visible tooltip. Called from TileMap_ProcessRect.
-     * Address: 0x423F00
+     * Address: 0x423F00 (RET 0x14 — same unused 5th arg as setTooltipText).
      */
-    void updateTooltip(int a1, int a2, int a3, int a4);
+    void updateTooltip(int a1, int a2, int a3, int a4, int unused5);
 
     /**
      * Reset all tooltips — iterate update_list and pos_list,

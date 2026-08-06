@@ -875,7 +875,8 @@ byte Town::select_building(Building* building)
 /* Town::deselect_building — Remove the building selection overlay     */
 /* Address: 0x42D280                                                   */
 /* ================================================================== */
-void Town::deselect_building()
+void Town::deselect_building(int32_t /*unused1*/, int32_t /*unused2*/,
+                              int32_t /*unused3*/, int32_t /*unused4*/)
 {
     RECT clip_rect;
     int right_inset, bottom_inset;
@@ -986,7 +987,8 @@ void Town::track_building()
 /* Town::update_selection — Blit the selection overlay to primary      */
 /* Address: 0x42D3A0                                                   */
 /* ================================================================== */
-void Town::update_selection()
+void Town::update_selection(int32_t /*unused1*/, int32_t /*unused2*/,
+                             int32_t /*unused3*/, int32_t /*unused4*/)
 {
     UIPANEL_Blit(
         this->overlay_panel,              /* +0x17C */
@@ -2989,4 +2991,30 @@ void Train_HandleTrackBuild(void* subsystem, int msg)
     } else {
         Train_SendPlayerInfo((void*)sub);
     }
+}
+
+/* ================================================================== */
+/* Typed wrappers for TileMap::ProcessRect's Town dispatch calls.       */
+/* Declared in world/tilemap.h; implemented here (not in tilemap.cpp)  */
+/* to avoid pulling this file's own headers into that one. Real         */
+/* signatures verified against each callee's RET immediate — see       */
+/* Town::render_selection/deselect_building/update_selection above.    */
+/* ================================================================== */
+extern void* g_town_view; /* 0x4852A0 */
+
+void Town_RenderSelection(int x1, int y1, int x2, int y2, int extra)
+{
+    static_cast<Town*>(g_town_view)->render_selection(x1, y1, x2, y2, extra);
+}
+
+void Town_DeselectBuilding(void)
+{
+    /* deselect_building's 4 stack args are proven unused by its body
+     * (RET 0x10, but every field it reads is this-relative) — pass 0s. */
+    static_cast<Town*>(g_town_view)->deselect_building(0, 0, 0, 0);
+}
+
+void Town_UpdateSelection(void)
+{
+    static_cast<Town*>(g_town_view)->update_selection(0, 0, 0, 0);
 }

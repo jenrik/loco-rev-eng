@@ -1605,3 +1605,23 @@ int Game_IsPositionBetween(int* current, int* start, int* end)
     }
     return 0;
 }
+
+/* ================================================================== */
+/* Typed wrappers for TileMap::ProcessRect's Game dispatch calls.       */
+/* Declared in world/tilemap.h; implemented here (not in tilemap.cpp)  */
+/* to avoid pulling this file's own headers into that one. Real         */
+/* signatures verified against each callee's RET immediate.            */
+/* ================================================================== */
+extern void* g_game; /* 0x4854C8 */
+
+void Game_SetCursorByResourceId(int left, int top, int right, int bottom,
+                                int enable_scroll)
+{
+    static_cast<Game*>(g_game)->SetCursorByResourceId(left, top, right,
+                                                       bottom, enable_scroll);
+}
+
+void Game_ResetCursor(void)
+{
+    static_cast<Game*>(g_game)->ResetCursor();
+}
