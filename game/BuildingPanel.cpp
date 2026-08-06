@@ -94,10 +94,6 @@ extern "C" {
     int    UIPANEL_BeginPaint(void* panel);                  /* 0x42B0C0 — returns HDC */
     void   UIPANEL_EndPaintEx(void* panel, HWND hWnd, int hdc, byte flag, RECT* rect);
     void*  UIPANEL_CreateSurface(void* obj);                  /* 0x42A110 */
-    void   UIPANEL_Blit(void* src_surface, uint32_t src_x, uint32_t src_y,
-                        int32_t src_w, uint32_t src_h,
-                        void* dest_surface, uint32_t dest_x, uint32_t dest_y,
-                        int32_t dest_w, uint32_t dest_h, uint32_t flags);
 
     /* GDI */
     HDC    BeginPaint(HWND hWnd, void* paint_struct);       /* Win32 BeginPaint */
@@ -117,6 +113,16 @@ extern "C" {
     int    UI_CalcDialogCoords(int* coords, int* sizes, int* unk, int* base);
     LRESULT DefWindowProcA(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 }
+
+/* Real def: ui/UIPANEL_Surface.cpp — C++ linkage (not extern "C"), bool
+ * return. Was declared inside the extern "C" block above with a void
+ * return; the extern "C" linkage alone means this never bound to the
+ * real C++-mangled symbol regardless of matching parameter types
+ * (call-0 landmine). */
+bool   UIPANEL_Blit(void* src_surface, uint32_t src_x, uint32_t src_y,
+                    int32_t src_w, uint32_t src_h,
+                    void* dest_surface, uint32_t dest_x, uint32_t dest_y,
+                    int32_t dest_w, uint32_t dest_h, uint32_t flags);
 
 /* ================================================================== */
 /* Global variables                                                    */

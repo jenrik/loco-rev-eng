@@ -71,8 +71,14 @@ extern void    TileMap_InvalidateRect(TileMap* tm, int left, int top, int right,
 extern int     g_world_width;        /* 0x4AAD0C — world width in pixels */
 extern int     g_world_height;       /* 0x4AAD10 — world height in pixels */
 extern void*   g_primary_surface;    /* primary DirectDraw surface */
-extern void    UIPANEL_Blit(void* panel, int dst_l, int dst_t, int dst_r, int dst_b,
-                            void* surface, int src_l, int src_t, int src_r, int src_b,
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * uniformly `int`, which doesn't match the real mixed uint32_t/int32_t
+ * shape. Not currently called from this file (declaration only), so this
+ * wasn't a live call-0 landmine, but the declaration is now correct if a
+ * caller is added. */
+extern bool    UIPANEL_Blit(void* panel, uint32_t dst_l, uint32_t dst_t, int32_t dst_r, uint32_t dst_b,
+                            void* surface, uint32_t src_l, uint32_t src_t, int32_t src_r, uint32_t src_b,
                             uint32_t flags);
 
 

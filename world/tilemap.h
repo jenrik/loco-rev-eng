@@ -442,8 +442,15 @@ extern void     AssetMgr_LoadFileEx(uint* ptr);
 extern void     AssetMgr_EnumFiles(uint* ptr);
 extern void     World_Lock(void* world);
 extern void     World_Unlock(void* world);
-extern void     UIPANEL_Blit(void* src, int sx, int sy, int sw, int sh,
-                              void* dst, int dx, int dy, int dw, int dh, int flags);
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t). This header's
+ * declaration used to shadow the corrected one in world/tilemap.cpp with a
+ * plain-`int` overload that won C++ overload resolution over RECT's `int`
+ * fields (an exact match beats the real signature's int->uint32_t implicit
+ * conversion) — the call still bound to the wrong shape even after the .cpp
+ * file's own declaration was fixed (call-0 landmine). */
+extern bool     UIPANEL_Blit(void* src, uint32_t sx, uint32_t sy, int32_t sw, uint32_t sh,
+                              void* dst, uint32_t dx, uint32_t dy, int32_t dw, uint32_t dh, uint32_t flags);
 #ifdef _WIN32
 extern void     DDRAW_PresentRect(RECT* rect, HWND hwnd,
                                    int32_t* viewport_x, char flag);

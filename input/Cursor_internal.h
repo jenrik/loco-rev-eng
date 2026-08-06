@@ -124,8 +124,12 @@ void* ResourceManager_GetById(void*, int);
 void Sprite_Init(void*);
 void Sprite_SetState(void*, int, int*);
 int UI_CreateFullWindow(void*, int, HWND, int, int, int, int, HMENU, HICON, UINT);
-void UIPANEL_Blit(void* srcSurf, int32_t sx, int32_t sy, int32_t sw, int32_t sh,
-                   void* dstSurf, int32_t dx, int32_t dy, int32_t dw, int32_t dh, int32_t flags);
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * uniformly int32_t, which doesn't match the real mixed uint32_t/int32_t
+ * shape (call-0 landmine). */
+bool UIPANEL_Blit(void* srcSurf, uint32_t sx, uint32_t sy, int32_t sw, uint32_t sh,
+                   void* dstSurf, uint32_t dx, uint32_t dy, int32_t dw, uint32_t dh, uint32_t flags);
 HDC UIPANEL_BeginPaint(void*);
 void UIPANEL_EndPaint(void*);
 void UIPANEL_EndPaintEx(void*, HWND, int, uint8_t, RECT*);

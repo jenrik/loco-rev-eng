@@ -80,10 +80,14 @@ extern void CGWND_AudioChannel_Stop(void* channel);                     /* 0x40E
 extern void CGWND_AudioChannel_UpdatePosition(void* channel, int x, int y); /* 0x406xxx */
 
 /* Surface blitting */
-extern void UIPANEL_Blit(void* panel, int dst_left, int dst_top,
-                          int dst_right, int dst_bottom,
-                          void* surface, int src_left, int src_top,
-                          int src_right, int src_bottom, uint32_t flags);
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * `int` for most params, which doesn't match the real mixed uint32_t/int32_t
+ * shape (call-0 landmine). */
+extern bool UIPANEL_Blit(void* panel, uint32_t dst_left, uint32_t dst_top,
+                          int32_t dst_right, uint32_t dst_bottom,
+                          void* surface, uint32_t src_left, uint32_t src_top,
+                          int32_t src_right, uint32_t src_bottom, uint32_t flags);
 
 /* Memory */
 extern void GLOBAL_free(void* p);                                 /* 0x465CD0 */

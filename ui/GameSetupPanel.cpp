@@ -81,10 +81,14 @@ extern int*   WNDPROC_StreamFromMemory(void* stream, const char* data,
 /* (declared in UI_WindowBase.h, included above) */
 
 /* UIPANEL functions — TODO: decompile RenderSurface/UIPANEL render helpers */
-extern void   UIPANEL_Blit(void* sprite, int dstX, int dstY,
-                           int dstW, int dstH, void* surface,
-                           int srcX, int srcY, int srcW,
-                           int srcH, int mode);            /* 0x42B050 */
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * uniformly `int`, which doesn't match the real mixed uint32_t/int32_t
+ * shape (call-0 landmine). */
+extern bool   UIPANEL_Blit(void* sprite, uint32_t dstX, uint32_t dstY,
+                           int32_t dstW, uint32_t dstH, void* surface,
+                           uint32_t srcX, uint32_t srcY, int32_t srcW,
+                           uint32_t srcH, uint32_t mode);            /* 0x42B050 */
 extern void*  UIPANEL_BeginPaint(void* self);              /* 0x426B00 */
 extern void   UIPANEL_EndPaintEx(void* self, HWND hWnd,
                                   void* hdc, byte flags,

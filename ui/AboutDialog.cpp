@@ -84,11 +84,15 @@ extern void  __fastcall Game_UnlockMutex(int mutex);                         /* 
 
 /* UI helper */
 extern void __fastcall UI_CenterWindow(int* left, int* rect);               /* 0x425A50 */
-extern void __fastcall UIPANEL_Blit(void* srcSurface, int srcX, int srcY,   /* 0x42B050 */
-                                     int srcW, int srcH,
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * `int` for most params, which doesn't match the real mixed uint32_t/int32_t
+ * shape (call-0 landmine). */
+extern bool __fastcall UIPANEL_Blit(void* srcSurface, uint32_t srcX, uint32_t srcY,   /* 0x42B050 */
+                                     int32_t srcW, uint32_t srcH,
                                      void* dstSurface,
-                                     int dstX, int dstY,
-                                     int dstW, int dstH,
+                                     uint32_t dstX, uint32_t dstY,
+                                     int32_t dstW, uint32_t dstH,
                                      uint32_t flags);
 
 /* CRT wide-string helper for parsing WVE marker */

@@ -344,49 +344,82 @@ scratch:
   already covering part of this class hierarchy) before assuming these need
   brand new stream primitives.
 
-## UIPANEL_Blit callers — wrong signature, newly discovered, still open
+## UIPANEL_Blit callers — wrong signature — FIXED (2026-08-06, cross-validation session)
 
 While fixing the `Town_Draw*` cluster above (which is `UIPANEL_Blit`'s own
 *callee* side), `nm --print-file-name build/lego_loco.p/*.o | grep
-UIPANEL_Blit` turned up a large, separate, pre-existing problem on
-`UIPANEL_Blit`'s *caller* side: at least 15 files declare `UIPANEL_Blit`
-locally with signatures that don't match its one real definition
+UIPANEL_Blit` had turned up a large, separate, pre-existing problem on
+`UIPANEL_Blit`'s *caller* side: at least 15 files declared `UIPANEL_Blit`
+locally with signatures that didn't match its one real definition
 (`ui/UIPANEL_Surface.cpp`, mangled `_Z12UIPANEL_BlitPvjjijS_jjijj` —
-`(void*, uint32_t,uint32_t,int32_t,uint32_t, void*, uint32_t,uint32_t,int32_t,uint32_t,uint32_t)`).
-This is NOT counted in the 46-site fix above (none of these are Town
-subsystem files, so fixing them was out of scope for this session), and not
-all of them show up in the plain `call 0` census the way the Town cluster
-did — some (e.g. `town/Town.cpp`, fixed above) instead silently bind to an
-unrelated wrong stub (`shared/defsym_stubs.cpp`'s plain-C `UIPANEL_Blit`),
-which is arguably worse than a loud call-0 crash and wouldn't be caught by
-grepping for `call 0`. A future sweep should check every caller by symbol,
-not just by `call 0` count.
+`(void*, uint32_t,uint32_t,int32_t,uint32_t, void*, uint32_t,uint32_t,int32_t,uint32_t,uint32_t)`,
+confirmed against Ghidra's disassembly of 0x42B050, which matches this
+signature exactly). All 14 real callers plus one dead declaration fixed this
+session (one more than this table's original 13 — `core/VehicleEditor.cpp`
+had a 14th mismatched declaration this table missed entirely, caught only by
+re-checking `nm` referrers after the fix, not by grepping the original list).
 
-Confirmed-wrong callers (all declare `(void*,int,int,int,int,void*,int,int,int,int,{h|i|j})`
-— all-`int` instead of the real mixed `uint32_t`/`int32_t` shape, or other
-mismatches):
+**Root cause, not just a param-type typo**: `shared/link_stubs.cpp` had three
+no-op overloads (`_Z12UIPANEL_BlitPviiiiS_iiiih/i/j`) deliberately added in an
+earlier session specifically to make these mismatched callers link — this is
+the "worse than call-0" shape flagged elsewhere in this doc: it linked
+cleanly and silently ate every blit these callers issued instead of crashing
+or showing up in a `call 0` census. Confirmed via `nm --print-file-name
+build/lego_loco.p/*.o` that this is why the main binary's `call 0` count
+(287) did **not** move at all from this fix — none of these were `call 0`
+sites to begin with. Removed the three dead no-op overloads after confirming
+zero referrers left in any object file.
 
-| File | Mangled symbol referenced | Matches real def? |
+Two extra gotchas found only by rebuilding after the mechanical fix, not by
+inspecting the caller files alone:
+- `world/tilemap.h` had its **own**, separate, wrong all-`int` declaration
+  that `world/tilemap.cpp` (which includes it) still bound to even after
+  `tilemap.cpp`'s own declaration was fixed — C++ overload resolution picked
+  the header's plain-`int` overload over the correct mixed-type one because
+  RECT's `int` fields are an exact match for the wrong shape and only a
+  conversion for the right one. Fixing the caller `.cpp` file is not
+  sufficient when a header it includes has its own conflicting declaration;
+  confirmed via `nm -u` on the compiled `.o`, not by re-reading the source.
+- Two narrow, deliberately-strict test targets (`inputmgr-canonical`,
+  `input-world`, `tests/meson.build`) link `core/GameObject.cpp`'s object
+  directly with no `--unresolved-symbols=ignore-all` override, and
+  `tests/persistence_fixtures.h` had a test-local `LOUD_FIXTURE(UIPANEL_Blit)`
+  shim whose signature matched the *old, wrong* shape (by design — it only
+  needed to match whatever `core/GameObject.cpp` declared, at the time). This
+  is the same "test-local shim, legitimate" pattern documented in the memory
+  system's landmine-bug-classes note (1c) — updated the fixture's signature
+  to match the real one rather than declaring it a regression.
+
+Fixed callers (all now declare the one real signature and link against the
+real implementation):
+
+| File | Old (wrong) shape | Fix |
 |---|---|---|
-| `ui/ButtonSprite.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiih` | No |
-| `input/Cursor.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
-| `input/Cursor_new_impls.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
-| `network/DPlayManager.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
-| `network/NetworkPlayerList.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
-| `ui/GameSetupPanel.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
-| `world/tilemap.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
-| `core/GameObject.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | No |
-| `ui/AboutDialog.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | No |
-| `ui/UIPANEL.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | No |
-| `game/BuildingPanel.cpp` | plain `UIPANEL_Blit` (extern "C") | No |
-| `graphics/LOCOBITMAP.cpp` | plain `UIPANEL_Blit` (extern "C") | No |
-| `native/NETMAN_NetworkUI.c` | plain `UIPANEL_Blit` (C, expected) | N/A — real C file, needs a matching C-linkage shim if it genuinely needs to call this C++ function |
-| `town/Town.cpp` | ~~plain `UIPANEL_Blit`~~ | **Fixed this session** — see "Fixed so far" |
-| `town/TownTiles.cpp` (`BlitElement`) | ~~`_Z12UIPANEL_BlitPvjjijPPijjijj`~~ | **Fixed this session** — see "Fixed so far" |
+| `ui/ButtonSprite.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiih` | param types corrected |
+| `input/Cursor_internal.h` (shared by `input/Cursor.cpp`, `input/Cursor_new_impls.cpp`) | `_Z12UIPANEL_BlitPviiiiS_iiiii` | param types corrected |
+| `network/DPlayManager.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | param types corrected |
+| `network/NetworkPlayerList.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | param types corrected |
+| `ui/GameSetupPanel.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | param types corrected |
+| `world/tilemap.cpp` + `world/tilemap.h` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | param types corrected in both; removed the now-redundant duplicate declaration from the `.cpp` |
+| `core/GameObject.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | param types corrected |
+| `ui/AboutDialog.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | param types corrected |
+| `ui/UIPANEL.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | param types corrected |
+| `core/VehicleEditor.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` (unused decl, no call site) | param types corrected for consistency; was never a live landmine |
+| `game/BuildingPanel.cpp` | plain `UIPANEL_Blit` (extern "C") | moved declaration out of the `extern "C"` block; return type corrected `void`→`bool` |
+| `graphics/LOCOBITMAP.cpp` | plain `UIPANEL_Blit` (extern "C") — param types already matched, only linkage was wrong | moved declaration out of the `extern "C"` block |
+| `native/NETMAN_NetworkUI.c` | plain `UIPANEL_Blit` (extern "C") | **Correction to this table's original "N/A" note**: `meson.build`'s `common_c_args` compiles all `native/*.c` as C++ (`-x c++`), matching the original Makefile's `$(CXX)` usage — this file needed the exact same fix as the other extern-"C" cases, not a C-linkage shim. |
+| `town/Town.cpp` | plain `UIPANEL_Blit` | Fixed in an earlier session — see "Fixed so far" |
+| `town/TownTiles.cpp` (`BlitElement`) | `_Z12UIPANEL_BlitPvjjijPPijjijj` | Fixed in an earlier session — see "Fixed so far" |
 
 `game/BuildingMgr.cpp` also references `_Z19UIPANEL_BlitSurfacePviiS_ii` —
-that's a genuinely different function (`UIPANEL_BlitSurface`, 0x42A540),
-not part of this cluster; don't conflate the two when someone picks this up.
+that's a genuinely different function (`UIPANEL_BlitSurface`, 0x42A540), not
+part of this cluster.
+
+Verified: `meson test -C build` 30/30, `meson test -C build --suite
+integration` 12/12 (both matching the pre-fix baseline exactly), main binary
+and every `build/tests/*_test` binary's `call 0` count unchanged from
+baseline (287 / 92 / 21 / 0×20 — see the note above on why this fix
+correctly does not move that count).
 
 ## Functions excluded from automated alignment (call-count mismatch)
 

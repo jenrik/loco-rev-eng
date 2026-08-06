@@ -71,9 +71,13 @@ extern void __fastcall UIPANEL_EndPaint(void* self);
 extern void __fastcall UIPANEL_CreateSurface(void* surface);                 /* 0x42A110 */
 extern void* __thiscall UIPANEL_CreateSprite(void* panel, void* entry);           /* creates a sprite from file entry */
 extern void __fastcall UIPANEL_LockSurface(void* surface);                   /* 0x42A370 */
-extern void __thiscall UIPANEL_Blit(void* tile_map, int src_x, int src_y,
-    int dest_x, int dest_y, void* dest_surface, int clip_x, int clip_y,
-    int clip_w, int clip_h, uint32_t flags);                                 /* 0x42B050 */
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * `int` for most params, which doesn't match the real mixed uint32_t/int32_t
+ * shape (call-0 landmine). */
+extern bool __thiscall UIPANEL_Blit(void* tile_map, uint32_t src_x, uint32_t src_y,
+    int32_t dest_x, uint32_t dest_y, void* dest_surface, uint32_t clip_x, uint32_t clip_y,
+    int32_t clip_w, uint32_t clip_h, uint32_t flags);                                 /* 0x42B050 */
 extern int __thiscall GameObject_BaseCtor(void* self, int a, int b,
     int c, int d);                                                           /* 0x405790 */
 extern void __thiscall GameObject_DtorBody(void* self);                      /* 0x405870 */

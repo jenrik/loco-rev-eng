@@ -87,10 +87,6 @@ extern void    __stdcall Sleep(uint32_t dwMilliseconds);
 extern int32_t __stdcall PtInRect(const RECT* lprc, POINT pt);
 extern void*   __stdcall DefWindowProcA(void* hWnd, uint32_t Msg, uint32_t wParam, uint32_t lParam);
 
-extern void  __cdecl    UIPANEL_Blit(void* surface, int32_t srcX, int32_t srcY,
-                                      int32_t srcW, int32_t srcH, void* dstSurface,
-                                      int32_t dstX, int32_t dstY, int32_t dstW,
-                                      int32_t dstH, int32_t flags);
 extern void  __thiscall UIPANEL_EndPaint(void* panel);
 extern void  __thiscall UIPANEL_EndPaintEx(void* panel, void* hwnd, int32_t hdc,
                                             uint8_t repaint, void* updateRect);
@@ -115,6 +111,18 @@ extern void __fastcall DPlayManager_RenderConnectionPanel(void* panel);
 extern void __fastcall NETMAN_GetSessionInfo(int32_t panel);
 extern void __fastcall NETMAN_UpdateSessionInfo(void* panel);
 }
+
+/* Real def: ui/UIPANEL_Surface.cpp, C++ linkage (not extern "C"),
+ * bool(void*,uint32_t,uint32_t,int32_t,uint32_t,void*,uint32_t,uint32_t,
+ * int32_t,uint32_t,uint32_t). This file is compiled as C++ (see meson.build
+ * common_c_args: native/*.c uses `-x c++`), so extern "C" linkage here is a
+ * real mismatch, not a documentation-only quirk — was declared inside the
+ * extern "C" block above with a uniform int32_t shape and void return,
+ * neither of which matches the real symbol (call-0 landmine). */
+extern bool  __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY,
+                                      int32_t srcW, uint32_t srcH, void* dstSurface,
+                                      uint32_t dstX, uint32_t dstY, int32_t dstW,
+                                      uint32_t dstH, uint32_t flags);
 
 /* ================================================================== */
 /* NETMAN_EnumerateSessions — 0x441720                                 */

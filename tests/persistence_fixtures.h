@@ -474,8 +474,14 @@ void GameObject_Update(void*) { fixture_reached_GameObject_Update(); }
 void GameObject_StopSound(void*, int) { fixture_reached_GameObject_StopSound(); }
 int Game_CheckTimeInRange(int*, int*, int*) { fixture_reached_Game_CheckTimeInRange(); return 0; }
 void Game_SelectGameObject(void*, void*) { fixture_reached_Game_SelectGameObject(); }
-void UIPANEL_Blit(void*, int, int, int, int, void*, int, int, int, int, unsigned int)
-{ fixture_reached_UIPANEL_Blit(); }
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t). Was a
+ * uniform-int shape that happened to match the call-0-landmine-era
+ * declaration in core/GameObject.cpp; updated alongside that file's
+ * real-signature fix (docs/landmine-sweep-worklist.md, UIPANEL_Blit
+ * caller cluster) so this fixture keeps satisfying the link. */
+bool UIPANEL_Blit(void*, uint32_t, uint32_t, int32_t, uint32_t, void*, uint32_t, uint32_t, int32_t, uint32_t, uint32_t)
+{ fixture_reached_UIPANEL_Blit(); return false; }
 int Math_DistSquared(int, int, int, int) { fixture_reached_Math_DistSquared(); return 0; }
 int Math_PointOnLineSegment(int, int, int, int, int, int)
 { fixture_reached_Math_PointOnLineSegment(); return 0; }

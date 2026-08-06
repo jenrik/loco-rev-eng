@@ -433,17 +433,18 @@ void TileMap_InvalidateRect(TileMap*,int32_t,int32_t,int32_t,int32_t){} /* _Z22T
  * stubs_impl.cpp) were dead weight (LINK-001). */
 void UIPANEL_BeginPaint(int32_t){}       /* _Z18UIPANEL_BeginPainti */
 
-/* UIPANEL_Blit — C++ overloads. The (...,uint32_t) shape is real
- * (ui/UIPANEL_Surface.cpp); removed the no-op duplicate (LINK-001). The
- * (...,int32_t) all-int shape has NO real implementation anywhere —
- * dozens of call sites (ui/AboutDialog.cpp, core/GameObject.cpp,
- * core/VehicleEditor.cpp, world/tilemap.cpp/.h, network/NetworkPlayerList.cpp,
- * network/DPlayManager.cpp, input/Cursor_internal.h) declare/call this
- * exact overload and are all CURRENTLY SILENT NO-OPS on host — see
- * PROGRESS.md follow-up note; kept as-is (not fixed) to stay in scope. */
-void UIPANEL_Blit(void*,int32_t,int32_t,int32_t,int32_t,void*,int32_t,int32_t,int32_t,int32_t,uint8_t){}   /* _Z12UIPANEL_BlitPviiiiS_iiiih */
-void UIPANEL_Blit(void*,int32_t,int32_t,int32_t,int32_t,void*,int32_t,int32_t,int32_t,int32_t,int32_t){}  /* _Z12UIPANEL_BlitPviiiiS_iiiii */
-void UIPANEL_Blit(void*,int32_t,int32_t,int32_t,int32_t,void*,int32_t,int32_t,int32_t,int32_t,uint32_t){} /* _Z12UIPANEL_BlitPviiiiS_iiiij */
+/* UIPANEL_Blit — these three all-`int` no-op overloads used to silently
+ * satisfy every mismatched caller declaration in ui/AboutDialog.cpp,
+ * core/GameObject.cpp, core/VehicleEditor.cpp (unused decl only),
+ * world/tilemap.cpp/.h, network/NetworkPlayerList.cpp,
+ * network/DPlayManager.cpp, and input/Cursor_internal.h — worse than a
+ * call-0 crash, since it linked cleanly while silently no-op'ing every
+ * real blit those callers issued. All those callers now declare the one
+ * real signature (ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,
+ * int32_t,uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t)) and
+ * link against the real implementation instead — see
+ * docs/landmine-sweep-worklist.md, UIPANEL_Blit caller cluster. Removed as
+ * dead code (zero referrers, confirmed via nm across every lego_loco.p/*.o). */
 
 /* UIPANEL_EndPaintEx — C++ overloads */
 void UIPANEL_EndPaintEx(void*,int32_t,int32_t,uint8_t,void*){}        /* _Z18UIPANEL_EndPaintExPviihS_ */

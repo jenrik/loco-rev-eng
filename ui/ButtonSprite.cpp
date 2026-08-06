@@ -23,11 +23,15 @@ extern void* __cdecl operator_new(size_t size);     /* 0x465CE0 — operator new
     extern void* __thiscall ResourceManager_GetById(void* resmgr, UINT id); /* 0x4472B0 */
     extern void  __fastcall RESMGR_ReleaseSoundResource(void* res);         /* 0x448EE0 */
 
-    /* UIPANEL_Blit — blits a sprite frame to a surface (0x42B050) */
-    extern void __cdecl UIPANEL_Blit(void* srcSurface, int destX, int destY,
-                                     int destW, int destH, void* targetSurface,
-                                     int srcX, int srcY, int srcW, int srcH,
-                                     byte flags);
+    /* UIPANEL_Blit — blits a sprite frame to a surface (0x42B050).
+     * Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,
+     * int32_t,uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t).
+     * Was declared with a uniform `int`/`byte` shape that doesn't match the
+     * real mixed uint32_t/int32_t parameter types — call-0 landmine. */
+    extern bool __cdecl UIPANEL_Blit(void* srcSurface, uint32_t destX, uint32_t destY,
+                                     int32_t destW, uint32_t destH, void* targetSurface,
+                                     uint32_t srcX, uint32_t srcY, int32_t srcW, uint32_t srcH,
+                                     uint32_t flags);
 
     /* Win32 GDI — OffsetRect (via IAT at 0x477374) */
 extern "C" {

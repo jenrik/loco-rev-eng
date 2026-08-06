@@ -63,11 +63,6 @@ extern "C" {
     void  UI_WindowBase_Hide(void* self);                                   /* @0x4258C0 - approximate */
     void  UIPANEL_EndPaintEx(void* self, HWND hWnd, int32_t param1,
                               uint8_t flag, RECT* rect);                     /* @0x426B90 */
-    bool  UIPANEL_Blit(void* panel, uint32_t src_left, uint32_t src_top,
-                       int32_t src_right, uint32_t src_bottom,
-                       void* dest_surface, uint32_t dst_left, uint32_t dst_top,
-                       int32_t dst_right, uint32_t dst_bottom,
-                       uint32_t flags);                                      /* @0x42B050 */
     void  UIPANEL_BeginPaint(void* self);                                   /* @0x426B00 */
 
     void  CGWND_SetMode(int mode);                                         /* @0x408130 */
@@ -95,6 +90,16 @@ extern "C" {
     void*  SelectObject(void* hdc, void* obj);                             /* GDI32 */
     void   SetTextAlign(void* hdc, uint32_t align);                        /* GDI32 */
 }
+
+/* Real def: ui/UIPANEL_Surface.cpp — C++ linkage (not extern "C"). Was
+ * declared inside the extern "C" block above; the parameter types already
+ * matched the real definition, but the extern "C" linkage alone means this
+ * never bound to the real C++-mangled symbol (call-0 landmine). */
+bool  UIPANEL_Blit(void* panel, uint32_t src_left, uint32_t src_top,
+                   int32_t src_right, uint32_t src_bottom,
+                   void* dest_surface, uint32_t dst_left, uint32_t dst_top,
+                   int32_t dst_right, uint32_t dst_bottom,
+                   uint32_t flags);                                      /* @0x42B050 */
 
 /* Global variables referenced */
 extern PixelDataCache* g_pixel_cache;       /* PixelDataCache singleton at 0x4FD3B4 */

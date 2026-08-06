@@ -127,10 +127,8 @@ extern void*    Entity_GetSubObjectPosition(void* obj, int* out_xy, int directio
 extern void     GameObject_GetSubObjectWorldPos(void* obj, int* out_packed);
 extern void     World_Lock(void* world);
 extern void     World_Unlock(void* world);
-extern void     UIPANEL_Blit(void* src, int sx, int sy, int sw, int sh,
-                              void* dst, int dx, int dy, int dw, int dh, int flags);
-/* DDRAW_PresentRect declared in tilemap.h (included above), platform-
- * guarded there. */
+/* UIPANEL_Blit and DDRAW_PresentRect declared in tilemap.h (included
+ * above), platform-guarded there. */
 extern int      WIN32_GetThreadResult(int param);
 extern void     AssetMgr_LoadFileEx(uint* ptr);
 extern void     AssetMgr_EnumFiles(uint* ptr);

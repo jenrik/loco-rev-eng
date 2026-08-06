@@ -96,11 +96,15 @@ extern void* __thiscall UIPANEL_BeginPaint(int32_t panel);
 extern void  __thiscall UIPANEL_EndPaintEx(void* panel, void* param2,
                                             int32_t hdc, uint8_t repaint,
                                             void* updateRect);
-extern void  __cdecl    UIPANEL_Blit(void* surface, int32_t srcX, int32_t srcY,
-                                      int32_t srcW, int32_t srcH,
-                                      void* dstSurface, int32_t dstX,
-                                      int32_t dstY, int32_t dstW,
-                                      int32_t dstH, int32_t flags);
+/* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
+ * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
+ * uniformly int32_t, which doesn't match the real mixed uint32_t/int32_t
+ * shape (call-0 landmine). */
+extern bool  __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY,
+                                      int32_t srcW, uint32_t srcH,
+                                      void* dstSurface, uint32_t dstX,
+                                      uint32_t dstY, int32_t dstW,
+                                      uint32_t dstH, uint32_t flags);
 extern void* __thiscall UIPANEL_CreateSurface(void* surface);
 extern void* __thiscall UIPANEL_CopySurface(void* dst, int32_t src);
 extern void  __cdecl    UIPANEL_StretchBlit(void* surface, const char* path,
