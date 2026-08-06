@@ -30,7 +30,7 @@ every `call 0` site, then deduplicated by distinct symbol (not by call site —
 one wrong/missing symbol is usually called from several functions).
 
 At the point this sweep started (2026-08-06): **475 `call 0` sites → 140
-distinct symbols**. **Current state: 412 `call 0` sites.**
+distinct symbols**. **Current state: 367 `call 0` sites.**
 
 Each symbol was checked against every symbol defined anywhere in
 `build/lego_loco.p/*.o` (same base name, ignoring parameters) to classify it:
@@ -76,6 +76,43 @@ multiple agents that will each run `meson compile -C build` /
 The `PtInRect` fix was manually reapplied after this incident (verified: 412
 call-0 sites, `meson test -C build` 30/30, `meson test -C build --suite
 integration` 12/12).
+
+**Batch 2 (worktree-isolated) results**: 4 agents dispatched with
+`isolation: "worktree"` against the same 4 clusters lost in batch 1
+(HelpWnd.cpp, UIPANEL family, wave_io.c+BuildingDescriptorEditor.cpp, Cursor
+family). Every worktree's self-reported test results were wrong in one
+direction or another and had to be independently re-verified (never trust a
+subagent's "tests pass"/"tests fail" claim on this project without rerunning
+them yourself):
+
+- **HelpWnd.cpp** — genuinely good work (42 sites fixed), but self-reported
+  "8 test failures" that were entirely a false negative: `lego-loco-unpacked/`
+  is gitignored and doesn't exist in a fresh worktree checkout, so any test
+  needing real game assets fails there regardless of code correctness.
+  Symlinking the asset directory into the worktree and re-running showed
+  30/30. **Merged.**
+- **wave_io.c + BuildingDescriptorEditor.cpp** — same false-negative pattern
+  (self-reported 8 failures, actually 30/30 once assets were symlinked in).
+  **Merged.**
+- **UIPANEL family** — the agent claimed a "critical blocker" (tool
+  permission restrictions preventing git/build commands) and never actually
+  ran a build. Directly inspecting the worktree found real, uncommitted,
+  *broken* code: an ambiguous `DDRAW_PresentRect` overload and `RESDATA*`
+  type errors elsewhere in `UIPANEL_Draw.cpp` that the diff's own signature
+  changes exposed. **Not merged** — discarded. The cluster is still fully
+  open below; the signature candidates it explored (RESMGR_* taking
+  `RESDATA*`, `WIN32_StreamDestroy(void*)`, `DDRAW_RestoreSurfaces(void*,
+  void*)`) are already reflected in the candidate lists below, so nothing
+  novel was lost by discarding it.
+- **Cursor family** — the agent's own initial fix broke 8 tests, it partially
+  reverted, and the final uncommitted worktree state builds clean with 30/30
+  passing but at the *same* 412 call-0 count it started from — a net-zero
+  outcome. **Not merged** (nothing to merge). The cluster is still fully
+  open below.
+
+Net result of both batches: 475 → 367 call-0 sites. Two of the six original
+clusters (UIPANEL family, Cursor family) remain completely unaddressed and
+are back in the open worklist below exactly as before.
 
 ## Fixed so far
 
