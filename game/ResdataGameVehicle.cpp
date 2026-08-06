@@ -23,7 +23,11 @@ struct ResourceVehicleTileMetadata {
 
 extern void  World_DeserializeMap(void* world, int obj);  /* 0x44DAD0 */
 extern void  GameObject_StopSound(void*, int);             /* 0x405A20 — Entity::StopSound */
-extern char  RESDATA_IsRoadTile(void* resource);           /* 0x44BD10 */
+/* RESDATA_IsRoadTile takes int32_t, not void* — the real implementation
+ * (world/tilemap.h) treats it as a __fastcall(int32_t); a void* param
+ * declaration here mangled to a symbol nothing defines (genuine call-0,
+ * not merely a wrong-stub binding). */
+extern uint8_t RESDATA_IsRoadTile(int32_t resource);       /* 0x44BD10 */
 extern void* g_world;                                      /* 0x4A98B0 */
 
 /* ================================================================== */
@@ -95,7 +99,8 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
         this->init_state   = 5;
     } else {
         /* Check for road tile */
-        char is_road = RESDATA_IsRoadTile(this->resource);
+        char is_road = RESDATA_IsRoadTile(static_cast<int32_t>(
+            reinterpret_cast<intptr_t>(this->resource)));
         if (is_road) {
             this->vehicle_kind = 3;
         } else if (tile_type == 0x0D) {

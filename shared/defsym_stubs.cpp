@@ -63,8 +63,6 @@ uint32_t GetUserNameA(char* buffer, uint32_t* size)
 void NETMAN_SendPacket() { /* host no-op */ }
 void PlaySound() { /* host no-op */ }
 void PlaySoundAt() { /* host no-op */ }
-void RESDATA_IsBuildingTile() { /* host no-op */ }
-void RESDATA_IsRoadTile() { /* host no-op */ }
 void RESMGR_LoadSoundResource() { /* host no-op */ }
 void RESMGR_ReleaseSoundResource() { /* host no-op */ }
 void Sprite_Init() { /* host no-op */ }

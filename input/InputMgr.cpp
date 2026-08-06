@@ -73,7 +73,7 @@ using loco::host::ChildRecord;
 using loco::host::EntityRecord;
 using loco::host::VehicleRecord;
 
-/* RESDATA_IsBuildingTile (0x44BD30) / RESDATA_IsRoadTile (0x44BD50) are
+/* RESDATA_IsBuildingTile (0x44BD30) / RESDATA_IsRoadTile (0x44BD10) are
  * canonically declared in world/tilemap.h (this file includes it):
  * uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj) — the
  * binary ABI is __thiscall (ECX = resource, 0x41D7BB/0x41E35A); the

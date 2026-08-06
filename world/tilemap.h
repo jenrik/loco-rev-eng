@@ -367,9 +367,12 @@ void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags);
  * 0x44BD30 with ECX = entity->resource); the __fastcall annotation keeps
  * that convention on 32-bit Windows and expands to the native ABI on
  * hosts (compat.h).  Implemented in world/tilemap.cpp.  (The sibling
- * predicates 0x44BD50/0x44BD70 are still declared below as the legacy
- * int IsWaterTile/IsTrackTile forms — same ABI defect class, tracked in
- * PROGRESS.) */
+ * predicates 0x44BD50/0x44BD70 are declared below as the legacy int
+ * IsWaterTile/IsTrackTile forms — checked 2026-08-06 during the
+ * RESDATA_IsBuildingTile/IsRoadTile cluster fix: both are consistently
+ * `(int)`, C++ linkage, defined once in shared/stubs_impl.cpp with no
+ * caller-side mismatch anywhere in the tree, so they do NOT share the
+ * extern-"C"/wrong-param-type defect the other two had.) */
 uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj);  /* 0x44BD30 */
 
 /* ================================================================== */

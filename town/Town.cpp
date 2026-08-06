@@ -112,9 +112,6 @@ extern "C" {
     char   PlaySound(int sound_id);                                  /* 0x44A290 */
     int    HelpWnd_PlayNarration(void* audio_mgr, int page, uint flags); /* 0x44F560 */
 
-    /* RESDATA */
-    char   RESDATA_IsBuildingTile(void* tile_data);                  /* 0x44C4E0 */
-
     /* Network */
     void*  NET_ResolveAddress(const char* hostname);                 /* 0x444C70 */
     void   NET_RegisterPlayer(void* dplay, void* data, int type, int unk); /* 0x4498E0 */
@@ -172,6 +169,13 @@ extern "C" {
 /* C++ linkage — these have C++ mangled symbol definitions */
 void   DDRAW_SelectBuilding(void* ddraw, void* building);       /* 0x459180 */
 char   RESDATA_HitTestChildren(void* self, int x, int y);        /* 0x44B200 */
+/* RESDATA_IsBuildingTile — was wrongly declared inside the extern "C"
+ * block above with a mismatched void* param and a bogus address
+ * (0x44C4E0 is mid-body of VehicleEditor_Update, not a real
+ * RESDATA_IsBuildingTile call) — bound silently to
+ * shared/defsym_stubs.cpp's no-op instead of the real implementation
+ * in world/tilemap.cpp/.h. */
+extern uint8_t RESDATA_IsBuildingTile(int32_t tile_obj);          /* 0x44BD30 */
 
 /**
  * DPLAY_GetMessageCount — get pending network message count (stub).
@@ -810,7 +814,8 @@ bool Town::is_valid_placement(Building* entity)
         return true;                /* connected tile */
     }
     if (tile_type == 0x03 &&
-        RESDATA_IsBuildingTile(entity->resource)) {
+        RESDATA_IsBuildingTile(static_cast<int32_t>(
+            reinterpret_cast<intptr_t>(entity->resource)))) {
         return true;                /* building tile */
     }
     if (tile_type == 0x0C) {        /* large-ID tile (ID > 0x300F) */

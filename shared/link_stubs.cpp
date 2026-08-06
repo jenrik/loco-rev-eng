@@ -330,10 +330,6 @@ void VehicleEditor_UpdateEditMode(void*,int32_t,void*){}
 void GameVehicle_AddDestination(void*,void*,int32_t){}
 void AssetMgr_LoadFile(void*,const char*,int32_t*){}
 void*RESDATA_CreateSpriteObject(void*,int32_t,int32_t){return nullptr;}
-void RESDATA_IsBuildingTile__pv(void*){}
-void RESDATA_IsRoadTile__pv(void*){}
-void RESDATA_IsBuildingTile__i(int32_t){}
-void RESDATA_IsRoadTile__i(int32_t){}
 void*DPLAY_CreatePlayer__strstr(void*,const char*,const char*){return nullptr;}
 void DPLAY_RenderPlayer(void*,void*,int32_t,void*,int32_t,int32_t,uint32_t,RECT*){}
 long double __ftol(double d){return static_cast<long double>(d);}
@@ -484,14 +480,6 @@ void*WIN32_StreamOpen(void*,const char*,int32_t,void*,int32_t){return nullptr;} 
 /* WNDPROC_StreamFromMemory — C++ overloads */
 void WNDPROC_StreamFromMemory(void*,const char*,int32_t,int32_t){}  /* _Z24WNDPROC_StreamFromMemoryPvPKcii */
 void WNDPROC_StreamFromMemory(void*,char*,int32_t,int32_t){}        /* _Z24WNDPROC_StreamFromMemoryPvPcii */
-
-/* RESDATA_IsBuildingTile / RESDATA_IsRoadTile — implemented in stubs_impl.cpp
- * (see the Ghidra-verified implementations there).  These C++ overloads
- * are now just extern declarations to avoid duplicate definitions. */
-extern void RESDATA_IsBuildingTile(void*);
-extern void RESDATA_IsBuildingTile(int32_t);
-extern void RESDATA_IsRoadTile(void*);
-extern void RESDATA_IsRoadTile(int32_t);
 
 /* Resource_IsBuildingTile / Resource_IsRoadTile / Resource_IsValidTrackIndex */
 void Resource_IsBuildingTile(void*){}    /* _Z22Resource_IsBuildingTilePv */

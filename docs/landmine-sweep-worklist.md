@@ -521,8 +521,8 @@ touching):
 | `CGWND_PumpMessages` | `core/InitMode1.cpp`, `input/Cursor_new_impls.cpp` | `(void*, unsigned char)` main-loop pump — `core/CGWND_sdl3.cpp` — **verify per call site first**: the Cursor family fix session found a call site that genuinely needed the single-`char` "loading transition" overload instead; don't assume both sites want the 2-arg pump without checking. |
 | `DDRAW_RestoreSurfaces` | `input/Cursor.cpp`, `input/Cursor_Editor.cpp` | Two real overloads exist (`IDirectDrawSurface4*,void*` in `graphics/sdl3_ddraw.cpp`; `void*,void*` in `native/ddraw_surface_ops.c`) — determine which one each call site actually needs. |
 | `ShowCursor` / `SetCapture` / `ReleaseCapture` | `core/Game.cpp`, `town/Town.cpp`, `ui/GameWindow.cpp` | **Do not fix mechanically.** `shared/link_stubs.cpp`'s versions were deliberately confirmed correct for `ReleaseCapture` in an earlier LINK-001 session (`core/Game.cpp::SetScreenMode`'s own comment says so) — first determine whether `input/Cursor_impls.cpp`/`ui/EditWindow.cpp`'s same-named C++-linkage functions are genuinely the same Win32-semantic operation or an unrelated collision, via Ghidra, before retargeting anything. |
-| `GetResourceType` | `core/BuildingMgrObjectGroup.cpp`, `game/BuildingMgr.cpp` | `(unsigned int)` — `resources/ResourceManager.cpp` |
-| `RESDATA_IsBuildingTile` | `game/Vehicle.cpp`, `town/Town.cpp` | `(int)` — `world/tilemap.cpp` |
+| `GetResourceType` | **FIXED (2026-08-06).** `core/BuildingMgrObjectGroup.cpp`, `game/BuildingMgr.cpp` declared `(int)` — mangling doesn't encode return type, so they silently bound to `shared/defsym_stubs.cpp`'s void-returning `(int)` no-op instead of the real `(unsigned int)` at 0x446030. `ui/UI_ChildWindow.cpp` also had it wrongly inside an `extern "C"` block. Fixed all 3 to `unsigned int`/C++ linkage; fixed a bogus `world/EditorState.cpp` address (0x45AAA0 — no function — should be 0x446030); removed the two now-dead stubs. `call 0` unchanged (287 — silent-stub, not call-0). | — |
+| `RESDATA_IsBuildingTile` / `RESDATA_IsRoadTile` | **FIXED (2026-08-06).** `town/Town.cpp` (`RESDATA_IsBuildingTile`, wrong `void*` param + bogus address 0x44C4E0 — that's mid-body of `VehicleEditor_Update`, not this function) and `game/Vehicle.cpp` (both, declared inside an `extern "C"` block) silently bound to `shared/defsym_stubs.cpp`'s plain no-ops instead of the real C++-linkage `(int32_t)` functions (`RESDATA_IsBuildingTile` 0x44BD30 in `world/tilemap.cpp`, `RESDATA_IsRoadTile` 0x44BD10 in `shared/stubs_impl.cpp`). `game/ResdataGameVehicle.cpp` declared `RESDATA_IsRoadTile(void*)` — a **genuine call-0** (no definition anywhere matched that mangled name), fixed by correcting the param type to `int32_t`; `call 0` dropped 287→286 confirming it. Removed 6 now-dead decoy/no-op stubs (`shared/link_stubs.cpp`'s `__pv`/`__i`-suffixed placeholders and misleading extern redeclarations, `shared/defsym_stubs.cpp`'s two zero-arg no-ops). **Reachability caveat**: the fixed call sites (`Town.cpp`'s building-tile check, `ResdataGameVehicle.cpp`'s road-tile check) aren't exercised by any current test (verified via a temporary `fprintf` instrumentation pass, removed before commit) — the real function does an `int32_t`→pointer round-trip on the resource address (same shape as the DirectPlay pointer-truncation bug), but the binary is non-PIE (`readelf -h` confirms `EXEC`, not `DYN`), and `input/InputMgr.cpp` already calls the identical real function with the identical truncating cast, live, in currently-passing tests — so this is judged safe, not verified-hot. Zero-delta call-0 diff confirmed against baseline (`e114a0b`) on every test binary, not just the main binary (`cgwnd_entermode3_test` 92, `host_mode3_bootstrap_test` 21, all others unchanged). | — |
 | `TileMap_GetObjectAt` | `game/Vehicle.cpp` | `(TileMap*, short, short, short)` — `core/Game.cpp`/`world/EditorState.cpp` |
 | `UI_IsBitmapReady` | `game/Panel.cpp`, `ui/UIPANEL.cpp` | **Re-check before fixing** — an earlier UIPANEL-family session claimed this was already fixed by making both callers consistent with each other, but the census shows both are still bound to `shared/stubs_impl.cpp`'s stub, not the real unmangled symbol in `ui/UI_ChildWindow.cpp`. That prior fix may have picked the wrong "real" symbol. |
 | `GetModuleHandleA` | `resources/ResourceManager.cpp` | `(char const*)` — `core/CGWND.cpp` |
@@ -600,10 +600,11 @@ implementation is safe to make reachable at all.
 
 The investigation's changes (to `game/Train_network.cpp`,
 `network/DirectPlay.h`, `network/DirectPlay.cpp`) were reverted via
-`git stash` rather than committed — kept on the stash stack, not on a
-branch, as of this writing. A future session picking this up should
-`git stash list` to find it rather than redoing the Ghidra verification work
-described above.
+`git stash` rather than committed, then given a durable branch name so the
+stash can't be lost to `git stash clear`/pop-collision: `git checkout
+wip/directplay-investigation`. A future session picking this up should
+start there rather than redoing the Ghidra verification work described
+above.
 
 ## Functions excluded from automated alignment (call-count mismatch)
 

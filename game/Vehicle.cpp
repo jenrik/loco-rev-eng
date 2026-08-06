@@ -83,14 +83,18 @@ extern "C" {
                                      int32_t param2, char param3,
                                      int32_t x, int32_t y, uint8_t param7);
 
-    /* Resource helpers */
-    uint8_t __fastcall RESDATA_IsRoadTile(int32_t tile_obj);
-    uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj);
-
     /* World */
     void __fastcall World_Init(void* world);
 
 }
+
+/* RESDATA_IsRoadTile/RESDATA_IsBuildingTile have plain C++ linkage
+ * (world/tilemap.h) — were wrongly declared inside the extern "C" block
+ * above, which bound them silently to shared/defsym_stubs.cpp's no-ops
+ * instead of the real implementations (world/tilemap.cpp and
+ * shared/stubs_impl.cpp respectively). */
+uint8_t __fastcall RESDATA_IsRoadTile(int32_t tile_obj);      /* 0x44BD10 */
+uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj);  /* 0x44BD30 */
 
 /* StopSound on GameObject */
 void __fastcall GameObject_StopSound(void* obj, int32_t sound_idx);
