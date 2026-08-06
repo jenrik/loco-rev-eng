@@ -33,7 +33,7 @@ extern TileMap* g_tilemap;          /* 0x4AAD08 */
 /* ================================================================== */
 /* External resource classification functions                          */
 /* ================================================================== */
-extern uint8_t  GetResourceType(uint32_t res_id);                     /* 0x45AAA0 */
+extern uint8_t  GetResourceType(uint32_t res_id);                     /* 0x446030 */
 
 /* Resource_IsValidTrackIndex — __thiscall method on resource object.
  * Reads current/alternate track index fields at +0x636/+0x638.

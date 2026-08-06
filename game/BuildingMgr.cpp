@@ -9,7 +9,7 @@
 
 extern void* operator_new(size_t);                              // 0x465ce0
 extern void* ResourceManager_GetById(void*, int);               // 0x446ea0
-extern uint8_t GetResourceType(int);                            // 0x446030
+extern unsigned int GetResourceType(unsigned int);              // 0x446030
 extern void RESDATA_Lock(void*);                                // 0x449410
 extern void RESDATA_Unlock(void*);                              // 0x449420
 extern void __thiscall UI_CreateMessageBox(void* self, int, int, char, int, int, int); // 0x423ab0, thiscall + 6 stack

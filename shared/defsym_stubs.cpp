@@ -498,7 +498,6 @@ void GameAudio_StopFinished(void*) { /* host no-op */ }
 void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
 void Ordinal_2(void*) { /* host no-op */ }
 void RESMGR_GetById(void*, unsigned int) { /* host no-op */ }
-void GetResourceType(int) { /* host no-op */ }
 void CGWND_AudioChannel_Play(unsigned int) { /* host no-op */ }
 void CGWND_AudioChannel_Pause(int) { /* host no-op */ }
 void Game_SetScreenMode(void*, int, int, int) { /* host no-op */ }
@@ -515,7 +514,6 @@ void GameAudio_StopFinished() { /* host no-op */ }
 void DDRAW_GetDsoundErrorString() { /* host no-op */ }
 void Ordinal_2() { /* host no-op */ }
 void RESMGR_GetById() { /* host no-op */ }
-void GetResourceType() { /* host no-op */ }
 void CGWND_AudioChannel_Play() { /* host no-op */ }
 void CGWND_AudioChannel_Pause() { /* host no-op */ }
 void Game_SetScreenMode() { /* host no-op */ }

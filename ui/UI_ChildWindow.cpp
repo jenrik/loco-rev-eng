@@ -27,8 +27,10 @@ void*  __thiscall ResourceManager_GetById(void* mgr, int32_t resId); /* 0x446EA0
 void*  __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id); /* 0x4472B0 */
 int    __thiscall RESMGR_LoadSoundResource(void* resHandle);  /* 0x448D60 */
 void   __thiscall RESMGR_ReleaseSoundResource(void* resHandle); /* 0x448EE0 */
-uint8_t __cdecl GetResourceType(int32_t resourceId);           /* 0x446030 */
 }
+/* GetResourceType has plain C++ linkage (resources/ResourceManager.h) —
+ * declared outside the extern "C" block above, not inside it. */
+extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
 
 #ifdef _WIN32
 extern void*  __thiscall UIPANEL_CreateSurface(void* panel);                    /* 0x42A110 */
@@ -121,7 +123,7 @@ void UI_ChildWindow_Create(void* self, uint32_t resourceId, int32_t nameParam)
 
     *reinterpret_cast<uint32_t*>(p + 0x04) = resourceId;               /* resourceId   */
     *reinterpret_cast<uint8_t*>(p + 0x08)  =
-        static_cast<uint8_t>(GetResourceType(static_cast<int32_t>(resourceId))); /* resourceType */
+        static_cast<uint8_t>(GetResourceType(resourceId)); /* resourceType */
     *reinterpret_cast<int32_t*>(p + 0x0C)  = 0;                        /* streamData   */
     *reinterpret_cast<int32_t*>(p + 0x38)  = 0;
     *reinterpret_cast<int32_t*>(p + 0x3C)  = 0;

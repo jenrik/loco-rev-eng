@@ -10,7 +10,7 @@ extern uint32_t g_game_time;                                    // 0x4a99b4
 extern BuildingMgr* g_building_mgr;                             // 0x485448 — host-constructed singleton
 extern void* g_resmgr;                                          // 0x4855e8
 extern void* ResourceManager_GetById(void*, int);                // 0x446ea0
-extern uint8_t GetResourceType(int);                             // 0x446030
+extern unsigned int GetResourceType(unsigned int);                // 0x446030
 extern tm* CRT_localtime(uint32_t*);                             // 0x4674e0
 extern int Game_CheckTimeInRange(int*, int*, int*);              // 0x412710
 extern BOOL Building_CheckPlacement(Building*, int, int);        // 0x433860, vtable [21]
