@@ -33,9 +33,12 @@ struct WNDPROC_Stream;
 /* A. Free function stubs (overloaded signatures)               */
 /* =========================================================== */
 
-/* UIPANEL_Blit — complex blit overload */
-void UIPANEL_Blit(void*, unsigned int, unsigned int, int, unsigned int, 
-                  int**, unsigned int, unsigned int, int, unsigned int, unsigned int) {}
+/* UIPANEL_Blit's `int**` 6th-param overload (_Z12UIPANEL_BlitPvjjijPPijjijj)
+ * removed: it was the unrelated wrong stub town/TownTiles.cpp's
+ * BlitElement used to call with a stray int**-typed argument before the
+ * town-tilerender-merge session fixed it (2026-08-06) — confirmed zero
+ * referrers via `nm --print-file-name build/lego_loco.p/*.o | grep
+ * _Z12UIPANEL_BlitPvjjijPPijjijj`. See docs/landmine-sweep-worklist.md. */
 
 /* AssetMgr_LoadFile — two overloads */
 void AssetMgr_LoadFile(int*, unsigned char*, int*) {}

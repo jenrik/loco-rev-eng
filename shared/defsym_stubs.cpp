@@ -69,7 +69,13 @@ void TileMap_InvalidateRect() { /* host no-op */ }
 void UIEntity_Ctor() { /* host no-op */ }
 void UI_MainMenu_SetState() { /* host no-op */ }
 void UIPANEL_BeginPaint() { /* host no-op */ }
-void UIPANEL_Blit() { /* host no-op */ }
+/* UIPANEL_Blit() (zero-arg, extern "C") removed: this is the unrelated
+ * wrong stub town/Town.cpp used to silently bind to before the
+ * town-tilerender-merge session fixed its declaration (2026-08-06), and
+ * every other caller cluster was fixed in the 2026-08-06 cross-validation
+ * session — confirmed zero referrers via `nm --print-file-name
+ * build/lego_loco.p/*.o | grep "U UIPANEL_Blit$"`. See
+ * docs/landmine-sweep-worklist.md. */
 void UIPANEL_CreateSurface() { /* host no-op */ }
 void UIPANEL_EndPaintEx() { /* host no-op */ }
 void UI_WindowBase_BaseDtor() { /* host no-op */ }

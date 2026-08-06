@@ -421,6 +421,34 @@ and every `build/tests/*_test` binary's `call 0` count unchanged from
 baseline (287 / 92 / 21 / 0×20 — see the note above on why this fix
 correctly does not move that count).
 
+**Caveat, stated explicitly so green tests aren't misread as pixel
+verification**: this fix moved ~14 call sites from silently-no-op to
+actually executing — `Entity::Draw`/`DrawConnected`, `AboutDialog`'s credits
+scroll, the tilemap cursor overlay, `NetworkPlayerList`/`DPlayManager`
+multiplayer panels, `GameSetupPanel`, `BuildingPanel`, `ButtonSprite`, and
+`Cursor`. Byte-for-byte diffed every GUI integration screenshot from a
+pre-fix baseline run against the same test's post-fix screenshot
+(`test_game_setup_lobby_search_and_exit`, `test_multiplayer_ready_go_is_exposed_after_session_projection`,
+`test_multiplayer_layout_choices_update_grid_geometry`) — **all identical**.
+30/30 + 12/12 proves no crash/regression on covered paths; it does **not**
+prove these newly-live blits render correctly, since none of the current
+GUI tests exercise a code path that reaches them (consistent with this
+doc's existing note that no test drives `UIPANEL_Blit` with `mode==0`).
+Follow-up cluster, distinct from a `call 0`/linkage fix: add GUI test
+coverage (or targeted screenshot assertions) for at least one of these
+newly-reachable rendering paths before trusting their pixel output.
+
+Also removed two now-fully-dead `UIPANEL_Blit` stub definitions found by
+re-running the whole-tree `nm` census after the fix above (not caught by
+the original 3-overload cleanup): `shared/defsym_stubs.cpp`'s zero-arg
+`UIPANEL_Blit()` (the wrong stub `town/Town.cpp` used to silently bind to
+before the town-tilerender-merge session fixed it) and
+`shared/core_stubs.cpp`'s `int**`-6th-param overload (the wrong stub
+`town/TownTiles.cpp`'s `BlitElement` used to call before that same
+session's fix). Both confirmed zero referrers via `nm --print-file-name
+build/lego_loco.p/*.o`; `ui/UIPANEL_Surface.cpp` is now the **only**
+`UIPANEL_Blit` definition anywhere in the tree.
+
 ## Functions excluded from automated alignment (call-count mismatch)
 
 These functions have a `call 0` landmine per the original per-function census
