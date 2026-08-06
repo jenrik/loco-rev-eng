@@ -1,14 +1,21 @@
 // Status: INTEGRATED
 /**
- * TownTiles.cpp — TownTileRenderer implementation
+ * TownTiles.cpp — UIPANEL_Surface tile-rendering method implementations
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * Core tile rendering primitives for the isometric town view. All functions
- * operate on a TownTileRenderer context object that holds the 8-bit indexed
- * tile pixel data (+0x18), a 16-bit color palette lookup table (+0x14), and
- * the source buffer stride (+0x08).
+ * Core tile rendering primitives for the isometric town view. These were
+ * originally reverse engineered as a standalone "TownTileRenderer" class
+ * before it was discovered that class was a duplicate view of
+ * UIPANEL_Surface (graphics/LOCOBITMAP.h) — every field it documented
+ * (mode, stride, palette, pixels, surface_ref) is UIPANEL_Surface's own
+ * mode/width/palette_ptr/pixels/ddraw_surf at the identical offsets, and
+ * UIPANEL_Blit (0x42B050) passes its own `this` directly as the receiver
+ * of these calls. See the method docs on UIPANEL_Surface for the per-flag
+ * dispatch table. All functions operate on the object's 8-bit indexed tile
+ * pixel data (+0x18), 16-bit color palette lookup table (+0x14), and the
+ * source buffer stride (width, +0x08).
  *
  * The 16-bit drawing functions remap 8-bit index bytes through the palette
  * and write to a locked DirectDraw 16-bit surface. Palette[0] is used as
@@ -20,7 +27,9 @@
  *   DrawCachedTile 0x42BC80, BlitElement 0x42B960.
  */
 
-#include "TownTiles.h"
+#include "../graphics/LOCOBITMAP.h"
+#include <cassert>
+#include <cstdio>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -35,11 +44,15 @@ extern "C" {
     extern int   g_pixel_format_mask;       /* 0x485248 — computed: g_bshift << 1 */
 }
 
-/* Forward declaration: UIPANEL_Blit is the main dispatcher */
+/* Forward declaration: UIPANEL_Blit is the main dispatcher (ui/UIPANEL_Surface.cpp).
+ * Signature must match the real definition exactly (C++ name-mangled — no
+ * extern "C" — a mismatched param type here is a call-0 landmine, as it was
+ * before this fix: the previous `int** dest_surface` didn't match the real
+ * `void* dest_surface`). */
 extern bool __thiscall UIPANEL_Blit(
-    void* tile_map,
+    void* renderer,
     uint32_t src_x, uint32_t src_y, int dest_x, uint32_t dest_y,
-    int** dest_surface, uint32_t clip_left, uint32_t clip_top,
+    void* dest_surface, uint32_t clip_left, uint32_t clip_top,
     int clip_right, uint32_t clip_bottom, uint32_t flags);  /* 0x42B050 */
 
 /* ================================================================== */
@@ -48,18 +61,18 @@ extern bool __thiscall UIPANEL_Blit(
 /*                                                                     */
 /* Initializes a 16-bit destination surface from 8-bit source tile     */
 /* data through palette lookup. Copies each source byte, remaps it     */
-/* through this->palette[source_byte], and writes the resulting        */
+/* through this->palette_ptr[source_byte], and writes the resulting        */
 /* uint16_t to the destination surface.                                */
 /*                                                                     */
 /* Called by: UIPANEL_Blit (dispatch for flags=0x01, 0x03)             */
 /* ================================================================== */
-bool TownTileRenderer::InitTileCache(
+bool UIPANEL_Surface::InitTileCache(
     int src_x, int src_y, int dest_x, int dest_y,
     uint8_t* dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, int clip_bottom)
 {
     /* Guard: must have pixel data and palette loaded */
-    if (this->pixels == nullptr || this->palette == nullptr) { /* +0x18, +0x14 */
+    if (this->pixels == nullptr || this->palette_ptr == nullptr) { /* +0x18, +0x14 */
         return false;
     }
 
@@ -74,15 +87,15 @@ bool TownTileRenderer::InitTileCache(
                         static_cast<uint32_t>(src_x)) * 2);
 
     /* Source pointer: start of clipped area in 8-bit tile cache */
-    uint8_t* src  = this->pixels + clip_top * this->stride + clip_left;   /* +0x18, +0x08 */
+    uint8_t* src  = this->pixels + clip_top * this->width + clip_left;   /* +0x18, +0x08 */
 
     /* Row strides (bytes to advance after each row) */
-    int32_t src_stride  = this->stride - static_cast<int32_t>(tile_width); /* +0x08 */
+    int32_t src_stride  = this->width - static_cast<int32_t>(tile_width); /* +0x08 */
     int32_t dest_stride = static_cast<int32_t>(half_pitch - tile_width) * 2;
 
     /* Source row end marker */
-    uint8_t* src_row_end = src + (tile_height - 1) * this->stride + tile_width;  /* +0x08 */
-    uint8_t* src_end     = src_row_end + (this->stride - tile_width);             /* +0x08 */
+    uint8_t* src_row_end = src + (tile_height - 1) * this->width + tile_width;  /* +0x08 */
+    uint8_t* src_end     = src_row_end + (this->width - tile_width);             /* +0x08 */
     uint8_t* src_limit   = src_row_end - 1;
 
     if (src >= src_limit) {
@@ -96,7 +109,7 @@ bool TownTileRenderer::InitTileCache(
         /* Iterate columns within row */
         while (src < src_col_end) {
             uint8_t index = *src;
-            *dest = this->palette[index];          /* +0x14 */
+            *dest = this->palette_ptr[index];          /* +0x14 */
             src++;
             dest++;
         }
@@ -122,7 +135,7 @@ bool TownTileRenderer::InitTileCache(
 /* Called by: EditWindow_render, Cursor_InitBackground,                */
 /*            CGWND_TrackPiece_Render, UIPANEL_DrawButton              */
 /* ================================================================== */
-void TownTileRenderer::BlitElement(
+void UIPANEL_Surface::BlitElement(
     uint32_t src_x, uint32_t src_y, int dest_x, uint32_t dest_y,
     void* element, uint32_t clip_left, uint32_t clip_top,
     int clip_right, uint32_t clip_bottom, uint32_t flags)
@@ -144,7 +157,7 @@ void TownTileRenderer::BlitElement(
 /* Base tile rendering function. For each pixel:
 /*   1. Read destination pixel, save it to palette[0]
 /*   2. Read source byte (8-bit index from this->pixels)
-/*   3. Look up color from this->palette[source_byte]
+/*   3. Look up color from this->palette_ptr[source_byte]
 /*   4. Write remapped color to destination
 /*
 /* Since palette[0] is overwritten with the destination pixel before
@@ -153,13 +166,13 @@ void TownTileRenderer::BlitElement(
 /*
 /* Called by: UIPANEL_Blit (flags=0x00, and default for unknown flags)
 /* ================================================================== */
-bool TownTileRenderer::DrawTile(
+bool UIPANEL_Surface::DrawTile(
     int src_x, int src_y, int dest_x, int dest_y,
     int dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, int clip_bottom)
 {
     uint8_t* pixels  = this->pixels;          /* +0x18 */
-    uint16_t* pal    = this->palette;          /* +0x14 */
+    uint16_t* pal    = this->palette_ptr;          /* +0x14 */
 
     /* Guard: must have pixel data and palette */
     if (pixels == nullptr || pal == nullptr) {
@@ -181,9 +194,9 @@ bool TownTileRenderer::DrawTile(
         static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
 
     /* Source: 8-bit pointer at (clip_left, clip_top) in tile cache */
-    uint8_t* src = pixels + clip_top * this->stride + clip_left;   /* +0x08 */
+    uint8_t* src = pixels + clip_top * this->width + clip_left;   /* +0x08 */
 
-    int32_t src_advance  = this->stride - tile_width;               /* +0x08 */
+    int32_t src_advance  = this->width - tile_width;               /* +0x08 */
     int32_t dest_advance = (half_pitch - tile_width) * 2;
 
     /* Iterate rows */
@@ -218,7 +231,7 @@ bool TownTileRenderer::DrawTile(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x04, 0x84)                          */
 /* ================================================================== */
-bool TownTileRenderer::FlushTileCache(
+bool UIPANEL_Surface::FlushTileCache(
     int src_x, int src_y, int dest_x, int dest_y,
     uint32_t dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, uint32_t clip_bottom)
@@ -254,7 +267,7 @@ bool TownTileRenderer::FlushTileCache(
 
                 if (index != 0) {
                     /* Write 2x2 block of the palette color */
-                    uint16_t color = *(this->palette + index);  /* +0x14 */
+                    uint16_t color = *(this->palette_ptr + index);  /* +0x14 */
 
                     dest[0] = color;           /* top-left */
                     dest[1] = color;           /* top-right */
@@ -287,7 +300,7 @@ bool TownTileRenderer::FlushTileCache(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x05, 0x85)                          */
 /* ================================================================== */
-bool TownTileRenderer::DrawCachedTile(
+bool UIPANEL_Surface::DrawCachedTile(
     uint32_t src_x, int src_y, int dest_x, int dest_y,
     uint32_t dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, uint32_t clip_bottom)
@@ -317,7 +330,7 @@ bool TownTileRenderer::DrawCachedTile(
             do {
                 uint8_t index;
                 index = *(this->pixels + tile_width * (row & 0xFFFF) + col);  /* +0x18 */
-                uint16_t color = *(this->palette + index);                     /* +0x14 */
+                uint16_t color = *(this->palette_ptr + index);                     /* +0x14 */
 
                 /* Always writes 2x2 block (no transparent skip) */
                 dest[0] = color;
@@ -353,7 +366,7 @@ bool TownTileRenderer::DrawCachedTile(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags in range 0x10-0x1F)                  */
 /* ================================================================== */
-bool TownTileRenderer::DrawTileEx(
+bool UIPANEL_Surface::DrawTileEx(
     int src_x, int src_y, int dest_x, int dest_y,
     uint32_t dest_surface, uint32_t dest_pitch,
     uint32_t clip_left, uint32_t clip_top,
@@ -391,7 +404,7 @@ bool TownTileRenderer::DrawTileEx(
                 index = *(this->pixels + tile_width * (row & 0xFFFF) + col);  /* +0x18 */
 
                 if (index != 0) {
-                    uint16_t color = *(this->palette + index);  /* +0x14 */
+                    uint16_t color = *(this->palette_ptr + index);  /* +0x14 */
 
                     /* Write 3x2 block */
                     dest[0] = color;
@@ -433,14 +446,14 @@ bool TownTileRenderer::DrawTileEx(
 /* Draws a tile with line-effect alpha blending. Uses pixel format     */
 /* globals to compute per-channel bit masks for half-bright blending.  */
 /*                                                                     */
-/* Saves destination pixels to this->palette (used as a line buffer),  */
+/* Saves destination pixels to this->palette_ptr (used as a line buffer),  */
 /* then blends source with destination by averaging (>> 1) each       */
 /* color channel separately. This creates a semi-transparent overlay   */
 /* effect used for selection/highlight lines on the isometric grid.    */
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x400, 0x402)                        */
 /* ================================================================== */
-bool TownTileRenderer::DrawTileLine(
+bool UIPANEL_Surface::DrawTileLine(
     int src_x, int src_y, int dest_x, int dest_y,
     int dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, int clip_bottom)
@@ -453,7 +466,7 @@ bool TownTileRenderer::DrawTileLine(
         static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
 
     /* Source position in tile cache */
-    int src_pos = clip_top * this->stride + clip_left;          /* +0x08 */
+    int src_pos = clip_top * this->width + clip_left;          /* +0x08 */
 
     /* Tile height */
     int32_t tile_height = (clip_bottom - clip_top) & 0xFFFF;
@@ -477,7 +490,7 @@ bool TownTileRenderer::DrawTileLine(
 
     /* End of destination for this operation */
     uint16_t* dest_end = dest + (tile_height - 1) * half_pitch + tile_width;
-    int32_t src_stride_advance = this->stride - tile_width;      /* +0x08 */
+    int32_t src_stride_advance = this->width - tile_width;      /* +0x08 */
     int32_t dest_stride = half_pitch - tile_width;
 
     /* Iterate rows */
@@ -487,16 +500,16 @@ bool TownTileRenderer::DrawTileLine(
         /* Iterate columns */
         while (dest < dest_row_end) {
             /* Save destination pixel to palette (used as line/color buffer) */
-            this->palette[0] = *dest;                           /* +0x14 */
+            this->palette_ptr[0] = *dest;                           /* +0x14 */
 
             /* Read source byte and check for transparency */
             uint16_t index = *(this->pixels + src_pos);         /* +0x18 */
             if (index != 0) {
                 /* Shadow: save half-bright version of original dest pixel */
-                this->palette[1] = (*dest >> 1) & g_surface_bshift;  /* +0x14 */
+                this->palette_ptr[1] = (*dest >> 1) & g_surface_bshift;  /* +0x14 */
 
                 /* Blend: source color & palette index, channel-averaged with dest */
-                uint16_t src_color = *(this->palette + index);  /* +0x14 */
+                uint16_t src_color = *(this->palette_ptr + index);  /* +0x14 */
                 *dest = ((src_color & blend_mask) >> 1) +
                         ((*dest & blend_mask) >> 1);
             }
@@ -527,7 +540,7 @@ bool TownTileRenderer::DrawTileLine(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x02)                                */
 /* ================================================================== */
-bool TownTileRenderer::DrawTiles16bpp_Strided(
+bool UIPANEL_Surface::DrawTiles16bpp_Strided(
     int src_x, int src_y, int dest_x, int dest_y,
     int dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, int clip_bottom)
@@ -541,7 +554,7 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
     int32_t tile_height = (clip_bottom - clip_top) & 0xFFFF;
 
     /* Source position in tile cache */
-    uint8_t* src = this->pixels + clip_top * this->stride + clip_left;  /* +0x18, +0x08 */
+    uint8_t* src = this->pixels + clip_top * this->width + clip_left;  /* +0x18, +0x08 */
 
     /* Precompute the pixel format mask for shadow computation */
     g_pixel_format_mask = g_surface_bshift << 1;
@@ -556,22 +569,22 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
         for (int32_t col = 0; col < tile_width; col++) {
             /* Save destination pixel to palette[0] */
             uint16_t saved = *dest;
-            this->palette[0] = saved;                               /* +0x14 */
+            this->palette_ptr[0] = saved;                               /* +0x14 */
 
             /* Compute half-bright shadow and store in palette[1] */
-            this->palette[1] = static_cast<uint16_t>(
+            this->palette_ptr[1] = static_cast<uint16_t>(
                 (saved & g_pixel_format_mask) >> 1);  /* +0x14 */
 
             /* Read source byte and write remapped color */
             uint8_t index = *src++;
-            *dest = this->palette[index];                           /* +0x14 */
+            *dest = this->palette_ptr[index];                           /* +0x14 */
             dest++;
         }
 
         /* Advance to next row */
         dest  = reinterpret_cast<uint16_t*>(
             reinterpret_cast<uint8_t*>(dest) + half_pitch * 2);
-        src  += this->stride;                                       /* +0x08 */
+        src  += this->width;                                       /* +0x08 */
     }
 
     return true;
@@ -591,7 +604,7 @@ bool TownTileRenderer::DrawTiles16bpp_Strided(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x22)                                */
 /* ================================================================== */
-bool TownTileRenderer::DrawTiles16bpp_Reversed(
+bool UIPANEL_Surface::DrawTiles16bpp_Reversed(
     int src_x, int src_y, int dest_x, int dest_y,
     int dest_surface, uint32_t dest_pitch,
     int clip_left, int clip_top, int clip_right, int clip_bottom)
@@ -605,7 +618,7 @@ bool TownTileRenderer::DrawTiles16bpp_Reversed(
         static_cast<uintptr_t>(dest_surface) + (half_pitch * src_y + src_x) * 2);
 
     /* Source: starts at RIGHT edge of clip rect and goes left */
-    uint8_t* src = this->pixels + clip_top * this->stride + clip_right;  /* +0x18, +0x08 */
+    uint8_t* src = this->pixels + clip_top * this->width + clip_right;  /* +0x18, +0x08 */
 
     /* Precompute pixel format mask */
     g_pixel_format_mask = g_surface_bshift << 1;
@@ -623,20 +636,20 @@ bool TownTileRenderer::DrawTiles16bpp_Reversed(
             col--;
 
             uint16_t saved = *dest;
-            this->palette[0] = saved;                               /* +0x14 */
+            this->palette_ptr[0] = saved;                               /* +0x14 */
 
             /* Half-bright shadow in palette[1] */
-            this->palette[1] = g_surface_bshift & (saved >> 1);     /* +0x14 */
+            this->palette_ptr[1] = g_surface_bshift & (saved >> 1);     /* +0x14 */
 
             /* Read source byte (right-to-left) and write remapped color */
             uint8_t index = *src;
             src--;
-            *dest = this->palette[index];                           /* +0x14 */
+            *dest = this->palette_ptr[index];                           /* +0x14 */
             dest++;
         }
 
         /* Advance to next row */
-        src  = src + this->stride + tile_width;                     /* +0x08 */
+        src  = src + this->width + tile_width;                     /* +0x08 */
         dest = dest + (half_pitch - tile_width);
     }
 
@@ -658,7 +671,7 @@ bool TownTileRenderer::DrawTiles16bpp_Reversed(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x102)                               */
 /* ================================================================== */
-bool TownTileRenderer::DrawTiles16bpp_Checker(
+bool UIPANEL_Surface::DrawTiles16bpp_Checker(
     int src_x, int src_y, int dest_x, int dest_y,
     uint32_t dest_surface, uint32_t dest_pitch,
     int clip_left, uint32_t clip_top,
@@ -681,7 +694,7 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
         static_cast<uintptr_t>(dest_surface) +
         (half_pitch * static_cast<uint32_t>(src_y) +
          static_cast<uint32_t>(src_x)) * 2);
-    int src_pos = static_cast<int>(clip_top) * this->stride + clip_left; /* +0x08 */
+    int src_pos = static_cast<int>(clip_top) * this->width + clip_left; /* +0x08 */
 
     uint32_t row = 0;
 
@@ -701,11 +714,11 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
                 index = *(this->pixels + src_pos);                  /* +0x18 */
 
                 /* Save destination to palette[0], shadow to palette[1] */
-                this->palette[0] = *col_dest;                       /* +0x14 */
-                this->palette[1] = *col_dest >> 1 & g_surface_bshift; /* +0x14 */
+                this->palette_ptr[0] = *col_dest;                       /* +0x14 */
+                this->palette_ptr[1] = *col_dest >> 1 & g_surface_bshift; /* +0x14 */
 
                 /* Write remapped source color */
-                *col_dest = this->palette[index];                   /* +0x14 */
+                *col_dest = this->palette_ptr[index];                   /* +0x14 */
 
                 col_dest++;
                 src_pos++;
@@ -715,7 +728,7 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
 
         /* Advance by 2 rows (checkerboard skip) */
         dest   = dest + (half_pitch * 2 - tile_width);
-        src_pos = src_pos + (this->stride * 2 - tile_width);        /* +0x08 */
+        src_pos = src_pos + (this->width * 2 - tile_width);        /* +0x08 */
         row += 2;
 
     } while ((row & 0xFFFF) < static_cast<uint32_t>(tile_height));
@@ -739,7 +752,7 @@ bool TownTileRenderer::DrawTiles16bpp_Checker(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x202)                                */
 /* ================================================================== */
-bool TownTileRenderer::DrawTiles16bpp_Staggered(
+bool UIPANEL_Surface::DrawTiles16bpp_Staggered(
     int src_x, int src_y, int dest_x, int dest_y,
     uint32_t dest_surface, uint32_t dest_pitch,
     int clip_left, uint32_t clip_top,
@@ -757,7 +770,7 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
          static_cast<uint32_t>(src_x)) * 2);
 
     /* Source position in 8-bit tile cache */
-    int src_pos = static_cast<int>(clip_top) * this->stride + clip_left; /* +0x08 */
+    int src_pos = static_cast<int>(clip_top) * this->width + clip_left; /* +0x08 */
 
     /* Checkerboard toggle — starts based on clip_left parity */
     bool toggle = ((clip_left & 1) != 0);
@@ -777,13 +790,13 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
                 uint8_t index = *(this->pixels + src_pos);           /* +0x18 */
 
                 /* Save destination pixel to palette[0] */
-                this->palette[0] = *dest_row;                       /* +0x14 */
+                this->palette_ptr[0] = *dest_row;                       /* +0x14 */
 
                 /* Compute dimmed (half-bright) pixel in palette[1] */
-                this->palette[1] = (*dest_row >> 1) & g_surface_bshift;  /* +0x14 */
+                this->palette_ptr[1] = (*dest_row >> 1) & g_surface_bshift;  /* +0x14 */
 
                 /* Write source color (index remapped through palette) */
-                *dest_row = this->palette[index];                   /* +0x14 */
+                *dest_row = this->palette_ptr[index];                   /* +0x14 */
             }
 
             toggle = !toggle;
@@ -794,7 +807,7 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
         /* Advance to next row */
         dest     = reinterpret_cast<uint16_t*>(
             reinterpret_cast<uint8_t*>(dest) + half_pitch * 2);
-        src_pos += this->stride - static_cast<int>(tile_width);    /* +0x08 */
+        src_pos += this->width - static_cast<int>(tile_width);    /* +0x08 */
     }
 
     return true;
@@ -816,7 +829,7 @@ bool TownTileRenderer::DrawTiles16bpp_Staggered(
 /*                                                                     */
 /* Called by: the clock-digit animation helper (0x447400) -- clock digit sprites     */
 /* ================================================================== */
-void TownTileRenderer::CopyTiles8bpp_Transparent(
+void UIPANEL_Surface::CopyTiles8bpp_Transparent(
     int dest_x, int dest_y,
     int dest_r, int dest_b,
     uint8_t* dest_surface, int dest_pitch,
@@ -831,7 +844,7 @@ void TownTileRenderer::CopyTiles8bpp_Transparent(
     uint8_t* dest = dest_surface + dest_pitch * dest_y + dest_x;
 
     /* Source start in tile cache */
-    int src_pos = src_top * this->stride + src_left;                /* +0x08 */
+    int src_pos = src_top * this->width + src_left;                /* +0x08 */
 
     /* Iterate rows */
     for (uint32_t row = 0; (row & 0xFFFF) < static_cast<uint32_t>(tile_height); row++) {
@@ -848,7 +861,7 @@ void TownTileRenderer::CopyTiles8bpp_Transparent(
 
         /* Advance to next row */
         dest    += dest_pitch - tile_width;
-        src_pos += this->stride - tile_width;                       /* +0x08 */
+        src_pos += this->width - tile_width;                       /* +0x08 */
     }
 }
 
@@ -868,7 +881,7 @@ void TownTileRenderer::CopyTiles8bpp_Transparent(
 /*                                                                     */
 /* Called by: UIPANEL_FillRect (0x42A610)                              */
 /* ================================================================== */
-void TownTileRenderer::CopyTiles8bpp_Direct(
+void UIPANEL_Surface::CopyTiles8bpp_Direct(
     int dest_x, int dest_y,
     int dest_r, int dest_b,
     uint8_t* dest_surface, int dest_pitch,
@@ -883,7 +896,7 @@ void TownTileRenderer::CopyTiles8bpp_Direct(
     uint8_t* dest = dest_surface + dest_pitch * dest_y + dest_x;
 
     /* Source start in tile cache */
-    int src_pos = src_top * this->stride + src_left;                /* +0x08 */
+    int src_pos = src_top * this->width + src_left;                /* +0x08 */
 
     /* Iterate rows */
     for (uint32_t row = 0; (row & 0xFFFF) < static_cast<uint32_t>(tile_height); row++) {
@@ -897,7 +910,7 @@ void TownTileRenderer::CopyTiles8bpp_Direct(
 
         /* Advance to next row */
         dest    += dest_pitch - tile_width;
-        src_pos += this->stride - tile_width;                       /* +0x08 */
+        src_pos += this->width - tile_width;                       /* +0x08 */
     }
 }
 
@@ -917,7 +930,7 @@ void TownTileRenderer::CopyTiles8bpp_Direct(
 /*                                                                     */
 /* Called by: UIPANEL_Blit (flags=0x20, dispatch @ 0x42B6C9)          */
 /* ================================================================== */
-bool TownTileRenderer::BlitTileSurface(
+bool UIPANEL_Surface::BlitTileSurface(
     int src_x, int src_y,
     int dest_x, int dest_y,
     uint32_t dest_surface, uint32_t dest_pitch,
@@ -937,7 +950,7 @@ bool TownTileRenderer::BlitTileSurface(
 
     /* Source position: RIGHT EDGE of clip rect, read right-to-left   */
     /* Start at clip_top * stride + (clip_right - 1)                  */
-    int src_pos = clip_top * this->stride + clip_right - 1;          /* +0x08 */
+    int src_pos = clip_top * this->width + clip_right - 1;          /* +0x08 */
 
     /* Early exit for empty clip region */
     if (tile_height == 0) {
@@ -955,7 +968,7 @@ bool TownTileRenderer::BlitTileSurface(
             uint8_t index = *(this->pixels + src_pos);               /* +0x18 */
             if (index != 0) {
                 /* Write remapped color through palette               */
-                *dest = this->palette[index];                        /* +0x14 */
+                *dest = this->palette_ptr[index];                        /* +0x14 */
             }
 
             dest++;         /* advance destination LEFT-to-RIGHT      */
@@ -969,8 +982,47 @@ bool TownTileRenderer::BlitTileSurface(
             (half_pitch - tile_width) * 2);
 
         /* Source: advance to right edge of next row                  */
-        src_pos += this->stride + tile_width;                        /* +0x08 */
+        src_pos += this->width + tile_width;                        /* +0x08 */
     }
 
     return true;
+}
+
+/* ================================================================== */
+/* CalcScrollRect / CalcScrollRect_Reversed — TODO: decompile 0x42C590 / 0x42C700 */
+/*                                                                     */
+/* Deferred per CLAUDE.md stub policy. Ghidra's own decompilation of   */
+/* both functions is internally inconsistent about the real parameter */
+/* count: the caller (UIPANEL_Blit, flags & 0x40) pushes 4 stack dwords */
+/* and the callee's `RET 0x10` pops exactly 4, but the decompiled body */
+/* only demonstrably reads 2 of them (a RECT* rewritten in place, and  */
+/* a surface-descriptor object dereferenced for a vtable+0x58 call);   */
+/* the other two surface only as Ghidra's unresolved "unaff_EBX"/      */
+/* "unaff_EBP" artifacts, which may just be the decompiler losing      */
+/* track of the SAME RECT*'s left/top across intervening SetRect/      */
+/* IntersectRect calls rather than genuinely distinct parameters. The  */
+/* vtable+0x58 call target's real interface (and therefore the exact  */
+/* shape of the width/height query it performs) is also unconfirmed.  */
+/* Rather than guess at pixel-level rect math with this much open      */
+/* uncertainty, this is a loud stub — never a silent no-op. Called     */
+/* from UIPANEL_Blit only when flags & 0x40 is set; not yet exercised  */
+/* by any test (the mode==0 software tile path this feeds has no test  */
+/* coverage — see PROGRESS.md).                                        */
+/* ================================================================== */
+bool UIPANEL_Surface::CalcScrollRect(RECT* rect, void* surface_obj)
+{
+    (void)rect;
+    (void)surface_obj;
+    fprintf(stderr, "STUB: UIPANEL_Surface::CalcScrollRect reached at %s:%d\n", __FILE__, __LINE__);
+    assert(0 && "UIPANEL_Surface::CalcScrollRect stub reached (TODO: decompile 0x42C590)");
+    return false;  /* unreachable */
+}
+
+bool UIPANEL_Surface::CalcScrollRect_Reversed(RECT* rect, void* surface_obj)
+{
+    (void)rect;
+    (void)surface_obj;
+    fprintf(stderr, "STUB: UIPANEL_Surface::CalcScrollRect_Reversed reached at %s:%d\n", __FILE__, __LINE__);
+    assert(0 && "UIPANEL_Surface::CalcScrollRect_Reversed stub reached (TODO: decompile 0x42C700)");
+    return false;  /* unreachable */
 }

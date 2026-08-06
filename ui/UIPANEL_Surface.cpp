@@ -65,9 +65,8 @@ struct DDBLTFX { DWORD dwSize; DWORD dwFillColor; DWORD dwDDFX; };
 
 /* UIPANEL_Surface is defined in graphics/LOCOBITMAP.h (pulled in transitively
  * via UIPANEL.h above). Its `ddraw_surf` member is a raw void* there, so this
- * file casts to IDirectDrawSurface4* at each use, and its palette pointer is
- * `palette_ptr` (uint32_t*), cast to uint16_t* since the data is a
- * uint16_t[256] lookup table. */
+ * file casts to IDirectDrawSurface4* at each use. `palette_ptr` is
+ * `uint16_t*` (a 256-entry lookup table) — no cast needed. */
 #define FAILED(hr) ((int)(hr) < 0)
 #define SUCCEEDED(hr) ((int)(hr) >= 0)
 #define DDBLT_WAIT 0x00000010
@@ -138,21 +137,13 @@ extern "C" {
     HDC   DDRAW_LoadBmpToSurface(LPCSTR path, int bpp, int unk1, int unk2, char unk3);
     void  DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
 
-    /* Town tile rendering functions */
-    bool __thiscall Town_InitTileCache(
-        void* self, int src_x, int src_y, int dest_x, int dest_y,
-        uint8_t* dest_surface, uint32_t dest_pitch,
-        int clip_left, int clip_top, int clip_right, int clip_bottom);
-    void __thiscall Town_DrawTile(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawTiles16bpp_Strided(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_FlushTileCache(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawCachedTile(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawTileEx(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_BlitTileSurface(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawTiles16bpp_Reversed(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawTiles16bpp_Checker(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawTiles16bpp_Staggered(void*, int, int, int, int, void*, int, int, int, int, int);
-    void __thiscall Town_DrawTileLine(void*, int, int, int, int, void*, int, int, int, int, int);
+    /* Town tile rendering functions are UIPANEL_Surface methods
+     * (graphics/LOCOBITMAP.h) implemented in town/TownTiles.cpp — see the
+     * struct comment there for why they're not free functions here. The
+     * `void*, int,int,int,int,void*,int,int,int,int,int` free-function
+     * declarations that used to live here didn't match any real symbol
+     * (only the typed methods exist), so every call site below was a
+     * call-0 landmine before this fix. */
 
     /* UIPANEL surface helpers (forward-declared, defined later) */
     uint32_t __thiscall UIPANEL_ClearSurface(void* surface, int width, int height);
@@ -195,7 +186,7 @@ extern "C" {
 
         /* Share global palette if small enough */
         if ((palette_param & 0xFFFF) <= (uint32_t)g_shared_palette_refcount) {
-            s->palette_ptr = (uint32_t*)g_shared_palette_buffer;
+            s->palette_ptr = (uint16_t*)g_shared_palette_buffer;
         }
 
         /* Fill pixel buffer with fill_byte pattern */
@@ -493,7 +484,7 @@ cleanup:
         /* Private palette */
         s->has_palette = 1;
         palette = (uint16_t*)operator_new(0x200);     /* 512 bytes */
-        s->palette_ptr = (uint32_t*)palette;
+        s->palette_ptr = palette;
         if (palette == NULL) {
             GLOBAL_free(g_shared_palette_buffer);
             g_shared_palette_buffer = NULL;
@@ -505,7 +496,7 @@ cleanup:
         palette = (uint16_t*)operator_new(0x200);
         g_shared_palette_buffer = palette;
         if (palette == NULL) return 0;
-        s->palette_ptr = (uint32_t*)palette;
+        s->palette_ptr = palette;
         g_shared_palette_refcount++;
     }
 
@@ -535,23 +526,30 @@ cleanup:
 /* Address: 0x42B050                                                   */
 /*                                                                     */
 /* This is the central blit function with 105+ callers across the      */
-/* entire rendering subsystem. It dispatches to specific tile drawing   */
-/* functions based on a flags parameter.                                */
+/* entire rendering subsystem. Ghidra's own decompilation of this      */
+/* function (cross-checked instruction-by-instruction) shows it is a   */
+/* SINGLE if/else-if/switch dispatch chain per call — exactly one Town */
+/* tile-rendering method or DDraw Blt() call ever executes, never two. */
+/* mode==1 (hardware DDraw surface) NEVER calls a Town_* tile method —  */
+/* it always performs exactly one IDirectDrawSurface4::Blt() call, with */
+/* the src/dest rects and DDBLT_KEYSRC flag varying by `flags`. The     */
+/* Town_* tile dispatch below only ever runs when mode==0 (software     */
+/* pixel buffer).                                                       */
 /*                                                                     */
-/* Flag dispatch:                                                      */
-/*   0x00     = Town_DrawTile (base tile drawing)                      */
-/*   0x01/0x03 = Town_InitTileCache (palette-init)                     */
-/*   0x02     = Town_DrawTiles16bpp_Strided (standard LTR 16bpp)       */
-/*   0x04/0x84 = Town_FlushTileCache (2x2 block expand)               */
-/*   0x05/0x85 = Town_DrawCachedTile (2x2 block from cache)           */
-/*   0x0F-0x1F = Town_DrawTileEx (3x2 block expand)                   */
-/*   0x20     = Town_BlitTileSurface (right-to-left blit)              */
-/*   0x22     = Town_DrawTiles16bpp_Reversed (H-mirror 16bpp)          */
-/*   0x40     = scroll rect adjustment (Town_CalcScrollRect)           */
-/*   0x80     = DDraw Blt (direct blit)                                */
-/*   0x100    = Town_DrawTiles16bpp_Checker (checkerboard 16bpp)       */
-/*   0x200    = Town_DrawTiles16bpp_Staggered (staggered 16bpp)        */
-/*   0x400/0x402 = Town_DrawTileLine (alpha-blended line)              */
+/* Flag dispatch (mode==0 path):                                       */
+/*   0x00     = DrawTile (base tile drawing)                           */
+/*   0x01/0x03 = InitTileCache (palette-init)                          */
+/*   0x02     = DrawTiles16bpp_Strided (standard LTR 16bpp)            */
+/*   0x04/0x84 = FlushTileCache (2x2 block expand)                     */
+/*   0x05/0x85 = DrawCachedTile (2x2 block from cache)                 */
+/*   0x10-0x1F = DrawTileEx (3x2 block expand)                         */
+/*   0x20     = BlitTileSurface (right-to-left blit)                   */
+/*   0x22     = DrawTiles16bpp_Reversed (H-mirror 16bpp)               */
+/*   0x40     = scroll rect adjustment (CalcScrollRect), handled first  */
+/*   0x102    = DrawTiles16bpp_Checker (checkerboard 16bpp)            */
+/*   0x202    = DrawTiles16bpp_Staggered (staggered 16bpp)             */
+/*   0x400/0x402 = DrawTileLine (alpha-blended line)                   */
+/*   anything else = DrawTile (fallback)                                */
 /*                                                                     */
 /* Parameters: this (tile_map/renderer), src_x, src_y, dest_x, dest_y, */
 /*   dest_surface, clip_left, clip_top, clip_right, clip_bottom, flags */
@@ -561,6 +559,8 @@ bool __thiscall UIPANEL_Blit(void* renderer,
     void* dest_surface, uint32_t clip_left, uint32_t clip_top,
     int clip_right, uint32_t clip_bottom, uint32_t flags)
 {
+    UIPANEL_Surface* surf = (UIPANEL_Surface*)renderer;
+
     /* Auto-detect scroll when source/dest rects differ and flag not set */
     if ((flags & 0xFFFFFFFB) != 0 && (flags & 0xFFFFFFEF) != 0) {
         if ((clip_right - clip_left) != (dest_x - (int)src_x) &&
@@ -571,174 +571,74 @@ bool __thiscall UIPANEL_Blit(void* renderer,
 
     /* Handle scroll rect calculation */
     if ((flags & 0x40) != 0) {
-        int mode = *(int*)((intptr_t)renderer + 4);  /* +0x04 */
-        if (mode == 1) {
-            /* Forward scroll rect */
-            RECT rect;
-            rect.left   = src_x;
-            rect.top    = src_y;
-            rect.right  = clip_right;
-            rect.bottom = clip_bottom;
-            void Town_CalcScrollRect(void* r, RECT* clip, void* surf);
-            Town_CalcScrollRect(renderer, &rect, dest_surface);
-            src_x       = rect.left;
-            src_y       = rect.top;
-            clip_right  = rect.right;
-            clip_bottom = rect.bottom;
-        } else if (mode == 0) {
-            /* Reversed scroll rect */
-            RECT rect;
-            rect.left   = src_x;
-            rect.top    = src_y;
-            rect.right  = clip_right;
-            rect.bottom = clip_bottom;
-            void Town_CalcScrollRect_Reversed(void* r, RECT* clip, void* surf);
-            Town_CalcScrollRect_Reversed(renderer, &rect, dest_surface);
-            src_x       = rect.left;
-            src_y       = rect.top;
-            clip_right  = rect.right;
-            clip_bottom = rect.bottom;
+        RECT rect;
+        rect.left   = src_x;
+        rect.top    = src_y;
+        rect.right  = clip_right;
+        rect.bottom = clip_bottom;
+        if (surf->mode == 1) {
+            surf->CalcScrollRect(&rect, dest_surface);
+        } else if (surf->mode == 0) {
+            surf->CalcScrollRect_Reversed(&rect, dest_surface);
         }
+        src_x       = rect.left;
+        src_y       = rect.top;
+        clip_right  = rect.right;
+        clip_bottom = rect.bottom;
         flags &= 0xFFFFFFBF;
     }
 
-    /* Determine surface type */
-    int surf_mode = *(int*)((intptr_t)renderer + 4);  /* +0x04 */
+    /* Snapshot g_surface_lost at entry (matches the original's cVar2,
+     * captured before either branch below can change it) — needed by the
+     * tail unlock logic further down. */
+    bool entry_surface_lost = g_surface_lost;
 
-    if (surf_mode == 1) {
-        DDSURFACEDESC desc;
-        uint8_t* locked_pixels = NULL;
-        uint32_t pitch = 0;
-
-        /* Handle surface lost */
+    if (surf->mode != 0) {
+        if (surf->mode != 1) {
+            return false;
+        }
+        /* Hardware DDraw path — always exactly one Blt() call. Never
+         * dispatches to a Town_* tile method (those only run for
+         * mode == 0, below). */
         if (g_surface_lost) {
-            IDirectDrawSurface4* primary = *(IDirectDrawSurface4**)0x4FD3C4;
-            if (primary != NULL) {
-                HRESULT hr = primary->Unlock(NULL);
-                if (SUCCEEDED(hr)) {
+            if (g_primary_surface != NULL) {
+                HRESULT unlock_hr = g_primary_surface->Unlock(NULL);
+                if (SUCCEEDED(unlock_hr)) {
                     g_surface_lost = 0;
                 }
             }
         }
 
-        /* DDraw surface mode: lock surface and blit */
-        memset(&desc, 0, sizeof(desc));
-        desc.dwSize = sizeof(desc);
+        /* dest_rect/src_rect roles are constant across every flags value;
+         * only the DDBLT_KEYSRC flag bit varies. */
+        RECT dest_rect = { (int)src_x, (int)src_y, dest_x, (int)dest_y };
+        RECT src_rect  = { (int)clip_left, (int)clip_top, clip_right, (int)clip_bottom };
+        IDirectDrawSurface4* dst_ddraw = (IDirectDrawSurface4*)dest_surface;
+        IDirectDrawSurface4* src_ddraw = (IDirectDrawSurface4*)surf->ddraw_surf;
 
-        HRESULT hr;
-        if (flags == 0 || flags == 1) {
-            /* Simple Blt via DDraw */
-            RECT src_rect;
-            src_rect.left   = clip_left;
-            src_rect.top    = clip_top;
-            src_rect.right  = clip_right;
-            src_rect.bottom = clip_bottom;
-
-            RECT dest_rect;
-            dest_rect.left   = src_x;
-            dest_rect.top    = src_y;
-            dest_rect.right  = dest_x;
-            dest_rect.bottom = dest_y;
-
-            IDirectDrawSurface4* src_ddraw = (IDirectDrawSurface4*)((UIPANEL_Surface*)renderer)->ddraw_surf;
-            IDirectDrawSurface4* dst_ddraw = (IDirectDrawSurface4*)dest_surface;
-
-            uint32_t blt_flags = (flags == 0) ? DDBLT_WAIT : (DDBLT_WAIT | DDBLT_KEYSRC);
-            hr = dst_ddraw->Blt(&dest_rect, src_ddraw, &src_rect, blt_flags, NULL);
-            return SUCCEEDED(hr);
-        } else if (flags == 0x80) {
-            /* Direct Blt using dest surface */
-            RECT src_r = { (int)src_x, (int)src_y, dest_x, (int)dest_y };
-            RECT clip_r = { (int)clip_left, (int)clip_top, clip_right, (int)clip_bottom };
-            IDirectDrawSurface4* src_ddraw = (IDirectDrawSurface4*)((UIPANEL_Surface*)renderer)->ddraw_surf;
-            hr = ((IDirectDrawSurface4*)dest_surface)->Blt(&clip_r, src_ddraw, &src_r, DDBLT_WAIT, NULL);
-            return SUCCEEDED(hr);
+        uint32_t blt_flags;
+        if (flags == 0) {
+            blt_flags = DDBLT_WAIT | DDBLT_KEYSRC;
+        } else if (flags == 1 || flags == 0x80) {
+            blt_flags = DDBLT_WAIT;
         } else {
-            /* Lock surface for pixel-level blit */
-            RECT lock_rect = { (int)clip_left, (int)clip_top, clip_right, (int)clip_bottom };
-            IDirectDrawSurface4* surf = (IDirectDrawSurface4*)dest_surface;
-            hr = surf->Lock(&lock_rect, &desc, DDLOCK_WAIT, NULL);
-            if (FAILED(hr)) {
-                return false;
-            }
-            locked_pixels = (uint8_t*)desc.lpSurface;
-            pitch = desc.lPitch;
+            blt_flags = ((flags & 1) == 0) ? (DDBLT_WAIT | DDBLT_KEYSRC) : DDBLT_WAIT;
         }
 
-        /* Dispatch to tile rendering function */
-        bool success = true;
-
-        switch (flags & 0xFF) {
-        case 0x00:
-            Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                         locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            break;
-        case 0x01:
-        case 0x03:
-            Town_InitTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                             locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            break;
-        case 0x02:
-            Town_DrawTiles16bpp_Strided(renderer, src_x, src_y, dest_x, dest_y,
-                                       locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            break;
-        case 0x04:
-            Town_FlushTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                              locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            break;
-        case 0x05:
-            Town_DrawCachedTile(renderer, src_x, src_y, dest_x, dest_y,
-                              locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            break;
-        default:
-            if (flags >= 0x10 && flags < 0x20) {
-                Town_DrawTileEx(renderer, src_x, src_y, dest_x, dest_y,
-                              locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else {
-                Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                            locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            }
-            break;
-        }
-
-        if (flags >= 0x20) {
-            if (flags == 0x20) {
-                Town_BlitTileSurface(renderer, src_x, src_y, dest_x, dest_y,
-                                   locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x22) {
-                Town_DrawTiles16bpp_Reversed(renderer, src_x, src_y, dest_x, dest_y,
-                                           locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x84 || flags == 0x04) {
-                Town_FlushTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                  locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x85 || flags == 0x05) {
-                Town_DrawCachedTile(renderer, src_x, src_y, dest_x, dest_y,
-                                  locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x102) {
-                Town_DrawTiles16bpp_Checker(renderer, src_x, src_y, dest_x, dest_y,
-                                          locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x202) {
-                Town_DrawTiles16bpp_Staggered(renderer, src_x, src_y, dest_x, dest_y,
-                                            locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x400 || flags == 0x402) {
-                Town_DrawTileLine(renderer, src_x, src_y, dest_x, dest_y,
-                                locked_pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            }
-        }
-
-        /* Unlock the surface */
-        if (locked_pixels != NULL) {
-            ((IDirectDrawSurface4*)dest_surface)->Unlock(NULL);
-        }
-
-        return success;
+        HRESULT hr = dst_ddraw->Blt(&dest_rect, src_ddraw, &src_rect, blt_flags, NULL);
+        return SUCCEEDED(hr);
     }
 
-    /* Software buffer mode */
+    /* Software buffer mode (mode == 0): lock pixels, dispatch to exactly
+     * one Town_* tile-rendering method (single if/else chain, matching
+     * the original — never more than one method per call). */
+    DDSURFACEDESC desc;
+    uint8_t* pixels;
+    uint32_t pitch;
+
     if (dest_surface == (void*)g_primary_surface) {
         if (!g_surface_lost) {
             /* Check surface lost */
-            DDSURFACEDESC desc;
             memset(&desc, 0, sizeof(desc));
             desc.dwSize = sizeof(desc);
             HRESULT hr = g_primary_surface->Lock(NULL, &desc, DDLOCK_WAIT, NULL);
@@ -747,154 +647,120 @@ bool __thiscall UIPANEL_Blit(void* renderer,
             }
         }
         /* Use DDSURFACEDESC from globals for primary surface */
-        uint32_t pitch = *(uint32_t*)0x4FD1AC;
-        uint8_t* pixels = *(uint8_t**)0x4FD1C0;
-
-        /* Dispatch to appropriate tile function */
-        if (flags < 0x12) {
-            if (flags > 0x0F) {
-                Town_DrawTileEx(renderer, src_x, src_y, dest_x, dest_y,
-                              pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else {
-                switch (flags) {
-                case 0:
-                    Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                                pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 1:
-                case 3:
-                    Town_InitTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                     pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 2:
-                    Town_DrawTiles16bpp_Strided(renderer, src_x, src_y, dest_x, dest_y,
-                                              pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 4:
-                    Town_FlushTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                      pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 5:
-                    Town_DrawCachedTile(renderer, src_x, src_y, dest_x, dest_y,
-                                      pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                default:
-                    Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                                pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                }
-            }
-        } else {
-            if (flags == 0x20) {
-                Town_BlitTileSurface(renderer, src_x, src_y, dest_x, dest_y,
-                                   pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x22) {
-                Town_DrawTiles16bpp_Reversed(renderer, src_x, src_y, dest_x, dest_y,
-                                           pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x84 || flags == 0x04) {
-                Town_FlushTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                  pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x85 || flags == 0x05) {
-                Town_DrawCachedTile(renderer, src_x, src_y, dest_x, dest_y,
-                                  pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x102) {
-                Town_DrawTiles16bpp_Checker(renderer, src_x, src_y, dest_x, dest_y,
-                                          pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x202) {
-                Town_DrawTiles16bpp_Staggered(renderer, src_x, src_y, dest_x, dest_y,
-                                            pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x400 || flags == 0x402) {
-                Town_DrawTileLine(renderer, src_x, src_y, dest_x, dest_y,
-                                pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else {
-                Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                            pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            }
-        }
-
-        /* Unlock primary surface if needed */
-        if (g_surface_lost) {
-            g_primary_surface->Unlock(NULL);
-            g_surface_lost = 0;
-        }
+        pitch  = *(uint32_t*)0x4FD1AC;
+        pixels = *(uint8_t**)0x4FD1C0;
     } else {
-        /* Lock the custom surface */
-        DDSURFACEDESC desc;
         memset(&desc, 0, sizeof(desc));
         desc.dwSize = sizeof(desc);
-        IDirectDrawSurface4* surf = (IDirectDrawSurface4*)dest_surface;
-        HRESULT hr = surf->Lock(NULL, &desc, DDLOCK_WAIT, NULL);
+        IDirectDrawSurface4* lock_surf = (IDirectDrawSurface4*)dest_surface;
+        HRESULT hr = lock_surf->Lock(NULL, &desc, DDLOCK_WAIT, NULL);
         if (FAILED(hr)) {
             return false;
         }
-        uint8_t* pixels = (uint8_t*)desc.lpSurface;
-        uint32_t pitch = desc.lPitch;
-
-        /* Dispatch to appropriate tile function (same pattern as above) */
-        if (flags < 0x12) {
-            if (flags > 0x0F) {
-                Town_DrawTileEx(renderer, src_x, src_y, dest_x, dest_y,
-                              pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else {
-                switch (flags) {
-                case 0:
-                    Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                                pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 1: case 3:
-                    Town_InitTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                     pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 2:
-                    Town_DrawTiles16bpp_Strided(renderer, src_x, src_y, dest_x, dest_y,
-                                              pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 4:
-                    Town_FlushTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                      pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                case 5:
-                    Town_DrawCachedTile(renderer, src_x, src_y, dest_x, dest_y,
-                                      pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                default:
-                    Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                                pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-                    break;
-                }
-            }
-        } else {
-            if (flags == 0x20) {
-                Town_BlitTileSurface(renderer, src_x, src_y, dest_x, dest_y,
-                                   pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x22) {
-                Town_DrawTiles16bpp_Reversed(renderer, src_x, src_y, dest_x, dest_y,
-                                           pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x84 || flags == 0x04) {
-                Town_FlushTileCache(renderer, src_x, src_y, dest_x, dest_y,
-                                  pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x85 || flags == 0x05) {
-                Town_DrawCachedTile(renderer, src_x, src_y, dest_x, dest_y,
-                                  pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x102) {
-                Town_DrawTiles16bpp_Checker(renderer, src_x, src_y, dest_x, dest_y,
-                                          pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x202) {
-                Town_DrawTiles16bpp_Staggered(renderer, src_x, src_y, dest_x, dest_y,
-                                            pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else if (flags == 0x400 || flags == 0x402) {
-                Town_DrawTileLine(renderer, src_x, src_y, dest_x, dest_y,
-                                pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            } else {
-                Town_DrawTile(renderer, src_x, src_y, dest_x, dest_y,
-                            pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
-            }
-        }
-
-        surf->Unlock(NULL);
+        pixels = (uint8_t*)desc.lpSurface;
+        pitch  = desc.lPitch;
     }
 
-    return true;
+    bool result;
+    if (flags < 0x12) {
+        if (flags > 0x0F) {
+            result = surf->DrawTileEx(src_x, src_y, dest_x, dest_y,
+                                      pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else {
+            switch (flags) {
+            case 0:
+                result = surf->DrawTile(src_x, src_y, dest_x, dest_y,
+                                        pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+                break;
+            case 1:
+            case 3:
+                result = surf->InitTileCache(src_x, src_y, dest_x, dest_y,
+                                             pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+                break;
+            case 2:
+                result = surf->DrawTiles16bpp_Strided(src_x, src_y, dest_x, dest_y,
+                                                      pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+                break;
+            case 4:
+                result = surf->FlushTileCache(src_x, src_y, dest_x, dest_y,
+                                              pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+                break;
+            case 5:
+                result = surf->DrawCachedTile(src_x, src_y, dest_x, dest_y,
+                                              pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+                break;
+            default:
+                result = surf->DrawTile(src_x, src_y, dest_x, dest_y,
+                                        pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+                break;
+            }
+        }
+    } else if (flags < 0x85) {
+        if (flags == 0x84) {
+            result = surf->FlushTileCache(src_x, src_y, dest_x, dest_y,
+                                          pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else if (flags == 0x20) {
+            result = surf->BlitTileSurface(src_x, src_y, dest_x, dest_y,
+                                           pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else if (flags == 0x22) {
+            result = surf->DrawTiles16bpp_Reversed(src_x, src_y, dest_x, dest_y,
+                                                    pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else {
+            result = surf->DrawTile(src_x, src_y, dest_x, dest_y,
+                                    pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        }
+    } else if (flags < 0x103) {
+        if (flags == 0x102) {
+            result = surf->DrawTiles16bpp_Checker(src_x, src_y, dest_x, dest_y,
+                                                  pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else if (flags == 0x85) {
+            result = surf->DrawCachedTile(src_x, src_y, dest_x, dest_y,
+                                          pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else {
+            result = surf->DrawTile(src_x, src_y, dest_x, dest_y,
+                                    pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        }
+    } else {
+        if (flags == 0x202) {
+            result = surf->DrawTiles16bpp_Staggered(src_x, src_y, dest_x, dest_y,
+                                                    pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else if (flags == 0x400 || flags == 0x402) {
+            result = surf->DrawTileLine(src_x, src_y, dest_x, dest_y,
+                                        pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        } else {
+            result = surf->DrawTile(src_x, src_y, dest_x, dest_y,
+                                    pixels, pitch, clip_left, clip_top, clip_right, clip_bottom);
+        }
+    }
+
+    /* Unlock/return tail — matches the original's LAB_0042b8d2 block
+     * exactly: custom surfaces always unlock and fail the whole call if
+     * that unlock fails; the primary surface only unlocks if it *wasn't*
+     * already lost at function entry (entry_surface_lost) and currently
+     * IS lost, and only clears g_surface_lost if the unlock succeeds. */
+    if (dest_surface != (void*)g_primary_surface) {
+        /* Original: `if (iVar4==0) return uVar3; return false;` — exact
+         * zero check (this vtable slot's own convention), not SUCCEEDED. */
+        int unlock_result = ((IDirectDrawSurface4*)dest_surface)->Unlock(NULL);
+        if (unlock_result == 0) {
+            return result;
+        }
+        return false;
+    }
+    if (entry_surface_lost) {
+        return result;
+    }
+    if (!g_surface_lost) {
+        return result;
+    }
+    /* Original: `if (iVar4!=0) return uVar3;` (skip clearing on failure,
+     * still return the tile-dispatch result either way) then clear. */
+    int unlock_result = g_primary_surface->Unlock(NULL);
+    if (unlock_result != 0) {
+        return result;
+    }
+    g_surface_lost = 0;
+    return result;
 }
 
 #pragma GCC diagnostic pop

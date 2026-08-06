@@ -31,7 +31,7 @@
  *        +0x0C  height
  *        +0x10  has_palette (byte)
  *        +0x11  flags       (byte)
- *        +0x14  palette_ptr (128 uint32 entries = 0x200 bytes, if has_palette)
+ *        +0x14  palette_ptr (256 uint16 entries = 0x200 bytes, if has_palette)
  *        +0x18  pixels      (width*height byte buffer)
  *        +0x1C  ddraw_surf  (IDirectDrawSurface*)
  *
@@ -513,15 +513,205 @@ public:
 struct UIPANEL_Surface {
     /* vtable at +0x00 is compiler-managed via virtual methods */
     int32_t     mode;            // +0x04  0=software pixel buffer, 1=DDraw surface
-    int32_t     width;           // +0x08  surface width in pixels
+    int32_t     width;           // +0x08  surface width in pixels (also read as the
+                                  //        8bpp tile-cache row stride by the tile
+                                  //        rendering methods below)
     int32_t     height;          // +0x0C  surface height in pixels
     uint8_t     has_palette;     // +0x10  if 1, palette_ptr is owned allocation
     uint8_t     flags;           // +0x11  misc flags
     // padding +0x12-0x13
-    uint32_t*   palette_ptr;     // +0x14  128 uint32 entries (0x200 bytes), or shared ref
+    uint16_t*   palette_ptr;     // +0x14  256 uint16 entries (0x200 bytes), or shared
+                                  //        ref. Evidenced uint16_t* (not uint32_t*) by
+                                  //        Town_DrawTile (0x42BA90): byte-indexed,
+                                  //        2-byte-stride lookup — see UIPANEL_Surface::
+                                  //        DrawTile below.
     uint8_t*    pixels;          // +0x18  width*height byte buffer (mode 0 only)
     void*       ddraw_surf;      // +0x1C  IDirectDrawSurface* (mode 1 only)
     void*       palette;         // shared/borrowed palette pointer (distinct from owned palette_ptr)
+
+    /* ================================================================ */
+    /* Tile rendering methods (all __thiscall, RET 0x28 in the original) */
+    /*                                                                    */
+    /* These implement the low-level tile pixel-pusher layer dispatched  */
+    /* from UIPANEL_Blit (0x42B050) based on its flags parameter. They    */
+    /* were originally reverse engineered as a standalone "TownTileRenderer" */
+    /* class (town/TownTiles.h) before it was discovered that class was a */
+    /* duplicate view of this exact struct: every field TownTileRenderer  */
+    /* documented (mode@+0x04, stride@+0x08, palette@+0x14, pixels@+0x18, */
+    /* surface_ref@+0x1C) is this struct's mode/width/palette_ptr/pixels/ */
+    /* ddraw_surf at the identical offsets — confirmed by UIPANEL_Blit    */
+    /* passing its own `this` directly as the receiver of these calls.   */
+    /* Implementations live in town/TownTiles.cpp (Status: INTEGRATED).  */
+    /*                                                                    */
+    /* Rendering modes are dispatched from UIPANEL_Blit based on a flags */
+    /* parameter:                                                        */
+    /*   0x00  = DrawTile (base tile drawing)                            */
+    /*   0x01  = InitTileCache (palette-initialize tile cache)           */
+    /*   0x02  = DrawTiles16bpp_Strided (standard LTR 16bpp with shadow)  */
+    /*   0x04  = FlushTileCache (2x2 block-expand palette cache)         */
+    /*   0x05  = DrawCachedTile (2x2 block from cache)                   */
+    /*   0x0F  = (default: DrawTile fallback)                            */
+    /*   0x10  = DrawTileEx (3x2 block expansion)                        */
+    /*   0x20  = BlitTileSurface (right-to-left blit)                    */
+    /*   0x22  = DrawTiles16bpp_Reversed (H-mirror 16bpp)                */
+    /*   0x84  = (alias for FlushTileCache)                              */
+    /*   0x85  = (alias for DrawCachedTile)                              */
+    /*   0x102 = DrawTiles16bpp_Checker (checkerboard 16bpp)             */
+    /*   0x202 = DrawTiles16bpp_Staggered (staggered 16bpp)              */
+    /*   0x400 = DrawTileLine (alpha-blended tile line)                  */
+    /*   0x402 = (alias for DrawTileLine)                                */
+    /*   0x40  = scroll rect adjustment (CalcScrollRect/CalcScrollRect_Reversed) */
+    /* ================================================================ */
+
+    /**
+     * InitTileCache — Initialize tile cache via palette lookup.
+     * Address: 0x42B9C0. Called by: UIPANEL_Blit (flags=0x01, 0x03).
+     */
+    bool InitTileCache(int src_x, int src_y, int dest_x, int dest_y,
+                       uint8_t* dest_surface, uint32_t dest_pitch,
+                       int clip_left, int clip_top, int clip_right, int clip_bottom);
+
+    /**
+     * BlitElement — Extract surface from element and blit.
+     * Address: 0x42B960. Called by: EditWindow_render, Cursor_InitBackground,
+     * CGWND_TrackPiece_Render, UIPANEL_DrawButton.
+     */
+    void BlitElement(uint32_t src_x, uint32_t src_y, int dest_x, uint32_t dest_y,
+                     void* element, uint32_t clip_left, uint32_t clip_top,
+                     int clip_right, uint32_t clip_bottom, uint32_t flags);
+
+    /**
+     * DrawTile — Draw an 8-bit indexed tile with palette remapping.
+     * Address: 0x42BA90. Called by: UIPANEL_Blit (flags=0x00, default/0x0F).
+     */
+    bool DrawTile(int src_x, int src_y, int dest_x, int dest_y,
+                  int dest_surface, uint32_t dest_pitch,
+                  int clip_left, int clip_top, int clip_right, int clip_bottom);
+
+    /**
+     * FlushTileCache — Flush tile cache by expanding each pixel to 2x2 block.
+     * Address: 0x42BB90. Called by: UIPANEL_Blit (flags=0x04, 0x84).
+     */
+    bool FlushTileCache(int src_x, int src_y, int dest_x, int dest_y,
+                        uint32_t dest_surface, uint32_t dest_pitch,
+                        int clip_left, int clip_top, int clip_right, uint32_t clip_bottom);
+
+    /**
+     * DrawCachedTile — Draw tile from cache with 2x2 expansion.
+     * Address: 0x42BC80. Called by: UIPANEL_Blit (flags=0x05, 0x85).
+     */
+    bool DrawCachedTile(uint32_t src_x, int src_y, int dest_x, int dest_y,
+                        uint32_t dest_surface, uint32_t dest_pitch,
+                        int clip_left, int clip_top, int clip_right, uint32_t clip_bottom);
+
+    /**
+     * DrawTileEx — Extended tile drawing with 3x2 pixel expansion.
+     * Address: 0x42BD70. Called by: UIPANEL_Blit (flags 0x10-0x1F).
+     */
+    bool DrawTileEx(int src_x, int src_y, int dest_x, int dest_y,
+                    uint32_t dest_surface, uint32_t dest_pitch,
+                    uint32_t clip_left, uint32_t clip_top,
+                    int clip_right, int clip_bottom);
+
+    /**
+     * DrawTileLine — Alpha-blended tile line drawing.
+     * Address: 0x42BEC0. Called by: UIPANEL_Blit (flags=0x400, 0x402).
+     */
+    bool DrawTileLine(int src_x, int src_y, int dest_x, int dest_y,
+                      int dest_surface, uint32_t dest_pitch,
+                      int clip_left, int clip_top, int clip_right, int clip_bottom);
+
+    /**
+     * DrawTiles16bpp_Strided — Standard left-to-right 16bpp tile with shadow.
+     * Address: 0x42C050. Called by: UIPANEL_Blit (flags=0x02).
+     */
+    bool DrawTiles16bpp_Strided(int src_x, int src_y, int dest_x, int dest_y,
+                                int dest_surface, uint32_t dest_pitch,
+                                int clip_left, int clip_top, int clip_right, int clip_bottom);
+
+    /**
+     * DrawTiles16bpp_Reversed — Horizontal mirror 16bpp tile.
+     * Address: 0x42C130. Called by: UIPANEL_Blit (flags=0x22).
+     */
+    bool DrawTiles16bpp_Reversed(int src_x, int src_y, int dest_x, int dest_y,
+                                 int dest_surface, uint32_t dest_pitch,
+                                 int clip_left, int clip_top, int clip_right, int clip_bottom);
+
+    /**
+     * DrawTiles16bpp_Checker — Checkerboard 16bpp tile (every other row).
+     * Address: 0x42C220. Called by: UIPANEL_Blit (flags=0x102).
+     */
+    bool DrawTiles16bpp_Checker(int src_x, int src_y, int dest_x, int dest_y,
+                                uint32_t dest_surface, uint32_t dest_pitch,
+                                int clip_left, uint32_t clip_top,
+                                int clip_right, int clip_bottom);
+
+    /**
+     * DrawTiles16bpp_Staggered — Staggered 16bpp tile dither overlay.
+     * Address: 0x42C470. Called by: UIPANEL_Blit (flags=0x202).
+     */
+    bool DrawTiles16bpp_Staggered(int src_x, int src_y, int dest_x, int dest_y,
+                                  uint32_t dest_surface, uint32_t dest_pitch,
+                                  int clip_left, uint32_t clip_top,
+                                  int clip_right, int clip_bottom);
+
+    /**
+     * CopyTiles8bpp_Transparent — Copy 8bpp tile data skipping zero pixels.
+     * Address: 0x42C330. Called by: the clock-digit animation helper (0x447400).
+     * NOTE: 3rd/4th args (dest rect right/bottom) are passed by callers but
+     * unused internally; dest_surface is an 8bpp buffer (not 16bpp).
+     */
+    void CopyTiles8bpp_Transparent(int dest_x, int dest_y,
+                                   int dest_r, int dest_b,
+                                   uint8_t* dest_surface, int dest_pitch,
+                                   int src_left, int src_top,
+                                   int src_right, int src_bottom);
+
+    /**
+     * CopyTiles8bpp_Direct — Copy 8bpp tile data directly (no transparency).
+     * Address: 0x42C3D0. Called by: UIPANEL_FillRect (0x42A610).
+     * NOTE: same unused-argument layout as CopyTiles8bpp_Transparent.
+     */
+    void CopyTiles8bpp_Direct(int dest_x, int dest_y,
+                              int dest_r, int dest_b,
+                              uint8_t* dest_surface, int dest_pitch,
+                              int src_left, int src_top,
+                              int src_right, int src_bottom);
+
+    /**
+     * BlitTileSurface — Right-to-left 16-bit tile blit with transparency.
+     * Address: 0x42C890. Called by: UIPANEL_Blit (flags=0x20).
+     * NOTE: dest_x/dest_y args are present but unused (src_x/src_y serve as
+     * the destination surface origin too).
+     */
+    bool BlitTileSurface(int src_x, int src_y,
+                         int dest_x, int dest_y,
+                         uint32_t dest_surface, uint32_t dest_pitch,
+                         int clip_left, int clip_top,
+                         int clip_right, int clip_bottom);
+
+    /**
+     * CalcScrollRect / CalcScrollRect_Reversed — Compute the visible tile
+     * rect from a scroll position, clamped against the surface bounds
+     * (queried via a GetSurfaceDesc-style vtable call on `surface_obj` at
+     * vtable+0x58) and an input clip rect. Rewrites `rect` in place.
+     * Address: 0x42C590 (forward) / 0x42C700 (reversed).
+     * Called by: UIPANEL_Blit (flags=0x40), selecting forward vs. reversed
+     * based on this->mode (1=forward, 0=reversed).
+     *
+     * CAVEAT: the original x86 callee pops 0x10 (4 stack dwords) via its
+     * RET instruction, and the caller (UIPANEL_Blit) pushes 4 values before
+     * the call, but only 2 of those four are demonstrably read by the
+     * decompiled body (the `rect` pointer and `surface_obj`) — Ghidra's own
+     * decompiler shows unresolved "unaff_EBX"/"unaff_EBP"/"ptStack_4"
+     * artifacts for the other two, which trace back to the SAME `rect`
+     * pointer being dereferenced early (this may just be a decompiler
+     * tracking limitation, not two genuinely distinct extra parameters).
+     * Implemented here with the two parameters the body unambiguously uses;
+     * revisit if the 4-vs-2 stack-argument discrepancy turns out to matter.
+     */
+    bool CalcScrollRect(RECT* rect, void* surface_obj);
+    bool CalcScrollRect_Reversed(RECT* rect, void* surface_obj);
 };
 
 /* ================================================================ */

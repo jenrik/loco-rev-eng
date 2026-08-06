@@ -58,6 +58,19 @@ void   GLOBAL_free(void* ptr);                  /* 0x465CD0 */
 
 /* C++ linkage — these have C++ mangled symbol definitions in object files */
 void   GameObject_GetRelPos(void* obj, int* out, int x, int y);  /* 0x436A40 */
+
+/* UIPANEL_Blit — real def: ui/UIPANEL_Surface.cpp:0x42B050, C++-mangled
+ * (no extern "C"). Was declared inside the extern "C" block below with a
+ * `void` return, giving it plain C linkage that didn't match the real
+ * mangled symbol — every one of this file's ~9 call sites was a call-0
+ * landmine. Moved out of extern "C"; param types already matched
+ * positionally (renderer, src_x, src_y, dest_x, dest_y, dest_surface,
+ * clip_left, clip_top, clip_right, clip_bottom, flags), only the linkage
+ * and return type were wrong. */
+bool   UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
+                    int32_t dest_x, uint32_t dest_y,
+                    void* dest_surface, uint32_t clip_left, uint32_t clip_top,
+                    int32_t clip_right, uint32_t clip_bottom, uint32_t flags); /* 0x42B050 */
 /* GameObject_Draw — real address 0x405E60 (disassembly shows __thiscall + 6 stack args,
  * RET 0x18), but current stubs_impl.cpp:436 only defines (void*). The render_selection
  * call site passes 6 arguments; this mismatch is recorded as blocked-by-scope since
@@ -85,11 +98,7 @@ extern "C" {
     void   UIPANEL_EndPaintEx(void* self, HWND hWnd, int unk1,
                               byte unk2, RECT* rect);                /* 0x42B2D0 */
 
-    /* UIPANEL blit */
-    void   UIPANEL_Blit(void* src_surface, uint32_t src_x, uint32_t src_y,
-                        int32_t src_w, uint32_t src_h,
-                        void* dest_surface, uint32_t dest_x, uint32_t dest_y,
-                        int32_t dest_w, uint32_t dest_h, uint32_t flags); /* 0x42B050 */
+    /* UIPANEL_Blit declared above, outside this extern "C" block (C++ linkage). */
     void*  UIPANEL_CreateSurface(void* obj);                         /* 0x42AF30 */
 
     /* Tile map */

@@ -783,9 +783,12 @@ public:
     /* NOTE: the tile-render primitives (BlitElement 0x42B960,
      * init_tile_cache 0x42B9C0, draw_tile 0x42BA90,
      * flush_tile_cache 0x42BB90, draw_cached_tile 0x42BC80) are the
-     * canonical members of TownTileRenderer (town/TownTiles.h) — the
-     * UIPANEL_Blit dispatch context. They were historically duplicated
-     * on Town; the TownTileRenderer forms are authoritative. */
+     * canonical members of UIPANEL_Surface (graphics/LOCOBITMAP.h,
+     * implemented in town/TownTiles.cpp) — the UIPANEL_Blit dispatch
+     * context. They were historically duplicated on Town, then on a
+     * standalone "TownTileRenderer" class that turned out to be a
+     * duplicate view of UIPANEL_Surface itself; the UIPANEL_Surface
+     * forms are authoritative. */
 };
 
 /* ================================================================== */

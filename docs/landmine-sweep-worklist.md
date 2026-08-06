@@ -5,11 +5,34 @@ Tracked continuation of the `call 0` landmine class documented in PROGRESS.md
 is the durable worklist for the remaining sweep so a future session can resume
 from it instead of re-deriving it.
 
-**Current state (2026-08-06 22:00 UTC, agent dispatch wave 6)**: 409 `call 0` sites
-(down from 412). Fixes: wave_io.c `__thiscall` removal (3 sites),
-BuildingDescriptorEditor.cpp `WNDPROC_CriticalSectionLock` linkage fix (1 site).
-Added loud stubs for 8 Stream I/O functions per MISSING category. Tests: 22/30
-passing; 8 failures due to stub assert paths being exercised (expected).
+**Current state (2026-08-06, Town subsystem session)**: 287 `call 0` sites
+(down from 333). Fix: the `Town_Draw*`/`Town_*TileCache*` cluster below (46
+sites, 13 symbols) — see "Fixed so far". **Correction to this file's own
+prior claim**: the "Genuinely missing" categorization for 11 of those 13
+symbols was wrong — they were never missing from the binary or from the
+tree; `town/TownTiles.cpp` already had validated, `Status: INTEGRATED`
+implementations of them under a class called `TownTileRenderer`. The actual
+bug was that `TownTileRenderer` was an undiscovered duplicate of the
+already-canonical `UIPANEL_Surface` struct (graphics/LOCOBITMAP.h) — same
+field layout at every offset the tile methods touch — and `UIPANEL_Blit`
+(ui/UIPANEL_Surface.cpp) was calling nonexistent `extern "C"`-flavored free
+functions instead of `UIPANEL_Surface`'s real typed methods. Fixed by
+merging `TownTileRenderer` into `UIPANEL_Surface` (deleted `town/TownTiles.h`,
+rescoped `town/TownTiles.cpp`'s definitions to `UIPANEL_Surface::`) and
+rewriting `UIPANEL_Blit` to call through the typed methods. Lesson for future
+sessions: a symbol landing in "Genuinely missing" from the caller-side
+`call 0` census doesn't mean no implementation exists anywhere — check for a
+differently-named class with a matching field layout before assuming new
+Ghidra RE work is needed.
+
+Tests: 30/30 (`meson test -C build`), verified against a real asset checkout
+(symlinked `lego-loco-unpacked/` — see the false-negative note below; a bare
+worktree checkout without that symlink will misreport ~8 failures that have
+nothing to do with code correctness). **Caveat**: 30/30 passing does NOT mean
+the mode==0 (software tile) rendering path is pixel-correct — no existing
+test drives `UIPANEL_Blit` with `mode==0`, since every call site into it was
+call-0 (unreachable) until this fix. The tests prove the linkage now
+resolves and nothing else regressed, not that the tile pixels are right.
 
 ## Methodology
 
@@ -184,6 +207,7 @@ calls where it's harmless) and flagged for a dedicated future pass.
 | 3 | Wave_io.c + BuildingDescriptorEditor.cpp cluster | Removed stray `__thiscall` annotations from extern declarations in wave_io.c (Game_ReadChunk, Game_LoadWaveFile). Moved `WNDPROC_CriticalSectionLock` from `extern "C"` block in BuildingDescriptorEditor.cpp to match real C++-mangled definition at 0x4647A0 (`_Z27WNDPROC_CriticalSectionLockPiPc`), updated signature to `(int*, char*)`, fixed call sites to cast stream. Added loud stubs (fprintf+assert) for MISSING Stream I/O family (WNDPROC_StreamPrintf, WNDPROC_StreamWrite, WNDPROC_StreamReadLine, WNDPROC_StreamSeekForward, Stream_BeginEnum, Stream_BeginRead, CRT_fabs, CRT_fmod) in stubs_impl.cpp per project policy. |
 | 20 | `UIPANEL` family (ui/UIPANEL.cpp, ui/UIPANEL_Draw.cpp, ui/UIPANEL_Surface.cpp) | Re-attempted after the batch-2 worktree agent left this cluster broken/uncommitted (see incident notes above). Split into 3 commits. **DDRAW_PresentRect** (5): the real bug was in the canonical declaration point, `graphics/LOCOBITMAP.h`, which declared the Windows RECT*/HWND/uint8_t shape unconditionally instead of guarding it `#ifdef _WIN32`/`#else` like `world/tilemap.h` already does — fixed there, which resolved every caller at once. **UI_IsBitmapReady** (1): two real functions share this name with different linkage (a C-linkage one in `ui/UI_ChildWindow.cpp`, a C++-linkage `int(int)` one declared via `game/Panel.h` bound to `shared/stubs_impl.cpp`'s stub); UIPANEL.cpp's own `void*`-param declaration matched neither — removed it, let the call bind to the same Panel.h symbol `game/Panel.cpp` already uses. **RESMGR_ResourceData_Init/ReleaseResource/IsSaveHeader/LoadResource** (2+2+2+1=7): all declared `void*`-typed against real defs (`resources/ResDataSave.cpp`) taking `RESDATA*`, two with mismatched return types too (`bool`, `int8_t`) — fixed all four, plus a latent stack-buffer bug this exposed: `UIPANEL_DrawEditField`'s scratch RESDATA was `int local_data[22]` (88 bytes) against `sizeof(RESDATA) == 0x1D8` (472 bytes); harmless only while the call was call-0, would have been a live stack overflow once linked, replaced with a properly-sized `RESDATA` object. **WIN32_StreamRead / DDRAW_GetDdrawErrorString** (4+1=5): real defs (`shared/link_stubs.cpp`) are `extern "C"` (plain, unmangled); UIPANEL_Surface.cpp declared them with ordinary C++ linkage — fixed with local `extern "C"`. **WIN32_StreamDestroy** (1): param was `int`, real def takes `void*`. **DDRAW_RestoreSurfaces** (1): first param was `int*`, real def (`graphics/sdl3_ddraw.cpp` host path) takes `IDirectDrawSurface4*`. Also corrected `DDRAW_GetDdrawErrorString`'s own real definition, which took zero params and returned nothing (could never match a caller needing the HRESULT code) — its only call site is unreachable on host (behind a `CreateSurface` stub that always "succeeds"), so gave it the correct `(int)` signature and made it a loud stub (fprintf+assert) rather than fabricating a DDERR-to-string table. Verified: 367 → 347 (exactly 20). `meson test -C build`: 30/30 after each of the 3 commits. `meson test -C build --suite integration`: 12/12, no new STUB firings. |
 | 15 | `Cursor` family (input/Cursor_internal.h, input/Cursor_impls.cpp, input/Cursor_new_impls.cpp, ui/CursorEditWindow.cpp, shared/link_stubs.cpp, shared/stubs_impl.cpp, shared/defsym_stubs.cpp) | Re-attempted after batch-2's worktree agent left this a net-zero outcome. First added `NetworkPlayerList::EnumeratePlayers` (0x443260) — Ghidra had mislabeled a real `__thiscall` method (ECX=this, 0 explicit args) as free-function `DPLAY_EnumeratePlayers`; loads cached player names from a locale-specific PostBag/Easter file. **WIN32_StreamOpenFile / WIN32_StreamRead** (2, `Cursor::init`): only real defs are `extern "C"`; moved out of default C++-linkage declarations, fixed `WIN32_StreamOpenFile`'s return type (`void*` not `int*`). **WIN32_StreamOpenPath** (1, `CursorEditWindow::init`, new site not in the existing cluster-B row above): same bug — only extern "C" def exists, no C++-mangled twin (unlike its WIN32_Stream/WNDPROC_Stream siblings, which do have one in `shared/defsym_stubs.cpp`). **DPLAY_LeaveSession** (1, `Cursor::hide`): real def took `(void*, int32_t)`, header declared `(void*)` — disassembly of 0x443440 (loops `surface_cache[256]`, ECX=this, zero pushed args) proved the 1-param header shape was the correct one; fixed the definition instead of the caller. **Game_SetScreenMode** (1, `Cursor::set_capture`): `uint8_t` vs `char` — distinct Itanium-mangled types; the only real definition (a loud stub) uses `char`. Verified the stub doesn't fire in either test suite before committing (`Cursor::set_capture`'s callers are not exercised by current GUI test coverage). **CGWND_PumpMessages** (1, `draw_locomotive_preview`): confirmed via disassembly this is the single-`char` "loading transition pump" overload (`shared/defsym_stubs.cpp`), not the two-arg main-loop pump — fixed the declaration and changed the call site from `CGWND_PumpMessages(nullptr)` (wouldn't compile against `char`) to `CGWND_PumpMessages(0)`. **NET_GetOrCreateSurface** (4, `draw_postcard_preview`) and the `DPLAY_EnumeratePlayers` call in `update_network_names` (1) were migrated to the already-integrated typed `NetworkPlayerList` methods (`g_dplay->GetOrCreateSurface(...)`, `g_dplay->EnumeratePlayers()`) rather than mechanically fixed as free functions, since real implementations already existed on the class — this also surfaced the `_g_dplay` shadow-global bug (see above) in the same two functions, fixed by switching to the real `g_dplay`. **DPLAY_RenderPlayer** (1, `blit_edit_preview`): NOT migrated to the typed method — `NetworkPlayerList::RenderPlayer`'s existing implementation relies on `&param2` aliasing adjacent stack parameters as a packed RECT (a literal-ABI x86 stack-layout assumption already flagged as a known 8-vs-9-arg fidelity gap), too fragile to load-bear a new call site under time budget; instead matched the declaration to the free-function no-op stub's real (and already-correct) signature. **NET_FindPlayer / NET_UploadAsset / PlaySoundFile** (3, `upload_custom_content`): genuinely missing (no real impl anywhere) but proven unreachable on host — `GetOpenFileNameA` (graphics/sdl3_window.cpp) always returns FALSE in headless/SDL3 mode, and `Cursor::show()` unconditionally zeroes `obj_184->upload_id` whenever a player record is attached, so `NET_FindPlayer`'s `upload_id != 0` gate can never trigger either; added loud stubs (fprintf+assert) with the correct signatures. Every call-0 site was address-anchored against live disassembly (not just positional `.o` alignment) before being attributed to a symbol. Verified: 347 → 333 (exactly 15, confirmed 0 remaining in any `Cursor::`/`CursorEditWindow::` function). Rebuilt from a clean worktree (fresh `meson setup`, symlinked `lego-loco-unpacked/`) after the shared working tree was corrupted by a concurrent session (see below). `meson test -C build`: 30/30. `meson test -C build --suite integration`: 1/1 (12/12 sub-tests), no new STUB firings. |
+| 46 | `Town_Draw*`/`Town_*TileCache*` cluster (ui/UIPANEL_Surface.cpp, graphics/LOCOBITMAP.h, town/TownTiles.cpp) | **Not genuinely missing** (correcting this file's own prior claim below) — `town/TownTiles.cpp` already had `Status: INTEGRATED`, instruction-validated implementations of `DrawTile`, `InitTileCache`, `FlushTileCache`, `DrawCachedTile`, `DrawTileEx`, `BlitTileSurface`, `DrawTiles16bpp_Strided/Reversed/Checker/Staggered`, and `DrawTileLine`, but as methods of a standalone `TownTileRenderer` class that turned out to be an undiscovered duplicate of `UIPANEL_Surface` (graphics/LOCOBITMAP.h) — same field layout at every offset the methods touch (`mode`@+4, `stride`→`width`@+8, `palette`→`palette_ptr`@+0x14, `pixels`@+0x18, `surface_ref`→`ddraw_surf`@+0x1C), confirmed by `UIPANEL_Blit` passing its own `this` directly as the receiver of these calls. `UIPANEL_Blit` (0x42B050) was calling `extern "C"`-flavored free-function declarations matching no real symbol (only the typed methods exist) — every dispatch site was call-0. Fixed by merging `TownTileRenderer` into `UIPANEL_Surface` (deleted `town/TownTiles.h`, rescoped `TownTiles.cpp`'s definitions to `UIPANEL_Surface::`, renamed the 3 shifted fields) and rewriting `UIPANEL_Blit` to call through the typed methods. Also fixed `UIPANEL_Surface::palette_ptr`'s declared type: `uint32_t*` (wrong, "128 uint32 entries") → `uint16_t*` (right, evidenced by `DrawTile`'s byte-indexed 2-byte-stride palette lookup and matching what `UIPANEL_ReadPaletteFromBMP`'s own comment already said). **Two real, pre-existing correctness bugs found and fixed in the same function while rewiring it** (both in the untested, never-validated `mode==1` DDraw-hardware branch): (1) the software-tile dispatch switch was incorrectly ALSO reachable from the `mode==1` branch and could double-dispatch for some flag values (e.g. `flags==0x20` ran both the switch's default case AND the separate `flags>=0x20` block) — the original is a single if/else-if/switch chain, exactly one dispatch per call, restored; (2) `mode==1` never calls a tile method in the original at all — it always performs exactly one `IDirectDrawSurface4::Blt()` call with `dest_rect`/`src_rect` built from `(src_x,src_y,dest_x,dest_y)` and `(clip_left,clip_top,clip_right,clip_bottom)` respectively — the existing code had those two rects swapped, and had the `DDBLT_KEYSRC`/flags==0/1 polarity backwards. Also fixed a second, independent call-0 landmine this merge surfaced: `TownTiles.cpp`'s own `BlitElement` method called `UIPANEL_Blit` with a stray `int**`-typed 5th parameter against the real `void*` — fixed. **Two symbols added as loud deferred stubs, not implemented**: `Town_CalcScrollRect` (0x42C590) and `Town_CalcScrollRect_Reversed` (0x42C700) — Ghidra's own decompilation of both is internally inconsistent about the real parameter count (caller pushes 4 stack dwords, callee's `RET 0x10` pops 4, but the decompiled body only demonstrably reads 2 of them; the other two surface only as unresolved `unaff_EBX`/`unaff_EBP`/`ptStack_4` artifacts that may just be the decompiler losing track of the same RECT pointer across intervening `SetRect`/`IntersectRect` calls, not genuinely distinct parameters) — rather than guess at pixel-level rect math with this much open uncertainty, implemented as loud stubs (fprintf+assert) per CLAUDE.md's stub policy; tracked in PROGRESS.md. Verified: 333 → 287 (exactly 46, matches this row's own count: 8+6+6+3×8+1+1). `meson test -C build`: 30/30 (with a real asset checkout — a bare worktree without `lego-loco-unpacked/` symlinked misreports 8 unrelated failures, see the false-negative note above). **Caveat**: no test drives `UIPANEL_Blit` with `mode==0` (the software tile path was entirely unreachable/call-0 before this fix), so 30/30 proves the linkage now resolves and nothing regressed — not that the mode==0 tile pixels are correct. Separately (not counted in the 46, since it wasn't a `call 0` — it was silently binding to an unrelated wrong stub in `shared/defsym_stubs.cpp` instead): `town/Town.cpp` declared `UIPANEL_Blit` inside its own `extern "C"` block with a `void` return, giving it plain-C linkage that didn't match the real C++-mangled symbol at any of its ~9 call sites; moved out of `extern "C"`, return type corrected to `bool`. |
 
 ## Near-match (mechanical declaration/linkage fixes) — still open
 
@@ -241,39 +265,25 @@ calls where it's harmless) and flagged for a dedicated future pass.
 
 ## Genuinely missing (need Ghidra RE or a loud deferred stub) — still open
 
-The `Town_Draw*` / `Town_*TileCache*` cluster (8 symbols, called only from
-`UIPANEL_Blit`) is the largest and most consequential: it looks like the
-low-level tile pixel-pusher layer was never implemented at all, one level
-below the "Town rendering — Phase B: tile-placement metadata" gap already
-tracked in PROGRESS.md. Worth investigating whether fixing this is actually a
-*precondition* for Phase B ever producing visible pixels, not an independent
-gap.
+The `Town_Draw*` / `Town_*TileCache*` cluster that used to be listed here (13
+symbols) is now fixed — see "Fixed so far" above. It was never actually
+"genuinely missing" (see the correction note near the top of this file):
+11 of the 13 had validated implementations sitting under the wrong class
+name, and the other 2 (`Town_CalcScrollRect`/`_Reversed`) are now loud
+deferred stubs rather than call-0 landmines.
 
 | Sites | Symbol | Callers |
 |---|---|---|
-| 8 | `Town_DrawTile` | UIPANEL_Blit(...) |
 | 8 | `WNDPROC_StreamPrintf` (STUB) | BuildingDescriptorEditor::draw_border_grid(void*), BuildingDescriptorEditor::paint_edit_regions(void*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 7 | `WNDPROC_StreamWrite` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
-| 6 | `Town_FlushTileCache` | UIPANEL_Blit(...) |
-| 6 | `Town_DrawCachedTile` | UIPANEL_Blit(...) |
 | 5 | `ReleaseSoundResource` | HelpWnd::go_next_page(), HelpWnd::go_prev_page(), HelpWnd::hide(), GameSetupPanel::base_destructor() |
 | 4 | `LoadSoundResource` | HelpWnd::go_next_page(), HelpWnd::go_prev_page() |
-| 3 | `Town_InitTileCache` | UIPANEL_Blit(...) |
-| 3 | `Town_DrawTiles16bpp_Strided` | UIPANEL_Blit(...) |
-| 3 | `Town_DrawTileEx` | UIPANEL_Blit(...) |
-| 3 | `Town_BlitTileSurface` | UIPANEL_Blit(...) |
-| 3 | `Town_DrawTiles16bpp_Reversed` | UIPANEL_Blit(...) |
-| 3 | `Town_DrawTiles16bpp_Checker` | UIPANEL_Blit(...) |
-| 3 | `Town_DrawTiles16bpp_Staggered` | UIPANEL_Blit(...) |
-| 3 | `Town_DrawTileLine` | UIPANEL_Blit(...) |
 | 3 | `WNDPROC_StreamReadLine` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 2 | `CRT_fabs` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 2 | `ScriptedObject_ParseStream` | ScriptedObject::HandleEvent(unsigned int, char const*) |
 | 2 | `Ordinal_1` | GameAudio::Init() |
 | 2 | `EditorState_Copy` | Vehicle::UpdateEngineSound() |
 | 2 | `ScriptedObject_InitBase` | ScriptedObject::RemoveChild(), ScriptedObject::AddChild(unsigned int, char const*) |
-| 1 | `Town_CalcScrollRect` | UIPANEL_Blit(...) |
-| 1 | `Town_CalcScrollRect_Reversed` | UIPANEL_Blit(...) |
 | 1 | `CRT_fmod` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 1 | `Stream_BeginEnum` (STUB) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 1 | `WNDPROC_StreamSeekForward` (STUB) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) — STUB: loud fprintf+assert in stubs_impl.cpp. |
@@ -333,6 +343,50 @@ scratch:
   documented in PROGRESS.md's "win32_stream.c removed (partial)" entry as
   already covering part of this class hierarchy) before assuming these need
   brand new stream primitives.
+
+## UIPANEL_Blit callers — wrong signature, newly discovered, still open
+
+While fixing the `Town_Draw*` cluster above (which is `UIPANEL_Blit`'s own
+*callee* side), `nm --print-file-name build/lego_loco.p/*.o | grep
+UIPANEL_Blit` turned up a large, separate, pre-existing problem on
+`UIPANEL_Blit`'s *caller* side: at least 15 files declare `UIPANEL_Blit`
+locally with signatures that don't match its one real definition
+(`ui/UIPANEL_Surface.cpp`, mangled `_Z12UIPANEL_BlitPvjjijS_jjijj` —
+`(void*, uint32_t,uint32_t,int32_t,uint32_t, void*, uint32_t,uint32_t,int32_t,uint32_t,uint32_t)`).
+This is NOT counted in the 46-site fix above (none of these are Town
+subsystem files, so fixing them was out of scope for this session), and not
+all of them show up in the plain `call 0` census the way the Town cluster
+did — some (e.g. `town/Town.cpp`, fixed above) instead silently bind to an
+unrelated wrong stub (`shared/defsym_stubs.cpp`'s plain-C `UIPANEL_Blit`),
+which is arguably worse than a loud call-0 crash and wouldn't be caught by
+grepping for `call 0`. A future sweep should check every caller by symbol,
+not just by `call 0` count.
+
+Confirmed-wrong callers (all declare `(void*,int,int,int,int,void*,int,int,int,int,{h|i|j})`
+— all-`int` instead of the real mixed `uint32_t`/`int32_t` shape, or other
+mismatches):
+
+| File | Mangled symbol referenced | Matches real def? |
+|---|---|---|
+| `ui/ButtonSprite.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiih` | No |
+| `input/Cursor.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
+| `input/Cursor_new_impls.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
+| `network/DPlayManager.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
+| `network/NetworkPlayerList.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
+| `ui/GameSetupPanel.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
+| `world/tilemap.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiii` | No |
+| `core/GameObject.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | No |
+| `ui/AboutDialog.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | No |
+| `ui/UIPANEL.cpp` | `_Z12UIPANEL_BlitPviiiiS_iiiij` | No |
+| `game/BuildingPanel.cpp` | plain `UIPANEL_Blit` (extern "C") | No |
+| `graphics/LOCOBITMAP.cpp` | plain `UIPANEL_Blit` (extern "C") | No |
+| `native/NETMAN_NetworkUI.c` | plain `UIPANEL_Blit` (C, expected) | N/A — real C file, needs a matching C-linkage shim if it genuinely needs to call this C++ function |
+| `town/Town.cpp` | ~~plain `UIPANEL_Blit`~~ | **Fixed this session** — see "Fixed so far" |
+| `town/TownTiles.cpp` (`BlitElement`) | ~~`_Z12UIPANEL_BlitPvjjijPPijjijj`~~ | **Fixed this session** — see "Fixed so far" |
+
+`game/BuildingMgr.cpp` also references `_Z19UIPANEL_BlitSurfacePviiS_ii` —
+that's a genuinely different function (`UIPANEL_BlitSurface`, 0x42A540),
+not part of this cluster; don't conflate the two when someone picks this up.
 
 ## Functions excluded from automated alignment (call-count mismatch)
 
