@@ -534,12 +534,12 @@ void Cursor::blit_edit_preview()
          * sites use the 8-argument form below (see Cursor_internal.h). */
         DPLAY_RenderPlayer(
             _g_dplay,
-            hdcVal,
-            this->obj_184,
+            reinterpret_cast<void*>(static_cast<intptr_t>(hdcVal)),
+            static_cast<int32_t>(reinterpret_cast<intptr_t>(this->obj_184)),
             _g_primary_surface,
             this->edit_preview_rect.left,
             this->edit_preview_rect.top,
-            this->edit_preview_rect.right,
+            static_cast<uint32_t>(this->edit_preview_rect.right),
             &this->edit_preview_rect);
     }
 }
@@ -885,7 +885,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
 
     /* Pump messages */
-    CGWND_PumpMessages(nullptr);
+    CGWND_PumpMessages(0);
     EnableWindow(this->hWnd, 1);
 }
 
@@ -895,7 +895,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
 /*                                                                     */
 /* Walks the toolbar sprite cache forward/backward from the current   */
 /* selection to determine which postcard thumbnails are visible,      */
-/* loading each via NET_GetOrCreateSurface. Updates palette_start_idx  */
+/* loading each via g_dplay->GetOrCreateSurface(). Updates palette_start_idx */
 /* (+0x2BC) / palette_end_idx (+0x2B8).                                */
 /*                                                                     */
 /* Rewritten to match the decompilation: direction=0 walks backward   */
@@ -919,8 +919,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
         uint8_t idx = static_cast<uint8_t>(this->palette_start_idx) - 1;
         ButtonSprite* surf = this->toolbar_sprites[idx];
         if (surf == nullptr) {
-            surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-                _g_dplay, this->editor_flags[2], this->editor_flags[1], idx + 1, 1));
+            surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
+                this->editor_flags[2], this->editor_flags[1], idx + 1, 1));
             this->toolbar_sprites[idx] = surf;
         }
 
@@ -941,8 +941,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
                 surf = this->toolbar_sprites[nextIdx];
                 if (surf == nullptr) {
-                    surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-                        _g_dplay, this->editor_flags[2], this->editor_flags[1],
+                    surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
+                        this->editor_flags[2], this->editor_flags[1],
                         static_cast<uint8_t>(nextIdx + 1), 1));
                     this->toolbar_sprites[nextIdx] = surf;
                 }
@@ -993,8 +993,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
         return 0;
     }
 
-    ButtonSprite* surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-        _g_dplay, this->editor_flags[2], this->editor_flags[1], seqNum + 1, 1));
+    ButtonSprite* surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
+        this->editor_flags[2], this->editor_flags[1], seqNum + 1, 1));
     this->toolbar_sprites[cacheIdx] = surf;
 
     if (surf == nullptr) {
@@ -1025,8 +1025,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
             totalWidth += 10;  /* gap */
 
-            surf = static_cast<ButtonSprite*>(NET_GetOrCreateSurface(
-                _g_dplay, this->editor_flags[2], this->editor_flags[1],
+            surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
+                this->editor_flags[2], this->editor_flags[1],
                 nextSeq + 1, 1));
             this->toolbar_sprites[cacheIdx] = surf;
 

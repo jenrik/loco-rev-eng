@@ -439,6 +439,22 @@ void Panel_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __
 
 /* Game stubs */
 void Game_SetScreenMode(void*, char, char, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+
+/**
+ * NET_FindPlayer / NET_UploadAsset / PlaySoundFile — Cursor::upload_custom_content()
+ * (0x419B10) network-upload helpers. Genuinely missing (no real
+ * implementation exists anywhere in the tree under any signature) but
+ * confirmed unreachable on the host build: the whole custom-content upload
+ * flow is gated by GetOpenFileNameA (graphics/sdl3_window.cpp), which
+ * always returns FALSE in headless/SDL3 mode ("no file dialog"), and
+ * Cursor::show() unconditionally zeroes obj_184->upload_id whenever a
+ * player record is attached — so upload_id can never be non-zero when
+ * NET_FindPlayer's gate checks it either. Loud stubs per CLAUDE.md's
+ * stub policy (never a silent no-op for missing internal logic).
+ */
+int NET_FindPlayer(int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); return 0; }
+uint16_t NET_UploadAsset(int, char*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); return 0; }
+void PlaySoundFile(char*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); }
 void Game_CheckScreensaverTimeout(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /** Game_DeselectGameObject — Host no-op (no selection state to clear).
  *  Binary sets selected building to null. */

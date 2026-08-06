@@ -31,10 +31,16 @@ extern "C" {
     extern int   __stdcall wsprintfA(char* buf, const char* fmt, ...); /* 0x477370 */
 }
 
+    /* WIN32_StreamOpenPath's only real definition (shared/link_stubs.cpp)
+     * is extern "C" (unmangled) — unlike its WIN32_Stream and WNDPROC_Stream
+     * siblings below, no C++-mangled twin exists in shared/defsym_stubs.cpp,
+     * so this one must stay out of default C++ linkage or it call-0s. */
+extern "C" {
+    void WIN32_StreamOpenPath(void* stream, const char* path, int32_t mode, int32_t fileType); /* 0x463AA0 */
+}
+
     /* Stream / WNDPROC helpers */
     extern void   __thiscall WIN32_StreamOpen(void* stream, int mode);        /* 0x463890 */
-    extern void   __thiscall WIN32_StreamOpenPath(void* stream, const char* path,
-                                                   int mode, int fileType);    /* 0x463AA0 */
     extern void   __thiscall WIN32_StreamDestroy(void* stream);                /* 0x463A80 */
     extern void   __thiscall WIN32_StreamDestroyImmediate(void* stream);       /* 0x463B10 */
     extern void   __thiscall WIN32_StreamRead(void* stream, void* buf, int sz); /* 0x463810 */

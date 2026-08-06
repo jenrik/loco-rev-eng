@@ -222,7 +222,10 @@ void DPLAY_SetPlayerData(void*,const char*){}
 void DPLAY_CleanupPlayer(void*){}
 void*DPLAY_CreatePlayer(void*){return nullptr;}
 void DPLAY_InitPlayer(void*,void*,int32_t){}
-void DPLAY_LeaveSession(void*,int32_t){}
+/* Confirmed via 0x443440: __thiscall, ECX = this, zero pushed stack args —
+ * loops surface_cache[256] releasing each cached surface. Was previously
+ * (void*, int32_t), which never matched any real caller declaration. */
+void DPLAY_LeaveSession(void*){}
 void Sprite_Destroy(void*){}
 void Sprite_Shutdown(int32_t){}
 void Sprite_UnlockAll(int32_t){}
@@ -295,7 +298,9 @@ void DirectPlay_HostSession(void*,const char*,const char*){}
 void DirectPlay_QueryConnection(void*,void*){}
 int32_t NET_CheckAssetExists(void*,int32_t){return 0;}
 int32_t NET_FindArchivedAsset(int32_t){return 0;}
-int32_t NET_FindPlayer(void*,int32_t){return 0;}
+/* NET_FindPlayer moved to shared/stubs_impl.cpp as a loud stub with the
+ * real (int, int) C++-linkage signature — this (void*, int32_t) shape had
+ * no real caller (see docs/landmine-sweep-worklist.md "Cursor family"). */
 int32_t NET_GetAssetPath(int32_t){return 0;}
 int32_t NET_GetAttFilePath(int32_t){return 0;}
 int32_t NET_GetFilePath(int32_t){return 0;}

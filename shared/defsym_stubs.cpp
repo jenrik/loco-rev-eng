@@ -126,8 +126,10 @@ void Cursor_DrawColorPalette() { /* host no-op */ }
 void Cursor_HandleTabChange() { /* host no-op */ }
 void GetOpenFileNameA() { /* host no-op */ }
 void NET_GetOrCreateSurface() { /* host no-op */ }
-void NET_UploadAsset() { /* host no-op */ }
-void PlaySoundFile() { /* host no-op */ }
+/* NET_UploadAsset and PlaySoundFile moved to shared/stubs_impl.cpp as loud
+ * stubs with their real (int, char*)/(char*, int, int, int) signatures —
+ * these 0-arg shapes had no real caller (see
+ * docs/landmine-sweep-worklist.md "Cursor family"). */
 void TileMap_CreateOverlay() { /* host no-op */ }
 void FMT_LAYOUT_PATH() { /* host no-op */ }
 void GAMESTATE_StartGameTimer() { /* host no-op */ }

@@ -587,8 +587,8 @@ void Cursor::render_with_viewport(uint8_t param)
 /*      copies the name at slot+0x51D (PlayerSlot::compact_name).     */
 /*   2. Otherwise: uses formatted resource string #0x6E (13 chars max) */
 /*      as a single default name.                                      */
-/*   3. Stores the count at +0x6F4, calls DPLAY_EnumeratePlayers(),    */
-/*      then appends names from _g_dplay (+0xB13, stride 0xD, up to   */
+/*   3. Stores the count at +0x6F4, calls g_dplay->EnumeratePlayers(), */
+/*      then appends names from g_dplay (+0xB13, stride 0xD, up to    */
 /*      16 entries).                                                   */
 /*   4. Zero-fills remaining slots up to 26.                           */
 /*                                                                     */
@@ -643,12 +643,13 @@ void Cursor::update_network_names()
     this->player_count = nameIdx;                      /* +0x6F4 */
 
     /* Enumerate DPLAY players */
-    DPLAY_EnumeratePlayers();
+    g_dplay->EnumeratePlayers();
 
-    /* Read names from _g_dplay player table at +0xB13, stride 0xD.
-     * Up to 16 entries (0xD0 bytes). */
-    if (_g_dplay != nullptr) {
-        uint8_t* dplayBase = static_cast<uint8_t*>(_g_dplay);
+    /* Read names from g_dplay player table at +0xB13, stride 0xD.
+     * Up to 16 entries (0xD0 bytes). (Was incorrectly reading the
+     * always-null `_g_dplay` shadow global — see Cursor_internal.h.) */
+    if (g_dplay != nullptr) {
+        uint8_t* dplayBase = reinterpret_cast<uint8_t*>(g_dplay);
         for (int offset = 0; offset < 0xD0 && nameIdx < 26; offset += 0xD) {
             const char* srcName = reinterpret_cast<const char*>(
                 dplayBase + 0xB13 + offset);

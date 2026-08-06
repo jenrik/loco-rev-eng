@@ -97,6 +97,18 @@ int DDRAW_RestoreSurfaces(void*, void*);
 void DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
 void* CRT_wcsstr(const uint8_t*, const uint16_t*);
 void Sprite_Destroy(void*);  /* declared extern "C" in ButtonSprite.h */
+
+/* The following were previously declared with default C++ linkage below,
+ * causing call-0 landmines: their only real definitions (link_stubs.cpp /
+ * defsym_stubs.cpp) are extern "C" (unmangled), so a C++-mangled caller
+ * declaration never bound to them. See docs/landmine-sweep-worklist.md
+ * "Cursor family" entry. */
+void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t);
+void WIN32_StreamRead(void*, void*, int32_t);
+/* Real def (link_stubs.cpp) takes a single this-pointer-only param — no
+ * second int32_t. Confirmed against 0x443440: loops surface_cache[256] with
+ * ECX = this and no pushed stack args. */
+void DPLAY_LeaveSession(void*);
 }
 
 /* ================================================================ */
@@ -106,6 +118,7 @@ void Sprite_Destroy(void*);  /* declared extern "C" in ButtonSprite.h */
 /*   intent is to replace them with direct C++ method calls.         */
 /* ================================================================ */
 #include "../ui/UIPANEL_Surface.h"
+#include "../network/NetworkPlayerList.h"  /* real g_dplay singleton + typed methods */
 
 void* ResourceManager_GetById(void*, int);
 void Sprite_Init(void*);
@@ -119,9 +132,10 @@ void UIPANEL_EndPaintEx(void*, HWND, int, uint8_t, RECT*);
 void* UIPANEL_CreateSurface(void*);
 void UIPANEL_UnlockSurface(void*);
 void FormatResourceString(void*, UINT, LPSTR, int);
-void DPLAY_EnumeratePlayers(void);
-void DPLAY_LeaveSession(void*);
-void* NET_GetOrCreateSurface(void*, uint8_t, uint8_t, uint8_t, uint8_t);
+/* DPLAY_EnumeratePlayers and NET_GetOrCreateSurface are now typed
+ * NetworkPlayerList methods (see ../network/NetworkPlayerList.h) — callers
+ * use g_dplay->EnumeratePlayers() / g_dplay->GetOrCreateSurface(...)
+ * directly rather than these free-function forms. */
 int NET_FindPlayer(int, int);
 uint16_t NET_UploadAsset(int, char*);
 void WIN32_FatalError(void);
@@ -138,22 +152,31 @@ void PlaySoundAt(int, int, int, int);
 void PlaySoundFile(char*, int, int, int);
 int HelpWnd_PlayNarration(void*, int, int);
 int* AssetMgr_LoadFile(void*, uint8_t*, int*);
-int* WIN32_StreamOpenFile(void*, char*, uint32_t, uint32_t, uint32_t);
-int WIN32_StreamRead(void*, void*, int);
-void Game_SetScreenMode(void*, uint8_t, uint8_t, uint8_t);
-void CGWND_PumpMessages(void*);
+/* WIN32_StreamOpenFile/WIN32_StreamRead moved to the extern "C" block above
+ * — their only real definitions are extern "C". */
+/* Game_SetScreenMode's real (and only) definition is the loud stub at
+ * shared/stubs_impl.cpp:441, `(void*, char, char, char)`. `char` and
+ * `unsigned char`/`uint8_t` are distinct Itanium-mangled types, so the
+ * previous `uint8_t` params here never bound to it. */
+void Game_SetScreenMode(void*, char, char, char);
+/* Real def (shared/defsym_stubs.cpp) is the single-char "loading
+ * transition pump" overload, distinct from the (void*, uint8_t) main-loop
+ * pump in core/CGWND_sdl3.cpp. */
+void CGWND_PumpMessages(char);
 int DPLAY_CreatePlayer(void* record);
-/* NOTE on DPLAY_RenderPlayer (NetworkPlayerList::RenderPlayer, 0x4437C0):
- * the binary call site at 0x418A9C pushes NINE stack args (hdc, player,
- * surface, left, top, right, bottom, hWnd, this+0x138) and the callee
- * does RET 0x24 (9 dwords). The host stub ABI (shared/link_stubs.cpp,
- * shared/stubs_impl.cpp) and the other reconstructed call sites
- * (Town, PostcardAlbum, LOCOBITMAP) use the 8-argument form below; a
- * 9-arg declaration would not link against those stubs. Keeping the
- * 8-arg form preserves the shared boundary; exact 9-arg fidelity is
- * owned by the network-subsystem agent (NetworkPlayerList.h). */
-void DPLAY_RenderPlayer(void* dplay, int hdcVal, void* player,
-                         void* surface, int x, int y, int w, RECT* rect);
+/* NOTE on DPLAY_RenderPlayer: the binary call site at 0x418A9C pushes NINE
+ * stack args (hdc, player, surface, left, top, right, bottom, hWnd,
+ * this+0x138) and the callee (NetworkPlayerList::RenderPlayer, 0x4437C0)
+ * does RET 0x24 (9 dwords) — a real 9-arg reconstruction is a separate,
+ * larger task owned by the network subsystem (see NetworkPlayerList.h,
+ * which already implements an 8-arg approximation). Cursor's call site
+ * targets the free-function no-op stub (shared/link_stubs.cpp), matching
+ * its real signature exactly rather than attempting the 9-arg fidelity
+ * fix or binding into the already-integrated (but RECT-aliasing-fragile)
+ * typed method — see docs/landmine-sweep-worklist.md "Cursor family". */
+void DPLAY_RenderPlayer(void* dplay, void* hdcVal, int32_t player,
+                         void* surface, int32_t x, int32_t y, uint32_t w,
+                         RECT* rect);
 void* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
 
 /* ================================================================ */
@@ -171,7 +194,16 @@ extern char    g_install_path[];
 extern void*   g_ddraw;         /* IDirectDraw4* — COM platform object */
 extern void*   _g_backbuffer;   /* IDirectDrawSurface4* — COM platform object */
 extern void*   _g_primary_surface; /* IDirectDrawSurface4* — COM platform object */
-extern void*   _g_dplay;        /* NetworkPlayerList* at 0x4FD3B0 (not IDirectPlay4) */
+/* NOTE: _g_dplay is a SEPARATE global from the real NetworkPlayerList
+ * singleton `g_dplay` (network/NetworkPlayerList.h, constructed by
+ * core/GameLoop.cpp at startup) — it is initialized to nullptr once
+ * (shared/link_stubs.cpp) and never assigned anywhere, so it is always
+ * null. This is a distinct landmine class (a duplicate/orphaned global
+ * from the 32-to-64-bit port, not a call-0 or undersized-allocation
+ * bug) — see docs/landmine-sweep-worklist.md. Do not use it for real
+ * NetworkPlayerList access; use the typed `g_dplay` from
+ * network/NetworkPlayerList.h instead (already included below). */
+extern void*   _g_dplay;        /* NetworkPlayerList* at 0x4FD3B0 (not IDirectPlay4) — always null, see NOTE above */
 extern int     _g_cursor_refcount;
 extern void*   _g_cursor_back;  /* IDirectDrawSurface4* — COM platform object */
 
