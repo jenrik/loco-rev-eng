@@ -48,8 +48,9 @@ extern void* g_backbuffer;                           /* 0x4FD3C0 */
 
 /* DDRAW helpers */
 extern void DDRAW_UnlockPrimary(void);               /* 0x4014CD */
-extern void DDRAW_PresentRect(RECT* rect, HWND hwnd,
-    int* unk, uint32_t flag);                        /* 0x401280 */
+/* DDRAW_PresentRect (0x401280) declared canonically in graphics/LOCOBITMAP.h
+ * (included transitively via UIPANEL.h), guarded #ifdef _WIN32/#else so host
+ * builds see the SDL3-path signature instead of the original RECT/HWND one. */
 /* Address corrected: 0x4412F0 disassembles to NameEntryPanel_CreateWindow,
  * not DDRAW_SelectBuilding; confirmed via Ghidra at 0x459180. This is the
  * (void*, void*) overload — a different mangled symbol from the
@@ -73,8 +74,6 @@ extern void __fastcall UIPANEL_LockSurface(void* surface);                   /* 
 extern void __thiscall UIPANEL_Blit(void* tile_map, int src_x, int src_y,
     int dest_x, int dest_y, void* dest_surface, int clip_x, int clip_y,
     int clip_w, int clip_h, uint32_t flags);                                 /* 0x42B050 */
-extern void __fastcall DDRAW_PresentRect(RECT* rect, HWND hwnd,
-    int* unk, uint32_t flag);                                                /* 0x401280 */
 extern int __thiscall GameObject_BaseCtor(void* self, int a, int b,
     int c, int d);                                                           /* 0x405790 */
 extern void __thiscall GameObject_DtorBody(void* self);                      /* 0x405870 */
@@ -84,7 +83,10 @@ extern void __thiscall Panel_DtorBody(void* self);                           /* 
 extern void* __thiscall RESDATA_CreateChildSprite(void* parent,
     void* resource, int x, int y);                                           /* 0x4546D0 */
 // REMOVED: duplicate ResourceManager_GetById (see Panel.h)
-extern int __fastcall UI_IsBitmapReady(void* res);                           /* 0x423DB0 */
+/* UI_IsBitmapReady(int) already declared (C++ linkage) via Panel.h, included
+ * above through UIPANEL.h; that's the symbol game/Panel.cpp's own call site
+ * binds to (shared/stubs_impl.cpp's stub). Re-declaring it here with a void*
+ * param mangled to a distinct, unlinked symbol — the actual landmine. */
 extern void __thiscall RESDATA_SoundObject_Init(void* sprite, const char* str); /* 0x44CA90 */
 
 /* Forward declarations for functions defined later in this file */
@@ -93,7 +95,6 @@ extern void __thiscall UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
 
 /* External functions referenced from UIPANEL drawing */
 class InputMgr;
-extern int __fastcall UI_IsBitmapReady(void* res);
 extern void __fastcall UIPANEL_DrawEditField(int param_1);                  /* 0x429490 */
 extern void INPUT_SaveCurrentWorld(InputMgr* input, const char* name); /* 0x41D9B0 */
 extern void __thiscall RESDATA_GameObject_UpdateAnimation(void* obj);        /* 0x44B810 */
@@ -312,7 +313,7 @@ byte UIPANEL::InitSprites()
         }
 
         /* Check if bitmap resource is ready */
-        int isReady = UI_IsBitmapReady(resource);
+        int isReady = UI_IsBitmapReady((int)(intptr_t)(resource));
         if ((char)isReady == 0) {
             continue;
         }

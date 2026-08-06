@@ -553,8 +553,19 @@ void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* @0x42A
  * @param use_color_key 0=no color key (0x1000000 flag), 1=use color key
  *                      (0x200 flag)
  */
+#ifdef _WIN32
 void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2],
                                uint8_t use_color_key);
+#else
+/* Host builds route present through the SDL3 path (graphics/sdl3_ddraw.cpp);
+ * that symbol's real signature uses plain int and void pointers rather than
+ * RECT/HWND/uint8_t — matching the same guard already used in
+ * world/tilemap.h. Declaring the RECT/HWND shape unconditionally here (as
+ * this header used to) mangles to a different, unlinked symbol on host
+ * builds and makes every caller that also declares the host shape
+ * ambiguous, since both declarations are visible at once. */
+void DDRAW_PresentRect(void* rect, void* hwnd, int* offset_xy, int use_color_key);
+#endif
 
 
 /* Ghidra naming artifact: LOCOBITMAP = PostcardAlbum */
