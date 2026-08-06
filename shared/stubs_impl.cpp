@@ -218,6 +218,19 @@ int CRT_atoi(const char* s) { return s ? atoi(s) : 0; }
 void Cursor_Render(void*, int, int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void CGWND_TrackPiece_SetZoom(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void WNDPROC_CriticalSectionLock(int*, char*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+
+/* Stream I/O stubs — called from BuildingDescriptorEditor and wave_io; may be unreachable on host in normal paths */
+void* WNDPROC_StreamPrintf(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  WNDPROC_StreamReadLine(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void* WNDPROC_StreamWrite(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+int   WNDPROC_StreamSeekForward(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  Stream_BeginEnum(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  Stream_BeginRead(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+
+/* Math/CRT stubs — signatures inferred from usage, likely misidentified by decompiler */
+void* CRT_fabs(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  CRT_fmod(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+
 int  Config_GetIniInt(void*, const char*, const char*, int def) { return def; }
 
 /* Win32 stubs */

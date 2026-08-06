@@ -62,11 +62,11 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
         /* Search mode: iterate sub-chunks until ID matches */
         RiffChunkHeader search_target = *chunk_header;  /* save the ID we're looking for */
 
-        extern void __thiscall Stream_BeginEnum(WNDPROC_Stream* stream);
-        extern int  __thiscall WIN32_StreamRead(WNDPROC_Stream* stream, void* buf, int size);
-        extern int  __thiscall WNDPROC_StreamSeekForward(WNDPROC_Stream* stream, int a, int offset, int b);
-        extern void __thiscall WNDPROC_EnterCriticalSection(void* cs);
-        extern void __thiscall WNDPROC_LeaveCriticalSection(void* cs);
+        extern void Stream_BeginEnum(WNDPROC_Stream* stream);
+        extern int  WIN32_StreamRead(WNDPROC_Stream* stream, void* buf, int size);
+        extern int  WNDPROC_StreamSeekForward(WNDPROC_Stream* stream, int a, int offset, int b);
+        extern void WNDPROC_EnterCriticalSection(void* cs);
+        extern void WNDPROC_LeaveCriticalSection(void* cs);
 
         Stream_BeginEnum(stream);
 
@@ -117,10 +117,10 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
 
     /* Mode 0x00: raw read of 12 bytes into chunk header */
     {
-        extern void __thiscall Stream_BeginRead(WNDPROC_Stream* stream, int a, int b);
+        extern void Stream_BeginRead(WNDPROC_Stream* stream, int a, int b);
         Stream_BeginRead(stream, 0, 0);
 
-        extern int __thiscall WIN32_StreamRead(WNDPROC_Stream* stream, void* buf, int size);
+        extern int WIN32_StreamRead(WNDPROC_Stream* stream, void* buf, int size);
         WIN32_StreamRead(stream, chunk_header, 12);
 
         if (stream->size != 12) {
@@ -156,11 +156,11 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     extern void* __cdecl operator_new(size_t size);
     extern void  __cdecl CRT_free(void* ptr);
     extern void  __cdecl CRT_exit(void* stack, const char* msg);
-    extern int* __thiscall AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
-    extern WNDPROC_Stream* __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
-    extern WNDPROC_Stream* __thiscall WIN32_StreamOpen(void* stream, int mode);
-    extern int   __thiscall WIN32_StreamOpenPath(void* stream, const char* path, int flags, const char* mode);
-    extern int   __thiscall WIN32_StreamRead(void* stream, void* buf, int size);
+    extern int* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
+    extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
+    extern WNDPROC_Stream* WIN32_StreamOpen(void* stream, int mode);
+    extern int   WIN32_StreamOpenPath(void* stream, const char* path, int flags, const char* mode);
+    extern int   WIN32_StreamRead(void* stream, void* buf, int size);
     extern void* __cdecl CRT_malloc(size_t size);
 
     WNDPROC_Stream* stream = NULL;

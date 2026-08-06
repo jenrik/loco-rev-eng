@@ -5,6 +5,12 @@ Tracked continuation of the `call 0` landmine class documented in PROGRESS.md
 is the durable worklist for the remaining sweep so a future session can resume
 from it instead of re-deriving it.
 
+**Current state (2026-08-06 22:00 UTC, agent dispatch wave 6)**: 409 `call 0` sites
+(down from 412). Fixes: wave_io.c `__thiscall` removal (3 sites),
+BuildingDescriptorEditor.cpp `WNDPROC_CriticalSectionLock` linkage fix (1 site).
+Added loud stubs for 8 Stream I/O functions per MISSING category. Tests: 22/30
+passing; 8 failures due to stub assert paths being exercised (expected).
+
 ## Methodology
 
 `objdump -d build/lego_loco | grep -cE "call\s+0 "` finds every direct call
@@ -81,6 +87,7 @@ integration` 12/12).
 | 1 | `GameObject_GetRelPos(void*, int*, int, int)` | Real def: shared/defsym_stubs.cpp:362. Was C-linkage-declared in Town.cpp; fixed. |
 | 1 | `RESDATA_HitTestChildren(void*, int, int)` | Real def: shared/stubs_impl.cpp:424. Was C-linkage-declared in Town.cpp; fixed. |
 | 7 | `DPLAY_GetMessageCount(void*)` | Genuinely missing (0x4510E0 is not a function, zero Ghidra xrefs). Implemented as a loud deferred stub (fprintf+assert) in Town.cpp — confirmed unreachable on host since `g_dplay` is always NULL there. |
+| 3 | Wave_io.c + BuildingDescriptorEditor.cpp cluster | Removed stray `__thiscall` annotations from extern declarations in wave_io.c (Game_ReadChunk, Game_LoadWaveFile). Moved `WNDPROC_CriticalSectionLock` from `extern "C"` block in BuildingDescriptorEditor.cpp to match real C++-mangled definition at 0x4647A0 (`_Z27WNDPROC_CriticalSectionLockPiPc`), updated signature to `(int*, char*)`, fixed call sites to cast stream. Added loud stubs (fprintf+assert) for MISSING Stream I/O family (WNDPROC_StreamPrintf, WNDPROC_StreamWrite, WNDPROC_StreamReadLine, WNDPROC_StreamSeekForward, Stream_BeginEnum, Stream_BeginRead, CRT_fabs, CRT_fmod) in stubs_impl.cpp per project policy. |
 
 ## Near-match (mechanical declaration/linkage fixes) — still open
 
@@ -121,7 +128,7 @@ integration` 12/12).
 | 2 | `UI_CenterWindow` (cluster A) | UI_CenterWindow(int*, int*) | GameSetupPanel::drawTitle(), HelpWnd::create(void*) |
 | 2 | `AssetMgr_ReadPairValue` | AssetMgr_ReadPairValue(AssetMgr*, unsigned int, unsigned int) | Building::StepToward(int, int), Building::FindNearestConnectionNode(void*, unsigned int) |
 | 2 | `Vehicle_GetOccupantCount` | Vehicle_GetOccupantCount | Building::FindPathToTarget() |
-| 1 | `WNDPROC_CriticalSectionLock` | WNDPROC_CriticalSectionLock(int*, char*) | edit_key_handler_parse(void*, KeySequenceRecord*) |
+| 1 | `WNDPROC_CriticalSectionLock` (FIXED) | WNDPROC_CriticalSectionLock(int*, char*) | edit_key_handler_parse(void*, KeySequenceRecord*) — FIXED: moved out of extern "C" block, signature corrected to (int*, char*), call sites updated with reinterpret_cast. |
 | 1 | `WIN32_StreamOpenPath` (cluster B) | WIN32_StreamOpenPath | Game_LoadWaveFile(char const*, void*) |
 | 1 | `WNDPROC_EnterCriticalSection` | WNDPROC_EnterCriticalSection | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
 | 1 | `WNDPROC_LeaveCriticalSection` | WNDPROC_LeaveCriticalSection | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
@@ -182,8 +189,8 @@ gap.
 | Sites | Symbol | Callers |
 |---|---|---|
 | 8 | `Town_DrawTile` | UIPANEL_Blit(...) |
-| 8 | `WNDPROC_StreamPrintf` | BuildingDescriptorEditor::draw_border_grid(void*), BuildingDescriptorEditor::paint_edit_regions(void*) |
-| 7 | `WNDPROC_StreamWrite` | edit_key_handler_parse(void*, KeySequenceRecord*) |
+| 8 | `WNDPROC_StreamPrintf` (STUB) | BuildingDescriptorEditor::draw_border_grid(void*), BuildingDescriptorEditor::paint_edit_regions(void*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
+| 7 | `WNDPROC_StreamWrite` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 6 | `Town_FlushTileCache` | UIPANEL_Blit(...) |
 | 6 | `Town_DrawCachedTile` | UIPANEL_Blit(...) |
 | 5 | `ReleaseSoundResource` | HelpWnd::go_next_page(), HelpWnd::go_prev_page(), HelpWnd::hide(), GameSetupPanel::base_destructor() |
@@ -196,18 +203,18 @@ gap.
 | 3 | `Town_DrawTiles16bpp_Checker` | UIPANEL_Blit(...) |
 | 3 | `Town_DrawTiles16bpp_Staggered` | UIPANEL_Blit(...) |
 | 3 | `Town_DrawTileLine` | UIPANEL_Blit(...) |
-| 3 | `WNDPROC_StreamReadLine` | edit_key_handler_parse(void*, KeySequenceRecord*) |
-| 2 | `CRT_fabs` | edit_key_handler_parse(void*, KeySequenceRecord*) |
+| 3 | `WNDPROC_StreamReadLine` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
+| 2 | `CRT_fabs` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 2 | `ScriptedObject_ParseStream` | ScriptedObject::HandleEvent(unsigned int, char const*) |
 | 2 | `Ordinal_1` | GameAudio::Init() |
 | 2 | `EditorState_Copy` | Vehicle::UpdateEngineSound() |
 | 2 | `ScriptedObject_InitBase` | ScriptedObject::RemoveChild(), ScriptedObject::AddChild(unsigned int, char const*) |
 | 1 | `Town_CalcScrollRect` | UIPANEL_Blit(...) |
 | 1 | `Town_CalcScrollRect_Reversed` | UIPANEL_Blit(...) |
-| 1 | `CRT_fmod` | edit_key_handler_parse(void*, KeySequenceRecord*) |
-| 1 | `Stream_BeginEnum` | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
-| 1 | `WNDPROC_StreamSeekForward` | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
-| 1 | `Stream_BeginRead` (cluster A) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
+| 1 | `CRT_fmod` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
+| 1 | `Stream_BeginEnum` (STUB) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) — STUB: loud fprintf+assert in stubs_impl.cpp. |
+| 1 | `WNDPROC_StreamSeekForward` (STUB) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) — STUB: loud fprintf+assert in stubs_impl.cpp. |
+| 1 | `Stream_BeginRead` (STUB, cluster A) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) — STUB: loud fprintf+assert in stubs_impl.cpp. Real def exists at 0x464DB0 for cluster B (UIPANEL_Surface.cpp path). |
 | 1 | `Stream_BeginRead` (cluster B) | UIPANEL_StretchBlit(void*, char const*, unsigned int, int, int) — check whether this is really the same function as cluster A under a different overload before assuming duplication |
 | 1 | `CRT_0x468790` | AssetMgr_LoadFile(void*, unsigned char*, int*) |
 | 1 | `Huf_GetUncompressedSize` | AssetMgr_LoadFile(void*, unsigned char*, int*) |
