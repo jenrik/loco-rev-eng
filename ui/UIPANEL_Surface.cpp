@@ -119,15 +119,22 @@ extern "C" {
     /* Memory stream / file helpers */
     int  WIN32_StreamOpen(void* stream, int mode);
     int  WIN32_StreamOpenPath(void* stream, LPCSTR path, int flags, int unk);
-    void WIN32_StreamDestroy(int stream);
+    void WIN32_StreamDestroy(void* stream);
     void WIN32_StreamDestroyImmediate(void* stream);
-    void WIN32_StreamRead(void* stream, void* buf, uint32_t size);
+    /* Real def (shared/link_stubs.cpp) is extern "C" (plain, unmangled) —
+     * a C++-linkage declaration here mangles to a distinct, unlinked
+     * symbol regardless of matching parameter types. */
+    extern "C" void WIN32_StreamRead(void* stream, void* buf, int32_t size);
     void Stream_BeginRead(void* stream, uint32_t offset, int mode);
     void* WNDPROC_StreamFromMemory(void* obj, char* data, int size, int mode);
     void WNDPROC_StreamCleanup(void* stream);
     void* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
-    int   DDRAW_RestoreSurfaces(int* surf, void* desc);
-    void* DDRAW_GetDdrawErrorString(int code);
+    /* Real def: graphics/sdl3_ddraw.cpp (host path, guarded #ifndef _WIN32);
+     * first param is the same IDirectDrawSurface4* typed elsewhere in this
+     * file (g_backbuffer/g_primary_surface), not int*. */
+    int   DDRAW_RestoreSurfaces(IDirectDrawSurface4* surf, void* desc);
+    /* Real def (shared/link_stubs.cpp) is extern "C" (plain, unmangled). */
+    extern "C" void* DDRAW_GetDdrawErrorString(int code);
     HDC   DDRAW_LoadBmpToSurface(LPCSTR path, int bpp, int unk1, int unk2, char unk3);
     void  DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
 
@@ -274,7 +281,7 @@ extern "C" {
         }
 
         s->ddraw_surf = new_surf;
-        DDRAW_RestoreSurfaces((int*)new_surf, (int*)&desc);
+        DDRAW_RestoreSurfaces(new_surf, &desc);
     }
 
     return 1;
@@ -469,7 +476,7 @@ cleanup:
         WIN32_StreamDestroyImmediate(stream_buf);
     }
 
-    WIN32_StreamDestroy(*(int*)((intptr_t)stream_buf + 8));
+    WIN32_StreamDestroy((void*)(intptr_t)(*(int*)((intptr_t)stream_buf + 8)));
 
     return result;
 }uint32_t __thiscall UIPANEL_ReadPaletteFromBMP(void* surface, void* stream)

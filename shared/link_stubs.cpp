@@ -210,7 +210,14 @@ void*DDRAW_GetSurface(void){return nullptr;}
 void DDRAW_LoadFile(int32_t*,const char*){}
 void DDRAW_ReleaseSurfaces(void){}
 void DDRAW_GetSurfaceWidthHeight(void*,uint16_t*,uint16_t*){}
-void DDRAW_GetDdrawErrorString(void){}
+/* Was declared/defined with zero params (a stale --defsym-era shape); its
+ * one caller (ui/UIPANEL_Surface.cpp's UIPANEL_ClearSurface) needs the
+ * HRESULT code param to match the real function and discards the return,
+ * so the return type is unconstrained. That call site is unreachable on
+ * host (guarded behind a local CreateSurface stub that always "succeeds"),
+ * so a loud stub is safe per CLAUDE.md's stub policy rather than
+ * fabricating a DDERR-code-to-string table without Ghidra evidence. */
+void* DDRAW_GetDdrawErrorString(int){ fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void DPLAY_SetPlayerData(void*,const char*){}
 void DPLAY_CleanupPlayer(void*){}
 void*DPLAY_CreatePlayer(void*){return nullptr;}
