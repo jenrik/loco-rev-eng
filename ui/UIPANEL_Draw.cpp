@@ -64,10 +64,13 @@ extern "C" {
     int    RESDATA_SoundObject_GetTextLength(void* sprite);
     void   RESDATA_SetPosition(void* obj, int x, int y);
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y);
-    void   RESMGR_ResourceData_Init(void* data);
-    uint32_t RESMGR_ReleaseResource(void* data);
-    int    RESMGR_IsSaveHeader(void* data);
-    void   RESMGR_LoadResource(void* res, void* path);
+    /* RESDATA (shared/types.h, sizeof == 0x1D8) forward-declared via
+     * graphics/LOCOBITMAP.h, included above through UIPANEL.h. Real defs:
+     * resources/ResDataSave.cpp. */
+    void   RESMGR_ResourceData_Init(RESDATA* data);
+    void   RESMGR_ReleaseResource(RESDATA* data);
+    bool   RESMGR_IsSaveHeader(RESDATA* data);
+    int8_t RESMGR_LoadResource(RESDATA* res, const char* path);
     class InputMgr;
    void   INPUT_SaveCurrentWorld(InputMgr* input, const char* name);
     void   Game_SetScreenMode(void* game, char a, char b, char c);
@@ -158,7 +161,7 @@ void __thiscall UIPANEL_DrawBorder(void* self, int resource_ptr)
                                 *(int*)0x4AAAAC);
         } else {
             /* Resource-backed button */
-            if (!RESMGR_IsSaveHeader((void*)((intptr_t)resource_ptr + 0x50))) {
+            if (!RESMGR_IsSaveHeader(reinterpret_cast<RESDATA*>((intptr_t)resource_ptr + 0x50))) {
                 return;
             }
 
@@ -516,10 +519,15 @@ uint32_t __fastcall UIPANEL_DrawEditField(int param_1)
     char filename_buf[260];
     uint16_t panel_mode = *(uint16_t*)((intptr_t)param_1 + 0x49C);
 
-    /* Init RESDATA for resource data init on stack */
-    int local_data[22];
-    memset(local_data, 0, sizeof(local_data));
-    RESMGR_ResourceData_Init(local_data);
+    /* Init RESDATA for resource data init on stack. Was previously a
+     * 22-int (88-byte) local — undersized against the real sizeof(RESDATA)
+     * == 0x1D8 (shared/types.h). That was harmless only because the
+     * linkage mismatch below made the call resolve to nothing (a call-0
+     * landmine); fixing the call to actually run RESMGR_ResourceData_Init,
+     * which writes fields out to +0x1D4, requires the full-sized object. */
+    RESDATA local_data;
+    memset(&local_data, 0, sizeof(local_data));
+    RESMGR_ResourceData_Init(&local_data);
 
     /* Destroy any existing sprite list */
     void* current = *(uintptr_t**)((intptr_t)param_1 + 0x4D8);  /* sprite_list_head */
@@ -597,7 +605,7 @@ uint32_t __fastcall UIPANEL_DrawEditField(int param_1)
             if (sprite_mem == NULL) continue;
 
             /* Initialize RESDATA at +0x50 offset within struct */
-            RESMGR_ResourceData_Init(sprite_mem + 0x50);
+            RESMGR_ResourceData_Init(reinterpret_cast<RESDATA*>(sprite_mem + 0x50));
 
             /* Set vtable */
             *(uintptr_t**)sprite_mem = (void*)VTBL_UIPANEL_SAVESPRITE;  /* 0x477D24 */
@@ -654,7 +662,7 @@ uint32_t __fastcall UIPANEL_DrawEditField(int param_1)
     }
 
     /* Cleanup RESDATA on stack */
-    RESMGR_ReleaseResource(local_data);
+    RESMGR_ReleaseResource(&local_data);
 
     return 1;
 }
@@ -670,7 +678,7 @@ uint32_t __fastcall UIPANEL_DrawEditField(int param_1)
 void __fastcall UIPANEL_FreeSprite(void* sprite)
 {
     *(uintptr_t**)sprite = (void*)VTBL_UIPANEL_SAVESPRITE;
-    RESMGR_ReleaseResource((void*)((intptr_t)sprite + 0x50));
+    RESMGR_ReleaseResource(reinterpret_cast<RESDATA*>((intptr_t)sprite + 0x50));
 }
 
 /* ================================================================== */
@@ -735,7 +743,7 @@ void __thiscall UIPANEL_CreateSprite(void* self, void* list_entry)
                 strcpy(name_buf + path_end, (char*)((intptr_t)current + 0x0F));
 
                 /* Load resource */
-                RESMGR_LoadResource((void*)((intptr_t)current + 0x50), name_buf);
+                RESMGR_LoadResource(reinterpret_cast<RESDATA*>((intptr_t)current + 0x50), name_buf);
             }
 
             /* Determine zoom based on panel mode */
@@ -743,7 +751,7 @@ void __thiscall UIPANEL_CreateSprite(void* self, void* list_entry)
             if (panel_mode == 3 || panel_mode == 4 || panel_mode == 5) {
                 CGWND_TrackPiece_SetZoom(item_slots[i], 1);
             } else {
-                if (RESMGR_IsSaveHeader((void*)((intptr_t)current + 0x50))) {
+                if (RESMGR_IsSaveHeader(reinterpret_cast<RESDATA*>((intptr_t)current + 0x50))) {
                     CGWND_TrackPiece_SetZoom(item_slots[i], 1);
                 } else {
                     CGWND_TrackPiece_SetZoom(item_slots[i], 3);
