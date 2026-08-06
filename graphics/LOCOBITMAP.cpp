@@ -40,8 +40,6 @@ extern "C" {
     void  ClientToScreen(HWND hWnd, POINT* pt);               /* @0x45B980 - indirect via 0x477374 */
     void  GetWindowRect(HWND hWnd, RECT* rect);               /* @0x45B990 - indirect via 0x47737C */
     BOOL  IntersectRect(RECT* dst, const RECT* src1, const RECT* src2); /* @0x45B940 - via 0x47726C */
-    void  TileMap_InvalidateRect(void* self, int32_t left, int32_t top,
-                                  int32_t right, int32_t bottom);           /* @0x455840 */
     void  TileMap_ScrollRect(int32_t left, int32_t top,
                               int32_t right, int32_t bottom);               /* @0x4553E0 */
     int32_t DDRAW_RestoreSurfaces(void* backbuffer, int32_t* desc);                       /* @0x456550 */
@@ -61,11 +59,6 @@ extern "C" {
                                int32_t x, int32_t y, int32_t w, int32_t h,
                                void* menu, void* icon, int32_t flags);      /* @0x425150 */
     void  UI_WindowBase_Hide(void* self);                                   /* @0x4258C0 - approximate */
-    void  UIPANEL_EndPaintEx(void* self, HWND hWnd, int32_t param1,
-                              uint8_t flag, RECT* rect);                     /* @0x426B90 */
-    void  UIPANEL_BeginPaint(void* self);                                   /* @0x426B00 */
-
-    void  CGWND_SetMode(int mode);                                         /* @0x408130 */
 
     /* Rendering helpers */
     bool  CopyRect(RECT* dst, const RECT* src);                             /* USER32 */
@@ -100,6 +93,22 @@ bool  UIPANEL_Blit(void* panel, uint32_t src_left, uint32_t src_top,
                    void* dest_surface, uint32_t dst_left, uint32_t dst_top,
                    int32_t dst_right, uint32_t dst_bottom,
                    uint32_t flags);                                      /* @0x42B050 */
+
+/* The following were also inside the extern "C" block above with correct
+ * param types but wrong linkage — real defs are C++-mangled, not extern
+ * "C" (same call-0 landmine shape as UIPANEL_Blit above). */
+void  UIPANEL_EndPaintEx(void* self, HWND hWnd, int32_t param1,
+                          uint8_t flag, RECT* rect);                     /* @0x426B90 */
+void  UIPANEL_BeginPaint(void* self);                                   /* @0x426B00 */
+void  CGWND_SetMode(int mode);                                         /* @0x408130 */
+
+/* TileMap_InvalidateRect: real def is the inline TileMap* overload in
+ * world/tilemap.h (`TileMap_InvalidateRect(TileMap*, int, int, int, int)`).
+ * Was declared void* here (a distinct mangled type from TileMap*) inside
+ * the extern "C" block above — both a type and a linkage mismatch. */
+class TileMap;
+void  TileMap_InvalidateRect(TileMap* self, int32_t left, int32_t top,
+                              int32_t right, int32_t bottom);           /* @0x455840 */
 
 /* Global variables referenced */
 extern PixelDataCache* g_pixel_cache;       /* PixelDataCache singleton at 0x4FD3B4 */
@@ -1209,7 +1218,7 @@ void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2]
 
         if (blt_result == 0) {
             /* Success — invalidate viewport for full redraw */
-            TileMap_InvalidateRect(g_tilemap,
+            TileMap_InvalidateRect(static_cast<TileMap*>(g_tilemap),
                 g_viewport_rect_left, g_viewport_rect_top,
                 g_viewport_rect_right, g_viewport_rect_bottom);  /* @0x455840 */
         }

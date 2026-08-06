@@ -65,7 +65,11 @@ extern "C" {
     void* __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x428E40 */
     int32_t __thiscall CGWND_TrackPiece_SetZoom(void* obj, int32_t zoom); /* @ 0x40DD90 */
     void __thiscall CGWND_SetBuildMode(int32_t mode);     /* @ 0x40E7A0 */
-    void __thiscall CGWND_SetMode(void* mode);            /* @ 0x40DF50 */
+    /* Real def: core/CGWND.cpp, void(int), address 0x408130 (the 0x40DF50
+     * annotation here was bogus). Was declared void* here, mismatching the
+     * real int param (call-0 landmine — silently bound to
+     * shared/link_stubs.cpp's void* no-op stub). */
+    void __thiscall CGWND_SetMode(int mode);            /* @ 0x408130 */
     void __thiscall GameAudio_UpdateVolume(void* audio, uint8_t mute);    /* @ 0x413150 */
     int32_t __thiscall HelpWnd_PlayNarration(void* audioMgr, int32_t page, int32_t param); /* @ 0x4510B0 */
     void __fastcall INPUT_ExitGame(void* obj, uint32_t resId, int32_t strPtr); /* @ 0x41E570 */
@@ -645,7 +649,7 @@ void __fastcall RESDATA_ScriptedObject::Update()
                 this->tooltip_id = tooltip;                          /* +0xA0 */
             }
             g_active_panel = 0;
-            CGWND_SetMode((void*)3);
+            CGWND_SetMode(3);
 
             SetRect(&this->drag_handle,                          /* drag_handle inside GameObject */
                 this->x + 0x18,                                       /* +0x08 */

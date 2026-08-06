@@ -364,14 +364,13 @@ void AudioChannel_Pause(int32_t){}  /* _Z19AudioChannel_Pausei */
 void AudioChannel_Play(){}          /* _Z19AudioChannel_Playv */
 void AudioChannel_Play(int32_t){}   /* _Z19AudioChannel_Playi */
 
-/* CGWND_SetMode(int) — real implementation is core/CGWND.cpp's
- * CGWND_SetMode(int new_mode) (0x408130); this no-op copy was dead
- * weight (LINK-001). CGWND_SetMode(void*) stays: several files
+/* CGWND_SetMode(void*) removed (2026-08-06, cross-validation session): all
+ * 6 callers that used to declare/call this void*-mode overload
  * (ui/EditWindow.cpp, ui/HelpWnd.cpp, game/ScriptedObject.cpp,
- * game/BuildingPanel.cpp, world/scriptengine.cpp) declare and call a
- * void*-mode overload that has no real implementation anywhere — see
- * PROGRESS.md follow-up note. */
-void CGWND_SetMode(void*){}         /* _Z13CGWND_SetModePv */
+ * game/BuildingPanel.cpp, world/scriptengine.cpp, graphics/LOCOBITMAP.cpp)
+ * were fixed to call the real CGWND_SetMode(int) (core/CGWND.cpp,
+ * 0x408130) instead — see docs/landmine-sweep-worklist.md. Confirmed zero
+ * referrers left via nm before removing. */
 
 /* Collection — these need to be member functions for correct vtable mangling */
 /* We'll handle vtables separately */

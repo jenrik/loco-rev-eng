@@ -134,7 +134,11 @@ extern void* g_netman;                  /* 0x4FD33C — Network manager (contain
 extern void* g_font_normal;             /* 0x4851D8 — Normal GDI font handle */
 
 /* Extern functions from CGWND */
-extern void CGWND_SetMode(void* mode);  /* 0x408350 */
+/* Real def: core/CGWND.cpp, void(int) (confirmed via Ghidra 0x408130 — the
+ * prior 0x408350 annotation was bogus, that address is CGWND_InitMode1).
+ * Was declared void* here, mismatching the real int param (call-0 landmine
+ * — silently bound to shared/link_stubs.cpp's void* no-op stub). */
+extern void CGWND_SetMode(int mode);  /* 0x408130 */
 extern void WIN32_PostQuit(void);       /* 0x463670 — real body in
                                             core/CGWND.cpp (0x419710, this
                                             comment's old value, is actually
@@ -796,7 +800,7 @@ LRESULT __stdcall BuildingPanel_WndProc(HWND hWnd, UINT msg, uint32_t wParam, LP
     /* Check for WM_SYSCOMMAND with SC_SCREENSAVE */
     if (msg == 0x112 && (wParam & 0xFFF0) == 0xF140) {
         /* Switch to town mode instead of screensaver */
-        CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(3)));
+        CGWND_SetMode(3);
         WIN32_PostQuit();
     }
 

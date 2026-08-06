@@ -80,7 +80,10 @@ extern void INPUT_LoadWorld(InputMgr* input_mgr, const char* path); /* 0x41D320 
 extern void INPUT_SaveCurrentWorld(InputMgr* input_mgr,
                                    const char* path);          /* 0x41D9B0 */
 extern void CGWND_SetBuildMode(int mode);                      /* 0x4089D0 */
-extern void CGWND_SetMode(void* mode);                         /* 0x408130 */
+/* Real def: core/CGWND.cpp, void(int) — was declared void* here,
+ * mismatching the real int param (call-0 landmine — silently bound to
+ * shared/link_stubs.cpp's void* no-op stub). */
+extern void CGWND_SetMode(int mode);                         /* 0x408130 */
 extern void Game_CheckScreensaverTimeout(void* game);          /* 0x410A20 */
 extern void CGWND_ToggleFullscreen();                          /* 0x408110 */
 extern void GameAudio_SetMute(void* audio, uint8_t mute);      /* 0x413560 */
@@ -791,7 +794,7 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
                 this->screen_rect.left - 0x31,
                 this->screen_rect.top  - 0x2F);
 
-            CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(4)));
+            CGWND_SetMode(4);
 
             /* Destroy old tooltip if exists */
             if (this->tooltip_handle != 0) {

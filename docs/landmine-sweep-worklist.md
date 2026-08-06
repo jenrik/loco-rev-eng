@@ -449,6 +449,77 @@ session's fix). Both confirmed zero referrers via `nm --print-file-name
 build/lego_loco.p/*.o`; `ui/UIPANEL_Surface.cpp` is now the **only**
 `UIPANEL_Blit` definition anywhere in the tree.
 
+## Whole-tree symbol census — new sweep instrument (2026-08-06)
+
+`call 0` counts are blind to this bug class whenever a fabricated stub
+happens to cover the mismatched caller's exact wrong signature (see the
+`UIPANEL_Blit` section above) — the caller links clean and silently no-ops
+instead of crashing or leaving a call-0 relocation. The census below finds
+that shape directly: for every plain free-function base name with more
+than one distinct defined signature in `build/lego_loco.p/*.o`, check
+whether (a) one signature is defined *only* in a stub file
+(`shared/{link,defsym,core,stubs_impl}_stubs.cpp`/`stubs_impl.cpp`) with
+live non-stub referrers, and (b) a genuinely different, non-stub
+implementation exists elsewhere under a different signature. That
+combination is the exact "wrong stub, real impl sitting unused elsewhere"
+shape. Regenerate with:
+
+```bash
+nm --print-file-name --defined-only -C build/lego_loco.p/*.o   # + a second pass without --defined-only for referrers
+```
+
+(see session scratchpad `analyze_census2.py` for the exact grouping logic —
+not checked in, regenerate as needed). First run found **43 findings across
+~25 distinct symbols**; each is tracked below as it's resolved.
+
+### `CGWND_SetMode(void*)` — FIXED (2026-08-06)
+
+See PROGRESS.md's "CGWND_SetMode(void*)" entry (was already a tracked open
+item there) for the full writeup: 6 callers fixed
+(`ui/EditWindow.cpp`, `ui/HelpWnd.cpp`, `game/ScriptedObject.cpp`,
+`game/BuildingPanel.cpp`, `world/scriptengine.cpp`, `graphics/LOCOBITMAP.cpp`),
+two bogus address annotations corrected, two dead stubs removed. `meson
+test -C build`: 30/30. `--suite integration`: 12/12. `call 0` unchanged
+(287).
+
+### Remaining census findings — still open
+
+Grouped by primary file(s) to fix together (real signature noted where
+already confirmed against Ghidra or an existing correct declaration
+elsewhere in the tree; unconfirmed ones need the same treatment before
+touching):
+
+| Symbol | Wrong-stub callers | Real signature / location |
+|---|---|---|
+| `TileMap_InvalidateRect` | `core/GameObject.cpp`, `game/Vehicle.cpp`, `town/Town.cpp`, `town/sdl3_town_mode3.cpp` | `(TileMap*, int, int, int, int)` — inline in `world/tilemap.h` |
+| `UIPANEL_CreateSurface` | `input/Cursor.cpp`, `native/ddraw_init.c`, `network/Netman.cpp`, `network/NetworkPlayerList.cpp`, `ui/AboutDialog.cpp`, `game/BuildingPanel.cpp`, `town/Town.cpp` | `(UIPANEL_Surface*)` — `graphics/LOCOBITMAP.cpp` |
+| `UIPANEL_EndPaintEx` | `game/BuildingPanel.cpp`, `native/NETMAN_NetworkUI.c`, `native/NETMAN_SessionSettings.c`, `town/Town.cpp` | `(void*, int, int, uint8_t, RECT*)` — `ui/UIPANEL.cpp` (C++ linkage, not extern "C") |
+| `UIPANEL_BeginPaint` | `game/BuildingPanel.cpp`, `network/DPlayManager.cpp` | `(void*)` — `ui/UIPANEL.cpp` |
+| `FormatResourceString` | `game/Train_network.cpp`, `native/NETMAN_NetworkUI.c`, `town/Town.cpp` | `(void*, unsigned int, char*, int)` — `core/CGWND.cpp` |
+| `AssetMgr_LoadFile` | `game/TrainStation.cpp`, `input/BuildingDescriptorEditor.cpp`, `ui/HelpWnd.cpp` | `(void*, unsigned char*, int*)` — `native/assetmgr_loadfile.c` |
+| `GetWindowTextA` | `native/NETMAN_NetworkUI.c`, `native/NETMAN_SessionSettings.c`, `ui/UI_WindowBase.cpp` | `(void*, char*, int)` — `shared/stubs_impl.cpp`/`ui/GameWindow.cpp` |
+| `PlaySound` | `native/NETMAN_NetworkUI.c`, `town/Town.cpp` | `(unsigned int)` — canonical form per an earlier session's `PlaySound` fix note (`input/Cursor_internal.h`) |
+| `CGWND_PumpMessages` | `core/InitMode1.cpp`, `input/Cursor_new_impls.cpp` | `(void*, unsigned char)` main-loop pump — `core/CGWND_sdl3.cpp` — **verify per call site first**: the Cursor family fix session found a call site that genuinely needed the single-`char` "loading transition" overload instead; don't assume both sites want the 2-arg pump without checking. |
+| `DDRAW_RestoreSurfaces` | `input/Cursor.cpp`, `input/Cursor_Editor.cpp` | Two real overloads exist (`IDirectDrawSurface4*,void*` in `graphics/sdl3_ddraw.cpp`; `void*,void*` in `native/ddraw_surface_ops.c`) — determine which one each call site actually needs. |
+| `ShowCursor` / `SetCapture` / `ReleaseCapture` | `core/Game.cpp`, `town/Town.cpp`, `ui/GameWindow.cpp` | **Do not fix mechanically.** `shared/link_stubs.cpp`'s versions were deliberately confirmed correct for `ReleaseCapture` in an earlier LINK-001 session (`core/Game.cpp::SetScreenMode`'s own comment says so) — first determine whether `input/Cursor_impls.cpp`/`ui/EditWindow.cpp`'s same-named C++-linkage functions are genuinely the same Win32-semantic operation or an unrelated collision, via Ghidra, before retargeting anything. |
+| `GetResourceType` | `core/BuildingMgrObjectGroup.cpp`, `game/BuildingMgr.cpp` | `(unsigned int)` — `resources/ResourceManager.cpp` |
+| `RESDATA_IsBuildingTile` | `game/Vehicle.cpp`, `town/Town.cpp` | `(int)` — `world/tilemap.cpp` |
+| `TileMap_GetObjectAt` | `game/Vehicle.cpp` | `(TileMap*, short, short, short)` — `core/Game.cpp`/`world/EditorState.cpp` |
+| `UI_IsBitmapReady` | `game/Panel.cpp`, `ui/UIPANEL.cpp` | **Re-check before fixing** — an earlier UIPANEL-family session claimed this was already fixed by making both callers consistent with each other, but the census shows both are still bound to `shared/stubs_impl.cpp`'s stub, not the real unmangled symbol in `ui/UI_ChildWindow.cpp`. That prior fix may have picked the wrong "real" symbol. |
+| `GetModuleHandleA` | `resources/ResourceManager.cpp` | `(char const*)` — `core/CGWND.cpp` |
+| `CRT_atoi` | `network/DPlayManager.cpp` | `(char const*)` — `core/CGWND.cpp`/`shared/stubs_impl.cpp` |
+| `DDRAW_GetSurfaceWidthHeight` | `input/Cursor.cpp` | Two real overloads exist (`graphics/sdl3_ddraw.cpp`, `native/DDRAW_GetSurfaceWidthHeight.c`) — determine which. |
+| `GetLastError` / `LocalFree` | `ui/GameWindow.cpp` | `graphics/sdl3_window.cpp` |
+| `Cursor_UnlockAllSurfaces` | `ui/GameWindow.cpp` | `()` — `input/Cursor.cpp` |
+| `DDRAW_FileData_Dtor` | `network/NetHelpers.cpp` | `(FileData*)` — `native/ddraw_filedata.c` |
+| `DDRAW_SpriteDataDtor` | `world/tilemap.cpp` | `(SpriteData*)` — `native/ddraw_spritedata.c` |
+| `NETMAN_CreateSession` | `ui/EditWindow.cpp` | `(int)` — `native/NETMAN_NetworkUI.c` |
+| `NETMAN_SendPacket` | `ui/EditWindow.cpp`, `native/NETMAN_NetworkUI.c` | `(unsigned char*)` — `native/NETMAN_SessionSettings.c` |
+| `UIPANEL_EndPaint` | `native/NETMAN_NetworkUI.c` | `(void*)` — `ui/UIPANEL.cpp` |
+| `DirectPlay_Close`/`CreatePeer`/`DestroyPeer`/`HostSession`/`EnumConnections`/`ConnectToSession`/`QueryConnection` | `game/Train_network.cpp` (all 7) | Real overloads in `network/DirectPlay.cpp` (and `network/sdl3_directplay_train_bridge.cpp` for some) — verify per-symbol against Ghidra, this file may need a specific overload. |
+| `Train_HandleTrackBuild` | `game/Train_network.cpp` | `(void*, int)` — `town/Town.cpp` |
+| `RESDATA_SoundObject_GetState`/`GetTextLength` | `ui/UIPANEL.cpp` | `(void*)` — `resources/ResourceManager.cpp` |
+
 ## Functions excluded from automated alignment (call-count mismatch)
 
 These functions have a `call 0` landmine per the original per-function census

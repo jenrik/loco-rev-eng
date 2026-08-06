@@ -18,15 +18,19 @@ extern "C" {
 void AudioChannel_Pause() { /* host no-op */ }
 void AudioChannel_Play() { /* host no-op */ }
 void ButtonSprite_Ctor() { /* host no-op */ }
-void CGWND_SetMode() { /* host no-op */ }
+/* CGWND_SetMode() (0-arg extern "C") removed (2026-08-06, cross-validation
+ * session): was the wrong stub graphics/LOCOBITMAP.cpp silently bound to
+ * (its own correctly-typed CGWND_SetMode(int) declaration was inside an
+ * extern "C" block, giving it C linkage instead of the real C++-mangled
+ * one). Fixed by moving the declaration out of extern "C"; confirmed zero
+ * referrers left via nm before removing this stub. */
 /* Config_GetIniString(): this 0-arg extern "C" landmine placeholder
  * collided with game/ConfigIni.cpp's real 6-arg extern "C" body
  * (LINK-001 — extern "C" doesn't mangle by arg count/type, so both are
  * literally the same symbol). Removed; no evidence any real caller
- * wants a 0-arg shape. ButtonSprite_Ctor()/CGWND_SetMode() above are
- * the same 0-arg-landmine pattern but don't currently collide with
- * anything (untouched — out of LINK-001's scope; tracked separately in
- * docs/landmine-sweep-worklist.md). */
+ * wants a 0-arg shape. ButtonSprite_Ctor() above is the same 0-arg-landmine
+ * pattern but doesn't currently collide with anything (untouched — out of
+ * LINK-001's scope; tracked separately in docs/landmine-sweep-worklist.md). */
 void DDRAW_RestoreSurfaces() { /* host no-op */ }
 void DDRAW_SetSurfaceFormat() { /* host no-op */ }
 void DDRAW_UnlockPrimary() { /* host no-op */ }

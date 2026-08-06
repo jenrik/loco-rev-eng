@@ -122,7 +122,11 @@ extern "C" {
     extern void   UI_SetWindowVisible(void* wnd, char visible); /* 0x425F20 */
     extern LRESULT UI_DefWndProc(HWND, UINT, WPARAM, LPARAM);  /* 0x422EA0 */
     extern void   CGWND_SetFullscreenMode(char flag);          /* 0x40BCF0 */
-    extern void   CGWND_SetMode(void* mode);                   /* 0x40BD50 */
+    /* Real def: core/CGWND.cpp, void(int), address 0x408130 (the 0x40BD50
+     * annotation here was bogus). Was declared void* here, mismatching the
+     * real int param (call-0 landmine — silently bound to
+     * shared/link_stubs.cpp's void* no-op stub). */
+    extern void   CGWND_SetMode(int mode);                   /* 0x408130 */
     extern int    Game_SetScreenMode(void* game, char a, char b, char c); /* 0x40EA10 */
     extern void   TileMap_InvalidateRect(void* tilemap, int l, int t,
                                           int r, int b);        /* 0x446330 */
@@ -624,16 +628,16 @@ LRESULT HelpWnd::wnd_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         this->hide();
 
         /* Determine mode to restore */
-        void* restoreMode;
+        int restoreMode;
         int mode = this->windowMode;
         if (mode == 1) {
-            restoreMode = (void*)5;
+            restoreMode = 5;
         } else if (mode == 2) {
-            restoreMode = (void*)6;
+            restoreMode = 6;
         } else if (mode == 3) {
-            restoreMode = (void*)7;
+            restoreMode = 7;
         } else {
-            restoreMode = (void*)(uintptr_t)this->returnGameMode;
+            restoreMode = this->returnGameMode;
         }
         CGWND_SetMode(restoreMode);
 
@@ -701,13 +705,13 @@ LRESULT HelpWnd::handle_click(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             int mode = this->windowMode;
             if (mode == 1) {
-                CGWND_SetMode((void*)5);
+                CGWND_SetMode(5);
             } else if (mode == 2) {
-                CGWND_SetMode((void*)6);
+                CGWND_SetMode(6);
             } else if (mode == 3) {
-                CGWND_SetMode((void*)7);
+                CGWND_SetMode(7);
             } else {
-                CGWND_SetMode((void*)(uintptr_t)this->returnGameMode);
+                CGWND_SetMode(this->returnGameMode);
             }
         }
         return 0;
@@ -720,13 +724,13 @@ LRESULT HelpWnd::handle_click(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 this->hide();
                 int mode = this->windowMode;
                 if (mode == 1) {
-                    CGWND_SetMode((void*)5);
+                    CGWND_SetMode(5);
                 } else if (mode == 2) {
-                    CGWND_SetMode((void*)6);
+                    CGWND_SetMode(6);
                 } else if (mode == 3) {
-                    CGWND_SetMode((void*)7);
+                    CGWND_SetMode(7);
                 } else {
-                    CGWND_SetMode((void*)(uintptr_t)this->returnGameMode);
+                    CGWND_SetMode(this->returnGameMode);
                 }
             }
         }
@@ -1010,7 +1014,7 @@ uint HelpWnd::play_narration(int windowMode, uint pageResourceType)
 
     /* Show help window */
     this->returnGameMode = g_game_mode;
-    CGWND_SetMode((void*)8);
+    CGWND_SetMode(8);
     this->load_page(this->currentPageIdx);
     this->show(this->currentPageIdx);
 

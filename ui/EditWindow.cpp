@@ -116,10 +116,16 @@ void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
 void  __thiscall NETMAN_SendPacket(void* netman);               /* 0x43CDF0 */
 void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x4616C0 */
 /* (was previously mis-annotated 0x466EA0, which is CRT_strncpy — unrelated) */
+#ifdef _WIN32
 void  __fastcall CGWND_SetMode(void* mode);                     /* 0x408130 */
-#ifndef _WIN32
+#else
 // The host calls the reconstructed C++ implementation, not the legacy
-// pointer-typed ABI bridge used by untranslated x86 call sites.
+// pointer-typed ABI bridge used by untranslated x86 call sites. The void*
+// overload used to be declared unconditionally here too, which on host
+// created two visible overloads — two call sites below deliberately cast
+// to void* and silently bound to shared/link_stubs.cpp's no-op stub
+// instead of this real one (call-0 landmine); fixed by removing the
+// unconditional void* overload and passing int directly at those sites.
 void  CGWND_SetMode(int mode);                                  /* 0x408130 */
 #endif
 void  __fastcall DDRAW_InitAudio(void);                         /* 0x4014C2 */
@@ -536,7 +542,7 @@ void EditWindow::setState(int32_t state)
         this->pPanelA->hide();
         if (*reinterpret_cast<char*>(_g_netman_state + 7) != 0) NETMAN_SetGameMode(g_netman, 1);
         WIN32_ResumeThread(_g_network_thread, 1);
-        CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
+        CGWND_SetMode(1);
         return;
     case 7:
         if (this->pPopupWindow) {
@@ -817,7 +823,7 @@ void EditWindow::onPlayerNameChanged()
     }
 
     WIN32_ResumeThread(_g_network_thread, 1);
-    CGWND_SetMode(reinterpret_cast<void*>(static_cast<uintptr_t>(1)));
+    CGWND_SetMode(1);
 }
 
 /* ================================================================== */
