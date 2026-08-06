@@ -260,6 +260,21 @@ public:
                                  uint32_t param7);
 
     /**
+     * EnumeratePlayers — Load cached player names from PostBag easter_usr file.
+     * Address: 0x443260
+     *
+     * Loads up to 16 player names (13 bytes each) from a locale-specific
+     * easter_usr file under PostBag\Easter\<language>. Names are read as
+     * newline-separated entries, stored in player_names array. Guarded by
+     * enumerated flag at +0xB12 — returns immediately if already enumerated.
+     * Sets enumerated to 1 after successful load. Called from Cursor UI
+     * when opening livery/cursor editor in multiplayer.
+     *
+     * Called by: Cursor_UpdateNetworkNames (0x416EEB), NETMAN_ReceiveSignalChange (0x43E941)
+     */
+    void EnumeratePlayers();
+
+    /**
      * RegisterPlayer — Save a DPLAY_PlayerSlot to .crd file in PostBag.
      * Address: 0x444D00 (formerly NET_RegisterPlayer)
      *

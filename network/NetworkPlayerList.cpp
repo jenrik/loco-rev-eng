@@ -1000,6 +1000,183 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
 }
 
 /* ================================================================== */
+/* EnumeratePlayers — 0x443260                                          */
+/*                                                                      */
+/* Load cached player names from locale-specific easter_usr file under  */
+/* PostBag\Easter\<language>. Names read as newline-separated entries.  */
+/* Guarded by enumerated flag — early return if already enumerated.      */
+/* ================================================================== */
+void NetworkPlayerList::EnumeratePlayers()
+{
+    char path_buf[0x2510];           /* local path/file buffer */
+    char file_buf[0x2000];           /* file read buffer */
+    void* file_handle;
+    uint32_t bytes_read;
+    int32_t i, j, k;
+    uint8_t ch;
+
+    /* Check enumeration guard — early return if already done */
+    if (this->enumerated != 0) {
+        return;
+    }
+
+    /* Zero the path buffer and player name array */
+    {
+        uint32_t* p = (uint32_t*)path_buf;
+        for (i = 0x2510 / 4; i > 0; i--) { *p++ = 0; }
+    }
+
+    /* Zero all 16 player name slots (13 bytes each) */
+    for (i = 0; i < 16; i++) {
+        for (j = 0; j < 13; j++) {
+            this->player_names[i][j] = '\0';
+        }
+    }
+
+    /* Select Easter language-specific subdirectory path by global selector.
+     * DAT_004a97a0 determines the season/language variant. Each case
+     * references a Windows string literal address (these are documentation
+     * only on host builds; real paths are constructed via snprintf in the
+     * #ifndef _WIN32 branch). */
+    extern int32_t DAT_004a97a0;
+    const char* easter_path;
+
+#ifdef _WIN32
+    /* Windows path: original PE string-literal addresses. Documentation
+     * only — never linked, only type-checked under cross-compile. */
+    switch (DAT_004a97a0) {
+    default: easter_path = (const char*)0x0047ebf8;   /* "\\Easter\\Eng" */
+        break;
+    case 1:  easter_path = (const char*)0x0047ec58;   /* "\\Easter\\Dan" */
+        break;
+    case 2:  easter_path = (const char*)0x0047ec4c;   /* "\\Easter\\Dut" */
+        break;
+    case 4:  easter_path = (const char*)0x0047ec40;   /* "\\Easter\\Fre" */
+        break;
+    case 5:  easter_path = (const char*)0x0047ec34;   /* "\\Easter\\Ger" */
+        break;
+    case 6:  easter_path = (const char*)0x0047ec28;   /* "\\Easter\\Ita" */
+        break;
+    case 7:  easter_path = (const char*)0x0047ec1c;   /* "\\Easter\\Nor" */
+        break;
+    case 8:  easter_path = (const char*)0x0047ec10;   /* "\\Easter\\Spa" */
+        break;
+    case 9:  easter_path = (const char*)0x0047ec04;   /* "\\Easter\\Swe" */
+        break;
+    }
+#else
+    /* Host path: construct the language variant name matching DAT_004a97a0.
+     * Use forward slashes for portability. */
+    static const char* const lang_variants[] = {
+        "/Easter/Eng",  /* default: index 0 */
+        "/Easter/Dan",  /* case 1 */
+        "/Easter/Dut",  /* case 2 */
+        "/Easter/Eng",  /* case 3 (undefined, default) */
+        "/Easter/Fre",  /* case 4 */
+        "/Easter/Ger",  /* case 5 */
+        "/Easter/Ita",  /* case 6 */
+        "/Easter/Nor",  /* case 7 */
+        "/Easter/Spa",  /* case 8 */
+        "/Easter/Swe",  /* case 9 */
+    };
+    easter_path = (DAT_004a97a0 >= 0 && DAT_004a97a0 <= 9) ?
+        lang_variants[DAT_004a97a0] : lang_variants[0];
+#endif
+
+    /* Build the full path: <install>\PostBag<Easter_lang>\easter_usr
+     * Format string at 0x47ebe4 is "%s%s%s\\easter_usr" (or equivalent). */
+#ifdef _WIN32
+    /* Windows path: use original format string address for type-checking */
+    wsprintfA(path_buf, (const char*)0x0047ebe4,
+              g_install_path,
+              (const char*)0x0047e0c4,    /* "\\PostBag\\" */
+              easter_path);
+#else
+    /* Host path: construct path with forward slashes */
+    std::snprintf(path_buf, sizeof(path_buf), "%s/PostBag%s/easter_usr",
+                  g_install_path, easter_path);
+#endif
+
+    /* Open the file for reading */
+    file_handle = CreateFileA(path_buf, 0x80000000, 1, nullptr, 3, 0x8000000, nullptr);
+    if (file_handle == reinterpret_cast<void*>(static_cast<intptr_t>(-1))) {
+        /* File not found or cannot open — leave enumerated = 0 */
+        return;
+    }
+
+    /* Read up to 0x2000 bytes from the file */
+    bytes_read = 0;
+    if (!ReadFile(file_handle, file_buf, 0x2000, &bytes_read, NULL) || bytes_read == 0) {
+        CloseHandle(file_handle);
+        return;
+    }
+
+    /* Parse lines from file into player_names array.
+     * Each line is up to 12 characters, separated by \r\n or \n.
+     * Fills 16 slots of 13 bytes each (12 chars + null terminator).
+     * Derived from disassembly 0x443376-0x4433E4: if a name is 12 chars,
+     * skip any remaining characters on that line until \n. */
+    i = 0;  /* buffer index (EAX in disasm) */
+    k = 0;  /* slot index as offset: 0, 13, 26, ... 195 (EDI in disasm) */
+
+    while (k < (int32_t)(16 * 13) && i < (int32_t)bytes_read) {
+        j = 0;  /* characters copied to current slot (ECX in disasm) */
+
+        /* Inner loop: copy characters until 12 copied or \r found */
+        while (j < 12 && i < (int32_t)bytes_read) {
+            ch = (uint8_t)file_buf[i];
+
+            if (ch == 0x0D) {  /* 0xD = '\r' */
+                i++;
+                break;
+            }
+
+            /* Copy character to slot */
+            this->player_names[k / 13][j] = (char)ch;
+            j++;
+            i++;
+        }
+
+        /* Null-terminate the name in current slot */
+        this->player_names[k / 13][j] = '\0';
+
+        /* If name is exactly 12 chars, skip remaining chars on this line until \n.
+         * This handles truncation of longer names. */
+        if (j == 12) {
+            while (i < (int32_t)bytes_read) {
+                ch = (uint8_t)file_buf[i];
+                if (ch == 0x0A) {  /* Found \n — skip it and break */
+                    i++;
+                    break;
+                }
+                i++;
+            }
+        } else {
+            /* Name shorter than 12 chars — skip any trailing \r\n */
+            while (i < (int32_t)bytes_read) {
+                ch = (uint8_t)file_buf[i];
+                if (ch == 0x0A) {  /* 0xA = '\n' */
+                    i++;
+                    break;
+                }
+                if (ch != 0x0D) {  /* Not \r — stop skipping */
+                    break;
+                }
+                i++;
+            }
+        }
+
+        /* Move to next slot (add 13 bytes offset) */
+        k += 13;
+    }
+
+    CloseHandle(file_handle);
+
+    /* Mark enumeration as complete */
+    this->enumerated = 1;
+}
+
+/* ================================================================== */
 /* count_and_free_postbag_list — shared by RegisterPlayer/                */
 /* UnregisterPlayer/GetPlayerAddress (0x444D00/0x444FB0/0x445000) and     */
 /* NET_UpdatePlayerList (0x445170): each walks a NET_GetHostName(2, 0)    */
