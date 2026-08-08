@@ -424,6 +424,29 @@ APIs while keeping the shim for complex subsystems (DDRAW, DSOUND, DPLAY).
 
 ---
 
+### Priority: STRICT=2 cleanup (meson -Dstrict=2)
+
+Started 2026-08-08. Goal: `meson setup build-strict2 -Dstrict=2 && ninja -C build-strict2`
+compiles clean. Baseline census (`ninja -k 0` on a fresh `-Dstrict=2` configure,
+full log at the time was `/tmp/strict2_full.log`, not preserved): **5195**
+Werror-tagged diagnostics.
+
+| Category | Count | Where | Notes |
+|---|---|---|---|
+| `old-style-cast` | 3804 | game 1630 (Train_network.cpp alone 912, Vehicle.cpp 435, Building.cpp 261, World.cpp 60), network 725, native 431, world 354, town 299, graphics 57, ui 43, core 30, shared 9, audio 5, tests 3, platform 1 | All in `.cpp`/`.c`, **zero in headers** — mechanical, file-local, safely parallelizable per file. ~136 sites are the raw `this`/pointer-offset field-access anti-pattern (CLAUDE.md), not plain style — must become named-field access or be flagged, not blindly cast. `Train_network.cpp`'s casts include the `int32_t`-as-pointer DirectPlay session-handle pattern already identified as a dormant landmine (see memory `landmine-bug-classes` note 1g, reverted 2026-08-06) — preserve exact truncating semantics, do not "fix" the truncation as a side effect. |
+| `missing-declarations` | 874 | shared/defsym_stubs.cpp 267, shared/link_stubs.cpp 240, shared/stubs_impl.cpp 155, tests/persistence_fixtures.h 108, shared/core_stubs.cpp 18, remainder scattered 1–7 each | 680 of 874 concentrated in the four `shared/*stub*.cpp` files that are the known call-0-landmine surface (memory `landmine-bug-classes`). Do **not** blindly add declarations or mark `static` — use the landmine methodology: `get_xrefs_to` the real address, match the one true signature, check for `static` linkage before trusting a same-named hit, re-check `call 0` count after. |
+| `-Weffc++` | 2685 warnings, 400 escalated to error | Escalation is `tests/meson.build:15`'s blanket `test_warn_args = ['-Wall','-Wextra','-Werror',...]` on test targets — the main `lego_loco` binary only gets a plain warning (meson.build:125 adds `-Weffc++` without `-Werror=`). 400 = 295 "should be initialized in the member init list" + 35 "has pointer data members" + 35 "does not declare copy-ctor/operator=". | Split by risk: **safe everywhere** — delete copy-ctor/operator= for pointer-member classes (verify first no code actually copy-constructs them: `IDirectDrawSurface4`/`IDirectDraw4` (sdl3_ddraw.h), `DDRAW_Building`, `CGWND`, `InputMgr`, `Entity`, `Game`, `ResourceGameObject`, `Vehicle`, `Building`, `GameVehicle`, `Netman`, `TileMap`, test-local `FakeAvahiService`). **Safe to add real member initializers** — host-only shim structs with no assembly counterpart: `platform/sdl3_types.h` (136, e.g. `DDSURFACEDESC`/`DDBLTFX` — already `memset(this,0,...)` at runtime, so init-list form is behavior-neutral), `graphics/sdl3_ddraw.h` (27), `network/{sdl3_net_protocol,sdl3_net_transport}.h`, `resources/{resource_archive,pe_string_table}.h`, `tests/*`. **Needs per-field Ghidra verification, do not fabricate** — decompiled original-game classes: `core/{Entity,Game,CGWND,BuildingMgrObjectGroup}.h`, `game/{Vehicle,Building,GameVehicle}.h`, `network/Netman.h`, `world/tilemap.h`, `input/InputMgr.h`, `graphics/DDRAW.h`, and check whether `network/network_discovery.h`/`input/PersistenceAdapter.h` are host-only (likely, unconfirmed) before treating as safe. |
+| `zero-as-null-pointer-constant` | 94 | game 39, network 32, town 16, ui 4, world 1, native 1 | Mechanical `0`→`nullptr`. |
+| `cast-qual` | 23 | network 16, native 7 | Case-by-case: confirm removing `const` is actually required by a non-const-correct API before `const_cast`. |
+
+Plan: Phase 1 (mechanical cast/nullptr/cast-qual cleanup, subsystem by
+subsystem) → Phase 2 (missing-declarations, landmine-aware) → Phase 3
+(-Weffc++, split by risk tier above). Track subtasks in-session; update this
+section as phases complete. Do not weaken any `warnflags` entry in
+`meson.build` to make this converge.
+
+---
+
 ### Priority: GameSetupPanel extended vtable stubs
 
 - [ ] **GameSetupPanel::HandleMapClick** (0x40ABA0) — vtable[12]. Stub in stubs/gamesetuppanel_network_stubs.cpp.
