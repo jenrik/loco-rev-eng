@@ -29,6 +29,20 @@
 #include <cstdint>
 #include <new>
 
+/* NOTE: deliberately NOT #include "../graphics/LOCOBITMAP.h" here — it
+ * pulls in ui/ButtonSprite.h's `extern "C" void Sprite_Destroy(void*)`,
+ * which conflicts with network/Netman.h's own (incorrectly C++-linked)
+ * declaration of the same real extern-"C" symbol; Netman.h is already
+ * included above (via network/Netman.h) and fixing that separate,
+ * pre-existing linkage landmine is out of scope for this file. Declare
+ * Town_BlitViewport's real signature locally instead (matching this
+ * file's existing style of many parallel per-TU extern declarations). */
+struct UIPANEL_Surface;
+extern uint32_t __thiscall Town_BlitViewport(UIPANEL_Surface* self, int x1,
+                                             int y1, int x2, int y2,
+                                             int x, int y);            /* @ 0x42CB10 —
+                                             canonical decl: graphics/LOCOBITMAP.h */
+
 /* ================================================================== */
 /* External function declarations                                      */
 /* ================================================================== */
@@ -60,10 +74,6 @@ extern void   __thiscall ArrivalQueue_RemoveVehicle(void* building,
 extern void*  __thiscall UI_CreateMessageBox(void* mgr, int res_id, short type,
                                              char anchor, int x, int y,
                                              char flags);             /* @ 0x423AB0 */
-extern int    __thiscall Town_BlitViewport(void* viewport, int src_x,
-                                           int src_y, int src_w,
-                                           int src_h, int dst_x,
-                                           int dst_y);               /* @ 0x42CB10 */
 extern void   __thiscall Town_SelectBuilding(void* town_view,
                                              int building);           /* @ 0x42D040 */
 extern int    __thiscall DDRAW_SelectBuilding(void* ddraw_building,
@@ -687,17 +697,12 @@ void World::UpdateTick(void)
             /* Network sync pending.
                Assembly chain: vehicle+0x20 (editor_state) -> +0x14
                (building) -> +0x88 (packed tile coords). EditorState::building
-               is declared Building* (world/EditorState.h), but the runtime
-               object here is always a GameVehicle/RESDATA_GameVehicle —
-               same mistyping game/Vehicle.cpp's cluster found and
-               deliberately left in place (see this cluster's commit message
-               for the file-wide decision). +0x88 is RESDATA_GameVehicle's
-               inherited sub_pos_x/sub_pos_y pair, which its own
-               tile_target() accessor (game/ResdataGameVehicle.h) already
-               exposes — used directly here via a local cast rather than
-               retyping the field. */
-            int packed_coords = reinterpret_cast<RESDATA_GameVehicle*>(
-                vehicle->editor_state->building)->tile_target();
+               is GameVehicle* (world/EditorState.h) — the three-time-deferred
+               retype this file's own comment used to flag is now resolved.
+               +0x88 is RESDATA_GameVehicle's inherited sub_pos_x/sub_pos_y
+               pair, exposed directly by its own tile_target() accessor
+               (game/ResdataGameVehicle.h). */
+            int packed_coords = vehicle->editor_state->building->tile_target();
 
             /* Mark as synced */
             vehicle->net_sync_flag = 2;
@@ -811,8 +816,8 @@ uint World::ProcessEvents(Vehicle* current_vehicle)
                as ui_panel (UIPANEL*) in some contexts": the ORIGINAL
                32-bit binary packs a full pointer into that one 4-byte
                dword. This host read is NOT equivalent to the binary's:
-               `*reinterpret_cast<void**>(...)` reads a native 8-byte
-               pointer starting at +0x10, spanning `flags` (+0x10..+0x13)
+               `*reinterpret_cast<UIPANEL_Surface**>(...)` reads a native
+               8-byte pointer starting at +0x10, spanning `flags` (+0x10..+0x13)
                AND `frame_width`/`frame_height` (+0x14..+0x17) — three
                unrelated fields reinterpreted as one pointer. Left
                unchanged (pre-existing before this cast-style pass, and
@@ -823,8 +828,8 @@ uint World::ProcessEvents(Vehicle* current_vehicle)
                for the sanctioned typed-vtable-bridge pattern to use
                instead of a raw offset if this needs a real accessor. */
             RESDATA* sub_res = static_cast<RESDATA*>(sub->resource);
-            int viewport_result = Town_BlitViewport(
-                *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(sub_res) + 0x10),
+            uint32_t viewport_result = Town_BlitViewport(
+                *reinterpret_cast<UIPANEL_Surface**>(reinterpret_cast<uint8_t*>(sub_res) + 0x10),
                 sub->source_rect.left,                            /* +0x30 */
                 sub->source_rect.top,                             /* +0x34 */
                 sub->source_rect.right,                           /* +0x38 */
@@ -926,11 +931,11 @@ char World::InitTimer(int object_ptr)
            object_ptr is a truncating int comparison against a pointer, per
            World.h's own doc: the real caller (RESDATA_GameVehicle_InitSounds,
            per Ghidra — not yet present in this C++ tree) passes a
-           RESDATA_GameVehicle*, consistent with EditorState::building's
-           GameVehicle-family mistyping noted throughout this cluster. The
-           truncation itself is a pre-existing signature-level property of
-           this function (not introduced here) — preserved as-is; only the
-           cast style changes. */
+           RESDATA_GameVehicle*, consistent with EditorState::building now
+           being declared GameVehicle* (world/EditorState.h). The truncation
+           itself is a pre-existing signature-level property of this function
+           (not introduced here) — preserved as-is; only the cast style
+           changes. */
         if (vehicle->editor_state != NULL &&
             static_cast<int32_t>(reinterpret_cast<intptr_t>(vehicle->editor_state->building)) == object_ptr) {
             return 1;
@@ -1262,12 +1267,9 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
     vehicle->target_tile_y = -1;
 
     /* Step 7: StopSound(1) on editor-state buildings with vehicle_kind==7.
-       vehicle->editor_state->building is typed Building* in EditorState.h
-       but at runtime holds a GameVehicle/RESDATA_GameVehicle (the +0x10C
-       read below is vehicle_kind). */
+       vehicle->editor_state->building is GameVehicle* (world/EditorState.h). */
     {
-        RESDATA_GameVehicle* main_building = static_cast<RESDATA_GameVehicle*>(
-            static_cast<void*>(vehicle->editor_state->building));
+        GameVehicle* main_building = vehicle->editor_state->building;
         if (main_building != NULL && main_building->vehicle_kind == 7) {
             main_building->StopSound(1);
         }
@@ -1278,15 +1280,13 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
         VehicleEditor* sub = vehicle->editors[i];
 
         /* Detach via editor state 1's building */
-        RESDATA_GameVehicle* editor_1 = static_cast<RESDATA_GameVehicle*>(
-            static_cast<void*>(sub->end_a->building));
+        GameVehicle* editor_1 = sub->end_a->building;
         if (editor_1 != NULL && editor_1->vehicle_kind == 7) {
             editor_1->StopSound(1);
         }
 
         /* Detach via editor state 2's building */
-        RESDATA_GameVehicle* editor_2 = static_cast<RESDATA_GameVehicle*>(
-            static_cast<void*>(sub->end_b->building));
+        GameVehicle* editor_2 = sub->end_b->building;
         if (editor_2 != NULL && editor_2->vehicle_kind == 7) {
             editor_2->StopSound(1);
         }

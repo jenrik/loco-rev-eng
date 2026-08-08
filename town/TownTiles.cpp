@@ -28,6 +28,7 @@
  */
 
 #include "../graphics/LOCOBITMAP.h"
+#include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
 #include <cassert>
 #include <cstdio>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -42,6 +43,20 @@ extern "C" {
     extern int   g_surface_channel2;        /* 0x48527C — green channel bit shift (5/6) */
     extern int   g_surface_bshift;          /* 0x485280 — bit shift for half-bright */
     extern int   g_pixel_format_mask;       /* 0x485248 — computed: g_bshift << 1 */
+}
+
+/* Globals used by Town_CheckOccupied/Town_CheckOccupiedEx/Town_BlitViewport
+ * below (see town/Town.cpp for the same globals used by the file's other
+ * DirectDraw-surface-locking paths). */
+extern void*  g_primary_surface;       /* 0x4FD3C4 — primary DirectDraw surface */
+extern char   g_surface_lost;          /* 0x4FD218 — primary surface lost flag */
+extern int    g_surface_red_mask;      /* 0x485288 — red channel mask (water check) */
+extern int    g_surface_blue_mask;     /* 0x485290 — blue channel mask (water check) */
+
+extern "C" {
+    /* Real def: shared/link_stubs.cpp (Section A, extern "C") — matching
+     * linkage required here too, or this becomes a call-0 landmine. */
+    void* DDRAW_GetDdrawErrorString(int code);                     /* 0x45BBC0 */
 }
 
 /* Forward declaration: UIPANEL_Blit is the main dispatcher (ui/UIPANEL_Surface.cpp).
@@ -1025,4 +1040,174 @@ bool UIPANEL_Surface::CalcScrollRect_Reversed(RECT* rect, void* surface_obj)
     fprintf(stderr, "STUB: UIPANEL_Surface::CalcScrollRect_Reversed reached at %s:%d\n", __FILE__, __LINE__);
     assert(0 && "UIPANEL_Surface::CalcScrollRect_Reversed stub reached (TODO: decompile 0x42C700)");
     return false;  /* unreachable */
+}
+
+/* ================================================================== */
+/* Town_CheckOccupied / Town_CheckOccupiedEx / Town_BlitViewport       */
+/* Addresses: 0x42C950 / 0x42C9F0 / 0x42CB10                           */
+/*                                                                     */
+/* MOVED HERE (2026-08-08 town-cpp-strict2 session) from a previous,   */
+/* mis-scoped transcription as `Town::check_occupied` / `_ex` /        */
+/* `blit_viewport` member functions. Ghidra evidence for the real      */
+/* scope:                                                              */
+/*   - Ghidra names them "Town_CheckOccupied"/"Town_BlitViewport" as   */
+/*     FREE functions (not Town:: methods) — get_xrefs_to confirms     */
+/*     their only callers are BuildingMgr::InvalidateRects/            */
+/*     BlitOverlaps (0x435020/0x435200) and World::ProcessEvents       */
+/*     (0x44E3F0), none of which are Town methods.                     */
+/*   - Every one of those call sites passes                            */
+/*     `*(void**)(*(int*)(entity+0x40) + 0x10)` as the receiver — the   */
+/*     RESDATA-embedded "ui_panel" alias documented in shared/types.h  */
+/*     (RESDATA::flags, +0x10) — i.e. a UIPANEL_Surface*, never a Town*.*/
+/*   - No caller anywhere in this codebase ever called                */
+/*     Town::check_occupied/blit_viewport as a method; they were fully */
+/*     dead code, while game/BuildingMgr.cpp and game/World.cpp already*/
+/*     declared+called the correctly-shaped free functions against a  */
+/*     symbol that didn't exist anywhere — a genuine call-0 landmine.  */
+/* This is a DIFFERENT resolution than CalcScrollRect above: that      */
+/* pair's Ghidra decompile dereferences an unresolved `ptStack_4`       */
+/* distinct from the tracked RECT* (evidence of a genuinely uncertain   */
+/* stack-argument count), so it stays a deferred stub. CheckOccupied/   */
+/* CheckOccupiedEx/BlitViewport have no such ambiguity — clean          */
+/* `this+4`/`this+8`/`this+0x18`/`this+0x1C` field reads throughout,    */
+/* matching UIPANEL_Surface::mode/width/pixels/ddraw_surf exactly.      */
+/* ================================================================== */
+
+namespace {
+/* Persistent primary-surface lock state — the original keeps a global
+ * DDSURFACEDESC at 0x4FD19C that persists across calls; reproduced as
+ * file-static storage so a failed re-lock still scans the previous
+ * lock's data exactly like the original global. Moved here (2026-08-08)
+ * from town/Town.cpp along with Town_CheckOccupiedEx, its only user. */
+DDSURFACEDESC g_primary_surface_desc = {};
+} // namespace
+
+uint8_t Town_CheckOccupied(UIPANEL_Surface* self, int x1, int y1, int x2, int y2)
+{
+    if (self->mode != 0) {                                        /* +0x04 */
+        return Town_CheckOccupiedEx(x1, y1, x2, y2);
+    }
+
+    int stride = self->width;                                     /* +0x08 */
+    uint8_t* buf = self->pixels;                                   /* +0x18 */
+    int width  = x2 - x1;
+    int height = y2 - y1;
+
+    uint8_t* row = buf + static_cast<ptrdiff_t>(y1) * stride + x1;
+    for (int row_idx = 0; row_idx < height; row_idx++) {
+        for (int col = 0; col < width; col++) {
+            if (row[col] != 0) {
+                return 1;
+            }
+        }
+        row += stride;
+    }
+    return 0;
+}
+
+uint8_t Town_CheckOccupiedEx(int x1, int y1, int x2, int y2)
+{
+    uint8_t result = 0;
+    IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
+
+    if (g_surface_lost == 0) {
+        /* NOTE: the binary sets the flag when Lock SUCCEEDS (returns 0)
+         * — "lost" is actually the locked state here (0x42CA33..0x42CA37). */
+        DDSURFACEDESC& desc = g_primary_surface_desc;
+        desc = DDSURFACEDESC();
+        desc.dwSize = 0x7C;
+
+        /* Lock(this, NULL, &desc, 0, 0) — COM slot 25 (byte 0x64). */
+        if (primary->Lock(nullptr, &desc, 0, nullptr) == 0) {
+            g_surface_lost = 1;
+        }
+    }
+
+    uint32_t pitch = static_cast<uint32_t>(g_primary_surface_desc.lPitch);
+    uint32_t height = static_cast<uint32_t>(y2 - y1) & 0xFFFF;
+    uint32_t width  = static_cast<uint32_t>(x2 - x1) & 0xFFFF;
+
+    uint16_t* pixels = reinterpret_cast<uint16_t*>(
+        static_cast<uint8_t*>(g_primary_surface_desc.lpSurface) +
+        ((pitch >> 1) * static_cast<uint32_t>(y1) + static_cast<uint32_t>(x1)) * 2);
+
+    for (uint32_t row = 0; row < height; row++) {
+        if (width != 0) {
+            for (uint32_t col = 0; col < width; col++) {
+                uint16_t pixel = pixels[col];
+                int channel1 = (g_surface_red_mask & pixel) >>
+                               (static_cast<uint8_t>(g_surface_channel1) & 0x1f);
+                int channel2 = g_surface_blue_mask & pixel;
+
+                if (channel1 != 0x1f && channel2 != 0x1f) {
+                    result = 1;
+                    break;
+                }
+            }
+        }
+
+        pixels += (pitch >> 1) - width;
+
+        if (result != 0) {
+            break;
+        }
+    }
+
+    if (g_surface_lost != 0) {
+        /* Unlock(NULL) — COM slot 32 (byte 0x80). */
+        if (primary->Unlock(nullptr) == 0) {
+            g_surface_lost = 0;
+        }
+    }
+
+    return result;
+}
+
+uint32_t Town_BlitViewport(UIPANEL_Surface* self, int x1, int y1, int x2, int y2,
+                           int x, int y)
+{
+    /* Outside bounds -> passable. Parameter usage matches the binary
+     * (0x42CB31..0x42CB61): y1 is never read. */
+    if (x < x1 || y2 < x || y < x2 || x < y) {
+        return 1;
+    }
+
+    if (self->mode != 1) {                                        /* +0x04 */
+        uint8_t* buf = self->pixels;                               /* +0x18 */
+        int stride = self->width;                                  /* +0x08 */
+        uint8_t val = buf[static_cast<ptrdiff_t>(stride) * y + x];
+        return (val == 0) ? 1 : 0;
+    }
+
+    /* Mode 1: lock the surface at self->ddraw_surf and check the pixel. */
+    IDirectDrawSurface4* surface =
+        static_cast<IDirectDrawSurface4*>(self->ddraw_surf);       /* +0x1C */
+    DDSURFACEDESC desc = {};
+    desc.dwSize = 0x7C;
+
+    /* Lock(this, NULL, &desc, 1, 0) — COM slot 25 (byte 0x64). */
+    int lock_result = surface->Lock(nullptr, &desc, 1, nullptr);
+    if (lock_result != 0) {
+        DDRAW_GetDdrawErrorString(1);
+        return 0;
+    }
+
+    uint32_t pitch = static_cast<uint32_t>(desc.lPitch);
+    uint8_t* base = static_cast<uint8_t*>(desc.lpSurface);
+    uint16_t pixel = *reinterpret_cast<uint16_t*>(
+        base + static_cast<ptrdiff_t>(pitch) * y + static_cast<ptrdiff_t>(x) * 2);
+
+    uint32_t channel1 = (static_cast<uint32_t>(g_surface_red_mask) & pixel) >>
+                        (static_cast<uint8_t>(g_surface_channel1) & 0x1f);
+    uint32_t channel2 = static_cast<uint32_t>(g_surface_blue_mask) & pixel;
+
+    uint8_t result = 1;
+    if (channel1 != 0x1f || channel2 != 0x1f) {
+        result = 0;
+    }
+
+    /* Unlock(NULL) — COM slot 32 (byte 0x80). */
+    surface->Unlock(nullptr);
+
+    return result;
 }

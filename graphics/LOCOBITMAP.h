@@ -721,6 +721,63 @@ void  UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* @0x42A110 */
 void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* @0x42A140 */
 
 /* ================================================================ */
+/* Tile-occupancy / viewport collision checks (0x42C950-0x42CB10)   */
+/*                                                                    */
+/* Free functions (not UIPANEL_Surface methods) operating on a        */
+/* UIPANEL_Surface* receiver. Ghidra's own function names carry a     */
+/* "Town_" prefix — MISLEADING, these are NOT Town methods, despite    */
+/* living at addresses adjacent to Town.cpp's own tile logic and       */
+/* having been transcribed there historically. Verified via Ghidra    */
+/* xrefs: the only callers are BuildingMgr::InvalidateRects/           */
+/* BlitOverlaps (game/BuildingMgr.cpp) and World::ProcessEvents        */
+/* (game/World.cpp), both of which pass a UIPANEL_Surface* pulled from */
+/* the RESDATA-embedded "ui_panel" alias documented in shared/types.h  */
+/* (RESDATA::flags, +0x10) / game/BuildingMgr.cpp's entity_surface().  */
+/* Implemented in town/TownTiles.cpp beside UIPANEL_Surface's other    */
+/* address-adjacent methods.                                           */
+/* ================================================================ */
+
+/**
+ * Town_CheckOccupied — Scan tile buffer or DDraw surface for non-empty
+ * (occupied) tiles in rect [x1..x2, y1..y2).
+ * Address: 0x42C950 (__thiscall on a UIPANEL_Surface* receiver).
+ *
+ * mode==0 (self->mode): scans the byte array at self->pixels (stride
+ * self->width). mode==1: delegates to Town_CheckOccupiedEx.
+ * @return 1 if any tile in the rect is occupied, 0 otherwise.
+ */
+uint8_t Town_CheckOccupied(UIPANEL_Surface* self, int x1, int y1, int x2, int y2);
+
+/**
+ * Town_CheckOccupiedEx — Extended tile occupancy via primary-surface lock.
+ * Address: 0x42C9F0 (__stdcall, 4 stack args). No receiver: operates on
+ * the global primary DirectDraw surface (g_primary_surface) directly.
+ * Called from Town_CheckOccupied when self->mode == 1.
+ *
+ * Locks the primary surface, scans 16-bit pixels in [x1..x2, y1..y2). A
+ * pixel is occupied when ((pixel & red_mask) >> red_shift) != 0x1f AND
+ * (pixel & blue_mask) != 0x1f (non-water).
+ */
+uint8_t Town_CheckOccupiedEx(int x1, int y1, int x2, int y2);
+
+/**
+ * Town_BlitViewport — Passability test for one point (x, y) against a
+ * viewport occupancy buffer/surface.
+ * Address: 0x42CB10 (__thiscall on a UIPANEL_Surface* receiver, 6 stack
+ * args, RET 0x18).
+ *
+ * NOTE: faithful to the binary, the bound tests use the parameters as
+ * (x < x1 || y2 < x || y < x2 || x < y) -> passable; parameter y1 is
+ * never read (documented quirk of the original).
+ * mode==0 (self->mode): byte index buffer at self->pixels (stride
+ * self->width); byte==0 -> passable. mode==1: locks self->ddraw_surf,
+ * water check (both channels == 0x1f -> passable).
+ * @return 1 = passable, 0 = occupied.
+ */
+uint32_t Town_BlitViewport(UIPANEL_Surface* self, int x1, int y1, int x2, int y2,
+                          int x, int y);
+
+/* ================================================================ */
 /* DDRAW_PresentRect — DDraw present/blit helper (free function)     */
 /* Address: 0x401280, __cdecl                                       */
 /* ================================================================ */

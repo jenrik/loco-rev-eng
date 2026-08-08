@@ -4,6 +4,7 @@
 #include "BuildingMgr.h"
 #include "Building.h"
 #include "Train.h"
+#include "../graphics/LOCOBITMAP.h"     // Town_CheckOccupied (canonical decl)
 #include <cstring>
 #include <new>
 
@@ -13,7 +14,6 @@ extern unsigned int GetResourceType(unsigned int);              // 0x446030
 extern void RESDATA_Lock(void*);                                // 0x449410
 extern void RESDATA_Unlock(void*);                              // 0x449420
 extern void __thiscall UI_CreateMessageBox(void* self, int, int, char, int, int, int); // 0x423ab0, thiscall + 6 stack
-extern int __thiscall Town_CheckOccupied(void* self, int, int, int, int);       // 0x42c950, thiscall + 4 stack
 extern int UIPANEL_BlitSurface(void*, int, int, void*, int, int); // 0x42a540
 extern void Game_SelectGameObject(void*, void*);                // 0x4113a0
 extern void Town_SelectBuilding(void*, void*);                  // 0x42d040
@@ -75,11 +75,15 @@ static const BuildingParentFields* building_parent_fields(const Entity* parent)
     return reinterpret_cast<const BuildingParentFields*>(parent);
 }
 
-/* Surface pointer at parent+0x10 (0x435020, 0x435200). */
-void* entity_surface(const Building* object)
+/* Surface pointer at parent+0x10 (0x435020, 0x435200). Real receiver
+ * type confirmed via Ghidra (town-cpp-strict2 session): UIPANEL_Surface*
+ * (see graphics/LOCOBITMAP.h's Town_CheckOccupied/Town_BlitViewport
+ * doc comments). */
+UIPANEL_Surface* entity_surface(const Building* object)
 {
     return object->parent == nullptr
-        ? nullptr : building_parent_fields(object->parent)->surface;
+        ? nullptr
+        : static_cast<UIPANEL_Surface*>(building_parent_fields(object->parent)->surface);
 }
 
 /* Shared body of InvalidateRects (0x435020): intersect clip with each visible

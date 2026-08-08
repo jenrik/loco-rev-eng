@@ -538,6 +538,45 @@ touching):
 | `DirectPlay_Close`/`CreatePeer`/`DestroyPeer`/`HostSession`/`EnumConnections`/`ConnectToSession`/`QueryConnection` | `game/Train_network.cpp` (all 7) | **Investigated and reverted 2026-08-06 — see "DirectPlay_* cluster" section below. Do not attempt a mechanical linkage fix; there is a real prerequisite bug blocking it.** |
 | `Train_HandleTrackBuild` | `game/Train_network.cpp` | `(void*, int)` — `town/Town.cpp` |
 | `RESDATA_SoundObject_GetState`/`GetTextLength` | `ui/UIPANEL.cpp` | `(void*)` — `resources/ResourceManager.cpp` |
+| `RESDATA_HitTestChildren` | `world/scriptengine.cpp` (@ wrong "0x44E6C0" — actually mid-`World_RenderAll`), `graphics/DDRAW.cpp` (@ wrong "0x44A0C0" — actually `RESDATA_ScriptedObject::HitTest` itself), `town/Town.cpp` (@ wrong "0x44B200" — actually `RESDATA_ScriptedObject::DtorChain`). All three plus `shared/stubs_impl.cpp:431`'s `void`-returning stub collide on one mangled symbol (Itanium mangling ignores return type) — every real call site binds to the stub's `assert(0)`. Real address **0x4549E0**, and a real typed C++ implementation already exists as `Panel::HitTestChildren` (`game/Panel.cpp:510`). **Not fixed** (2026-08-08, scriptengine-cpp-cast-cluster session) — `Panel::HitTestChildren` itself dispatches `child->vtable[0x11]` as a `void**` array index (byte offset 0x88 on this 64-bit host's 8-byte vtable entries, not the original x86 0x44), the same vtable-byte-offset-misalignment landmine this sweep watches for; wiring a forwarder to it without fixing that first would trade a loud `assert(0)` for a silent wild call through 3 live paths (`ScriptedObject::HitTest`, `DDRAW_Building::HitTestWithDrag`, `Town`'s click path) that no current test exercises. Needs slot 17's real signature resolved first (`game/ScriptedObject.h`'s own vtable-layout comment cites 0x44EF00 for slots [17]/[18], but Ghidra reports no function at that address). | `char (void*, int, int)` — real impl `Panel::HitTestChildren`, `game/Panel.cpp:510`, needs the vtable-stride fix above before forwarding to it |
+| `GameObject_GetRelPos` | `game/Panel.cpp` (real caller, `Panel::HitTestChildren`), `town/Town.cpp`, `town/sdl3_town_mode3.cpp` | `shared/defsym_stubs.cpp:396`'s definition is a silent no-op (`{ /* host no-op */ }`, doesn't fill the output buffer) — same shape as the "silent-wrong-stub" class (not call-0: it has a body, just an empty one). Real implementation already exists, fully typed, as `GameObject::GetRelPos` (`core/GameObject.cpp:283`, `out[0]=x-screen_rect.left, out[1]=y-screen_rect.top`) — trivial to forward once someone picks this up; not fixed here because it was only a transitive dependency of the deferred `RESDATA_HitTestChildren` fix above, not itself on this session's touched call path. |
+| `CGWND_TrackPiece_SetZoom` | `world/scriptengine.cpp` (8 sites, all pre-existing), `game/Panel.cpp`, `ui/UIPANEL_Draw.cpp` | `shared/stubs_impl.cpp:216`'s only definition is a loud `assert(0)` stub. Ghidra confirms every real `TrackPiece_SetZoom(...)` call `world/scriptengine.cpp`'s own disassembly resolves to targets **0x40D170**, which is the already-fully-implemented `TrackPiece::SetZoom` (`game/TrackPiece.cpp:266`) — a real `void (TrackPiece*, int16_t)`, not this stub's `(void*, int32_t)`. **Not fixed** (2026-08-08) — `TrackPiece::SetZoom` dispatches through ordinary compiler-managed virtual calls (no byte-stride risk like the `RESDATA_HitTestChildren` case above), so this one's likely safe to wire up, but doing so activates 3 files' worth of currently-dormant call paths at once (wider blast radius than a single-file session should take on without dedicated verification). | `void (TrackPiece*, int16_t)` — `game/TrackPiece.cpp:266`, address 0x40D170 |
+| `UIPANEL_ScrollPanel_HandleDrag` | `world/scriptengine.cpp` (@ wrong "0x427BD0" — mid-body; Ghidra resolves to 0x4277D0), `game/ScriptedObject.cpp:90` (declared `(void*, int, int)`), `shared/stubs_impl.cpp:518` and `shared/defsym_stubs.cpp:105` (two more conflicting definitions, one with **zero parameters**) | Real entry **0x4277D0**. The `param` argument is a genuine pointer, not a small int: several call sites inside `RESDATA_ScriptedObject::HandleToolClick` (0x44A250) pass a raw child-list node pointer through it, and the real body stores it verbatim into a 4-byte slot at `this+0xD4` without ever treating it as an integer — declaring it `int32_t` truncates a real pointer on this 64-bit host. **Not fixed** — four declarations/definitions need auditing together, not just the one in `world/scriptengine.cpp`; retyping only one risks silently rebinding that TU's calls to a different symbol than the others use. |
+
+### `RESDATA_ScriptedObject` (`world/scriptengine.h`) / `ScriptedObject` (`game/ScriptedObject.h`) — duplicate-class landmine, same shape as row 46 (2026-08-08)
+
+Two independent, complete reconstructions of the same real object exist side
+by side: `world/scriptengine.h`'s `RESDATA_ScriptedObject` (flat, raw-offset
+fields, no real inheritance) and `game/ScriptedObject.h`'s `ScriptedObject :
+public Panel` (real inheritance, named fields). Both target the identical
+real class — same vtable address (0x4782A8), same singleton address
+(0x4A99E0), same method addresses throughout (`Start` 0x449600, `Update`
+0x4497A0, `Dispatch`/Draw 0x449C00, `IsDragging` 0x449CE0, `CheckClick`
+0x449D00, `GetDragOffset` 0x449D80, `MoveTo` 0x449DC0, `HitTest` 0x44A0C0,
+`HandleToolClick` 0x44A250) — and even cross-corroborate several field
+offsets independently (`+0x1B0`/`+0x200`/`+0x298`/`+0x2E8` script-engine/
+scroll-panel sub-object offsets and visibility flags match exactly between
+the two headers).
+
+`world/scriptengine.h`'s flat `RESDATA_ScriptedObject` is the one actually
+wired into the live game: `core/Game.cpp:97` states outright "g_scripted_object
+is canonically declared in world/scriptengine.h", and `g_scripted_object` is
+called throughout `core/Game.cpp`, `core/GameLoop.cpp`, `world/tilemap.cpp`
+as that type. `game/ScriptedObject.h`'s properly-inherited `ScriptedObject`
+class appears to be orphaned — nothing constructs or references a live
+instance of it anywhere in the tree (unlike row 46's `TownTileRenderer`,
+which *was* being called live through `UIPANEL_Blit`).
+
+This is backwards from the usual direction of these merges (the raw-offset
+class is the live one; the properly-inherited class is the orphan), and the
+blast radius of merging them is large: `core/Game.cpp`, `world/tilemap.cpp`,
+`core/GameLoop.cpp`, and `world/scriptengine.cpp` itself all touch
+`g_scripted_object` through the flat type's API. **Not attempted** in the
+2026-08-08 scriptengine-cpp-cast-cluster session — flagged for a dedicated
+follow-up, same as row 46 was. `game/ScriptedObject.h`'s independent field-
+offset corroboration is still useful as a cross-check for anyone editing
+`world/scriptengine.h`'s field layout, even though the classes shouldn't be
+merged casually.
 
 ### DirectPlay_* cluster in `game/Train_network.cpp` — investigated, reverted, blocked (2026-08-06)
 
@@ -730,6 +769,142 @@ landmine class as the rest of this document, scoped as its own future
 tree-wide, pick the correct `HANDLE` signature, fix the two wrong ones,
 verify call sites) rather than folded into the cast-cleanup commit that
 found it.
+
+## Update 2026-08-08 (town-cpp-strict2 session — partial, blocked by a shared-tree collision)
+
+Started as a `town/Town.cpp` STRICT=2 old-style-cast cleanup (319 errors).
+Found and fixed one real "silent-wrong-stub" landmine in the same family as
+this document's other entries; the rest of the Town.cpp cast sweep was
+**not completed** — see the note at the bottom of this section for why, and
+`docs/town-strict2-wip.patch` (untracked, not committed) for the salvaged diff.
+
+**`Town_CheckOccupied`/`Town_CheckOccupiedEx`/`Town_BlitViewport`
+(0x42C950/0x42C9F0/0x42CB10) — FIXED.** These were transcribed into
+`town/Town.cpp` as `Town::check_occupied`/`_ex`/`blit_viewport` **member
+functions**, even though `Town.h`'s own prior doc comments already said
+`this` in those methods was NOT the Town instance. Ghidra `get_xrefs_to`
+proved they're free functions: the only callers are
+`BuildingMgr::InvalidateRects`/`BlitOverlaps` (`game/BuildingMgr.cpp`,
+0x435020/0x435200) and `World::ProcessEvents` (`game/World.cpp`, 0x44E3F0)
+— none of which are Town methods — and every one of those call sites
+passes `*(void**)(entity+0x40 + 0x10)` as the receiver: the RESDATA-
+embedded "ui_panel" alias (`shared/types.h`'s `RESDATA::flags`/+0x10
+comment), i.e. a `UIPANEL_Surface*`, never a `Town*`. Both caller files
+already declared+called the correctly-shaped free functions
+(`game/BuildingMgr.cpp`'s `Town_CheckOccupied(void* self, int,int,int,int)`,
+`game/World.cpp`'s `Town_BlitViewport(void* viewport, ...)`) against a
+symbol that was **never defined anywhere with that shape** — same
+mangled-name collision this document tracks elsewhere: they silently bound
+to `shared/defsym_stubs.cpp`'s host no-ops (`void Town_BlitViewport(void*,
+int,int,int,int,int,int){}`, `void Town_CheckOccupied(void*,int,int,int,
+int){}`) instead of running any real logic. **Not a `call 0` site** — the
+`objdump -d build/lego_loco | grep -cE "call\s+0 "` count is unchanged at
+272 before/after, exactly as expected for a silent-wrong-stub fix rather
+than an unresolved-symbol fix. Verified via `objdump -d -C`: both real call
+sites (`BuildingMgr::InvalidateRects`/`BlitOverlaps`, 3 sites;
+`World::ProcessEvents`, 1 site) now resolve to the real
+`Town_CheckOccupied(UIPANEL_Surface*, int, int, int, int)` /
+`Town_BlitViewport(UIPANEL_Surface*, int, int, int, int, int, int)`
+symbols, not the `defsym_stubs.cpp` no-ops. Fixed by moving the three
+functions' real implementations to `town/TownTiles.cpp` (beside
+`UIPANEL_Surface`'s other address-adjacent methods), retyping their
+receiver to `UIPANEL_Surface*`, adding the canonical declaration to
+`graphics/LOCOBITMAP.h`, and retyping `game/BuildingMgr.cpp`'s
+`entity_surface()` / `game/World.cpp`'s call site to match. Deleted the
+now-fully-dead `Town::check_occupied`/`_ex`/`blit_viewport` member
+functions from `town/Town.h`/`Town.cpp` — nothing in the tree ever called
+them as methods. **Leftover, not fixed**: `world/tilemap.h:494` still
+declares a third, differently-wrong-signature
+`extern int Town_BlitViewport(void* res, int src_x, int src_y, ...)` —
+currently unused (no caller in `world/tilemap.cpp`), so not a live
+landmine, but worth deleting whenever that header is next touched.
+`ninja -C build`: clean. `meson test -C build`: 30/30. `meson test -C build
+--suite integration`: 1/1 (12/12 GUI cases). Confirmed no link collision
+from moving `g_primary_surface_desc` into a second anonymous-namespace
+(one in `Town.cpp`, one now in `TownTiles.cpp`) via `nm`: both mangle to
+distinct internal (`b`, lowercase) `_ZN12_GLOBAL__N_1...` symbols, as
+expected for anonymous-namespace internal linkage — no ODR conflict.
+
+**`UIPANEL_CreateSurface` in `town/Town.cpp` — still open** (this document's
+existing row above already lists `town/Town.cpp` as a wrong-signature
+caller; this session found the specific bug, didn't fix it). The local
+declaration carried a bogus address (`0x42AF30`, which Ghidra resolves to
+`UIPANEL_ReadPaletteFromBMP`, an unrelated function) and the wrong
+signature (`void* UIPANEL_CreateSurface(void*)` vs. the real
+`void UIPANEL_CreateSurface(UIPANEL_Surface*)` at `0x42A110`). Ghidra
+decompilation of `Town::handle_tile_click` (0x42CE10) shows the ORIGINAL
+disassembly itself already has this shape: `pvVar4 = (void
+*)UIPANEL_CreateSurface(puVar5);` treating a genuinely `void`-returning
+`__fastcall` function's leftover-register value as if it were a return —
+almost certainly a decompiler artifact (the real intent is "allocate
+`puVar5`, initialize it in place via `UIPANEL_CreateSurface`, store
+`puVar5` itself into `this->overlay_panel`", not "store the call's
+return value"). Needs its own fix inside the wider Town.cpp cast sweep;
+not attempted here since Town.cpp's edits didn't survive this session (see
+below).
+
+**`UIPANEL_Surface::CalcScrollRect`/`CalcScrollRect_Reversed`
+(0x42C590/0x42C700) deferral — upheld, with new corroborating evidence.**
+This document's `Town_Draw*` entry above already hedges that the
+unresolved `unaff_EBX`/`unaff_EBP` stack artifacts "may just be the
+decompiler losing track of the SAME RECT pointer". This session found a
+fresh Ghidra decompile of 0x42C590 that weakens that hedge: the body
+dereferences `ptStack_4->left` and `ptStack_4->top` — a **distinct**
+pointer from the tracked `param_1` (pClipRect), read *before* the
+unresolved `unaff_EBX`/`unaff_EBP` values are used to build
+`RStack_b4.right`/`.bottom`. A separate, fully-implemented (non-stub) copy
+of this logic existed in `town/Town.cpp` as dead, uncalled
+`Town::calc_scroll_rect`/`_reversed` methods (no caller anywhere in the
+tree ever invoked them) — its transcription had silently assumed
+`ptStack_4 == param_1`, collapsing two Ghidra-distinct pointers into one
+with no supporting evidence. That dead code was deleted rather than
+promoted onto `UIPANEL_Blit`'s live `flags & 0x40` path; `TownTiles.cpp`'s
+existing loud `assert`-stubs for both functions are still the honest,
+correct state. Whoever picks this up next needs to identify what
+`ptStack_4` actually is (a genuine 3rd distinct RECT parameter, most
+likely) before implementing either function for real.
+
+**Two duplicate-class-definition blockers found, own cluster, not
+fixed**: (1) `class PostcardAlbum` is defined twice with different shapes
+— `ui/PostcardAlbum.h` (`Status: INTEGRATED`, extends `UI_WindowBase`) and
+`graphics/LOCOBITMAP.h` ("concept A", the file's own header comment already
+flags the ambiguity). Including `graphics/LOCOBITMAP.h` from any TU that
+already includes `ui/PostcardAlbum.h` (e.g. `town/Town.cpp`) is a hard
+redefinition error. (2) `Sprite_Destroy(void*)` is declared `extern "C"` in
+`ui/ButtonSprite.h` (matching its real definition) but plain C++-linked in
+`network/Netman.h` — a live linkage-mismatch landmine on its own (any TU
+using `Netman.h`'s declaration silently binds to a stub instead of the
+real symbol), and it also means any TU that includes both `Netman.h` and
+`graphics/LOCOBITMAP.h`/`ui/ButtonSprite.h` (e.g. `game/World.cpp`) gets a
+hard "conflicting declaration ... with 'C' linkage" compile error. Worked
+around locally in `game/World.cpp` (forward-declared `UIPANEL_Surface`
+instead of including `LOCOBITMAP.h`) rather than fixing `Netman.h`'s
+linkage, which is its own scoped fix.
+
+**Session note — shared-tree collision cost most of this session's Town.cpp
+work.** Another concurrent session was active in the same working tree
+(visible via its own uncommitted `game/GameVehicle.h`/
+`game/ResdataGameVehicle.h`/`world/EditorState.h`/`world/scriptengine.cpp`
+changes appearing and disappearing independently of this session's edits).
+At some point a `git stash` (not this session's own — this session's own
+stash/pop pair completed and was verified clean before this happened) swept
+up this session's in-progress edits to `game/BuildingMgr.cpp`,
+`graphics/LOCOBITMAP.h`, `town/Town.cpp`, `town/Town.h`, and
+`town/TownTiles.cpp` together with the other session's unrelated
+`world/scriptengine.cpp`/`.h` changes, silently reverting all five files
+to `HEAD` in the working tree. Recovered the five files' content via
+`git checkout stash@{0} -- <path>` (per-file, not a full `stash pop`, to
+avoid touching `world/scriptengine.*` or conflicting with the other
+session's live edits) — `stash@{0}` is left in place, undropped, in case
+the other session still needs it. `town/Town.cpp`/`town/Town.h` were then
+reverted back to `HEAD` deliberately (via `git restore`, not `git
+checkout`) once recovered, since a file this large can't be committed in a
+half-converted state and this session ran out of safe runway to finish the
+remaining ~280 cast sites — the recovered diff is saved as
+`docs/town-strict2-wip.patch` (untracked, not committed — apply with `git
+apply docs/town-strict2-wip.patch` then delete it) for the next session,
+which should run in an isolated `git worktree`, not this shared tree, to
+avoid a repeat.
 
 ## Raw data
 
