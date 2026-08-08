@@ -40,32 +40,9 @@
  *   type 0x1B: REFRESH_REQUEST  — request building overlay refresh
  *   type 0x1C: TIMEOUT_CHECK    — trigger timeout check
  *
- * === InboundTrainNode — linked-list node in m_vehicleList ===
- * Size: 0x94 bytes (same allocation as Vehicle, fields repurpose padding)
- *   +0x00: vtable            — compiler-managed vtable pointer
- *   +0x04: vehicle_data[0x6C] — Vehicle fields (offset 0x04-0x6F)
- *   +0x70: next              — linked-list next pointer
- *   +0x74: tunnel_angle      — tunnel exit angle (uint16_t)
- *   +0x76: field_76          — unknown uint16_t
- *   +0x78: slot_index        — source slot index (uint8_t)
- *   +0x7A: network_id        — network-assigned ID (uint16_t)
- *   +0x7C: peer_index        — peer routing index (uint8_t)
- *   +0x7E: field_7E          — unknown uint16_t
- *   +0x80: field_80          — unknown uint16_t
- *   +0x82: field_82          — unknown uint8_t
- *   +0x84: field_84          — unknown uint16_t
- *   +0x86: field_86          — unknown uint16_t
- *   +0x88: process_delay     — process delay counter (uint8_t)
- *   +0x89: ack_counter       — ack countdown (uint8_t)
- *
- * === PingEntry — per-ping tracking node in transfer_list ===
- * Size: 0x14 bytes
- *   +0x00: dpId            — DirectPlay ID of tracked player
- *   +0x04: pos_x           — X position component
- *   +0x08: pos_y           — Y position component
- *   +0x0C: peer_index      — peer slot index for routing
- *   +0x0D: slot_index      — preferred slot index
- *   +0x10: next            — linked-list next pointer
+ * InboundTrainNode and PingEntry (per-ping tracking node in transfer_list)
+ * field layouts now live in network/NetmanTypes.h, alongside PlayerSlot,
+ * CarObject/SpriteObject, and the `class Netman` declaration itself.
  *
  * Status: TRANSCRIBED
  */
