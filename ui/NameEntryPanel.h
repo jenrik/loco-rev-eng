@@ -100,8 +100,16 @@ public:
 
     int32_t    field_144;              // +0x144  (unknown, init 0)
 
-    /* +0x148..+0x14B: unknown — not initialized by Init */
-    uint8_t    _gap_148[4];            // +0x148  gap (unnamed, unevidenced)
+    /* +0x148: input-gate flag. Evidence: NETMAN_JoinSession (0x441870)
+     * clears it to 0 unconditionally on (re)open; NETMAN_DestroySession
+     * (0x441F80) and NETMAN_SetSessionInfo (0x441C80) both gate all
+     * ENTER/ESC/click handling on `*(char*)(this+0x148) != 0`. No in-tree
+     * setter that assigns it nonzero has been found yet (same read-side-
+     * only situation as field_E8 above) — open TODO for whoever
+     * decompiles the rest of NETMAN_JoinSession/UI_DefWndProc for this
+     * panel. +0x149..+0x14B remain an unevidenced gap. */
+    uint8_t    inputEnabled;           // +0x148  nonzero = ENTER/ESC/click handling active
+    uint8_t    _gap_149[3];            // +0x149  gap (unnamed, unevidenced)
 
     /* +0x14C/+0x150: second scroll-offset pair, read by RenderConnectionPanel
      * and passed to OffsetRect() alongside UI_WindowBase::workRect's
@@ -150,7 +158,13 @@ public:
 
     HBRUSH       backgroundBrush;      // +0x1D4  Solid brush for background (color 0xA8C4D8)
 
-    int32_t      field_1D8;            // +0x1D8  (unknown, init 0)
+    /* +0x1D8: child edit-control HWND for the typed player/session name.
+     * Evidence: NETMAN_DestroySession (0x441F80) and NETMAN_SetSessionInfo
+     * (0x441C80) both call GetWindowTextA(*(HWND*)(this+0x1D8), buf, 0x40)
+     * to copy the typed text into GameConfig::m_sessionName. Previously
+     * documented as an unevidenced int32_t; not yet confirmed which
+     * Init()/OnCreate() path creates this child control. */
+    HWND         nameEditHwnd;         // +0x1D8  edit control HWND (name/session text entry)
 
     uint8_t      field_1E0;            // +0x1E0  (unknown byte, init 0)
     uint8_t      field_1E1;            // +0x1E1  (unknown byte, init 0)

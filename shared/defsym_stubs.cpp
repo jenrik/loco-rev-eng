@@ -322,7 +322,15 @@ void* DPLAY_SetPlayerName = nullptr;
  * TODO), but now returns a well-defined value instead of UB. */
 struct UIPANEL_Surface;
 void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
-void NET_ComputeColor(unsigned char, unsigned char, unsigned char) { /* host no-op */ }
+/* NET_ComputeColor's real definition now lives in native/NET_Dtor.c
+ * (renamed from the stale Ghidra-default-label filename; 0x4441C0). This
+ * stub used to be a silent-wrong-stub of exactly the kind documented
+ * above for UIPANEL_CopySurface: network/NetworkPlayerList.cpp calls this
+ * exact name expecting a real uint32_t color, but got this always-empty
+ * `void`-returning no-op (Itanium mangling ignores return type, so it
+ * linked fine and every caller read an undefined register as the
+ * "color"). Removed now that a real, correctly-typed definition exists —
+ * keeping both would be a duplicate-definition link error. */
 void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
 void TileMap_GetTileRect(void*, void*) { /* host no-op */ }

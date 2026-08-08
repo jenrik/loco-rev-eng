@@ -14,10 +14,14 @@
  */
 
 #include "../shared/types.h"
+#include "../game/GameConfig.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
+
+/* Canonical declaration: resources/ResourceManager.h (matching exactly). */
+extern void __cdecl MultiplayerLobby_Reload(void);
 
 extern void __cdecl EditWindow_InitNetworkPanel(void* ui_main); /* 0x422820 */
 extern void __thiscall NETMAN_SetGameMode(void* netman, int mode); /* 0x43D2B0 */
@@ -30,8 +34,17 @@ extern void __cdecl DDRAW_InitAudio(void);                       /* 0x45B7E0 */
 
 extern void* g_ui_main;             /* 0x4FD378 — main menu UI (EditWindow) */
 extern void* g_netman;              /* 0x4FD3AC — network manager */
-extern void* g_net_host_info;       /* 0x4FD3A8 — network host info struct */
 extern void* g_network_thread;      /* 0x4FD398 — network thread handle */
+
+/* GameConfig singleton (0x4FD3A8). Previously accessed here as
+ * `g_net_host_info` (a bare `void*` alias of the same storage, declared in
+ * network/Netman.h) via raw `+7`/`+0x0C` byte offsets. Host GameConfig has
+ * no vtable (its destructor isn't virtual), so its host memory layout does
+ * NOT match the original x86 offsets used by raw pointer arithmetic —
+ * network/Netman.cpp already made this exact substitution (typed
+ * `_g_netman_data` + named fields) for the same 0x4FD3A8 object; this file
+ * now matches that precedent instead of `g_net_host_info`. */
+extern GameConfig* _g_netman_data;  /* 0x4FD3A8 */
 
 /* ================================================================== */
 /* MultiplayerLobby_Reload                                             */
@@ -44,14 +57,17 @@ extern void* g_network_thread;      /* 0x4FD398 — network thread handle */
 /* ================================================================== */
 void __cdecl MultiplayerLobby_Reload(void)
 {
-    /* Step 1: Re-enable UI network flag at g_net_host_info+0x07 */
-    *(char*)((uintptr_t)g_net_host_info + 7) = 1;
+    /* Step 1: Re-enable UI network flag (GameConfig::m_autoStart, +0x07) */
+    _g_netman_data->m_autoStart = 1;
 
     /* Step 2: Re-initialize the network panel on the main menu UI */
     EditWindow_InitNetworkPanel(g_ui_main);
 
-    /* Step 3: Set network polling to 50ms (0x32) */
-    *(int*)((uintptr_t)g_net_host_info + 0x0C) = 0x32;
+    /* Step 3: Set network polling to 50ms (0x32). Original offset +0x0C is
+     * GameConfig::m_timeout; this call site repurposes it as a poll
+     * interval rather than the session timeout documented in
+     * GameConfig.h — same dual-use field, different caller's intent. */
+    _g_netman_data->m_timeout = 0x32;
 
     /* Step 4: Set game mode to 1 (hosting/lobby mode) */
     NETMAN_SetGameMode(g_netman, 1);

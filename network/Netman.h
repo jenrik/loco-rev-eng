@@ -211,6 +211,7 @@ extern "C" {
 /* -- Globals -- */
 class TileMap;   /* forward decl for g_tilemap below (tilemap.h) */
 struct UIPANEL_Surface;   /* forward decl (graphics/LOCOBITMAP.h) */
+class GameConfig;   /* forward decl (game/GameConfig.h) — NETMAN_FreePacket/SendPacket below */
 extern int32_t  g_game_mode;          /* 0x4851F4 — global game mode   */
 extern char     g_install_path[];     /* 0x4A99C8 — installation path  */
 extern int32_t  g_player_id;          /* 0x4AAD46 — global player ID   */
@@ -352,7 +353,14 @@ void  WIN32_StreamRead(void* stream, void* buf, int32_t size);
 uint8_t* AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t* out_size);
 
 /* -- NET class helpers -- */
-uint32_t NET_Dtor(uint8_t param1, uint8_t param2, uint8_t param3);
+/* NET_ComputeColor — Ghidra-confirmed name (0x4441C0). Formerly declared
+ * here as "NET_Dtor" (Ghidra default label reused by mistake); it is not
+ * a destructor. See native/NET_Dtor.c. */
+uint32_t NET_ComputeColor(uint8_t param1, uint8_t param2, uint8_t param3);
+/* NET_Ctor/NET_BaseDtor(void* dplay) below are genuinely undecompiled
+ * placeholders for a real "NET" class ctor/base-dtor pair — distinct from
+ * the two postcard helpers above/below that merely reused these Ghidra
+ * default labels. Neither is defined or called anywhere in-tree. */
 void     NET_Ctor(void* dplay, void* param1, uint32_t param2, uint32_t param3,
                    int32_t param4, uint32_t param5, uint8_t* param6);
 void     NET_BaseDtor(void* dplay);
@@ -365,19 +373,39 @@ void  NETMAN_LeaveSession(int32_t panel);
 void  NETMAN_UpdateSessionInfo(void* panel);
 void  NETMAN_GetSessionInfo(int32_t panel);
 void  NETMAN_SetSessionInfo(void* panel);
-void* NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
-                             uint32_t wParam, uint32_t lParam);
+/* Return type fixed to LRESULT (was void*) — Ghidra confirms 0x441F80
+ * returns LRESULT (always 0 on every path), matching a __thiscall
+ * session-panel WindowProc, not a pointer. See native/NETMAN_SessionSettings.c. */
+LRESULT NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
+                               uint32_t wParam, uint32_t lParam);
 
 /* -- DirectPlay message/file management -- */
 void  DPLAY_SendMessages(void);
 void __stdcall DPLAY_ReceiveMessage(const char* path);
 
 /* -- Network settings persistence -- */
-void  NETMAN_FreePacket(int32_t packetPtr);
-void  NETMAN_SendPacket(int32_t packetPtr);
+/* Parameter fixed to GameConfig* (was int32_t) — the object these two
+ * operate on this-relative is GameConfig (game/GameConfig.h), not an
+ * opaque 32-bit handle. The int32_t form previously here mangled to a
+ * different, never-defined symbol than native/NETMAN_SessionSettings.c's
+ * real definition, so any caller using the old declaration (e.g.
+ * GameConfig::GameConfig()) was an unresolved call masked only by this
+ * target's -Wl,--unresolved-symbols=ignore-all link flag. */
+void  NETMAN_FreePacket(GameConfig* packetPtr);
+void  NETMAN_SendPacket(GameConfig* packetPtr);
 
 /* -- DPlayConfig destructor -- */
+/* 0x440CC0 in the original binary. On host this is dead: GameConfig has a
+ * real, integrated C++ destructor (GameConfig::~GameConfig(), same
+ * address) which the compiler-generated scalar deleting destructor already
+ * wraps. No definition of NETMAN_FreeProviderList exists in-tree (the old
+ * native/NETMAN_SessionSettings.c body under the name NETMAN_AllocPacket
+ * was removed as a duplicate that also did a forbidden manual vtable
+ * write); this declaration is orphaned documentation only. */
 void* NETMAN_FreeProviderList(void* config, uint8_t flags);
 
 /* -- Postcard attachment ID -- */
-uint16_t NET_BaseDtor(void);
+/* NET_GetNextAttId — Ghidra-confirmed name (0x445F20). Formerly declared
+ * here as "NET_BaseDtor" (Ghidra default label reused by mistake); it is
+ * not a destructor. See native/NET_BaseDtor.c. */
+uint16_t NET_GetNextAttId(void);
