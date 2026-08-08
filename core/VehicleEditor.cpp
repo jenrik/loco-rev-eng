@@ -55,6 +55,14 @@ extern void   DPLAY_CleanupPlayer(void* slot);                                  
 extern uint8_t  Resource_IsValidTrackIndex(void* resource, int16_t idx);               /* 0x44BCD0 */
 extern uint8_t  Resource_IsRoadTile(void* resource);                                    /* 0x44BD10 */
 extern uint8_t  Resource_IsBuildingTile(void* resource);                                /* 0x44BD30 */
+extern unsigned int __cdecl CGWND_MapResourceToDirection(int resource_id);              /* 0x40EB60 —
+                                                     same real function as game/World.cpp's
+                                                     `uint`-returning declaration (equivalent
+                                                     type; spelled out here since this TU
+                                                     doesn't otherwise pull in the typedef and
+                                                     mingw's headers don't provide the bare
+                                                     `uint` alias), used by
+                                                     VehicleEditor::SetResourceId */
 
 /* Vehicle / Train functions */
 extern char   Vehicle_GetOccupantCount(int vehicle);                                    /* 0x44C370 */
@@ -726,7 +734,9 @@ uint32_t VehicleEditor::CheckEditBounds2(Vehicle* vehicle)
 }
 
 /**
- * GetResourceId (vtable[7]) — Returns the resource ID if track resource loaded.
+ * GetResourceId (non-virtual — see core/VehicleEditor.h's vtable slot
+ * correction; vtable[7] is actually inherited Entity::StopSound, not this
+ * method) — Returns the resource ID if track resource loaded.
  * Address: 0x40E0D0
  */
 uint32_t VehicleEditor::GetResourceId()
@@ -739,6 +749,26 @@ uint32_t VehicleEditor::GetResourceId()
     return this->resource != nullptr
         ? static_cast<uint32_t>(this->res_id) : 0xFFFFFFFFu;
 #endif
+}
+
+/**
+ * SetResourceId (vtable[15], +0x3C) — Reload the editor's resource and
+ * recompute its route direction. Address: 0x40E0F0.
+ *
+ * Disassembly (0x40E0F0-0x40E126): writes res_id (+0x428) unconditionally,
+ * calls Entity::InitBase(resource_id, anim_index, force_reload=false)
+ * (0x405900), and only when that succeeds recomputes res_id_2 (+0x42C) via
+ * CGWND_MapResourceToDirection(resource_id) (0x40EB60). Returns InitBase's
+ * result unchanged.
+ */
+int VehicleEditor::SetResourceId(int resource_id, int anim_index)
+{
+    this->res_id = resource_id;
+    int result = this->InitBase(resource_id, anim_index, false);
+    if (result != 0) {
+        this->res_id_2 = static_cast<int32_t>(CGWND_MapResourceToDirection(resource_id));
+    }
+    return result;
 }
 
 /**

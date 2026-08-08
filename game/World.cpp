@@ -154,25 +154,54 @@ void World::Init(void)
 
         /* Render final state then save */
         World_RenderAll(vehicle);
-        this->SaveToFile((uint)vehicle->network_id,          /* +0x7A */
-                         (char)vehicle->slot_index,          /* +0x78 */
-                         (char)1);                           /* mp_flag */
+        this->SaveToFile(static_cast<uint>(vehicle->network_id),   /* +0x7A */
+                         static_cast<char>(vehicle->slot_index),   /* +0x78 */
+                         static_cast<char>(1));                    /* mp_flag */
     }
 
     /* Release global object pointers at 0x485268 and 0x48526C.
        Both are released via vtable slot 2 (+0x08) when non-NULL and then
-       nulled. Neither is ever assigned anywhere in loco.exe, so both are
-       always NULL at runtime and this cleanup never fires in the shipped
-       binary; their concrete object type is unknown (no writer evidence).
-       TODO: type g_world_release_a/b and use a typed release call once a
-       creator/writer is found in the binary. */
-    if (g_world_release_a != NULL) {
-        (*(void (**)(void*))((uintptr_t)*(void**)g_world_release_a + 8))(g_world_release_a);
-        g_world_release_a = NULL;
+       nulled. get_xrefs_to() on both addresses (Ghidra) shows World::Init
+       is their ONLY reader or writer anywhere in the binary — neither is
+       ever assigned, so both are always NULL at runtime and this cleanup
+       never fires in the shipped binary.
+       Their concrete class remains unidentified: a disassembly of the call
+       itself (0x44DA15-0x44DA24) shows a single-argument call (self only,
+       no extra ints), which rules out this being GameObject/Entity's own
+       slot [2] = PtInRect(int,int) (that overload needs two more pushed
+       args) — so whatever real class this is, its vtable diverges from
+       the GameObject/Entity convention at slot 2, or predates it entirely.
+       With no writer to type-narrow from and no matching known class,
+       this stays an untyped function-pointer dispatch (no header to add a
+       virtual method to) — only the C-style casts are replaced here.
+
+       IMPORTANT: the retained `+ 8` is the ORIGINAL x86 binary's byte
+       offset into a 4-byte-pointer vtable (slot 2 = +0x08 there). On this
+       64-bit host, `*reinterpret_cast<void**>(...)` reads the object's
+       real (GCC-emitted) host vtable pointer, whose entries are 8 bytes
+       each — so `+ 8` here actually lands on host vtable slot 1, not
+       slot 2, and does not correspond to "PtInRect" or anything else in
+       the GameObject/Entity convention on this host. This is the exact
+       bug class fixed as a live bug in World_SerializeMap's
+       VehicleEditor::SetResourceId call below (misaligned/mis-slotted
+       host vtable arithmetic derived from an x86 byte offset). It is
+       NOT fixed here because it is genuinely dead (no writer anywhere;
+       always NULL) — do not revive this path without first retyping
+       g_world_release_a/b to a real class and replacing this with a
+       named virtual call, the same way that other call was fixed.
+       TODO: revisit if a writer for either global is ever found. */
+    typedef void (*ReleaseFn)(void*);
+    if (g_world_release_a != nullptr) {
+        ReleaseFn release = *reinterpret_cast<ReleaseFn*>(
+            reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(g_world_release_a)) + 8);
+        release(g_world_release_a);
+        g_world_release_a = nullptr;
     }
-    if (g_world_release_b != NULL) {
-        (*(void (**)(void*))((uintptr_t)*(void**)g_world_release_b + 8))(g_world_release_b);
-        g_world_release_b = NULL;
+    if (g_world_release_b != nullptr) {
+        ReleaseFn release = *reinterpret_cast<ReleaseFn*>(
+            reinterpret_cast<uintptr_t>(*reinterpret_cast<void**>(g_world_release_b)) + 8);
+        release(g_world_release_b);
+        g_world_release_b = nullptr;
     }
 }
 
@@ -212,7 +241,7 @@ void World::Reset(char flag)
 
         int32_t occupancy = vehicle->occupancy;          /* +0x64 */
         if (occupancy == 0 || occupancy == 4 || occupancy == 5 || occupancy == 1) {
-            vehicle->UpdatePosition((uint8_t)flag);
+            vehicle->UpdatePosition(static_cast<uint8_t>(flag));
         }
     }
 }
@@ -306,7 +335,7 @@ void World::SerializeObject(char player_id)
 
         /* Render final state and save */
         World_RenderAll(vehicle);
-        this->SaveToFile((uint)vehicle->network_id,  /* +0x7A */
+        this->SaveToFile(static_cast<uint>(vehicle->network_id),  /* +0x7A */
                          player_id,
                          0);                         /* mp_flag=0 */
     }
@@ -369,8 +398,8 @@ void World::DeserializeMap(RESDATA_GameVehicle* game_vehicle)
 
             /* Render and save */
             World_RenderAll(vehicle);
-            this->SaveToFile((uint)vehicle->network_id,   /* +0x7A */
-                             (char)vehicle->slot_index,   /* +0x78 */
+            this->SaveToFile(static_cast<uint>(vehicle->network_id),   /* +0x7A */
+                             static_cast<char>(vehicle->slot_index),   /* +0x78 */
                              1);                          /* mp_flag=1 */
         }
     }
@@ -404,7 +433,8 @@ Vehicle* World::LoadFromFile(int* route_data, int* vehicle_init)
     bool do_register;
 
     /* Bounds check — world must not be full */
-    if ((uint16_t)this->vehicle_count > 3 || (uint16_t)this->local_vehicle_count > 2) {
+    if (static_cast<uint16_t>(this->vehicle_count) > 3 ||
+        static_cast<uint16_t>(this->local_vehicle_count) > 2) {
         return NULL;
     }
 
@@ -429,7 +459,7 @@ Vehicle* World::LoadFromFile(int* route_data, int* vehicle_init)
             vehicle = NULL;
         } else {
             /* Random resource from {0x1804, 0x1806, 0x1808} */
-            int resource_id = (int)(CRT_rand() % 3) * 2 + 0x1804;
+            int resource_id = static_cast<int>(CRT_rand() % 3) * 2 + 0x1804;
             vehicle = new (vehicle_mem) Vehicle(resource_id, 0, 0, 0);
         }
         this->vehicles[slot] = vehicle;
@@ -443,19 +473,19 @@ Vehicle* World::LoadFromFile(int* route_data, int* vehicle_init)
                    (format string at 0x47F030, player name at g_player_config+0x06) */
                 char name_buf[12];
                 CRT_sprintf(name_buf, 10, "%s %lu", g_player_config->name,
-                            (unsigned long)vehicle->network_id);
+                            static_cast<unsigned long>(vehicle->network_id));
                 vehicle->editors[0]->SetName(name_buf);
 
                 /* Generate random route (0 to 4 segments) */
-                int segments = (int)(CRT_rand() % 5);
+                int segments = static_cast<int>(CRT_rand() % 5);
                 for (int i = 0; i < segments; i++) {
-                    int choice = (int)(CRT_rand() % 3);
+                    int choice = static_cast<int>(CRT_rand() % 3);
                     if (choice == 0) {
                         /* Destination type A: random from {0x1866, 0x1868, 0x186A} */
-                        vehicle->InitRoute((int)(CRT_rand() % 3) * 2 + 0x1866, 2, 0);
+                        vehicle->InitRoute(static_cast<int>(CRT_rand() % 3) * 2 + 0x1866, 2, 0);
                     } else if (choice == 1) {
                         /* Destination type B: {0x186C, 0x186E} (assembly: (rand%2)*2+0x186C) */
-                        vehicle->InitRoute((int)(CRT_rand() % 2) * 2 + 0x186C, 3, 0);
+                        vehicle->InitRoute(static_cast<int>(CRT_rand() % 2) * 2 + 0x186C, 3, 0);
                     } else {
                         /* Destination type C: 0x1870 */
                         vehicle->InitRoute(0x1870, 4, 0);
@@ -490,7 +520,7 @@ Vehicle* World::LoadFromFile(int* route_data, int* vehicle_init)
                 /* Assign name */
                 char name_buf[12];
                 CRT_sprintf(name_buf, 10, "%s %lu", g_player_config->name,
-                            (unsigned long)vehicle->network_id);
+                            static_cast<unsigned long>(vehicle->network_id));
                 vehicle->editors[0]->SetName(name_buf);
 
                 /* Set up initial position */
@@ -564,8 +594,8 @@ char World::FinalizeLoad(Vehicle* vehicle, int packed_coords, char mp_flag)
     this->vehicle_count++;
 
     /* Unpack destination coordinates */
-    dest_x = (short)(packed_coords & 0xFFFF);
-    dest_y = (short)((packed_coords >> 16) & 0xFFFF);
+    dest_x = static_cast<short>(packed_coords & 0xFFFF);
+    dest_y = static_cast<short>((packed_coords >> 16) & 0xFFFF);
 
     /* Determine destination based on network scenario.
        Assembly: MOV ECX,[0x004fd3ac]; MOV EAX,[ECX+0x7C4] — no NULL check. */
@@ -649,20 +679,25 @@ void World::UpdateTick(void)
 
             /* Render and save */
             World_RenderAll(vehicle);
-            this->SaveToFile((uint)vehicle->network_id,
-                             (char)vehicle->slot_index,
+            this->SaveToFile(static_cast<uint>(vehicle->network_id),
+                             static_cast<char>(vehicle->slot_index),
                              1);
 
         } else if (vehicle->net_sync_flag == 1) {
             /* Network sync pending.
                Assembly chain: vehicle+0x20 (editor_state) -> +0x14
-               (building) -> +0x88 (packed tile coords). The runtime
-               object is a GameVehicle whose sub_pos_x/sub_pos_y at
-               +0x88 form the packed tile target (see
-               ResdataGameVehicle::tile_target()).
-               TODO: use the typed tile_target() accessor once
-               EditorState::building is retyped away from Building*. */
-            int packed_coords = *(int32_t*)((uint8_t*)vehicle->editor_state->building + 0x88);
+               (building) -> +0x88 (packed tile coords). EditorState::building
+               is declared Building* (world/EditorState.h), but the runtime
+               object here is always a GameVehicle/RESDATA_GameVehicle —
+               same mistyping game/Vehicle.cpp's cluster found and
+               deliberately left in place (see this cluster's commit message
+               for the file-wide decision). +0x88 is RESDATA_GameVehicle's
+               inherited sub_pos_x/sub_pos_y pair, which its own
+               tile_target() accessor (game/ResdataGameVehicle.h) already
+               exposes — used directly here via a local cast rather than
+               retyping the field. */
+            int packed_coords = reinterpret_cast<RESDATA_GameVehicle*>(
+                vehicle->editor_state->building)->tile_target();
 
             /* Mark as synced */
             vehicle->net_sync_flag = 2;
@@ -740,7 +775,7 @@ uint World::ProcessEvents(Vehicle* current_vehicle)
         if (other == current_vehicle)                    continue;  /* skip self */
 
         /* Check all sub-objects of the other vehicle */
-        for (int j = 0; j <= (int)other->editor_count; j++) {
+        for (int j = 0; j <= static_cast<int>(other->editor_count); j++) {
             VehicleEditor* sub = other->editors[j];                /* +0x10 + j*4 */
 
             /* Only test sub-objects whose editor states reference the
@@ -767,15 +802,35 @@ uint World::ProcessEvents(Vehicle* current_vehicle)
                 continue;
             }
 
-            /* Visual overlap check via Town_BlitViewport */
+            /* Visual overlap check via Town_BlitViewport.
+               sub->resource (Entity::resource, +0x40) is a RESDATA*
+               (shared/types.h) here: +0x14 is RESDATA::frame_width, a
+               named uint16_t field used directly below — a clean,
+               width-correct fit.
+               +0x10 is RESDATA::flags, documented there as "also aliased
+               as ui_panel (UIPANEL*) in some contexts": the ORIGINAL
+               32-bit binary packs a full pointer into that one 4-byte
+               dword. This host read is NOT equivalent to the binary's:
+               `*reinterpret_cast<void**>(...)` reads a native 8-byte
+               pointer starting at +0x10, spanning `flags` (+0x10..+0x13)
+               AND `frame_width`/`frame_height` (+0x14..+0x17) — three
+               unrelated fields reinterpreted as one pointer. Left
+               unchanged (pre-existing before this cast-style pass, and
+               this collision path isn't exercised by any current test),
+               but flagged as a real pointer-width landmine candidate if
+               this branch is ever live with a genuine cached surface
+               pointer — see input/Cursor_internal.h's RESDATA_GetSurface
+               for the sanctioned typed-vtable-bridge pattern to use
+               instead of a raw offset if this needs a real accessor. */
+            RESDATA* sub_res = static_cast<RESDATA*>(sub->resource);
             int viewport_result = Town_BlitViewport(
-                *(void**)((uint8_t*)sub->resource + 0x10),       /* +0x40 -> +0x10 */
+                *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(sub_res) + 0x10),
                 sub->source_rect.left,                            /* +0x30 */
                 sub->source_rect.top,                             /* +0x34 */
                 sub->source_rect.right,                           /* +0x38 */
                 sub->source_rect.bottom,                          /* +0x3C */
-                ((uint)*(uint16_t*)((uint8_t*)sub->resource + 0x14) *
-                     (uint)sub->angle_frame -                     /* +0x438 */
+                (static_cast<uint>(sub_res->frame_width) *
+                     static_cast<uint>(sub->angle_frame) -         /* +0x438 */
                  sub->screen_rect.left) + current_es->pos_x,      /* +0x0C */
                 current_es->pos_y - sub->screen_rect.top);        /* +0x10 - +0x0C */
 
@@ -784,7 +839,7 @@ uint World::ProcessEvents(Vehicle* current_vehicle)
 
                 /* Stop current vehicle */
                 current_vehicle->SetState(4);                     /* STOPPED */
-                current_vehicle->stop_timer = (int32_t)(CRT_rand() % 100) + 1;
+                current_vehicle->stop_timer = static_cast<int32_t>(CRT_rand() % 100) + 1;
 
                 /* Show collision message box */
                 UI_CreateMessageBox(g_tooltip_mgr, 0x3861, 0, 'W',
@@ -793,7 +848,7 @@ uint World::ProcessEvents(Vehicle* current_vehicle)
                 /* Also stop the other vehicle if it's active */
                 if (other->state != 0) {
                     other->SetState(4);
-                    other->stop_timer = (int32_t)(CRT_rand() % 100) + 1;
+                    other->stop_timer = static_cast<int32_t>(CRT_rand() % 100) + 1;
                 }
                 break;
             }
@@ -826,7 +881,7 @@ char World::ProcessAudio(int audio_x, int audio_y)
             continue;
         }
 
-        for (int j = 0; j <= (int)vehicle->editor_count; j++) {
+        for (int j = 0; j <= static_cast<int>(vehicle->editor_count); j++) {
             VehicleEditor* sub = vehicle->editors[j];
             if (sub == NULL) {
                 continue;
@@ -837,7 +892,7 @@ char World::ProcessAudio(int audio_x, int audio_y)
                 /* vtable[2] = GameObject::PtInRect(thiscall) */
                 if (sub->PtInRect(audio_x, audio_y) != 0) {
                     Town_SelectBuilding(g_town_view,
-                        (int)(uintptr_t)vehicle->editors[j]);
+                        static_cast<int>(reinterpret_cast<uintptr_t>(vehicle->editors[j])));
                     result = 1;
                     break;
                 }
@@ -867,20 +922,28 @@ char World::InitTimer(int object_ptr)
             continue;
         }
 
-        /* Check main editor state's building pointer */
+        /* Check main editor state's building pointer.
+           object_ptr is a truncating int comparison against a pointer, per
+           World.h's own doc: the real caller (RESDATA_GameVehicle_InitSounds,
+           per Ghidra — not yet present in this C++ tree) passes a
+           RESDATA_GameVehicle*, consistent with EditorState::building's
+           GameVehicle-family mistyping noted throughout this cluster. The
+           truncation itself is a pre-existing signature-level property of
+           this function (not introduced here) — preserved as-is; only the
+           cast style changes. */
         if (vehicle->editor_state != NULL &&
-            (int32_t)(intptr_t)vehicle->editor_state->building == object_ptr) {
+            static_cast<int32_t>(reinterpret_cast<intptr_t>(vehicle->editor_state->building)) == object_ptr) {
             return 1;
         }
 
         /* Check array sub-objects' editor states */
-        for (int j = 0; j <= (int)vehicle->editor_count; j++) {
+        for (int j = 0; j <= static_cast<int>(vehicle->editor_count); j++) {
             VehicleEditor* sub = vehicle->editors[j];
 
             /* Check editor states for matching building pointer.
                (Assembly dereferences end_a/end_b without null checks.) */
-            if ((int32_t)(intptr_t)sub->end_a->building == object_ptr ||
-                (int32_t)(intptr_t)sub->end_b->building == object_ptr) {
+            if (static_cast<int32_t>(reinterpret_cast<intptr_t>(sub->end_a->building)) == object_ptr ||
+                static_cast<int32_t>(reinterpret_cast<intptr_t>(sub->end_b->building)) == object_ptr) {
                 return 1;
             }
         }
@@ -919,7 +982,7 @@ void World::Lock(void)
             continue;
         }
 
-        for (int sub_idx = 0; sub_idx <= (int)vehicle->editor_count; sub_idx++) {
+        for (int sub_idx = 0; sub_idx <= static_cast<int>(vehicle->editor_count); sub_idx++) {
             VehicleEditor* sub = vehicle->editors[sub_idx];
 
             /* Skip excluded types (assembly dereferences sub directly) */
@@ -1007,7 +1070,7 @@ void World::InvalidateRect(int x, int y, int param3, int param4, short scroll_st
 
         /* Check if sub-object bounds include this tile.
            (Binary passes x, y, scroll_stop plus an unused padding arg.) */
-        if (sub_obj->IsInBounds((short)x, (short)y, scroll_stop) != 0) {
+        if (sub_obj->IsInBounds(static_cast<short>(x), static_cast<short>(y), scroll_stop) != 0) {
             sub_obj->BlitBackground(x, y);
 
             /* If scroll_stop == 1, also check adjacent sub-objects with
@@ -1024,7 +1087,7 @@ void World::InvalidateRect(int x, int y, int param3, int param4, short scroll_st
                        bound_check_flag (+0x448) */
                     if (next->target_building == sub_obj->target_building &&
                         next->bound_check_flag == 0) {
-                        if (next->IsInBounds((short)x, (short)y, 0) != 0) {
+                        if (next->IsInBounds(static_cast<short>(x), static_cast<short>(y), 0) != 0) {
                             next->BlitBackground(x, y);
                         }
                         break;
@@ -1063,20 +1126,31 @@ bool __stdcall World_SerializeMap(GameVehicle* game_vehicle, int* route_data)
     }
 
     int initial_resource = *route_data;
-    int current_resource = (int)vehicle->editors[0]->GetResourceId();
+    int current_resource = static_cast<int>(vehicle->editors[0]->GetResourceId());
 
     bool result = (current_resource != initial_resource);
 
     if (result) {
-        /* Set new resource on the sub-object via its vtable[15] (+0x3C).
-           The method (0x40E0F0) is a VehicleEditor resource setter that
-           writes res_id (+0x428) / res_id_2 (+0x42C) and reloads the
-           editor resource; it is __thiscall with (resource, -1).
-           TODO: expose as a typed VehicleEditor method (e.g.
-           SetResourceId(int, int)) during VehicleEditor integration. */
-        typedef void(__thiscall* SetResFn)(void* self, int resource, int param);
-        (*(SetResFn*)((uintptr_t)*(void**)vehicle->editors[0] + 0x3C))
-            (vehicle->editors[0], initial_resource, -1);
+        /* VehicleEditor::SetResourceId — vtable[15] (+0x3C), 0x40E0F0.
+           See core/VehicleEditor.h's vtable layout comment: this is the
+           sole call site (confirmed via get_xrefs_to(0x40E0F0) — only the
+           vtable data itself references it, i.e. it was never called
+           directly).
+
+           BUG FIX, not just a cast-style change: the previous code read
+           the byte offset +0x3C off *this TU's own host GCC vtable
+           pointer* (`*(void**)vehicle->editors[0]`) — the x86 binary's
+           vtable-slot byte offset applied to an unrelated, differently-
+           laid-out host vtable of 8-byte entries. 0x3C/8 = 7.5, i.e. the
+           computed address was misaligned, straddling two real host
+           vtable entries — calling through it would read half of one
+           function pointer and half of the next as if they were one
+           pointer, then jump there. This path is reachable from real
+           gameplay (called from the town building-purchase path per the
+           function doc above), so it was a live, always-wrong host bug,
+           not dead code. Fixed by dispatching through the named C++
+           virtual method instead of any raw vtable arithmetic. */
+        vehicle->editors[0]->SetResourceId(initial_resource, -1);
     }
 
     /* Remove 3 old route entries */
@@ -1133,7 +1207,7 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
 
     /* Step 2: Find destination game vehicle at current tile */
     GameVehicle* building = static_cast<GameVehicle*>(TileMap_GetObjectAt(
-        g_tilemap, vehicle->tile_x, (short)(vehicle->tile_y + 1), 0));
+        g_tilemap, vehicle->tile_x, static_cast<short>(vehicle->tile_y + 1), 0));
 
     if (building != NULL) {
         switch (vehicle->direction) {                 /* +0x60 */
@@ -1163,7 +1237,7 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
     case 5:   /* ARRIVING */
     {
         GameVehicle* dest_building = static_cast<GameVehicle*>(TileMap_GetObjectAt(
-            g_tilemap, vehicle->target_tile_x, (short)(vehicle->target_tile_y + 1), 0));
+            g_tilemap, vehicle->target_tile_x, static_cast<short>(vehicle->target_tile_y + 1), 0));
 
         if (dest_building != NULL) {
             if (vehicle->occupancy == 2) {
@@ -1200,7 +1274,7 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
     }
 
     /* Iterate sub-objects and detach editor visual states */
-    for (int i = 0; i <= (int)vehicle->editor_count; i++) {
+    for (int i = 0; i <= static_cast<int>(vehicle->editor_count); i++) {
         VehicleEditor* sub = vehicle->editors[i];
 
         /* Detach via editor state 1's building */
@@ -1219,7 +1293,7 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
     }
 
     /* Step 8: Detach via EditorState::Detach (second pass) */
-    for (int i = 0; i <= (int)vehicle->editor_count; i++) {
+    for (int i = 0; i <= static_cast<int>(vehicle->editor_count); i++) {
         VehicleEditor* sub = vehicle->editors[i];
         if (sub != NULL) {
             sub->end_a->Detach();
@@ -1261,6 +1335,15 @@ void __stdcall World_GetObjectAt(Vehicle* vehicle)
 /* signature verified against InvalidateRect's own RET immediate.     */
 /* ================================================================== */
 extern void* g_world; /* 0x4A98B0 */
+
+/* Forward declarations matching world/tilemap.h's canonical extern
+   declarations exactly (not including that header here — it declares its
+   own conflicting g_* globals; see the file comment above). Required by
+   -Werror=missing-declarations since these definitions are the first
+   thing in this TU to mention them. */
+void World_InvalidateRect(int x, int y, int w, int h, short type);
+void World_Lock(void* world);
+void World_Unlock(void* world);
 
 void World_InvalidateRect(int x, int y, int w, int h, short type)
 {

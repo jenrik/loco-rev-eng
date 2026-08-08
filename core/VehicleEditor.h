@@ -17,21 +17,59 @@
  * Size: ~0x450 bytes (1092 bytes)
  * Vtable: 0x477590
  *
- * Vtable layout:
- *   [0] +0x00: scalar deleting destructor (0x40D660)
- *   [1] +0x04: StopSound / invalidate rect (inherited: 0x405A20)
- *   [2] +0x08: (release resource? — inherited)
- *   [3] +0x0C: SetRenderOffset / update position (0x40D8E0)
- *   [4] +0x10: (unknown — inherited)
- *   [5] +0x14: (unknown — inherited)
- *   [6] +0x18: SetAnimState (inherited: 0x405A50)
- *   [7] +0x1C: StopSound (inherited: 0x405A20) — NOT overridden by
- *              VehicleEditor. Confirmed by a raw read of the vtable data
- *              at 0x477590+0x1C (= 0x405A20 = Entity::StopSound); the
- *              previous "GetResourceId" label here was wrong — GetResourceId
- *              (0x40E0D0) is a plain non-virtual member, not in this vtable.
- *   [8] +0x20: SetFrame (inherited: 0x405DE0)
- *   [9] +0x24: IsInBounds (0x40E250)
+ * Vtable layout — re-verified this session via a raw read of the vtable
+ * data at 0x477590 (64 bytes = slots [0]-[15]). Several slots were
+ * mislabeled in earlier passes (see per-slot notes below); slots
+ * [1]-[14] are ALL inherited from Entity unmodified (see core/Entity.h's
+ * own 15-slot vtable list at 0x477488) — VehicleEditor only supplies
+ * slot [0] (its own destructor override) and slot [15] (a genuinely new
+ * VehicleEditor-only virtual; Entity's vtable ends at slot [14]/+0x38):
+ *   [0]  +0x00: scalar deleting destructor (0x40D660) — OVERRIDDEN
+ *   [1]  +0x04: InvalidateRect (inherited, unmodified: 0x436AB0)
+ *   [2]  +0x08: PtInRect (inherited, unmodified: 0x436A10)
+ *   [3]  +0x0C: MoveTo / SetWorldPos (inherited, unmodified: 0x405C00).
+ *               A previous version of this comment claimed slot [3] WAS
+ *               SetRenderOffset (0x40D8E0) — wrong; the raw vtable data
+ *               is 0x405C00 (Entity::MoveTo), not 0x40D8E0. SetRenderOffset
+ *               is a plain non-virtual member (see below) that itself
+ *               CALLS this slot (via GameObject_HitTest) after recomputing
+ *               screen_rect — it does not occupy it.
+ *   [4]  +0x10: InvokeCallback1 (inherited, unmodified: 0x436AE0)
+ *   [5]  +0x14: InvokeCallback2 (inherited, unmodified: 0x436B00)
+ *   [6]  +0x18: InitBase (inherited, unmodified: 0x405900) — previously
+ *               mislabeled "SetAnimState"; corrected against the raw
+ *               vtable read.
+ *   [7]  +0x1C: StopSound (inherited: 0x405A20) — NOT overridden by
+ *               VehicleEditor. Confirmed by a raw read of the vtable data
+ *               at 0x477590+0x1C (= 0x405A20 = Entity::StopSound); the
+ *               previous "GetResourceId" label here was wrong — GetResourceId
+ *               (0x40E0D0) is a plain non-virtual member, not in this vtable.
+ *   [8]  +0x20: SetFrame (inherited, unmodified: 0x405DE0)
+ *   [9]  +0x24: SetVisible (inherited, unmodified: 0x4061B0) — previously
+ *               mislabeled "IsInBounds"; IsInBounds (0x40E250, see below)
+ *               is also a plain non-virtual member, not in this vtable.
+ *   [10] +0x28: Update (inherited, unmodified: 0x405C40)
+ *   [11] +0x2C: Draw (inherited, unmodified: 0x405E60)
+ *   [12] +0x30: DrawConnected (inherited, unmodified: 0x405FD0)
+ *   [13] +0x34: SetName (inherited, unmodified: 0x405E20)
+ *   [14] +0x38: SetAnimState (inherited, unmodified: 0x405A50)
+ *   [15] +0x3C: SetResourceId(int resource_id, int anim_index) (0x40E0F0)
+ *               — a genuinely NEW slot (nothing occupies it in Entity's
+ *               own 15-slot vtable above), the only VehicleEditor-specific
+ *               entry besides its own destructor at [0]. Read directly
+ *               past this vtable's 64 documented bytes (0x4775D0, 48
+ *               more bytes) shows non-code data immediately after,
+ *               confirming the table really is exactly 16 slots.
+ *               get_xrefs_to(0x40E0F0) shows exactly one reference in the
+ *               whole binary: the vtable data slot itself (0x4775CC) —
+ *               i.e. its sole caller was always a virtual dispatch, never
+ *               a direct call. That caller is World_SerializeMap
+ *               (0x44DEA0, game/World.cpp) — previously a literal
+ *               `*(vtable+0x3C)` cast taken against this TU's own *host*
+ *               GCC vtable pointer (an x86 byte offset misapplied to an
+ *               unrelated 8-byte-entry host layout — see game/World.cpp's
+ *               fix comment for why that was a live bug, not just a style
+ *               issue), now this typed virtual call.
  *
  * Class hierarchy:
  *   GameObject (root, type=1)
@@ -193,7 +231,9 @@ public:
     uint32_t BlitBackground(int clip_x, int clip_y);
 
     /**
-     * IsInBounds (vtable[9]) — Test if a 16x16 point intersects the editor rect.
+     * IsInBounds (non-virtual — vtable[9] is actually Entity::SetVisible,
+     * see the vtable slot correction above) — Test if a 16x16 point
+     * intersects the editor rect.
      * Address: 0x40E250
      *
      * @param x     Grid X coordinate
@@ -244,6 +284,24 @@ public:
      * Address: 0x40E0D0
      */
     uint32_t GetResourceId();
+
+    /**
+     * SetResourceId (vtable[15], +0x3C) — Reload the editor's resource and
+     * recompute its route direction. Address: 0x40E0F0.
+     *
+     * The first VehicleEditor-specific vtable slot (see the vtable layout
+     * comment above the class). Writes res_id (+0x428) unconditionally,
+     * calls the inherited Entity::InitBase(resource_id, anim_index,
+     * force_reload=false), and only on success recomputes res_id_2
+     * (+0x42C) via CGWND_MapResourceToDirection(resource_id). Returns
+     * InitBase's result.
+     *
+     * @param resource_id  New resource ID to load
+     * @param anim_index   Initial animation index (World_SerializeMap's
+     *                     sole caller passes -1)
+     * @return             InitBase's result (non-zero on success)
+     */
+    virtual int SetResourceId(int resource_id, int anim_index);
 
     /**
      * GetDPlayData — Get pointer to DPLAY network data if initialized.
