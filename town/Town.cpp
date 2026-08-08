@@ -216,8 +216,13 @@ extern uint8_t RESDATA_IsBuildingTile(int32_t tile_obj);          /* 0x44BD30 */
  * on the host build (g_dplay is always initialized to NULL). The calling code
  * at lines 1441, 1464, 1484, etc. in Town.cpp checks the result and updates UI
  * to show message counts, but this path is dead when networking is disabled.
+ *
+ * Kept `static`: network/Netman.h declares an unrelated, incompatible
+ * `DPLAY_GetMessageCount(int32_t)` (int16_t return) for a different real
+ * call path elsewhere in the tree — this file's own stub is local to the
+ * host-unreachable code below and must not collide with that symbol.
  */
-int DPLAY_GetMessageCount(void* dplay)
+static int DPLAY_GetMessageCount(void* dplay)
 {
     (void)dplay;  /* unused parameter */
     fprintf(stderr, "STUB: DPLAY_GetMessageCount reached at %s:%d\n", __FILE__, __LINE__);
@@ -1887,7 +1892,7 @@ LRESULT Town::on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     if (sVar3 != 0) {
     button_set_mode:
-        if (this->postcard_data == 0) {
+        if (this->postcard_data == nullptr) {
         set_mode_pair_again:
             this->set_mode(this->childCount1, this->childObj1, 0, 1);
         }
@@ -1975,7 +1980,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         goto set_mode_base_pair;
 
     case 2:
-        if (this->postcard_data == 0) {
+        if (this->postcard_data == nullptr) {
             this->postcard_dlg_proc(2);
             UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
             Sleep(0x96);
@@ -1986,7 +1991,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         goto clear_pending;
 
     case 3:
-        if (this->postcard_data == 0) {
+        if (this->postcard_data == nullptr) {
             this->postcard_dlg_proc(3);
             UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
             Sleep(0x96);
@@ -1997,9 +2002,9 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
         this->set_mode(this->childCount1, this->childObj1, 0, 1);
         this->receive_postcard();
-        this->postcard_data = 0;
+        this->postcard_data = nullptr;
         this->clear_postcard_ui();
-        if (!this->is_host && this->selected_player == 0) {
+        if (!this->is_host && this->selected_player == nullptr) {
             this->postcard_update_ui(8);
         }
         this->postcard_update_ui(7);
@@ -2015,7 +2020,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         Sleep(0x96);
         Cursor_Show(g_cursor);
         if (this->postcard_data) {
-            this->postcard_data = 0;
+            this->postcard_data = nullptr;
             this->selected_player = nullptr;
         }
         this->hide();                        /* vtable[1] */
@@ -2024,7 +2029,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case 5:
         if (this->postcard_data) {
-            this->postcard_data = 0;
+            this->postcard_data = nullptr;
             this->set_mode(this->childCount1, this->childObj1, 0, 1);
         }
         if (!this->has_remote_players) {     /* +0x607 */
@@ -2044,14 +2049,14 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         this->postcard_update_ui(7);
         this->postcard_update_ui(6);
         this->clear_postcard_ui();
-        if (!this->is_host && this->selected_player == 0) {
+        if (!this->is_host && this->selected_player == nullptr) {
             this->postcard_update_ui(8);
         }
         break;
 
     case 6:
         if (this->postcard_data) {
-            this->postcard_data = 0;
+            this->postcard_data = nullptr;
             this->set_mode(this->childCount1, this->childObj1, 0, 1);
             return 0;
         }
@@ -2071,9 +2076,9 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (this->postcard_data) {
             this->set_mode(this->childCount1, this->childObj1, 0, 1);
             this->save_postcard();
-            this->postcard_data = 0;
+            this->postcard_data = nullptr;
             this->clear_postcard_ui();
-            if (!this->is_host && this->selected_player == 0) {
+            if (!this->is_host && this->selected_player == nullptr) {
                 this->postcard_update_ui(8);
                 UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
                 return 0;
@@ -2095,12 +2100,12 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case_8_path:
     case 8:
-        if (this->postcard_data == 0) {
+        if (this->postcard_data == nullptr) {
             return 0;
         }
         this->set_mode(this->childCount1, this->childObj1, 0, 1);
         this->load_postcard();
-        this->postcard_data = 0;
+        this->postcard_data = nullptr;
         this->postcard_update_ui(8);
         this->postcard_update_ui(7);
         this->clear_postcard_ui();
@@ -2132,7 +2137,7 @@ set_mode_base_pair:
     return 0;
 
 clear_pending:
-    this->postcard_data = 0;
+    this->postcard_data = nullptr;
     this->set_mode(this->childCount1, this->childObj1, 0, 1);
     return 0;
 }
@@ -2852,7 +2857,18 @@ void Train_HandleTrackBuild(void* subsystem, int msg)
 /* to avoid pulling this file's own headers into that one. Real         */
 /* signatures verified against each callee's RET immediate — see       */
 /* Town::render_selection/deselect_building/update_selection above.    */
+/*                                                                      */
+/* Re-declared locally (matching world/tilemap.h exactly) rather than   */
+/* #include-ing that header: tilemap.h pulls in its own, differently-   */
+/* shaped local declarations of SetRect/Sleep/g_tilemap/g_game_mode/    */
+/* ResourceManager_GetById that collide with this file's own — the      */
+/* same mutual-entanglement the comment above already avoids for the    */
+/* reverse direction. */
 /* ================================================================== */
+extern void Town_RenderSelection(int x1, int y1, int x2, int y2, int extra);
+extern void Town_DeselectBuilding(void);
+extern void Town_UpdateSelection(void);
+
 extern void* g_town_view; /* 0x4852A0 */
 
 void Town_RenderSelection(int x1, int y1, int x2, int y2, int extra)
