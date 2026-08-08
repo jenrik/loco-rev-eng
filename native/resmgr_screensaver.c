@@ -4,16 +4,26 @@
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * These two C free functions manage screensaver .sav file selection:
- *   - RESMGR_EnumScreenSavers: enumerates *.sav files in SaveGame/ or ScrSaver/
+ * These two functions manage screensaver .sav file selection:
+ *   - RESMGR_EnumScreenSavers (static/internal — no other caller in the
+ *     tree): enumerates *.sav files in SaveGame/ or ScrSaver/
  *   - RESMGR_SelectScreensaver: picks a random screensaver, writes its path
  *
- * Both use __fastcall convention (ECX = first param). The tiny hint-of-C++ is
- * that ECX is used, but there is no this pointer, vtable, or class context.
- * These are C functions compiled with the C++ compiler's __fastcall default.
+ * Calling convention: Ghidra disassembly of both functions (0x4481B0,
+ * 0x448390) shows `RET 4` — one callee-cleaned stack dword — not the
+ * `__fastcall`/`__cdecl` this file and resources/ResourceManager.h
+ * previously (independently) claimed. Both also read/forward ECX at
+ * entry (RESMGR_SelectScreensaver: `MOV ESI,ECX` then, later, `MOV
+ * ECX,ESI` immediately before calling RESMGR_EnumScreenSavers) but the
+ * callee never reads it — RESMGR_EnumScreenSavers' own explicit parameter
+ * is stack-passed (`MOV AL, [ESP+0xB38]`). This is __stdcall with a
+ * vestigial, functionally-dead ECX passthrough; corrected here and in
+ * ResourceManager.h.
  */
 
 #include "../shared/types.h"
+#include "../resources/ResourceManager.h"
+#include <cstring>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -36,7 +46,6 @@ extern HANDLE __stdcall CRT_FindFirstFile(const char* path, void* findData); /* 
 extern int   __stdcall CRT_FindNextFile(HANDLE handle, void* findData);      /* 0x467B50 */
 extern BOOL  __stdcall CRT_FindClose(HANDLE handle);                          /* 0x467C70 */
 
-extern int   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...);       /* 0x466D60 */
 extern int   __stdcall wsprintfA(char* buf, const char* fmt, ...);            /* 0x477370 */
 
 /* ================================================================== */
@@ -45,102 +54,102 @@ extern int   __stdcall wsprintfA(char* buf, const char* fmt, ...);            /*
 
 extern void* g_config_ini;          /* 0x4A9EEC — config/INI manager (Config struct) */
 extern char  g_install_path[];      /* 0x4A99C8 — installation directory path */
-extern char  g_empty_string;        /* 0x4851D0 — empty string ("") */
 
 /* String literals (from Ghidra data listings) */
 static const char s_ScreenSaver[] = "ScreenSaver";       /* 0x47E2B4 */
 static const char s_Random[] = "Random";                 /* 0x47EE58 */
 static const char s_Layout[] = "Layout";                 /* 0x47EE3C */
-static const char s_ScrSaver_fmt[] = "ScrSaver\\%s";     /* 0x47EE44 — actually "%s\\ScrSaver\\*.sav" style */
 static const char s_ScrSaver_out_fmt[] = "ScrSaver\\%s"; /* 0x47EE30 — output format "ScrSaver\\%s" */
 static const char s_SaveGame_wild[] = "%s\\SaveGame\\*.sav";  /* 0x47EE60 */
 static const char s_ScrSaver_wild[] = "%s\\ScrSaver\\*.sav";  /* 0x47EE74 */
 
-/* WIN32_FIND_DATA structure size: 0x140 bytes (320) for Win9x/ME */
+/* WIN32_FIND_DATAA size: 0x140 bytes (320) for Win9x/ME. No canonical
+ * struct exists in this tree (nothing but cFileName, at the standard
+ * Win32 offset 0x2C, is ever read) — kept as a raw buffer per the
+ * project's existing convention for opaque external-API structs. */
 #define WIN32_FIND_DATA_SIZE 0x140
+#define FIND_DATA_CFILENAME_OFFSET 0x2C
 
 /* ================================================================== */
-/* RESMGR_EnumScreenSaver — linked list node sizes                     */
-/* ================================================================== */
-#define ENUM_NODE_SIZE 0x508  /* 1288 bytes: filename[0x504] + next[0x504] */
-#define ENUM_NAME_LEN  0x504  /* max filename length including null */
-#define ENUM_NEXT_OFF  0x504  /* next pointer offset within node */
+/* Screensaver enumeration node — one per .sav file found.             */
+/*                                                                      */
+/* Real layout confirmed via Ghidra disassembly of 0x448390: allocated  */
+/* with `operator_new(0x508)`; the filename is copied starting at      */
+/* offset 0, and exactly one 4-byte "next" pointer field lives at      */
+/* offset 0x504 (`MOV dword ptr [node+0x504], ...`, read/written twice: */
+/* zeroed defensively before the filename copy, then set to the prior  */
+/* list head after it). A previous version of this file additionally  */
+/* zeroed dwords at offsets 0x508 and 0x50C on every allocation — those */
+/* offsets are one and two dwords *past* the 0x508-byte allocation      */
+/* (out-of-bounds heap writes on every node; not present in the real    */
+/* disassembly at all). Using a named struct instead of raw offset      */
+/* arithmetic makes that class of bug structurally impossible. The      */
+/* struct is host-native-sized (an 8-byte pointer here, vs. 4 in the    */
+/* original x86 binary) per CLAUDE.md's host-layout-parity non-goal —   */
+/* every access goes through operator_new(sizeof(ScreenSaverNode)),     */
+/* never a hardcoded byte count. */
+struct ScreenSaverNode {
+    char filename[0x504];
+    ScreenSaverNode* next;
+};
 
 /* ================================================================== */
 /* RESMGR_EnumScreenSavers                                             */
 /* Address: 0x448390                                                    */
 /*                                                                      */
 /* Enumerates .sav files from SaveGame/ or ScrSaver/ directory.         */
-/* Builds a singly linked list of ENUM_NODE_SIZE-byte nodes.            */
+/* Builds a singly linked list, most-recently-found node first.         */
 /*                                                                      */
-/* param_1: 0 = enumerate SaveGame/*.sav, non-zero = ScrSaver/*.sav    */
+/* scrSaverMode: 0 = enumerate SaveGame/*.sav, non-zero = ScrSaver/*.sav*/
 /*                                                                      */
 /* Returns: head pointer to linked list, or NULL if no files found.     */
 /* The caller must walk the list and free nodes with GLOBAL_free.       */
+/*                                                                      */
+/* No caller outside this file (grepped tree-wide) — kept internal.     */
 /* ================================================================== */
-char* __fastcall RESMGR_EnumScreenSavers(char param_1)
+static ScreenSaverNode* __stdcall RESMGR_EnumScreenSavers(char scrSaverMode)
 {
-    char  findPath[0x140];       /* search path buffer (260+ bytes) */
-    char  findData[WIN32_FIND_DATA_SIZE];  /* WIN32_FIND_DATAA (0x140 = 320 bytes) */
-    char* head = NULL;           /* linked list head (returned) */
+    char findPath[0x140];                  /* search path buffer (260+ bytes) */
+    char findData[WIN32_FIND_DATA_SIZE];   /* WIN32_FIND_DATAA */
+    ScreenSaverNode* head = nullptr;       /* linked list head (returned) */
     HANDLE hFind;
 
-    /* Initialize findPath to empty string */
-    findPath[0] = g_empty_string;
-    {
-        int* p = (int*)(findPath + 1);
-        for (int i = 0; i < 0x140; i++) {
-            *p++ = 0;
-        }
-        *(short*)p = 0;
-        *(char*)((intptr_t)p + 2) = 0;
-    }
+    std::memset(findPath, 0, sizeof(findPath));
 
     /* Build the search path: "%s\\SaveGame\\*.sav" or "%s\\ScrSaver\\*.sav" */
     {
-        const char* fmt = (param_1 == 0) ? s_SaveGame_wild : s_ScrSaver_wild;
+        const char* fmt = (scrSaverMode == 0) ? s_SaveGame_wild : s_ScrSaver_wild;
         wsprintfA(findPath, fmt, g_install_path);
     }
 
     /* Find first .sav file */
     hFind = CRT_FindFirstFile(findPath, findData);
-    if (hFind == (HANDLE)0xFFFFFFFF) {
-        return NULL;
+    if (hFind == reinterpret_cast<HANDLE>(static_cast<intptr_t>(-1))) {
+        return nullptr;
     }
 
     do {
         /* Skip entries starting with '.' (current/parent dir entries) */
         if (findData[0] != '.') {
-            /* Allocate a new node */
-            char* node = (char*)operator_new(ENUM_NODE_SIZE);
+            ScreenSaverNode* node =
+                static_cast<ScreenSaverNode*>(operator_new(sizeof(ScreenSaverNode)));
 
-            /* Zero out filename area and next pointer */
-            node[0] = '\0';
-            *(int*)(node + ENUM_NEXT_OFF + 0) = 0;
-            *(int*)(node + ENUM_NEXT_OFF + 4) = 0;
-            *(int*)(node + ENUM_NEXT_OFF + 8) = 0;
+            node->next = nullptr;
 
-            /* Copy filename from findData (cFileName at offset 0x2C in WIN32_FIND_DATAA) */
-            {
-                const char* src = findData + 0x2C;  /* cFileName offset */
-                char* dst = node;
-                /* String copy loop — strlen + memcpy equivalent */
-                int len = 0;
-                const char* p = src;
-                while (*p++ != '\0') len++;
-                p = src;
-                for (int i = 0; i < (len + 4) / 4; i++) {
-                    *(int*)dst = *(int*)p;
-                    dst += 4;
-                    p += 4;
-                }
-                for (int i = 0; i < (len & 3); i++) {
-                    *dst++ = *p++;
-                }
-            }
+            /* Copy filename from findData (cFileName at the standard
+             * WIN32_FIND_DATAA offset 0x2C). Equivalent to strcpy: the
+             * original's dword-at-a-time copy loop (preserved in this
+             * file's prior version) writes the same bytes as strcpy up
+             * to and including the NUL, only differing in that it may
+             * also write up to 3 further bytes of alignment padding
+             * past the NUL — into freshly-allocated, not-yet-read
+             * memory that strcpy simply leaves untouched. Both are
+             * observationally identical to every reader (all of which
+             * stop at the NUL), so strcpy is used here. */
+            std::strcpy(node->filename, findData + FIND_DATA_CFILENAME_OFFSET);
 
             /* Prepend to linked list */
-            *(char**)(node + ENUM_NEXT_OFF) = head;
+            node->next = head;
             head = node;
         }
     } while (CRT_FindNextFile(hFind, findData) == 0);  /* 0 = success */
@@ -158,86 +167,65 @@ char* __fastcall RESMGR_EnumScreenSavers(char param_1)
 /* to the output buffer. If Random == 0, reads the Layout INI value     */
 /* directly.                                                            */
 /*                                                                      */
-/* param_1 (ECX): output buffer (char*, caller-allocated, >= 128 bytes) */
+/* outBuf: output buffer (caller-allocated, >= 128 bytes)               */
 /* ================================================================== */
-void __fastcall RESMGR_SelectScreensaver(char* outBuf)
+void __stdcall RESMGR_SelectScreensaver(char* outBuf)
 {
     char selected[0x80];   /* 128-byte local buffer for selected name */
 
-    /* Initialize selected to empty string */
-    selected[0] = g_empty_string;
-    {
-        int* p = (int*)(selected + 1);
-        for (int i = 0; i < 0x1F; i++) {
-            *p++ = 0;
-        }
-        *(short*)p = 0;
-        *(char*)((intptr_t)p + 2) = 0;
-    }
+    std::memset(selected, 0, sizeof(selected));
 
     /* Check if Random screensaver is enabled */
     int randomEnabled = Config_GetIniInt(g_config_ini, s_ScreenSaver, s_Random, 0);
     if (randomEnabled != 0) {
         /* Enumerate available screensavers */
-        char* list = RESMGR_EnumScreenSavers(1);  /* 1 = ScrSaver directory */
+        ScreenSaverNode* list = RESMGR_EnumScreenSavers(1);  /* 1 = ScrSaver directory */
         Config_GetIniString(g_config_ini, s_ScreenSaver, s_Layout,
                             "ScrSaver\\saver.sav", selected, 0x80);
 
         /* Count total items in list */
         int total = 0;
-        char* node = list;
-        while (node != NULL) {
+        for (ScreenSaverNode* node = list; node != nullptr; node = node->next) {
             total++;
-            node = *(char**)(node + ENUM_NEXT_OFF);
         }
 
         /* Seed random with current time */
-        DWORD tick = CRT_timeGetTime(NULL);
+        DWORD tick = CRT_timeGetTime(nullptr);
         CRT_srand(tick);
 
         /* Pick a random index */
         int pickIdx;
         if (total > 0) {
             pickIdx = CRT_rand() % total;
+        } else if (total == 0) {
+            pickIdx = 0;
         } else {
-            /* total <= 0: handle edge case when total == 0 or negative */
-            if (total == 0) {
-                pickIdx = 0;
+            /* total < 0: overflow-handling branch reproduced exactly from
+             * the original (see 0x448264-0x44827F). */
+            int diff = 2 - total;
+            if (diff != 0) {
+                pickIdx = (CRT_rand() % diff) + total - 1;
             } else {
-                /* total < 0: this branch handles possible overflow from decrement */
-                int diff = 2 - total;
-                if (diff != 0) {
-                    pickIdx = (CRT_rand() % diff) + total - 1;
-                } else {
-                    pickIdx = -1; /* fallthrough below will use selected default */
-                }
+                pickIdx = -1; /* fallthrough below will use selected default */
             }
         }
 
-        /* Walk the list to the selected index and copy the filename */
+        /* Walk the list to the selected index, copy the filename, and
+         * free every node (matching the original: the whole list is
+         * always freed here, not just the unselected entries). */
         int idx = 0;
-        node = list;
-        while (node != NULL) {
+        ScreenSaverNode* node = list;
+        while (node != nullptr) {
             if (idx == pickIdx) {
-                /* Copy filename from node to selected buffer */
-                const char* src = node;
-                char* dst = selected;
-                {
-                    int len = 0;
-                    const char* p = src;
-                    while (*p++ != '\0') len++;
-                    p = src;
-                    for (int i = 0; i < (len + 4) / 4; i++) {
-                        *(int*)dst = *(int*)p;
-                        dst += 4;
-                        p += 4;
-                    }
-                    for (int i = 0; i < (len & 3); i++) {
-                        *dst++ = *p++;
-                    }
-                }
+                /* Same strcpy-equivalence note as RESMGR_EnumScreenSavers.
+                 * Unbounded, matching the original exactly: neither this
+                 * nor the original binary clamps the copy to selected's
+                 * 0x80-byte size, so a .sav filename longer than 0x7F
+                 * bytes would overflow selected in both — preserved, not
+                 * fixed, per CLAUDE.md (no invented behavior change). */
+                std::strcpy(selected, node->filename);
             }
-            char* nextNode = *(char**)(node + ENUM_NEXT_OFF);
+            ScreenSaverNode* nextNode = node->next;
             GLOBAL_free(node);
             idx++;
             node = nextNode;
@@ -252,21 +240,7 @@ void __fastcall RESMGR_SelectScreensaver(char* outBuf)
     Config_GetIniString(g_config_ini, s_ScreenSaver, s_Layout,
                         "ScrSaver\\saver.sav", selected, 0x80);
 
-    /* Copy selected name to output buffer */
-    {
-        const char* src = selected;
-        char* dst = outBuf;
-        int len = 0;
-        const char* p = src;
-        while (*p++ != '\0') len++;
-        p = src;
-        for (int i = 0; i < (len + 4) / 4; i++) {
-            *(int*)dst = *(int*)p;
-            dst += 4;
-            p += 4;
-        }
-        for (int i = 0; i < (len & 3); i++) {
-            *dst++ = *p++;
-        }
-    }
+    /* Copy selected name to output buffer (unbounded, matching the
+     * original — see the strcpy-equivalence note above). */
+    std::strcpy(outBuf, selected);
 }

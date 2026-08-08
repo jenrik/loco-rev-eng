@@ -582,7 +582,9 @@ void RESMGR_LoadCompressedResource();
 /**
  * RESMGR_SelectScreensaver — Select random .sav file for screensaver.
  * Address: 0x4481B0
- * Calling convention: __cdecl
+ * Calling convention: __stdcall (Ghidra: `RET 4`, one callee-cleaned
+ * stack dword; corrected from a previous __cdecl annotation here — see
+ * native/resmgr_screensaver.c for the full evidence).
  *
  * Reads [ScreenSaver] Layout/Random config. If Random!=0, enumerates
  * ScrSaver/"*.sav" files, picks one randomly via CRT_rand(), formats
@@ -590,21 +592,11 @@ void RESMGR_LoadCompressedResource();
  *
  * @param outPath  Output buffer for formatted path string
  */
-void __cdecl RESMGR_SelectScreensaver(char* outPath);
+void __stdcall RESMGR_SelectScreensaver(char* outPath);
 
-/**
- * RESMGR_EnumScreenSavers — Enumerate .sav files in SaveGame/ or ScrSaver/.
- * Address: 0x448390
- * Calling convention: __cdecl
- *
- * Builds a linked list of allocated filename entries (0x508 bytes each).
- * param_1=0 -> SaveGame (*.sav), param_1!=0 -> ScrSaver (*.sav).
- * Each node has the filename at +0x00 and a next pointer at +0x504.
- *
- * @param scrSaverMode  0 = SaveGame/, non-zero = ScrSaver/
- * @return              Head pointer to linked list, or NULL
- */
-char* __cdecl RESMGR_EnumScreenSavers(char scrSaverMode);
+/* RESMGR_EnumScreenSavers (0x448390) has no caller outside
+ * native/resmgr_screensaver.c (its only user is RESMGR_SelectScreensaver,
+ * in the same file) — declared `static` there instead of here. */
 
 /**
  * RESMGR_VehicleAnimationTick — Per-frame vehicle animation update.
