@@ -358,13 +358,21 @@ void     NET_Ctor(void* dplay, void* param1, uint32_t param2, uint32_t param3,
 void     NET_BaseDtor(void* dplay);
 
 /* -- Network UI helpers -- */
-void  NETMAN_EnumerateSessions(int32_t panel);
-void  NETMAN_JoinSession(void* panel);
-void  NETMAN_CreateSession(int32_t panel);
-void  NETMAN_LeaveSession(int32_t panel);
-void  NETMAN_UpdateSessionInfo(void* panel);
-void  NETMAN_GetSessionInfo(int32_t panel);
-void  NETMAN_SetSessionInfo(void* panel);
+/* All operate on NameEntryPanel (ui/NameEntryPanel.h), confirmed via the
+ * vtable data at 0x4781D0 — see that header's vtable table. Real
+ * definitions: native/NETMAN_NetworkUI.c. Previously declared here with
+ * `int32_t`/plain `void*` panel params (a documentation-only mismatch:
+ * nothing outside native/NETMAN_NetworkUI.c currently includes/calls
+ * through these particular declarations, so it was never a live call-0). */
+class NameEntryPanel;
+void  NETMAN_EnumerateSessions(NameEntryPanel* panel);
+void  NETMAN_JoinSession(NameEntryPanel* panel);
+void  NETMAN_CreateSession(NameEntryPanel* panel);
+void  NETMAN_LeaveSession(NameEntryPanel* panel);
+void  NETMAN_UpdateSessionInfo(NameEntryPanel* panel);
+void  NETMAN_GetSessionInfo(NameEntryPanel* panel);
+LRESULT NETMAN_SetSessionInfo(NameEntryPanel* panel, void* hWnd, uint32_t msg,
+                               uint32_t wParam, uint32_t lParam);
 void* NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
                              uint32_t wParam, uint32_t lParam);
 
@@ -374,7 +382,12 @@ void __stdcall DPLAY_ReceiveMessage(const char* path);
 
 /* -- Network settings persistence -- */
 void  NETMAN_FreePacket(int32_t packetPtr);
-void  NETMAN_SendPacket(int32_t packetPtr);
+/* Real def: native/NETMAN_SessionSettings.c, `void(uint8_t*)`. Previously
+ * declared `int32_t` here — see docs/landmine-sweep-worklist.md; still a
+ * live call-0 for ui/EditWindow.cpp's own separate `void*`-typed local
+ * declaration (not fixed — real file I/O side effect risk, left for a
+ * dedicated session). */
+void  NETMAN_SendPacket(uint8_t* packetPtr);
 
 /* -- DPlayConfig destructor -- */
 void* NETMAN_FreeProviderList(void* config, uint8_t flags);

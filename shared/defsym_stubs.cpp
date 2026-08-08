@@ -34,7 +34,11 @@ void ButtonSprite_Ctor() { /* host no-op */ }
 void DDRAW_RestoreSurfaces() { /* host no-op */ }
 void DDRAW_SetSurfaceFormat() { /* host no-op */ }
 void DDRAW_UnlockPrimary() { /* host no-op */ }
-void DPlayManager_RenderConnectionPanel() { /* host no-op */ }
+/* DPlayManager_RenderConnectionPanel — removed. It was a distinct, wrongly
+ * (0-arg) named stub that native/NETMAN_NetworkUI.c's NETMAN_JoinSession
+ * silently called instead of the real RenderConnectionPanel(NameEntryPanel*)
+ * (network/DPlayManager.cpp, 0x4421D0) — a call-0 landmine fixed by
+ * correcting that call site to the real name/signature. */
 void FormatResourceString() { /* host no-op */ }
 // PlayerRecord_constructor (0x452E10) calls GetUserNameA only after its
 // Configuration/PlayerName lookup is empty. Preserve the Win32 size contract
@@ -294,7 +298,12 @@ void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
 void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
-void NETMAN_CreateSession(void*) { /* host no-op */ }
+/* NETMAN_CreateSession(void*) — removed. ui/EditWindow.cpp's own
+ * `NETMAN_CreateSession` declaration was retyped from `void*` to the real
+ * `NameEntryPanel*` (native/NETMAN_NetworkUI.c, 0x4419C0), so this
+ * mismatched-signature stub is now dead: EditWindow::show()'s call binds
+ * to the real function instead (guarded internally against
+ * `_g_netman_data` being null on the host — see that file's comment). */
 void UI_WindowBase_Show(void*) { /* host no-op */ }
 void* BringWindowToTop = nullptr;
 void TrackPiece_Dtor(void*) { /* host no-op */ }
