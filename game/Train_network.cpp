@@ -21,6 +21,14 @@
 #include "Train.h"
 #include "../network/TrainMessage.h"
 #include "../network/DPlayManager.h"
+/* NetmanTypes.h (not the full Netman.h) — gets the complete Netman/
+ * PlayerSlot types for named-field access (g_netman->m_gameMode, etc.)
+ * without pulling in Netman.h's extern "C" Win32 block or its ~13
+ * C++-linkage free-function declarations, which collide with (and are
+ * superseded in practice by) this file's own correct extern "C"
+ * declarations of the same names below — see NetmanTypes.h's header
+ * comment for why that split exists and why the full header is unsafe here. */
+#include "../network/NetmanTypes.h"
 #include "Vehicle.h"
 #include "../world/scriptengine.h"
 #include <new>
@@ -196,10 +204,24 @@ extern int      g_demo_mode;       /* 0x004A9918 */
 extern void*    g_dplay_peer;      /* 0x0048525C */
 extern void*    g_train;           /* 0x004FD3A4 */
 extern void*    g_network_thread;  /* 0x004FD398 */
-extern void*    g_netman;          /* 0x004FD3AC */
+extern Netman*  g_netman;          /* 0x004FD3AC — matches the extern Netman*
+                                     * g_netman pattern already used by
+                                     * game/Vehicle.cpp, game/World.cpp,
+                                     * ui/PostcardPreviewWindow.cpp; the global
+                                     * variable name/symbol is shared with the
+                                     * `extern void* g_netman` declared in
+                                     * other TUs (BuildingPanel.cpp, EditWindow.cpp,
+                                     * etc.) — harmless, since a global's extern
+                                     * type annotation isn't part of the linker
+                                     * symbol. */
 extern void*    g_netSettings;     /* 0x004FD3A8 */
 extern void*    g_main_window;     /* 0x004AA4A0 */
-extern void*    g_resmgr;          /* 0x004855E8 */
+/* g_resmgr: declared by resources/ResourceManager.h (pulled in transitively
+ * via NetmanTypes.h above) as `extern ResourceManager g_resmgr;` — the
+ * correct type (an object, not a pointer; many other TUs across the tree
+ * still wrongly declare it as `extern void* g_resmgr`, matching what this
+ * file used to do). Removed the local wrong-typed redeclaration rather than
+ * letting it conflict with the newly-visible correct one. */
 extern PlayerConfig* g_player_config; /* canonical singleton */
 extern void*    g_ui_main;         /* 0x004FD3B4 */
 extern void*    g_config_ini;      /* 0x0048537C */
@@ -446,7 +468,7 @@ void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
     return;
 #else
     void* entity = session;
-    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) != 1) return;
+    if (g_netman->m_gameMode != 1) return;
 
     struct MissingAsset { uint8_t type, mode; uint8_t pad[2]; MissingAsset* next; };
     MissingAsset* missing = NULL;
@@ -745,9 +767,11 @@ void TrainSubsystem::DispatchMessage(void* msg)
 
     case 0x19: /* UpdatePlayerCount + Reset */
     {
-        /* netman[0x17].field_7cc at g_netman + 0x7D0 */
-        uint32_t player_count = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
-        this->UpdatePlayerCount(player_count);
+        /* g_netman->m_mySlotIndex — self slot index, not a count despite the
+         * misleading local name this replaces (see Netman.h's own doc
+         * comment: "self slot index (0-8 or -1)"). */
+        uint32_t self_slot_index = static_cast<uint32_t>(g_netman->m_mySlotIndex);
+        this->UpdatePlayerCount(self_slot_index);
         this->ResetMultiplayerState(0);
         return;
     }
@@ -794,7 +818,7 @@ void TrainSubsystem::ProcessMessages()
                 }
 
                 /* If scenario mode, unlink all cars from sprite_list_1 */
-                if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 1) {
+                if (g_netman->m_gameMode == 1) {
                     uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
                     while (car != nullptr) {
                         NetworkMsg* qmsg = AllocateNetworkMessage();
@@ -1390,8 +1414,7 @@ void TrainSubsystem::HandleTrainPosUpdate(TrainPositionAckPacket* packet,
 
     int32_t local_slot_index;
 #ifdef _WIN32
-    local_slot_index = *reinterpret_cast<const int32_t*>(
-        static_cast<const uint8_t*>(g_netman) + 0x7D0);
+    local_slot_index = g_netman->m_mySlotIndex;
 #else
     local_slot_index = NETMAN_HostLocalSlotIndex();
 #endif
@@ -1503,7 +1526,8 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
 /* ================================================================== */
 void TrainSubsystem::UpdatePlayerCount(uint32_t player_index)
 {
-    uint32_t local_player = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+    /* g_netman->m_mySlotIndex — self slot index, not a "local player" count. */
+    uint32_t self_slot_index = static_cast<uint32_t>(g_netman->m_mySlotIndex);
 
     void*  prev = NULL;
     void*  node = this->sprite_list_3;
@@ -1520,9 +1544,9 @@ void TrainSubsystem::UpdatePlayerCount(uint32_t player_index)
                 *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
             }
 
-            if (player_index == local_player) {
+            if (player_index == self_slot_index) {
                 /* Local player's slot: preserve on sprite_list_1 free list */
-                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) = static_cast<uint8_t>(local_player);
+                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) = static_cast<uint8_t>(self_slot_index);
                 *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70)) = this->sprite_list_1;
                 this->sprite_list_1 = node;
                 node = this->sprite_list_3;
@@ -1564,7 +1588,7 @@ void TrainSubsystem::ShutdownNetwork()
     /* Reconnect to session to send shutdown message */
     if (*reinterpret_cast<uint8_t*>(g_dplay_peer) == 0) {
         /* Host player */
-        if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 1) {
+        if (g_netman->m_gameMode == 1) {
             /* Scenario mode: read server name from config */
             char buf[1024];
             Config_GetIniString(g_config_ini, "Configuration", "ServerName",
@@ -1631,7 +1655,7 @@ void TrainSubsystem::HandleDisconnect()
     if (g_dplay_peer != NULL) {
         /* Send game-over notification if connected in scenario mode */
         if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0 &&
-            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 2) {
+            g_netman->m_gameMode == 2) {
             uint16_t msg = 0x3FD;
             WIN32_SendNetworkData(g_dplay_peer, 0, &msg, 4, 1);
             Sleep(10);
@@ -1648,7 +1672,7 @@ void TrainSubsystem::HandleDisconnect()
     }
 
     /* Only free lists in scenario mode or non-scenario */
-    int scenario = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4));
+    int scenario = g_netman->m_gameMode;
     if (scenario == 2 || scenario == 0) {
         /* Free sprite_list_1 (active) */
         {
@@ -1696,7 +1720,7 @@ void TrainSubsystem::HandleFileTransfer(void* msg)
     void*       car     = net_msg->data;
     int         dir     = net_msg->flags;
 
-    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) != 2) {
+    if (g_netman->m_gameMode != 2) {
         /* Not in multiplayer scenario — destroy car */
         if (car != NULL) {
             void** vt = *reinterpret_cast<void***>(car);
@@ -1716,28 +1740,33 @@ void TrainSubsystem::HandleFileTransfer(void* msg)
         return;
     }
 
-    /* Compute target town index from direction */
-    int local_player = *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
-    int target_town = local_player;
+    /* Compute target town index from direction. g_netman->m_playerRows is the
+     * grid's row stride (Ghidra ground truth via Netman::CheckTrackConnection
+     * at 0x43DE30: this field is used as the position/row divisor and as the
+     * right-edge bound — despite its name, it holds the *column* count; see
+     * the loud TODO in Netman.cpp's CheckTrackConnection for the same
+     * pre-existing name/role mismatch). Only the raw address matters here —
+     * it is the field occupying +0xC, whatever its name says. */
+    int self_slot_index = g_netman->m_mySlotIndex;
+    int target_town = self_slot_index;
 
     if (dir < 0x5B) {
-        if (dir == 0x5A)      target_town = local_player + 1;
-        else if (dir == 0)    target_town = local_player - *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0xC));
+        if (dir == 0x5A)      target_town = self_slot_index + 1;
+        else if (dir == 0)    target_town = self_slot_index - g_netman->m_playerRows;
     } else {
-        if (dir == 0xB4)      target_town = *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0xC)) + local_player;
-        else if (dir == 0x10E) target_town = local_player - 1;
+        if (dir == 0xB4)      target_town = g_netman->m_playerRows + self_slot_index;
+        else if (dir == 0x10E) target_town = self_slot_index - 1;
     }
 
     /* Find player at target town */
-    int* player_slot = NULL;
+    PlayerSlot* player_slot = NULL;
     if (target_town >= 0) {
-        /* netman[0xF].playerIds + target_town * 0x13 + 6 */
-        player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + target_town * 0x4C));
+        player_slot = &g_netman->m_slots[target_town];
     }
 
-    if (player_slot && *player_slot != 0) {
+    if (player_slot && player_slot->dpId != 0) {
         /* Player exists at target — transfer the car */
-        uint8_t result = this->MoveToNeighborTown(*player_slot, car, dir);
+        uint8_t result = this->MoveToNeighborTown(player_slot->dpId, car, dir);
         if (static_cast<char>(result) == 0) {
             /* Transfer succeeded — forward the train */
             goto forward_train;
@@ -1811,7 +1840,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                 int match = -1;
                 for (int j = 0; j < player_count; j++) {
                     /* Compare player name from track_entry */
-                    uint8_t* pn = reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x51D + j * 0x4C));
+                    uint8_t* pn = reinterpret_cast<uint8_t*>(g_netman->m_slots[j].compact_name);
                     uint8_t* tn = player_name;
                     int k = 0;
                     while (tn[k] == pn[k] && tn[k] != 0) { k++; }
@@ -1827,20 +1856,20 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                         resp[3] = NET_GetNextAttId();
 
                         /* Find player by name match */
-                        int* target_player = NULL;
+                        PlayerSlot* target_player = NULL;
                         for (int j = 0; j < player_count; j++) {
-                            uint8_t* pn = reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x51D + j * 0x4C));
+                            uint8_t* pn = reinterpret_cast<uint8_t*>(g_netman->m_slots[j].compact_name);
                             uint8_t* tn = reinterpret_cast<uint8_t*>(track_entry) + 6; /* 2+ byte per char */
                             int k = 0;
                             while (tn[k*2] == pn[k] && tn[k*2] != 0) { k++; }
                             if (tn[k*2] == pn[k]) {
-                                target_player = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + j * 0x4C));
+                                target_player = &g_netman->m_slots[j];
                                 break;
                             }
                         }
 
                         if (target_player) {
-                            WIN32_SendNetworkData(g_dplay_peer, *target_player,
+                            WIN32_SendNetworkData(g_dplay_peer, target_player->dpId,
                                                   resp, 8, 1);
 
                             /* Create PlayerConnectionNode for attachment transfer */
@@ -1849,7 +1878,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 
                             PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(operator_new(sizeof(PlayerConnectionNode)));
                             if (node) {
-                                node->player_id      = *target_player;
+                                node->player_id      = target_player->dpId;
                                 node->file_handle    = 0;
                                 node->sub_type       = resp[3];
                                 node->extra_info     = resp[3];
@@ -1884,7 +1913,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 
     /* If this train belongs to the local player, remove from sprite_list_1 */
     if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78)) ==
-        *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0))) {
+        static_cast<uint32_t>(g_netman->m_mySlotIndex)) {
         void* prev = NULL;
         void* node = this->sprite_list_1;
         while (node) {
@@ -1911,7 +1940,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
             ctrl_init[0] = 0x3F3;
             ctrl_init[2] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
             *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 6)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 7)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 7)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
             ctrl_init[4] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x74));
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
             GLOBAL_free(ctrl_init);
@@ -1919,7 +1948,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
     }
 
     /* Set controller owner and queue type-0x11 notification */
-    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7C)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7C)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
     *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x8A)) = 0;
 
     {
@@ -1982,11 +2011,11 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
 /* ================================================================== */
 void TrainSubsystem::ResetMultiplayerState(int player_id)
 {
-    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) != 2) return;
+    if (g_netman->m_gameMode != 2) return;
 
     uint32_t player_index;
     if (player_id == 0) {
-        player_index = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+        player_index = static_cast<uint32_t>(g_netman->m_mySlotIndex);
     } else {
         player_index = NETMAN_FindPlayerIndex(g_netman, player_id);
     }
@@ -2037,7 +2066,7 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
 
                 /* Set owner to local player */
                 *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) =
-                    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+                    static_cast<uint8_t>(g_netman->m_mySlotIndex);
 
                 /* Clear DPlay data on all carriages */
                 if (*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(node) + 0x0C) != 0) {
@@ -2074,12 +2103,12 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
 void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
 {
     /* Check if player exists at target index */
-    int* player_slot = NULL;
+    PlayerSlot* player_slot = NULL;
     if (player_index >= 0) {
-        player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + player_index * 0x4C));
+        player_slot = &g_netman->m_slots[player_index];
     }
 
-    if (player_slot && player_slot[0x11] != 0) {
+    if (player_slot && player_slot->pixel_buffer != nullptr) {
         /* === Multiplayer path: prepend to sprite_list_3, broadcast 0x3F3 === */
 
         *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C)) = static_cast<uint8_t>(player_index);
@@ -2106,8 +2135,7 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
 
             /* Also update local handler */
-            this->HandleControllerInit(ctrl_init,
-                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D4))); /* field_7d0 */
+            this->HandleControllerInit(ctrl_init, g_netman->m_myDpId);
 
             GLOBAL_free(ctrl_init);
         }
@@ -2172,9 +2200,9 @@ void TrainSubsystem::UpdateTrainMovement()
 
         /* Check if player at node's town is still connected */
         uint8_t owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
-        int* player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + owner * 0x4C));
+        PlayerSlot* player_slot = &g_netman->m_slots[owner];
 
-        if (player_slot[0x11] == 0 || *player_slot != 0) {
+        if (player_slot->pixel_buffer == nullptr || player_slot->dpId != 0) {
             /* Owner disconnected — move from sprite_list_3 to sprite_list_2 */
             if (prev == NULL) {
                 this->sprite_list_3 = next_node;
@@ -2213,7 +2241,7 @@ void TrainSubsystem::UpdateTrainMovement()
                 (reinterpret_cast<Building*>(this->sprite_list_2))->occupation_level = 0;
 
                 uint8_t* cur = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
                 *reinterpret_cast<void**>((cur + 0x70)) = NULL;
                 *reinterpret_cast<uint8_t*>((cur + 0x88)) = 0;
                 this->sprite_list_2 = *reinterpret_cast<void**>((cur + 0x70));
@@ -2229,8 +2257,8 @@ void TrainSubsystem::UpdateTrainMovement()
         /* === Check map edge routing === */
         int pos_x = *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E));
         int pos_y = *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80));
-        int map_width  = static_cast<int>(static_cast<short>(player_slot[0x10]));
-        int map_height = static_cast<int>(*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(player_slot) + 0x42));
+        int map_width  = static_cast<int>(static_cast<int16_t>(player_slot->pixel_width));
+        int map_height = static_cast<int>(static_cast<int16_t>(player_slot->pixel_height));
 
         uint8_t routed = this->RouteTrainAtEdge(
             prev, node, pos_x, pos_y, map_width, map_height);
@@ -2246,7 +2274,7 @@ void TrainSubsystem::UpdateTrainMovement()
         int new_x = pos_x;
         int new_y = pos_y;
         int tile_row_size = map_width;
-        uint8_t* tile_data_base = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(player_slot[0x11]));
+        uint8_t* tile_data_base = reinterpret_cast<uint8_t*>(player_slot->pixel_buffer);
 
         if (move_dir == 0x5A) {
             /* Moving right */
@@ -2437,15 +2465,18 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             }
             *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int target_town = static_cast<int>(owner) +
-                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x0C));
-            int* player_slot = NULL;
+            /* g_netman->m_playerRows: see the loud TODO in the identically-
+             * shaped block in HandleFileTransfer above — this is the field
+             * at raw offset +0xC (address-preserving; name/role mismatch
+             * tracked separately, not fixed here). */
+            int target_town = static_cast<int>(owner) + g_netman->m_playerRows;
+            PlayerSlot* player_slot = NULL;
             if (target_town >= 0) {
-                player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + target_town * 0x4C + 0x518));
+                player_slot = &g_netman->m_slots[target_town];
             }
-            if (player_slot && *player_slot != 0 &&
-                *reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(player_slot) + 4)) != 0) {
-                return this->MoveToNeighborTown(*player_slot, train, 0xB4);
+            if (player_slot && player_slot->dpId != 0 &&
+                player_slot->is_connected != 0) {
+                return this->MoveToNeighborTown(player_slot->dpId, train, 0xB4);
             }
             this->AddTrainCar(train, 0xB4, target_town);
             return 1;
@@ -2463,14 +2494,13 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             }
             *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int target_town = static_cast<int>(owner) -
-                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x0C));
-            int* player_slot = NULL;
+            int target_town = static_cast<int>(owner) - g_netman->m_playerRows;
+            PlayerSlot* player_slot = NULL;
             if (target_town >= 0) {
-                player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + target_town * 0x4C + 0x518));
+                player_slot = &g_netman->m_slots[target_town];
             }
-            if (player_slot && *player_slot != 0) {
-                return this->MoveToNeighborTown(*player_slot, train, 0);
+            if (player_slot && player_slot->dpId != 0) {
+                return this->MoveToNeighborTown(player_slot->dpId, train, 0);
             }
             this->AddTrainCar(train, 0, target_town);
             return 1;
@@ -2489,12 +2519,12 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
             int target_town = static_cast<int>(owner) - 1;
-            int* player_slot = NULL;
+            PlayerSlot* player_slot = NULL;
             if (target_town >= 0) {
-                player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + target_town * 0x4C));
+                player_slot = &g_netman->m_slots[target_town];
             }
-            if (player_slot && *player_slot != 0) {
-                return this->MoveToNeighborTown(*player_slot, train, 0x10E);
+            if (player_slot && player_slot->dpId != 0) {
+                return this->MoveToNeighborTown(player_slot->dpId, train, 0x10E);
             }
             this->AddTrainCar(train, 0x10E, target_town);
             return 1;
@@ -2512,9 +2542,9 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             }
             *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int* player_ptr = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + (owner + 1) * 0x4C));
-            if (*player_ptr != 0) {
-                return this->MoveToNeighborTown(*player_ptr, train, 0x5A);
+            PlayerSlot* player_ptr = &g_netman->m_slots[owner + 1];
+            if (player_ptr->dpId != 0) {
+                return this->MoveToNeighborTown(player_ptr->dpId, train, 0x5A);
             }
             this->AddTrainCar(train, 0x5A, owner + 1);
             return 1;
@@ -2540,10 +2570,10 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
 /* ================================================================== */
 uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direction)
 {
-    int local_player = *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+    int self_slot_index = g_netman->m_mySlotIndex;
     int target_idx = NETMAN_FindPlayerIndex(g_netman, to_player);
 
-    if (local_player == target_idx) {
+    if (self_slot_index == target_idx) {
         /* === Local player: mirror direction, append to sprite_list_2 === */
 
         /* Mirror direction */
@@ -2659,7 +2689,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
                 (reinterpret_cast<Building*>(this->sprite_list_2))->occupation_level = 0;
 
                 uint8_t* cur = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
                 *reinterpret_cast<void**>((cur + 0x70)) = NULL;
                 *reinterpret_cast<uint8_t*>((cur + 0x88)) = 0;
                 this->sprite_list_2 = *reinterpret_cast<void**>((cur + 0x70));
@@ -2719,7 +2749,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     if (car == NULL) return;
 
-    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 1) {
+    if (g_netman->m_gameMode == 1) {
         /* === Scenario mode: append car to sprite_list_1 === */
         *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = 32000; /* max timeout */
 
@@ -3185,7 +3215,7 @@ void Train_RemoveAllTracks(void* subsystem)
 
         uint8_t* node = reinterpret_cast<uint8_t*>(self->sprite_list_2);
         node[0x88] = 0;
-        node[0x7C] = *(reinterpret_cast<uint8_t*>(g_netman) + 0x7D0);
+        node[0x7C] = static_cast<uint8_t>(g_netman->m_mySlotIndex);
 
         /* BUG (0x43CC8D clears +0x70 before 0x43CC96-0x43CC99 re-reads it
          * to advance the head) — preserved as-is; see doc comment above. */
