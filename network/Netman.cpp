@@ -44,13 +44,17 @@
 #include "Netman.h"
 #include "DPlayManager.h"
 #include "../game/Building.h"
+#include "../game/GameConfig.h"
 #include "../game/PlayerConfig.h"
+#include "../game/Train.h"
+#include "../core/CGWND.h"
 #include "../core/VehicleEditor.h"
 #include "../core/Entity.h"
 #include "../shared/Collection.h"
+#include "../ui/EditWindow.h"
+#include "../ui/GameSetupPanel.h"
 #include "../world/scriptengine.h"
 #ifndef _WIN32
-#include "../game/Train.h"
 #include "host_test_events.h"
 #include "sdl3_net_runtime.h"
 #endif
@@ -68,7 +72,18 @@
 extern void* _g_train;              /* 0x4FD3A4 */
 extern void* g_network_queue;       /* 0x4FD39C */
 extern void* g_train_resources;    /* 0x4FD394 */
-extern void* _g_netman_data;        /* 0x4FD3A8 */
+
+/* _g_netman_data — GameConfig singleton (GameLoop_Setup: DAT_004fd3a8 =
+ * GameConfig_constructor(...), confirmed via Ghidra at 0x406C6C). The
+ * name given to this global in this file predates that finding and
+ * suggests it was assumed to be Netman-owned state; it is not. The exact
+ * same 0x4FD3A8 singleton also appears elsewhere under g_dplayConfig
+ * (game/GameConfig.h), _g_dplay/_g_dplay_config (this file's own extern
+ * block below), and g_game_config (core/GameLoop.cpp) — a pre-existing
+ * one-global/many-names landmine across the tree, out of scope to
+ * consolidate here. Retyped (was void*) so the +8/+0x10 reads below use
+ * GameConfig's own named fields instead of raw offsets. */
+extern GameConfig* _g_netman_data;  /* 0x4FD3A8 */
 
 /* String constants */
 extern const char STR_LEGO_LOCO[];  /* 0x47E1C0 — "LEGO LOCO" */
@@ -304,7 +319,10 @@ void Netman::Init(uint8_t is_init)
         } else {
             void* n = sl->msg_queue;
             while (n) {
-                void* nx = *(void**)((uint8_t*)n + 0x10);
+                /* msg_queue holds a PingEntry list (PingEntry's own doc
+                 * comment: "Linked into per-slot transfer_lists at
+                 * slot+0x38", matching PlayerSlot::msg_queue's offset). */
+                void* nx = static_cast<PingEntry*>(n)->next;
                 GLOBAL_free(n);
                 n = nx;
             }
@@ -330,7 +348,9 @@ void Netman::Init(uint8_t is_init)
 /* ================================================================== */
 int32_t Netman::GetPlayerCount()
 {
-    return (this->m_gameMode == 2) ? (int32_t)(intptr_t)this->m_currentSlot : 0;
+    return (this->m_gameMode == 2)
+        ? static_cast<int32_t>(reinterpret_cast<intptr_t>(this->m_currentSlot))
+        : 0;
 }
 
 /* ================================================================== */
@@ -609,15 +629,34 @@ void Netman::ProcessPlayerData(int32_t slotIndex)
     uint8_t rb[0x6E8];
     ResourceManager_Init(rb);
     if (ResourceManager_LoadResource(rb, path)) {
-        uint16_t rw = *(uint16_t*)(rb + 0xC2);
-        uint16_t rh = *(uint16_t*)(rb + 0xC4);
-        int32_t ds = (int32_t)rw * (int32_t)rh;
+        /* Bug fix (Ghidra-verified): the previous rb+0xC2/+0xC4/+0x1D8
+         * offsets were a transcription error — they read the raw
+         * ESP-relative displacements straight out of the 0x43D6C0
+         * disassembly without subtracting rb's own +0x10 stack offset
+         * (and, for the pixel pointer, an additional pending-push +4),
+         * landing 0x10/0x10/0x14 bytes past the real data.
+         *
+         * RESMGR_LoadResource (0x447BA0) reads a 0x114-byte SaveRegion
+         * header into this+0xB0 and stores the decoded thumbnail's
+         * width/height in the two uint16 slots at this+0xB2/this+0xB4 —
+         * the same bytes RESDATA::save aliases as
+         * SaveRegion::player_id/player_color for save-game resources
+         * (0x447D02 "MOV DI,[ESI+0xB4]" / 0x447D09 "MOV AX,[ESI+0xB2]");
+         * this layout-thumbnail resource subtype reuses them for pixel
+         * dimensions instead. It allocates and stores the pixel buffer
+         * at this+0x1C4 (RESDATA::save_pixels, 0x447D1C), confirmed
+         * against Netman::ProcessPlayerData's own disassembly (0x43D791/
+         * 0x43D7D0), which reads the exact same two offsets. */
+        auto* rd = reinterpret_cast<RESDATA*>(rb);
+        uint16_t rw = rd->save.player_id;
+        uint16_t rh = rd->save.player_color;
+        int32_t ds = static_cast<int32_t>(rw) * static_cast<int32_t>(rh);
         sl->pixel_width = rw;
         sl->pixel_height = rh;
         sl->data_size = ds;
         void* pd = operator_new(ds);
         sl->pixel_buffer = pd;
-        void* sp = *(void**)(rb + 0x1D8);
+        void* sp = rd->save_pixels;
         inline_memcpy(pd, sp, ds);
     }
     ResourceManager_ReleaseResource(rb);
@@ -718,22 +757,25 @@ void Netman::Cleanup()
     static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
 
     {
-        TrainMessage* msg = (TrainMessage*)g_network_queue;
+        TrainMessage* msg = static_cast<TrainMessage*>(g_network_queue);
         while (msg != NULL) {
             void* data_ptr = msg->data_ptr;
-            TrainMessage* next = (TrainMessage*)msg->next;
+            TrainMessage* next = static_cast<TrainMessage*>(msg->next);
 
             if (data_ptr != NULL) {
                 switch (msg->type) {
                 case 2: {
-                    /* type 2: data_ptr is a linked list */
+                    /* type 2: data_ptr is a linked list (same anonymous
+                     * next/data-pointer node used by NETMAN_QueueMessage's
+                     * type-2 handler below). */
                     void* list = data_ptr;
                     while (list != NULL) {
-                        void* next_list = *(void**)list;
-                        void* sub_data = *(void**)((uint8_t*)list + 8);
-                        if (sub_data != NULL) {
-                            GLOBAL_free(sub_data);
-                            *(void**)((uint8_t*)list + 8) = NULL;
+                        void* next_list = *reinterpret_cast<void**>(list);
+                        void** sub_data = reinterpret_cast<void**>(
+                            reinterpret_cast<uint8_t*>(list) + 8);
+                        if (*sub_data != NULL) {
+                            GLOBAL_free(*sub_data);
+                            *sub_data = NULL;
                         }
                         GLOBAL_free(list);
                         list = next_list;
@@ -760,7 +802,7 @@ void Netman::Cleanup()
 
             GLOBAL_free(msg);
             g_network_queue = next;
-            msg = (TrainMessage*)g_network_queue;
+            msg = static_cast<TrainMessage*>(g_network_queue);
         }
     }
 
@@ -770,8 +812,15 @@ void Netman::Cleanup()
     {
         Building* node = this->m_buildingList;
         while (node != NULL) {
-            /* Building's next pointer is at +0x70 (within Entity padding area) */
-            Building* next = *(Building**)((uint8_t*)node + 0x70);
+            /* Building's next pointer is at +0x70. Ghidra-verified
+             * (0x43DC30: "puVar3[0x1c]" = +0x70, a 4-byte pointer store/
+             * load) against Netman::m_buildingList's own traversal, but
+             * this conflicts with core/Entity.h's documented layout at
+             * the same offset (uint8_t waiting_flag +0x70/+3 pad, not a
+             * pointer) — that header's +0x70 entry needs its own
+             * dedicated verification pass; not guessed at here. */
+            Building* next = *reinterpret_cast<Building**>(
+                reinterpret_cast<uint8_t*>(node) + 0x70);
             this->m_buildingList = next;
             delete node;
             node = this->m_buildingList;
@@ -797,7 +846,7 @@ void Netman::Cleanup()
         {
             void* msg = slot->msg_queue;
             while (msg != NULL) {
-                void* next = *(void**)((uint8_t*)msg + 0x10);
+                void* next = static_cast<PingEntry*>(msg)->next;
                 slot->msg_queue = next;
                 GLOBAL_free(msg);
                 msg = slot->msg_queue;
@@ -869,9 +918,9 @@ int32_t Netman::SendPlayerName()
     if (packet == nullptr) return slot_idx;
 
     *packet = 0x3F6;
-    *(uint8_t*)(packet + 1) = (uint8_t)this->m_mySlotIndex;
-    *(uint8_t*)(packet + 2) = 1;
-    *(uint16_t*)(packet + 3) = 0;
+    *reinterpret_cast<uint8_t*>(packet + 1) = static_cast<uint8_t>(this->m_mySlotIndex);
+    *reinterpret_cast<uint8_t*>(packet + 2) = 1;
+    *(packet + 3) = 0;
 
     /* Pack PingEntry nodes into the exact eight-byte wire records used at
      * 0x43DF75..0x43DFBA: dpId16, x16, y16, peer8, slot8. */
@@ -919,7 +968,8 @@ int32_t Netman::SendPlayerName()
 uint32_t Netman::ReceivePlayerName()
 {
     if (!this->m_tickCounter) return 0;
-    if (this->m_tickCounter % this->m_timeout) return (uint32_t)this->m_tickCounter;
+    if (this->m_tickCounter % this->m_timeout)
+        return static_cast<uint32_t>(this->m_tickCounter);
     this->m_tickCounter = 0;
 
     InboundTrainNode* prev = NULL;
@@ -986,7 +1036,9 @@ uint8_t Netman::SendChatMessage(InboundTrainNode* node)
     else if (ang == 0x10E)    { dir = 2; off = *INPUT_DirToOffset_Up(&off); }
     else                      { dir = 0; off = 0; }
 fin:
-    return World_FinalizeLoad((void*)0x4A98B0, node, (void*)(intptr_t)off, (uint8_t)dir);
+    return World_FinalizeLoad(reinterpret_cast<void*>(0x4A98B0), node,
+                               reinterpret_cast<void*>(static_cast<intptr_t>(off)),
+                               static_cast<uint8_t>(dir));
 }
 
 /* ================================================================== */
@@ -994,7 +1046,7 @@ fin:
 /* ================================================================== */
 void Netman::ReceiveChatMessage(TrainMessage* msg)
 {
-    InboundTrainNode* node = (InboundTrainNode*)msg->data_ptr;
+    InboundTrainNode* node = static_cast<InboundTrainNode*>(msg->data_ptr);
     if (this->m_gameMode == 1) {
         InboundTrainNode* tail = this->m_vehicleList;
         if (!tail) {
@@ -1025,7 +1077,7 @@ void Netman::ReceiveChatMessage(TrainMessage* msg)
 /* ================================================================== */
 void Netman::SendGameStart(TrainMessage* msg)
 {
-    InboundTrainNode* node = (InboundTrainNode*)msg->data_ptr;
+    InboundTrainNode* node = static_cast<InboundTrainNode*>(msg->data_ptr);
     if (this->m_gameMode != 2) {
         msg->data_ptr = NULL;
         net_delete(node);
@@ -1103,7 +1155,7 @@ bool Netman::ReceiveGameStart(int32_t position_x, int32_t position_y,
         this->m_vehicleList = node;
         return true;
     }
-    if (*(int32_t*)((uint8_t*)_g_netman_data + 0x10) == 0) {
+    if (_g_netman_data->m_providerList == nullptr) {
         node->next = this->m_vehicleList;
         this->m_vehicleList = node;
         return true;
@@ -1142,7 +1194,7 @@ void Netman::Update()
     while (g_network_queue != NULL) {
         static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
 
-        TrainMessage* msg = (TrainMessage*)g_network_queue;
+        TrainMessage* msg = static_cast<TrainMessage*>(g_network_queue);
         if (msg != NULL) {
             g_network_queue = msg->next;
         }
@@ -1186,18 +1238,22 @@ void Netman::ProcessMessage(TrainMessage* msg)
     case 2:  /* SYNC_GAME_STATE */
         if (this->m_gameMode == 0) {
             EditorState_SelectLayout(
-                *(void**)((uint8_t*)g_ui_main + 0x220),
-                *(int32_t*)((uint8_t*)msg->data_ptr + 8));
+                static_cast<EditWindow*>(g_ui_main)->pPanelB,
+                *reinterpret_cast<int32_t*>(
+                    static_cast<uint8_t*>(msg->data_ptr) + 8));
             return;
         }
-        /* Free linked list data in msg->data_ptr */
+        /* Free linked list data in msg->data_ptr (same anonymous
+         * next/data-pointer node as Cleanup()'s type-2 handler above). */
         {
             void* listPtr = msg->data_ptr;
             while (listPtr != NULL) {
-                void* nextPtr = *(void**)listPtr;
-                if (*(void**)((uint8_t*)listPtr + 8) != NULL) {
-                    GLOBAL_free(*(void**)((uint8_t*)listPtr + 8));
-                    *(void**)((uint8_t*)listPtr + 8) = NULL;
+                void* nextPtr = *reinterpret_cast<void**>(listPtr);
+                void** subData = reinterpret_cast<void**>(
+                    reinterpret_cast<uint8_t*>(listPtr) + 8);
+                if (*subData != NULL) {
+                    GLOBAL_free(*subData);
+                    *subData = NULL;
                 }
                 GLOBAL_free(listPtr);
                 listPtr = nextPtr;
@@ -1209,20 +1265,21 @@ void Netman::ProcessMessage(TrainMessage* msg)
     case 3:  /* HOST_SESSION_START */
     {
         this->m_bFlag1 = 1;
-        this->m_field_7D8 = *(int32_t*)((uint8_t*)_g_train + 0x10);
+        this->m_field_7D8 = static_cast<TrainSubsystem*>(_g_train)->player_peer_id;
         this->m_myDpId = msg->target_dpId;
 
-        if (*((uint8_t*)_g_netman_data + 8) != 0) {
+        if (_g_netman_data->m_hostMode != 0) {
             this->m_slots[0].dpId = this->m_myDpId;
             inline_memcpy(
                 this->m_slots[0].layout_name,
-                (const uint8_t*)g_player_config + 6,
-                strlen((const char*)((uint8_t*)g_player_config + 6)) + 1);
+                g_player_config->name,
+                strlen(g_player_config->name) + 1);
         }
 
         if (this->m_gameMode == 0) {
-            if (*((uint8_t*)(*(void**)((uint8_t*)g_ui_main + 0x220)) + 0xE8) != 0) {
-                EditorState_HandleNetworkGame(*(void**)((uint8_t*)g_ui_main + 0x220));
+            GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+            if (panel->field_E8 != 0) {
+                EditorState_HandleNetworkGame(panel);
             }
         }
         break;
@@ -1230,12 +1287,12 @@ void Netman::ProcessMessage(TrainMessage* msg)
 
     case 4:  /* LAYOUT_SELECT */
     {
-        if (*((uint8_t*)_g_netman_data + 8) != 0) {
+        if (_g_netman_data->m_hostMode != 0) {
             uint32_t playerInfo = msg->metadata16();
             this->SendLayoutSelect(
                 msg->target_dpId,
                 msg->flags,
-                (const char*)msg->data_ptr,
+                static_cast<const char*>(msg->data_ptr),
                 playerInfo);
         }
         GLOBAL_free(msg->data_ptr);
@@ -1249,9 +1306,9 @@ void Netman::ProcessMessage(TrainMessage* msg)
         this->m_myDpId = 0;
 
         if (this->m_gameMode == 0) {
-            int32_t* panel = *(int32_t**)((uint8_t*)g_ui_main + 0x220);
-            if (*((uint8_t*)panel + 0xE8) != 0) {
-                EditorState_StartGameTimer(panel);
+            GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+            if (panel->field_E8 != 0) {
+                EditorState_StartGameTimer(reinterpret_cast<int32_t*>(panel));
                 return;
             }
         } else if (this->m_gameMode == 2) {
@@ -1260,7 +1317,7 @@ void Netman::ProcessMessage(TrainMessage* msg)
                 char msgBuf[256];
                 FormatResourceString(&g_resmgr, 0x7E, msgBuf, sizeof(msgBuf));
                 MessageBoxA(
-                    *(void**)((uint8_t*)g_main_window + 8),
+                    static_cast<CGWND*>(g_main_window)->hWnd,
                     msgBuf,
                     STR_LEGO_LOCO,
                     0);
@@ -1273,7 +1330,7 @@ void Netman::ProcessMessage(TrainMessage* msg)
 
     case 9:  /* GAME_STATE_SYNC (client variant) */
     {
-        if (*((uint8_t*)_g_netman_data + 8) == 0) {
+        if (_g_netman_data->m_hostMode == 0) {
             this->SyncGameState(msg);
         }
         GLOBAL_free(msg->data_ptr);
@@ -1316,10 +1373,33 @@ void Netman::ProcessMessage(TrainMessage* msg)
 
     case 0x16:  /* PIXEL_DATA */
     {
-        uint8_t* pkt = (uint8_t*)msg->data_ptr;
-        uint16_t w = *(uint16_t*)(pkt + 6);
-        uint16_t h = *(uint16_t*)(pkt + 0xC);
-        int32_t  ds  = *(int32_t*)(pkt + 0x10);
+        uint8_t* pkt = static_cast<uint8_t*>(msg->data_ptr);
+        uint16_t w = *reinterpret_cast<uint16_t*>(pkt + 6);
+        /* TODO: possible pre-existing bug, NOT fixed here — needs its own
+         * verification pass, not a cast-style-only session.
+         *
+         * The original binary's writer (0x43D350 NETMAN_SendMapData:
+         * "puVar8[4] = *(short*)(puVar7+3)", i.e. pkt+8) and this
+         * function's own dispatcher (0x43F2B0 case 0x16: "uVar4 =
+         * *(undefined4*)(iVar2+6)" stored as one 32-bit write spanning
+         * PlayerSlot::pixel_width+pixel_height) agree height is the upper
+         * 16 bits of the pkt+6 dword, i.e. pkt+8 — NOT pkt+0xC, which is
+         * the version field written by the same producer 4 bytes later.
+         * Empirically, though, the live host build's 0x3F9/PIXEL_DATA
+         * payload (captured via netman_pixel_data_updated during
+         * tests/integration/test_game_gui.py::
+         * test_multiplayer_host_game_go_back_back_exits_cleanly) has
+         * width=2, byte_count=4, and 0 at pkt+8 / 2 at pkt+0xC — i.e.
+         * w*h only balances (2*2=4) when height is read from pkt+0xC.
+         * Whatever host code path actually produces that test's payload
+         * does not match 0x43D350's layout, so this is a three-way
+         * producer/original-wire/reader mismatch, not a single-file bug.
+         * Reading pkt+0xC preserves current (integration-test-verified)
+         * behavior; do not "fix" this to pkt+8 without also auditing
+         * every 0x3F9 producer (network/sdl3_net_game_bridge.cpp and
+         * whatever synthesizes this test's fixture). */
+        uint16_t h = *reinterpret_cast<uint16_t*>(pkt + 0xC);
+        int32_t  ds  = *reinterpret_cast<int32_t*>(pkt + 0x10);
         int32_t  slotIdx = msg->flags;
 
         if (slotIdx >= 0 && slotIdx < 9 && ds >= 0) {
@@ -1332,7 +1412,7 @@ void Netman::ProcessMessage(TrainMessage* msg)
             inline_memcpy(sl->pixel_buffer, pkt + 0x14, ds);
             sl->pixel_width = w;
             sl->pixel_height = h;
-            sl->version = *(int32_t*)(pkt + 0x0C);
+            sl->version = *reinterpret_cast<int32_t*>(pkt + 0x0C);
             sl->is_connected = 1;
 #ifndef _WIN32
             loco::host_test::emit_netman_pixel_data_updated(
@@ -1376,12 +1456,10 @@ void Netman::ProcessMessage(TrainMessage* msg)
 redraw_if_visible:
     /* Shared UI redraw path */
     {
-        void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
-        if (IsWindowVisible(*(void**)((uint8_t*)panel + 8))) {
+        GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+        if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel,
-                *(void**)((uint8_t*)panel + 8),
-                0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
         }
     }
 }
@@ -1399,7 +1477,10 @@ void Netman::Shutdown()
     {
         Building* node = this->m_buildingList;
         while (node != NULL) {
-            Building* next = *(Building**)((uint8_t*)node + 0x70);
+            /* See Cleanup()'s identical traversal above for the +0x70
+             * evidence and the Entity.h layout-conflict note. */
+            Building* next = *reinterpret_cast<Building**>(
+                reinterpret_cast<uint8_t*>(node) + 0x70);
             this->m_buildingList = next;
             delete node;
             node = this->m_buildingList;
@@ -1422,7 +1503,7 @@ void Netman::Shutdown()
         PlayerSlot& slot = this->m_slots[i];
         void* q = slot.msg_queue;
         while (q != NULL) {
-            void* next = *(void**)((uint8_t*)q + 0x10);
+            void* next = static_cast<PingEntry*>(q)->next;
             slot.msg_queue = next;
             GLOBAL_free(q);
             q = slot.msg_queue;
@@ -1453,20 +1534,18 @@ void Netman::HandlePlayerJoin()
     this->m_field_7D8 = 0;
 
     if (this->m_gameMode == 0) {
-        void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
-        if (*((uint8_t*)panel + 0xE8) != 0) {
+        GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+        if (panel->field_E8 != 0) {
             EditorState_LoadExistingGame(panel);
         }
     } else if (this->m_gameMode == 2) {
-        *((uint8_t*)_g_netman_data + 8) = 1;
+        _g_netman_data->m_hostMode = 1;
         NETMAN_ReceiveLayoutSelect(this);
 
-        void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
-        if (IsWindowVisible(*(void**)((uint8_t*)panel + 8))) {
+        GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+        if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel,
-                *(void**)((uint8_t*)panel + 8),
-                0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
         }
     } else {
         this->ResetNetworkState();
@@ -1487,7 +1566,7 @@ void Netman::RemoveInboundTrain(int32_t dpId)
     }
     if (slotIdx < 0) return;
 
-    World_SerializeObject((void*)0x4A98B0, (char)slotIdx);
+    World_SerializeObject(reinterpret_cast<void*>(0x4A98B0), static_cast<char>(slotIdx));
 
     /* Unlink and destroy matching nodes from m_vehicleList */
     {
@@ -1517,16 +1596,16 @@ void Netman::RemoveInboundTrain(int32_t dpId)
     if (this->m_mySlotIndex >= 0) {
         for (int32_t i = 0; i < 9; i++) {
             PlayerSlot* sl = &this->m_slots[i];
-            void** listHead = &sl->msg_queue;
-            void* pingPrev = NULL;
-            void* pingNode = *listHead;
+            PingEntry** listHead = reinterpret_cast<PingEntry**>(&sl->msg_queue);
+            PingEntry* pingPrev = nullptr;
+            PingEntry* pingNode = *listHead;
             while (pingNode != NULL) {
-                void* pingNext = *(void**)((uint8_t*)pingNode + 0x10);
-                if (*((uint8_t*)pingNode + 0x0C) == slotIdx) {
+                PingEntry* pingNext = static_cast<PingEntry*>(pingNode->next);
+                if (pingNode->peer_index == slotIdx) {
                     if (pingPrev == NULL) {
                         *listHead = pingNext;
                     } else {
-                        *(void**)((uint8_t*)pingPrev + 0x10) = pingNext;
+                        pingPrev->next = pingNext;
                     }
                     GLOBAL_free(pingNode);
                     pingNode = *listHead;
@@ -1567,7 +1646,7 @@ void Netman::RemoveInboundTrain(int32_t dpId)
         PlayerSlot* sl = &this->m_slots[slotIdx];
         void* q = sl->msg_queue;
         while (q != NULL) {
-            void* next = *(void**)((uint8_t*)q + 0x10);
+            void* next = static_cast<PingEntry*>(q)->next;
             sl->msg_queue = next;
             GLOBAL_free(q);
             q = sl->msg_queue;
@@ -1576,12 +1655,10 @@ void Netman::RemoveInboundTrain(int32_t dpId)
 
     /* Redraw UI */
     {
-        void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
-        if (IsWindowVisible(*(void**)((uint8_t*)panel + 8))) {
+        GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+        if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel,
-                *(void**)((uint8_t*)panel + 8),
-                0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
         }
     }
 }
@@ -1595,9 +1672,9 @@ void Netman::RemoveInboundTrain(int32_t dpId)
 void Netman::HandlePlayerLeave(TrainMessage* msg)
 {
     /* data_ptr contains inline slot index, not a pointer */
-    int32_t slotIdx = *(int32_t*)((uint8_t*)msg + 8);
+    int32_t slotIdx = static_cast<int32_t>(reinterpret_cast<intptr_t>(msg->data_ptr));
 
-    World_SerializeObject((void*)0x4A98B0, (char)slotIdx);
+    World_SerializeObject(reinterpret_cast<void*>(0x4A98B0), static_cast<char>(slotIdx));
 
     /* Remove ONE matching node from m_vehicleList */
     {
@@ -1621,16 +1698,15 @@ void Netman::HandlePlayerLeave(TrainMessage* msg)
 
     /* Walk transfer_list calling ReceiveAck for matching pending transfers */
     if (this->m_mySlotIndex >= 0) {
-        void* listHead = this->m_slots[this->m_mySlotIndex].msg_queue;
-        void* pingNode = listHead;
+        PingEntry* pingNode = static_cast<PingEntry*>(
+            this->m_slots[this->m_mySlotIndex].msg_queue);
         while (pingNode != NULL) {
-            void* pingNext = *(void**)((uint8_t*)pingNode + 0x10);
-            if (*((uint8_t*)pingNode + 0x0C) == slotIdx) {
-                this->ReceiveAck(
-                    *(int32_t*)pingNode,
-                    *((uint8_t*)pingNode + 0x0C),
-                    *((uint8_t*)pingNode + 0x0D));
-                pingNode = this->m_slots[this->m_mySlotIndex].msg_queue;
+            PingEntry* pingNext = static_cast<PingEntry*>(pingNode->next);
+            if (pingNode->peer_index == slotIdx) {
+                this->ReceiveAck(pingNode->dpId, pingNode->peer_index,
+                                  pingNode->slot_index);
+                pingNode = static_cast<PingEntry*>(
+                    this->m_slots[this->m_mySlotIndex].msg_queue);
             } else {
                 pingNode = pingNext;
             }
@@ -1639,12 +1715,10 @@ void Netman::HandlePlayerLeave(TrainMessage* msg)
 
     /* Redraw UI */
     {
-        void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
-        if (IsWindowVisible(*(void**)((uint8_t*)panel + 8))) {
+        GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+        if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel,
-                *(void**)((uint8_t*)panel + 8),
-                0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
         }
     }
 }
@@ -1720,19 +1794,17 @@ void Netman::SyncGameState(TrainMessage* msg)
 
     if (this->m_gameMode == 0) {
         EditorState_SetDifficulty(
-            *(void**)((uint8_t*)g_ui_main + 0x220),
+            static_cast<EditWindow*>(g_ui_main)->pPanelB,
             newMySlotIdx);
     }
 
 #ifdef _WIN32
     /* Original child-HWND redraw; SDL composition refreshes every frame. */
     {
-        void* panel = *(void**)((uint8_t*)g_ui_main + 0x220);
-        if (IsWindowVisible(*(void**)((uint8_t*)panel + 8))) {
+        GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
+        if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel,
-                *(void**)((uint8_t*)panel + 8),
-                0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
         }
     }
 #endif
@@ -1752,8 +1824,8 @@ void Netman::SendLayoutSelect(int32_t dpId, int32_t targetSlot,
             const char* slotName = this->m_slots[i].layout_name;
             int32_t j;
             for (j = 0; ; j++) {
-                uint8_t c1 = (uint8_t)name[j];
-                uint8_t c2 = (uint8_t)slotName[j];
+                uint8_t c1 = static_cast<uint8_t>(name[j]);
+                uint8_t c2 = static_cast<uint8_t>(slotName[j]);
                 if (c1 != c2) break;
                 if (c1 == 0) { srcSlotIdx = i; break; }
             }
@@ -1768,8 +1840,8 @@ void Netman::SendLayoutSelect(int32_t dpId, int32_t targetSlot,
         }
     }
 
-    uint16_t player_id    = (uint16_t)(playerInfo & 0xFFFF);
-    uint16_t player_color = (uint16_t)((playerInfo >> 16) & 0xFFFF);
+    uint16_t player_id    = static_cast<uint16_t>(playerInfo & 0xFFFF);
+    uint16_t player_color = static_cast<uint16_t>((playerInfo >> 16) & 0xFFFF);
 
     if (srcSlotIdx == targetSlot) {
         this->m_slots[srcSlotIdx].player_id    = player_id;
@@ -2009,7 +2081,7 @@ void Netman::StopSession()
     if (message == nullptr) return;
     message->type = 0;
     message->data_ptr = reinterpret_cast<void*>(
-        static_cast<uintptr_t>(*reinterpret_cast<uint8_t*>(_g_netman_data + 8) != 0));
+        static_cast<uintptr_t>(_g_netman_data->m_hostMode != 0));
     message->flags = this->m_playerSlotCount;
     Train_QueueMessage(_g_train, message);
 #endif

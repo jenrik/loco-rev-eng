@@ -142,6 +142,23 @@ bool NETMAN_ReceiveTrainPosition(int32_t position_x, int32_t position_y,
  */
 void* NETMAN_ReceiveSignalChange(void* playerDPlayData);
 
+#ifndef _WIN32
+/**
+ * NETMAN_HostLocalSlotIndex — m_mySlotIndex accessor for translation units
+ * (game/Train_network.cpp) that only need this one bit through the global
+ * Netman singleton and can't include this header directly.
+ * Defined in network/Netman.cpp.
+ */
+int32_t NETMAN_HostLocalSlotIndex();
+#endif
+
+/**
+ * NETMAN_CheckTimeout — call-site adapter for translation units that hold
+ * g_netman as void* and cannot include Netman.h (town/Town.cpp). Forwards
+ * to Netman::CheckTimeout (0x440820). Defined in network/Netman.cpp.
+ */
+void NETMAN_CheckTimeout(void* netman, int32_t timeoutVal);
+
 /* ================================================================== */
 /* Win32 API imports (C linkage only)                                   */
 /* ================================================================== */

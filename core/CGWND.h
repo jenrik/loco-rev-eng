@@ -256,7 +256,7 @@ void CGWND_ParseCmdLine(char* lpCmdLine);
  * completed frame for screen flip/blit. Called from the WinMain message
  * loop after each frame update.
  */
-extern "C" void CGWND_Present(uint flags); /* original __cdecl 0x45E1E0 */
+extern "C" void CGWND_Present(uint32_t flags); /* original __cdecl 0x45E1E0 */
 
 /**
  * CGWND_MapResourceToDirection — Map resource ID to direction enum. 0x40EB60.
