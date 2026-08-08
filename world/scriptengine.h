@@ -38,6 +38,7 @@
 /* Forward declarations                                                */
 /* ================================================================== */
 class GameObject;
+class TrackPiece;
 
 /* ================================================================== */
 /* ScriptEngine class                                                  */
@@ -397,8 +398,11 @@ public:
      * track placement (0x2403-0x2405,0x2409-0x240A), build mode toggle
      * (0x2406), switch tools (0x2407-0x2408), placement toggle (0x240B),
      * fullscreen (0x240C), mute (0x240E). Returns non-zero on handled.
+     * `toolObj` is a TrackPiece* — see world/scriptengine.cpp's definition
+     * for the Ghidra evidence (TrackPiece::SetZoom call target, matching
+     * +0x44/+0x48/+0x56 field offsets).
      */
-    uint32_t __thiscall HandleToolClick(void* toolObj, int32_t x, int32_t y);
+    uint32_t __thiscall HandleToolClick(TrackPiece* toolObj, int32_t x, int32_t y);
 
     /**
      * EnterBuildMode. 0x44A9D0.

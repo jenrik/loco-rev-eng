@@ -23,8 +23,11 @@
 // Status: TRANSCRIBED
 
 #include "scriptengine.h"
+#include "tilemap.h"                        /* for RESDATA_ScriptedObject_Dispatch's declaration */
 #include "../resources/ResourceManager.h"  /* for PlaySoundAt, etc. */
 #include "../core/Entity.h"                /* embedded resource-backed entity fields */
+#include "../core/CGWND.h"                 /* for CGWND::hWnd (g_main_window+0x08) */
+#include "../game/TrackPiece.h"            /* ScriptEngine_Run/HandleToolClick's real operand type */
 #include "../ui/UI_ChildWindow.h"
 
 /* ================================================================== */
@@ -47,9 +50,46 @@ extern "C" {
     void __fastcall UIPANEL_InitScrollPanel(void* panel); /* 0x427370 */
     void __fastcall UIPANEL_ScrollPanel_Dtor(void* panel); /* 0x427460 */
     void __fastcall Panel_DtorBody(void* panel);        /* 0x4545A0 */
-    void __thiscall UIPANEL_ScrollPanel_HandleDrag(void* panel, int32_t param, int32_t action); /* @ 0x427BD0 */
+    /* TODO(evidence-insufficient): address corrected 0x427BD0 -> 0x4277D0
+     * (0x427BD0 is mid-body; Ghidra resolves it to the function starting at
+     * 0x4277D0). The `param` parameter is a genuine pointer, not an int32_t:
+     * several call sites inside RESDATA_ScriptedObject::HandleToolClick pass
+     * a raw child-list node pointer here (see HandleToolClick's `pvVar4`
+     * dispatch sites in the Ghidra decompilation of 0x44A250), and the real
+     * body at 0x4277D0 stores it verbatim into a 4-byte "last active tool"
+     * slot at this+0xD4 without ever treating it as a small integer. On this
+     * 64-bit host, passing a real pointer through an int32_t parameter is a
+     * truncating-pointer-arithmetic landmine (loses the pointer's upper 32
+     * bits). NOT fixed here: game/ScriptedObject.cpp:90 declares this same
+     * symbol as `(void*, int, int)` and shared/stubs_impl.cpp:518 /
+     * shared/defsym_stubs.cpp:105 each define it differently (one with zero
+     * parameters) — retyping only this declaration would silently rebind
+     * this TU's call to a different symbol than intended. Needs a dedicated
+     * pass auditing all four declarations/definitions together; tracked in
+     * docs/landmine-sweep-worklist.md. Left as int32_t/truncating here. */
+    void __thiscall UIPANEL_ScrollPanel_HandleDrag(void* panel, int32_t param, int32_t action); /* @ 0x4277D0 */
     void __thiscall RESDATA_SetPosition(void* obj, int32_t x, int32_t y);  /* @ 0x44E700 */
-    char __thiscall RESDATA_HitTestChildren(void* obj, int32_t x, int32_t y); /* @ 0x44E6C0 */
+    /* TODO(deferred — see docs/landmine-sweep-worklist.md): address corrected
+     * 0x44E6C0 -> 0x4549E0 (0x44E6C0 falls inside World_RenderAll; the real
+     * function, confirmed by Ghidra symbol lookup, decompiles cleanly and
+     * already has a typed C++ implementation at Panel::HitTestChildren,
+     * game/Panel.cpp:510). NOT wired up to call it here: two other TUs
+     * (graphics/DDRAW.cpp:102 @ "0x44A0C0" - actually
+     * RESDATA_ScriptedObject::HitTest itself; town/Town.cpp:171 @ "0x44B200"
+     * - actually RESDATA_ScriptedObject::DtorChain) declare the same symbol
+     * at two more wrong addresses with mismatched return types. Because
+     * Itanium mangling ignores return type, all three declarations plus
+     * shared/stubs_impl.cpp:431's `void`-returning stub collide on one
+     * mangled symbol, and every real call site today silently binds to that
+     * stub's assert(0) instead of running. Wiring a forwarder to
+     * Panel::HitTestChildren is NOT a safe drop-in fix on its own: that
+     * method dispatches child->vtable[0x11] as a `void**` array index, which
+     * is byte offset 0x88 on this 64-bit (8-byte vtable entry) host, not the
+     * original x86 byte offset 0x44 — the same vtable-byte-offset-
+     * misalignment landmine class this cleanup sweep watches for. Fixing
+     * this cluster requires resolving slot 17's real signature first;
+     * tracked as a dedicated follow-up, not done in this commit. */
+    char __thiscall RESDATA_HitTestChildren(void* obj, int32_t x, int32_t y); /* @ 0x4549E0 */
     /* Address corrected: 0x44E530 falls inside World_ProcessEvents, not
      * RESDATA_CreateChildSprite; confirmed via Ghidra at 0x4546D0, which
      * also confirms the real return type is `void*` (not `void` — an ODR
@@ -63,13 +103,37 @@ extern "C" {
     int32_t __thiscall ResourceManager_GetById(void* resmgr, int32_t resId); /* @ 0x446EA0 */
     void* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int32_t param, int32_t x, int32_t y); /* @ 0x428DA0 */
     void* __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x428E40 */
-    int32_t __thiscall CGWND_TrackPiece_SetZoom(void* obj, int32_t zoom); /* @ 0x40DD90 */
-    void __thiscall CGWND_SetBuildMode(int32_t mode);     /* @ 0x40E7A0 */
-    /* Real def: core/CGWND.cpp, void(int), address 0x408130 (the 0x40DF50
-     * annotation here was bogus). Was declared void* here, mismatching the
-     * real int param (call-0 landmine — silently bound to
-     * shared/link_stubs.cpp's void* no-op stub). */
-    void __thiscall CGWND_SetMode(int mode);            /* @ 0x408130 */
+    /* TODO(deferred — see docs/landmine-sweep-worklist.md): address corrected
+     * 0x40DD90 -> 0x40D170. Ghidra confirms every `TrackPiece_SetZoom(...)`
+     * call this file's own disassembly resolves to (e.g. inside
+     * ScriptEngine_Run and HandleToolClick below) targets 0x40D170, which is
+     * TrackPiece::SetZoom (game/TrackPiece.cpp) — a real `void __thiscall
+     * (TrackPiece* this, int16_t zoom)`, not this declaration's `int32_t
+     * (void*, int32_t)`. shared/stubs_impl.cpp:216 is the only actual
+     * definition bound to this declared symbol name/signature, so every
+     * call site under this name (here and in game/Panel.cpp,
+     * ui/UIPANEL_Draw.cpp) is currently a silent-wrong-stub landmine that
+     * asserts if reached. NOT fixed here: retyping `engine`/`toolObj` to
+     * TrackPiece* below does not change this — TrackPiece* implicitly
+     * converts to void* at these call sites, so behavior is unchanged.
+     * Fixing the stub itself is a separate, wider-blast-radius pass (it
+     * would newly activate currently-dormant call paths in those other
+     * files too); tracked as a dedicated follow-up. */
+    int32_t __thiscall CGWND_TrackPiece_SetZoom(void* obj, int32_t zoom); /* @ 0x40D170 */
+    /* CGWND_SetBuildMode/CGWND_SetMode are declared in core/CGWND.h (now
+     * included above for CGWND::hWnd) with no calling-convention
+     * annotation, matching their real implementation in core/CGWND.cpp.
+     * This file's own `__thiscall`-annotated local redeclarations were a
+     * calling-convention mismatch invisible on this native 64-bit host
+     * (where __thiscall/__fastcall/etc. are empty macros — see
+     * stubs/compat.h) but a hard "ambiguating declaration" error on the
+     * real 32-bit mingw typecheck build, where they're genuinely different
+     * ABIs. Removed in favor of core/CGWND.h's declarations. CGWND_SetMode
+     * previously had a real call-0 landmine fixed here (real def:
+     * core/CGWND.cpp, void(int), 0x408130 — a bogus 0x40DF50 address and a
+     * void* param mismatch had silently bound it to shared/link_stubs.cpp's
+     * void* no-op stub); core/CGWND.h's declaration carries the same
+     * corrected signature. */
     void __thiscall GameAudio_UpdateVolume(void* audio, uint8_t mute);    /* @ 0x413150 */
     int32_t __thiscall HelpWnd_PlayNarration(void* audioMgr, int32_t page, int32_t param); /* @ 0x4510B0 */
     void __fastcall INPUT_ExitGame(void* obj, uint32_t resId, int32_t strPtr); /* @ 0x41E570 */
@@ -79,7 +143,11 @@ extern "C" {
 
     /* Globals */
     /* g_resmgr is declared in ResourceManager.h as ResourceManager */
-    extern void* g_tilemap;                    /* @ 0x4A99DC */
+    /* g_tilemap is declared in tilemap.h (now included above) as
+     * `extern TileMap* g_tilemap;` — this file previously redeclared it as
+     * `void*`, an undetected type mismatch across TUs until this file
+     * started including tilemap.h directly (for RESDATA_ScriptedObject_
+     * Dispatch's declaration) and the compiler could see both at once. */
     extern void* g_tooltip_mgr;               /* @ 0x4AA500 */
     extern void* g_audio;                      /* @ 0x4FD3BC */
     extern void* g_audio_mgr;                  /* @ 0x4A9E0C */
@@ -94,7 +162,10 @@ extern "C" {
     extern int32_t g_cursor_world_y;           /* @ 0x4AA414 */
     extern int32_t g_drag_start_x;             /* @ 0x4AA418 */
     extern int32_t g_drag_start_y;             /* @ 0x4AA41C */
-    extern int32_t g_disable_input;            /* @ 0x4AA418 (overlaps with drag_start_x?) */
+    /* g_disable_input is declared in tilemap.h as `extern uint8_t
+     * g_disable_input;` — this file previously redeclared it as int32_t,
+     * a latent type mismatch (a 4-byte read of a real 1-byte global) only
+     * surfaced once tilemap.h's own declaration became visible here. */
     extern int32_t g_demo_mode;                /* @ 0x4A9918 */
     extern int32_t g_screen_width;             /* @ 0x4AA420 */
     extern uint8_t g_is_fullscreen;            /* @ 0x4AA418 */
@@ -102,12 +173,25 @@ extern "C" {
     extern int32_t g_in_build_mode;            /* @ 0x4A9E10 */
     extern int32_t g_viewport_x;               /* @ 0x4AA43C */
     extern int32_t g_viewport_y;               /* @ 0x4AA440 */
-    extern int32_t g_active_panel;             /* @ 0x4AA428 */
+    /* Real type is `void*` (see shared/stubs_impl.cpp's definition and
+     * every other TU's declaration: ui/UIPANEL.cpp, town/Town.cpp,
+     * graphics/DDRAW.h, game/ScriptedObject.cpp). This file previously
+     * declared it `int32_t` — an undetected type mismatch that only
+     * surfaced as a pointer-truncation warning once this function's
+     * `g_active_panel = this;` assignment (below) was reached; corrected. */
+    extern void* g_active_panel;               /* @ 0x4AA428 */
     extern void* g_trainstation_window;        /* @ 0x4A9E04 */
     extern int32_t g_game;                     /* @ 0x4FCCCC */
     void __thiscall Game_CheckScreensaverTimeout(int32_t* game); /* @ 0x40E160 */
 extern "C" {
-    void __stdcall ClientToScreen(void* hwnd, void* point);
+    /* Real signature (matches stubs/windows.h / graphics/sdl3_window.h,
+     * the TU that actually implements this on non-Windows hosts): `BOOL
+     * __stdcall (HWND, POINT*)`. This file previously declared it as
+     * `void __stdcall (void*, void*)`, and shared/stubs_impl.cpp separately
+     * declares `int(void*, void*)` — an ODR-mismatch cluster of the same
+     * shape already fixed for other Win32 imports in this series; the
+     * return value isn't used at this file's one call site either way. */
+    BOOL __stdcall ClientToScreen(HWND hwnd, POINT* point);
     void __stdcall SetCursorPos(int32_t x, int32_t y);
 }
 
@@ -122,7 +206,14 @@ extern "C" {
     void __thiscall WIN32_StreamDestroyImmediate(void* stream);          /* @ 0x00461800 */
     void __thiscall WIN32_StreamDestroy(void* stream);                   /* @ 0x004617C0 */
     void __thiscall WNDPROC_StreamCleanup(void* stream);                 /* @ 0x00460D50 */
-    int CDECL ScriptEngine_Run(void* engine, int param_2, int param_3);
+    /* `engine` is a misnomer inherited from this function's address label:
+     * Ghidra confirms the zoom-setting call inside resolves to
+     * TrackPiece::SetZoom (0x40D170), and every accessed offset (+0x2C
+     * flags, +0x48 zoom_level) matches game/TrackPiece.h's documented
+     * layout, not ScriptEngine's. Zero callers tree-wide today; retyped
+     * without renaming since the address label is Ghidra's own and no
+     * stronger name is evidenced. */
+    int CDECL ScriptEngine_Run(TrackPiece* tool, int x, int y);
 extern "C" {
     void __stdcall SetRect(void* lprc, int32_t left, int32_t top, int32_t right, int32_t bottom);
 }
@@ -191,6 +282,60 @@ static PanelDispatchView* panel_view(void* object)
 static EntityDispatchView* entity_view(void* object)
 {
     return reinterpret_cast<EntityDispatchView*>(object);
+}
+
+/* ScriptEngine's OWN vtable slot 21 (+0x54) is a distinct method from
+ * RESDATA_ScriptedObject's slot 21 (PanelDispatchView::point_or_tool_action,
+ * a coordinate hit-test). Ghidra's disassembly of HandleToolClick
+ * (0x44A250) calls this same slot on the *scriptengine* sub-object with a
+ * raw child/tool pointer and a small action code — the same calling shape
+ * as the sibling UIPANEL_ScrollPanel_HandleDrag(void*, void*, int32_t) free
+ * function used a few lines later for the scrollpanel sub-object. A
+ * separate view struct (rather than folding into PanelDispatchView, whose
+ * point_or_tool_action is genuinely used elsewhere with (uint32_t x,
+ * int32_t y) coordinate arguments) avoids misrepresenting either use.
+ *
+ * Deliberately identical to PanelDispatchView through slot 20 so slot 21
+ * lands at the same *virtual-method declaration position* — compiler-
+ * managed dispatch, not a raw `void**` array index. Indexing a raw vtable
+ * array by the x86 slot number (e.g. `vtable[21]`) would misindex on this
+ * 64-bit host, whose vtable entries are 8 bytes instead of the original's
+ * 4 (byte offset 0x54 vs. array slot 21*8=0xA8) — exactly the vtable-byte-
+ * offset-misalignment landmine this cleanup sweep watches for. Ordinary
+ * virtual dispatch through a matching-shape interface sidesteps it: the
+ * compiler computes the real (8-byte-stride) slot for "the 21st declared
+ * virtual" on both this view and the target's real class alike. */
+struct ScriptEngineDragView {
+    virtual void* scalar_destroy(uint8_t flags) = 0;       /* 0x00 */
+    virtual void update_child() = 0;                       /* 0x04 */
+    virtual uint8_t point_in_rect(int32_t, int32_t) = 0;   /* 0x08 */
+    virtual void set_position(int32_t, int32_t) = 0;       /* 0x0C */
+    virtual uint8_t hit_test(int32_t, int32_t) = 0;        /* 0x10 */
+    virtual void slot5() = 0;                              /* 0x14 */
+    virtual uint32_t init(int32_t, int32_t, int32_t) = 0;  /* 0x18 */
+    virtual void set_animation(int32_t) = 0;               /* 0x1C */
+    virtual void slot8() = 0;                              /* 0x20 */
+    virtual void slot9() = 0;                              /* 0x24 */
+    virtual void update() = 0;                             /* 0x28 */
+    virtual void draw(RECT, int32_t, uint32_t) = 0;        /* 0x2C */
+    virtual void slot12() = 0;                             /* 0x30 */
+    virtual void slot13() = 0;                             /* 0x34 */
+    virtual void shutdown() = 0;                          /* 0x38 */
+    virtual void slot15() = 0;                             /* 0x3C */
+    virtual uint32_t handle_tool_click(void*, int32_t) = 0;/* 0x40 */
+    virtual void slot17() = 0;                             /* 0x44 */
+    virtual void slot18() = 0;                             /* 0x48 */
+    virtual uint32_t slot19(void*) = 0;                    /* 0x4C */
+    virtual uint32_t update_tool_state(void*) = 0;         /* 0x50 */
+    virtual uint32_t handle_drag(void* param, int32_t action) = 0; /* 0x54 */
+
+protected:
+    ~ScriptEngineDragView() = default;
+};
+
+static ScriptEngineDragView* script_engine_drag_view(void* object)
+{
+    return reinterpret_cast<ScriptEngineDragView*>(object);
 }
 
 } // namespace
@@ -320,40 +465,47 @@ void* __thiscall ScriptEngine::Reset(uint8_t free_memory)
 }
 
 /* ==================================================================== */
-/* ScriptEngine_Run — Run the script engine with parameters              */
+/* ScriptEngine_Run — Update a track piece's zoom based on a hit-test   */
 /* Address: 0x44EF10                                                   */
-/* __cdecl (param_1=ScriptEngine*, param_2, param_3)                    */
+/* __cdecl (tool, x, y)                                                 */
 /*                                                                      */
-/* Checks if engine's flags have bit 1 set (flags&2). If set, dispatches*/
-/* vtable[2] method with 2 parameters. On success (non-zero return),    */
-/* sets zoom=2. On failure or type==2, sets zoom=1.                    */
+/* Real operand type is TrackPiece*, not ScriptEngine* (see the         */
+/* declaration's comment above and game/TrackPiece.h for field          */
+/* evidence). Checks tool->flags bit 1 (flags&2). If set, dispatches    */
+/* PtInRect(x, y) (vtable slot 2, +0x08). On success (non-zero return), */
+/* sets zoom=2 if zoom_level==1. On failure, sets zoom=1 if             */
+/* zoom_level==2.                                                       */
+/*                                                                      */
+/* Bug found and fixed: the flags check previously read byte offset     */
+/* +0x0C. Ghidra's decompilation is `*(byte*)(param_1 + 0xb)` with      */
+/* `param_1` typed `int*`, i.e. byte offset 0xb*4 = 0x2C — matching     */
+/* TrackPiece::flags (uint16_t, +0x2C, game/TrackPiece.h). +0x0C falls  */
+/* inside TrackPiece's inherited GameObject::screen_rect (the "top"     */
+/* field), which has no flags semantics. Corrected to +0x2C.            */
 /* ==================================================================== */
-int CDECL ScriptEngine_Run(void* engine, int param_2, int param_3)
+int CDECL ScriptEngine_Run(TrackPiece* tool, int x, int y)
 {
     int result;
 
-    if (engine == NULL) {
+    if (tool == nullptr) {
         return 0;
     }
 
-    /* Check bit 1 of flags at offset +0x0C (relative to base) */
-    if ((*(uint8_t*)((uint8_t*)engine + 0x0C) & 2) == 0) {
+    if ((tool->flags & 2) == 0) {                        /* +0x2C */
         return 0;
     }
 
-    /* Ghidra 0x44EF10 calls the engine's slot 2 (+0x08). */
-    result = panel_view(engine)->point_in_rect(param_2, param_3);
+    /* Ghidra 0x44EF10 calls the tool's slot 2 (+0x08, PtInRect). */
+    result = panel_view(tool)->point_in_rect(x, y);
 
-    if ((char)result != 0) {
-        /* Success — check type at +0x48 */
-        if (*(int16_t*)((uint8_t*)engine + 0x48) == 1) {
-            result = CGWND_TrackPiece_SetZoom(engine, 2);
+    if (static_cast<char>(result) != 0) {
+        if (tool->zoom_level == 1) {                      /* +0x48 */
+            result = CGWND_TrackPiece_SetZoom(tool, 2);
         }
         return 1;
     } else {
-        /* Failure — check type at +0x48 */
-        if (*(int16_t*)((uint8_t*)engine + 0x48) == 2) {
-            result = CGWND_TrackPiece_SetZoom(engine, 1);
+        if (tool->zoom_level == 2) {                      /* +0x48 */
+            result = CGWND_TrackPiece_SetZoom(tool, 1);
         }
         return result & 0xFFFFFF00;
     }
@@ -368,7 +520,7 @@ int CDECL ScriptEngine_Run(void* engine, int param_2, int param_3)
 /* ==================================================================== */
 uint8_t __fastcall RESDATA_Lock(void* ptr)
 {
-    EnterCriticalSection((uint8_t*)ptr + 0x04);
+    EnterCriticalSection(reinterpret_cast<uint8_t*>(ptr) + 0x04);
     return 1;
 }
 
@@ -381,7 +533,7 @@ uint8_t __fastcall RESDATA_Lock(void* ptr)
 /* ==================================================================== */
 uint8_t __fastcall RESDATA_Unlock(void* ptr)
 {
-    LeaveCriticalSection((uint8_t*)ptr + 0x04);
+    LeaveCriticalSection(reinterpret_cast<uint8_t*>(ptr) + 0x04);
     return 1;
 }
 
@@ -492,7 +644,7 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
 
     /* Set sub-object mapping flag */
     if (this->resource != NULL) {                                    /* +0x40 */
-        ((RESDATA*)this->resource)->frame_width = 1;
+        static_cast<RESDATA*>(this->resource)->frame_width = 1;
     }
 
     if (initResult != 0) {
@@ -509,7 +661,7 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
                 int32_t resource = ResourceManager_GetById(&g_resmgr, resId);
                 if (resource != 0) {
                     if (UI_IsBitmapReady(resource) != 0) {
-                        int32_t resType = *(int32_t*)((uint8_t*)(uintptr_t)resource + 4);
+                        int32_t resType = reinterpret_cast<RESDATA*>(static_cast<uintptr_t>(resource))->resource_id;
                         if (resType == 0x2406) {
                             RESDATA_CreateChildSprite(this, resource, 0, 0);
                             this->child_sprite1 = nullptr;  /* sprite handle stored internally */            /* +0x744 */
@@ -534,7 +686,7 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
 
             /* Destroy old tooltip */
             if (this->tooltip_id != nullptr) {                       /* +0xA0 */
-                UI_DestroyTooltip(&g_tooltip_mgr, (int32_t)this->tooltip_id);
+                UI_DestroyTooltip(&g_tooltip_mgr, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->tooltip_id)));
             }
 
             /* Create tooltip */
@@ -549,16 +701,17 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
             if (modeResult != 0) {
                 /* Set resource mapping flag */
                 if (this->resource != NULL) {                        /* +0x40 */
-                    ((RESDATA*)this->resource)->frame_width = 1;
-                    *(uint32_t*)((uint8_t*)this->resource + 0x164) |=
-                        *(uint32_t*)((uint8_t*)this->resource + 0x164) | 2;
+                    static_cast<RESDATA*>(this->resource)->frame_width = 1;
+                    uint32_t* resFlags = reinterpret_cast<uint32_t*>(
+                        static_cast<uint8_t*>(this->resource) + 0x164);
+                    *resFlags |= *resFlags | 2;
                 }
 
                 /* Set dispatch state = 0 (idle) */
                 this->dispatch_state = 0;                            /* +0x740 */
                 this->field_2C |= 2;                                 /* +0x2C */
                 this->field_88 = 0;                                     /* +0x88 */
-                g_active_panel = 0;
+                g_active_panel = nullptr;
 
                 /* Set animation state 0 and move to (50, 10). */
                 panel_view(this)->set_animation(0);
@@ -568,7 +721,7 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
         }
     }
 
-    return (uint32_t)initResult & 0xFFFFFF00;
+    return static_cast<uint32_t>(initResult) & 0xFFFFFF00;
 }
 
 /* ==================================================================== */
@@ -586,33 +739,43 @@ void __fastcall RESDATA_ScriptedObject::Update()
     /* State 1: In-world — clamp to world bounds */
     if (dispatchState == 1) {
         if (g_town_mode != nullptr) {
-            extern void __thiscall Town_SelectBuilding(void* town, int32_t building);
+            /* Declared in tilemap.h (now included above) as `extern int
+             * Town_SelectBuilding(void*, int)`; this file's own local
+             * `void`-returning redeclaration was an undetected ODR
+             * mismatch only surfaced once both were visible together.
+             * Return value unused here either way. */
             Town_SelectBuilding(g_town_view, 0);
         }
         if (g_ddraw_active != nullptr) {
-            /* 0x459180 — returns uint8_t; corrected from a `void` decl,
-             * which was an ODR mismatch against the real definition
-             * (graphics/DDRAW.cpp). Return value unused here either way. */
-            extern int __thiscall DDRAW_SelectBuilding(void* ddraw, int32_t building);
+            /* Declared in tilemap.h (now included above) as `extern int
+             * DDRAW_SelectBuilding(void*, int)`, 0x459180 — matches the
+             * real definition in graphics/DDRAW.cpp. This file's own local
+             * `__thiscall`-annotated redeclaration was a calling-convention
+             * mismatch invisible on this native 64-bit host but a hard
+             * "ambiguating declaration" error on the real 32-bit mingw
+             * typecheck build; removed in favor of tilemap.h's. Return
+             * value unused here either way. */
             DDRAW_SelectBuilding(g_ddraw_building, 0);
         }
 
-        int32_t* objPtr = (int32_t*)this;
         int32_t x = this->x;                  /* +0x08 */
         int32_t y = this->y;                  /* +0x0C */
 
-        /* Clamp to world bounds */
+        /* Clamp to world bounds. objPtr[4]/[15] (raw int32_t* indices into
+         * `this`) are this->field_10/+0x3C — already named fields in
+         * scriptengine.h; using them directly instead of re-deriving a raw
+         * pointer removes the cast rather than just re-spelling it. */
         if (x < 0) {
             panel_view(this)->set_position(x - 1, y);
         }
-        if (g_world_width < objPtr[4]) {
-            panel_view(this)->set_position(objPtr[4] - 1 + x, y);
+        if (g_world_width < this->field_10) {                /* +0x10 */
+            panel_view(this)->set_position(this->field_10 - 1 + x, y);
         }
         if (y < 0) {
             panel_view(this)->set_position(x, y - 1);
         }
-        if (g_world_height - objPtr[15] < y) {
-            panel_view(this)->set_position(x, y + objPtr[15] - 1);
+        if (g_world_height - this->field_3C < y) {            /* +0x3C */
+            panel_view(this)->set_position(x, y + this->field_3C - 1);
         }
     }
 
@@ -629,17 +792,17 @@ void __fastcall RESDATA_ScriptedObject::Update()
         /* Check animation frame completion for state transitions */
         int32_t animIndex = this->anim_index;                        /* +0x54 */
         void* frameData = this->resource;                            /* +0x40 */
-        uint16_t* animTable = *(uint16_t**)((uint8_t*)frameData + 0x20);
+        uint16_t* animTable = *reinterpret_cast<uint16_t**>(static_cast<uint8_t*>(frameData) + 0x20);
         uint16_t startFrame = animTable[0x19];  /* anim_table[start_frame] */
 
-        if (animIndex == (uint32_t)startFrame) {
+        if (animIndex == static_cast<uint32_t>(startFrame)) {
             /* Animation reached start — return to idle */
             panel_view(this)->init(0x2401, -1, 0);
             panel_view(this)->set_position(x + 0x31, y + 0x2F);
             this->dispatch_state = 0;                                /* +0x740 */
 
             if (this->tooltip_id != nullptr) {                       /* +0xA0 */
-                UI_DestroyTooltip(&g_tooltip_mgr, (int32_t)this->tooltip_id);
+                UI_DestroyTooltip(&g_tooltip_mgr, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->tooltip_id)));
             }
             if (this->drag_flag != 0) {                              /* +0x24 */
                 void* tooltip = UI_CreateTooltip(
@@ -648,10 +811,26 @@ void __fastcall RESDATA_ScriptedObject::Update()
                     this->y + 0x32);                                  /* +0x0C */
                 this->tooltip_id = tooltip;                          /* +0xA0 */
             }
-            g_active_panel = 0;
+            g_active_panel = nullptr;
             CGWND_SetMode(3);
 
-            SetRect(&this->drag_handle,                          /* drag_handle inside GameObject */
+            /* Explicit void* cast: world/tilemap.h (included above for
+             * RESDATA_ScriptedObject_Dispatch's declaration) separately
+             * declares a real, C++-linked `SetRect(RECT*, ...)` overload
+             * using shared/types.h's RECT — but that overload has no actual
+             * definition anywhere (graphics/sdl3_window.cpp's SetRect(RECT*,
+             * ...) is compiled against stubs/windows.h's distinct `tagRECT`,
+             * a different type entirely, so it can't satisfy this one).
+             * Without this cast, &this->drag_handle (RECT*) is an exact
+             * match for that dead overload and wins over this file's own
+             * working `extern "C" SetRect(void*, ...)` declaration (which
+             * only needs an implicit conversion) — a call-0 landmine this
+             * cast avoids by making the argument an exact match for the
+             * working overload instead. Pre-existing, unrelated to this
+             * fix: the working overload itself resolves to
+             * shared/defsym_stubs.cpp's no-op stub, so drag_handle isn't
+             * actually being set on this host either way. */
+            SetRect(static_cast<void*>(&this->drag_handle),
                 this->x + 0x18,                                       /* +0x08 */
                 this->y + 3,                                          /* +0x0C */
                 this->x + 0x2C,
@@ -663,33 +842,33 @@ void __fastcall RESDATA_ScriptedObject::Update()
                 this->drag_handle.bottom);
 
         } else {
-            uint16_t endFrame = *(uint16_t*)((uint8_t*)frameData + 0x1A);
-            if (animIndex == (uint32_t)endFrame) {
+            uint16_t endFrame = *reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(frameData) + 0x1A);
+            if (animIndex == static_cast<uint32_t>(endFrame)) {
                 /* Animation reached end — switch to placed state */
                 this->field_88 = 1;                                     /* +0x88 */
                 panel_view(this)->update_child();
                 this->dispatch_state = 3;                            /* +0x740 */
 
                 g_active_panel = this;
-                this->drag_handle.left = ((GameObject*)this->gameobject)->screen_rect.left;
-                this->drag_handle.top = ((GameObject*)this->gameobject)->screen_rect.top;
-                this->drag_handle.right = ((GameObject*)this->gameobject)->screen_rect.right;
-                this->drag_handle.bottom = ((GameObject*)this->gameobject)->screen_rect.bottom;
+                this->drag_handle.left = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.left;
+                this->drag_handle.top = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.top;
+                this->drag_handle.right = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.right;
+                this->drag_handle.bottom = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.bottom;
                 TileMap_InvalidateRect(g_tilemap,
-                    ((GameObject*)this->gameobject)->screen_rect.left,
-                    ((GameObject*)this->gameobject)->screen_rect.top,
-                    ((GameObject*)this->gameobject)->screen_rect.right,
-                    ((GameObject*)this->gameobject)->screen_rect.bottom);
+                    reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.left,
+                    reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.top,
+                    reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.right,
+                    reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.bottom);
 
                 /* Update children via linked list at/* +0xD0 */
                 for (void* child = this->child_list_head;            /* +0xD0 */
                      child != NULL;
-                     child = *(void**)((uint8_t*)child + 0x28)) {
+                     child = *reinterpret_cast<void**>(static_cast<uint8_t*>(child) + 0x28)) {
                     panel_view(child)->slot8();
                 }
 
                 /* Play narration if not scenario 2 */
-                if (*(int32_t*)((uint8_t*)g_netman + 0x5C) != 2) {
+                if (*reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_netman) + 0x5C) != 2) {
                     HelpWnd_PlayNarration(g_audio_mgr, 6, 0);
                 }
             }
@@ -875,16 +1054,16 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
             if (x < 0) x = 0;
             int32_t maxX;
             if (this->scriptengine_visible != 0 &&        /* inside scriptengine */
-                (maxX = g_world_width - ((ScriptEngine*)this->scriptengine)->field_38,
+                (maxX = g_world_width - reinterpret_cast<ScriptEngine*>(this->scriptengine)->field_38,
                  maxX < x)) {
                 x = maxX;
             } else if (this->scrollpanel_visible != 0 &&           /* +0x2E8 */
-                       (maxX = g_world_width - *(int32_t*)(this->scrollpanel + 0x38),
+                       (maxX = g_world_width - *reinterpret_cast<int32_t*>(this->scrollpanel + 0x38),
                         maxX < x)) {
                 x = maxX;
             } else {
-                uint16_t frameWidth = ((RESDATA*)this->resource)->frame_width;  /* +0x40 */
-                maxX = g_world_width - (uint32_t)frameWidth;
+                uint16_t frameWidth = static_cast<RESDATA*>(this->resource)->frame_width;  /* +0x40 */
+                maxX = g_world_width - static_cast<uint32_t>(frameWidth);
                 if (maxX < x) x = maxX;
             }
         } else {
@@ -892,14 +1071,14 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
             if (x < 0) x = 0;
             int32_t minX;
             if (this->scriptengine_visible != 0 &&
-                x < (minX = ((ScriptEngine*)this->scriptengine)->field_38)) {
+                x < (minX = reinterpret_cast<ScriptEngine*>(this->scriptengine)->field_38)) {
                 x = minX;
             } else if (this->scrollpanel_visible != 0 &&           /* +0x2E8 */
-                       x < (minX = *(int32_t*)(this->scrollpanel + 0x38))) {
+                       x < (minX = *reinterpret_cast<int32_t*>(this->scrollpanel + 0x38))) {
                 x = minX;
             } else {
-                uint16_t frameWidth = ((RESDATA*)this->resource)->frame_width;
-                int32_t maxX = g_world_width - (uint32_t)frameWidth;
+                uint16_t frameWidth = static_cast<RESDATA*>(this->resource)->frame_width;
+                int32_t maxX = g_world_width - static_cast<uint32_t>(frameWidth);
                 if (maxX < x) x = maxX;
             }
         }
@@ -935,12 +1114,12 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
     } else {
         /* Right direction */
         if (this->scriptengine_visible != 0) {
-            uint16_t frameWidth = ((RESDATA*)this->resource)->frame_width;
+            uint16_t frameWidth = static_cast<RESDATA*>(this->resource)->frame_width;
             panel_view(this->scriptengine)->set_position(
                 static_cast<uint32_t>(frameWidth) + x, y + 14);
         }
         if (this->scrollpanel_visible != 0) {
-            uint16_t frameWidth = ((RESDATA*)this->resource)->frame_width;
+            uint16_t frameWidth = static_cast<RESDATA*>(this->resource)->frame_width;
             panel_view(this->scrollpanel)->set_position(
                 static_cast<uint32_t>(frameWidth) + x, y + 14);
         }
@@ -948,16 +1127,16 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
 
     /* Update drag-handle rect */
     if (state == 0) {
-        SetRect(&this->drag_handle,
+        SetRect(static_cast<void*>(&this->drag_handle),
             this->x + 0x18,
             this->y + 3,
             this->x + 0x2C,
             this->y + 0x0D);
     } else {
-        this->drag_handle.left = ((GameObject*)this->gameobject)->screen_rect.left;
-        this->drag_handle.top = ((GameObject*)this->gameobject)->screen_rect.top;
-        this->drag_handle.right = ((GameObject*)this->gameobject)->screen_rect.right;
-        this->drag_handle.bottom = ((GameObject*)this->gameobject)->screen_rect.bottom;
+        this->drag_handle.left = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.left;
+        this->drag_handle.top = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.top;
+        this->drag_handle.right = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.right;
+        this->drag_handle.bottom = reinterpret_cast<GameObject*>(this->gameobject)->screen_rect.bottom;
     }
 
     /* Update cursor position if tracking enabled */
@@ -966,13 +1145,14 @@ void __thiscall RESDATA_ScriptedObject::MoveTo(int32_t x, int32_t y)
         int32_t offsetX = x - g_viewport_x + this->drag_offset_x;
         int32_t offsetY = y - g_viewport_y + this->drag_offset_y;
 
-        /* Perform ClientToScreen + SetCursorPos */
+        /* Perform ClientToScreen + SetCursorPos. g_main_window points at a
+         * CGWND (core/CGWND.h), whose hWnd field is already named at +0x08
+         * — using it directly instead of a raw offset removes the cast
+         * rather than just re-spelling it. */
         extern void* g_main_window;
-        int32_t screenPoint[2];
-        screenPoint[0] = offsetX;
-        screenPoint[1] = offsetY;
-        ClientToScreen(*(void**)((uint8_t*)g_main_window + 8), screenPoint);
-        SetCursorPos(screenPoint[0], screenPoint[1]);
+        POINT screenPoint{offsetX, offsetY};
+        ClientToScreen(reinterpret_cast<CGWND*>(g_main_window)->hWnd, &screenPoint);
+        SetCursorPos(screenPoint.x, screenPoint.y);
 
         /* Update last cursor position */
         extern int32_t g_last_cursor_pos;
@@ -1003,7 +1183,7 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
     /* Skip if in placement/drag mode, or placed mode with train station active */
     if (state == 1 || state == 2) return 0;
     if (state == 3) {
-        if (*(uint8_t*)((uint8_t*)g_trainstation_window + 0x1BC) != 0) return 0;
+        if (*(reinterpret_cast<uint8_t*>(g_trainstation_window) + 0x1BC) != 0) return 0;
     }
 
     /* Cancel any active drag tracking */
@@ -1032,9 +1212,9 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
             if (result != 0) {
                 result = static_cast<char>(panel_view(this->scriptengine)->hit_test(
                     x, y));
-                if (this->scriptengine_visible != 0) return (uint8_t)result;
+                if (this->scriptengine_visible != 0) return static_cast<uint8_t>(result);
                 this->direction = 1;                               /* +0xAD */
-                return (uint8_t)result;
+                return static_cast<uint8_t>(result);
             }
         }
 
@@ -1045,14 +1225,14 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
             if (result != 0) {
                 result = static_cast<char>(panel_view(this->scrollpanel)->hit_test(
                     x, y));
-                if (this->scrollpanel_visible != 0) return (uint8_t)result;
+                if (this->scrollpanel_visible != 0) return static_cast<uint8_t>(result);
                 this->direction = 1;                               /* +0xAD */
-                return (uint8_t)result;
+                return static_cast<uint8_t>(result);
             }
         }
 
         /* Try children linked list */
-        return (uint8_t)RESDATA_HitTestChildren(this, x, y);
+        return static_cast<uint8_t>(RESDATA_HitTestChildren(this, x, y));
     }
 
     /* Idle state: try own hit-test -> enter build mode */
@@ -1074,46 +1254,56 @@ uint8_t __thiscall RESDATA_ScriptedObject::HitTest(int32_t x, int32_t y)
 /*                                                                      */
 /* Central tool interaction handler. Dispatches by tool type.           */
 /* Tool types: 0x2403-0x240E = track placement, build, switch, etc.    */
+/*                                                                      */
+/* `toolObj` is a TrackPiece*, not a generic void*: Ghidra confirms the */
+/* zoom calls below resolve to TrackPiece::SetZoom (0x40D170), and      */
+/* +0x44/+0x48/+0x56 match TrackPiece::resource/zoom_level/             */
+/* render_enabled exactly (game/TrackPiece.h). Retyped without renaming */
+/* the parameter's original label; zero non-vtable callers tree-wide.   */
 /* ==================================================================== */
-uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(void* toolObj, int32_t x, int32_t y)
+uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(TrackPiece* toolObj, int32_t x, int32_t y)
 {
-    if (toolObj == NULL) return 0;
+    if (toolObj == nullptr) return 0;
 
     /* Check tool is active and in valid position */
-    if (*(uint8_t*)((uint8_t*)toolObj + 0x56) == 0) return 0;
+    if (toolObj->render_enabled == 0) return 0;                     /* +0x56 */
 
     /* Ghidra 0x44A250 calls the tool's slot 2 with (x, y). */
     char hitResult = static_cast<char>(panel_view(toolObj)->point_in_rect(x, y));
     if (hitResult == 0) return 0;
 
-    int32_t toolType = *(int32_t*)((uint8_t*)(uintptr_t)(*(int32_t*)((uint8_t*)toolObj + 0x44)) + 4);
+    int32_t toolType = toolObj->resource->resource_id;               /* +0x44 -> +0x04 */
     int32_t toolIndex = toolType - 0x2403;
 
     switch (toolIndex) {
     case 0:  /* 0x2403 — Track tool */
     case 1:  /* 0x2404 — Track tool */
-        if (*(int16_t*)((uint8_t*)toolObj + 0x48) != 1) {
+        if (toolObj->zoom_level != 1) {                              /* +0x48 */
             CGWND_TrackPiece_SetZoom(toolObj, 1);
             this->direction = 0;                                   /* +0xAD */
-            return panel_view(this->scriptengine)->point_or_tool_action(
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(toolObj)), 0) | 1;
-                                                                    /* +0x178 */
+            /* Dispatches ScriptEngine's own slot 21 (+0x54), a distinct
+             * method from this object's own point_or_tool_action at the
+             * same slot number — see script_engine_drag_view's comment.
+             * Previously truncated `toolObj` through a uint32_t parameter
+             * (pointer-truncation bug on this 64-bit host); now passed
+             * through untruncated. */
+            return script_engine_drag_view(this->scriptengine)->handle_drag(
+                toolObj, 0) | 1;                                   /* +0x178 */
         }
         /* Fall through to common tool activation */
         goto common_tool_activate;
 
     case 2:  /* 0x2405 — Track tool */
-        if (*(int16_t*)((uint8_t*)toolObj + 0x48) != 1) {
+        if (toolObj->zoom_level != 1) {                              /* +0x48 */
             CGWND_TrackPiece_SetZoom(toolObj, 1);
             this->direction = 0;                                   /* +0xAD */
-            return panel_view(this->scriptengine)->point_or_tool_action(
-                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(toolObj)), 0) | 1;
-                                                                    /* +0x178 */
+            return script_engine_drag_view(this->scriptengine)->handle_drag(
+                toolObj, 0) | 1;                                   /* +0x178 */
         }
         goto common_tool_activate;
 
     case 3:  /* 0x2406 — Build mode toggle */
-        if (*(int16_t*)((uint8_t*)toolObj + 0x48) != 1) {
+        if (toolObj->zoom_level != 1) {                              /* +0x48 */
             CGWND_TrackPiece_SetZoom(toolObj, 1);
             CGWND_SetBuildMode(0);
             return 1;
@@ -1124,9 +1314,14 @@ uint32_t __thiscall RESDATA_ScriptedObject::HandleToolClick(void* toolObj, int32
         return 1;
 
     case 6:  /* 0x2409 — Track tool */
-        if (*(int16_t*)((uint8_t*)toolObj + 0x48) != 1) {
+        if (toolObj->zoom_level != 1) {                              /* +0x48 */
             CGWND_TrackPiece_SetZoom(toolObj, 1);
             this->direction = 0;                                   /* +0xAD */
+            /* TODO(deferred — see the UIPANEL_ScrollPanel_HandleDrag
+             * declaration's comment above and docs/landmine-sweep-
+             * worklist.md): `param` truncates `toolObj` through int32_t on
+             * this 64-bit host. Not fixed here; four conflicting
+             * declarations of this symbol need auditing together first. */
             UIPANEL_ScrollPanel_HandleDrag(
                 this->scrollpanel,
                 static_cast<int32_t>(reinterpret_cast<uintptr_t>(toolObj)), 0);
