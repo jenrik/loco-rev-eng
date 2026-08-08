@@ -219,7 +219,7 @@ calls where it's harmless) and flagged for a dedicated future pass.
 | 3 | `WIN32_StreamRead` (cluster A) | WIN32_StreamRead | Game_LoadWaveFile(char const*, void*), GameSetupPanel::loadLayouts(bool) |
 | 4 | `PlaySound` | PlaySound, PlaySound(unsigned int) | BuildingMgr::HandleClick(BuildingClickCommand const*, int, int, int, int), HelpWnd::handle_click(void*, unsigned int, unsigned int, int) |
 | 4 | `IntersectRect` | IntersectRect | UIPANEL_EndPaintEx(void*, int, int, unsigned char, RECT*), Panel::DispatchEvent(RECT*) |
-| 4 | `TileMap_GetObjectAt` (cluster A) | TileMap_GetObjectAt, TileMap_GetObjectAt(TileMap*, short, short, short) | Building::StepToward(int, int), Building::FindNearbyObject(int, int, int) |
+| 4 | `TileMap_GetObjectAt` (cluster A) — **FIXED (2026-08-08, Building.cpp STRICT=2 cast cluster)** | TileMap_GetObjectAt(TileMap*, short, short, short) | Building::StepToward(int, int), Building::FindNearbyObject(int, int, int), plus AddOccupant/RemoveOccupant/CheckPlacementCollision (not originally counted in this row's tally but the same symbol/fix). Dropped the local `extern void* TileMap_GetObjectAt(TileMap*, int, int, int)` declaration entirely; now uses world/tilemap.h's real inline wrapper. |
 | 3 | `WIN32_StreamRead` (cluster C) | WIN32_StreamRead | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
 | 3 | `CRT_sprintf_buf` | CRT_sprintf_buf, CRT_sprintf_buf(char*, char const*), CRT_sprintf_buf(char*, char const*, ...) | ScriptedObject::HandleEvent(unsigned int, char const*) |
 | 3 | `InflateRect` | InflateRect | TileMap_ProcessDirtyRects(RECT*) |
@@ -230,8 +230,8 @@ calls where it's harmless) and flagged for a dedicated future pass.
 | 2 | `FormatMessageA` | FormatMessageA, FormatMessageA(int, void*, int, int, char*, int, void*) | GameWindow::create(...) |
 | 2 | `DDRAW_UnlockPrimary` | DDRAW_UnlockPrimary, DDRAW_UnlockPrimary() | GameWindow::show(), GameWindow::set_mode(int, void*, unsigned char, unsigned char) |
 | 2 | `CGWND_GameSetup_DrawGrid_Thunk` | CGWND_GameSetup_DrawGrid_Thunk | Netman::HandlePlayerJoin(), Netman::RemoveInboundTrain(int) |
-| 2 | `AssetMgr_ReadPairValue` | AssetMgr_ReadPairValue(AssetMgr*, unsigned int, unsigned int) | Building::StepToward(int, int), Building::FindNearestConnectionNode(void*, unsigned int) |
-| 2 | `Vehicle_GetOccupantCount` | Vehicle_GetOccupantCount | Building::FindPathToTarget() |
+| 2 | `AssetMgr_ReadPairValue` — **FIXED (2026-08-08, Building.cpp STRICT=2 cast cluster)** | AssetMgr_ReadPairValue(AssetMgr*, unsigned int, unsigned int) | Building::StepToward(int, int), Building::FindNearestConnectionNode(void*, unsigned int) — both call sites now static_cast their `void*`/AssetMgr-shaped pointer to `AssetMgr*` (forward-declared locally in Building.cpp; resources/AssetMgr.h itself is deliberately NOT included there — see that file's top-of-file comment on why). |
+| 2 | `Vehicle_GetOccupantCount` — **FIXED (2026-08-08, Building.cpp STRICT=2 cast cluster)** | Vehicle::GetOccupantCount() (typed method, game/Vehicle.h — not a free function) | Building::FindPathToTarget() — both sites converted from the untyped free-function call to `vehicle->GetOccupantCount()` after Ghidra-confirming (via Vehicle::state @ +0x5C matching the read at vehicle+0x5C) that the object is genuinely a `Vehicle*`. |
 | 1 | `WNDPROC_CriticalSectionLock` (FIXED) | WNDPROC_CriticalSectionLock(int*, char*) | edit_key_handler_parse(void*, KeySequenceRecord*) — FIXED: moved out of extern "C" block, signature corrected to (int*, char*), call sites updated with reinterpret_cast. |
 | 1 | `WIN32_StreamOpenPath` (cluster B) | WIN32_StreamOpenPath | Game_LoadWaveFile(char const*, void*) |
 | 1 | `WNDPROC_EnterCriticalSection` | WNDPROC_EnterCriticalSection | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) |
@@ -310,7 +310,7 @@ deferred stubs rather than call-0 landmines.
 | 1 | `EditorState_Ctor` | Vehicle::Vehicle(int, int, unsigned char, unsigned char) |
 | 1 | `Entity_Ctor` | ScriptedObject::ScriptedObject() |
 | 1 | `World_DeserializeMap` | RESDATA_GameVehicle::~RESDATA_GameVehicle() |
-| 1 | `TileMap_FindTileByType` | Building::TeleportTo(int, int) |
+| 1 | `TileMap_FindTileByType` — **FIXED (2026-08-08): NOT genuinely missing** (correcting this file's own prior claim). Ghidra-decompiling 0x432940 (Building::TeleportTo) shows the real call is `TileMap_FindNearestObject(&g_tilemap, 0xc, target_x, target_y, 0x900)` — i.e. `TileMap::FindNearestObject` (0x457CE0, world/tilemap.h/.cpp), already implemented and exposed as `TileMap_FindNearestObject`; Building.cpp's own comment already cited the same address (0x457ce0) under the wrong name. The caller also had the arguments in the wrong order/positions (type_filter and radius swapped with x/y) — fixed both the symbol and the call-site argument order together, since fixing only the linkage would have made a now-reachable call read (x, y, 0x0C, 0x900) as (type_filter=x, tx=y, ty=0x0C, radius=0x900). | Building::TeleportTo(int, int) |
 
 Note: `Cursor_Render` (1 site, `AboutDialog::Update()`) folded into the
 `Cursor_Render` row above (was previously listed separately).

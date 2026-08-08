@@ -59,7 +59,8 @@ extern void*    g_ddraw_building;        /* 0x4A9EF0 */
 extern void*    g_about;                 /* 0x4FD390 */
 extern void*    g_netman;                /* 0x4FD3AC */
 extern uint8_t  g_click_on_town;         /* 0x48557C */
-extern int32_t  g_selected_building;     /* 0x4855B0 */
+/* Entity* — see world/tilemap.h's g_selected_building comment. */
+extern Entity*  g_selected_building;     /* 0x4855B0 */
 extern int32_t  g_town_selection_rect_left;   /* 0x4854D0 */
 extern int32_t  g_town_selection_rect_top;    /* 0x4854D4 */
 extern int32_t  g_town_selection_rect_right;  /* 0x4854D8 */
@@ -1726,11 +1727,10 @@ void TileMap::InvalidateDirtyRects(char force_all)
     /* Append selection rects (selected building + town selection rect) */
     if (g_has_selection != 0) {
         RECT* prev = last;
-        if (g_selected_building != 0) {
+        if (g_selected_building != nullptr) {
             RECT* node = TileMap_AllocRectNode();
             if (node != NULL) {
-                uint8_t* sel = reinterpret_cast<uint8_t*>(
-                    static_cast<uintptr_t>(g_selected_building));
+                uint8_t* sel = reinterpret_cast<uint8_t*>(g_selected_building);
                 node->left   = *reinterpret_cast<int*>(sel + 8);
                 node->top    = *reinterpret_cast<int*>(sel + 0xC);
                 node->right  = *reinterpret_cast<int*>(sel + 0x10);
@@ -1987,10 +1987,9 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
         bool intersects = IntersectRect(&local_10, &town_selection, &param_rect);
         if (!intersects) {
             RECT sel_rect;
-            if (g_selected_building != 0) {
+            if (g_selected_building != nullptr) {
                 sel_rect = *reinterpret_cast<RECT*>(
-                    reinterpret_cast<uint8_t*>(
-                        static_cast<uintptr_t>(g_selected_building)) + 8);
+                    reinterpret_cast<uint8_t*>(g_selected_building) + 8);
                 intersects = IntersectRect(&local_10, &sel_rect, &param_rect);
             }
         }

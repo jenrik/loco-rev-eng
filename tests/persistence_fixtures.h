@@ -71,7 +71,7 @@ void*    g_audio = nullptr;               /* 0x4FD3BC */
 void*    g_building_mgr = nullptr;        /* 0x485448 */
 void*    g_main_window = nullptr;         /* 0x4AA4A0 */
 void*    g_primary_surface = nullptr;     /* 0x4FD3C4 */
-int32_t  g_selected_building = 0;        /* 0x4855B0 (tilemap.h) */
+Entity*  g_selected_building = nullptr;  /* 0x4855B0 (Entity* — see world/tilemap.h) */
 int32_t  g_player_id = 0;                 /* 0x4AAD46 */
 int32_t  g_player_color = 0;              /* 0x4AAD48 */
 int32_t  g_in_build_mode = 0;             /* 0x4FD199 */
@@ -176,6 +176,17 @@ LOUD_FIXTURE(TileMap_FindObject)
 LOUD_FIXTURE(TileMap_FullReset)
 LOUD_FIXTURE(TileMap_ScrollTo)
 LOUD_FIXTURE(TileMap_InvalidateDirtyRects)
+/* TileMap::GetObjectAt / TileMap::FindNearestObject (member-method form)
+ * are newly referenced by game/Building.cpp (StepToward/TeleportTo/
+ * AddOccupant/RemoveOccupant/FindNearbyObject/CheckPlacementCollision),
+ * fixing a call-0 landmine — see docs/landmine-sweep-worklist.md's
+ * "TileMap_GetObjectAt (cluster A)" / "TileMap_FindTileByType" rows.
+ * The old, now-superseded `TileMap_GetObjectAt(TileMap*, int, int, int)`
+ * free-function fixture further below reuses this same
+ * fixture_reached_TileMap_GetObjectAt helper (declared here, ahead of
+ * both use sites, since this is the first one in file order). */
+LOUD_FIXTURE(TileMap_GetObjectAt)
+LOUD_FIXTURE(TileMap_FindNearestObject)
 int* TileMap::FindObject(unsigned int id, short x, short y, char u, unsigned int m)
 {
     (void)u; (void)m;
@@ -214,6 +225,10 @@ void TileMap::InvalidateDirtyRects(char)
         fixture_reached_TileMap_InvalidateDirtyRects();
     }
 }
+void* TileMap::GetObjectAt(short, short, short)
+{ fixture_reached_TileMap_GetObjectAt(); return nullptr; }
+void* TileMap::FindNearestObject(unsigned short, int, int, int)
+{ fixture_reached_TileMap_FindNearestObject(); return nullptr; }
 
 /* Fake TileMap/Netman storage for the recording tests: a zeroed
  * instance is a safe stand-in because every fixture method above never
@@ -277,6 +292,7 @@ LOUD_FIXTURE(Vehicle_Stop)
 LOUD_FIXTURE(Vehicle_FindPath)
 LOUD_FIXTURE(Vehicle_IsMoving)
 LOUD_FIXTURE(Vehicle_SetState)
+LOUD_FIXTURE(Vehicle_GetOccupantCount)
 void Vehicle::UpdatePosition(uint8_t)
 { fixture_reached_Vehicle_UpdatePosition(); }
 void Vehicle::InitOccupant(int32_t)
@@ -289,6 +305,12 @@ uint8_t Vehicle::IsMoving()
 { fixture_reached_Vehicle_IsMoving(); return 0; }
 void Vehicle::SetState(int32_t)
 { fixture_reached_Vehicle_SetState(); }
+/* Newly referenced by game/Building.cpp::FindPathToTarget, fixing the
+ * Vehicle_GetOccupantCount free-function call-0 landmine (docs/landmine-
+ * sweep-worklist.md) by calling the real typed method instead. Not
+ * exercised by the persistence tests (they never construct a Building). */
+uint8_t Vehicle::GetOccupantCount()
+{ fixture_reached_Vehicle_GetOccupantCount(); return 0; }
 
 /* BuildingMgr methods referenced by the class cone — not exercised. */
 LOUD_FIXTURE(BuildingMgr_RemoveObject)
@@ -345,6 +367,21 @@ int RESDATA_IsRoadTile(int)
 { fixture_reached_RESDATA_IsRoadTile(); return 0; }
 int RESDATA_IsRoadTile(void*)
 { fixture_reached_RESDATA_IsRoadTile(); return 0; }
+
+/* AssetMgr_ReadPairValue (0x45DD80) — newly referenced by
+ * game/Building.cpp::StepToward/FindNearestConnectionNode, fixing the
+ * void*-first-param call-0 landmine (docs/landmine-sweep-worklist.md,
+ * "AssetMgr_ReadPairValue") by matching the real AssetMgr*-typed
+ * signature (resources/AssetMgr.h). AssetMgr is only forward-declared —
+ * resources/AssetMgr.h itself isn't included in this cone — the fixture
+ * never touches `self`. The old void*-shaped overload further below
+ * reuses this same fixture_reached_AssetMgr_ReadPairValue helper
+ * (declared here, ahead of both use sites). Not exercised (this cone
+ * never constructs a Building). */
+struct AssetMgr;
+LOUD_FIXTURE(AssetMgr_ReadPairValue)
+uint8_t AssetMgr_ReadPairValue(AssetMgr*, uint32_t, uint32_t)
+{ fixture_reached_AssetMgr_ReadPairValue(); return 0xFF; }
 
 /* Host resource bridge: no resources are loaded in the persistence
  * tests, so GetById returns nullptr (a fresh host manager). */
@@ -455,14 +492,11 @@ LOUD_FIXTURE(UIPANEL_Blit)
 LOUD_FIXTURE(Math_DistSquared)
 LOUD_FIXTURE(Math_PointOnLineSegment)
 LOUD_FIXTURE(CRT_localtime)
-LOUD_FIXTURE(TileMap_GetObjectAt)
 LOUD_FIXTURE(TileMap_FindTileByType)
 LOUD_FIXTURE(World_DeserializeMap)
-LOUD_FIXTURE(AssetMgr_ReadPairValue)
 LOUD_FIXTURE(Building_CheckPlacement)
 LOUD_FIXTURE(Vehicle_SetState_free)
 LOUD_FIXTURE(Vehicle_LoadSounds)
-LOUD_FIXTURE(Vehicle_GetOccupantCount)
 LOUD_FIXTURE(GameAudio_AllocChannel)
 LOUD_FIXTURE(CGWND_AudioChannel_Play)
 LOUD_FIXTURE(CGWND_AudioChannel_Stop)

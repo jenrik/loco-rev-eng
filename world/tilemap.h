@@ -414,7 +414,17 @@ extern int32_t  g_town_selection_rect_top;    /* 0x4854D4 */
 extern int32_t  g_town_selection_rect_right;  /* 0x4854D8 */
 extern int32_t  g_town_selection_rect_bottom; /* 0x4854DC */
 extern uint8_t  g_has_selection;        /* 0x4854EC */
-extern int32_t  g_selected_building;    /* 0x4855B0 */
+/* g_selected_building is Entity* (real definition: shared/stubs_impl.cpp
+ * `Entity* g_selected_building = nullptr;`, matching game/Building.cpp /
+ * game/BuildingMgr.cpp / game/World.cpp's own extern declarations) — this
+ * header previously declared it int32_t, a cross-TU type mismatch
+ * (landmine class: wrong-width global, not just wrong-signature function)
+ * that silently truncates the pointer on 64-bit hosts. Not previously a
+ * compile-time conflict only because no single TU included both this
+ * header and an Entity*-typed declaration at once; fixed rather than
+ * left latent once game/Building.cpp needed to include both. */
+class Entity;
+extern Entity*  g_selected_building;    /* 0x4855B0 */
 extern void*    g_town_view;            /* 0x4852A0 */
 extern void*    g_ddraw_building;       /* 0x4A9EF0 */
 extern void*    g_about;                /* 0x4FD390 */

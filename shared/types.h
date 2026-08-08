@@ -233,8 +233,14 @@ static_assert(sizeof(SaveRegion) == 0x114, "SaveRegion must be exactly 0x114 byt
 struct RESDATA {
     void     *vtable;           /* +0x00  vtable[1]=Lock/GetSurface         */
     int32_t   resource_id;      /* +0x04  numeric resource ID               */
-    /* gap +0x08..+0x0F — padding / unknown */
-    uint8_t   _pad_08[8];       /* +0x08  padding                           */
+    /* +0x08 object_type: resource/tile classification byte. Named from
+     * world/tilemap.h's independently-evidenced TileMapResource::object_type
+     * at the same offset (+0x08), corroborated by every `resource+0x08`
+     * sub-type read across the tree (game/Building.cpp, world/tilemap.cpp).
+     * Shared "ChildWindow-family" descriptor header convention — see
+     * input/BuildingDescriptorEditor.h's class-level doc comment. */
+    uint8_t   object_type;      /* +0x08  resource/tile type/sub-type byte  */
+    uint8_t   _pad_09[7];       /* +0x09  padding                           */
     uint32_t  flags;            /* +0x10  0 = no surface data               */
     /* Note: +0x10 also aliased as ui_panel (UIPANEL*) in some contexts    */
     uint16_t  frame_width;      /* +0x14  sprite frame width in pixels      */

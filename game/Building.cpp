@@ -8,10 +8,23 @@
 
 #include "Building.h"
 #include "BuildingMgr.h"
+#include "Vehicle.h"
 #include "../core/GameObject.h"
+#include "../core/BuildingMgrObjectGroup.h"
+#include "../world/tilemap.h"
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+
+/* resources/AssetMgr.h is deliberately NOT included: it re-declares
+ * operator_new/GLOBAL_free as extern "C" (this file needs the ordinary
+ * C++-linkage forms already declared below) and re-declares CRT_wcsstr
+ * with yet another incompatible shape (uint32_t(uint8_t*,uint8_t*) —
+ * one more entry in this tree's already-tracked CRT_wcsstr landmine
+ * cluster, out of scope to fully resolve here). Only what's needed —
+ * the AssetMgr type name and AssetMgr_ReadPairValue's real signature —
+ * is forward-declared locally instead. */
+struct AssetMgr;
 
 /* ================================================================== */
 /* External references                                                 */
@@ -38,17 +51,28 @@ static inline int randInRange(int lo, int hi) {
     if (hi == lo) return lo;
     if (hi > lo) {
         int w = hi - lo + 1;
-        return (w == 1) ? lo : (int)(CRT_rand() % w) + lo;
+        return (w == 1) ? lo : static_cast<int>(CRT_rand() % w) + lo;
     } else {
         int w = lo - hi + 1;
-        return (w == 1) ? hi : (int)(CRT_rand() % w) + hi;
+        return (w == 1) ? hi : static_cast<int>(CRT_rand() % w) + hi;
     }
 }
 
 /* Forward-declared types used in externs */
 class BuildingMgr;
 class InputMgr;
-class TileMap;
+/* class TileMap and g_tilemap/TileMap_GetObjectAt/TileMap_FindNearestObject
+ * now come from world/tilemap.h (included above). Building.cpp previously
+ * declared its own extern void* TileMap_GetObjectAt(TileMap*, int, int, int)
+ * and TileMap_FindTileByType(void*, int, int, int, int) — both wrong-
+ * signature landmines (docs/landmine-sweep-worklist.md "TileMap_GetObjectAt
+ * (cluster A)" / "TileMap_FindTileByType"): the real functions are
+ * TileMap_GetObjectAt(TileMap*, short, short, short) and
+ * TileMap::FindNearestObject(unsigned short, int, int, int) (0x457CE0,
+ * exposed as TileMap_FindNearestObject), both inline in world/tilemap.h.
+ * Neither the wrong `int` params nor the wrong name/param-order matched
+ * the real mangled symbols, so every call in this file was a silent
+ * call-0 (ignore-all unresolved-symbols) prior to this fix. */
 
 /* Heap allocation */
 extern void* operator_new(size_t size);                                  /* 0x465CE0 */
@@ -59,12 +83,9 @@ extern Entity*      g_selected_building;    /* currently selected building (poin
 extern void         GLOBAL_free(void* ptr);
 extern InputMgr     g_input_mgr;            /* 0x4A9990 — static object */
 extern void*        INPUT_FindObjectAt(InputMgr* mgr, int mode);
-extern TileMap*     g_tilemap;
-extern void*        TileMap_GetObjectAt(TileMap* tilemap, int tx, int ty, int flags);
 extern uint8_t      g_building_animating;
 extern void*        CRT_localtime(const time_t* timer);
 extern int          Game_CheckTimeInRange(int* current_time, int* start, int* end);  /* 0x40CA40 */
-extern int          Vehicle_GetOccupantCount(void* v);
 extern uint8_t      g_is_game_active;
 
 /* GameObject destructor body (0x405870) — called by BaseCleanup */
@@ -76,17 +97,22 @@ extern void Game_SelectGameObject(void* game, void* obj);
 /* Game singleton — used for selection/deselection */
 extern void* g_game;
 
-/* TileMap helpers — used by StepToward, TeleportTo */
-extern void*    TileMap_FindTileByType(void* tilemap, int x, int y,
-                                      int search_flags, int tile_type);               /* 0x457ce0 */
-
 /* Math helpers — used by StepToward, FindNearestConnectionNode */
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);                     /* 0x45C7A0 */
 extern uint8_t  Math_PointOnLineSegment(int px, int py, int ax, int ay, int bx, int by); /* 0x45C7C0 */
 
-/* Asset manager — used by StepToward, FindNearestConnectionNode */
+/* Asset manager — used by StepToward, FindNearestConnectionNode.
+ * g_asset_mgr is declared void* almost everywhere in this tree (matching
+ * the original C-style opaque handle); AssetMgr_ReadPairValue's one real
+ * definition (resources/AssetMgr.cpp/.h) takes a typed AssetMgr* first
+ * arg, so callers here static_cast at the call site rather than widen
+ * the global's declared type. Building.cpp previously declared this
+ * extern with a `void*` first param — a landmine (worklist
+ * "AssetMgr_ReadPairValue", callers Building::StepToward /
+ * Building::FindNearestConnectionNode): the real symbol takes AssetMgr*,
+ * so every call here was silently unresolved (call 0). */
 extern void*    g_asset_mgr;                                                       /* asset manager singleton */
-extern uint8_t  AssetMgr_ReadPairValue(void* mgr, uint32_t a, uint32_t b);        /* 0x45DD80 */
+extern uint8_t  AssetMgr_ReadPairValue(AssetMgr* self, uint32_t a, uint32_t b);    /* 0x45DD80 */
 
 /* ROM string at 0x47E4FC in .rdata */
 static const wchar_t PARTY_STRING[] = L"PARTY";
@@ -184,8 +210,12 @@ void Building::BaseCtor(int resource_id, bool base_only)
     /* --- Step 3: Record creation timestamp --- */
     this->create_time = g_game_time;        /* +0x94 */
 
-    /* --- Step 4: Get resource pointer --- */
-    RESDATA* resource = (RESDATA*)this->parent;  /* +0x40 (resource stored in parent slot before overridden) */
+    /* --- Step 4: Get resource pointer ---
+     * this->parent is the Entity*-typed alias of the +0x40 union slot;
+     * during construction it actually holds the RESDATA* set by InitBase
+     * just above, so this is a same-address reinterpretation of an
+     * unrelated pointer type, not a real Entity — reinterpret_cast. */
+    RESDATA* resource = reinterpret_cast<RESDATA*>(this->parent);  /* +0x40 (resource stored in parent slot before overridden) */
     /* NOTE: In the original binary, the resource pointer is stored at +0x40.
      * Our Entity class uses 'parent' at +0x40 for scene graph, but during
      * construction, +0x40 holds the RESDATA* before it's replaced. */
@@ -226,18 +256,31 @@ void Building::BaseCtor(int resource_id, bool base_only)
 
     /* --- Step 7: Set the building's name --- */
     if (resource != nullptr) {
-        char* res_name = (char*)resource + RESNAME_OFFSET;  /* +0x14D */
+        /* +0x14D is inside the opaque, undocumented "ChildWindow-family"
+         * base region of input/BuildingDescriptorEditor.h (a Building's
+         * resource is that 0x630-byte descriptor, confirmed via
+         * resources/ResourceManager.cpp's operator_new(0x630)+INPUT_ExitGame
+         * allocation for odd-id types 0/2/4 and 12/13, and via
+         * resources/ResourceManager.h's own comment "Building resources
+         * extend this with schedule data at +0x534/+0x548" — see the
+         * +0x534/+0x548 TrackPos use in DecideAction below). No specific
+         * field name is evidenced yet for +0x14D within that class, so
+         * this stays a raw offset (reinterpret_cast, not a named field). */
+        char* res_name = reinterpret_cast<char*>(resource) + RESNAME_OFFSET;  /* +0x14D */
 
         if (*res_name == '\0') {
             /* Branch A: No resource-provided name.
              * Generate a random name from the game's String Table.
              * Building class at resource+RESCLASS_OFFSET determines pool:
              *   'M' (0x4D) = Residential → 50 names (IDs 2..51)
-             *   otherwise   = Commercial  → 11 names (IDs 51..61)        */
+             *   otherwise   = Commercial  → 11 names (IDs 51..61)
+             * Ghidra-confirmed (0x433A20): the binary genuinely reads a
+             * 4-byte int at +0x170 and compares to 0x4D, not a single
+             * byte — preserved as-is, not a truncation bug. */
             UINT name_id;
             uint32_t rand_val = CRT_rand();                     /* +0x466150 */
 
-            if (*(uint32_t*)((uint8_t*)resource + RESCLASS_OFFSET) == 0x4D) {
+            if (*reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(resource) + RESCLASS_OFFSET) == 0x4D) {
                 /* Residential: "M" = Minifigure house */
                 name_id = (rand_val % RESIDENTIAL_NAME_COUNT) + RESIDENTIAL_NAME_BASE;
             } else {
@@ -247,16 +290,17 @@ void Building::BaseCtor(int resource_id, bool base_only)
 
             /* Load name from executable's string table.
              * hInstance is at g_main_window + 0x0C */
-            HINSTANCE hInst = *(HINSTANCE*)((uint8_t*)g_main_window + 0x0C);
+            HINSTANCE hInst = *reinterpret_cast<HINSTANCE*>(reinterpret_cast<uint8_t*>(g_main_window) + 0x0C);
             LoadStringA(hInst, name_id, this->name, 10);
         } else {
             /* Branch B: Resource has a custom name.
              * Copy it with validation via CopyName.                      */
             this->CopyName(res_name);                           /* +0x405E20 */
 
-            /* Check building sub-type at resource+0x08.
+            /* Check building sub-type/object_type at resource+0x08
+             * (RESDATA::object_type — see shared/types.h).
              * If type == STATION (7), compact BuildingMgr collections.   */
-            uint8_t sub_type = *(uint8_t*)((uint8_t*)resource + 0x08);
+            uint8_t sub_type = resource->object_type;
             if (sub_type == SUBTYPE_STATION) {
                 g_building_mgr->CompactCollections();  /* +0x434870 */
             }
@@ -267,7 +311,7 @@ void Building::BaseCtor(int resource_id, bool base_only)
              * correct behavior (confirmed: wcsstr returns NULL → jz
              * taken → activate party). Party mode appears to be the
              * default state; naming a building "PARTY" disables it.      */
-            if (CRT_wcsstr((const wchar_t*)res_name, PARTY_STRING) == 0) {
+            if (CRT_wcsstr(reinterpret_cast<const wchar_t*>(res_name), PARTY_STRING) == nullptr) {
                 g_is_party_mode    = 1;
                 g_party_start_time = g_game_time;
             }
@@ -333,27 +377,31 @@ void Building::BaseDtor()
 /* ================================================================== */
 void Building::BaseCleanup()
 {
-    /* --- Step 1: Read scene-graph parent from +0x90 (occupant_b slot) --- */
-    Entity* scene_parent = this->occupant_b;
+    /* --- Step 1: Read scene-graph parent from +0x90 (occupant_b slot) ---
+     * Ghidra-confirmed (0x433BE0 decompile): the "parent"'s +0xA4 read is
+     * a 5-slot pointer array and its +0x8E is a decremented byte counter —
+     * this EXACTLY matches core/BuildingMgrObjectGroup.h's ResourceGameObject
+     * (linked_objects[5] @ +0xA4, group_flag @ +0x8E), not a generic Entity.
+     * occupant_b is declared Entity* because ResourceGameObject IS-A Entity;
+     * downcast to reach the group-specific fields. */
+    ResourceGameObject* scene_parent = static_cast<ResourceGameObject*>(this->occupant_b);
 
     if (scene_parent != nullptr) {
         /* --- Step 2: Search parent's 5-slot child array at parent+0xA4 ---
-         * Each slot holds a pointer to a child entity. Find and clear ours.*/
-        Entity** child_array = (Entity**)((uint8_t*)scene_parent + 0xA4);
+         * Each slot holds a pointer to a child Building. Find and clear ours.*/
         int slot;
         for (slot = 0; slot < 5; slot++) {
-            if (child_array[slot] == this) {
-                child_array[slot] = nullptr;
+            if (scene_parent->linked_objects[slot] == this) {
+                scene_parent->linked_objects[slot] = nullptr;
                 break;
             }
         }
 
-        /* --- Step 3: Decrement parent's child_count at parent+0x8E ---
+        /* --- Step 3: Decrement parent's group_flag (child count) at +0x8E ---
          * If our pointer wasn't found in the 5-slot array (slot >= 5),
          * skip the decrement and just null out the parent link. */
         if (slot < 5) {
-            uint8_t* child_count = (uint8_t*)scene_parent + 0x8E;
-            *child_count = *child_count - 1;
+            scene_parent->group_flag = static_cast<uint8_t>(scene_parent->group_flag - 1);
         }
 
         /* --- Step 4: Clear the parent link --- */
@@ -435,7 +483,7 @@ void Building::Update(void* next_entity)
                 void* found = INPUT_FindObjectAt(&g_input_mgr, 2);
 
                 if (found != nullptr) {
-                    GameObject* found_obj = (GameObject*)found;
+                    GameObject* found_obj = static_cast<GameObject*>(found);
                     int fx = found_obj->world_x;            /* +0x4C */
                     int fy = found_obj->world_y;            /* +0x50 */
 
@@ -523,8 +571,17 @@ void Building::AddOccupant(Entity* entity)
 
     /* --- Find a free slot in the entity's 9-slot occupant tracking
      *     array at entity+0x38. The entity uses this to track which
-     *     buildings it's currently occupying. --- */
-    Entity** occupant_slots = (Entity**)((uint8_t*)entity + 0x38);
+     *     buildings it's currently occupying.
+     * NOTE: Entity's own declared layout has source_rect.right at +0x38
+     * (core/Entity.h), not an array — this raw offset only makes sense
+     * for whatever concrete occupant type is actually passed at each call
+     * site (e.g. game/Vehicle.h's Vehicle::occupant_tracks[8] @ +0x38 for
+     * the Vehicle occupant passed from FindPathToTarget below). Kept as a
+     * raw reinterpret_cast rather than retyping the Entity* parameter,
+     * matching the existing duck-typed convention documented throughout
+     * this file (Entity* is the common calling-convention type; the real
+     * runtime layout varies by caller). --- */
+    Entity** occupant_slots = reinterpret_cast<Entity**>(reinterpret_cast<uint8_t*>(entity) + 0x38);
 
     int slot;
     for (slot = 0; slot < 9; slot++) {
@@ -555,14 +612,14 @@ void Building::AddOccupant(Entity* entity)
     this->visible = 0;
 
     /* Read the entity's model data for entry coordinates */
-    RESDATA* model_data = *(RESDATA**)((uint8_t*)entity + 0x20);
+    RESDATA* model_data = *reinterpret_cast<RESDATA**>(reinterpret_cast<uint8_t*>(entity) + 0x20);
     if (model_data == nullptr) return;
 
-    void* entry_data = *(void**)((uint8_t*)model_data + 0x14);
+    void* entry_data = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(model_data) + 0x14);
     if (entry_data == nullptr) return;
 
-    int entry_x = *(int*)((uint8_t*)entry_data + 0x4C);
-    int entry_y = *(int*)((uint8_t*)entry_data + 0x50);
+    int entry_x = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(entry_data) + 0x4C);
+    int entry_y = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(entry_data) + 0x50);
     this->dest_x = entry_x;
     this->dest_y = entry_y;
 
@@ -581,10 +638,11 @@ void Building::AddOccupant(Entity* entity)
         int tile_x = worldToTile(this->dest_x);
         int tile_y = worldToTile(this->dest_y);
 
-        void* tile = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
+        TileMapObject* tile = static_cast<TileMapObject*>(
+            TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            void* tile_parent = *(void**)((uint8_t*)tile + 0x40);
-            tile_type = (tile_parent != nullptr) ? *(uint8_t*)((uint8_t*)tile_parent + 0x08) : 0;
+            TileMapResource* tile_parent = tile->resource;
+            tile_type = (tile_parent != nullptr) ? tile_parent->object_type : 0;
         } else {
             break;
         }
@@ -628,8 +686,10 @@ void Building::RemoveOccupant()
     if (occupant == nullptr) return;
 
     /* --- Step 2: Find and clear this building in occupant's slot
-     *     array at occupant+0x38 (8 slots). --- */
-    Entity** occupant_slots = (Entity**)((uint8_t*)occupant + 0x38);
+     *     array at occupant+0x38 (8 slots). Same duck-typed convention as
+     *     AddOccupant (see its comment) — Entity's own +0x38 is unrelated
+     *     (source_rect.right); this depends on the real occupant type. --- */
+    Entity** occupant_slots = reinterpret_cast<Entity**>(reinterpret_cast<uint8_t*>(occupant) + 0x38);
     for (int idx = 0; idx < 8; idx++) {
         if (occupant_slots[idx] == this) {
             occupant_slots[idx] = nullptr;
@@ -637,20 +697,31 @@ void Building::RemoveOccupant()
         }
     }
 
-    /* --- Step 3: Determine road class from entity's model/tile data --- */
-    void* type_info = *(void**)((uint8_t*)occupant + 0x20);
-    void* resdata = (type_info != nullptr) ? *(void**)((uint8_t*)type_info + 0x14) : nullptr;
+    /* --- Step 3: Determine road class from entity's model/tile data ---
+     * Ghidra-confirmed (0x4336A0): `type_info` is occupant+0x20 (same
+     * field AddOccupant calls model_data); its own +0x14 holds a pointer
+     * whose +0x40 is a TileMapResource* (world/tilemap.h) — i.e. the
+     * same TileMapObject-shaped "tile entry" AddOccupant reads via
+     * entry_data above, just followed one level further here to reach
+     * its resource's object_type (the road/tile-class byte at +0x63A,
+     * the same offset already established by the RESDATA_IsBuildingTile/
+     * IsRoadTile cluster). The binary does not null-check the +0x40
+     * resource pointer before reading +0x63A; preserved as-is. */
+    void* type_info = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(occupant) + 0x20);
+    TileMapObject* tile_entry = (type_info != nullptr)
+        ? *reinterpret_cast<TileMapObject**>(reinterpret_cast<uint8_t*>(type_info) + 0x14)
+        : nullptr;
     uint8_t road_class = 0xFF;
 
-    if (resdata != nullptr) {
-        void* tile_res = *(void**)((uint8_t*)resdata + 0x40);
-        road_class = *(uint8_t*)((uint8_t*)tile_res + 0x63A);
+    if (tile_entry != nullptr) {
+        TileMapResource* tile_res = tile_entry->resource;
+        road_class = tile_res->object_type;
     }
 
     /* --- Step 4: Read building's frame data for sprite offset --- */
-    RESDATA* frame_data = (RESDATA*)this->resource;     /* +0x40 */
-    int16_t offset_x = (frame_data != nullptr) ? *(int16_t*)((uint8_t*)frame_data + 0x32) : 0;
-    int16_t offset_y = (frame_data != nullptr) ? *(int16_t*)((uint8_t*)frame_data + 0x34) : 0;
+    RESDATA* frame_data = static_cast<RESDATA*>(this->resource);     /* +0x40 */
+    int16_t offset_x = (frame_data != nullptr) ? frame_data->offset_x : 0;  /* RESDATA::offset_x, +0x32 */
+    int16_t offset_y = (frame_data != nullptr) ? frame_data->offset_y : 0;  /* RESDATA::offset_y, +0x34 */
 
     int exit_x, exit_y;
     int move_tx = this->dest_x;                             /* +0xCC */
@@ -661,7 +732,7 @@ void Building::RemoveOccupant()
         uint32_t r1 = CRT_rand();
         int sign = (r1 & 1) ? -1 : 1;
         uint32_t r2 = CRT_rand();
-        exit_x = move_tx + sign * ((int)(r2 % 11) + 15) - offset_x;
+        exit_x = move_tx + sign * (static_cast<int>(r2 % 11) + 15) - offset_x;
         exit_y = move_ty - offset_y;
     } else if (road_class == 0x13) {
         /* Vertical road: random offset perpendicular to road */
@@ -680,12 +751,13 @@ void Building::RemoveOccupant()
     int tile_y = worldToTile(exit_y);
 
     /* Validate exit tile (must be type 0x0C = walkable surface) */
-    void* tile_obj = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
+    TileMapObject* tile_obj = static_cast<TileMapObject*>(
+        TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
 
     bool use_fallback = true;
     if (tile_obj != nullptr) {
-        void* tile_frame = *(void**)((uint8_t*)tile_obj + 0x40);
-        uint8_t tile_type = (tile_frame != nullptr) ? *(uint8_t*)((uint8_t*)tile_frame + 8) : 0;
+        TileMapResource* tile_frame = tile_obj->resource;
+        uint8_t tile_type = (tile_frame != nullptr) ? tile_frame->object_type : 0;
         if (tile_type == 0x0C) {
             use_fallback = false;
         }
@@ -755,7 +827,7 @@ void Building::CalcMoveTarget(int* out_pos, int target_x, int target_y, int max_
     this->waypoint_y1 = dy;                                 /* +0xD8 */
 
     /* Euclidean (crow-flight) distance */
-    this->field_dc = (int32_t)sqrt((double)(dx * dx + dy * dy));  /* +0xDC */
+    this->field_dc = static_cast<int32_t>(sqrt(static_cast<double>(dx * dx + dy * dy)));  /* +0xDC */
 
     /* X axis: clamp step to max_step, apply from screen_rect.left */
     int abs_dx = (dx >= 0) ? dx : -dx;
@@ -833,10 +905,10 @@ void Building::CheckTimeout()
 /* ================================================================== */
 int Building::DecideAction()
 {
-    int game_time = (int)g_game_time;
+    int game_time = static_cast<int>(g_game_time);
 
     /* Not ready to decide yet */
-    if (game_time < (int)this->next_action_time) {          /* +0xA0 */
+    if (game_time < static_cast<int>(this->next_action_time)) {          /* +0xA0 */
         return 0;
     }
 
@@ -851,16 +923,28 @@ int Building::DecideAction()
     }
 
     /* Convert game tick to local time */
-    void* time_info = CRT_localtime((const time_t*)&game_time);
+    void* time_info = CRT_localtime(reinterpret_cast<const time_t*>(&game_time));
 
     /* Check spawn_building schedule (+0x90 = occupant_b).
      * If time is within its active window, go there.
-     * Occupant's resource is at Entity::resource (+0x40). */
+     * Occupant's resource is at Entity::resource (+0x40); +0x534/+0x548
+     * are BuildingDescriptorEditor::track_pos_a/track_pos_b
+     * (input/BuildingDescriptorEditor.h) — confirmed by
+     * resources/ResourceManager.h's own comment "Building resources
+     * extend this with schedule data at +0x534/+0x548" and by
+     * core/BuildingMgrObjectGroup.cpp's UpdateScheduledAnimation, which
+     * already reads the identical offsets the same way. TrackPos's
+     * layout {vtable, field_04, field_08, coordinate, segment_index}
+     * happens to line up byte-for-byte with Game_CheckTimeInRange's
+     * expected {second, minute, hour} ints (field_04/field_08 double as
+     * the minute/hour slots, sharing the same -1-uninitialized sentinel
+     * convention) — kept as a raw int* reinterpret rather than
+     * introducing TrackPos here, matching that sibling file's style. */
     if (this->occupant_b != nullptr) {                     /* +0x90 */
-        RESDATA* resource = (RESDATA*)this->occupant_b->resource;
-        if (Game_CheckTimeInRange((int*)time_info,
-                (int*)((uint8_t*)resource + 0x534),
-                (int*)((uint8_t*)resource + 0x548))) {
+        RESDATA* resource = static_cast<RESDATA*>(this->occupant_b->resource);
+        if (Game_CheckTimeInRange(static_cast<int*>(time_info),
+                reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(resource) + 0x534),
+                reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(resource) + 0x548))) {
             return 2;  /* spawn */
         }
     }
@@ -868,10 +952,10 @@ int Building::DecideAction()
     /* Check occupy_building schedule (+0x8C = occupant_a).
      * If time is OUTSIDE its active window, go there. */
     if (this->occupant_a != nullptr) {                     /* +0x8C */
-        RESDATA* resource = (RESDATA*)this->occupant_a->resource;
-        if (!Game_CheckTimeInRange((int*)time_info,
-                (int*)((uint8_t*)resource + 0x534),
-                (int*)((uint8_t*)resource + 0x548))) {
+        RESDATA* resource = static_cast<RESDATA*>(this->occupant_a->resource);
+        if (!Game_CheckTimeInRange(static_cast<int*>(time_info),
+                reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(resource) + 0x534),
+                reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(resource) + 0x548))) {
             return 1;  /* occupy */
         }
     }
@@ -890,17 +974,18 @@ int Building::DecideAction()
 /* ================================================================== */
 void* Building::FindNearbyObject(int target_type, int x, int y)
 {
-    RESDATA* res_ptr = (RESDATA*)this->resource;           /* +0x40 */
+    RESDATA* res_ptr = static_cast<RESDATA*>(this->resource);           /* +0x40 */
 
     /* Check 1: tile at (x, y) only if this is road type 8 */
-    uint8_t res_type = (res_ptr != nullptr) ? *(uint8_t*)((uint8_t*)res_ptr + 0x08) : 0;
+    uint8_t res_type = (res_ptr != nullptr) ? res_ptr->object_type : 0;
     if (res_type == 8) {
         int tile_y = (y < 0) ? -1 : (y >> 4);
         int tile_x = ((x + 4) < 0) ? -1 : ((x + 4) >> 4);
-        void* tile = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
+        TileMapObject* tile = static_cast<TileMapObject*>(
+            TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            RESDATA* tres = *(RESDATA**)((uint8_t*)tile + 0x40);
-            if (tres != nullptr && *(uint8_t*)((uint8_t*)tres + 0x08) == target_type) {
+            TileMapResource* tres = tile->resource;
+            if (tres != nullptr && tres->object_type == target_type) {
                 return tile;
             }
         }
@@ -911,10 +996,11 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
         uint16_t fh = res_ptr->frame_height;               /* +0x16 */
         int tile_y = ((fh / 2 + y) < 0) ? -1 : ((fh / 2 + y) >> 4);
         int tile_x = ((x + 4) < 0) ? -1 : ((x + 4) >> 4);
-        void* tile = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
+        TileMapObject* tile = static_cast<TileMapObject*>(
+            TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            RESDATA* tres = *(RESDATA**)((uint8_t*)tile + 0x40);
-            if (tres != nullptr && *(uint8_t*)((uint8_t*)tres + 0x08) == target_type) {
+            TileMapResource* tres = tile->resource;
+            if (tres != nullptr && tres->object_type == target_type) {
                 return tile;
             }
         }
@@ -926,10 +1012,11 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
         uint16_t fh = res_ptr->frame_height;               /* +0x16 */
         int tile_y = ((fh + y) < 0) ? -1 : ((fh + y) >> 4);
         int tile_x = ((fw - 4 + x) < 0) ? -1 : ((fw - 4 + x) >> 4);
-        void* tile = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
+        TileMapObject* tile = static_cast<TileMapObject*>(
+            TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            RESDATA* tres = *(RESDATA**)((uint8_t*)tile + 0x40);
-            if (tres != nullptr && *(uint8_t*)((uint8_t*)tres + 0x08) == target_type) {
+            TileMapResource* tres = tile->resource;
+            if (tres != nullptr && tres->object_type == target_type) {
                 return tile;
             }
         }
@@ -951,11 +1038,12 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
 int Building::FindPathToTarget()
 {
     /* Find tile type 3 (road/walkable) at target position */
-    void* tile_obj = this->FindNearbyObject(3, this->target_x, this->target_y);
+    TileMapObject* tile_obj = static_cast<TileMapObject*>(
+        this->FindNearbyObject(3, this->target_x, this->target_y));
 
     if (tile_obj == nullptr) return 0;
 
-    RESDATA* resdata = *(RESDATA**)((uint8_t*)tile_obj + 0x40);
+    TileMapResource* resdata = tile_obj->resource;
     int resource_id = (resdata != nullptr) ? resdata->resource_id : -1;
 
     /* Rail tile check: IDs 0xC6C (straight), 0xC6E (crossing) — block passage */
@@ -963,52 +1051,65 @@ int Building::FindPathToTarget()
         return 0;
     }
 
-    /* Road class stored deep in RESDATA at +0x63A */
-    uint8_t road_class = *(uint8_t*)((uint8_t*)resdata + 0x63A);
+    /* Road class stored deep in the tile resource at +0x63A */
+    uint8_t road_class = resdata->state_63A;
 
     /* Horizontal road (class 0x12) */
     if (road_class == 0x12) {
-        /* Check for vehicle boarding at tile+0x118 */
-        void* vehicle = *(void**)((uint8_t*)tile_obj + 0x118);
+        /* Check for vehicle boarding at tile+0x118. Ghidra-confirmed
+         * (Vehicle::state @ +0x5C, game/Vehicle.h) this is a Vehicle*,
+         * not a generic Entity — AddOccupant's `entity+0x38` param is the
+         * same duck-typed convention documented there (Vehicle's own
+         * occupant_tracks[8] @ +0x38). Vehicle_GetOccupantCount was a
+         * void*-taking free-function landmine (docs/landmine-sweep-
+         * worklist.md, callers: Building::FindPathToTarget) that bound
+         * to nothing — the real function is the typed method
+         * Vehicle::GetOccupantCount() (0x44C370, uint8_t, no args). */
+        Vehicle* vehicle = *reinterpret_cast<Vehicle**>(reinterpret_cast<uint8_t*>(tile_obj) + 0x118);
         if (vehicle != nullptr) {
-            int vs = *(int*)((uint8_t*)vehicle + 0x5C);
+            int32_t vs = vehicle->state;
             if (vs == 0 || vs == 1) {  /* idle or boarding */
-                if (Vehicle_GetOccupantCount(vehicle) != 0) {
-                    this->AddOccupant((Entity*)vehicle);
+                if (vehicle->GetOccupantCount() != 0) {
+                    this->AddOccupant(reinterpret_cast<Entity*>(vehicle));
                     return 1;
                 }
             }
         }
 
-        int tile_x = *(int*)((uint8_t*)tile_obj + 0x4C);
+        /* +0x4C/+0x50: tile_obj's own world pixel position (the universal
+         * GameObject::world_x/world_y convention — core/GameObject.h — NOT
+         * TileMapObject's grid tile_x/tile_y at +0x88/+0x8A, a distinct,
+         * smaller int16 pair). No named field exists for it on
+         * TileMapObject itself; kept as a raw reinterpret_cast. */
+        int tile_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x4C);
         if (this->world_x == tile_x) {
             uint32_t r = CRT_rand();
             int sign = (r & 1) ? -1 : 1;
             r = CRT_rand();
-            this->dest_x = tile_x + sign * ((int)(r % 11) + 15);
+            this->dest_x = tile_x + sign * (static_cast<int>(r % 11) + 15);
         } else {
             this->dest_x = tile_x;
         }
 
-        int tile_y = *(int*)((uint8_t*)tile_obj + 0x50);
+        int tile_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x50);
         this->dest_y = (tile_y > this->world_y) ? this->world_y - 4 : this->world_y + 4;
         return 1;
     }
 
     /* Vertical road (class 0x13) */
     if (road_class == 0x13) {
-        void* vehicle = *(void**)((uint8_t*)tile_obj + 0x118);
+        Vehicle* vehicle = *reinterpret_cast<Vehicle**>(reinterpret_cast<uint8_t*>(tile_obj) + 0x118);
         if (vehicle != nullptr) {
-            int vs = *(int*)((uint8_t*)vehicle + 0x5C);
+            int32_t vs = vehicle->state;
             if (vs == 0 || vs == 1) {
-                if (Vehicle_GetOccupantCount(vehicle) != 0) {
-                    this->AddOccupant((Entity*)vehicle);
+                if (vehicle->GetOccupantCount() != 0) {
+                    this->AddOccupant(reinterpret_cast<Entity*>(vehicle));
                     return 1;
                 }
             }
         }
 
-        int tile_y = *(int*)((uint8_t*)tile_obj + 0x50);
+        int tile_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x50);
         if (this->world_y == tile_y) {
             uint32_t r = CRT_rand();
             int sign = (r & 1) ? -1 : 1;
@@ -1017,7 +1118,7 @@ int Building::FindPathToTarget()
             this->dest_y = tile_y;
         }
 
-        int tile_x = *(int*)((uint8_t*)tile_obj + 0x4C);
+        int tile_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x4C);
         this->dest_x = (tile_x > this->world_x) ? this->world_x - 4 : this->world_x + 4;
         return 1;
     }
@@ -1046,10 +1147,15 @@ void Building::MoveToTarget()
         return;
     }
 
-    /* Check for random arrival rect */
+    /* Check for random arrival rect.
+     * target->resource is Entity's own named +0x40 field (no raw offset
+     * needed for that indirection); +0x62C is
+     * BuildingDescriptorEditor::leisure_destination (input/
+     * BuildingDescriptorEditor.h) — same flag OnOccupantReady checks
+     * below and town/Town.cpp already reads at entity->resource+0x62C. */
     RECT bounds;
     if (!target->GetBoundingRect(&bounds) ||
-        *(uint8_t*)(*(uintptr_t*)((uint8_t*)target + 0x40) + 0x62C) == 0) {
+        *(reinterpret_cast<uint8_t*>(target->resource) + 0x62C) == 0) {
         int tx = target->world_x;
         int ty = target->world_y;
         this->TeleportTo(tx, ty);
@@ -1105,7 +1211,7 @@ void Building::HandleAction(int action)
         goto epilogue;
     }
 
-    this->next_action_time = (int)(CRT_rand() % 21) + 10 + g_game_time;
+    this->next_action_time = static_cast<int>(CRT_rand() % 21) + 10 + g_game_time;
 epilogue:
     this->prev_target_x = this->target_x;
     this->prev_target_y = this->target_y;
@@ -1131,7 +1237,7 @@ epilogue:
 /* ================================================================== */
 Building* Building::Deserialize(void* data)
 {
-    uint8_t* src = (uint8_t*)data;
+    uint8_t* src = reinterpret_cast<uint8_t*>(data);
 
     /* Step 1: Allocate via proper C++ constructor chain.
      * `new Building(0)` calls the full constructor chain
@@ -1147,79 +1253,79 @@ Building* Building::Deserialize(void* data)
      * +0x00 (vtable) is managed by C++ — skip it.
      * +0x1C and +0x20 are callback function pointers in the
      * serialized format; write them as raw bytes. */
-    obj->type                = *(int32_t*) (src + 0x04);  /* +0x04 */
-    obj->screen_rect.left    = *(int32_t*) (src + 0x08);  /* +0x08 */
-    obj->screen_rect.top     = *(int32_t*) (src + 0x0C);  /* +0x0C */
-    obj->screen_rect.right   = *(int32_t*) (src + 0x10);  /* +0x10 */
-    obj->screen_rect.bottom  = *(int32_t*) (src + 0x14);  /* +0x14 */
-    obj->initialized         = *(uint8_t*) (src + 0x18);  /* +0x18 */
+    obj->type                = *reinterpret_cast<int32_t*>(src + 0x04);  /* +0x04 */
+    obj->screen_rect.left    = *reinterpret_cast<int32_t*>(src + 0x08);  /* +0x08 */
+    obj->screen_rect.top     = *reinterpret_cast<int32_t*>(src + 0x0C);  /* +0x0C */
+    obj->screen_rect.right   = *reinterpret_cast<int32_t*>(src + 0x10);  /* +0x10 */
+    obj->screen_rect.bottom  = *reinterpret_cast<int32_t*>(src + 0x14);  /* +0x14 */
+    obj->initialized         = *reinterpret_cast<uint8_t*>(src + 0x18);  /* +0x18 */
 
     /* Callback slots at +0x1C/+0x20: write as raw uint32_t.
      * These overlap with callback_1/callback_2 function pointers
      * in GameObject; the save format stores them as POD. */
-    *(uint32_t*)((uint8_t*)obj + 0x1C) = *(uint32_t*)(src + 0x1C);
-    *(uint32_t*)((uint8_t*)obj + 0x20) = *(uint32_t*)(src + 0x20);
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(obj) + 0x1C) = *reinterpret_cast<uint32_t*>(src + 0x1C);
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(obj) + 0x20) = *reinterpret_cast<uint32_t*>(src + 0x20);
 
     /* Step 2b: Overwrite Entity fields (+0x24..+0x86) */
-    obj->visible            = *(uint8_t*) (src + 0x24);  /* +0x24 */
-    obj->anim_index         = *(int32_t*) (src + 0x28);  /* +0x28 */
-    obj->blit_flags         = *(uint32_t*)(src + 0x2C);  /* +0x2C */
-    obj->source_rect.left   = *(int32_t*) (src + 0x30);
-    obj->source_rect.top    = *(int32_t*) (src + 0x34);
-    obj->source_rect.right  = *(int32_t*) (src + 0x38);
-    obj->source_rect.bottom = *(int32_t*) (src + 0x3C);
+    obj->visible            = *reinterpret_cast<uint8_t*>(src + 0x24);  /* +0x24 */
+    obj->anim_index         = *reinterpret_cast<int32_t*>(src + 0x28);  /* +0x28 */
+    obj->blit_flags         = *reinterpret_cast<uint32_t*>(src + 0x2C);  /* +0x2C */
+    obj->source_rect.left   = *reinterpret_cast<int32_t*>(src + 0x30);
+    obj->source_rect.top    = *reinterpret_cast<int32_t*>(src + 0x34);
+    obj->source_rect.right  = *reinterpret_cast<int32_t*>(src + 0x38);
+    obj->source_rect.bottom = *reinterpret_cast<int32_t*>(src + 0x3C);
 
-    obj->resource           = *(void**)   (src + 0x40);  /* +0x40 */
-    obj->sound_res_id       = *(uint32_t*)(src + 0x44);  /* +0x44 */
-    obj->audio_channel      = *(void**)   (src + 0x48);  /* +0x48 */
-    obj->world_x            = *(int32_t*) (src + 0x4C);  /* +0x4C */
-    obj->world_y            = *(int32_t*) (src + 0x50);  /* +0x50 */
-    obj->frame_index        = *(int32_t*) (src + 0x54);  /* +0x54 */
-    obj->timer              = *(uint32_t*)(src + 0x58);  /* +0x58 */
-    obj->active_state       = *(uint32_t*)(src + 0x5C);  /* +0x5C */
-    obj->next_sound_time    = *(uint32_t*)(src + 0x60);  /* +0x60 */
-    obj->stored_resource_id   = *(uint32_t*)(src + 0x64);  /* +0x64 */
-    obj->action_cooldown_time = *(uint32_t*)(src + 0x68);  /* +0x68 */
-    obj->phase_timer        = *(uint32_t*)(src + 0x6C);  /* +0x6C */
-    obj->waiting_flag       = *(uint8_t*) (src + 0x70);  /* +0x70 */
-    obj->world_x_raw        = *(int32_t*) (src + 0x74);  /* +0x74 */
-    obj->world_y_raw        = *(int32_t*) (src + 0x78);  /* +0x78 */
+    obj->resource           = *reinterpret_cast<void**>(src + 0x40);  /* +0x40 */
+    obj->sound_res_id       = *reinterpret_cast<uint32_t*>(src + 0x44);  /* +0x44 */
+    obj->audio_channel      = *reinterpret_cast<void**>(src + 0x48);  /* +0x48 */
+    obj->world_x            = *reinterpret_cast<int32_t*>(src + 0x4C);  /* +0x4C */
+    obj->world_y            = *reinterpret_cast<int32_t*>(src + 0x50);  /* +0x50 */
+    obj->frame_index        = *reinterpret_cast<int32_t*>(src + 0x54);  /* +0x54 */
+    obj->timer              = *reinterpret_cast<uint32_t*>(src + 0x58);  /* +0x58 */
+    obj->active_state       = *reinterpret_cast<uint32_t*>(src + 0x5C);  /* +0x5C */
+    obj->next_sound_time    = *reinterpret_cast<uint32_t*>(src + 0x60);  /* +0x60 */
+    obj->stored_resource_id   = *reinterpret_cast<uint32_t*>(src + 0x64);  /* +0x64 */
+    obj->action_cooldown_time = *reinterpret_cast<uint32_t*>(src + 0x68);  /* +0x68 */
+    obj->phase_timer        = *reinterpret_cast<uint32_t*>(src + 0x6C);  /* +0x6C */
+    obj->waiting_flag       = *reinterpret_cast<uint8_t*>(src + 0x70);  /* +0x70 */
+    obj->world_x_raw        = *reinterpret_cast<int32_t*>(src + 0x74);  /* +0x74 */
+    obj->world_y_raw        = *reinterpret_cast<int32_t*>(src + 0x78);  /* +0x78 */
 
     /* Name field (+0x7C..+0x86, 11 bytes) */
     memcpy(obj->name, src + 0x7C, 11);
 
     /* Step 2c: Overwrite Building fields (+0x88..+0xF3) */
-    obj->occupation_level   = *(uint8_t*) (src + 0x88);  /* +0x88 */
-    obj->disabled           = *(uint8_t*) (src + 0x89);  /* +0x89 */
-    obj->_pad_8a[0]         = *(uint8_t*) (src + 0x8A);
-    obj->_pad_8a[1]         = *(uint8_t*) (src + 0x8B);
-    obj->occupant_a         = *(Entity**) (src + 0x8C);  /* +0x8C */
-    obj->occupant_b         = *(Entity**) (src + 0x90);  /* +0x90 */
-    obj->create_time        = *(uint32_t*)(src + 0x94);  /* +0x94 */
-    obj->conn_building_a    = *(int32_t*) (src + 0x98);  /* +0x98 */
-    obj->conn_building_b    = *(int32_t*) (src + 0x9C);  /* +0x9C */
-    obj->next_action_time   = *(uint32_t*)(src + 0xA0);  /* +0xA0 */
-    obj->field_a4           = *(uint32_t*)(src + 0xA4);  /* +0xA4 */
-    obj->target_x           = *(int32_t*) (src + 0xA8);  /* +0xA8 */
-    obj->target_y           = *(int32_t*) (src + 0xAC);  /* +0xAC */
-    obj->search_x1          = *(int32_t*) (src + 0xB0);  /* +0xB0 */
-    obj->search_y1          = *(int32_t*) (src + 0xB4);  /* +0xB4 */
-    obj->track_x            = *(int32_t*) (src + 0xB8);  /* +0xB8 */
-    obj->track_y            = *(int32_t*) (src + 0xBC);  /* +0xBC */
-    obj->track_node_id      = *(int32_t*) (src + 0xC0);  /* +0xC0 */
-    obj->prev_target_x      = *(int32_t*) (src + 0xC4);  /* +0xC4 */
-    obj->prev_target_y      = *(int32_t*) (src + 0xC8);  /* +0xC8 */
-    obj->dest_x             = *(int32_t*) (src + 0xCC);  /* +0xCC */
-    obj->dest_y             = *(int32_t*) (src + 0xD0);  /* +0xD0 */
-    obj->waypoint_x1        = *(int32_t*) (src + 0xD4);  /* +0xD4 */
-    obj->waypoint_y1        = *(int32_t*) (src + 0xD8);  /* +0xD8 */
-    obj->field_dc           = *(int32_t*) (src + 0xDC);  /* +0xDC */
-    obj->field_e0           = *(uint32_t*)(src + 0xE0);  /* +0xE0 */
-    obj->field_e4           = *(uint8_t*) (src + 0xE4);  /* +0xE4 */
+    obj->occupation_level   = *reinterpret_cast<uint8_t*>(src + 0x88);  /* +0x88 */
+    obj->disabled           = *reinterpret_cast<uint8_t*>(src + 0x89);  /* +0x89 */
+    obj->_pad_8a[0]         = *reinterpret_cast<uint8_t*>(src + 0x8A);
+    obj->_pad_8a[1]         = *reinterpret_cast<uint8_t*>(src + 0x8B);
+    obj->occupant_a         = *reinterpret_cast<Entity**>(src + 0x8C);  /* +0x8C */
+    obj->occupant_b         = *reinterpret_cast<Entity**>(src + 0x90);  /* +0x90 */
+    obj->create_time        = *reinterpret_cast<uint32_t*>(src + 0x94);  /* +0x94 */
+    obj->conn_building_a    = *reinterpret_cast<int32_t*>(src + 0x98);  /* +0x98 */
+    obj->conn_building_b    = *reinterpret_cast<int32_t*>(src + 0x9C);  /* +0x9C */
+    obj->next_action_time   = *reinterpret_cast<uint32_t*>(src + 0xA0);  /* +0xA0 */
+    obj->field_a4           = *reinterpret_cast<uint32_t*>(src + 0xA4);  /* +0xA4 */
+    obj->target_x           = *reinterpret_cast<int32_t*>(src + 0xA8);  /* +0xA8 */
+    obj->target_y           = *reinterpret_cast<int32_t*>(src + 0xAC);  /* +0xAC */
+    obj->search_x1          = *reinterpret_cast<int32_t*>(src + 0xB0);  /* +0xB0 */
+    obj->search_y1          = *reinterpret_cast<int32_t*>(src + 0xB4);  /* +0xB4 */
+    obj->track_x            = *reinterpret_cast<int32_t*>(src + 0xB8);  /* +0xB8 */
+    obj->track_y            = *reinterpret_cast<int32_t*>(src + 0xBC);  /* +0xBC */
+    obj->track_node_id      = *reinterpret_cast<int32_t*>(src + 0xC0);  /* +0xC0 */
+    obj->prev_target_x      = *reinterpret_cast<int32_t*>(src + 0xC4);  /* +0xC4 */
+    obj->prev_target_y      = *reinterpret_cast<int32_t*>(src + 0xC8);  /* +0xC8 */
+    obj->dest_x             = *reinterpret_cast<int32_t*>(src + 0xCC);  /* +0xCC */
+    obj->dest_y             = *reinterpret_cast<int32_t*>(src + 0xD0);  /* +0xD0 */
+    obj->waypoint_x1        = *reinterpret_cast<int32_t*>(src + 0xD4);  /* +0xD4 */
+    obj->waypoint_y1        = *reinterpret_cast<int32_t*>(src + 0xD8);  /* +0xD8 */
+    obj->field_dc           = *reinterpret_cast<int32_t*>(src + 0xDC);  /* +0xDC */
+    obj->field_e0           = *reinterpret_cast<uint32_t*>(src + 0xE0);  /* +0xE0 */
+    obj->field_e4           = *reinterpret_cast<uint8_t*>(src + 0xE4);  /* +0xE4 */
     memcpy(obj->_pad_e5, src + 0xE5, 3);
-    obj->last_action        = *(int32_t*) (src + 0xE8);  /* +0xE8 */
-    obj->field_ec           = *(uint32_t*)(src + 0xEC);  /* +0xEC */
-    obj->occupant_ptr       = *(Entity**) (src + 0xF0);  /* +0xF0 */
+    obj->last_action        = *reinterpret_cast<int32_t*>(src + 0xE8);  /* +0xE8 */
+    obj->field_ec           = *reinterpret_cast<uint32_t*>(src + 0xEC);  /* +0xEC */
+    obj->occupant_ptr       = *reinterpret_cast<Entity**>(src + 0xF0);  /* +0xF0 */
 
     /* Step 3: Registration is deferred to caller.
      * In the original binary, manager->vtable[0x28](context, obj)
@@ -1314,9 +1420,11 @@ void Building::OnOccupantReady(Entity* entity)
         return;
     }
 
-    /* Check the flag at resource + 0x62C */
-    RESDATA* res = (RESDATA*)entity->resource;      /* +0x40 */
-    uint8_t flag_62c = *(uint8_t*)((uint8_t*)res + 0x62C);
+    /* Check the flag at resource + 0x62C
+     * (BuildingDescriptorEditor::leisure_destination — see MoveToTarget
+     * above and town/Town.cpp's identical entity->resource+0x62C read). */
+    RESDATA* res = static_cast<RESDATA*>(entity->resource);      /* +0x40 */
+    uint8_t flag_62c = *(reinterpret_cast<uint8_t*>(res) + 0x62C);
 
     if (flag_62c == 0) {
         /* Branch B: Flag is 0 — teleport directly */
@@ -1367,7 +1475,7 @@ void Building::PartyModeUpdate(void* next_entity)
     this->visible = 1;                              /* +0x24 */
 
     /* Check connection buildings on the next entity */
-    Building* next_bldg = (Building*)next_entity;
+    Building* next_bldg = static_cast<Building*>(next_entity);
     if (next_bldg != nullptr) {
         if (next_bldg->conn_building_a == -1 && next_bldg->conn_building_b == -1) {
             /* No connections — disable this building */
@@ -1397,11 +1505,18 @@ void Building::PartyModeUpdate(void* next_entity)
 /* ================================================================== */
 int Building::IsActionComplete()
 {
+    /* +0x168/+0x169 are BuildingDescriptorEditor::border_width/
+     * border_height (input/BuildingDescriptorEditor.h's physical-
+     * occupancy grid dimensions) — reused here as a max-step pixel
+     * clamp / animation-frame limit respectively. Same shared-offset
+     * convention as the +0x168/+0x169 grid_width/grid_height on
+     * TileMapResource (world/tilemap.h): both are within the common
+     * "ChildWindow-family" descriptor header. */
     if (this->occupant_ptr != nullptr) {
         /* Occupant present — compute step toward dest */
         int out[2];
         this->CalcMoveTarget(out, this->dest_x, this->dest_y,
-            *(uint8_t*)((uint8_t*)this->resource + 0x168));
+            *(reinterpret_cast<uint8_t*>(this->resource) + 0x168));
 
         int step_x = out[0];
         int step_y = out[1];
@@ -1419,8 +1534,8 @@ int Building::IsActionComplete()
     }
 
     /* Check against resource's animation duration at +0x169 */
-    RESDATA* res = (RESDATA*)this->resource;        /* +0x40 */
-    uint8_t anim_limit = *(uint8_t*)((uint8_t*)res + 0x169);
+    RESDATA* res = static_cast<RESDATA*>(this->resource);        /* +0x40 */
+    uint8_t anim_limit = *(reinterpret_cast<uint8_t*>(res) + 0x169);
 
     if (this->field_e4 < anim_limit) {
         return 1;  /* still counting frames */
@@ -1431,7 +1546,7 @@ int Building::IsActionComplete()
 
     int out[2];
     this->CalcMoveTarget(out, this->dest_x, this->dest_y,
-        *(uint8_t*)((uint8_t*)res + 0x168));
+        *(reinterpret_cast<uint8_t*>(res) + 0x168));
 
     uint8_t blocked = this->CheckPlacementCollision(out[0], out[1]);
     return (blocked != 1) ? 0 : 1;
@@ -1482,12 +1597,13 @@ void Building::StepToward(int x, int y)
     int tile_y = (y < 0) ? -1 : (y >> 4);
 
     /* --- Step 2: Look up tile at target tile position --- */
-    void* tile = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);  /* 0x455620 */
+    TileMapObject* tile = static_cast<TileMapObject*>(
+        TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));  /* 0x455620 */
 
     uint8_t tile_type = 0;
     if (tile != nullptr) {
-        RESDATA* tile_res = *(RESDATA**)((uint8_t*)tile + 0x40);
-        tile_type = (tile_res != nullptr) ? *(uint8_t*)((uint8_t*)tile_res + 0x08) : 0;
+        TileMapResource* tile_res = tile->resource;
+        tile_type = (tile_res != nullptr) ? tile_res->object_type : 0;
     }
 
     /* --- Step 3: Branch on tile type (binary: 0x432B50) ---
@@ -1499,36 +1615,51 @@ void Building::StepToward(int x, int y)
      * Branch (b): All other types → fallback direct step toward target.
      *
      * Within branch (a), the binary has two sub-cases:
-     *   (c) Lane-offset: conn_node_id at tile+0xE4 == 0xFFFFFFFF
-     *       → scans 4 connection slots at tile+0xD8 for lane selection.
+     *   (c) Lane-offset: conn_node_id at tile+0xE4 (TileMapObject::
+     *       occupancy_more) == 0xFFFFFFFF → scans the 4-slot
+     *       occupancy_scores[4] array at tile+0xD4 for lane selection.
      *   (d) Connection-node traversal: conn_node_id != 0xFFFFFFFF
      *       → uses AssetMgr_ReadPairValue + Math_PointOnLineSegment. */
     if (tile_type == 0x0C || (tile_type == 3 && this->occupant_ptr != nullptr)) {
         /* --- Step 3a: Determine connection node at tile+0xE4 --- */
         uint32_t conn_node_id = (tile != nullptr)
-            ? *(uint32_t*)((uint8_t*)tile + 0xE4) : 0xFFFFFFFF;
+            ? static_cast<uint32_t>(tile->occupancy_more) : 0xFFFFFFFF;
 
         if (conn_node_id == 0xFFFFFFFF) {
             /* Branch (c): Lane-offset computation (0x432B80–0x432D30).
              *
-             * No connection node → scan 4 "lane" slots at tile+0xD8
-             * (uint32_t each). Identical dest means no selection needed.
-             * Otherwise pick the lane with the highest count, then read
-             * the connected tile from tile+0xC4[lane*4].             */
+             * No connection node → scan the 4 "lane" scores at
+             * occupancy_scores[4] (+0xD4..+0xE3), then read the
+             * connected tile from occupancy_links[lane] (+0xC4..+0xD3).
+             *
+             * BUG FIX (Ghidra-confirmed against 0x432AE0/0x432940
+             * disassembly, both instances of this lane-scan loop): the
+             * count-array base is +0xD4, not +0xD8 — the previous +0xD8
+             * base read occupancy_scores[1..3] shifted down by one slot
+             * and, for lane 3, read occupancy_more (+0xE4, a completely
+             * different field: "keep walking the chain" flag, not a
+             * score) instead of occupancy_scores[3]. Fixed to index
+             * occupancy_scores[] directly, matching disassembly's
+             * `dword ptr [EDI + EAX*0x4 + 0xd4]` / `LEA EBP,[EDI+0xd8]`
+             * (the scan pointer starts one slot past the base, at
+             * lane 1, because lane 0 is the implicit initial candidate —
+             * preserved by scanning lanes 0..3 against a base of +0xD4
+             * here, which is behaviorally equivalent to the binary's
+             * "start from lane 0, compare candidates 1..3" walk). */
             if (x != this->target_x || y != this->target_y) {
                 uint8_t best_lane = 0;
                 uint32_t best_count = 0;
                 for (int lane = 0; lane < 4; lane++) {
-                    uint32_t count = *(uint32_t*)((uint8_t*)tile + 0xD8 + lane * 4);
+                    uint32_t count = static_cast<uint32_t>(tile->occupancy_scores[lane]);
                     if (count != 0 && (best_count == 0 || count < best_count)) {
                         best_count = count;
                         best_lane = lane;
                     }
                 }
-                void* conn = *(void**)((uint8_t*)tile + 0xC4 + best_lane * 4);
+                TileMapObject* conn = reinterpret_cast<TileMapObject*>(tile->occupancy_links[best_lane]);
                 if (conn != nullptr) {
-                    this->dest_x = *(int32_t*)((uint8_t*)conn + 0x4C);
-                    this->dest_y = *(int32_t*)((uint8_t*)conn + 0x50);
+                    this->dest_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x4C);
+                    this->dest_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x50);
                     return;
                 }
             }
@@ -1536,21 +1667,21 @@ void Building::StepToward(int x, int y)
             /* Branch (d): Connection-node traversal (0x432C50–0x432F80).
              *
              * Valid node ID → follow the connection graph:
-             *  1. Get connected tile via tile+0xC4[node_id*4]
+             *  1. Get connected tile via occupancy_links[node_id]
              *  2. AssetMgr_ReadPairValue for direction mask
              *  3. Math_PointOnLineSegment for path validation
              *  4. If direction differs from node_id, switch lanes
              *  5. Set track/dest to final tile position              */
-            void* conn = *(void**)((uint8_t*)tile + 0xC4 + conn_node_id * 4);
+            TileMapObject* conn = reinterpret_cast<TileMapObject*>(tile->occupancy_links[conn_node_id]);
             if (conn != nullptr) {
-                uint32_t peer_node = *(uint32_t*)((uint8_t*)conn + 0xE4);
+                uint32_t peer_node = static_cast<uint32_t>(conn->occupancy_more);
                 uint8_t dir = AssetMgr_ReadPairValue(
-                    g_asset_mgr, peer_node, this->track_node_id);
+                    static_cast<AssetMgr*>(g_asset_mgr), peer_node, this->track_node_id);
 
-                int conn_x = *(int32_t*)((uint8_t*)conn + 0x4C);
-                int conn_y = *(int32_t*)((uint8_t*)conn + 0x50);
-                int tile_x2 = *(int32_t*)((uint8_t*)tile + 0x4C);
-                int tile_y2 = *(int32_t*)((uint8_t*)tile + 0x50);
+                int conn_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x4C);
+                int conn_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x50);
+                int tile_x2 = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile) + 0x4C);
+                int tile_y2 = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile) + 0x50);
 
                 uint8_t on_seg = Math_PointOnLineSegment(
                     this->track_x, this->track_y,
@@ -1558,15 +1689,15 @@ void Building::StepToward(int x, int y)
 
                 if (on_seg == 0 &&
                     ((dir - 2) & 3) == conn_node_id &&
-                    *(void**)((uint8_t*)tile + 0xC4 + dir * 4) != nullptr) {
+                    tile->occupancy_links[dir] != 0) {
                     conn_node_id = dir;
                 }
 
-                void* final_tile = *(void**)((uint8_t*)tile + 0xC4 + conn_node_id * 4);
+                TileMapObject* final_tile = reinterpret_cast<TileMapObject*>(tile->occupancy_links[conn_node_id]);
                 if (final_tile != nullptr) {
-                    this->track_x = *(int32_t*)((uint8_t*)final_tile + 0x4C);
-                    this->track_y = *(int32_t*)((uint8_t*)final_tile + 0x50);
-                    this->track_node_id = *(uint32_t*)((uint8_t*)final_tile + 0xE4);
+                    this->track_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(final_tile) + 0x4C);
+                    this->track_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(final_tile) + 0x50);
+                    this->track_node_id = static_cast<uint32_t>(final_tile->occupancy_more);
 
                     if (this->track_node_id == conn_node_id) {
                         this->dest_x = this->track_x;
@@ -1642,32 +1773,52 @@ void Building::TeleportTo(int x, int y)
         this->target_y      = y;                    /* +0xAC */
     }
 
-    /* Search for a road tile near the target */
-    void* road_tile = TileMap_FindTileByType(g_tilemap, x, y, 0x0C, 0x900);
+    /* Search for a road tile near the target.
+     * TileMap_FindTileByType was a landmine (docs/landmine-sweep-
+     * worklist.md, "genuinely missing"): no symbol of that name/shape
+     * exists. The address it cites, 0x457CE0, is TileMap::FindNearestObject
+     * (world/tilemap.h/.cpp, exposed as TileMap_FindNearestObject) — the
+     * worklist's "genuinely missing" classification was itself wrong, not
+     * just the caller. Fixed the name AND the argument order/types to
+     * match: real signature is (type_filter, tx, ty, radius), but this
+     * call passed (tx, ty, 0x0C, 0x900) — type_filter and radius were in
+     * the wrong argument positions. Ghidra-confirmed against 0x432940's
+     * decompile: `TileMap_FindNearestObject(&g_tilemap,0xc,target_x,
+     * target_y,0x900)`. */
+    TileMapObject* road_tile = static_cast<TileMapObject*>(
+        TileMap_FindNearestObject(g_tilemap, 0x0C, x, y, 0x900));
 
     if (road_tile != nullptr) {
         /* Store road tile position in track-follow fields */
-        this->track_x      = *(int32_t*)((uint8_t*)road_tile + 0x4C);  /* +0xB8 */
-        this->track_y      = *(int32_t*)((uint8_t*)road_tile + 0x50);  /* +0xBC */
+        this->track_x      = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(road_tile) + 0x4C);  /* +0xB8 */
+        this->track_y      = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(road_tile) + 0x50);  /* +0xBC */
 
-        /* Get connection node ID from the tile's +0xE4 field */
-        int32_t conn_node = *(int32_t*)((uint8_t*)road_tile + 0xE4);
+        /* Get connection node ID from the tile's occupancy_more (+0xE4) */
+        int32_t conn_node = road_tile->occupancy_more;
         if (conn_node != -1) {
             this->track_node_id = conn_node;        /* +0xC0 */
         } else {
-            /* Scan the tile's 4 connection slots at +0xD8 for a valid node */
-            int best_slot = 0;
+            /* Scan the tile's occupancy_scores[4] (+0xD4) for the lane
+             * with the minimum nonzero score — same selection rule as
+             * StepToward's lane scan above (see its BUG FIX comment for
+             * full Ghidra evidence). This function's own version of the
+             * loop additionally had the comparison direction inverted
+             * (`count > best_count`, i.e. picking the MAXIMUM) — the
+             * decompile of 0x432940 shows the identical min-nonzero
+             * selection as StepToward's, so both the base offset and
+             * the comparison direction are fixed here to match. */
+            uint8_t best_slot = 0;
             uint32_t best_count = 0;
             for (int slot = 0; slot < 4; slot++) {
-                uint32_t count = *(uint32_t*)((uint8_t*)road_tile + 0xD8 + slot * 4);
-                if (count > best_count) {
+                uint32_t count = static_cast<uint32_t>(road_tile->occupancy_scores[slot]);
+                if (count != 0 && (best_count == 0 || count < best_count)) {
                     best_count = count;
-                    best_slot = slot;
+                    best_slot = static_cast<uint8_t>(slot);
                 }
             }
-            void* conn_slot_obj = *(void**)((uint8_t*)road_tile + 0xC4 + best_slot * 4);
+            TileMapObject* conn_slot_obj = reinterpret_cast<TileMapObject*>(road_tile->occupancy_links[best_slot]);
             if (conn_slot_obj != nullptr) {
-                this->track_node_id = *(int32_t*)((uint8_t*)conn_slot_obj + 0xE4);
+                this->track_node_id = conn_slot_obj->occupancy_more;
             } else {
                 this->track_node_id = 0xFF;
             }
@@ -1702,43 +1853,67 @@ void Building::TeleportTo(int x, int y)
 /* ================================================================== */
 void Building::PostMoveDispatch()
 {
-    /* Step 1: Detach from current scene-graph parent (occupant_b) */
+    /* Step 1: Detach from current scene-graph parent (occupant_b).
+     * Ghidra-confirmed (0x433CA0 decompile) identical to BaseCleanup:
+     * the parent is a ResourceGameObject* (linked_objects[5] @ +0xA4,
+     * group_flag @ +0x8E), not a generic Entity. */
     if (this->occupant_b != nullptr) {
-        Entity* parent = this->occupant_b;          /* +0x90 */
+        ResourceGameObject* parent = static_cast<ResourceGameObject*>(this->occupant_b);  /* +0x90 */
 
         /* Search parent's 5-slot child array at parent+0xA4 for `this` */
-        Entity** child_array = (Entity**)((uint8_t*)parent + 0xA4);
         for (int slot = 0; slot < 5; slot++) {
-            if (child_array[slot] == this) {
-                child_array[slot] = nullptr;
-                /* Decrement parent's child_count at parent+0x8E */
-                uint8_t* child_count = (uint8_t*)parent + 0x8E;
-                *child_count = *child_count - 1;
+            if (parent->linked_objects[slot] == this) {
+                parent->linked_objects[slot] = nullptr;
+                /* Decrement parent's group_flag (child count) at +0x8E */
+                parent->group_flag = static_cast<uint8_t>(parent->group_flag - 1);
                 break;
             }
         }
         this->occupant_b = nullptr;                 /* +0x90 */
     }
 
-    /* Step 2: Search building collection for a compatible host.
+    /* Step 2: Search for a compatible host to re-attach to.
      * Address: 0x433D98
      *
-     * Iterates all buildings in g_building_mgr->buildings collection,
-     * looking for one whose occupant_b (+0x90) is NULL and whose
-     * resource sub-type matches ours. When found, adds `this` to the
-     * matching building's 5-slot child array at host+0xA4, increments
-     * host's child_count at host+0x8E, and sets this->occupant_b = host.
+     * KNOWN-WRONG, NOT JUST APPROXIMATED (upgraded from the previous vaguer
+     * TODO after Ghidra-decompiling 0x433CA0 in full):
      *
-     * DECOMPILER NOTE: The binary at 0x433D98 calls
-     * g_building_mgr->vtable[0x20](index) for iteration. The C++
-     * uses BuildingCollection::GetItem() directly which is equivalent
-     * (BuildingCollection vtable[8] = GetItem). BuildingMgr does not
-     * override vtable[0x20] — it's a compiler-generated passthrough
-     * to the 'buildings' member collection.
-     * TODO: Verify BuildingMgr vtable layout at 0x477F70 slot [0x20]. */
+     *   1. The binary does NOT iterate g_building_mgr->buildings. It reads
+     *      the global object-list Collection at 0x4A9994 (DAT_004a9994,
+     *      the same "all live GameObjects" list Netman::CheckTimeout /
+     *      AssetMgr_LoadFileEx / INPUT_PeriodicTickDispatch already use —
+     *      see network/Netman.cpp's `extern Collection DAT_004a9994`),
+     *      dispatching through ITS vtable slot [8] (byte offset 0x20,
+     *      the same slot BuildingCollection::GetItem occupies —
+     *      `iVar4 = (**(code**)(DAT_004a9994 + 0x20))(index)`), bounded by
+     *      g_object_count, not BuildingCollection::GetCount().
+     *   2. The match predicate is NOT a sub_type-byte compare. It is:
+     *      `candidate->group_flag < candidate->resource[0x516]` (a
+     *      per-resource max-member-count byte — BuildingDescriptorEditor::
+     *      max_employees, input/BuildingDescriptorEditor.h) AND
+     *      `this->resource->resource_id` appears in the 5×int16 list at
+     *      `candidate->resource + 0x518` (BuildingDescriptorEditor::
+     *      possible_employees[5]).
+     *   3. `candidate` itself is a ResourceGameObject* (its +0xA4/+0x8E
+     *      reads are linked_objects[5]/group_flag, exactly Step 1's shape),
+     *      NOT a Building*.
+     *
+     *   The code below still iterates g_building_mgr->buildings and treats
+     *   each `candidate` as if it had a 5-slot pointer array at +0xA4 —
+     *   but Building's OWN layout at +0xA4..+0xB7 is field_a4/target_x/
+     *   target_y/search_x1/search_y1 (game/Building.h), not a pointer
+     *   array. If this branch is ever reached with a real Building
+     *   candidate, it corrupts that candidate's own movement-state fields
+     *   instead of registering a group membership. Reproducing the real
+     *   behavior needs: (a) a typed accessor for DAT_004a9994's vtable
+     *   slot [8] (Collection, shared/collections.h, doesn't currently
+     *   expose that slot), and (b) switching the predicate to the
+     *   BuildingDescriptorEditor fields above — both out of scope for a
+     *   cast-cleanup pass; left as raw-cast-modernized but behaviorally
+     *   unchanged rather than fabricating an unvalidated rewrite. */
     if (g_building_mgr != nullptr && this->resource != nullptr) {
-        RESDATA* my_res = (RESDATA*)this->resource;     /* +0x40 */
-        uint8_t my_sub_type = *(uint8_t*)((uint8_t*)my_res + 0x08);
+        RESDATA* my_res = static_cast<RESDATA*>(this->resource);     /* +0x40 */
+        uint8_t my_sub_type = my_res->object_type;
 
         BuildingCollection* collection = &g_building_mgr->buildings;
         uint32_t count = collection->GetCount();
@@ -1751,14 +1926,16 @@ void Building::PostMoveDispatch()
             if (candidate->occupant_b != nullptr) continue;
 
             /* Check sub-type compatibility */
-            RESDATA* cand_res = (RESDATA*)candidate->resource;
+            RESDATA* cand_res = static_cast<RESDATA*>(candidate->resource);
             if (cand_res == nullptr) continue;
-            uint8_t cand_sub_type = *(uint8_t*)((uint8_t*)cand_res + 0x08);
+            uint8_t cand_sub_type = cand_res->object_type;
             if (cand_sub_type != my_sub_type) continue;
 
             /* Compatible host found: add `this` to host's child array.
-             * Host child array is at host+0xA4 (5 slots of Entity*). */
-            Entity** child_array = (Entity**)((uint8_t*)candidate + 0xA4);
+             * Host child array is at host+0xA4 (5 slots) — see the
+             * KNOWN-WRONG note above; `candidate` is really a Building*
+             * here, not the ResourceGameObject* this layout requires. */
+            Entity** child_array = reinterpret_cast<Entity**>(reinterpret_cast<uint8_t*>(candidate) + 0xA4);
             int slot;
             for (slot = 0; slot < 5; slot++) {
                 if (child_array[slot] == nullptr) {
@@ -1769,7 +1946,7 @@ void Building::PostMoveDispatch()
 
             if (slot < 5) {
                 /* Increment host's child count at host+0x8E */
-                uint8_t* child_count = (uint8_t*)candidate + 0x8E;
+                uint8_t* child_count = reinterpret_cast<uint8_t*>(candidate) + 0x8E;
                 *child_count = *child_count + 1;
 
                 /* Set our occupant_b to point to the host */
@@ -1829,7 +2006,7 @@ uint8_t Building::CheckPlacementCollision(int x, int y)
      * Each tile within the footprint is checked via TileMap_GetObjectAt
      * for map obstacles. Returns 1 (blocked) if any tile is occupied
      * or blocked; returns 0 if all tiles are clear. */
-    RESDATA* res = (RESDATA*)this->resource;        /* +0x40 */
+    RESDATA* res = static_cast<RESDATA*>(this->resource);        /* +0x40 */
     if (res != nullptr) {
         uint16_t fw = res->frame_width;             /* +0x14 */
         uint16_t fh = res->frame_height;            /* +0x16 */
@@ -1839,8 +2016,8 @@ uint8_t Building::CheckPlacementCollision(int x, int y)
 
         /* Compute tile footprint: frame dimensions in tiles.
          * The binary divides width/height by 16 (>> 4) to get tile count. */
-        int tiles_wide = (int)fw >> 4;
-        int tiles_high = (int)fh >> 4;
+        int tiles_wide = static_cast<int>(fw) >> 4;
+        int tiles_high = static_cast<int>(fh) >> 4;
         if (tiles_wide < 1) tiles_wide = 1;
         if (tiles_high < 1) tiles_high = 1;
 
@@ -1852,14 +2029,15 @@ uint8_t Building::CheckPlacementCollision(int x, int y)
 
                 if (tile_x < 0 || tile_y < 0) continue;
 
-                void* tile_obj = TileMap_GetObjectAt(g_tilemap, tile_x, tile_y, 0);
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
+                    TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
                 if (tile_obj != nullptr) {
                     /* Check if tile is occupied by another building or obstacle.
                      * The binary checks tile->resource type and occupancy flags.
                      * A non-null tile with certain type flags means blocked. */
-                    RESDATA* tile_res = *(RESDATA**)((uint8_t*)tile_obj + 0x40);
+                    TileMapResource* tile_res = tile_obj->resource;
                     if (tile_res != nullptr) {
-                        uint8_t tile_type = *(uint8_t*)((uint8_t*)tile_res + 0x08);
+                        uint8_t tile_type = tile_res->object_type;
                         /* Type 0x01 = building/obstacle, blocks placement */
                         if (tile_type == 0x01) {
                             return 1;  /* blocked */
@@ -1897,31 +2075,46 @@ uint32_t Building::FindNearestConnectionNode(void* node_set, uint32_t current_no
 {
     /* Binary at 0x4343F0 calls Math_DistSquared (0x45C7A0) for
      * squared Euclidean distance computation, then calls
-     * AssetMgr_ReadPairValue (0x45DD80) for connection flags. */
+     * AssetMgr_ReadPairValue (0x45DD80) for connection flags.
+     *
+     * node_set's documented layout here (+0x00 count, +0x08 nodes[])
+     * matches resources/AssetMgr.h's AssetMgr struct exactly
+     * (entry_count @ +0x00, resource_array @ +0x08) — node_set really
+     * is an AssetMgr*-shaped connection matrix (its own +0x04
+     * pair_matrix is what AssetMgr_ReadPairValue below reads),
+     * corroborated by AssetMgr_ReadPairValue's real signature taking
+     * `AssetMgr* self` as the exact object passed as `this=node_set`.
+     * AssetMgr is only forward-declared here (see the top-of-file note
+     * on why resources/AssetMgr.h isn't included), so field access below
+     * stays a raw reinterpret_cast rather than named members; only the
+     * pointer's TYPE (needed for AssetMgr_ReadPairValue's correct
+     * mangled overload) is fixed. */
+    AssetMgr* node_mgr = static_cast<AssetMgr*>(node_set);
 
     /* Compute baseline squared distance: self world_pos → target */
     int best_dist = Math_DistSquared(
         this->world_x, this->world_y, this->target_x, this->target_y);
 
-    /* node_set layout:
-     *   +0x00: uint32_t count
-     *   +0x08: Entity* nodes[] */
-    uint32_t count = *(uint32_t*)node_set;          /* +0x00 */
+    uint32_t count = *reinterpret_cast<uint32_t*>(node_set);          /* +0x00 */
     uint32_t best_idx = current_node_id;
-    void** node_array = (void**)((uint8_t*)node_set + 0x08);
+    void** node_array = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(node_set) + 0x08);    /* +0x08 */
 
     for (uint32_t i = 0; i < count; i++) {
         /* AssetMgr_ReadPairValue(this=node_set, a=current_node_id, b=i)
          * Returns 0-3 = valid connection direction,
          *         0x80 = empty but valid,
-         *         0xFF = invalid/nonexistent. */
-        uint8_t flag = AssetMgr_ReadPairValue(node_set, current_node_id, i);
+         *         0xFF = invalid/nonexistent.
+         * AssetMgr_ReadPairValue was a void*-first-param landmine
+         * (docs/landmine-sweep-worklist.md, callers: Building::
+         * StepToward, Building::FindNearestConnectionNode) — the real
+         * function takes AssetMgr*. */
+        uint8_t flag = AssetMgr_ReadPairValue(node_mgr, current_node_id, i);
 
         if (flag == 0x80 || flag == 0xFF) {
             continue;
         }
 
-        Entity* node_entity = (Entity*)node_array[i];
+        Entity* node_entity = static_cast<Entity*>(node_array[i]);
         if (node_entity == nullptr) continue;
 
         int node_dist = Math_DistSquared(
@@ -1963,9 +2156,9 @@ void Building::SetName(const char* name)
     Entity::SetName(name);                          /* 0x405E20 */
 
     /* Step 2: Check if it's a station */
-    RESDATA* res = (RESDATA*)this->resource;        /* +0x40 */
+    RESDATA* res = static_cast<RESDATA*>(this->resource);        /* +0x40 */
     if (res != nullptr) {
-        uint8_t sub_type = *(uint8_t*)((uint8_t*)res + 0x08);
+        uint8_t sub_type = res->object_type;
         if (sub_type == SUBTYPE_STATION) {
             g_building_mgr->CompactCollections();   /* 0x434870 */
         }
@@ -1975,7 +2168,7 @@ void Building::SetName(const char* name)
      * Party mode activates when the name does NOT contain "PARTY"
      * (inverted check, binary-correct per Ghidra). Party mode
      * appears to be the default; naming a building "PARTY" disables it. */
-    if (CRT_wcsstr((const wchar_t*)name, PARTY_STRING) == 0) {
+    if (CRT_wcsstr(reinterpret_cast<const wchar_t*>(name), PARTY_STRING) == nullptr) {
         g_is_party_mode    = 1;
         g_party_start_time = g_game_time;
     }
