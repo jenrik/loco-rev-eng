@@ -12,12 +12,28 @@
  * This file contains the Town main gameplay view implementation:
  *   - Building selection and tracking (select_building/deselect_building/
  *     track_building)
- *   - Viewport occupancy checks (check_occupied, check_occupied_ex,
- *     blit_viewport)
- *   - Viewport scroll rect computation (calc_scroll_rect, ..._reversed)
  *   - Postcard creation, sending, receiving, album management
  *   - Tile viewport rendering helpers (UIPANEL_Blit dispatch targets)
  *   - Train_HandleTrackBuild (remote track-build network message)
+ *
+ * NOTE (2026-08-08, town-cpp-strict2 session): Town_CheckOccupied,
+ * Town_CheckOccupiedEx, and Town_BlitViewport (0x42C950/0x42C9F0/0x42CB10)
+ * used to be transcribed here as `Town::check_occupied`/`_ex`/
+ * `blit_viewport` member functions, despite Town.h's own doc comments
+ * already noting `this` in those methods was NOT the Town instance.
+ * Ghidra xrefs confirm they are free functions operating on a
+ * UIPANEL_Surface* (not Town*), called only from game/BuildingMgr.cpp and
+ * game/World.cpp — moved to town/TownTiles.cpp beside UIPANEL_Surface's
+ * other address-adjacent methods; see the comment there for full
+ * evidence. Town::calc_scroll_rect/calc_scroll_rect_reversed (the same
+ * "this is not Town" pattern, 0x42C590/0x42C700) were also mis-scoped
+ * here as dead, uncalled Town:: methods — deleted rather than promoted,
+ * since their bodies silently assumed two Ghidra-distinct stack pointers
+ * (`ptStack_4` vs `param_1`) were the same RECT*, which disassembly does
+ * not support; town/TownTiles.cpp's existing loud
+ * UIPANEL_Surface::CalcScrollRect/_Reversed stubs remain the correct,
+ * honest state pending real disambiguation of that stack-argument
+ * mismatch.
  */
 
 #include "Town.h"
@@ -33,7 +49,6 @@
 #include "../ui/UIPANEL_Surface.h"
 #include "../ui/UI_ChildWindow.h"
 #ifndef _WIN32
-#include "sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
 #include <cassert>
 #include <cstdio>
 #endif
@@ -77,6 +92,23 @@ bool   UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
  * the stub is in shared/ which is outside my modification scope. */
 void   GameObject_Draw(void* self);  /* stub @ shared/stubs_impl.cpp:436 */
 
+/* UIPANEL_CreateSurface — real def: graphics/LOCOBITMAP.cpp:0x42A110,
+ * C++-mangled __fastcall(ECX=this) constructor for UIPANEL_Surface (zeroes
+ * fields, sets vtable, increments the global surface ref-count), `void`
+ * return. This file used to declare `void* UIPANEL_CreateSurface(void*)`
+ * *inside* the extern "C" block below, mislabeled with 0x42AF30 (which
+ * Ghidra confirms is actually UIPANEL_ReadPaletteFromBMP, an unrelated
+ * function) — the extern "C" linkage collapsed the declared name down to
+ * plain C linkage, which resolved not to the real mangled constructor but
+ * to shared/defsym_stubs.cpp's unrelated 0-arg `UIPANEL_CreateSurface()`
+ * no-op placeholder (confirmed via objdump: the call in handle_tile_click
+ * disassembled to `call 0x4ba150 <UIPANEL_CreateSurface>`, an empty `ret`
+ * stub, distinct from the real ctor at a different address entirely) — a
+ * silent-wrong-stub landmine: overlay_panel was left with whatever garbage
+ * `operator_new` returned in EAX, never actually constructed. Moved out of
+ * extern "C" with the correct signature so it binds to the real ctor. */
+void   UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* 0x42A110 */
+
 extern "C" {
     /* Resource management */
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
@@ -98,15 +130,12 @@ extern "C" {
     void   UIPANEL_EndPaintEx(void* self, HWND hWnd, int unk1,
                               byte unk2, RECT* rect);                /* 0x42B2D0 */
 
-    /* UIPANEL_Blit declared above, outside this extern "C" block (C++ linkage). */
-    void*  UIPANEL_CreateSurface(void* obj);                         /* 0x42AF30 */
+    /* UIPANEL_Blit and UIPANEL_CreateSurface declared above, outside this
+     * extern "C" block (C++ linkage). */
 
     /* Tile map */
     void   TileMap_InvalidateRect(void* tilemap, int left, int top,
                                   int right, int bottom);            /* 0x416FF0 */
-
-    /* DDraw */
-    void*  DDRAW_GetDdrawErrorString(int code);                     /* 0x45BBC0 */
 
     /* Audio */
     char   PlaySound(int sound_id);                                  /* 0x44A290 */
@@ -222,15 +251,8 @@ extern char   g_game_mode;              /* 0x4852AC — current game mode */
 extern int    g_cursor_world_x;         /* 0x4FD348 — cursor world X */
 extern int    g_cursor_world_y;         /* 0x4FD34C — cursor world Y */
 extern void*  g_active_panel;           /* 0x4FD3E0 — active panel override */
-extern char   g_surface_lost;           /* 0x4FD218 — primary surface lost flag */
 extern void*  g_main_window;            /* 0x4FD230 — main CGWND window */
 extern void*  g_world;                  /* 0x4A98B0 — World singleton */
-
-    /* Pixel format state, initialized by DDRAW_SetSurfaceFormat (0x45B9DB):
-     * red-channel bit shift (10 for 555, 11 for 565). */
-    extern int    g_surface_channel1;       /* 0x485278 — red channel shift */
-    extern int    g_surface_red_mask;       /* 0x485288 — red channel mask (water check) */
-    extern int    g_surface_blue_mask;      /* 0x485290 — blue channel mask (water check) */
 
 /* Viewport rect globals (one RECT at 0x4AAD14) */
 extern int g_viewport_rect_left;        /* 0x4AAD14 */
@@ -291,8 +313,45 @@ namespace {
  * offset 0x18); used by handle_tile_click (0x42CEDA / 0x42CEF6). */
 char panel_load_resource(void* obj, int res_id, int a, int b)
 {
-    return (char)((char (*)(void*, int, int, int))(*(void***)obj)[6])(
-        obj, res_id, a, b);
+    using LoadResourceFn = char (*)(void*, int, int, int);
+    void** vtable = *reinterpret_cast<void***>(obj);
+    return reinterpret_cast<LoadResourceFn>(vtable[6])(obj, res_id, a, b);
+}
+
+/* UIPANEL_Surface (canonical definition: graphics/LOCOBITMAP.h) mirrored
+ * here with only the fields Town.cpp actually touches — not included
+ * directly, see the forward-declaration comment on Town.h's
+ * `overlay_panel` field for why. */
+struct UIPANEL_SurfaceView {
+    void*   vtable;       // +0x00
+    int32_t mode;          // +0x04
+    int32_t width;          // +0x08
+    int32_t height;         // +0x0C
+    uint8_t has_palette;   // +0x10
+    uint8_t flags;          // +0x11
+    uint8_t _pad_12[2];
+    uint16_t* palette_ptr; // +0x14
+    uint8_t*  pixels;       // +0x18
+    void*     ddraw_surf;   // +0x1C
+};
+
+UIPANEL_SurfaceView* view(UIPANEL_Surface* surface)
+{
+    return reinterpret_cast<UIPANEL_SurfaceView*>(surface);
+}
+
+/* `Town::panel_graphics`'s concrete class is unidentified (see Town.h's
+ * field comment) — mirrors only the two Ghidra-confirmed fields. */
+struct PanelGraphicsView {
+    uint8_t          _pad_00[0x10];
+    UIPANEL_Surface* surface;      // +0x10
+    uint8_t          _pad_14[0x0C];
+    void*            anim_table;   // +0x20 — array of 0x18-byte entries
+};
+
+PanelGraphicsView* panel_graphics_view(void* panel_graphics)
+{
+    return reinterpret_cast<PanelGraphicsView*>(panel_graphics);
 }
 
 /* RESDATA child resource — released via vtable[2] (Destroy/Release).
@@ -305,23 +364,30 @@ void release_sprite_resource(void* resource)
     }
 }
 
-/* Player/session record (+0x0C player id, +0x3A need-connect flag). */
-int32_t record_player_id(const void* record)
+/* Player/session record — real type DPlayManager* (network/DPlayManager.h),
+ * confirmed via DPLAY_CreatePlayer (0x442850): sets vtable=0x478264,
+ * size 0x39C, matching DPlayManager.h's own "This IS the DPLAY_PlayerSlot
+ * structure" header comment. upload_postcard's WriteFile of 0x398 bytes
+ * from selected_player+4 covers exactly [0x4, 0x39C) of that layout.
+ * These two accessors read/write DPlayManager's own already-named fields
+ * (m_configId @+0xC, m_wordValue @+0x3A) rather than raw offsets — kept as
+ * thin wrappers (not inlined at each call site) since several callers
+ * document these values under different working names ("player id" at
+ * some sites, "need-connect flag" at others — both point at the same two
+ * fields; not reconciled here, out of scope for this pass). */
+int32_t record_player_id(const DPlayManager* record)
 {
-    return *reinterpret_cast<const int32_t*>(
-        reinterpret_cast<const uint8_t*>(record) + 0xC);
+    return record->m_configId;
 }
 
-uint16_t record_need_connect(const void* record)
+uint16_t record_need_connect(const DPlayManager* record)
 {
-    return *reinterpret_cast<const uint16_t*>(
-        reinterpret_cast<const uint8_t*>(record) + 0x3A);
+    return record->m_wordValue;
 }
 
-void record_set_need_connect(void* record, uint16_t value)
+void record_set_need_connect(DPlayManager* record, uint16_t value)
 {
-    *reinterpret_cast<uint16_t*>(
-        reinterpret_cast<uint8_t*>(record) + 0x3A) = value;
+    record->m_wordValue = value;
 }
 
 /* UI_CenterWindow @ 0x425A50 — center `inner` rect within `outer`. */
@@ -339,16 +405,6 @@ void center_window_rect(const RECT* outer, RECT* inner)
     inner->top = top;
     inner->bottom = (inner->bottom - old_top) + top;
 }
-
-} // namespace
-
-namespace {
-
-/* Persistent primary-surface lock state — the original keeps a global
- * DDSURFACEDESC at 0x4FD19C that persists across calls; reproduced as
- * file-static storage so a failed re-lock still scans the previous
- * lock's data exactly like the original global. */
-DDSURFACEDESC g_primary_surface_desc = {};
 
 } // namespace
 
@@ -562,7 +618,7 @@ void Town::hide()
 
         if (this->selected_player) {                /* +0x608 */
             /* Release the player record (vtable[0] deleting dtor). */
-            delete (DPlayManager*)this->selected_player;
+            delete this->selected_player;
             this->selected_player = nullptr;
             this->postcard_data = nullptr;          /* +0x60C */
         }
@@ -767,19 +823,31 @@ char Town::handle_tile_click()
     if (loaded) {
         loaded = panel_load_resource(this->child_panel, 0x3804, -1, 0);
         if (loaded) {
-            void* surface_obj = operator_new(0x20);
-            this->overlay_panel = surface_obj ? UIPANEL_CreateSurface(surface_obj) : nullptr;
+            /* UIPANEL_CreateSurface (0x42A110) is a placement-style
+             * constructor: it initializes *surface_obj in place and
+             * returns void (MSVC constructor ABI echoes `this` back in
+             * EAX, which is what the original decompile's fabricated
+             * "return value" actually reflects) — surface_obj itself,
+             * not any call result, is what gets stored into
+             * overlay_panel. */
+            UIPANEL_Surface* surface_obj =
+                static_cast<UIPANEL_Surface*>(operator_new(0x20));
+            if (surface_obj) {
+                UIPANEL_CreateSurface(surface_obj);
+            }
+            this->overlay_panel = surface_obj;
 
             if (this->overlay_panel) {
-                void* pgfx = *(void**)((intptr_t)this->panel_graphics + 0x10);
+                UIPANEL_Surface* pgfx_surface =
+                    panel_graphics_view(this->panel_graphics)->surface;
                 UIPANEL_InitSurface(this->overlay_panel,
-                                    *(int*)((intptr_t)pgfx + 8),
-                                    *(int*)((intptr_t)pgfx + 0xC),
+                                    view(pgfx_surface)->width,
+                                    view(pgfx_surface)->height,
                                     1, 0, 0);
 
-                SetRect((RECT*)&this->backup_surface, 0, 0,
-                        *(int*)((intptr_t)this->overlay_panel + 8),
-                        *(int*)((intptr_t)this->overlay_panel + 0xC));
+                SetRect(reinterpret_cast<RECT*>(&this->backup_surface), 0, 0,
+                        view(this->overlay_panel)->width,
+                        view(this->overlay_panel)->height);
             }
             return 1;
         }
@@ -1058,271 +1126,6 @@ void Town::render_selection(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
          * just the self pointer to match the reconstructed signature. */
         GameObject_Draw(this);
     }
-}
-
-/* ================================================================== */
-/* Town::check_occupied — Scan tile buffer for non-empty tiles         */
-/* Address: 0x42C950 (__thiscall)                                      */
-/* ================================================================== */
-uint8_t Town::check_occupied(int x1, int y1, int x2, int y2)
-{
-    if (*(int*)((intptr_t)this + 4) != 0) {          /* mode flag */
-        return check_occupied_ex(x1, y1, x2, y2);
-    }
-
-    int stride = *(int*)((intptr_t)this + 8);
-    uint8_t* buf = (uint8_t*)(uintptr_t)(*(int*)((intptr_t)this + 0x18));
-    int width  = x2 - x1;
-    int height = y2 - y1;
-
-    uint8_t* row = buf + y1 * stride + x1;
-    for (int row_idx = 0; row_idx < height; row_idx++) {
-        for (int col = 0; col < width; col++) {
-            if (row[col] != 0) {
-                return 1;
-            }
-        }
-        row += stride;
-    }
-    return 0;
-}
-
-/* ================================================================== */
-/* Town::check_occupied_ex — Extended tile occupancy via surface lock  */
-/* Address: 0x42C9F0 (__stdcall, 4 stack args, RET 0x10)               */
-/*                                                                     */
-/* Locks the global primary surface (COM slot 25 = vtable byte offset  */
-/* 0x64), scans 16-bit pixels; occupied when (red>>shift) != 0x1f AND  */
-/* blue != 0x1f. Unlock via COM slot 32 (byte offset 0x80).            */
-/* ================================================================== */
-uint8_t Town::check_occupied_ex(int x1, int y1, int x2, int y2)
-{
-    uint8_t result = 0;
-    IDirectDrawSurface4* primary = (IDirectDrawSurface4*)g_primary_surface;
-
-    if (g_surface_lost == 0) {
-        /* NOTE: the binary sets the flag when Lock SUCCEEDS (returns 0)
-         * — "lost" is actually the locked state here (0x42CA33..0x42CA37). */
-        DDSURFACEDESC& desc = g_primary_surface_desc;
-        desc = DDSURFACEDESC();
-        desc.dwSize = 0x7C;
-
-        /* Lock(this, NULL, &desc, 0, 0) — COM slot 25 (byte 0x64). */
-        if (primary->Lock(nullptr, &desc, 0, 0) == 0) {
-            g_surface_lost = 1;
-        }
-    }
-
-    uint32_t pitch = (uint32_t)g_primary_surface_desc.lPitch;
-    uint32_t height = (y2 - y1) & 0xFFFF;
-    uint32_t width  = (x2 - x1) & 0xFFFF;
-
-    uint16_t* pixels = (uint16_t*)((uintptr_t)g_primary_surface_desc.lpSurface +
-                                   ((pitch >> 1) * (uint32_t)y1 +
-                                    (uint32_t)x1) * 2);
-
-    for (uint32_t row = 0; row < height; row++) {
-        if (width != 0) {
-            for (uint32_t col = 0; col < width; col++) {
-                uint16_t pixel = pixels[col];
-                int channel1 = (g_surface_red_mask & pixel) >>
-                               ((uint8_t)g_surface_channel1 & 0x1f);
-                int channel2 = g_surface_blue_mask & pixel;
-
-                if (channel1 != 0x1f && channel2 != 0x1f) {
-                    result = 1;
-                    break;
-                }
-            }
-        }
-
-        pixels += (pitch >> 1) - width;
-
-        if (result != 0) {
-            break;
-        }
-    }
-
-    if (g_surface_lost != 0) {
-        /* Unlock(NULL) — COM slot 32 (byte 0x80). */
-        if (primary->Unlock(nullptr) == 0) {
-            g_surface_lost = 0;
-        }
-    }
-
-    return result;
-}
-
-/* ================================================================== */
-/* Town::blit_viewport — Viewport occupancy check for collision        */
-/* Address: 0x42CB10 (__thiscall, 6 stack args, RET 0x18)              */
-/*                                                                     */
-/* NOTE: faithful to the binary, the bound tests use the parameters    */
-/* as (x < x1 || y2 < x || y < x2 || x < y) — y1 is never read.        */
-/* ================================================================== */
-uint32_t Town::blit_viewport(int x1, int y1, int x2, int y2, int x, int y)
-{
-    /* Outside bounds -> passable. Parameter usage matches the binary
-     * (0x42CB31..0x42CB61): y1 is never read. */
-    if (x < x1 || y2 < x || y < x2 || x < y) {
-        return 1;
-    }
-
-    if (*(int*)((intptr_t)this + 4) != 1) {
-        uint8_t* buf = *(uint8_t**)((intptr_t)this + 0x18);
-        int stride = *(int*)((intptr_t)this + 8);
-        uint8_t val = buf[stride * y + x];
-        return (val == 0) ? 1 : 0;
-    }
-
-    /* Mode 1: lock the surface at this+0x1C and check the pixel. */
-    IDirectDrawSurface4* surface = *(IDirectDrawSurface4**)((intptr_t)this + 0x1C);
-    DDSURFACEDESC desc = {};
-    desc.dwSize = 0x7C;
-
-    /* Lock(this, NULL, &desc, 1, 0) — COM slot 25 (byte 0x64). */
-    int lock_result = surface->Lock(nullptr, &desc, 1, 0);
-    if (lock_result != 0) {
-        DDRAW_GetDdrawErrorString(1);
-        return 0;
-    }
-
-    uint32_t pitch = (uint32_t)desc.lPitch;
-    uint8_t* base = (uint8_t*)desc.lpSurface;    /* ddsd + 0x24 */
-    uint16_t pixel = *(uint16_t*)(base + pitch * (uint32_t)y + (uint32_t)x * 2);
-
-    uint32_t channel1 = (g_surface_red_mask & (uint32_t)pixel) >>
-                        ((uint8_t)g_surface_channel1 & 0x1f);
-    uint32_t channel2 = g_surface_blue_mask & (uint32_t)pixel;
-
-    uint8_t result = 1;
-    if (channel1 != 0x1f || channel2 != 0x1f) {
-        result = 0;
-    }
-
-    /* Unlock(NULL) — COM slot 32 (byte 0x80). */
-    surface->Unlock(nullptr);
-
-    return result;
-}
-
-/* ================================================================== */
-/* Town::calc_scroll_rect — Visible tile rect from scroll position     */
-/* Address: 0x42C590 (__thiscall)                                      */
-/*                                                                     */
-/* DDSURFACEDESC setup, surface + viewport rects, negative clip        */
-/* compensation, intersection with the surface bounds. Returns 0 (the  */
-/* value is unused by callers).                                        */
-/* ================================================================== */
-uint32_t Town::calc_scroll_rect(RECT* pClipRect, void* surface)
-{
-    /* Get surface dimensions via IDirectDrawSurface4::GetSurfaceDesc
-     * (COM slot 22 = vtable byte offset 0x58). */
-    IDirectDrawSurface4* surf = static_cast<IDirectDrawSurface4*>(surface);
-    DDSURFACEDESC desc = {};
-    desc.dwSize = 0x7C;
-    surf->GetSurfaceDesc(&desc);
-
-    RECT surface_rect;
-    SetRect(&surface_rect, 0, 0,
-            (int32_t)desc.dwWidth, (int32_t)desc.dwHeight);
-
-    RECT viewport_rect;
-    SetRect(&viewport_rect, 0, 0, *(int*)((intptr_t)this + 8),
-            *(int*)((intptr_t)this + 0xC));
-
-    /* Adjust the scroll origin by the (negative) clip offsets. */
-    RECT* clip = pClipRect;
-    int scroll_x = clip->left - ((clip->left < 0) ? clip->left : 0);
-    int scroll_y = clip->top - ((clip->top < 0) ? clip->top : 0);
-
-    RECT candidate;
-    IntersectRect(&candidate, clip, clip);
-
-    if (IsRectEmpty(&candidate) == 0) {
-        RECT src_rect;
-        src_rect.left   = scroll_x;
-        src_rect.top    = scroll_y;
-        src_rect.right  = scroll_x + (candidate.right - candidate.left);
-        src_rect.bottom = scroll_y + (candidate.bottom - candidate.top);
-
-        RECT out_rect;
-        IntersectRect(&out_rect, &src_rect, &surface_rect);
-
-        if (IsRectEmpty(&out_rect) == 0) {
-            if (scroll_x > 0) scroll_x = 0;
-            if (scroll_y > 0) scroll_y = 0;
-
-            SetRect(clip, out_rect.left, out_rect.top,
-                    (out_rect.right - out_rect.left) + out_rect.left,
-                    (out_rect.bottom - out_rect.top) + out_rect.top);
-
-            SetRect(pClipRect,
-                    clip->left - scroll_x, clip->top - scroll_y,
-                    (clip->left - scroll_x) +
-                        (out_rect.right - out_rect.left),
-                    (clip->top - scroll_y) +
-                        (out_rect.bottom - out_rect.top));
-        }
-    }
-
-    /* The original always returns FALSE (0); kept faithful. */
-    return 0;
-}
-
-/* ================================================================== */
-/* Town::calc_scroll_rect_reversed — Reversed scroll rect calculation  */
-/* Address: 0x42C700 (__thiscall)                                      */
-/* ================================================================== */
-uint32_t Town::calc_scroll_rect_reversed(RECT* pClipRect, void* surface)
-{
-    /* Get surface dimensions via IDirectDrawSurface4::GetSurfaceDesc
-     * (COM slot 22 = vtable byte offset 0x58). */
-    IDirectDrawSurface4* surf = static_cast<IDirectDrawSurface4*>(surface);
-    DDSURFACEDESC desc = {};
-    desc.dwSize = 0x7C;
-    surf->GetSurfaceDesc(&desc);
-
-    RECT surface_rect;
-    SetRect(&surface_rect, 0, 0,
-            (int32_t)desc.dwWidth, (int32_t)desc.dwHeight);
-
-    RECT viewport_rect;
-    SetRect(&viewport_rect, 0, 0, *(int*)((intptr_t)this + 8),
-            *(int*)((intptr_t)this + 0xC));
-
-    int scroll_x = pClipRect->left - ((pClipRect->left < 0) ? pClipRect->left : 0);
-    int scroll_y = pClipRect->top - ((pClipRect->top < 0) ? pClipRect->top : 0);
-
-    RECT clip_rect;
-    IntersectRect(&clip_rect, &viewport_rect, pClipRect);
-
-    if (IsRectEmpty(&clip_rect) != 0) {
-        return 0;
-    }
-
-    RECT src_rect;
-    src_rect.left   = scroll_x;
-    src_rect.top    = scroll_y;
-    src_rect.right  = scroll_x + (clip_rect.right - clip_rect.left);
-    src_rect.bottom = scroll_y + (clip_rect.bottom - clip_rect.top);
-
-    RECT out_rect;
-    IntersectRect(&out_rect, &src_rect, &surface_rect);
-
-    if (IsRectEmpty(&out_rect) != 0) {
-        return 0;
-    }
-
-    if (scroll_x > 0) scroll_x = 0;
-    if (scroll_y > 0) scroll_y = 0;
-
-    SetRect(pClipRect,
-            clip_rect.left - scroll_x, clip_rect.top - scroll_y,
-            (clip_rect.left - scroll_x) + (out_rect.right - out_rect.left),
-            (clip_rect.top - scroll_y) + (out_rect.bottom - out_rect.top));
-
-    return 1;
 }
 
 /* ================================================================== */
@@ -1801,8 +1604,14 @@ byte Town::send_postcard(TrackPiece* track_piece)
                  * the host uses the g_world value — same singleton. */
                 char player_id = *(char*)((intptr_t)world + 0x78);
                 uint16_t resource_id = *(uint16_t*)((intptr_t)world + 0x7A);
-                World_GetObjectAt(world);
-                World_RenderAll(world);
+                /* game/World.h declares both of these taking Vehicle* —
+                 * `world` here is the World singleton (read from
+                 * Building+0x44C, see comment above), not a Vehicle.
+                 * That parameter type looks like a pre-existing signature
+                 * bug in World.h (out of scope for this file); cast
+                 * locally rather than touching the shared declaration. */
+                World_GetObjectAt(static_cast<Vehicle*>(world));
+                World_RenderAll(static_cast<Vehicle*>(world));
                 static_cast<World*>(g_world)->SaveToFile(resource_id,
                                                          player_id, 1);
             }
@@ -2342,7 +2151,8 @@ void Town::upload_postcard()
     PostBagFileNode* hostname = NET_GetHostName(type, 0);
 
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname->path);
+        DPlayManager* addr =
+            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
         if (addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
             g_dplay->UnregisterPlayer(hostname->path);
@@ -2361,7 +2171,7 @@ void Town::upload_postcard()
             }
         }
         if (addr) {
-            delete (DPlayManager*)addr;
+            delete addr;
         }
         PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
@@ -2383,14 +2193,15 @@ void Town::receive_postcard()
     PostBagFileNode* hostname = NET_GetHostName(type, 0);
 
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname->path);
+        DPlayManager* addr =
+            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
             g_dplay->UnregisterPlayer(hostname->path);
         }
         if (addr) {
-            delete (DPlayManager*)addr;
+            delete addr;
         }
         PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
@@ -2410,7 +2221,7 @@ void Town::receive_postcard()
     NET_RegisterPlayer(g_dplay, this->postcard_data, 0, 0);
 
     if (this->selected_player) {
-        delete (DPlayManager*)this->selected_player;
+        delete this->selected_player;
     }
     this->selected_player = nullptr;
 
@@ -2444,7 +2255,8 @@ void Town::list_postcards()
         return;
     }
 
-    void* first_addr = NET_ResolveAddress(first_hostname->path);
+    DPlayManager* first_addr =
+        static_cast<DPlayManager*>(NET_ResolveAddress(first_hostname->path));
     if (!this->selected_player) {
         this->selected_player = first_addr;
         PostBagFileNode* p = first_hostname;
@@ -2456,20 +2268,22 @@ void Town::list_postcards()
         return;
     }
 
-    void* next_player = nullptr;
+    DPlayManager* next_player = nullptr;
     PostBagFileNode* p = first_hostname;
     while (p) {
-        void* addr = NET_ResolveAddress(p->path);
+        DPlayManager* addr =
+            static_cast<DPlayManager*>(NET_ResolveAddress(p->path));
 
         if (!next_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player) &&
             p->next) {
-            next_player = NET_ResolveAddress(p->next->path);
+            next_player =
+                static_cast<DPlayManager*>(NET_ResolveAddress(p->next->path));
         }
 
         if (addr) {
-            delete (DPlayManager*)addr;
+            delete addr;
         }
         PostBagFileNode* next = p->next;
         GLOBAL_free(p);
@@ -2478,17 +2292,17 @@ void Town::list_postcards()
 
     if (!next_player) {
         if (this->selected_player) {
-            delete (DPlayManager*)this->selected_player;
+            delete this->selected_player;
         }
         this->selected_player = first_addr;
         return;
     }
 
     if (first_addr) {
-        delete (DPlayManager*)first_addr;
+        delete first_addr;
     }
     if (this->selected_player) {
-        delete (DPlayManager*)this->selected_player;
+        delete this->selected_player;
     }
     this->selected_player = next_player;
 }
@@ -2505,14 +2319,15 @@ void Town::save_postcard()
 
     PostBagFileNode* hostname = NET_GetHostName(2, 0);
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname->path);
+        DPlayManager* addr =
+            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
             g_dplay->UnregisterPlayer(hostname->path);
         }
         if (addr) {
-            delete (DPlayManager*)addr;
+            delete addr;
         }
         PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
@@ -2522,7 +2337,7 @@ void Town::save_postcard()
     NET_RegisterPlayer(g_dplay, this->postcard_data, 1, 0);
 
     if (this->selected_player) {
-        delete (DPlayManager*)this->selected_player;
+        delete this->selected_player;
     }
     this->selected_player = nullptr;
 
@@ -2555,14 +2370,15 @@ void Town::load_postcard()
 
     PostBagFileNode* hostname = NET_GetHostName(1, 0);
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname->path);
+        DPlayManager* addr =
+            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
             g_dplay->UnregisterPlayer(hostname->path);
         }
         if (addr) {
-            delete (DPlayManager*)addr;
+            delete addr;
         }
         PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);
@@ -2572,7 +2388,7 @@ void Town::load_postcard()
     NET_RegisterPlayer(g_dplay, this->postcard_data, 2, 0);
 
     if (this->selected_player) {
-        delete (DPlayManager*)this->selected_player;
+        delete this->selected_player;
     }
     this->selected_player = nullptr;
 
@@ -2607,18 +2423,19 @@ void Town::delete_postcard()
     PostBagFileNode* hostname = NET_GetHostName(type, 0);
 
     while (hostname) {
-        void* addr = NET_ResolveAddress(hostname->path);
+        DPlayManager* addr =
+            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
             g_dplay->UnregisterPlayer(hostname->path);
             if (this->selected_player) {
-                delete (DPlayManager*)this->selected_player;
+                delete this->selected_player;
             }
             this->selected_player = nullptr;
         }
         if (addr) {
-            delete (DPlayManager*)addr;
+            delete addr;
         }
         PostBagFileNode* next = hostname->next;
         GLOBAL_free(hostname);

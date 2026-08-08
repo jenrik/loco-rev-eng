@@ -93,6 +93,16 @@
 /* ================================================================== */
 
 class Building;
+class DPlayManager;
+/* Canonical definition: graphics/LOCOBITMAP.h. NOT included from this
+ * header/Town.cpp — LOCOBITMAP.h also defines a conflicting, differently
+ * shaped `class PostcardAlbum` ("concept A" per its own header comment)
+ * that collides with this file's ui/PostcardAlbum.h (a separate,
+ * pre-existing landmine, out of scope here). Forward-declared as an
+ * opaque pointer target; Town.cpp mirrors the confirmed field offsets
+ * locally (see UIPANEL_SurfaceView there) rather than dereferencing the
+ * real type. */
+struct UIPANEL_Surface;
 
 /* ================================================================== */
 /* Town class                                                          */
@@ -127,7 +137,16 @@ public:
     TrackPiece* cursor_invalid_dup;     // +0xDC  dup of cursor_invalid_sprite
 
     Building*  selected_building;       // +0xE0  currently selected building
-    void*      child_panel;             // +0xE4  child panel object
+    /* child_panel's exact concrete class is unidentified (never assigned
+     * within Town.cpp — wired up externally, presumably during CGWND's
+     * subsystem init). Retyped to UI_WindowBase* on vtable-membership
+     * evidence: every dispatch site calls vtable slot [1] (Hide,
+     * verified against Town's own base-class vtable layout above) and
+     * vtable slot [6] (create_full_window, via panel_load_resource) —
+     * both are UI_WindowBase base-class slots shared by every subclass,
+     * so the call is valid through UI_WindowBase* regardless of the
+     * concrete type. */
+    UI_WindowBase* child_panel;         // +0xE4  child panel object
 
     uint8_t    flag_E8;                 // +0xE8  dialog guard flag (GetSaveFileNameA)
     /* +0xE9..+0x5ED: postcard data/filename buffer (0x504 bytes) —
@@ -147,8 +166,17 @@ public:
     int32_t    overlay_dest_right;      // +0x11C
     int32_t    overlay_dest_bottom;     // +0x120
 
+    /* panel_graphics's own concrete class is likewise unidentified (never
+     * assigned within Town.cpp). TODO: identify it (likely BuildingPanel-
+     * family; game/BuildingPanel.h's current field layout does NOT match
+     * the two confirmed offsets below, so it is a different class) and
+     * fold into a real canonical header. Kept void* here; Town.cpp
+     * mirrors the two Ghidra-confirmed fields via a local
+     * PanelGraphicsView struct rather than raw offsets at each use site. */
     void*      panel_graphics;          // +0x124  building panel object:
-                                        //   +0x10 = surface ptr (blit source)
+                                        //   +0x10 = UIPANEL_Surface* (surface ptr, blit source —
+                                        //           its own +8/+0xC are read directly as
+                                        //           width/height, matching UIPANEL_Surface exactly)
                                         //   +0x20 = anim table (0x18-byte entries)
     uint8_t    _pad_128[0x44];          // +0x128  padding to +0x16C
 
@@ -161,7 +189,13 @@ public:
 
     TrackPiece* track_piece;            // +0x178  track-piece zoom control
                                         //         (cursor hover sprite res 0x3806)
-    void*      overlay_panel;           // +0x17C  UIPANEL surface for selection overlay
+    /* Real type UIPANEL_Surface* (created via UIPANEL_CreateSurface +
+     * UIPANEL_InitSurface in handle_tile_click; its own +8/+0xC/+0x1C
+     * are read directly as width/height/ddraw_surf, matching
+     * UIPANEL_Surface exactly). Forward-declared only — see the
+     * UIPANEL_Surface forward-decl comment above for why the full
+     * definition isn't included here. */
+    UIPANEL_Surface* overlay_panel;     // +0x17C  UIPANEL surface for selection overlay
 
     /* Backup surface data — background restore on deselect */
     uint32_t   backup_surface;          // +0x180  backup surface handle
@@ -193,8 +227,15 @@ public:
     uint8_t    is_host;                 // +0x606  1 = this player is the game host
     uint8_t    has_remote_players;      // +0x607  1 = remote players are connected
 
-    void*      selected_player;         // +0x608  current selected player/crd entry
-    void*      postcard_data;           // +0x60C  postcard receive data / player info
+    /* Real type DPlayManager* (network/DPlayManager.h) — confirmed via
+     * DPLAY_CreatePlayer (0x442850): sets vtable=0x478264, size 0x39C,
+     * matching DPlayManager.h's own "This IS the DPLAY_PlayerSlot
+     * structure" comment. upload_postcard's WriteFile of 0x398 bytes
+     * from selected_player+4 covers exactly [0x4, 0x39C) of that layout,
+     * and the existing `delete (DPlayManager*)selected_player` sites
+     * elsewhere in this file already assumed this type. */
+    DPlayManager* selected_player;      // +0x608  current selected player/crd entry
+    DPlayManager* postcard_data;        // +0x60C  postcard receive data / player info
 
     uint8_t    player_count_flag;       // +0x610  player-count byte (init to 1)
 
@@ -444,66 +485,32 @@ public:
                           int32_t extra);
 
     /* ================================================================ */
-    /* Viewport / tile occupancy checks                                  */
+    /* Viewport / tile occupancy checks — NOT Town methods               */
+    /*                                                                    */
+    /* check_occupied/check_occupied_ex/blit_viewport (0x42C950/0x42C9F0/ */
+    /* 0x42CB10) and calc_scroll_rect/calc_scroll_rect_reversed           */
+    /* (0x42C590/0x42C700) used to be declared here as Town:: methods,    */
+    /* despite this class's own prior doc comments already noting `this` */
+    /* in those methods was NOT the Town instance. Ghidra xrefs (2026-08- */
+    /* 08, town-cpp-strict2 session) confirmed both groups operate on a   */
+    /* UIPANEL_Surface* receiver instead:                                 */
+    /*   - Town_CheckOccupied/Town_CheckOccupiedEx/Town_BlitViewport are   */
+    /*     free functions (graphics/LOCOBITMAP.h), called only from       */
+    /*     game/BuildingMgr.cpp and game/World.cpp — implemented in       */
+    /*     town/TownTiles.cpp beside UIPANEL_Surface's other address-     */
+    /*     adjacent methods. Town.cpp used to carry a fully-implemented   */
+    /*     but entirely uncalled/dead duplicate of these under the wrong  */
+    /*     scope; deleted in favor of the real free functions, which had  */
+    /*     been silent call-0 landmines (declared and called by their     */
+    /*     real callers, but never defined anywhere) until this fix.      */
+    /*   - UIPANEL_Surface::CalcScrollRect/CalcScrollRect_Reversed        */
+    /*     (graphics/LOCOBITMAP.h) are called only from UIPANEL_Blit and  */
+    /*     remain loud deferred stubs in town/TownTiles.cpp — Town.cpp's  */
+    /*     dead duplicate body silently assumed two Ghidra-distinct stack */
+    /*     pointers (`ptStack_4` vs the tracked RECT* `param_1`) were the */
+    /*     same object, which the disassembly does not support; deleted   */
+    /*     rather than promoted onto the live UIPANEL_Blit path.          */
     /* ================================================================ */
-
-    /**
-     * check_occupied — Scan tile buffer or DDraw surface for occupancy.
-     * Address: 0x42C950 (__thiscall)
-     *
-     * NOTE: `this` is the tile-cache/viewport context object (fields
-     * +0x04 mode, +0x08 stride, +0x18 pixels), not the Town instance.
-     * Mode 0 (this+0x04 == 0): scans the byte array at +0x18 (stride
-     * +0x08) over [x1..x2, y1..y2), returns 1 on any non-zero byte.
-     * Mode 1: delegates to check_occupied_ex.
-     */
-    uint8_t check_occupied(int x1, int y1, int x2, int y2);
-
-    /**
-     * check_occupied_ex — Extended tile occupancy via primary-surface lock.
-     * Address: 0x42C9F0 (__stdcall, 4 args)
-     *
-     * Locks the global primary DirectDraw surface (COM slot 25 = byte
-     * offset 0x64) with a DDSURFACEDESC, scans 16-bit pixels in
-     * [x1..x2, y1..y2). A pixel is occupied when
-     * ((pixel & red_mask) >> red_shift) != 0x1f AND (pixel & blue_mask)
-     * != 0x1f (non-water). Unlock via COM slot 32 (byte offset 0x80)
-     * with loss recovery through g_surface_lost.
-     */
-    static uint8_t check_occupied_ex(int x1, int y1, int x2, int y2);
-
-    /**
-     * blit_viewport — Viewport occupancy check for collision detection.
-     * Address: 0x42CB10 (__thiscall, 6 stack args)
-     *
-     * Passability test for point (x, y). NOTE: the binary uses the
-     * parameters as (x < x1 || y2 < x || y < x2 || x < y) -> passable;
-     * parameter y1 is never read (documented quirk of the original).
-     * Mode 0 (this+0x04 != 1): byte index buffer at +0x18 with stride
-     * +0x08; byte==0 -> passable. Mode 1: locks the surface from
-     * this+0x1C, water check (both channels == 0x1f -> passable).
-     */
-    uint32_t blit_viewport(int x1, int y1, int x2, int y2, int x, int y);
-
-    /**
-     * calc_scroll_rect — Calculate the visible tile rect from scroll.
-     * Address: 0x42C590 (__thiscall)
-     *
-     * Fills a DDSURFACEDESC via surface vtable[0x58 bytes = slot 22],
-     * builds surface + viewport rects, compensates negative clip
-     * offsets and intersects with the surface bounds. Returns 0 (the
-     * return value is unused by callers; kept faithful).
-     */
-    uint32_t calc_scroll_rect(RECT* pClipRect, void* surface);
-
-    /**
-     * calc_scroll_rect_reversed — Reversed scroll direction rect calc.
-     * Address: 0x42C700 (__thiscall)
-     *
-     * Same DDSURFACEDESC setup, but first IntersectRect clips the
-     * viewport rect against pClipRect. Returns TRUE on success.
-     */
-    uint32_t calc_scroll_rect_reversed(RECT* pClipRect, void* surface);
 
     /* ================================================================ */
     /* Postcard UI management                                            */
