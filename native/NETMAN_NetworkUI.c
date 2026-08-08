@@ -115,9 +115,6 @@ extern void    __stdcall Sleep(uint32_t dwMilliseconds);
 extern int32_t __stdcall PtInRect(const RECT* lprc, POINT pt);
 extern LRESULT __stdcall DefWindowProcA(void* hWnd, uint32_t Msg, uint32_t wParam, uint32_t lParam);
 
-extern void  __thiscall UIPANEL_EndPaint(void* panel);
-extern void  __thiscall UIPANEL_EndPaintEx(void* panel, void* hwnd, int32_t hdc,
-                                            uint8_t repaint, void* updateRect);
 extern int32_t __cdecl  ResourceManager_GetStringById(void* resmgr, uint32_t id);
 extern void  __cdecl    RESMGR_LoadSoundResource(int32_t resId);
 extern void  __cdecl    Sprite_Init(void* sprite);
@@ -129,6 +126,26 @@ extern void  __cdecl    PlaySoundAt(int32_t soundId, int32_t x, int32_t y, int32
 extern int32_t __cdecl  CRT_rand(void);
 extern void  __cdecl    UI_MainMenu_SetState(void* ui_main, int32_t state);
 }
+
+/* Real def: ui/UIPANEL.cpp (0x426B70/0x426B90), C++ linkage (not
+ * extern "C"), void(void*) / void(void*, int, int, uint8_t, RECT*) — the
+ * 2nd EndPaintEx param is `int hdc`, not `void* hwnd`/`HWND`. Both were
+ * declared inside the extern "C" block above (UIPANEL_EndPaint's params
+ * matched but its linkage didn't; EndPaintEx's linkage *and* 2nd param
+ * type were both wrong), so both silently bound to
+ * shared/stubs_impl.cpp's host no-op instead of the real present pipeline
+ * — the identical landmine already fixed for UIPANEL_Blit in this same
+ * file. Confirmed safe to call with this file's `NameEntryPanel*` as
+ * `self`: EndPaintEx's Path A (the only path reachable here, since
+ * UI_WindowBase::field_14 — read as "tile_map" — is always null on this
+ * class) uses `self+0xD4` (UI_WindowBase::workRect) and `self+0x08`
+ * (UI_WindowBase::hWnd), both of which NameEntryPanel has via inheritance;
+ * NULL `restrict_rect` (passed at every call site below, matching what
+ * Ghidra shows the original assembly passes too) is explicitly handled by
+ * falling back to that same viewport rect, not dereferenced. */
+extern void  __fastcall UIPANEL_EndPaint(void* self);
+extern void  __thiscall UIPANEL_EndPaintEx(void* self, int32_t hdc, int32_t unlockParam,
+                                            uint8_t unlockFlag, RECT* restrictRect);
 
 /* Real def: native/NETMAN_SessionSettings.c, C++ linkage (not extern "C"),
  * void(uint8_t*). Was declared inside the extern "C" block above with a
@@ -174,10 +191,9 @@ extern bool  __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY
  * it keeps the same C-linkage identity established by the first
  * declaration, so the definitions below were silently emitting unmangled
  * symbols instead of the mangled C++ names network/Netman.h's (C++-linkage)
- * declarations of the same two names look for — the identical
- * UIPANEL_EndPaintEx-class landmine, self-inflicted on this file's own
- * functions. UIPANEL_EndPaint/UIPANEL_EndPaintEx above still have this bug;
- * left for a follow-up commit (see docs/landmine-sweep-worklist.md).
+ * declarations of the same two names look for — the identical landmine
+ * class as UIPANEL_EndPaint/UIPANEL_EndPaintEx above, self-inflicted on
+ * this file's own functions this time.
  *
  * All 7 are declared here (not just the 2 called out of order) to satisfy
  * -Werror=missing-declarations without pulling in network/Netman.h — that
@@ -473,7 +489,7 @@ void NETMAN_UpdateSessionInfo(NameEntryPanel* panel)
 
     NETMAN_GetSessionInfo(panel);
 
-    UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);
     panel->paintReadyFlag = 1;
 }
 
@@ -618,7 +634,7 @@ LRESULT NETMAN_SetSessionInfo(NameEntryPanel* panel, void* hWnd, uint32_t msg,
         }
         NETMAN_GetSessionInfo(panel);
         PlaySound(0x5015);
-        UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);
         return 0;
     }
 
@@ -639,7 +655,7 @@ LRESULT NETMAN_SetSessionInfo(NameEntryPanel* panel, void* hWnd, uint32_t msg,
         }
         NETMAN_GetSessionInfo(panel);
         PlaySound(0x5015);
-        UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);
         return 0;
     }
 
