@@ -148,16 +148,18 @@ extern void  __thiscall UIPANEL_EndPaintEx(void* self, int32_t hdc, int32_t unlo
                                             uint8_t unlockFlag, RECT* restrictRect);
 
 /* Real def: native/NETMAN_SessionSettings.c, C++ linkage (not extern "C"),
- * void(uint8_t*). Was declared inside the extern "C" block above with a
- * `void*` param — same UIPANEL_EndPaintEx-class landmine (call-0; already
- * tracked for ui/EditWindow.cpp's separate, still-unfixed copy in
- * docs/landmine-sweep-worklist.md). Fixed here only for this file's two
- * call sites, both inside a null-`_g_netman_data`-guarded block (see the
- * `_g_netman_data` comment above) — neither is reachable from outside this
- * file today, so this carries none of ui/EditWindow.cpp's live-call-site
- * risk (real file I/O to NetSettings.dat on an unguarded, non-null
+ * void(GameConfig*) — network/Netman.h's canonical declaration (fixed in the
+ * native-session-glue-cluster session) takes GameConfig*, not the uint8_t*
+ * this file originally declared. Was declared inside the extern "C" block
+ * above with a `void*` param — same UIPANEL_EndPaintEx-class landmine
+ * (call-0; already tracked for ui/EditWindow.cpp's separate, still-unfixed
+ * copy in docs/landmine-sweep-worklist.md). Fixed here only for this file's
+ * one call site, inside a null-`_g_netman_data`-guarded block (see the
+ * `_g_netman_data` comment above) — not reachable from outside this file
+ * today, so this carries none of ui/EditWindow.cpp's live-call-site risk
+ * (real file I/O to NetSettings.dat on an unguarded, non-null
  * `_g_netman_state`); left that one alone. */
-extern void  __fastcall NETMAN_SendPacket(uint8_t* packetPtr);
+extern void  __fastcall NETMAN_SendPacket(GameConfig* packetPtr);
 
 /* Real def: resources/resource_manager_sdl3.cpp returns `void*`, matching
  * every other in-tree caller of ResourceManager_GetById (ui/AboutDialog.cpp,
@@ -598,7 +600,7 @@ LRESULT NETMAN_SetSessionInfo(NameEntryPanel* panel, void* hWnd, uint32_t msg,
             } else {
                 config->m_hostFlagAuto = 1;
             }
-            NETMAN_SendPacket(static_cast<uint8_t*>(_g_netman_data));
+            NETMAN_SendPacket(config);
         }
         UI_MainMenu_SetState(g_ui_main, 3);
         return 0;

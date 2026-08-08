@@ -269,7 +269,7 @@ void __fastcall NETMAN_SendPacket(GameConfig* cfg)
 /*                                                                      */
 /* `panel` is a NameEntryPanel* (ui/NameEntryPanel.h), evidenced by five */
 /* independently corroborating facts gathered while fixing this file:   */
-/*   - +0x148 matches NameEntryPanel::inputEnabled, which gates this    */
+/*   - +0x148 matches NameEntryPanel::paintReadyFlag, which gates this    */
 /*     exact ENTER/ESC handling in this function and in                */
 /*     NETMAN_SetSessionInfo (0x441C80), and which NETMAN_JoinSession   */
 /*     (0x441870) clears on (re)open.                                  */
@@ -291,7 +291,7 @@ LRESULT __thiscall NETMAN_DestroySession(void* panelPtr, void* hWnd, uint32_t ms
 {
     NameEntryPanel* panel = static_cast<NameEntryPanel*>(panelPtr);
 
-    if (panel->inputEnabled == 0) {
+    if (panel->paintReadyFlag == 0) {
         return DefWindowProcA(hWnd, msg, wParam, lParam);
     }
 
