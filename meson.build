@@ -77,12 +77,12 @@ endif
 
 host_ui_font_file = ''
 if not meson.is_cross_build()
-  sdl3_dep      = dependency('sdl3')
-  sdl3_net_dep  = dependency('sdl3-net')
-  gst_app_dep   = dependency('gstreamer-app-1.0')
-  gst_video_dep = dependency('gstreamer-video-1.0')
-  freetype_dep  = dependency('freetype2')
-  dbus_dep      = dependency('dbus-1')
+  sdl3_dep      = dependency('sdl3', include_type: 'system')
+  sdl3_net_dep  = dependency('sdl3-net', include_type: 'system')
+  gst_app_dep   = dependency('gstreamer-app-1.0', include_type: 'system')
+  gst_video_dep = dependency('gstreamer-video-1.0', include_type: 'system')
+  freetype_dep  = dependency('freetype2', include_type: 'system')
+  dbus_dep      = dependency('dbus-1', include_type: 'system')
   threads_dep   = dependency('threads')
 
   # GameSetupPanel list text follows ResourceManager_Init (0x44611A): 14px
