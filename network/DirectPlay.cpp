@@ -17,6 +17,7 @@
  */
 
 #include "DirectPlay.h"
+#include "../stubs/ddraw.h"
 #include "../core/Entity.h"
 #include <cstddef>
 #include <cstring>
@@ -39,10 +40,19 @@
  */
 /* IID_IDirectPlay4A: QueryInterface argument to obtain the ANSI IDirectPlay4
  * interface (the symbol name was previously CLSID_DirectPlay — wrong, this
- * value is an IID used for QueryInterface, not a CLSID for object creation) */
-static const uint32_t IID_IDirectPlay4A[4] = {0x0ab1c531, 0x11d14745, 0x0000a1a7, 0xfcab03f8};
+ * value is an IID used for QueryInterface, not a CLSID for object creation).
+ * Declared as a real GUID (not a raw address literal or uint32_t[4]) so
+ * QueryInterface calls reference it by name, the way a human writing
+ * against Microsoft's real dplay.h would have. */
+static const GUID IID_IDirectPlay4A = {0x0ab1c531, 0x4745, 0x11d1,
+                                        {0xa7, 0xa1, 0x00, 0x00, 0xf8, 0x03, 0xab, 0xfc}};
+/* IID_IDirectPlayLobby3A: QueryInterface argument to obtain the ANSI
+ * IDirectPlayLobby3 interface — see the file-header comment above. */
+static const GUID IID_IDirectPlayLobby3A = {0x2db72491, 0x652c, 0x11d1,
+                                             {0xa7, 0xa8, 0x00, 0x00, 0xf8, 0x03, 0xab, 0xfc}};
 /* GUID_SessionDesc: game's guidApplication, stored into DPSESSIONDESC2 */
-static const uint32_t GUID_SessionDesc[4]  = {0xf9cd2546, 0x11d2577f, 0xa0002694, 0x7ada4b24};
+static const GUID GUID_SessionDesc = {0xf9cd2546, 0x577f, 0x11d2,
+                                       {0x94, 0x26, 0x00, 0xa0, 0x24, 0x4b, 0xda, 0x7a}};
 /* DPAID_Modem {F6DCC200-A2FE-11D0-9C4F-00A0C905425E}, byte-verified at
  * 0x4790F8 against the real DirectX 6.0 SDK's dplobby.h ("Chunk is a
  * string containing a modem name registered with TAPI"). Identifies
@@ -128,19 +138,13 @@ extern "C" {
     void* __stdcall GetProcessHeap(void);
     void* __stdcall HeapAlloc(void* hHeap, uint32_t dwFlags, uint32_t dwBytes);
     int32_t __stdcall HeapFree(void* hHeap, uint32_t dwFlags, void* lpMem);
-    int32_t __stdcall PlaySoundA(const char* pszSound, void* hmod, uint32_t fdwSound);
-    int32_t __stdcall GetSystemMetrics(int32_t nIndex);
-    int32_t __stdcall wsprintfA(char* lpOut, const char* lpFmt, ...);
-    int32_t __stdcall LoadStringA(void* hInstance, uint32_t uID, char* lpBuffer, int32_t cchBufferMax);
-    int32_t __stdcall MessageBoxA(void* hWnd, const char* lpText, const char* lpCaption, uint32_t uType);
     int32_t __stdcall DialogBoxParamA(void* hInstance, const char* lpTemplateName,
                                        void* hWndParent, void* lpDialogFunc, int32_t dwInitParam);
-    int32_t __stdcall CreateFileA(const char* lpFileName, uint32_t dwDesiredAccess,
-                                   uint32_t dwShareMode, void* lpSecurityAttributes,
-                                   uint32_t dwCreationDisposition,
-                                   uint32_t dwFlagsAndAttributes, void* hTemplateFile);
-    int32_t __stdcall CloseHandle(void* hObject);
-    void    __stdcall Sleep(uint32_t dwMilliseconds);
+    /* CreateFileA, PlaySoundA, GetSystemMetrics, wsprintfA, LoadStringA,
+     * MessageBoxA, CloseHandle, Sleep: declared in stubs/windows.h (pulled
+     * in transitively via stubs/dplay.h for the GUID/DPID types below),
+     * not redeclared here — their real signatures use HANDLE/BOOL/HMODULE,
+     * not the int32_t/void* placeholders this block used before. */
     void*   __stdcall GlobalAlloc(uint32_t uFlags, uint32_t dwBytes);
     void*   __stdcall GlobalLock(void* hMem);
     int32_t __stdcall GlobalUnlock(void* hMem);
@@ -168,76 +172,39 @@ extern int32_t __stdcall Ordinal_1(void* ptr1, void* ptr2, void* ptr3, void* ptr
 extern int32_t __stdcall Ordinal_4(void* ptr1, void** ptr2, void* ptr3, void* ptr4, void* ptr5);
 
 /* ================================================================== */
-/* COM interface vtable helpers — inline wrappers for TRANSCRIBED     */
-/* (will be replaced by proper IDirectDrawSurface/IDirectPlay classes */
-/*  during the INTEGRATED pass)                                        */
-/* ================================================================== */
-
-/* IDirectDrawSurface4 vtable helpers (surface stored in _g_primary_surface).
- * Confirmed via search_bytes against loco.exe: only the IID_IDirectDraw/
- * IDirectDraw2/IDirectDraw4 and IID_IDirectDrawSurface/Surface2/Surface3/
- * Surface4 GUIDs are present (contiguous table at 0x4785C8-0x478628,
- * matching Microsoft's ddraw.h declaration order exactly); the 7-series
- * GUIDs (IID_IDirectDraw7, IID_IDirectDrawSurface7) are absent. loco.exe
- * was built against a DirectDraw 4-era SDK, not 7 — "Surface7"/"DirectDraw7"
- * in prior comments elsewhere in this codebase was a documentation error. */
-static inline int32_t ddraw_surface_GetDC(void* surface, int32_t* hdc) {
-    /* vtable[17] = GetDC — matches Microsoft's ddraw.h IDirectDrawSurface4
-       declaration order exactly (verified against the genuine DirectX 6.0
-       SDK ddraw.h — see NOTE-directx-sdk.md) */
-    return ((int32_t (*)(void*, int32_t*))(*(void***)surface)[17])(surface, hdc);
-}
-static inline void ddraw_surface_ReleaseDC(void* surface, void* hdc) {
-    /* vtable[26] = ReleaseDC — verified, see above */
-    ((void (*)(void*, void*))(*(void***)surface)[26])(surface, hdc);
-}
-
-/* ================================================================== */
-/* IDirectPlay4A vtable helpers (dplay_interface at session+0x1588).   */
-/*                                                                      */
-/* All offsets below are now cross-checked, slot-for-slot, against the */
-/* genuine DirectX 6.0 SDK's dplay.h (Aug 1998; see NOTE-directx-sdk.md)*/
-/* and confirmed via disassembly (not decompiler pseudocode, which was */
-/* independently shown to fabricate a stale-register argument on one   */
-/* call site — see DirectPlay_FindModemNameCallback's comment). Real   */
-/* IDirectPlay4/4A slot order (0=QueryInterface,1=AddRef,2=Release):   */
-/* 3=AddPlayerToGroup 4=Close 5=CreateGroup 6=CreatePlayer               */
+/* COM interfaces are called through their real typed virtual methods */
+/* (IDirectDrawSurface4/IDirectPlay4A/IDirectPlayLobby3A, declared as a */
+/* typed adapter in stubs/ddraw.h/dplay.h whose method order/signatures */
+/* are verified against the genuine DirectX 6.0 SDK — see the header    */
+/* comment there for why the real mingw-w64 headers aren't used         */
+/* directly). No raw vtable-offset arithmetic anywhere in this file:    */
+/* every interface pointer below is properly typed, so                  */
+/* e.g. `dplay->GetPlayerAddress(...)` resolves through the compiler-  */
+/* generated vtable call exactly as it would if loco.exe had been      */
+/* written against Microsoft's real dplay.h directly (which it was).   */
+/* Real IDirectPlay4/4A slot order (0=QueryInterface,1=AddRef,          */
+/* 2=Release): 3=AddPlayerToGroup 4=Close 5=CreateGroup 6=CreatePlayer  */
 /* 7=DeletePlayerFromGroup 8=DestroyGroup 9=DestroyPlayer               */
 /* 10=EnumGroupPlayers 11=EnumGroups 12=EnumPlayers 13=EnumSessions     */
 /* 14=GetCaps 15=GetGroupData 16=GetGroupName 17=GetMessageCount        */
 /* 18=GetPlayerAddress 19=GetPlayerCaps 20=GetPlayerData 21=GetPlayerName*/
 /* 22=GetSessionDesc 23=Initialize 24=Open 25=Receive 26=Send ...       */
-/* 51=CancelMessage.                                                    */
+/* 51=CancelMessage — cross-checked against the genuine DirectX 6.0 SDK */
+/* (see NOTE-directx-sdk.md) and confirmed via disassembly (not         */
+/* decompiler pseudocode, which was independently shown to fabricate a  */
+/* stale-register argument on one call site — see                      */
+/* DirectPlay_FindModemNameCallback's comment).                        */
 /*                                                                       */
-/* Every helper's offset and name now match; three of the higher-level */
-/* callers (DirectPlay_FindLocalModemName, DirectPlay_OpenSession) were */
-/* also renamed to reflect what they actually invoke. One caller,       */
 /* DirectPlay_SetSessionDesc (0x45F090, calls the real EnumSessions     */
-/* below with a genuine callback at 0x45F2B0 — not "Open"/CreateSession */
-/* as its old name claimed), is NOT yet renamed: EnumSessions's         */
-/* callback body is substantial, previously entirely unexamined code    */
-/* (builds a session-list linked list conditionally on connection      */
-/* type) and needs its own dedicated decompilation pass before this    */
-/* function's true higher-level purpose (join-precheck? host-precheck?)*/
-/* can be named with confidence — see PROGRESS.md.                      */
+/* below with a genuine callback at 0x45F2B0) is NOT yet renamed:       */
+/* EnumSessions's callback body is substantial, previously entirely     */
+/* unexamined code (builds a session-list linked list conditionally on */
+/* connection type) and needs its own dedicated decompilation pass      */
+/* before this function's true higher-level purpose (join-precheck?    */
+/* host-precheck?) can be named with confidence — see PROGRESS.md.      */
 /* ================================================================== */
-static inline int32_t dplay_Release(void* iface) {
-    /* vtable[2] = Release */
-    return ((int32_t (*)(void*))(*(void***)iface)[2])(iface);
-}
-static inline int32_t dplay_Close(void* iface) {
-    /* vtable[4] = Close */
-    return ((int32_t (*)(void*))(*(void***)iface)[0x10 / 4])(iface);
-}
-static inline int32_t dplay_CreatePlayer(void* iface, void* pid, void* pidSize,
-                                          void* friendlyName, void* formalName,
-                                          void* data, void* dataSize) {
-    /* vtable[6] = CreatePlayer */
-    return ((int32_t (*)(void*, void*, void*, void*, void*, void*, void*))
-            (*(void***)iface)[0x18 / 4])
-            (iface, pid, pidSize, friendlyName, formalName, data, dataSize);
-}
-/* DPENUMSESSIONSCALLBACK2 — real callback type for dplay_EnumSessions below.
+
+/* LPDPENUMSESSIONSCALLBACK2 — real callback type for EnumSessions.
  * Address: 0x45F2B0, __stdcall (RET 0x10 = 4 params, confirmed via
  * decode_instructions). Builds a session-list entry (operator_new(0xC),
  * appended to the linked list at session+0xD64) when dwFlags's low bit
@@ -247,102 +214,10 @@ static inline int32_t dplay_CreatePlayer(void* iface, void* pid, void* pidSize,
  * pointer instead, a separate bug fixed below) — so the body is left as
  * a documented deferred stub rather than guessed at partial disassembly.
  * TODO: decompile 0x45F2B0 fully (tracked in PROGRESS.md). */
-uint32_t __stdcall DirectPlay_EnumSessionsCallback(const void* lpThisSD, uint32_t* lpdwTimeOut,
-                                                    uint32_t dwFlags, void* lpContext) {
+BOOL STDMETHODCALLTYPE DirectPlay_EnumSessionsCallback(LPCDPSESSIONDESC2 lpThisSD, LPDWORD lpdwTimeOut,
+                                                        DWORD dwFlags, LPVOID lpContext) {
     (void)lpThisSD; (void)lpdwTimeOut; (void)dwFlags; (void)lpContext;
     return 1;  /* stub — TODO: decompile 0x45F2B0; continue enumeration */
-}
-
-static inline int32_t dplay_EnumSessions(void* iface, void* desc, uint32_t timeout,
-                                          void* callback, void* context, uint32_t flags) {
-    /* vtable[13] = EnumSessions (real offset 0x34; disassembly of
-       DirectPlay_SetSessionDesc/0x45F210-0x45F227 confirms CALL [EDX+0x34]
-       with 5-push arity (desc,timeout,callback@0x45F2B0,context,flags) —
-       the previous name "dplay_Open" and its 3rd argument
-       (&GUID_SessionDesc, a GUID pointer where EnumSessions expects a
-       callback function pointer) were both wrong; real Open is at 0x60,
-       see below) */
-    return ((int32_t (*)(void*, void*, uint32_t, void*, void*, uint32_t))
-            (*(void***)iface)[0x34 / 4])
-            (iface, desc, timeout, callback, context, flags);
-}
-static inline int32_t dplay_GetCaps(void* iface, void* caps, void* capsSize) {
-    /* vtable[14] = GetCaps (real offset 0x38; disassembly of
-       DirectPlay_ConnectToSession/0x45EA84-0x45EA90 confirms CALL [ECX+0x38]
-       with the 2-push arity of GetCaps(LPDPCAPS,DWORD) — the previous 0x3C
-       was a transcription slip, off by one real slot from GetGroupData) */
-    return ((int32_t (*)(void*, void*, void*))(*(void***)iface)[0x38 / 4])
-            (iface, caps, capsSize);
-}
-static inline int32_t dplay_GetMessageCount(void* iface, uint32_t pid, int32_t* count) {
-    /* vtable[17] = GetMessageCount (real offset 0x44). Previously
-       mislabeled "dplay_EnumSessions" at this same (wrong) offset —
-       real EnumSessions is 0x34, see above. Dead code either way: zero
-       callers before or after this rename. */
-    return ((int32_t (*)(void*, uint32_t, int32_t*))
-            (*(void***)iface)[0x44 / 4])
-            (iface, pid, count);
-}
-static inline int32_t dplay_GetPlayerAddress(void* iface, uint32_t idPlayer,
-                                              void* lpAddress, int32_t* lpdwAddressSize) {
-    /* vtable[18] = GetPlayerAddress (real offset 0x48; disassembly of
-       DirectPlay_FindLocalModemName/0x45EEC0 confirms CALL [EDX+0x48]
-       with the 3-push arity of GetPlayerAddress(DPID,LPVOID,LPDWORD) —
-       the previous name "dplay_GetSessionDesc" was wrong; real
-       GetSessionDesc is at 0x58, unused by any current call site) */
-    return ((int32_t (*)(void*, uint32_t, void*, int32_t*))
-            (*(void***)iface)[0x48 / 4])
-            (iface, idPlayer, lpAddress, lpdwAddressSize);
-}
-static inline int32_t dplay_Open(void* iface, void* desc, uint32_t flags) {
-    /* vtable[24] = Open (real offset 0x60; disassembly of
-       DirectPlay_OpenSession/0x45FE23-0x45FE32 confirms CALL [EDX+0x60]
-       with the 2-push arity of Open(LPDPSESSIONDESC2,DWORD) — the
-       previous name "dplay_EnumPlayers" was wrong; real EnumPlayers is
-       at 0x30, unused by any current call site) */
-    return ((int32_t (*)(void*, void*, uint32_t))
-            (*(void***)iface)[0x60 / 4])
-            (iface, desc, flags);
-}
-static inline void dplay_CancelMessage(void* iface, uint32_t dwMsgID, uint32_t dwFlags) {
-    /* vtable[51] = CancelMessage(DWORD,DWORD) (real offset 0xCC). Previously
-       named "dplay_ClosePlayer" under an assumed-different Close — real
-       Close is slot 4/0x10, already correctly used by dplay_Close above.
-       Arity matches this call's (0,0) args exactly (dwMsgID=0/"all",
-       dwFlags=0); the calling function's higher-level purpose in using
-       CancelMessage here is otherwise unexamined. */
-    ((void (*)(void*, uint32_t, uint32_t))
-     (*(void***)iface)[0xCC / 4])
-     (iface, dwMsgID, dwFlags);
-}
-
-/* Generic COM QueryInterface helper */
-static inline int32_t com_QueryInterface(void* iface, void* iid, void** ppv) {
-    /* vtable[0] = QueryInterface */
-    return ((int32_t (*)(void*, void*, void**))(*(void***)iface)[0])(iface, iid, ppv);
-}
-
-/* IDirectPlayLobby3A vtable helpers (dplay_lobby3a at session+0x15E0).
- * "IDirectPlayAddress"/"IDirectPlayAddress2" (the prior names for this
- * section and these functions) do not exist in classic DirectPlay — the
- * GUID queried for this interface (0x479048) is byte-verified as
- * IID_IDirectPlayLobby3A. vtable[5]/+0x14 is IDirectPlayLobby3A::EnumAddress
- * (LPDPENUMADDRESSCALLBACK,LPCVOID,DWORD,LPVOID), confirmed via disassembly
- * of DirectPlay_FindLocalModemName/0x45EEC0 (4-push arity: callback, address
- * buffer, size, NULL context). The callback passed is
- * DirectPlay_FindModemNameCallback (0x45FBD0), re-derived against
- * EnumAddress's real (REFGUID,DWORD,LPCVOID,LPVOID) callback type — see
- * that function's header comment. */
-static inline int32_t dplobby3a_Release(void* iface) {
-    return ((int32_t (*)(void*))(*(void***)iface)[2])(iface);
-}
-static inline int32_t dplobby3a_EnumAddress(void* iface, void* callback,
-                                             void* address, int32_t addressSize,
-                                             uint32_t flags) {
-    /* vtable[5] = IDirectPlayLobby3A::EnumAddress */
-    return ((int32_t (*)(void*, void*, void*, int32_t, uint32_t))
-            (*(void***)iface)[0x14 / 4])
-            (iface, callback, address, addressSize, flags);
 }
 
 /* ================================================================== */
@@ -385,9 +260,15 @@ void DirectPlay_Init(void)
     /* Step 1: Play startup sound (null = just stop/init) */
     PlaySoundA(NULL, NULL, 0);
 
-    /* Step 2: Get primary surface DC, fill with white, release DC */
-    int32_t surface_hdc = 0;
-    ddraw_surface_GetDC(_g_primary_surface, &surface_hdc);
+    /* Step 2: Get primary surface DC, fill with white, release DC.
+     * _g_primary_surface is declared void* for this project's established
+     * cross-file convention (see shared/types.h), but its real type is
+     * IDirectDrawSurface4* (Cursor_internal.h's own comment agrees) —
+     * typed here so GetDC/ReleaseDC go through real virtual methods,
+     * not manual vtable-offset arithmetic. */
+    IDirectDrawSurface4* primarySurface = (IDirectDrawSurface4*)_g_primary_surface;
+    void* surface_hdc = nullptr;
+    primarySurface->GetDC(&surface_hdc);
 
     void* hBrush = GetStockObject(0); /* WHITE_BRUSH (stock object index 0) */
     // NOTE: binary passes &g_client_width as RECT* — these globals happen
@@ -398,8 +279,8 @@ void DirectPlay_Init(void)
     fillRect.top    = 0;
     fillRect.right  = g_client_width;
     fillRect.bottom = g_client_height;
-    FillRect((void*)(intptr_t)surface_hdc, &fillRect, hBrush);
-    ddraw_surface_ReleaseDC(_g_primary_surface, (void*)(intptr_t)surface_hdc);
+    FillRect(surface_hdc, &fillRect, hBrush);
+    primarySurface->ReleaseDC(surface_hdc);
 
     /* Step 3: Create shadow GameObject at 0x4FD398 (res 0x402) */
     void* shadow_mem = operator_new(0x88);
@@ -487,27 +368,26 @@ void DirectPlay_CreateAddress(void* self, uint32_t hInstance, uint32_t hWnd)
     *(uint32_t*)(s + 0xD6C) = 0;       /* connection_list */
     *(uint32_t*)(s + 0xD5C) = 10;      /* max_players = 10 */
 
-    /* Create DirectPlayAddress */
-    uint32_t* address_ptr = (uint32_t*)(s + 0x15DC);
-    *address_ptr = 0;
-    *(uint32_t*)(s + 0x15E0) = 0;      /* dplay_address2 */
+    /* Obtain the transient lobby object (Ordinal_4), then QueryInterface it
+     * up to IDirectPlayLobby3A — see the file-header comment on why this
+     * is not "IDirectPlayAddress" (that interface doesn't exist). */
+    *(void**)(s + 0x15DC) = nullptr;
+    *(void**)(s + 0x15E0) = nullptr;   /* dplay_lobby3a */
 
     int32_t hr = Ordinal_4(0, (void**)(s + 0x15DC), NULL, NULL, NULL);
     *(uint32_t*)(s + 0xD48) = hr;
 
-    if (hr == 0 && *(void**)(s + 0x15DC) != NULL) {
-        /* Query for IDirectPlayAddress2 — IID @ 0x479048 */
-        hr = com_QueryInterface(*(void**)(s + 0x15DC),
-                                 (void*)0x479048,
-                                 (void**)(s + 0x15E0));
+    IDirectPlayLobby3A* lobbyObj = *(IDirectPlayLobby3A**)(s + 0x15DC);
+    if (hr == 0 && lobbyObj != NULL) {
+        hr = lobbyObj->QueryInterface(IID_IDirectPlayLobby3A, (void**)(s + 0x15E0));
         *(uint32_t*)(s + 0xD48) = hr;
     }
 
-    /* Release the initial DirectPlayAddress object */
-    if (*(void**)(s + 0x15DC) != NULL) {
-        dplobby3a_Release(*(void**)(s + 0x15DC));
+    /* Release the initial lobby object */
+    if (lobbyObj != NULL) {
+        lobbyObj->Release();
     }
-    *(uint32_t*)(s + 0x15DC) = 0;
+    *(void**)(s + 0x15DC) = nullptr;
 }
 
 /* ================================================================== */
@@ -523,10 +403,11 @@ void DirectPlay_DestroyPeer(int32_t session)
     /* Close session */
     DirectPlay_Close(session);
 
-    /* Release dplay_address2 */
-    if (*(void**)(s + 0x15E0) != NULL) {
-        dplobby3a_Release(*(void**)(s + 0x15E0));
-        *(uint32_t*)(s + 0x15E0) = 0;
+    /* Release dplay_lobby3a */
+    IDirectPlayLobby3A* lobby3a = *(IDirectPlayLobby3A**)(s + 0x15E0);
+    if (lobby3a != NULL) {
+        lobby3a->Release();
+        *(void**)(s + 0x15E0) = nullptr;
     }
 
     /* Free session data */
@@ -682,10 +563,16 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
         /* Join session via DirectPlay CreatePlayer */
         if (*(void**)(s + 0x1588) != NULL) {
             int32_t desc_size = 0x10;
-            int32_t hr2 = dplay_CreatePlayer(*(void**)(s + 0x1588),
-                                              s + 0x924, &desc_size,
-                                              (void*)(uintptr_t)&g_empty_string,
-                                              name_dst, NULL, NULL);
+            /* Cast preserves the exact pre-existing argument values;
+             * whether desc_size/&g_empty_string genuinely match
+             * CreatePlayer's real (LPDPNAME,HANDLE,LPVOID) parameter
+             * types is a pre-existing question unrelated to this pass
+             * (which only replaces manual vtable dispatch with the real
+             * typed virtual call). */
+            IDirectPlay4A* dplayIface = *(IDirectPlay4A**)(s + 0x1588);
+            int32_t hr2 = dplayIface->CreatePlayer((DPID*)(s + 0x924), (LPDPNAME)&desc_size,
+                                                    (HANDLE)(uintptr_t)&g_empty_string,
+                                                    name_dst, 0, 0);
             *(int32_t*)(s + 0xD48) = hr2;
 
             if (hr2 == 0) {
@@ -718,10 +605,10 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
             /* Enumerate succeeded */
             if (*(void**)(s + 0x1588) != NULL) {
                 int32_t desc_size = 0x10;
-                int32_t hr2 = dplay_CreatePlayer(*(void**)(s + 0x1588),
-                                                  s + 0x924, &desc_size,
-                                                  (void*)(uintptr_t)&g_empty_string,
-                                                  name_dst, NULL, NULL);
+                IDirectPlay4A* dplayIface = *(IDirectPlay4A**)(s + 0x1588);
+                int32_t hr2 = dplayIface->CreatePlayer((DPID*)(s + 0x924), (LPDPNAME)&desc_size,
+                                                        (HANDLE)(uintptr_t)&g_empty_string,
+                                                        name_dst, 0, 0);
                 *(int32_t*)(s + 0xD48) = hr2;
 
                 if (hr2 == 0) {
@@ -752,14 +639,13 @@ uint8_t DirectPlay_ConnectToSession(void* self, const char* playerName,
         }
     }
 
-    /* On success: initialize address struct (0x28 bytes) */
+    /* On success: query the real DPCAPS at +0x15E4 (0x28 bytes) */
     if (result != 0 && *(void**)(s + 0x1588) != NULL) {
-        uint32_t* addr_buf = (uint32_t*)(s + 0x15E4);
-        for (int i = 0; i < 10; i++) {
-            addr_buf[i] = 0;
-        }
-        addr_buf[0] = 0x28;  /* dwSize */
-        dplay_GetCaps(*(void**)(s + 0x1588), addr_buf, 0);
+        DPCAPS* caps = (DPCAPS*)(s + 0x15E4);
+        memset(caps, 0, sizeof(DPCAPS));
+        caps->dwSize = sizeof(DPCAPS);
+        IDirectPlay4A* dplayIface = *(IDirectPlay4A**)(s + 0x1588);
+        dplayIface->GetCaps(caps, 0);
     }
 
     return result;
@@ -782,7 +668,7 @@ int32_t DirectPlay_EnumConnections(int32_t session)
         return *(int32_t*)(s + 0xD6C);
     }
 
-    void** dplay_ptr = (void**)(s + 0x1588);
+    IDirectPlay4A** dplay_ptr = (IDirectPlay4A**)(s + 0x1588);
     if (*dplay_ptr != NULL) {
         return 0;  /* already connected */
     }
@@ -799,25 +685,23 @@ int32_t DirectPlay_EnumConnections(int32_t session)
     }
 
     /* Try provider 1 (TCP/IP typically) via Ordinal_1 */
-    void* dplay_dll[2];
+    IDirectPlay4A* dplay_dll[2];
     int32_t hr = Ordinal_1(nullptr, nullptr, nullptr, nullptr);
     *(int32_t*)(s + 0xD48) = hr;
 
     if (hr == 0) {
         /* Query for IDirectPlay4 interface via IID_IDirectPlay4A */
-        hr = com_QueryInterface((void*)dplay_dll[0],
-                                 (void*)(uintptr_t)&IID_IDirectPlay4A,
-                                 dplay_ptr);
+        hr = dplay_dll[0]->QueryInterface(IID_IDirectPlay4A, (void**)dplay_ptr);
         *(int32_t*)(s + 0xD48) = hr;
 
         if (hr == 0) {
             /* Success — release DLL handle, store connection */
-            dplay_Release((void*)dplay_dll[0]);
-            dplay_dll[0] = 0;
+            dplay_dll[0]->Release();
+            dplay_dll[0] = nullptr;
 
             /* Release interface */
-            dplay_Release(*dplay_ptr);
-            *dplay_ptr = 0;
+            (*dplay_ptr)->Release();
+            *dplay_ptr = nullptr;
 
             uint32_t* entry = (uint32_t*)operator_new(8);
             entry[0] = *(uint32_t*)(s + 0xD6C);
@@ -826,8 +710,8 @@ int32_t DirectPlay_EnumConnections(int32_t session)
             goto check_provider_2;
         }
         /* Release DLL handle */
-        dplay_Release((void*)dplay_dll[0]);
-        dplay_dll[0] = 0;
+        dplay_dll[0]->Release();
+        dplay_dll[0] = nullptr;
     }
 
 check_provider_2:
@@ -836,24 +720,22 @@ check_provider_2:
     *(int32_t*)(s + 0xD48) = hr;
 
     if (hr == 0) {
-        hr = com_QueryInterface((void*)dplay_dll[0],
-                                 (void*)(uintptr_t)&IID_IDirectPlay4A,
-                                 dplay_ptr);
+        hr = dplay_dll[0]->QueryInterface(IID_IDirectPlay4A, (void**)dplay_ptr);
         *(int32_t*)(s + 0xD48) = hr;
 
         if (hr == 0) {
-            dplay_Release((void*)dplay_dll[0]);
-            dplay_dll[0] = 0;
-            dplay_Release(*dplay_ptr);
-            *dplay_ptr = 0;
+            dplay_dll[0]->Release();
+            dplay_dll[0] = nullptr;
+            (*dplay_ptr)->Release();
+            *dplay_ptr = nullptr;
 
             uint32_t* entry = (uint32_t*)operator_new(8);
             entry[0] = *(uint32_t*)(s + 0xD6C);
             entry[1] = 2;
             *(uint32_t**)(s + 0xD6C) = entry;
         } else {
-            dplay_Release((void*)dplay_dll[0]);
-            dplay_dll[0] = 0;
+            dplay_dll[0]->Release();
+            dplay_dll[0] = nullptr;
         }
     }
 
@@ -864,21 +746,19 @@ check_provider_2:
     *(int32_t*)(s + 0xD48) = hr;
 
     if (hr == 0) {
-        hr = com_QueryInterface((void*)dplay_dll[0],
-                                 (void*)(uintptr_t)&IID_IDirectPlay4A,
-                                 dplay_ptr);
+        hr = dplay_dll[0]->QueryInterface(IID_IDirectPlay4A, (void**)dplay_ptr);
         *(int32_t*)(s + 0xD48) = hr;
 
         if (hr != 0) {
-            dplay_Release((void*)dplay_dll[0]);
-            dplay_dll[0] = 0;
+            dplay_dll[0]->Release();
+            dplay_dll[0] = nullptr;
             return *(int32_t*)(s + 0xD6C);
         }
 
-        dplay_Release((void*)dplay_dll[0]);
-        dplay_dll[0] = 0;
-        dplay_Release(*dplay_ptr);
-        *dplay_ptr = 0;
+        dplay_dll[0]->Release();
+        dplay_dll[0] = nullptr;
+        (*dplay_ptr)->Release();
+        *dplay_ptr = nullptr;
 
         uint32_t* entry = (uint32_t*)operator_new(8);
         entry[0] = *(uint32_t*)(s + 0xD6C);
@@ -904,12 +784,12 @@ uint32_t DirectPlay_GetConnectionCaps(uint8_t* devicePath)
     // Copy dword from 0x481214 ("COMn" string fragment) into path buffer
     *(uint32_t*)&local_path[1] = *(uint32_t*)g_device_path_null;
 
-    int32_t hFile = CreateFileA((const char*)local_path, 0xC0000000, 0,
-                                 NULL, 3, 0, NULL);
-    if (hFile == -1) {
+    HANDLE hFile = CreateFileA((const char*)local_path, 0xC0000000, 0,
+                                NULL, 3, 0, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
         return 0xFFFFFF00;
     }
-    CloseHandle((void*)(uintptr_t)hFile);
+    CloseHandle(hFile);
     return 0x0100FF00;  /* success with type byte */
 }
 
@@ -931,36 +811,34 @@ bool DirectPlay_FindLocalModemName(int32_t session)
     }
 
     /* Create DirectPlay via Ordinal_1 */
-    void** dplay_dll = (void**)(s + 0x1584);
+    IDirectPlay4A** dplay_dll = (IDirectPlay4A**)(s + 0x1584);
     int32_t hr = Ordinal_1(nullptr, nullptr, nullptr, nullptr);
     *(int32_t*)(s + 0xD48) = hr;
     if (hr != 0) return false;
 
     /* Query IDirectPlay4 interface via IID_IDirectPlay4A */
-    hr = com_QueryInterface((void*)dplay_dll[0],
-                             (void*)(uintptr_t)&IID_IDirectPlay4A,
-                             (void**)(s + 0x1588));
+    hr = dplay_dll[0]->QueryInterface(IID_IDirectPlay4A, (void**)(s + 0x1588));
     *(int32_t*)(s + 0xD48) = hr;
     if (hr != 0) {
-        dplay_Release((void*)dplay_dll[0]);
-        dplay_dll[0] = 0;
+        dplay_dll[0]->Release();
+        dplay_dll[0] = nullptr;
         return false;
     }
 
     /* Release DLL handle */
-    dplay_Release((void*)dplay_dll[0]);
-    dplay_dll[0] = 0;
+    dplay_dll[0]->Release();
+    dplay_dll[0] = nullptr;
 
-    /* Query session desc size */
-    void* dplay = *(void**)(s + 0x1588);
-    int32_t desc_size = 0;
-    dplay_GetPlayerAddress(dplay, 0, NULL, &desc_size);
+    /* Query the local player's own address */
+    IDirectPlay4A* dplay = *(IDirectPlay4A**)(s + 0x1588);
+    DWORD desc_size = 0;
+    dplay->GetPlayerAddress(0, NULL, &desc_size);
 
-    /* Allocate + lock global memory for session desc */
-    void* hMem = GlobalAlloc(0x42, (uint32_t)desc_size);
+    /* Allocate + lock global memory for the address blob */
+    void* hMem = GlobalAlloc(0x42, desc_size);
     void* pMem = GlobalLock(hMem);
 
-    hr = dplay_GetPlayerAddress(dplay, 0, pMem, &desc_size);
+    hr = dplay->GetPlayerAddress(0, pMem, &desc_size);
     *(int32_t*)(s + 0xD48) = hr;
 
     if (hr != 0) {
@@ -970,16 +848,15 @@ bool DirectPlay_FindLocalModemName(int32_t session)
             hglb = GlobalHandle(pMem);
             GlobalFree(hglb);
         }
-        dplay_Release(dplay);
+        dplay->Release();
         *(void**)(s + 0x1588) = NULL;
         return false;
     }
 
-    /* Create player enumeration */
+    /* Walk the address for the DPAID_Modem chunk */
     s[0xD70] = 0;  /* Clear player name buffer */
-    hr = dplobby3a_EnumAddress(*(void**)(s + 0x15E0),
-                              (void*)&DirectPlay_FindModemNameCallback,
-                              pMem, desc_size, 0);
+    IDirectPlayLobby3A* lobby3a = *(IDirectPlayLobby3A**)(s + 0x15E0);
+    hr = lobby3a->EnumAddress(&DirectPlay_FindModemNameCallback, pMem, desc_size, NULL);
     *(int32_t*)(s + 0xD48) = hr;
 
     /* Cleanup */
@@ -989,10 +866,10 @@ bool DirectPlay_FindLocalModemName(int32_t session)
         hglb = GlobalHandle(pMem);
         GlobalFree(hglb);
     }
-    dplay_Release(dplay);
+    dplay->Release();
     *(void**)(s + 0x1588) = NULL;
 
-    return s[0xD70] != 0;  /* true if a player was found */
+    return s[0xD70] != 0;  /* true if a modem name was found */
 }
 
 /* ================================================================== */
@@ -1056,27 +933,25 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password)
         return 0;
     }
 
-    /* Create session desc packet at +0x158C (0x50 bytes) */
-    uint32_t* desc = (uint32_t*)(s + 0x158C);
-    for (int i = 0; i < 0x14; i++) {
-        desc[i] = 0;
-    }
-    desc[0] = 0x50;                         /* dwSize */
-    desc[6] = *(uint32_t*)0x479158;         /* guidApplication[0] */
-    desc[7] = *(uint32_t*)0x47915C;         /* guidApplication[1] */
-    desc[8] = *(uint32_t*)0x479160;         /* guidApplication[2] */
-    desc[9] = *(uint32_t*)0x479164;         /* guidApplication[3] */
+    /* Build a real DPSESSIONDESC2 at +0x158C (0x50 bytes) — see
+     * stubs/dplay.h for the layout; loco.exe's own dword-indexed writes
+     * (fixed via a raw pointer cast rather than field access in earlier
+     * revisions of this file) matched this real struct exactly. */
+    LPDPSESSIONDESC2 desc = (LPDPSESSIONDESC2)(s + 0x158C);
+    memset(desc, 0, sizeof(DPSESSIONDESC2));
+    desc->dwSize          = sizeof(DPSESSIONDESC2);
+    desc->guidApplication = GUID_SessionDesc;
 
     if (*(char*)(s + 0x498) != 0) {
-        *(uint32_t*)(s + 0x15C0) = (uint32_t)(s + 0x498);  /* lpszPassword */
+        desc->lpszPasswordA = (LPSTR)(s + 0x498);
     }
 
     /* Enumerate matching sessions via DirectPlay (NOT "Open"/CreateSession —
-     * see dplay_EnumSessions's comment above; the callback's own body at
+     * see the vtable-slot comment above; the callback's own body at
      * 0x45F2B0 is still a deferred stub) */
-    void* dplay = *(void**)(s + 0x1588);
-    int32_t hr2 = dplay_EnumSessions(dplay, desc, 0, (void*)&DirectPlay_EnumSessionsCallback,
-                                      (void*)(uintptr_t)*(uint32_t*)(s + 0x938), 0x81);
+    IDirectPlay4A* dplay = *(IDirectPlay4A**)(s + 0x1588);
+    int32_t hr2 = dplay->EnumSessions(desc, 0, &DirectPlay_EnumSessionsCallback,
+                                       (LPVOID)(uintptr_t)*(uint32_t*)(s + 0x938), 0x81);
     *(int32_t*)(s + 0xD48) = hr2;
 
     /* Retry on DPERR_PENDING */
@@ -1089,8 +964,8 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password)
         }
         Sleep(1);
 
-        hr2 = dplay_EnumSessions(dplay, desc, 0, (void*)&DirectPlay_EnumSessionsCallback,
-                                  (void*)(uintptr_t)*(uint32_t*)(s + 0x938), 0x81);
+        hr2 = dplay->EnumSessions(desc, 0, &DirectPlay_EnumSessionsCallback,
+                                   (LPVOID)(uintptr_t)*(uint32_t*)(s + 0x938), 0x81);
         *(int32_t*)(s + 0xD48) = hr2;
     }
 
@@ -1166,12 +1041,12 @@ uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_
 /* return-value comments backwards, though the numeric values          */
 /* themselves were already correct).                                   */
 /* ================================================================== */
-uint32_t __stdcall DirectPlay_FindModemNameCallback(const GUID* guidDataType, uint32_t dwDataSize,
-                                                     const void* lpData, void* lpContext)
+BOOL STDMETHODCALLTYPE DirectPlay_FindModemNameCallback(const GUID& guidDataType, DWORD dwDataSize,
+                                                         LPCVOID lpData, LPVOID lpContext)
 {
     (void)dwDataSize;
     (void)lpContext;
-    if (memcmp(guidDataType, &DPAID_Modem, sizeof(GUID)) != 0) {
+    if (memcmp(&guidDataType, &DPAID_Modem, sizeof(GUID)) != 0) {
         return 1;  /* not the modem-name chunk: continue enumeration */
     }
     const char* modemName = (const char*)lpData;
@@ -1212,16 +1087,17 @@ void DirectPlay_Close(int32_t session)
 
     /* Close player connection and release DirectPlay interface */
     if (*(void**)(s + 0x1588) != NULL) {
-        void* dplay = *(void**)(s + 0x1588);
+        IDirectPlay4A* dplay = *(IDirectPlay4A**)(s + 0x1588);
 
-        /* Close player connection */
-        dplay_CancelMessage(dplay, 0, 0);
+        /* Cancel outstanding messages (not "close player" — see
+         * dplay->CancelMessage's declaration comment) */
+        dplay->CancelMessage(0, 0);
 
         /* Close session */
-        dplay_Close(dplay);
+        dplay->Close();
 
         /* Release interface */
-        dplay_Release(dplay);
+        dplay->Release();
 
         *(void**)(s + 0x1588) = NULL;
     }
@@ -1284,36 +1160,31 @@ uint32_t DirectPlay_OpenSession(void* self)
         return 0;
     }
 
-    /* Build session desc structure at +0x158C */
-    uint32_t* desc = (uint32_t*)(s + 0x158C);
-    for (int i = 0; i < 0x14; i++) {
-        desc[i] = 0;
-    }
-    desc[0] = 0x50;
+    /* Build the real DPSESSIONDESC2 at +0x158C */
+    LPDPSESSIONDESC2 desc = (LPDPSESSIONDESC2)(s + 0x158C);
+    memset(desc, 0, sizeof(DPSESSIONDESC2));
+    desc->dwSize = sizeof(DPSESSIONDESC2);
 
     uint8_t is_host = s[2];
-    desc[1] = (is_host ? 0 : 4) + 0xA040;  /* dwFlags */
+    desc->dwFlags = (is_host ? 0 : 4) + 0xA040;
 
-    desc[6] = *(uint32_t*)0x479158;   /* guid fields */
-    desc[7] = *(uint32_t*)0x47915C;
-    desc[8] = *(uint32_t*)0x479160;
-    desc[9] = *(uint32_t*)0x479164;
-    desc[10] = *(uint32_t*)(s + 0x920);  /* dwMaxPlayers */
+    desc->guidApplication = GUID_SessionDesc;
+    desc->dwMaxPlayers    = *(uint32_t*)(s + 0x920);
 
-    desc[12] = (uint32_t)(s + 0x18);    /* lpszSessionName */
+    desc->lpszSessionNameA = (LPSTR)(s + 0x18);
     if (*(char*)(s + 0x498) != '\0') {
-        desc[13] = (uint32_t)(s + 0x498);  /* lpszPassword */
+        desc->lpszPasswordA = (LPSTR)(s + 0x498);
     }
 
-    /* Call EnumPlayers */
-    void* dplay = *(void**)(s + 0x1588);
-    int32_t hr = dplay_Open(dplay, desc, 0x82);
+    /* Open (host or join) the session */
+    IDirectPlay4A* dplay = *(IDirectPlay4A**)(s + 0x1588);
+    int32_t hr = dplay->Open(desc, 0x82);
     *(int32_t*)(s + 0xD48) = hr;
 
     /* Retry on pending */
     while (hr == -0x7788fea2 && s[1] == 0) {
         Sleep(1);
-        hr = dplay_Open(dplay, desc, 0x82);
+        hr = dplay->Open(desc, 0x82);
         *(int32_t*)(s + 0xD48) = hr;
     }
 

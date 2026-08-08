@@ -12,22 +12,11 @@ extern "C" {
 #endif
 
 /* ================================================================== */
-/* DirectPlay interface stubs                                          */
-/* ================================================================== */
-
-typedef struct IDirectPlay4 {
-    void* vtable;
-} IDirectPlay4;
-
-typedef struct IDirectPlayAddress {
-    void* vtable;
-} IDirectPlayAddress;
-
-/* ================================================================== */
 /* DPID — DirectPlay player ID                                        */
 /* ================================================================== */
 
 typedef DWORD DPID;
+typedef DWORD* LPDWORD;
 
 /* ================================================================== */
 /* DPSESSIONDESC2                                                     */
@@ -61,6 +50,7 @@ typedef struct _DPSESSIONDESC2 {
     DWORD  dwUser3;
     DWORD  dwUser4;
 } DPSESSIONDESC2, *LPDPSESSIONDESC2;
+typedef const DPSESSIONDESC2* LPCDPSESSIONDESC2;
 
 /* ================================================================== */
 /* DPNAME                                                             */
@@ -220,5 +210,63 @@ typedef struct _DPCAPS {
 #ifdef __cplusplus
 }
 #endif
+
+/* ================================================================== */
+/* IDirectPlay4A / IDirectPlayLobby3A — COM interfaces                 */
+/*                                                                     */
+/* Never extern "C": virtual dispatch is a C++ linkage feature (see    */
+/* CLAUDE.md's anti-pattern rule on this). Real signatures, method     */
+/* names, and calling convention (__stdcall) come from the genuine     */
+/* DirectX 6.0 SDK's dplay.h/dplobby.h (see NOTE-directx-sdk.md);      */
+/* loco.exe's own decompiled code calls through these, never through   */
+/* manual vtable-offset arithmetic — see network/DirectPlay.cpp.       */
+/*                                                                     */
+/* This is a typed adapter exposing only the methods loco.exe's        */
+/* reconstructed code actually calls, as real C++ virtual methods —    */
+/* not a vtable-slot-accurate replica, since no concrete instance is   */
+/* ever backed by a real dplayx.dll on Linux, and the real mingw-w64   */
+/* dplay.h/dplobby.h headers are not usable here either (their         */
+/* DEFINE_GUID/COM preamble needs an ole2.h-based include chain this   */
+/* project's forced compat.h header pre-empts — see PROGRESS.md for    */
+/* the open item to wire in the genuine headers on _WIN32 instead).    */
+/* The whole DirectPlay subsystem is dormant on host in any case.      */
+/* ================================================================== */
+#ifdef __cplusplus
+
+typedef BOOL (STDMETHODCALLTYPE *LPDPENUMSESSIONSCALLBACK2)(
+    LPCDPSESSIONDESC2 lpThisSD, LPDWORD lpdwTimeOut, DWORD dwFlags, LPVOID lpContext);
+typedef BOOL (STDMETHODCALLTYPE *LPDPENUMADDRESSCALLBACK)(
+    const GUID& guidDataType, DWORD dwDataSize, LPCVOID lpData, LPVOID lpContext);
+
+struct IDirectPlay4A {
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(const GUID& riid, LPVOID* ppvObj) = 0;
+    virtual ULONG   STDMETHODCALLTYPE AddRef() = 0;
+    virtual ULONG   STDMETHODCALLTYPE Release() = 0;
+    virtual HRESULT STDMETHODCALLTYPE Close() = 0;
+    virtual HRESULT STDMETHODCALLTYPE CreatePlayer(DPID* lpidPlayer, LPDPNAME lpPlayerName,
+                                                    HANDLE hEvent, LPVOID lpData,
+                                                    DWORD dwDataSize, DWORD dwFlags) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetCaps(DPCAPS* lpDPCaps, DWORD dwFlags) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPlayerAddress(DPID idPlayer, LPVOID lpAddress,
+                                                        LPDWORD lpdwAddressSize) = 0;
+    virtual HRESULT STDMETHODCALLTYPE Open(LPDPSESSIONDESC2 lpsd, DWORD dwFlags) = 0;
+    virtual HRESULT STDMETHODCALLTYPE EnumSessions(LPDPSESSIONDESC2 lpsd, DWORD dwTimeout,
+                                                    LPDPENUMSESSIONSCALLBACK2 lpEnumSessionsCallback2,
+                                                    LPVOID lpContext, DWORD dwFlags) = 0;
+    virtual HRESULT STDMETHODCALLTYPE CancelMessage(DWORD dwMsgID, DWORD dwFlags) = 0;
+    virtual ~IDirectPlay4A() {}
+};
+
+struct IDirectPlayLobby3A {
+    virtual HRESULT STDMETHODCALLTYPE QueryInterface(const GUID& riid, LPVOID* ppvObj) = 0;
+    virtual ULONG   STDMETHODCALLTYPE AddRef() = 0;
+    virtual ULONG   STDMETHODCALLTYPE Release() = 0;
+    virtual HRESULT STDMETHODCALLTYPE EnumAddress(LPDPENUMADDRESSCALLBACK lpEnumAddressCallback,
+                                                   LPCVOID lpAddress, DWORD dwAddressSize,
+                                                   LPVOID lpContext) = 0;
+    virtual ~IDirectPlayLobby3A() {}
+};
+
+#endif /* __cplusplus */
 
 #endif /* STUBS_DPLAY_H */

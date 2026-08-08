@@ -107,19 +107,7 @@
 #pragma once
 
 #include "../shared/types.h"
-
-/* GUID — same layout as stubs/windows.h's _GUID; guarded so this header
- * is safe to include alongside stubs/windows.h (which would otherwise
- * clash on real Win32 declarations pulled in by that larger header). */
-#ifndef LOCO_GUID_DEFINED
-#define LOCO_GUID_DEFINED
-typedef struct _GUID {
-    uint32_t Data1;
-    uint16_t Data2;
-    uint16_t Data3;
-    uint8_t  Data4[8];
-} GUID;
-#endif
+#include "../stubs/dplay.h"
 
 /* ================================================================== */
 /* DirectPlay functions                                                */
@@ -285,10 +273,15 @@ uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_
  * revision of this file mistook guidDataType (a GUID*) for a short
  * ASCII player-name string.
  *
+ * Declared with the exact LPDPENUMADDRESSCALLBACK signature (REFGUID,
+ * DWORD, LPCVOID, LPVOID) so it can be passed to EnumAddress with no
+ * cast, matching what a human writing against Microsoft's real dplay.h
+ * would have done.
+ *
  * @return TRUE (1) to continue enumeration, FALSE (0) to stop
  */
-uint32_t __stdcall DirectPlay_FindModemNameCallback(const GUID* guidDataType, uint32_t dwDataSize,
-                                                     const void* lpData, void* lpContext);
+BOOL STDMETHODCALLTYPE DirectPlay_FindModemNameCallback(const GUID& guidDataType, DWORD dwDataSize,
+                                                         LPCVOID lpData, LPVOID lpContext);
 
 /**
  * DirectPlay_Close — Close DirectPlay session and free resources.

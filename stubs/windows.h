@@ -336,7 +336,9 @@ typedef int32_t HRESULT;
 #define OPEN_ALWAYS             4
 #define FILE_ATTRIBUTE_NORMAL   0x00000080
 #define FILE_FLAG_SEQUENTIAL_SCAN 0x08000000
+#ifndef INVALID_HANDLE_VALUE
 #define INVALID_HANDLE_VALUE    ((HANDLE)-1)
+#endif
 #define INVALID_FILE_SIZE       ((DWORD)0xFFFFFFFF)
 
 /* Seek */
@@ -371,8 +373,12 @@ typedef int32_t HRESULT;
 /* Registry / Config constants                                         */
 /* ================================================================== */
 
+#ifndef HKEY_CURRENT_USER
 #define HKEY_CURRENT_USER       ((HKEY)0x80000001)
+#endif
+#ifndef HKEY_LOCAL_MACHINE
 #define HKEY_LOCAL_MACHINE      ((HKEY)0x80000002)
+#endif
 #define KEY_READ                0x20019
 #define KEY_WRITE               0x20006
 #define REG_SZ                  1
