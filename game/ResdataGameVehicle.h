@@ -46,6 +46,8 @@
 #include "../shared/types.h"
 #include "../core/BuildingMgrObjectGroup.h"
 
+class Vehicle;
+
 /**
  * RESDATA_GameVehicle — Base class for vehicle-hosting track/buildings.
  *
@@ -64,7 +66,18 @@ public:
     int32_t init_state;         // +0x110  animation init / occupant state
     int16_t counter_timer;      // +0x114  counter/timer field
     uint8_t _pad_116[2];        // +0x116  alignment padding
-    int32_t reserved;           // +0x118  unused/reserved
+    /* +0x118: was documented "unused/reserved" — wrong. Ghidra-confirmed a
+     * Vehicle* by TWO independent sites: game/Building.cpp's
+     * FindPathToTarget (raw `tile_obj+0x118`, its own evidence comment
+     * predates this rename) and world/EditorState.cpp's TryAttach /
+     * UpdateVehiclePlacement (store/compare a Vehicle* at this same offset
+     * while resolving EditorState::building's real type to GameVehicle*).
+     * Semantics: the vehicle currently attached/boarding at this track or
+     * station node; cleared to null on detach. A live C++ field (not a
+     * serialized resource blob), so a native Vehicle* is safe on any host
+     * width — this is unrelated to the 32-bit on-disk RESDATA/TileMapResource
+     * layout concern. */
+    Vehicle* boarding_vehicle;  // +0x118
 
     /* ================================================================ */
     /* Convenience accessor for tile_target at +0x88                     */
@@ -139,6 +152,6 @@ static_assert(offsetof(RESDATA_GameVehicle, vehicle_kind) == 0x10C,
               "RESDATA_GameVehicle::vehicle_kind offset mismatch");
 static_assert(offsetof(RESDATA_GameVehicle, init_state) == 0x110,
               "RESDATA_GameVehicle::init_state offset mismatch");
-static_assert(offsetof(RESDATA_GameVehicle, reserved) == 0x118,
-              "RESDATA_GameVehicle::reserved offset mismatch");
+static_assert(offsetof(RESDATA_GameVehicle, boarding_vehicle) == 0x118,
+              "RESDATA_GameVehicle::boarding_vehicle offset mismatch");
 #endif

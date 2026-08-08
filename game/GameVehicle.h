@@ -76,7 +76,15 @@ public:
     /*   +0x110: init_state — animation init state                      */
 
     /* GameVehicle-specific fields (+0x11C..+0x12B):                      */
-    int32_t    occupant_state;     // +0x11C 0 = free, 2 = occupied
+    /* occupant_state also takes value 1 in world/EditorState.cpp's
+     * UpdateVehiclePlacement (road-tile branch): set to 1 while a vehicle
+     * is mid-transition onto this node, checked back against 1 with a
+     * direction guard before allowing another vehicle through, and never
+     * observed as 2 in that call path. 0/2 (free/occupied) remain the
+     * values set by this class's own Update()/World_RenderAll paths; 1 is
+     * a third, narrower "claimed by an in-progress placement" state used
+     * only by the track editor. */
+    int32_t    occupant_state;     // +0x11C 0 = free, 1 = claimed (editor), 2 = occupied
     Vehicle*   current_vehicle;    // +0x120 currently assigned vehicle
     DestNode*  dest_list_head;     // +0x124 head of singly-linked destination queue
     uint8_t    busy_flag;          // +0x128 1 = busy/occupied

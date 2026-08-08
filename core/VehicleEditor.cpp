@@ -9,6 +9,7 @@
 
 #include "VehicleEditor.h"
 #include "../game/Building.h"
+#include "../game/GameVehicle.h"
 #include "../game/Vehicle.h"
 #include "../network/DPlayManager.h"
 #include <cmath>
@@ -286,7 +287,12 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
 {
     /* Determine the "road building" — which editor state (end A or B) */
     /* tracks the road segment for non-road-to-road transitions.        */
-    Building* road_building = nullptr;
+    /* GameVehicle*, not Building* — see world/EditorState.h's class-level
+     * doc comment for the EditorState::building retype evidence; every
+     * offset this function reads through these pointers (+0x10C, +0x14 as
+     * screen_rect.bottom, +0x11C) is GameObject/RESDATA_GameVehicle/
+     * GameVehicle-shaped, not Building-shaped. */
+    GameVehicle* road_building = nullptr;
 
     if (vehicle->active_editor == 0) {
         /* Active index 0: use end B from vehicle's child entry */
@@ -304,28 +310,29 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
 
     char moved = 0;
 
-    /* Get buildings for both editor ends */
-    Building* bldg_a = this->end_a->building;
-    Building* bldg_b = this->end_b->building;
+    /* Get track nodes for both editor ends */
+    GameVehicle* bldg_a = this->end_a->building;
+    GameVehicle* bldg_b = this->end_b->building;
 
     if (bldg_a != nullptr && bldg_b != nullptr) {
-        int substate_a = *field_at<int32_t>(bldg_a, 0x10c);
-        int substate_b = *field_at<int32_t>(bldg_b, 0x10c);
+        int substate_a = bldg_a->vehicle_kind;   /* +0x10C */
+        int substate_b = bldg_b->vehicle_kind;   /* +0x10C */
 
         if (substate_a == 5 && substate_b == 5 && bldg_a == bldg_b) {
             /* Both ends on the same road building */
             vehicle->detach_flag = 1;
 
-            void* resource = *field_at<void*>(bldg_a, 0x40);
+            void* resource = bldg_a->resource;
             char res_type = *field_at<char>(resource, 0x63a);
 
             if (res_type == 5) {
                 /* Road type — move along track */
                 moved = static_cast<char>(this->MoveAlongTrack(vehicle));
             } else {
-                /* Non-road bridge conditions */
-                int a_limit = *field_at<int32_t>(bldg_a, 0x14) - 0x20;
-                int b_limit = *field_at<int32_t>(bldg_b, 0x14) - 0x20;
+                /* Non-road bridge conditions. +0x14 is GameObject::screen_rect.bottom
+                 * (RECT = left/top/right/bottom at +0x08/+0x0C/+0x10/+0x14). */
+                int a_limit = bldg_a->screen_rect.bottom - 0x20;
+                int b_limit = bldg_b->screen_rect.bottom - 0x20;
 
                 if ((a_limit < this->end_a->pos_y) ||
                     (b_limit < this->end_b->pos_y) ||
@@ -391,11 +398,11 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
 
     /* Road-to-building transition check — same road_building all the way through */
     if (road_building != nullptr) {
-        void* road_res = *field_at<void*>(road_building, 0x40);
+        void* road_res = road_building->resource;
         if (road_res != nullptr) {
             uint8_t is_road = Resource_IsRoadTile(road_res);
             if (is_road == 1) {
-                Building* target_bldg = nullptr;
+                GameVehicle* target_bldg = nullptr;
                 if (vehicle->active_editor == 0) {
                     uint32_t child_idx = vehicle->editor_count;
                     Vehicle* child_veh = reinterpret_cast<Vehicle*>(vehicle->editors[child_idx]);
@@ -408,13 +415,11 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
                 }
 
                 if (target_bldg != nullptr) {
-                    void* target_res = *field_at<void*>(target_bldg, 0x40);
+                    void* target_res = target_bldg->resource;
                     if (target_res != nullptr) {
                         uint8_t target_is_road = Resource_IsRoadTile(target_res);
-                        if (target_is_road == 0 &&
-                            *field_at<int32_t>(road_building, 0x11c) == 1)
-                        {
-                            *field_at<int32_t>(road_building, 0x11c) = 0;
+                        if (target_is_road == 0 && road_building->occupant_state == 1) {
+                            road_building->occupant_state = 0;   /* +0x11C */
                         }
                     }
                 }
@@ -438,7 +443,7 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
     }
 
     int dir = active_end->direction;
-    void* track_bldg = *field_at<void*>(active_end->building, 0x40);
+    void* track_bldg = active_end->building->resource;
     int track_idx = active_end->track_pos;
     int track_count = *field_at<uint16_t>(track_bldg, 0x636);
 
@@ -447,15 +452,18 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
         (dir == 0 && track_idx == 1))
     {
         int16_t* track_coords = *field_at<int16_t*>(track_bldg, 0x630);
-        /* NOTE: The binary reads 16-bit grid coordinates from Building+0x88
-           and Building+0x8A. Building.h names these 'occupation_level' (+0x88)
-           and '_pad_8a[0]' (+0x8A), but in VehicleEditor context they are
-           16-bit grid positions. TODO: verify with Ghidra whether the owning
-           object type at these offsets is truly a Building or a track subtype. */
-        int16_t base_x_a = static_cast<int16_t>(this->end_a->building->occupation_level);
-        int16_t base_y_a = static_cast<int16_t>(this->end_a->building->_pad_8a[0]);
-        int16_t base_x_b = static_cast<int16_t>(this->end_b->building->occupation_level);
-        int16_t base_y_b = static_cast<int16_t>(this->end_b->building->_pad_8a[0]);
+        /* end_a/end_b->building is GameVehicle* (world/EditorState.h's
+         * class-level doc comment has the full retype evidence trail), and
+         * +0x88/+0x8A are ResourceGameObject::sub_pos_x/sub_pos_y — resolves
+         * this function's own former TODO ("verify... Building or a track
+         * subtype"): it's neither Building::occupation_level (a single
+         * byte, can't hold a 16-bit grid coordinate) nor a distinct
+         * unnamed subtype, just the same GameVehicle-family node used
+         * throughout world/EditorState.cpp. */
+        int16_t base_x_a = this->end_a->building->sub_pos_x;
+        int16_t base_y_a = this->end_a->building->sub_pos_y;
+        int16_t base_x_b = this->end_b->building->sub_pos_x;
+        int16_t base_y_b = this->end_b->building->sub_pos_y;
 
         this->end_a->pos_x = static_cast<int>(track_coords[this->end_a->track_pos * 2]) + base_x_a * 0x10;
         this->end_a->pos_y = static_cast<int>(track_coords[this->end_b->track_pos * 2 + 1]) + base_y_a * 0x10;
@@ -514,10 +522,10 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
     }
 
     int16_t* track_coords = *field_at<int16_t*>(track_bldg, 0x630);
-    int16_t base_x_a = static_cast<int16_t>(this->end_a->building->occupation_level);
-    int16_t base_y_a = static_cast<int16_t>(this->end_a->building->_pad_8a[0]);
-    int16_t base_x_b = static_cast<int16_t>(this->end_b->building->occupation_level);
-    int16_t base_y_b = static_cast<int16_t>(this->end_b->building->_pad_8a[0]);
+    int16_t base_x_a = this->end_a->building->sub_pos_x;
+    int16_t base_y_a = this->end_a->building->sub_pos_y;
+    int16_t base_x_b = this->end_b->building->sub_pos_x;
+    int16_t base_y_b = this->end_b->building->sub_pos_y;
 
     this->end_a->pos_x = static_cast<int>(track_coords[offset * 2]) + base_x_a * 0x10;
     this->end_a->pos_y = static_cast<int>(track_coords[offset * 2 + 1]) + base_y_a * 0x10;

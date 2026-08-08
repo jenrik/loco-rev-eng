@@ -45,7 +45,7 @@ extern void* g_world;                                      /* 0x4A98B0 */
 /*      0x05/0x06 → fuel pump (kind=5)                                 */
 /*      0x0E-0x11 → signal (kind=7), init_state=4, StopSound(1)       */
 /*      Resource IDs 0xC64-0xC6A → special (kind=8)                   */
-/*   4. Zeros counter_timer and reserved                               */
+/*   4. Zeros counter_timer and boarding_vehicle                       */
 /* ================================================================== */
 RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
     : ResourceGameObject(resource_id)
@@ -56,8 +56,8 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
     this->init_state   = 3;
 
     if (this->resource == nullptr) {
-        this->reserved      = 0;
-        this->counter_timer = 0;
+        this->boarding_vehicle = nullptr;
+        this->counter_timer    = 0;
         return;
     }
 
@@ -126,8 +126,8 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
         }
     }
 
-    this->reserved      = 0;
-    this->counter_timer = 0;
+    this->boarding_vehicle = nullptr;
+    this->counter_timer    = 0;
 }
 
 

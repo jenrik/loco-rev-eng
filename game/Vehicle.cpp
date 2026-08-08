@@ -574,15 +574,10 @@ void Vehicle::ClearRoute()
        Note: original code does NOT null-check the target pointer —
        it is guaranteed valid by prior state checks.
 
-       wheel->building is declared Building* in EditorState.h, but the
-       object actually read here is a GameVehicle: +0x10C only exists on
-       GameVehicle (Building tops out at 0xF4 bytes). EditorState::building's
-       declared type looks wrong for this call path; that's a separate,
-       pre-existing EditorState.h/.cpp cluster (EditorState.cpp does the
-       same raw +0x88/+0x114/+0x11C offset reads on this same field) —
-       flagged for a follow-up, not fixed here. Cast is local. */
+       wheel->building is GameVehicle* (world/EditorState.h) — resolved
+       cluster-wide; no cast needed at this call site anymore. */
     int32_t wheel_state = wheel->edit_state;
-    GameVehicle* target = reinterpret_cast<GameVehicle*>(wheel->building);
+    GameVehicle* target = wheel->building;
     if (wheel_state == 0 && target != nullptr && target->vehicle_kind != 4) {
 
         /* Can clear route */
@@ -621,9 +616,7 @@ uint8_t Vehicle::HandleStop()
         return 0;
     }
 
-    /* this->editor_state->building is declared Building* but the real
-     * object here is a GameVehicle — see ClearRoute's note above. */
-    GameVehicle* target = reinterpret_cast<GameVehicle*>(this->editor_state->building);
+    GameVehicle* target = this->editor_state->building;
     if (target == nullptr) {
         return 0;
     }
@@ -784,17 +777,17 @@ uint8_t Vehicle::UpdateEngineSound()
     }
 
     /* --- Copy editor state and run placement iteration ---
-     * this->editor_state->building is declared Building* but the real
-     * object is a GameVehicle (see ClearRoute's note above); re-read after
-     * each Copy() below since Copy() overwrites the building field too. */
-    GameVehicle* editor_target = reinterpret_cast<GameVehicle*>(this->editor_state->building);
+     * this->editor_state->building is GameVehicle* (world/EditorState.h);
+     * re-read after each Copy() below since Copy() overwrites the
+     * building field too. */
+    GameVehicle* editor_target = this->editor_state->building;
     editor_target->counter_timer--;  /* +0x114 */
 
     if (this->active_editor == 1) {
         /* ActiveEditor 1: copy from rear wheel of last editor */
         this->editor_state->Copy(this->editors[this->editor_count]->end_b);
 
-        editor_target = reinterpret_cast<GameVehicle*>(this->editor_state->building);
+        editor_target = this->editor_state->building;
         editor_target->counter_timer++;
 
         /* Run exactly 12 placement iterations */
@@ -805,7 +798,7 @@ uint8_t Vehicle::UpdateEngineSound()
         /* Forward: copy from front wheel of first editor */
         this->editor_state->Copy(this->editors[0]->end_a);
 
-        editor_target = reinterpret_cast<GameVehicle*>(this->editor_state->building);
+        editor_target = this->editor_state->building;
         editor_target->counter_timer++;
 
         /* Run placement iterations, stop if failure, max 12 */
@@ -939,8 +932,8 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
         EditorState* rear_wheel  = editor->end_b;
 
         /* Set target reference on both wheels */
-        front_wheel->building = reinterpret_cast<Building*>(target);
-        rear_wheel->building  = reinterpret_cast<Building*>(target);
+        front_wheel->building = gv;
+        rear_wheel->building  = gv;
 
         if (tile_category == 2) {       /* ROAD */
             editor->edge_dir_a = 4;
@@ -998,13 +991,13 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
         /* else: no special handling for other tile types */
 
         /* Re-set target on wheels (redundant, preserved from original) */
-        front_wheel->building = reinterpret_cast<Building*>(target);
-        rear_wheel->building  = reinterpret_cast<Building*>(target);
+        front_wheel->building = gv;
+        rear_wheel->building  = gv;
     }
 
     /* --- Set editor state position --- */
     EditorState* editor_state = this->editor_state;
-    editor_state->building = reinterpret_cast<Building*>(target);
+    editor_state->building = gv;
 
     /* Copy position from front wheel of first editor to editor state.
      * NOTE: despite the original's own "copy pos X"/"copy pos Y" framing,
@@ -1016,10 +1009,9 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
     editor_state->track_pos = first_front_wheel->track_pos;   /* +0x08 */
 
     /* Calculate world position from target. editor_state->building is
-     * declared Building* but the real object is gv (== target) — see
-     * ClearRoute's note above; target_res/track_table stay raw int32_t*
-     * since they point into an opaque RESDATA blob, not a class we've
-     * reconstructed. */
+     * GameVehicle* (== gv == target); target_res/track_table stay raw
+     * int32_t* since they point into an opaque RESDATA blob, not a class
+     * we've reconstructed. */
     int32_t* target_res = reinterpret_cast<int32_t*>(gv->resource);
     int32_t* track_table = *reinterpret_cast<int32_t**>(reinterpret_cast<uint8_t*>(target_res) + 0x630);
 
@@ -1214,9 +1206,7 @@ int32_t Vehicle::GetNearestTrack()
         wheel = this->editors[0]->end_a;
     }
 
-    /* Get wheel's target pointer. wheel->building is declared Building* but
-     * the real object is a GameVehicle — see ClearRoute's note above. */
-    GameVehicle* target = reinterpret_cast<GameVehicle*>(wheel->building);
+    GameVehicle* target = wheel->building;
 
     /* Return target only if vehicle_kind == 7 (track-alike), otherwise 0 */
     /* Original asm: target & ((target->vehicle_kind != 7) - 1) */
@@ -1354,10 +1344,8 @@ uint8_t Vehicle::IsMoving()
         wheel = this->editors[0]->end_a;
     }
 
-    /* Check if target exists and is a road/building tile.
-     * this->editor_state->building is declared Building* but the real
-     * object is a GameVehicle — see ClearRoute's note above. */
-    GameVehicle* target = reinterpret_cast<GameVehicle*>(this->editor_state->building);
+    /* Check if target exists and is a road/building tile. */
+    GameVehicle* target = this->editor_state->building;
     if (target == nullptr) {
         return 1;   /* no target = assume moving */
     }
@@ -1368,7 +1356,7 @@ uint8_t Vehicle::IsMoving()
     }
 
     /* Check wheel's current target for continuity */
-    GameVehicle* wheel_target = reinterpret_cast<GameVehicle*>(wheel->building);
+    GameVehicle* wheel_target = wheel->building;
     if (wheel_target != nullptr) {
         int32_t wheel_res = static_cast<int32_t>(reinterpret_cast<uintptr_t>(wheel_target->resource));
         if (RESDATA_IsRoadTile(wheel_res) || RESDATA_IsBuildingTile(wheel_res)) {
