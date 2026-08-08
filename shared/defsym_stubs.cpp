@@ -311,7 +311,17 @@ void CGWND_CursorEditWindow_Ctor(void*, int, int) { /* host no-op */ }
 void TrainStation_Ctor(void*, int, int) { /* host no-op */ }
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) { /* host no-op */ }
 void* DPLAY_SetPlayerName = nullptr;
-void UIPANEL_CopySurface(void*, int) { /* host no-op */ }
+/* Signature corrected (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
+ * cluster): real 2nd param is a UIPANEL_Surface* (Ghidra-confirmed at
+ * 0x42A1C0 — dereferences it at the struct's real field offsets), not an
+ * int, and callers expect a void* return (they cache it in
+ * NetworkPlayerList::surface_cache[]), not void — Itanium mangling ignores
+ * return type, so the old `void`-returning stub linked fine and every
+ * caller read an undefined register as the "surface" it got back. Still a
+ * host no-op (the real deep-copy body at 0x42A1C0 was never transcribed —
+ * TODO), but now returns a well-defined value instead of UB. */
+struct UIPANEL_Surface;
+void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
 void NET_ComputeColor(unsigned char, unsigned char, unsigned char) { /* host no-op */ }
 void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }

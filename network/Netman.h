@@ -193,6 +193,7 @@ extern "C" {
 
 /* -- Globals -- */
 class TileMap;   /* forward decl for g_tilemap below (tilemap.h) */
+struct UIPANEL_Surface;   /* forward decl (graphics/LOCOBITMAP.h) */
 extern int32_t  g_game_mode;          /* 0x4851F4 — global game mode   */
 extern char     g_install_path[];     /* 0x4A99C8 — installation path  */
 extern int32_t  g_player_id;          /* 0x4AAD46 — global player ID   */
@@ -294,7 +295,11 @@ void    Sprite_SetState(void* sprite, int32_t state, int32_t* unk);
 void    UI_WindowBase_Show(void* window);
 void    UI_WindowBase_Hide(void* window);
 void    UIPANEL_StretchBlit(void* surface, const char* path, int32_t x, int32_t y, int32_t flags);
-void*   UIPANEL_CopySurface(void* dst, int32_t src);
+/* Real def: shared/defsym_stubs.cpp — signature corrected to match
+ * network/NetworkPlayerList.cpp's evidenced declaration (see that file's
+ * own comment on this symbol); no caller in this codebase currently
+ * declares it via this header. */
+void*   UIPANEL_CopySurface(void* dst, UIPANEL_Surface* src);
 void    Config_GetIniInt(void* ini, const char* section, const char* key, int32_t def);
 void    Config_WriteInt(void* ini, const char* section, const char* key, int32_t val);
 

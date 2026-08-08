@@ -105,8 +105,31 @@ extern bool  __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY
                                       void* dstSurface, uint32_t dstX,
                                       uint32_t dstY, int32_t dstW,
                                       uint32_t dstH, uint32_t flags);
-extern void* __thiscall UIPANEL_CreateSurface(void* surface);
-extern void* __thiscall UIPANEL_CopySurface(void* dst, int32_t src);
+/* UIPANEL_CreateSurface: no local declaration here — the real, fully
+ * INTEGRATED implementation (graphics/LOCOBITMAP.h/.cpp, 0x42A110) takes
+ * UIPANEL_Surface* and is visible via the LOCOBITMAP.h include above.
+ * This file used to shadow it with a local `void* __thiscall
+ * UIPANEL_CreateSurface(void* surface)` declaration that, once `surface`
+ * below is properly typed UIPANEL_Surface* rather than void*, would lose
+ * overload resolution to the real declaration anyway — but the old local
+ * declaration bound instead to shared/stubs_impl.cpp's untyped no-op stub
+ * (same "wrong local declaration masks a real typed impl elsewhere" shape
+ * as UIPANEL_CopySurface below). Removed so the call resolves to the real
+ * method. */
+/* Real def: shared/defsym_stubs.cpp (host no-op stub; TODO: decompile
+ * 0x42A1C0's deep-copy body for real — never transcribed). The 2nd param
+ * and return type were declared int32_t/void* here against Ghidra's
+ * decompile of 0x42A1C0, which dereferences the 2nd param as a
+ * UIPANEL_Surface* (fields read at +4/+8/+0xC/+0x10/+0x11/+0x14/+0x18/+0x1C
+ * match UIPANEL_Surface, graphics/LOCOBITMAP.h, exactly) — the old int32_t
+ * param silently truncated the pointer on this 64-bit host, and Itanium
+ * mangling ignores return type, so the void*-returning declaration linked
+ * against the stub's real `void` return and read an undefined register as
+ * the "surface" it cached (call sites store the result straight into
+ * surface_cache[], later passed to UIPANEL_DestroySurface). Fixed to the
+ * evidenced signature in lockstep with network/Netman.h's unused twin
+ * declaration and the stub definition (shared/defsym_stubs.cpp). */
+extern void* __thiscall UIPANEL_CopySurface(void* dst, UIPANEL_Surface* src);
 extern void  __cdecl    UIPANEL_StretchBlit(void* surface, const char* path,
                                               int32_t x, int32_t y, int32_t flags);
 extern void* __thiscall ResourceManager_GetById(void* resmgr, uint32_t id);
@@ -143,26 +166,26 @@ static const char* PostBag_Subdir(int32_t type)
      * Documentation only: this branch is never linked, only type-checked
      * under the MinGW cross build (cross/mingw32-typecheck.txt). */
     switch (type) {
-    case 0: return (const char*)0x0047eba4;   /* "\\Album" */
-    case 1: return (const char*)0x0047ebc4;   /* "\\Sort\\In" */
-    case 2: return (const char*)0x0047ebb8;   /* "\\Sort\\Out" */
-    case 3: return (const char*)0x0047ebac;   /* "\\Sort\\Bag" */
-    case 4: return (const char*)0x0047eb90;   /* "\\Att_Out" */
-    case 5: return (const char*)0x0047eb9c;   /* "\\Att_In" */
+    case 0: return reinterpret_cast<const char*>(0x0047eba4);   /* "\\Album" */
+    case 1: return reinterpret_cast<const char*>(0x0047ebc4);   /* "\\Sort\\In" */
+    case 2: return reinterpret_cast<const char*>(0x0047ebb8);   /* "\\Sort\\Out" */
+    case 3: return reinterpret_cast<const char*>(0x0047ebac);   /* "\\Sort\\Bag" */
+    case 4: return reinterpret_cast<const char*>(0x0047eb90);   /* "\\Att_Out" */
+    case 5: return reinterpret_cast<const char*>(0x0047eb9c);   /* "\\Att_In" */
     case 6:
         switch (DAT_004a97a0) {
-        default: return (const char*)0x0047ebf8;  /* "\\Easter\\Eng" */
-        case 1:  return (const char*)0x0047ec58;  /* "\\Easter\\Dan" */
-        case 2:  return (const char*)0x0047ec4c;  /* "\\Easter\\Dut" */
-        case 4:  return (const char*)0x0047ec40;  /* "\\Easter\\Fre" */
-        case 5:  return (const char*)0x0047ec34;  /* "\\Easter\\Ger" */
-        case 6:  return (const char*)0x0047ec28;  /* "\\Easter\\Ita" */
-        case 7:  return (const char*)0x0047ec1c;  /* "\\Easter\\Nor" */
-        case 8:  return (const char*)0x0047ec10;  /* "\\Easter\\Spa" */
-        case 9:  return (const char*)0x0047ec04;  /* "\\Easter\\Swe" */
+        default: return reinterpret_cast<const char*>(0x0047ebf8);  /* "\\Easter\\Eng" */
+        case 1:  return reinterpret_cast<const char*>(0x0047ec58);  /* "\\Easter\\Dan" */
+        case 2:  return reinterpret_cast<const char*>(0x0047ec4c);  /* "\\Easter\\Dut" */
+        case 4:  return reinterpret_cast<const char*>(0x0047ec40);  /* "\\Easter\\Fre" */
+        case 5:  return reinterpret_cast<const char*>(0x0047ec34);  /* "\\Easter\\Ger" */
+        case 6:  return reinterpret_cast<const char*>(0x0047ec28);  /* "\\Easter\\Ita" */
+        case 7:  return reinterpret_cast<const char*>(0x0047ec1c);  /* "\\Easter\\Nor" */
+        case 8:  return reinterpret_cast<const char*>(0x0047ec10);  /* "\\Easter\\Spa" */
+        case 9:  return reinterpret_cast<const char*>(0x0047ec04);  /* "\\Easter\\Swe" */
         }
-    case 7: return (const char*)0x0047ed18;   /* "\\Design" */
-    default: return (const char*)0x0047eba4;
+    case 7: return reinterpret_cast<const char*>(0x0047ed18);   /* "\\Design" */
+    default: return reinterpret_cast<const char*>(0x0047eba4);
     }
 #else
     /* Host addresses do not contain the original PE string literals (see
@@ -261,7 +284,7 @@ NetworkPlayerList::NetworkPlayerList()
 #endif
     path_buf[0] = g_empty_string;
     {
-        uint32_t* p = (uint32_t*)(path_buf + 1);
+        uint32_t* p = reinterpret_cast<uint32_t*>(path_buf + 1);
         for (i = 0x40; i != 0; i--) { *p = 0; p++; }
     }
     path_buf[0x101] = 0;
@@ -269,88 +292,88 @@ NetworkPlayerList::NetworkPlayerList()
 
     /* 1. <install>\PostBag\ */
     wsprintfA(path_buf,
-              (const char*)0x0047e8a0,  /* "%s%s" */
+              reinterpret_cast<const char*>(0x0047e8a0),  /* "%s%s" */
               g_install_path,
-              (const char*)0x0047e0c4); /* "\\PostBag\\" */
+              reinterpret_cast<const char*>(0x0047e0c4)); /* "\\PostBag\\" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 2. <install>\PostBag\Easter (subdir at 0x47ebd8) */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,  /* "%s%s%s" */
+              reinterpret_cast<const char*>(0x0047e3d0),  /* "%s%s%s" */
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047ebd8); /* "Easter" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047ebd8)); /* "Easter" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 3. Sort */
     path_buf[0] = g_empty_string;
     {
-        uint32_t* p = (uint32_t*)(path_buf + 1);
+        uint32_t* p = reinterpret_cast<uint32_t*>(path_buf + 1);
         for (i = 0x40; i != 0; i--) { *p = 0; p++; }
     }
     path_buf[0x101] = 0;
     path_buf[0x102] = 0;
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047ebd0); /* "Sort" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047ebd0)); /* "Sort" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 4. Sort_In */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047ebc4); /* "Sort_In" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047ebc4)); /* "Sort_In" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 5. Sort_Out */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047ebb8); /* "Sort_Out" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047ebb8)); /* "Sort_Out" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 6. Sort_Bag */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047ebac); /* "Sort_Bag" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047ebac)); /* "Sort_Bag" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 7. AlbIndex */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047e0cc); /* "AlbIndex" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047e0cc)); /* "AlbIndex" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 8. Album */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047eba4); /* "Album" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047eba4)); /* "Album" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 9. Att_In */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047eb9c); /* "Att_In" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047eb9c)); /* "Att_In" */
     CreateDirectoryA(path_buf, NULL);
 
     /* 10. Att_Out */
     wsprintfA(path_buf,
-              (const char*)0x0047e3d0,
+              reinterpret_cast<const char*>(0x0047e3d0),
               g_install_path,
-              (const char*)0x0047e0c4,
-              (const char*)0x0047eb90); /* "Att_Out" */
+              reinterpret_cast<const char*>(0x0047e0c4),
+              reinterpret_cast<const char*>(0x0047eb90)); /* "Att_Out" */
     CreateDirectoryA(path_buf, NULL);
 
 }
@@ -369,8 +392,12 @@ NetworkPlayerList::~NetworkPlayerList()
 
     /* Free sub-object at +0xB08 (resource_mgr) via vtable[2] */
     if (resource_mgr != NULL) {
-        void** mgr_vtbl = *(void***)resource_mgr;
-        ((void(__stdcall*)(void))mgr_vtbl[2])();  /* vtable[2] = release/shutdown */
+        void** mgr_vtbl = *reinterpret_cast<void***>(resource_mgr);
+        /* vtable[2] = release/shutdown (byte offset 8 / 4 in the original
+         * x86 vtable — array-indexing a void** scales by the host's own
+         * pointer width, so this slot index is correct on both 32- and
+         * 64-bit hosts; not the byte-offset-misalignment bug class). */
+        reinterpret_cast<void(__stdcall*)(void)>(mgr_vtbl[2])();
         resource_mgr = NULL;
         resource_data = NULL;
     }
@@ -404,21 +431,23 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
 {
     char  filename[0x150];
     char  filepath[0x510];
-    void* surface;
+    UIPANEL_Surface* surface;
     int32_t i;
 
-    /* Initialize buffers */
-    filename[0] = *(char*)0x4851D0;
+    /* Initialize buffers. Address 0x4851D0 is g_empty_string's declared
+     * address (see the extern above) — use the named global instead of the
+     * raw literal, matching the constructor's own established precedent. */
+    filename[0] = g_empty_string;
     {
-        uint32_t* p = (uint32_t*)(filename + 1);
+        uint32_t* p = reinterpret_cast<uint32_t*>(filename + 1);
         for (i = 0x0F; i != 0; i--) { *p = 0; p++; }
     }
     filename[0x41] = 0;
     filename[0x42] = 0;
 
-    filepath[0] = *(char*)0x4851D0;
+    filepath[0] = g_empty_string;
     {
-        uint32_t* p = (uint32_t*)(filepath + 1);
+        uint32_t* p = reinterpret_cast<uint32_t*>(filepath + 1);
         for (i = 0x140; i != 0; i--) { *p = 0; p++; }
     }
     filepath[0x501] = 0;
@@ -436,7 +465,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
 
             void* new_surf = operator_new(0x20);
             if (new_surf != NULL) {
-                return UIPANEL_CopySurface(new_surf, (int32_t)this->surface_cache[i]);
+                return UIPANEL_CopySurface(new_surf, this->surface_cache[i]);
             }
             return NULL;
         }
@@ -448,40 +477,47 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
         uint8_t v = variant - 1;
 
         if (type_idx <= 0x0F) {
-            wsprintfA(filename, (const char*)0x0047ec9c,
-                      (uint32_t)type_idx, v, tag_low);
+            wsprintfA(filename, reinterpret_cast<const char*>(0x0047ec9c),
+                      static_cast<uint32_t>(type_idx), v, tag_low);
         } else if (type_idx <= 0x19) {
-            wsprintfA(filename, (const char*)0x0047ecb0,
+            wsprintfA(filename, reinterpret_cast<const char*>(0x0047ecb0),
                       type_idx + 0x58, v, tag_low);
         } else if (type_idx <= 0x1D) {
-            wsprintfA(filename, (const char*)0x0047ecb0,
+            wsprintfA(filename, reinterpret_cast<const char*>(0x0047ecb0),
                       type_idx + 0x5A, v, tag_low);
         } else if (type_idx == 0x1E) {
-            wsprintfA(filename, (const char*)0x0047ecc0, v, tag_low);
+            wsprintfA(filename, reinterpret_cast<const char*>(0x0047ecc0), v, tag_low);
         } else if (type_idx == 0x1F) {
-            wsprintfA(filename, (const char*)0x0047ecd0, tag_low);
+            wsprintfA(filename, reinterpret_cast<const char*>(0x0047ecd0), tag_low);
         } else {
-            wsprintfA(filename, (const char*)0x0047ec8c, v, tag_low);
+            wsprintfA(filename, reinterpret_cast<const char*>(0x0047ec8c), v, tag_low);
         }
     }
 
     /* Build full path */
-    wsprintfA(filepath, (const char*)0x0047ec7c,
+    wsprintfA(filepath, reinterpret_cast<const char*>(0x0047ec7c),
               g_install_path, filename);
 
-    /* Create surface from file */
-    surface = operator_new(0x20);
+    /* Create surface from file. UIPANEL_CreateSurface (the real 0x42A110
+     * method, graphics/LOCOBITMAP.h/.cpp) initializes *surface in place and
+     * returns void — it does not hand back a new pointer to reassign. */
+    surface = static_cast<UIPANEL_Surface*>(operator_new(0x20));
     if (surface != NULL) {
-        surface = UIPANEL_CreateSurface(surface);
+        UIPANEL_CreateSurface(surface);
     }
     UIPANEL_StretchBlit(surface, filepath, 0, 0, 0);
 
-    /* Check if surface has valid dimensions */
+    /* Check if surface has valid dimensions. Ghidra's decompile of this
+     * function (0x4442B0) indexes the surface as an undefined4* array —
+     * local_558[6]/[7], i.e. byte offsets +0x18/+0x1C — matching
+     * UIPANEL_Surface::pixels/ddraw_surf (graphics/LOCOBITMAP.h), not
+     * width/height (+0x08/+0x0C). Confirmed correct as originally written;
+     * only the raw-offset spelling changes here. */
     if (surface != NULL &&
-        *(int32_t*)((int8_t*)surface + 0x18) == 0 &&
-        *(int32_t*)((int8_t*)surface + 0x1C) == 0) {
+        surface->pixels == nullptr &&
+        surface->ddraw_surf == nullptr) {
         if (surface != NULL) {
-            UIPANEL_DestroySurface((UIPANEL_Surface*)surface, 1);
+            UIPANEL_DestroySurface(surface, 1);
         }
         return NULL;
     }
@@ -496,7 +532,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
 
             void* copy = operator_new(0x20);
             if (copy != NULL) {
-                this->surface_cache[i] = UIPANEL_CopySurface(copy, (int32_t)surface);
+                this->surface_cache[i] = static_cast<UIPANEL_Surface*>(UIPANEL_CopySurface(copy, surface));
             } else {
                 this->surface_cache[i] = NULL;
             }
@@ -519,7 +555,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
 
         void* copy = operator_new(0x20);
         if (copy != NULL) {
-            this->surface_cache[lru] = UIPANEL_CopySurface(copy, (int32_t)surface);
+            this->surface_cache[lru] = static_cast<UIPANEL_Surface*>(UIPANEL_CopySurface(copy, surface));
         } else {
             this->surface_cache[lru] = NULL;
         }
@@ -541,7 +577,7 @@ void NetworkPlayerList::RenderTrackEntry(void* hdc,
                                                       uint32_t clip_bot,
                                                       const uint8_t entry[6])
 {
-    void* surface;
+    UIPANEL_Surface* surface;
     uint32_t surf_w, surf_h;
     uint32_t dst_left, dst_top;
     uint32_t dst_right, dst_bot;
@@ -549,20 +585,25 @@ void NetworkPlayerList::RenderTrackEntry(void* hdc,
     uint32_t src_w, src_h;
 
     /* Get surface for this track entry's packed type */
-    surface = this->GetOrCreateSurface(
+    surface = static_cast<UIPANEL_Surface*>(this->GetOrCreateSurface(
         entry[0] >> 3,
         (entry[0] & 7) + 1,
         entry[1],
-        0);
+        0));
 
     if (surface == NULL) return;
 
-    surf_w = *(uint32_t*)((int8_t*)surface + 0x18);
-    surf_h = *(uint32_t*)((int8_t*)surface + 0x1C);
+    /* width/height, not pixels/ddraw_surf — Ghidra's NET_RenderTrackEntry
+     * (0x4440A0) reads this_00[2]/[3] (undefined4* indexing = byte offsets
+     * +0x08/+0x0C), matching UIPANEL_Surface::width/height. The raw-offset
+     * version of this code used +0x18/+0x1C (pixels/ddraw_surf) instead —
+     * a real bug, not just an unmodernized cast; fixed here. */
+    surf_w = static_cast<uint32_t>(surface->width);
+    surf_h = static_cast<uint32_t>(surface->height);
 
     /* Compute destination rect from entry position */
-    dst_left  = ((uint32_t)entry[2] * 2 - (surf_w >> 1)) + clip_x;
-    dst_top   = ((uint32_t)entry[4] * 2 - (surf_h >> 1)) + clip_y;
+    dst_left  = (static_cast<uint32_t>(entry[2]) * 2 - (surf_w >> 1)) + clip_x;
+    dst_top   = (static_cast<uint32_t>(entry[4]) * 2 - (surf_h >> 1)) + clip_y;
     dst_right = dst_left + surf_w;
     dst_bot   = dst_top  + surf_h;
 
@@ -572,19 +613,19 @@ void NetworkPlayerList::RenderTrackEntry(void* hdc,
     src_w = surf_w;
     src_h = surf_h;
 
-    if ((int32_t)dst_left < (int32_t)clip_x) {
+    if (static_cast<int32_t>(dst_left) < static_cast<int32_t>(clip_x)) {
         src_x_off = clip_x - dst_left;
         dst_left = clip_x;
     }
-    if ((int32_t)dst_top < (int32_t)clip_y) {
+    if (static_cast<int32_t>(dst_top) < static_cast<int32_t>(clip_y)) {
         src_y_off = clip_y - dst_top;
         dst_top = clip_y;
     }
-    if (clip_right < (int32_t)dst_right) {
-        src_w = surf_w + (clip_right - (int32_t)dst_right);
+    if (clip_right < static_cast<int32_t>(dst_right)) {
+        src_w = surf_w + (clip_right - static_cast<int32_t>(dst_right));
         dst_right = clip_right;
     }
-    if ((int32_t)clip_bot < (int32_t)dst_bot) {
+    if (static_cast<int32_t>(clip_bot) < static_cast<int32_t>(dst_bot)) {
         src_h = surf_h + (clip_bot - dst_bot);
         dst_bot = clip_bot;
     }
@@ -593,7 +634,7 @@ void NetworkPlayerList::RenderTrackEntry(void* hdc,
                  hdc, src_x_off, src_y_off, src_w, src_h, 0);
 
     /* Release surface copy */
-    UIPANEL_DestroySurface((UIPANEL_Surface*)surface, 1);
+    UIPANEL_DestroySurface(surface, 1);
 }
 
 /* ================================================================== */
@@ -613,8 +654,9 @@ void NetworkPlayerList::PeekMessage(void* player_slot, void* hdc,
     if (this->resource_data == NULL) {
         this->resource_mgr = ResourceManager_GetById(&g_resmgr, 0x3CBD);
         if (this->resource_mgr != NULL) {
-            vtbl = *(void***)this->resource_mgr;
-            this->resource_data = ((void*(__stdcall*)(int32_t,int32_t))vtbl[1])(0, 0);
+            vtbl = *reinterpret_cast<void***>(this->resource_mgr);
+            this->resource_data =
+                reinterpret_cast<void*(__stdcall*)(int32_t, int32_t)>(vtbl[1])(0, 0);
         }
     }
 
@@ -632,32 +674,48 @@ void NetworkPlayerList::PeekMessage(void* player_slot, void* hdc,
         int32_t entry_idx;
         const uint8_t* entry_ptr;
 
-        entry_ptr = (const uint8_t*)player_slot + 0x391;
+        entry_ptr = reinterpret_cast<const uint8_t*>(player_slot) + 0x391;
         for (entry_idx = 0x7F; entry_idx >= 0; entry_idx--) {
             if (*entry_ptr != 0) break;
             entry_ptr -= 6;
         }
 
         if (entry_idx >= 0) {
+            /* BUG FIX (Ghidra-confirmed against 0x4436C0's disassembly):
+             * the checked byte above is entry[1] (RenderTrackEntry reads
+             * entry[0]/entry[1]), i.e. the true entry base is one byte
+             * before the address the scan loop found — matching Ghidra's
+             * own `param_1 + (iVar4 + 0x19) * 6` versus the checked
+             * `param_1 + 0x391`, which differ by exactly 1. The previous
+             * expression here, `entry_ptr - 6 * (int32_t)(*entry_ptr -
+             * *entry_ptr)`, was a self-subtracting no-op (always 0),
+             * silently passing entry_ptr itself (one byte past the real
+             * base) instead of entry_ptr - 1. */
             this->RenderTrackEntry(hdc, param3, param4, param5, param6,
-                                   entry_ptr - 6 * (int32_t)(uintptr_t)(*entry_ptr - *entry_ptr));
+                                   entry_ptr - 1);
         }
     }
 
     /* End paint cycle */
     if (this->resource_mgr != NULL) {
-        vtbl = *(void***)this->resource_mgr;
-        ((void(__stdcall*)(void*, void*))vtbl[0x44/4])(this->resource_mgr, &param7);
+        vtbl = *reinterpret_cast<void***>(this->resource_mgr);
+        reinterpret_cast<void(__stdcall*)(void*, void*)>(vtbl[0x44 / 4])(
+            this->resource_mgr, &param7);
     }
 
     {
         void* hbr = GetStockObject(4);  /* BLACK_BRUSH */
-        FrameRect(hdc, (void*)(uintptr_t)&param3, hbr);
+        /* &param3 aliases param3/param4/param5/param6 as a packed RECT —
+         * the same stack-parameter-aliasing fidelity gap RenderPlayer's
+         * &param2 usage documents below; preserved as-is. uint32_t*
+         * converts to const void* implicitly, no cast needed. */
+        FrameRect(hdc, &param3, hbr);
     }
 
     if (this->resource_mgr != NULL) {
-        vtbl = *(void***)this->resource_mgr;
-        ((void(__stdcall*)(void*, void*))vtbl[0x68/4])(this->resource_mgr, hdc);
+        vtbl = *reinterpret_cast<void***>(this->resource_mgr);
+        reinterpret_cast<void(__stdcall*)(void*, void*)>(vtbl[0x68 / 4])(
+            this->resource_mgr, hdc);
     }
 }
 
@@ -666,7 +724,7 @@ void NetworkPlayerList::PeekMessage(void* player_slot, void* hdc,
 /* ================================================================== */
 void NetworkPlayerList::RenderSessionFrame(void* hdc)
 {
-    void* surface;
+    UIPANEL_Surface* surface;
     int32_t i;
 
     /* Increment frame counter and handle overflow */
@@ -679,9 +737,9 @@ void NetworkPlayerList::RenderSessionFrame(void* hdc)
     }
 
     /* Get session surface (tag 0x1E) */
-    surface = this->GetOrCreateSurface(0x1E, 0, 0, 0);
+    surface = static_cast<UIPANEL_Surface*>(this->GetOrCreateSurface(0x1E, 0, 0, 0));
     if (surface != NULL) {
-        UIPANEL_DestroySurface((UIPANEL_Surface*)surface, 1);
+        UIPANEL_DestroySurface(surface, 1);
     }
 }
 
@@ -695,7 +753,7 @@ void NetworkPlayerList::RenderSessionBase(void* hdc,
                                                        uint32_t param5,
                                                        uint8_t param6)
 {
-    void* surface;
+    UIPANEL_Surface* surface;
     int32_t i;
 
     /* Increment frame counter */
@@ -708,16 +766,21 @@ void NetworkPlayerList::RenderSessionBase(void* hdc,
     }
 
     /* Get session base surface (tag 0x1F) */
-    surface = this->GetOrCreateSurface(0x1F, 1, param6, 0);
+    surface = static_cast<UIPANEL_Surface*>(this->GetOrCreateSurface(0x1F, 1, param6, 0));
     if (surface != NULL) {
-        int32_t surf_w = *(int32_t*)((int8_t*)surface + 0x18);
-        int32_t surf_h = *(int32_t*)((int8_t*)surface + 0x1C);
+        /* width/height (+0x08/+0x0C) — Ghidra's DPLAY_RenderSessionBase
+         * (0x443FF0) reads puVar1[2]/[3], matching UIPANEL_Surface's
+         * width/height, not pixels/ddraw_surf (+0x18/+0x1C) as the
+         * raw-offset version of this code used; same bug class fixed in
+         * RenderTrackEntry above. */
+        int32_t surf_w = surface->width;
+        int32_t surf_h = surface->height;
 
         UIPANEL_Blit(surface,
                      (param4 - 1) - surf_w, param3 + 1U,
                      param4 - 1, surf_h + param3 + 1U,
                      hdc, 0, 0, surf_w, surf_h, 0);
-        UIPANEL_DestroySurface((UIPANEL_Surface*)surface, 1);
+        UIPANEL_DestroySurface(surface, 1);
     }
 }
 
@@ -757,22 +820,36 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
     void** ctx_vtbl;
     uint32_t frame_count;
 
+    /* playerData's real identity is register-confused in the original
+     * decompile (see the function-level NOTE above) — used both as a
+     * vtable-dispatched rendering context and as a raw player-slot data
+     * pointer. Truncating it to a 32-bit coordinate below is itself part
+     * of that same confusion (the original x86 code ran with 32-bit
+     * pointers natively; this host is 64-bit). Preserved exactly, not
+     * re-derived; this helper only spells the truncation as a legal cast
+     * (a bare `(int32_t)ptr` old-style cast is ill-formed for an 8-byte
+     * pointer under -Werror=old-style-cast). */
+    auto ptr_lo32 = [](const void* p) -> int32_t {
+        return static_cast<int32_t>(reinterpret_cast<uintptr_t>(p));
+    };
+
     /* Init label buffers — "Sent" / "Received" resource strings */
     label_rcvd[0] = 0;
-    *(uint32_t*)(label_rcvd + 4) = 0;
-    *(uint32_t*)(label_rcvd + 8) = 0;
+    *reinterpret_cast<uint32_t*>(label_rcvd + 4) = 0;
+    *reinterpret_cast<uint32_t*>(label_rcvd + 8) = 0;
     label_sent[0] = 0;
-    *(uint32_t*)(label_sent + 4) = 0;
-    *(uint32_t*)(label_sent + 8) = 0;
-    *(uint32_t*)(label_sent + 12) = 0;
-    *(uint16_t*)(label_sent + 14) = 0;
+    *reinterpret_cast<uint32_t*>(label_sent + 4) = 0;
+    *reinterpret_cast<uint32_t*>(label_sent + 8) = 0;
+    *reinterpret_cast<uint32_t*>(label_sent + 12) = 0;
+    *reinterpret_cast<uint16_t*>(label_sent + 14) = 0;
 
     /* 1. Lazily cache resource from ResourceManager_GetById(0x3CBD) */
     if (this->resource_data == NULL) {
         this->resource_mgr = ResourceManager_GetById(&g_resmgr, 0x3CBD);
         if (this->resource_mgr != NULL) {
-            ctx_vtbl = *(void***)this->resource_mgr;
-            this->resource_data = ((void*(__stdcall*)(int32_t, int32_t))ctx_vtbl[1])(0, 0);
+            ctx_vtbl = *reinterpret_cast<void***>(this->resource_mgr);
+            this->resource_data =
+                reinterpret_cast<void*(__stdcall*)(int32_t, int32_t)>(ctx_vtbl[1])(0, 0);
         }
     }
 
@@ -793,29 +870,45 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
     /* 4. Begin paint cycle — call vtable slot 17 (0x44/4) on the
      *    rendering context (playerData). The context has a vtable
      *    where slot 17 is an BeginPaint-like method. */
-    ctx_vtbl = *(void***)playerData;
-    ((void(__stdcall*)(void*, void*))ctx_vtbl[0x44 / 4])(playerData, &hbr);
+    ctx_vtbl = *reinterpret_cast<void***>(playerData);
+    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x44 / 4])(playerData, &hbr);
 
     /* 5. Draw background.
      *    If playerData+0x39 flag is set, compute fill color from
      *    fields +0x40/0x41/0x42 via NET_ComputeColor.
-     *    Otherwise use WHITE_BRUSH and draw optional highlight rect. */
-    if (*(int8_t*)((int8_t*)playerData + 0x39) != 0) {
+     *    Otherwise use WHITE_BRUSH and draw optional highlight rect.
+     *    NOTE: +0x39/+0x40/+0x41/+0x42/+0x43 coincide with DPlayPlayer's
+     *    declared upload_status/color_r/color_g/color_b/player_name fields
+     *    (this file, above) — a possible lead that playerData is really a
+     *    DPlayPlayer*, but +0x10/+0x25/+0x93/+0x96 below have no matching
+     *    DPlayPlayer fields, and DPlayPlayer as declared has no vtable
+     *    slot 0 for the ctx_vtbl dispatch above/below to bind to. Left as
+     *    raw offsets per this function's own top-of-file caveat rather
+     *    than guess; flagged for a dedicated future RE pass, not resolved
+     *    here. */
+    if (*reinterpret_cast<int8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x39) != 0) {
         color = NET_ComputeColor(
-            *(uint8_t*)((int8_t*)playerData + 0x40),
-            *(uint8_t*)((int8_t*)playerData + 0x41),
-            *(uint8_t*)((int8_t*)playerData + 0x42));
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x40),
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x41),
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x42));
         hbr = CreateSolidBrush(color);
-        FillRect(hdc, (const RECT*)&param2, hbr);
+        /* &param2 aliases param2..param5 as a packed RECT — the documented
+         * stack-parameter-aliasing fidelity gap (see PeekMessage's &param3
+         * above); preserved as-is, respelled only. */
+        FillRect(hdc, reinterpret_cast<const RECT*>(&param2), hbr);
         DeleteObject(hbr);
     } else {
         hbr = GetStockObject(0);  /* WHITE_BRUSH */
-        FillRect(hdc, (const RECT*)&param2, hbr);
+        FillRect(hdc, reinterpret_cast<const RECT*>(&param2), hbr);
 
         if (param7 != NULL) {
             hbr = CreateSolidBrush(0xE6E6E6);
-            FillRect(hdc, (const RECT*)param7, hbr);
-            DrawEdge(hdc, (void*)param7, 5, 0xF);
+            FillRect(hdc, reinterpret_cast<const RECT*>(param7), hbr);
+            /* DrawEdge's real signature (declared above) takes a
+             * non-const void* qrc; param7 is an optional caller-owned
+             * highlight rect this function only reads. const_cast (not
+             * reinterpret_cast) makes that qualifier drop explicit. */
+            DrawEdge(hdc, const_cast<void*>(param7), 5, 0xF);
         }
     }
 
@@ -825,7 +918,7 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
     /* 7. Player name text rectangle (left side panel) */
     text_rect.left   = param2 + 10;
     text_rect.bottom = param5 - 10;
-    text_rect.top    = (int32_t)playerData + 2;
+    text_rect.top    = ptr_lo32(playerData) + 2;
     text_rect.right  = (param4 - param2) / 2 - 0x14 + text_rect.left;
 
     if (param7 != NULL) {
@@ -838,7 +931,7 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
 
     /* 8. Draw player name (+0x43) in orange text */
     {
-        const char* name = (const char*)((int8_t*)playerData + 0x43);
+        const char* name = reinterpret_cast<const char*>(reinterpret_cast<int8_t*>(playerData) + 0x43);
         uint32_t name_len;
         for (name_len = 0; name[name_len] != '\0'; name_len++) { }
 
@@ -857,11 +950,11 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
     hpen = CreatePen(0, 2, 0x808080);
     old_pen = SelectObject(hdc, hpen);
     mid_x = (param4 - param2) / 2 + param2;
-    MoveToEx(hdc, mid_x, (int32_t)playerData + 2, NULL);
+    MoveToEx(hdc, mid_x, ptr_lo32(playerData) + 2, NULL);
     LineTo(hdc, mid_x, param5 - 10);
 
     /* 10. Session data section (right side of panel) */
-    mid_y = (int32_t)playerData + (param5 - (int32_t)playerData) / 2;
+    mid_y = ptr_lo32(playerData) + (param5 - ptr_lo32(playerData)) / 2;
     {
         int32_t label_x = mid_x + 10;
 
@@ -882,7 +975,8 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
 
         /* Draw "Sent" label (+0x10) */
         {
-            const char* session_data = (const char*)((int8_t*)playerData + 0x10);
+            const char* session_data =
+                reinterpret_cast<const char*>(reinterpret_cast<int8_t*>(playerData) + 0x10);
             uint32_t sd_len;
             for (sd_len = 0; session_data[sd_len] != '\0'; sd_len++) { }
             DrawTextA(hdc, session_data, -1, &text_rect, 0);
@@ -924,7 +1018,8 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
             LineTo(hdc, param4 - 0x14, line4_y);
 
             SelectObject(hdc, g_font_normal);
-            DrawTextA(hdc, (const char*)((int8_t*)playerData + 0x25), -1, &text_rect, 0);
+            DrawTextA(hdc, reinterpret_cast<const char*>(reinterpret_cast<int8_t*>(playerData) + 0x25),
+                      -1, &text_rect, 0);
         }
 
         /* Restore GDI state */
@@ -937,68 +1032,75 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
 
     /* 11. Render session/track overlays */
     /* Call vtable slot 26 (0x68/4) on rendering context — EndPaint-like method */
-    ctx_vtbl = *(void***)playerData;
-    ((void(__stdcall*)(void*, void*))ctx_vtbl[0x68 / 4])(playerData, hdc);
+    ctx_vtbl = *reinterpret_cast<void***>(playerData);
+    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x68 / 4])(playerData, hdc);
 
-    if (*(int8_t*)((int8_t*)playerData + 0x39) == 0) {
+    if (*reinterpret_cast<int8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x39) == 0) {
         /* Non-highlighted: render base + frame session overlays */
         /* NOTE: Exact parameters to RenderSessionBase are approximate;
            the original passes values derived from playerData, hdc, and
            the slider positions. The +0x93 field selects the session
            base surface variant. */
         this->RenderSessionBase(
-            hdc, (uint32_t)param2, (int32_t)playerData,
-            param4, (uint32_t)param5,
-            *(uint8_t*)((int8_t*)playerData + 0x93));
+            hdc, static_cast<uint32_t>(param2), ptr_lo32(playerData),
+            param4, static_cast<uint32_t>(param5),
+            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x93));
         this->RenderSessionFrame(hdc);
     } else {
         /* Highlighted row: render all non-empty track entries (+0x96) */
-        const uint8_t* entry_ptr = (const uint8_t*)((int8_t*)playerData + 0x96);
+        const uint8_t* entry_ptr =
+            reinterpret_cast<const uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x96);
         int32_t entry_count;
         for (entry_count = 0; entry_count < 128; entry_count++) {
             if (entry_ptr[1] == 0) break;
             /* NOTE: Clip coordinates here are approximate; the original
                derives them from playerData, hdc, and param2 offsets */
             this->RenderTrackEntry(
-                hdc, (uint32_t)(int32_t)playerData, (uint32_t)hdc,
-                param2, (uint32_t)param5,
+                hdc, static_cast<uint32_t>(ptr_lo32(playerData)), static_cast<uint32_t>(ptr_lo32(hdc)),
+                param2, static_cast<uint32_t>(param5),
                 entry_ptr);
             entry_ptr += 6;
         }
     }
 
     /* 12. Blit postcard image if word (+0x3A) is non-zero */
-    if (*(int16_t*)((int8_t*)playerData + 0x3A) != 0) {
-        void* postcard_surf = this->resource_data;
+    if (*reinterpret_cast<int16_t*>(reinterpret_cast<int8_t*>(playerData) + 0x3A) != 0) {
+        UIPANEL_Surface* postcard_surf = static_cast<UIPANEL_Surface*>(this->resource_data);
         if (postcard_surf != NULL) {
-            int32_t post_w = *(int32_t*)((int8_t*)postcard_surf + 0x18);
-            int32_t post_h = *(int32_t*)((int8_t*)postcard_surf + 0x1C);
+            /* width/height (+0x08/+0x0C) — Ghidra's DPLAY_RenderPlayer
+             * (0x4437C0) reads this_00+8/this_00+0xc for the exact same
+             * Blit call, matching UIPANEL_Surface::width/height, not
+             * pixels/ddraw_surf (+0x18/+0x1C) as the raw-offset version of
+             * this code used; same bug class fixed above in
+             * RenderTrackEntry/RenderSessionBase. */
+            int32_t post_w = postcard_surf->width;
+            int32_t post_h = postcard_surf->height;
             /* Postcard position derived from playerData+0x14 and HDC
                struct offset +0x10 (UIPANEL surface top-left) */
-            int32_t post_x = (int32_t)playerData + 0x14;
-            int32_t post_y = *(int32_t*)((int8_t*)hdc + 0x10);
+            int32_t post_x = ptr_lo32(playerData) + 0x14;
+            int32_t post_y = *reinterpret_cast<int32_t*>(reinterpret_cast<int8_t*>(hdc) + 0x10);
 
             UIPANEL_Blit(postcard_surf,
-                         (uint32_t)post_x, (uint32_t)post_y,
-                         (uint32_t)(post_x + post_w),
-                         (uint32_t)(post_y + post_h),
-                         hdc, 0, 0, (uint32_t)post_w, (uint32_t)post_h, 0);
+                         static_cast<uint32_t>(post_x), static_cast<uint32_t>(post_y),
+                         static_cast<uint32_t>(post_x + post_w),
+                         static_cast<uint32_t>(post_y + post_h),
+                         hdc, 0, 0, static_cast<uint32_t>(post_w), static_cast<uint32_t>(post_h), 0);
         }
     }
 
     /* 13. End paint cycle */
-    ctx_vtbl = *(void***)playerData;
-    ((void(__stdcall*)(void*, void*))ctx_vtbl[0x44 / 4])(playerData, &hbr);
+    ctx_vtbl = *reinterpret_cast<void***>(playerData);
+    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x44 / 4])(playerData, &hbr);
 
     /* 14. Frame outer rect with black */
     {
         void* black_brush = GetStockObject(4);  /* BLACK_BRUSH */
-        FrameRect(hdc, (const RECT*)&param2, black_brush);
+        FrameRect(hdc, reinterpret_cast<const RECT*>(&param2), black_brush);
     }
 
     /* 15. Final end-paint method */
-    ctx_vtbl = *(void***)playerData;
-    ((void(__stdcall*)(void*, void*))ctx_vtbl[0x68 / 4])(playerData, hdc);
+    ctx_vtbl = *reinterpret_cast<void***>(playerData);
+    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x68 / 4])(playerData, hdc);
 
     DeleteObject(hbr);
 }
@@ -1026,7 +1128,7 @@ void NetworkPlayerList::EnumeratePlayers()
 
     /* Zero the path buffer and player name array */
     {
-        uint32_t* p = (uint32_t*)path_buf;
+        uint32_t* p = reinterpret_cast<uint32_t*>(path_buf);
         for (i = 0x2510 / 4; i > 0; i--) { *p++ = 0; }
     }
 
@@ -1049,23 +1151,23 @@ void NetworkPlayerList::EnumeratePlayers()
     /* Windows path: original PE string-literal addresses. Documentation
      * only — never linked, only type-checked under cross-compile. */
     switch (DAT_004a97a0) {
-    default: easter_path = (const char*)0x0047ebf8;   /* "\\Easter\\Eng" */
+    default: easter_path = reinterpret_cast<const char*>(0x0047ebf8);   /* "\\Easter\\Eng" */
         break;
-    case 1:  easter_path = (const char*)0x0047ec58;   /* "\\Easter\\Dan" */
+    case 1:  easter_path = reinterpret_cast<const char*>(0x0047ec58);   /* "\\Easter\\Dan" */
         break;
-    case 2:  easter_path = (const char*)0x0047ec4c;   /* "\\Easter\\Dut" */
+    case 2:  easter_path = reinterpret_cast<const char*>(0x0047ec4c);   /* "\\Easter\\Dut" */
         break;
-    case 4:  easter_path = (const char*)0x0047ec40;   /* "\\Easter\\Fre" */
+    case 4:  easter_path = reinterpret_cast<const char*>(0x0047ec40);   /* "\\Easter\\Fre" */
         break;
-    case 5:  easter_path = (const char*)0x0047ec34;   /* "\\Easter\\Ger" */
+    case 5:  easter_path = reinterpret_cast<const char*>(0x0047ec34);   /* "\\Easter\\Ger" */
         break;
-    case 6:  easter_path = (const char*)0x0047ec28;   /* "\\Easter\\Ita" */
+    case 6:  easter_path = reinterpret_cast<const char*>(0x0047ec28);   /* "\\Easter\\Ita" */
         break;
-    case 7:  easter_path = (const char*)0x0047ec1c;   /* "\\Easter\\Nor" */
+    case 7:  easter_path = reinterpret_cast<const char*>(0x0047ec1c);   /* "\\Easter\\Nor" */
         break;
-    case 8:  easter_path = (const char*)0x0047ec10;   /* "\\Easter\\Spa" */
+    case 8:  easter_path = reinterpret_cast<const char*>(0x0047ec10);   /* "\\Easter\\Spa" */
         break;
-    case 9:  easter_path = (const char*)0x0047ec04;   /* "\\Easter\\Swe" */
+    case 9:  easter_path = reinterpret_cast<const char*>(0x0047ec04);   /* "\\Easter\\Swe" */
         break;
     }
 #else
@@ -1091,9 +1193,9 @@ void NetworkPlayerList::EnumeratePlayers()
      * Format string at 0x47ebe4 is "%s%s%s\\easter_usr" (or equivalent). */
 #ifdef _WIN32
     /* Windows path: use original format string address for type-checking */
-    wsprintfA(path_buf, (const char*)0x0047ebe4,
+    wsprintfA(path_buf, reinterpret_cast<const char*>(0x0047ebe4),
               g_install_path,
-              (const char*)0x0047e0c4,    /* "\\PostBag\\" */
+              reinterpret_cast<const char*>(0x0047e0c4),    /* "\\PostBag\\" */
               easter_path);
 #else
     /* Host path: construct path with forward slashes */
@@ -1123,12 +1225,12 @@ void NetworkPlayerList::EnumeratePlayers()
     i = 0;  /* buffer index (EAX in disasm) */
     k = 0;  /* slot index as offset: 0, 13, 26, ... 195 (EDI in disasm) */
 
-    while (k < (int32_t)(16 * 13) && i < (int32_t)bytes_read) {
+    while (k < static_cast<int32_t>(16 * 13) && i < static_cast<int32_t>(bytes_read)) {
         j = 0;  /* characters copied to current slot (ECX in disasm) */
 
         /* Inner loop: copy characters until 12 copied or \r found */
-        while (j < 12 && i < (int32_t)bytes_read) {
-            ch = (uint8_t)file_buf[i];
+        while (j < 12 && i < static_cast<int32_t>(bytes_read)) {
+            ch = static_cast<uint8_t>(file_buf[i]);
 
             if (ch == 0x0D) {  /* 0xD = '\r' */
                 i++;
@@ -1136,7 +1238,7 @@ void NetworkPlayerList::EnumeratePlayers()
             }
 
             /* Copy character to slot */
-            this->player_names[k / 13][j] = (char)ch;
+            this->player_names[k / 13][j] = static_cast<char>(ch);
             j++;
             i++;
         }
@@ -1147,8 +1249,8 @@ void NetworkPlayerList::EnumeratePlayers()
         /* If name is exactly 12 chars, skip remaining chars on this line until \n.
          * This handles truncation of longer names. */
         if (j == 12) {
-            while (i < (int32_t)bytes_read) {
-                ch = (uint8_t)file_buf[i];
+            while (i < static_cast<int32_t>(bytes_read)) {
+                ch = static_cast<uint8_t>(file_buf[i]);
                 if (ch == 0x0A) {  /* Found \n — skip it and break */
                     i++;
                     break;
@@ -1157,8 +1259,8 @@ void NetworkPlayerList::EnumeratePlayers()
             }
         } else {
             /* Name shorter than 12 chars — skip any trailing \r\n */
-            while (i < (int32_t)bytes_read) {
-                ch = (uint8_t)file_buf[i];
+            while (i < static_cast<int32_t>(bytes_read)) {
+                ch = static_cast<uint8_t>(file_buf[i]);
                 if (ch == 0x0A) {  /* 0xA = '\n' */
                     i++;
                     break;
@@ -1216,20 +1318,20 @@ uint32_t NetworkPlayerList::RegisterPlayer(void* player_slot,
     subdir = PostBag_Subdir(type);
 
     if (param3 == 0) {
-        wsprintfA(filepath, (const char*)0x0047e3d0,
+        wsprintfA(filepath, reinterpret_cast<const char*>(0x0047e3d0),
                   g_install_path,
-                  (const char*)0x0047e0c4,
+                  reinterpret_cast<const char*>(0x0047e0c4),
                   subdir);
     } else {
-        wsprintfA(filepath, (const char*)0x0047ed20,
+        wsprintfA(filepath, reinterpret_cast<const char*>(0x0047ed20),
                   g_install_path,
-                  (const char*)0x0047e0c4,
+                  reinterpret_cast<const char*>(0x0047e0c4),
                   subdir,
                   param3);
     }
 
     result = DPLAY_SetPlayerData(player_slot, filepath);
-    if ((uint8_t)result == 0) {
+    if (static_cast<uint8_t>(result) == 0) {
         return result & 0xFFFFFF00;
     }
 
@@ -1268,11 +1370,11 @@ void NetworkPlayerList::GetPlayerAddress(void* player_slot,
     int32_t configId;
 
     subdir = PostBag_Subdir(type);
-    configId = *(int32_t*)((int8_t*)player_slot + 0x0C);
+    configId = *reinterpret_cast<int32_t*>(reinterpret_cast<int8_t*>(player_slot) + 0x0C);
 
-    wsprintfA(filepath, (const char*)0x0047ed2c,
+    wsprintfA(filepath, reinterpret_cast<const char*>(0x0047ed2c),
               g_install_path,
-              (const char*)0x0047e0c4,
+              reinterpret_cast<const char*>(0x0047e0c4),
               subdir,
               configId);
 
@@ -1308,16 +1410,16 @@ PostBagFileNode* NET_GetHostName(int32_t type, int32_t param2)
     char wildcard[0x504] = {};
     char directory[0x504] = {};
     if (param2 == 0) {
-        wsprintfA(wildcard, (const char*)0x0047ece4, g_install_path,
-                  (const char*)0x0047e0c4, subdir, g_player_config->player_id);
-        wsprintfA(directory, (const char*)0x0047ecdc, g_install_path,
-                  (const char*)0x0047e0c4, subdir);
+        wsprintfA(wildcard, reinterpret_cast<const char*>(0x0047ece4), g_install_path,
+                  reinterpret_cast<const char*>(0x0047e0c4), subdir, g_player_config->player_id);
+        wsprintfA(directory, reinterpret_cast<const char*>(0x0047ecdc), g_install_path,
+                  reinterpret_cast<const char*>(0x0047e0c4), subdir);
     } else {
-        wsprintfA(wildcard, (const char*)0x0047ed04, g_install_path,
-                  (const char*)0x0047e0c4, subdir, param2,
+        wsprintfA(wildcard, reinterpret_cast<const char*>(0x0047ed04), g_install_path,
+                  reinterpret_cast<const char*>(0x0047e0c4), subdir, param2,
                   g_player_config->player_id);
-        wsprintfA(directory, (const char*)0x0047ecf8, g_install_path,
-                  (const char*)0x0047e0c4, subdir, param2);
+        wsprintfA(directory, reinterpret_cast<const char*>(0x0047ecf8), g_install_path,
+                  reinterpret_cast<const char*>(0x0047e0c4), subdir, param2);
     }
 
     PostBagFileNode* head = nullptr;
@@ -1330,7 +1432,7 @@ PostBagFileNode* NET_GetHostName(int32_t type, int32_t param2)
                 auto* node = static_cast<PostBagFileNode*>(operator_new(sizeof(PostBagFileNode)));
                 node->path[0] = '\0';
                 node->next = nullptr;
-                wsprintfA(node->path, (const char*)0x0047e8a0, directory, filename);
+                wsprintfA(node->path, reinterpret_cast<const char*>(0x0047e8a0), directory, filename);
 
                 void* file = CreateFileA(node->path, 0x80000000, 1, nullptr, 3,
                                           0x8000000, nullptr);
@@ -1442,8 +1544,8 @@ void NET_DownloadAsset(uint32_t player_id, int32_t type, void* buf)
 #ifdef _WIN32
     /* Windows-faithful path: original PE string-literal address for the
      * "%s%s%s\%08d.dat" format (documentation only, never linked). */
-    wsprintfA(path, (const char*)0x0047ed3c, g_install_path,
-              (const char*)0x0047e0c4, subdir, player_id & 0xffff);
+    wsprintfA(path, reinterpret_cast<const char*>(0x0047ed3c), g_install_path,
+              reinterpret_cast<const char*>(0x0047e0c4), subdir, player_id & 0xffff);
 #else
     std::snprintf(path, sizeof(path), "%s/PostBag%s/%08u.dat",
                   g_install_path, subdir, player_id & 0xffffu);

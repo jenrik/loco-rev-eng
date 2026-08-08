@@ -500,7 +500,19 @@ void UIEntity_Ctor(void) { /* host no-op */ }
 /* UIPANEL_Blit(void*,int...int) and UIPANEL_BeginPaint(void*): duplicates
  * of shared/link_stubs.cpp / ui/UIPANEL.cpp (LINK-001); removed here. */
 void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { /* host no-op */ }
-void UIPANEL_CreateSurface(void* self) { (void)self; }
+/* Returns `self` (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
+ * cluster): the real definition (0x42A110, graphics/LOCOBITMAP.cpp
+ * UIPANEL_CreateSurface(UIPANEL_Surface*)) is a placement-style constructor
+ * that initializes *self in place; this narrower void*-param overload is
+ * the one every other caller in the tree (EditWindow.cpp, Town.cpp,
+ * UI_ChildWindow.cpp, BuildingPanel.cpp, Cursor.cpp, Netman.cpp,
+ * NetworkPlayerList.cpp) actually links against, and every one of them
+ * chains the result back into the same surface variable (`surface =
+ * UIPANEL_CreateSurface(surface)`), expecting identity to be preserved —
+ * previously `void`-returning, which is UB read by every caller (Itanium
+ * mangling ignores return type, so it linked clean). Still a host no-op
+ * (init logic itself not ported), but now well-defined. */
+void* UIPANEL_CreateSurface(void* self) { return self; }
 void UIPANEL_StretchBlit(void*, void*, int, int, int) { /* host no-op */ }
 void UIPANEL_SetClipRect(void* self, int a, int b) { (void)self; (void)a; (void)b; }
 void UIPANEL_ScrollPanel_HandleDrag(void*, int, int) { /* host no-op */ }
