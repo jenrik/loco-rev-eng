@@ -41,6 +41,8 @@
 #include "../game/Building.h"
 #include "../game/TrackPiece.h"
 #include "../game/World.h"
+#include "../game/Vehicle.h"
+#include "../core/VehicleEditor.h"
 #include "../game/Train.h"
 #include "../game/PlayerConfig.h"
 #include "../network/DPlayManager.h"
@@ -2743,63 +2745,68 @@ void Town::save_received_postcard(uint32_t unused_arg)
 /* ================================================================== */
 void Train_HandleTrackBuild(void* subsystem, int msg)
 {
-    uintptr_t sub = (uintptr_t)subsystem;
-    uintptr_t data = (uintptr_t)msg;
+    TrainSubsystem* sub = static_cast<TrainSubsystem*>(subsystem);
+    /* `msg` is a pointer disguised as `int` (original 32-bit convention).
+     * Its pointee's shape beyond +0xC (session count) and +0x10 (packed
+     * 0xE4-byte session records, narrower than the full 0x390-byte
+     * DPLAY_SessionData — a compact wire view, same pattern as
+     * DPlayManager::CopyPlayerData's compact packet) isn't otherwise
+     * evidenced here; TODO: identify the real message struct and replace
+     * this raw view once Train_ProcessMessages' full shape is confirmed. */
+    uintptr_t data = static_cast<uintptr_t>(msg);
 
     /* Reset the pending-timeout field on every pending vehicle node. */
-    for (void* node = *(void**)(sub + 0x14); node != nullptr;
-         node = *(void**)((intptr_t)node + 0x70)) {
-        *(uint16_t*)((intptr_t)node + 0x74) = 32000;
+    for (Vehicle* node = sub->sprite_list_1; node != nullptr;
+         node = node->next) {
+        node->tunnel_angle = 32000;
     }
 
-    if (*(int*)(data + 0xC) != 0) {
+    if (*reinterpret_cast<int*>(data + 0xC) != 0) {
         /* Create a local vehicle with a random type from 3 variants
          * starting at resource 0x1804. */
         void* mem = operator_new(0x94);
-        void* vehicle = nullptr;
+        Vehicle* vehicle = nullptr;
         if (mem != nullptr) {
-            vehicle = Vehicle_Ctor(mem,
-                                   (CRT_rand() % 3) * 2 + 0x1804,
-                                   1, 1, 1);
+            vehicle = static_cast<Vehicle*>(Vehicle_Ctor(
+                mem, (CRT_rand() % 3) * 2 + 0x1804, 1, 1, 1));
         }
 
         if (vehicle != nullptr) {
-            /* vehicle->editors[0] (+0x10) vtable slot 13: set the
-             * player-name string (0x43CEA9..0x43CEAD). */
-            void* editor = *(void**)((intptr_t)vehicle + 0x10);
-            ((void (*)(void*, const char*))(*(void***)editor)[13])(
-                editor, s_LEGO_LOCO_0047e1c0);
+            /* vtable slot 13 (Entity::SetName): set the player-name
+             * string (0x43CEA9..0x43CEAD). */
+            vehicle->editors[0]->SetName(s_LEGO_LOCO_0047e1c0);
 
             /* Clear the vehicle's saved-track fields. */
-            *(uint16_t*)((intptr_t)vehicle + 0x74) = 0;
-            *(uint16_t*)((intptr_t)vehicle + 0x76) = 0;
-            *(uint16_t*)((intptr_t)vehicle + 0x7E) = 0;
-            *(uint16_t*)((intptr_t)vehicle + 0x80) = 0;
-            *(uint8_t*)((intptr_t)vehicle + 0x82) = 0;
-            *(uint16_t*)((intptr_t)vehicle + 0x84) = 0;
-            *(uint16_t*)((intptr_t)vehicle + 0x86) = 0;
+            vehicle->tunnel_angle = 0;
+            vehicle->field_76 = 0;
+            vehicle->field_7E = 0;
+            vehicle->field_80 = 0;
+            vehicle->field_82 = 0;
+            vehicle->field_84 = 0;
+            vehicle->field_86 = 0;
 
             /* For each session record in the message: create a slot,
              * copy the local player name, init the route, attach the
              * slot to the vehicle editor and download missing assets. */
-            const uint8_t* record = (const uint8_t*)(data + 0x10);
-            int count = *(int*)(data + 0xC);
+            const uint8_t* record = reinterpret_cast<const uint8_t*>(data + 0x10);
+            int count = *reinterpret_cast<int*>(data + 0xC);
             int index = 0;
             while (index < count) {
                 DPlayManager* session = DPlayManager::EnumerateSessions(
-                    (const DPLAY_SessionData*)record);
+                    reinterpret_cast<const DPLAY_SessionData*>(record));
                 /* Binary: no null check before use (0x43CF53..0x43CF5D). */
-                const char* name = (const char*)g_player_config + 6;
+                const char* name = reinterpret_cast<const char*>(g_player_config) + 6;
                 size_t len = strlen(name);
-                memcpy((char*)((intptr_t)session + 0x10), name, len + 1);
-                *(uint16_t*)((intptr_t)session + 0x3A) = 0;
+                memcpy(session->m_sessionBlk1, name, len + 1);
+                session->m_wordValue = 0;
 
                 Vehicle_InitRoute(vehicle, 0x1871, 4, 1);
-                VehicleEditor_SetDPlayData(
-                    *(void**)((intptr_t)vehicle + 0x14 + index * 4),
-                    (int)(intptr_t)session);
-                static_cast<TrainSubsystem*>(subsystem)
-                    ->DownloadMissingAssets(session);
+                /* Remote sessions occupy editors[1..3]; editors[0] is the
+                 * local editor named above. */
+                VehicleEditor_SetDPlayData(vehicle->editors[index + 1],
+                                           static_cast<int>(
+                                               reinterpret_cast<intptr_t>(session)));
+                sub->DownloadMissingAssets(session);
                 if (session != nullptr) {
                     delete session;
                 }
@@ -2811,43 +2818,43 @@ void Train_HandleTrackBuild(void* subsystem, int msg)
             TrainMessage* tm = new TrainMessage();
             tm->type = 0xF;
             tm->data_ptr = vehicle;
-            *(uint8_t*)((intptr_t)vehicle + 0x88) = 0;
+            vehicle->init_flag = 0;
             NETMAN_QueueMessage(tm);
         }
     }
 
     /* Move the first pending vehicle node (if any) into the network
      * queue. */
-    void* head = *(void**)(sub + 0x14);
+    Vehicle* head = sub->sprite_list_1;
     if (head != nullptr) {
-        *(void**)(sub + 0x14) = *(void**)((intptr_t)head + 0x70);
-        *(void**)((intptr_t)head + 0x70) = nullptr;
+        sub->sprite_list_1 = head->next;
+        head->next = nullptr;
 
         TrainMessage* tm = new TrainMessage();
         tm->type = 0xF;
         tm->data_ptr = head;
-        *(uint8_t*)((intptr_t)head + 0x88) = 0;
+        head->init_flag = 0;
         NETMAN_QueueMessage(tm);
     }
 
-    if (*(void**)(sub + 0x14) == nullptr) {
-        if (*(int*)(sub + 0x34) == 0) {
+    if (sub->sprite_list_1 == nullptr) {
+        if (sub->request_count == 0) {
             DirectPlay_Close(g_dplay_peer);
         }
 
         /* Drain any remaining pending vehicles into the queue. */
-        while (*(void**)(sub + 0x14) != nullptr) {
-            uintptr_t node = (uintptr_t)*(void**)(sub + 0x14);
+        while (sub->sprite_list_1 != nullptr) {
+            Vehicle* node = sub->sprite_list_1;
             TrainMessage* tm = new TrainMessage();
             tm->type = 0xF;
-            tm->data_ptr = (void*)node;
-            *(uint8_t*)(node + 0x88) = 0;
-            *(void**)(sub + 0x14) = *(void**)(node + 0x70);
-            *(void**)(node + 0x70) = nullptr;
+            tm->data_ptr = node;
+            node->init_flag = 0;
+            sub->sprite_list_1 = node->next;
+            node->next = nullptr;
             NETMAN_QueueMessage(tm);
         }
     } else {
-        Train_SendPlayerInfo((void*)sub);
+        Train_SendPlayerInfo(sub);
     }
 }
 
