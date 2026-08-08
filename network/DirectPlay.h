@@ -45,7 +45,7 @@
  *   +0x1584: dplay_create_obj (void*) - transient IDirectPlay-family object
  *            returned by Ordinal_1; QueryInterface'd for IID_IDirectPlay4A
  *            into dplay_interface, then Released. NOT a DLL handle (verified
- *            via disassembly of DirectPlay_EnumConnections/GetSessionDesc:
+ *            via disassembly of DirectPlay_EnumConnections/FindLocalModemName:
  *            this slot is always dereferenced through a vtable, never
  *            passed to FreeLibrary).
  *   +0x1588: dplay_interface (void*) - IDirectPlay4A* interface pointer
@@ -68,7 +68,7 @@
  * === Known GUIDs from binary ===
  *   IID_IDirectPlay4A     @ 0x478F88: {0AB1C531-4745-11D1-A7A1-0000F803ABFC}
  *     (byte-verified; used as the QueryInterface argument in
- *      DirectPlay_GetSessionDesc/EnumConnections — NOT a CLSID, despite
+ *      DirectPlay_FindLocalModemName/EnumConnections — NOT a CLSID, despite
  *      the misleading `CLSID_DirectPlay` symbol name still used in
  *      DirectPlay.cpp for this value)
  *   CLSID_DirectPlay      @ 0x478F98: {D1EB6D20-8923-11D0-9D97-00A0C90A43CB}
@@ -107,6 +107,19 @@
 #pragma once
 
 #include "../shared/types.h"
+
+/* GUID — same layout as stubs/windows.h's _GUID; guarded so this header
+ * is safe to include alongside stubs/windows.h (which would otherwise
+ * clash on real Win32 declarations pulled in by that larger header). */
+#ifndef LOCO_GUID_DEFINED
+#define LOCO_GUID_DEFINED
+typedef struct _GUID {
+    uint32_t Data1;
+    uint16_t Data2;
+    uint16_t Data3;
+    uint8_t  Data4[8];
+} GUID;
+#endif
 
 /* ================================================================== */
 /* DirectPlay functions                                                */
@@ -204,14 +217,24 @@ int32_t DirectPlay_EnumConnections(int32_t session);
 uint32_t DirectPlay_GetConnectionCaps(uint8_t* devicePath);
 
 /**
- * DirectPlay_GetSessionDesc — Query session description from DirectPlay.
+ * DirectPlay_FindLocalModemName — Look up the local player's modem name.
  * Address: 0x45EEC0
  *
- * Creates DirectPlay, queries session desc, allocates + locks global memory,
- * creates player enumeration callback, stores player name at +0xD70.
- * Returns true if a session was found.
+ * Queries the local player's own DirectPlay address via
+ * IDirectPlay4A::GetPlayerAddress(idPlayer=0 [DPID_ALLPLAYERS — the exact
+ * reason for using this sentinel here, rather than the local player's own
+ * DPID, is not yet determined], buffer, &size), then walks that address via
+ * IDirectPlayLobby3A::EnumAddress looking for the DPAID_Modem chunk (see
+ * DirectPlay_FindModemNameCallback). If found and non-empty, the modem
+ * name ends up in player_name_buf (+0xD70). Renamed from
+ * "DirectPlay_GetSessionDesc" — its old name and doc were wrong: this
+ * queries a player address and modem-name chunk, not a session
+ * description at all (confirmed via disassembly of both DirectPlay
+ * calls it makes).
+ *
+ * @return true if a modem name was found (and stored at +0xD70)
  */
-bool DirectPlay_GetSessionDesc(int32_t session);
+bool DirectPlay_FindLocalModemName(int32_t session);
 
 /**
  * DirectPlay_SetSessionDesc — Set session description and host.
@@ -249,17 +272,23 @@ uint32_t DirectPlay_SetSessionDesc(void* self, const char* password);
 uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_t flags);
 
 /**
- * DirectPlay_CreatePlayer — DirectPlay enum callback.
- * Address: 0x45FBD0
+ * DirectPlay_FindModemNameCallback — IDirectPlayLobby3A::EnumAddress callback.
+ * Address: 0x45FBD0, __stdcall (real signature: LPDPENUMADDRESSCALLBACK)
  *
- * Called by DirectPlay when enumerating session players. If player name
- * is empty ("") and displayName is non-empty, copies displayName into the
- * global player name buffer at g_dplay_peer+0xD70.
+ * Called while walking the local player's own DirectPlay address (obtained
+ * via IDirectPlay4A::GetPlayerAddress) for the DPAID_Modem chunk — the
+ * modem name registered with TAPI, present only for modem connections.
+ * When found and non-empty, copies it into the global player_name_buf at
+ * g_dplay_peer+0xD70. Confirmed via disassembly (RET 0x10 = 4 stdcall
+ * params) and byte-verified against the real DPAID_Modem GUID
+ * (0x4790F8) — this is NOT a "player enumeration" callback; a prior
+ * revision of this file mistook guidDataType (a GUID*) for a short
+ * ASCII player-name string.
  *
- * @return 0 to continue enumeration, 1 to stop
+ * @return TRUE (1) to continue enumeration, FALSE (0) to stop
  */
-uint32_t DirectPlay_CreatePlayer(const char* playerName, uint32_t flags,
-                                  const char* displayName);
+uint32_t __stdcall DirectPlay_FindModemNameCallback(const GUID* guidDataType, uint32_t dwDataSize,
+                                                     const void* lpData, void* lpContext);
 
 /**
  * DirectPlay_Close — Close DirectPlay session and free resources.
@@ -271,14 +300,19 @@ uint32_t DirectPlay_CreatePlayer(const char* playerName, uint32_t flags,
 void DirectPlay_Close(int32_t session);
 
 /**
- * DirectPlay_EnumPlayers — Enumerate players in a session.
+ * DirectPlay_OpenSession — Open (host or join) a DirectPlay session.
  * Address: 0x45FD80
  *
- * Builds a session desc structure, calls IDirectPlay4::EnumPlayers,
- * retries on DPERR_PENDING. Returns 1 on success, 0x88770100 on
- * DP_OK_USERCANCEL, or error code on failure.
+ * Builds a DPSESSIONDESC2 (dwMaxPlayers, guidApplication, session name,
+ * password) and calls IDirectPlay4A::Open(lpsd, dwFlags=0x82), retrying
+ * on DPERR_PENDING. Renamed from "DirectPlay_EnumPlayers" — confirmed via
+ * disassembly (real vtable offset 0x60 is Open, 2-push arity matching
+ * Open(LPDPSESSIONDESC2,DWORD), not EnumPlayers's 4-param signature) —
+ * this creates/opens the session, it does not enumerate anything.
+ *
+ * @return 1 on success, 0x88770100 on DP_OK_USERCANCEL, or error code
  */
-uint32_t DirectPlay_EnumPlayers(void* self);
+uint32_t DirectPlay_OpenSession(void* self);
 
 /**
  * DirectPlay_Open — Convert DPERR_* HRESULT to string.
@@ -297,5 +331,5 @@ void DirectPlay_Open(char* outBuf, int32_t hresult);
 /* Global state                                                       */
 /* ================================================================== */
 
-/* Forward declaration used by DirectPlay_CreatePlayer */
+/* Forward declaration used by DirectPlay_FindModemNameCallback */
 extern void* g_dplay_peer;  /* DirectPlay peer struct pointer */
