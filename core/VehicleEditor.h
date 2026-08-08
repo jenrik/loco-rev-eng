@@ -25,7 +25,11 @@
  *   [4] +0x10: (unknown — inherited)
  *   [5] +0x14: (unknown — inherited)
  *   [6] +0x18: SetAnimState (inherited: 0x405A50)
- *   [7] +0x1C: GetResourceId (0x40E0D0)
+ *   [7] +0x1C: StopSound (inherited: 0x405A20) — NOT overridden by
+ *              VehicleEditor. Confirmed by a raw read of the vtable data
+ *              at 0x477590+0x1C (= 0x405A20 = Entity::StopSound); the
+ *              previous "GetResourceId" label here was wrong — GetResourceId
+ *              (0x40E0D0) is a plain non-virtual member, not in this vtable.
  *   [8] +0x20: SetFrame (inherited: 0x405DE0)
  *   [9] +0x24: IsInBounds (0x40E250)
  *
@@ -235,7 +239,8 @@ public:
     uint32_t CheckEditBounds2(Vehicle* vehicle);
 
     /**
-     * GetResourceId (vtable[7]) — Returns the resource ID if track resource loaded.
+     * GetResourceId (non-virtual — see the vtable[7] correction above) —
+     * Returns the resource ID if track resource loaded.
      * Address: 0x40E0D0
      */
     uint32_t GetResourceId();

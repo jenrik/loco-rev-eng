@@ -282,7 +282,7 @@ deferred stubs rather than call-0 landmines.
 | 2 | `CRT_fabs` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 2 | `ScriptedObject_ParseStream` | ScriptedObject::HandleEvent(unsigned int, char const*) |
 | 2 | `Ordinal_1` | GameAudio::Init() |
-| 2 | `EditorState_Copy` | Vehicle::UpdateEngineSound() |
+| 2 | `EditorState_Copy` | **FIXED (2026-08-08, Vehicle.cpp cast cluster session).** Both call sites in `Vehicle::UpdateEngineSound()` went through an `extern "C"` free-function declaration for a real, already-existing typed method (`EditorState::Copy(const EditorState*)`, 0x40B5D0) — fixed by calling `this->editor_state->Copy(...)` directly as part of a broader raw-offset-cast cleanup in `game/Vehicle.cpp`. `call 0` dropped 286→284, confirming both sites were genuinely unresolved (not a silent-wrong-stub). `VehicleEditor_Ctor`/`EditorState_Ctor` in the same file are a separate, still-open silent-wrong-stub/call-0 pair (see their own worklist rows below) — deliberately left for a follow-up commit. |
 | 2 | `ScriptedObject_InitBase` | ScriptedObject::RemoveChild(), ScriptedObject::AddChild(unsigned int, char const*) |
 | 1 | `CRT_fmod` (STUB) | edit_key_handler_parse(void*, KeySequenceRecord*) — STUB: loud fprintf+assert in stubs_impl.cpp. |
 | 1 | `Stream_BeginEnum` (STUB) | Game_ReadChunk(WNDPROC_Stream*, RiffChunkHeader*, int, int) — STUB: loud fprintf+assert in stubs_impl.cpp. |
