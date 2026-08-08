@@ -325,6 +325,18 @@ char panel_load_resource(void* obj, int res_id, int a, int b)
     return reinterpret_cast<LoadResourceFn>(vtable[6])(obj, res_id, a, b);
 }
 
+/* RESDATA vtable slot 1 = Lock/GetSurface (per shared/types.h's own doc
+ * comment on RESDATA::vtable). RESDATA is a raw resource-blob overlay,
+ * not a live C++ polymorphic object (no compiler-managed vtable on the
+ * host side), so this stays a raw dispatch rather than a typed virtual
+ * call. */
+void* resdata_get_surface(void* res, int a, int b)
+{
+    using GetSurfaceFn = void* (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(res);
+    return reinterpret_cast<GetSurfaceFn>(vtable[1])(res, a, b);
+}
+
 /* UIPANEL_Surface (canonical definition: graphics/LOCOBITMAP.h) mirrored
  * here with only the fields Town.cpp actually touches — not included
  * directly, see the forward-declaration comment on Town.h's
@@ -594,7 +606,7 @@ void Town::show()
 
     /* Arm the 0x4D / 200 ms postcard refresh timer. */
     if (this->timer_active == 0) {                  /* +0x5FC */
-        this->timer_active = (int)SetTimer(this->hWnd, 0x4D, 200, nullptr);
+        this->timer_active = static_cast<int>(SetTimer(this->hWnd, 0x4D, 200, nullptr));
     }
 
     this->list_postcards();                         /* 0x42DD50 */
@@ -678,8 +690,8 @@ void Town::on_create()
     RECT overlay;
     overlay.left   = 0;
     overlay.top    = 0;
-    overlay.right  = (uint16_t)(*(uint16_t*)((intptr_t)this->overlay_resource + 0x14));
-    overlay.bottom = (uint16_t)(*(uint16_t*)((intptr_t)this->overlay_resource + 0x16));
+    overlay.right  = static_cast<RESDATA*>(this->overlay_resource)->frame_width;
+    overlay.bottom = static_cast<RESDATA*>(this->overlay_resource)->frame_height;
     center_window_rect(&this->workRect, &overlay);
     this->postcard_rect_left   = overlay.left;      /* +0x614 */
     this->postcard_rect_top    = overlay.top;       /* +0x618 */
@@ -712,33 +724,33 @@ void Town::on_create()
                this->player_rect.top);
 
     /* Send animation source rect (right/bottom = background size). */
-    CopyRect((RECT*)&this->send_rect_left, &this->player_rect);
+    CopyRect(reinterpret_cast<RECT*>(&this->send_rect_left), &this->player_rect);
     this->send_rect_right =
-        (uint16_t)(*(uint16_t*)((intptr_t)this->background_resource + 0x14)) +
+        static_cast<RESDATA*>(this->background_resource)->frame_width +
         this->send_rect_left;
     this->send_rect_bottom =
         this->send_rect_top +
-        (uint16_t)(*(uint16_t*)((intptr_t)this->background_resource + 0x16));
-    OffsetRect((RECT*)&this->send_rect_left, 0x14C, 0xB0);
+        static_cast<RESDATA*>(this->background_resource)->frame_height;
+    OffsetRect(reinterpret_cast<RECT*>(&this->send_rect_left), 0x14C, 0xB0);
 
     /* Button strip source rect (right/bottom = strip size). */
-    CopyRect((RECT*)&this->button_src_left, &this->player_rect);
+    CopyRect(reinterpret_cast<RECT*>(&this->button_src_left), &this->player_rect);
     this->button_src_right =
-        (uint16_t)(*(uint16_t*)((intptr_t)this->button_strip_resource + 0x14)) +
+        static_cast<RESDATA*>(this->button_strip_resource)->frame_width +
         this->button_src_left;
     this->button_src_bottom =
         this->button_src_top +
-        (uint16_t)(*(uint16_t*)((intptr_t)this->button_strip_resource + 0x16));
-    OffsetRect((RECT*)&this->button_src_left, 0x100, 0xD2);
+        static_cast<RESDATA*>(this->button_strip_resource)->frame_height;
+    OffsetRect(reinterpret_cast<RECT*>(&this->button_src_left), 0x100, 0xD2);
 
     /* Player render area rect: player_rect offset by (0x199, 0xB2).
      * render_extra/render_rect_ptr are computed from the player rect
      * BEFORE the offset (binary order at 0x42FD8E/0x42FD98). */
     this->render_extra = this->player_rect.left + 300;
     this->render_rect_ptr =
-        (void*)(uintptr_t)(this->player_rect.top + 200);
-    CopyRect((RECT*)&this->render_param_x, &this->player_rect);
-    OffsetRect((RECT*)&this->render_param_x, 0x199, 0xB2);
+        reinterpret_cast<void*>(static_cast<uintptr_t>(this->player_rect.top + 200));
+    CopyRect(reinterpret_cast<RECT*>(&this->render_param_x), &this->player_rect);
+    OffsetRect(reinterpret_cast<RECT*>(&this->render_param_x), 0x199, 0xB2);
 
     /* Postcard preview area, offset by the render-area origin. */
     SetRect(&this->preview_rect, 0x14, -0xB, 0x2D, 0x3B);
@@ -756,10 +768,8 @@ void Town::layout_postcard_sprite(ButtonSprite* sprite, int dx, int dy)
     RECT r;
     r.left   = this->player_rect.left;
     r.top    = this->player_rect.top;
-    r.right  = r.left +
-        (uint16_t)(*(uint16_t*)((intptr_t)sprite->pixelData + 0x14));
-    r.bottom = r.top +
-        (uint16_t)(*(uint16_t*)((intptr_t)sprite->pixelData + 0x16));
+    r.right  = r.left + static_cast<RESDATA*>(sprite->pixelData)->frame_width;
+    r.bottom = r.top + static_cast<RESDATA*>(sprite->pixelData)->frame_height;
     OffsetRect(&r, dx, dy);
 
     sprite->x = r.left;
@@ -778,15 +788,17 @@ bool Town::init_sprites(HWND hParent)
     HWND hDesktop = GetDesktopWindow();
     GetClientRect(hDesktop, &desktop_rect);
 
-    /* Load window icon (resource 0x65). */
-    this->icon_handle = (HICON)LoadIconA(this->hInstance, (const char*)0x65);
+    /* Load window icon (resource 0x65, MAKEINTRESOURCE-style small integer
+     * disguised as a string pointer — standard Win32 resource-ID idiom). */
+    this->icon_handle = static_cast<HICON>(
+        LoadIconA(this->hInstance, reinterpret_cast<const char*>(0x65)));
 
     int width  = desktop_rect.right - desktop_rect.left;
     int height = desktop_rect.bottom - desktop_rect.top;
     int result = UI_CreateFullWindow(this, 0, hParent,
                                      desktop_rect.left, desktop_rect.top,
                                      width, height,
-                                     (void*)0, this->icon_handle, 0);
+                                     nullptr, this->icon_handle, 0);
     return (result != 0);
 }
 
@@ -803,23 +815,23 @@ bool Town::init_sprites(HWND hParent)
 char Town::handle_tile_click()
 {
     void* res = ResourceManager_GetById(&g_resmgr, 0x3807);
-    if (res && UI_IsBitmapReady((int)(intptr_t)res)) {
-        TrackPiece* sprite = (TrackPiece*)RESDATA_CreateChildSprite(this, res, 0, 0);
+    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
+        TrackPiece* sprite = static_cast<TrackPiece*>(RESDATA_CreateChildSprite(this, res, 0, 0));
         this->cursor_valid_sprite = sprite;          /* +0x170 */
         this->cursor_valid_dup = sprite;             /* +0xD8 */
     }
 
     res = ResourceManager_GetById(&g_resmgr, 0x3808);
-    if (res && UI_IsBitmapReady((int)(intptr_t)res)) {
-        TrackPiece* sprite = (TrackPiece*)RESDATA_CreateChildSprite(this, res, 0, 0);
+    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
+        TrackPiece* sprite = static_cast<TrackPiece*>(RESDATA_CreateChildSprite(this, res, 0, 0));
         this->cursor_invalid_sprite = sprite;        /* +0x174 */
         this->cursor_invalid_dup = sprite;           /* +0xDC */
     }
 
     res = ResourceManager_GetById(&g_resmgr, 0x3806);
-    if (res && UI_IsBitmapReady((int)(intptr_t)res)) {
+    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
         this->track_piece =                          /* +0x178 */
-            (TrackPiece*)RESDATA_CreateChildSprite(this, res, 0, 0);
+            static_cast<TrackPiece*>(RESDATA_CreateChildSprite(this, res, 0, 0));
     }
 
     /* Load animation resources 0x3805 (self) / 0x3804 (child_panel) via
@@ -871,7 +883,7 @@ bool Town::is_valid_placement(Building* entity)
     uint8_t tile_type = 0;
     if (entity != nullptr && entity->initialized == 1) {      /* +0x18 */
         if (entity->resource != nullptr) {                    /* +0x40 */
-            tile_type = *(uint8_t*)((intptr_t)entity->resource + 8);
+            tile_type = static_cast<RESDATA*>(entity->resource)->object_type;
         }
     }
 
@@ -885,7 +897,12 @@ bool Town::is_valid_placement(Building* entity)
         return entity->visible == 1;                    /* +0x24 */
     }
     if (tile_type == 0x04 &&
-        *(uint8_t*)((intptr_t)entity->resource + 0x62C) == 1) {
+        /* +0x62C is well past RESDATA's documented/asserted 0x1D8 size —
+         * this resource type's data extends beyond the common RESDATA
+         * header into fields RESDATA doesn't model; kept as a raw offset
+         * read rather than forced through RESDATA's (too-small) type. */
+        *reinterpret_cast<uint8_t*>(
+            reinterpret_cast<intptr_t>(entity->resource) + 0x62C) == 1) {
         return true;                /* connected tile */
     }
     if (tile_type == 0x03 &&
@@ -896,7 +913,7 @@ bool Town::is_valid_placement(Building* entity)
     if (tile_type == 0x0C) {        /* large-ID tile (ID > 0x300F) */
         int32_t id = -1;
         if (entity->resource != nullptr) {
-            id = ((RESDATA*)entity->resource)->resource_id;     /* +0x04 */
+            id = static_cast<RESDATA*>(entity->resource)->resource_id;
         }
         if (id > 0x300F) {
             return true;
@@ -918,7 +935,7 @@ byte Town::select_building(Building* building)
 
             uint16_t tile_type = 0;
             if (building->resource != nullptr) {
-                tile_type = *(uint8_t*)((intptr_t)building->resource + 8);
+                tile_type = static_cast<RESDATA*>(building->resource)->object_type;
             }
             this->selected_building_type = tile_type;           /* +0x16C */
 
@@ -937,7 +954,9 @@ byte Town::select_building(Building* building)
             /* vtable[3] dispatch; the binary pushes only the two
              * center coords (0x42D0D3..0x42D0DB) leaving the trailing
              * set_mode args undefined — reproduced with zeros. */
-            this->set_mode(center_x, (void*)(intptr_t)center_y, 0, 0);
+            this->set_mode(center_x,
+                           reinterpret_cast<void*>(static_cast<intptr_t>(center_y)),
+                           0, 0);
 
             short zoom = (this->selected_building_type == 6) ? 1 : 3;
             this->track_piece->SetZoom(zoom);                   /* 0x40D170 */
@@ -947,10 +966,10 @@ byte Town::select_building(Building* building)
             /* Binary reads this+0x08..+0x14 as the invalidate rect
              * (0x42D10C..0x42D122); kept as raw base-slot access. */
             TileMap_InvalidateRect(&g_tilemap,
-                *(int*)((intptr_t)this + 8),
-                *(int*)((intptr_t)this + 0xC),
-                *(int*)((intptr_t)this + 0x10),
-                *(int*)((intptr_t)this + 0x14));
+                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 8),
+                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 0xC),
+                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 0x10),
+                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 0x14));
 
             DDRAW_SelectBuilding(&g_ddraw_building, this->selected_building);
 
@@ -964,13 +983,12 @@ byte Town::select_building(Building* building)
 
     /* In the binary: g_active_panel = (g_ddraw_active == 1)
      * ? &g_ddraw_building : 0  (0x42D156..0x42D16C). */
-    g_active_panel = (g_ddraw_active == 1) ? (void*)&g_ddraw_building : nullptr;
+    g_active_panel = (g_ddraw_active == 1) ? &g_ddraw_building : nullptr;
 
     this->hide();                                               /* vtable[1] */
 
     if (this->child_panel) {
-        /* child_panel vtable[1] (Hide) */
-        ((void (*)(void*))(*(void***)this->child_panel)[1])(this->child_panel);
+        this->child_panel->hide();                                /* vtable[1] */
     }
 
     return this->selection_active;
@@ -1006,13 +1024,21 @@ void Town::deselect_building(int32_t /*unused1*/, int32_t /*unused2*/,
     viewport_rect.bottom = g_viewport_rect_bottom;
     IntersectRect(&clip_rect, &clip_rect, &viewport_rect);
 
-    /* overlay_panel + 0x1C = backing surface (no extra dereference). */
-    void* backing_surface = *(void**)((intptr_t)this->overlay_panel + 0x1C);
+    /* overlay_panel's own ddraw_surf field (no extra dereference). */
+    void* backing_surface = view(this->overlay_panel)->ddraw_surf;
 
-    /* backing_surface vtable slot 5: (surface, &backup, primary, rect,
-     * 0x1000000, 0) — restore the cached background. */
-    ((void (*)(void*, uint32_t, void*, RECT*, uint32_t, int))(
-        *(void***)backing_surface)[5])(
+    /* backing_surface vtable slot 5 (IDirectDrawSurface4::Blt, standard
+     * COM order): (surface, &backup, primary, rect, 0x1000000, 0) —
+     * restore the cached background. Kept as raw vtable dispatch rather
+     * than a typed IDirectDrawSurface4::Blt() call: the second argument
+     * here is this->backup_surface passed as a uint32_t scalar, not
+     * `&this->backup_surface` as a RECT* (which is how the same field
+     * group is used elsewhere, e.g. handle_tile_click's
+     * SetRect((RECT*)&this->backup_surface, ...)) — that mismatch needs
+     * Ghidra disassembly to resolve before this can be safely retyped;
+     * not done here to avoid guessing at DirectDraw parameter semantics. */
+    using BltFn = void (*)(void*, uint32_t, void*, RECT*, uint32_t, int);
+    reinterpret_cast<BltFn>((*reinterpret_cast<void***>(backing_surface))[5])(
         backing_surface,
         this->backup_surface,
         g_primary_surface,
@@ -1024,12 +1050,14 @@ void Town::deselect_building(int32_t /*unused1*/, int32_t /*unused2*/,
      * the base timerId slot (+0x28), repurposed as panel index. */
     uint32_t panel_flags = 0;
     int panel_index = static_cast<int>(this->timerId);           /* +0x28 */
-    if (*(uint8_t*)(*(intptr_t*)((intptr_t)this->panel_graphics + 0x20) +
-                    panel_index * 0x18 + 0x16) == 1) {
+    PanelGraphicsView* pgfx = panel_graphics_view(this->panel_graphics);
+    const uint8_t* anim_entry = reinterpret_cast<const uint8_t*>(pgfx->anim_table) +
+                                 panel_index * 0x18;
+    if (anim_entry[0x16] == 1) {
         panel_flags = 0x20;
     }
 
-    void* panel_surface = *(void**)((intptr_t)this->panel_graphics + 0x10);
+    void* panel_surface = pgfx->surface;
     UIPANEL_Blit(
         panel_surface,
         this->backup_surface,
@@ -1068,7 +1096,7 @@ void Town::track_building()
     if (this->building_center_x != cx ||                         /* +0x190 */
         this->building_center_y != cy) {                         /* +0x194 */
         /* vtable[3] dispatch; binary pushes only (cx, cy). */
-        this->set_mode(cx, (void*)(intptr_t)cy, 0, 0);
+        this->set_mode(cx, reinterpret_cast<void*>(static_cast<intptr_t>(cy)), 0, 0);
         this->building_center_x = cx;
         this->building_center_y = cy;
     }
@@ -1076,15 +1104,30 @@ void Town::track_building()
     int local_8[2];
     GameObject_GetRelPos(this, local_8, g_cursor_world_x, g_cursor_world_y);
 
-    /* Update each child sprite (vtable[20] dispatch per child). */
+    /* Update each child sprite (vtable[20] dispatch per child). Chained
+     * via TrackPiece::sub_resource (+0x28) — Ghidra-confirmed as a real
+     * linked-list "next" pointer (RESDATA_CreateChildSprite writes each
+     * new child's address into the previous child's +0x28 via
+     * `*(void**)(prev+0x28) = new_child`), despite game/TrackPiece.h
+     * currently declaring it `int32_t` — a pre-existing, wider landmine
+     * (game/TrackPiece.cpp's own destructor already works around the
+     * same mismatch via a uint32_t truncate-then-widen cast rather than
+     * a real pointer field). Matching that established workaround here
+     * rather than reading the full 8 bytes as `*(void**)`, which would
+     * pull in 4 bytes of the adjacent `flags`/_pad_2E fields as garbage
+     * upper address bits on this 64-bit host. Not fixing TrackPiece.h's
+     * field type itself: out of scope for town/Town.cpp, touches
+     * game/ScriptedObject.cpp's independent +0x28 use too. */
     for (TrackPiece* child = this->children_list;                /* +0xD0 */
          child != nullptr;
-         child = (TrackPiece*)*(void**)((intptr_t)child + 0x28)) {
-        this->on_mouse_move(this->hWnd, 0x200, 0, (LPARAM)(intptr_t)child);
+         child = reinterpret_cast<TrackPiece*>(
+             static_cast<uintptr_t>(static_cast<uint32_t>(child->sub_resource)))) {
+        this->on_mouse_move(this->hWnd, 0x200, 0,
+                            static_cast<LPARAM>(reinterpret_cast<intptr_t>(child)));
     }
 
     if (this->child_panel) {                                     /* +0xE4 */
-        ((void (*)(void*))(*(void***)this->child_panel)[1])(this->child_panel);
+        this->child_panel->hide();                                /* vtable[1] */
     }
 }
 
@@ -1195,10 +1238,10 @@ void Town::postcard_send_handler(char full_render)
         dest_rect.right  = this->postcard_rect_right;
         dest_rect.bottom = this->postcard_rect_bottom;
 
-        src_x = (uint32_t)this->workRect.left;
-        src_y = (uint32_t)this->workRect.top;
+        src_x = static_cast<uint32_t>(this->workRect.left);
+        src_y = static_cast<uint32_t>(this->workRect.top);
         src_w = this->workRect.right;
-        src_h = (uint32_t)this->workRect.bottom;
+        src_h = static_cast<uint32_t>(this->workRect.bottom);
     } else {
         CopyRect(&dest_rect, &this->preview_rect);               /* +0x68C */
         OffsetRect(&dest_rect, this->postcard_rect_left,
@@ -1207,22 +1250,22 @@ void Town::postcard_send_handler(char full_render)
         UIPANEL_Blit(
             this->overlay_surface,
             this->preview_rect.left,
-            (uint32_t)this->preview_rect.top,
+            static_cast<uint32_t>(this->preview_rect.top),
             this->preview_rect.right,
-            (uint32_t)this->preview_rect.bottom,
+            static_cast<uint32_t>(this->preview_rect.bottom),
             g_primary_surface,
             dest_rect.left, dest_rect.top,
             dest_rect.right, dest_rect.bottom,
             1);
 
-        CopyRect(&dest_rect, (RECT*)&this->send_rect_left);      /* +0x654 */
+        CopyRect(&dest_rect, reinterpret_cast<RECT*>(&this->send_rect_left));      /* +0x654 */
         OffsetRect(&dest_rect, this->postcard_rect_left,
                                this->postcard_rect_top);
 
-        src_x = (uint32_t)this->send_rect_left;
-        src_y = (uint32_t)this->send_rect_top;
+        src_x = static_cast<uint32_t>(this->send_rect_left);
+        src_y = static_cast<uint32_t>(this->send_rect_top);
         src_w = this->send_rect_right;
-        src_h = (uint32_t)this->send_rect_bottom;
+        src_h = static_cast<uint32_t>(this->send_rect_bottom);
     }
 
     UIPANEL_Blit(
@@ -1264,17 +1307,17 @@ void Town::postcard_update_ui(int action_id)
     case 6:
         {
             RECT src_rect;
-            CopyRect(&src_rect, (RECT*)((intptr_t)this->sprite_inbox + 4));
+            CopyRect(&src_rect, reinterpret_cast<RECT*>(&this->sprite_inbox->x));
             OffsetRect(&src_rect, this->postcard_rect_left,
                                    this->postcard_rect_top);
 
             ButtonSprite* sprite = this->sprite_inbox;           /* +0x6B4 */
             UIPANEL_Blit(
                 this->overlay_surface,
-                (uint32_t)sprite->x,
-                (uint32_t)sprite->y,
+                static_cast<uint32_t>(sprite->x),
+                static_cast<uint32_t>(sprite->y),
                 sprite->sourceX,
-                (uint32_t)sprite->sourceY,
+                static_cast<uint32_t>(sprite->sourceY),
                 g_primary_surface,
                 src_rect.left, src_rect.top,
                 src_rect.right, src_rect.bottom,
@@ -1282,7 +1325,7 @@ void Town::postcard_update_ui(int action_id)
 
             int msg_count = 0;
             if (!this->is_host) {
-                msg_count = (int)DPLAY_GetMessageCount(g_dplay);
+                msg_count = static_cast<int>(DPLAY_GetMessageCount(g_dplay));
             } else {
                 PostBagFileNode* host = NET_GetHostName(1, 0);
                 while (host) {
@@ -1305,7 +1348,7 @@ void Town::postcard_update_ui(int action_id)
         {
             uint16_t msg_count = 0;
             if (!this->is_host) {
-                msg_count = (uint16_t)DPLAY_GetMessageCount(g_dplay);
+                msg_count = static_cast<uint16_t>(DPLAY_GetMessageCount(g_dplay));
             } else {
                 PostBagFileNode* host = NET_GetHostName(1, 0);
                 while (host) {
@@ -1325,7 +1368,7 @@ void Town::postcard_update_ui(int action_id)
 
     case 8:
         {
-            uint16_t msg_count = (uint16_t)DPLAY_GetMessageCount(g_dplay);
+            uint16_t msg_count = static_cast<uint16_t>(DPLAY_GetMessageCount(g_dplay));
             int lut_idx = (msg_count < 5) ? msg_count : 4;
             Sprite_SetState(this->sprite_outbox_counter,         /* +0x6BC */
                             this->outbox_state_lut[lut_idx], nullptr);
@@ -1375,15 +1418,15 @@ void Town::postcard_dlg_proc(int action_id)
             ButtonSprite* sprite = this->sprite_inbox;           /* +0x6B4 */
             UIPANEL_Blit(
                 this->overlay_surface,
-                (uint32_t)sprite->x,
-                (uint32_t)sprite->y,
+                static_cast<uint32_t>(sprite->x),
+                static_cast<uint32_t>(sprite->y),
                 sprite->sourceX,
-                (uint32_t)sprite->sourceY,
+                static_cast<uint32_t>(sprite->sourceY),
                 g_primary_surface,
-                (uint32_t)sprite->x + this->postcard_rect_left,
-                (uint32_t)sprite->y + this->postcard_rect_top,
+                static_cast<uint32_t>(sprite->x) + this->postcard_rect_left,
+                static_cast<uint32_t>(sprite->y) + this->postcard_rect_top,
                 sprite->sourceX + this->postcard_rect_left,
-                (uint32_t)sprite->sourceY + this->postcard_rect_top,
+                static_cast<uint32_t>(sprite->sourceY) + this->postcard_rect_top,
                 1);
             Sprite_SetState(this->sprite_inbox, 1, nullptr);
         }
@@ -1394,7 +1437,7 @@ void Town::postcard_dlg_proc(int action_id)
         {
             uint16_t msg_count = 0;
             if (!this->is_host) {
-                msg_count = (uint16_t)DPLAY_GetMessageCount(g_dplay);
+                msg_count = static_cast<uint16_t>(DPLAY_GetMessageCount(g_dplay));
             } else {
                 PostBagFileNode* host = NET_GetHostName(1, 0);
                 while (host) {
@@ -1414,7 +1457,7 @@ void Town::postcard_dlg_proc(int action_id)
 
     case 8:
         {
-            uint16_t msg_count = (uint16_t)DPLAY_GetMessageCount(g_dplay);
+            uint16_t msg_count = static_cast<uint16_t>(DPLAY_GetMessageCount(g_dplay));
             int lut_idx = (msg_count < 5) ? msg_count : 4;
             Sprite_SetState(this->sprite_outbox_counter,
                             this->outbox_state_lut[lut_idx], nullptr);
@@ -1444,10 +1487,10 @@ void Town::postcard_update_buttons()
 
     UIPANEL_Blit(
         this->button_strip_surface,
-        (uint32_t)this->button_src_left,
-        (uint32_t)this->button_src_top,
+        static_cast<uint32_t>(this->button_src_left),
+        static_cast<uint32_t>(this->button_src_top),
         this->button_src_right,
-        (uint32_t)this->button_src_bottom,
+        static_cast<uint32_t>(this->button_src_bottom),
         g_primary_surface,
         dest_rect.left, dest_rect.top,
         dest_rect.right, dest_rect.bottom,
@@ -1461,28 +1504,28 @@ void Town::postcard_update_buttons()
 byte Town::hit_test_buttons(int32_t x, int32_t y)
 {
     POINT pt{ x, y };
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_close + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_btn_close->x), pt)) {
         return 2;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_options + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_btn_options->x), pt)) {
         return 3;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_rotate + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_btn_rotate->x), pt)) {
         return 4;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_btn_save + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_btn_save->x), pt)) {
         return 5;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_inbox + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_inbox->x), pt)) {
         return 6;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_inbox_counter + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_inbox_counter->x), pt)) {
         return 7;
     }
     if (PtInRect(&this->button_hit_rect_send, pt)) {           /* +0x67C */
         return 9;
     }
-    if (PtInRect((RECT*)((intptr_t)this->sprite_outbox_counter + 4), pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->sprite_outbox_counter->x), pt)) {
         return 8;
     }
     return 0;
@@ -1545,8 +1588,12 @@ int Town::postcard_command_handler(TrackPiece* control, uint32_t wParam,
         return 0;
     }
 
-    char handled = ((char (*)(void*, uint32_t, uint32_t))(
-        *(void***)control)[2])(control, wParam, lParam);
+    /* vtable slot 2 = GameObject::PtInRect (BOOL(int x, int y)), inherited
+     * unmodified by every class in this hierarchy — see e.g.
+     * core/GameObject.h's own vtable doc. wParam/lParam are used as the
+     * x/y point here, matching the original call site's own param names. */
+    BOOL handled = control->PtInRect(static_cast<int>(wParam),
+                                     static_cast<int>(lParam));
     if (handled == 0) {
         return 0;
     }
@@ -1601,7 +1648,8 @@ byte Town::send_postcard(TrackPiece* track_piece)
             track_piece->SetZoom(1);
 
             /* world pointer at building+0x44C */
-            void* world = *(void**)((intptr_t)this->selected_building + 0x44C);
+            void* world = *reinterpret_cast<void**>(
+                reinterpret_cast<intptr_t>(this->selected_building) + 0x44C);
             if (world) {
                 this->select_building(nullptr);
                 DDRAW_SelectBuilding(&g_ddraw_building, nullptr);
@@ -1609,8 +1657,10 @@ byte Town::send_postcard(TrackPiece* track_piece)
                 /* Save the world (0x43CF47/0x43CF53/0x43CF5D). The
                  * binary passes &g_world (0x4A98B0 = World storage);
                  * the host uses the g_world value — same singleton. */
-                char player_id = *(char*)((intptr_t)world + 0x78);
-                uint16_t resource_id = *(uint16_t*)((intptr_t)world + 0x7A);
+                char player_id = *reinterpret_cast<char*>(
+                    reinterpret_cast<intptr_t>(world) + 0x78);
+                uint16_t resource_id = *reinterpret_cast<uint16_t*>(
+                    reinterpret_cast<intptr_t>(world) + 0x7A);
                 /* game/World.h declares both of these taking Vehicle* —
                  * `world` here is the World singleton (read from
                  * Building+0x44C, see comment above), not a Vehicle.
@@ -1667,9 +1717,9 @@ void Town::clear_postcard_ui()
             UIPANEL_Blit(
                 this->overlay_surface,
                 this->preview_rect.left,
-                (uint32_t)this->preview_rect.top,
+                static_cast<uint32_t>(this->preview_rect.top),
                 this->preview_rect.right,
-                (uint32_t)this->preview_rect.bottom,
+                static_cast<uint32_t>(this->preview_rect.bottom),
                 g_primary_surface,
                 restore_rect.left, restore_rect.top,
                 restore_rect.right, restore_rect.bottom,
@@ -1679,13 +1729,13 @@ void Town::clear_postcard_ui()
         /* DPLAY_RenderPlayer(dplay, flag(+0x610), player(+0x608),
          * primary, +0x624, +0x628, +0x62C, *(void**)(+0x630)). */
         DPLAY_RenderPlayer(g_dplay,
-                           (int)this->player_count_flag,
-                           (int)(intptr_t)this->selected_player,
+                           static_cast<int>(this->player_count_flag),
+                           static_cast<int>(reinterpret_cast<intptr_t>(this->selected_player)),
                            g_primary_surface,
                            this->render_param_x,
                            this->render_param_y,
                            this->render_extra,
-                           (RECT*)this->render_rect_ptr);
+                           reinterpret_cast<RECT*>(this->render_rect_ptr));
 
         RECT send_area;
         SetRectEmpty(&send_area);
@@ -1694,10 +1744,10 @@ void Town::clear_postcard_ui()
 
         UIPANEL_Blit(
             this->overlay_surface,
-            (uint32_t)this->send_rect_left,
-            (uint32_t)this->send_rect_top,
+            static_cast<uint32_t>(this->send_rect_left),
+            static_cast<uint32_t>(this->send_rect_top),
             this->send_rect_right,
-            (uint32_t)this->send_rect_bottom,
+            static_cast<uint32_t>(this->send_rect_bottom),
             g_primary_surface,
             send_area.left, send_area.top,
             send_area.right, send_area.bottom,
@@ -1724,8 +1774,7 @@ void Town::init_overlay_sprite()
 
     void* res = ResourceManager_GetById(&g_resmgr, 0x3CF7);
     this->overlay_resource = res;                                /* +0x644 */
-    this->overlay_surface = ((void* (*)(void*, int, int))(
-        *(void***)res)[1])(res, 0, 0);                           /* +0x648 */
+    this->overlay_surface = resdata_get_surface(res, 0, 0);      /* +0x648 */
     this->overlay_initialized = 1;
 }
 
@@ -1750,18 +1799,15 @@ void Town::init_postcard_sprites()
 
     void* res = ResourceManager_GetById(&g_resmgr, 0x3CF8);
     this->background_resource = res;                             /* +0x64C */
-    this->background_surface = ((void* (*)(void*, int, int))(
-        *(void***)res)[1])(res, 0, 0);                           /* +0x650 */
+    this->background_surface = resdata_get_surface(res, 0, 0);   /* +0x650 */
 
     res = ResourceManager_GetById(&g_resmgr, 0x3CFB);
     this->button_strip_resource = res;                           /* +0x664 */
-    this->button_strip_surface = ((void* (*)(void*, int, int))(
-        *(void***)res)[1])(res, 0, 0);                           /* +0x668 */
+    this->button_strip_surface = resdata_get_surface(res, 0, 0); /* +0x668 */
 
     res = ResourceManager_GetById(&g_resmgr, 0x3CFA);
     this->send_confirm_resource = res;                           /* +0x69C */
-    this->send_confirm_surface = ((void* (*)(void*, int, int))(
-        *(void***)res)[1])(res, 0, 0);                           /* +0x6A0 */
+    this->send_confirm_surface = resdata_get_surface(res, 0, 0); /* +0x6A0 */
 
     this->sprites_initialized = 1;                               /* +0x5F9 */
 }
@@ -1938,24 +1984,34 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (!this->is_host) {
             return 0;
         }
-        this->save_received_postcard((uint32_t)y);
+        this->save_received_postcard(static_cast<uint32_t>(y));
         return 0;
     }
 
-    /* Click on the player render area: select the player. */
+    /* Click on the player render area: select the player.
+     *
+     * NOTE: on the original x86 layout, render_param_x/render_param_y/
+     * render_extra/render_rect_ptr (Town.h +0x624..+0x630) are 4
+     * consecutive 4-byte fields forming a tightly-packed RECT overlay —
+     * this cast is faithful there. On this 64-bit host, render_rect_ptr
+     * is a real 8-byte pointer, so the same 16-byte reinterpret only
+     * covers the low 4 bytes of it as "bottom" — a pre-existing,
+     * host-layout-only discrepancy (not introduced by this pass) that
+     * would need its own Ghidra-verified fix to resolve; preserved as-is
+     * rather than guessed at here. */
     if (this->selected_player &&
-        PtInRect((RECT*)&this->render_param_x, pt)) {
+        PtInRect(reinterpret_cast<RECT*>(&this->render_param_x), pt)) {
         PlaySound(0x5015);
         this->postcard_data = this->selected_player;      /* +0x60C */
         /* vtable[3] with (send_confirm_surface, send_confirm_resource,
          * 0, 1) — binary passes the +0x6A0/+0x69C pair. */
-        this->set_mode((int32_t)(intptr_t)this->send_confirm_surface,
+        this->set_mode(static_cast<int32_t>(reinterpret_cast<intptr_t>(this->send_confirm_surface)),
                        this->send_confirm_resource, 0, 1);
         return 0;
     }
 
     /* Click on the button strip area: toggle the inbox preview. */
-    if (PtInRect((RECT*)&this->button_src_left, pt)) {
+    if (PtInRect(reinterpret_cast<RECT*>(&this->button_src_left), pt)) {
         if (this->timer_counter) {                         /* +0x5F0 */
             return 0;
         }
@@ -2170,9 +2226,10 @@ void Town::upload_postcard()
                                        2,
                                        0x8000000,
                                        nullptr);
-            if (hFile != (HANDLE)-1) {
+            if (hFile != reinterpret_cast<HANDLE>(-1)) {
                 DWORD written;
-                WriteFile(hFile, (void*)((intptr_t)this->selected_player + 4),
+                WriteFile(hFile, reinterpret_cast<void*>(
+                          reinterpret_cast<intptr_t>(this->selected_player) + 4),
                           0x398, &written, nullptr);
                 CloseHandle(hFile);
             }
@@ -2478,7 +2535,7 @@ byte Town::save_postcard_as()
 {
     /* Step 1: default filename buffer lives at this+0xE9 (0x504 bytes,
      * overlapping the viewport/panel fields during the dialog). */
-    char* filename_buf = (char*)this + 0xE9;
+    char* filename_buf = reinterpret_cast<char*>(this) + 0xE9;
 
     /* File title + initial-dir buffers for the dialog. */
     char file_title_buf[0x100] = {0};
@@ -2534,7 +2591,7 @@ byte Town::save_postcard_as()
     ofn.lpstrInitialDir = initial_dir_buf;
     ofn.lpstrTitle     = title_buf;
     ofn.Flags          = 0x80024;  /* OFN_HIDEREADONLY|OFN_OVERWRITEPROMPT|OFN_EXPLORER */
-    ofn.lpfnHook       = (void*)&SaveAsDlgHook;             /* 0x419FD0 */
+    ofn.lpfnHook       = reinterpret_cast<void*>(&SaveAsDlgHook);             /* 0x419FD0 */
 
     /* Step 4: show the dialog — enable window, set guard, reposition. */
     PostMessageA(this->hWnd, 0x5F5, 0, 0);      /* WM_USER+0x1F5: enable town window */
@@ -2561,7 +2618,7 @@ byte Town::save_postcard_as()
                                    0x80,           /* FILE_ATTRIBUTE_NORMAL */
                                    nullptr);
 
-        if (hFile != (HANDLE)-1) {
+        if (hFile != reinterpret_cast<HANDLE>(-1)) {
             /* File exists — prompt for overwrite (MB_YESNO = 4). */
             char msg_buf[0x100] = {0};
             FormatResourceString(g_resmgr, 0x6b, msg_buf, sizeof(msg_buf));
@@ -2626,11 +2683,11 @@ void Town::save_received_postcard(uint32_t unused_arg)
                                0x80,        /* FILE_ATTRIBUTE_NORMAL */
                                nullptr);
 
-    if (hFile == (HANDLE)-1) {
+    if (hFile == reinterpret_cast<HANDLE>(-1)) {
         DWORD err = GetLastError();
         char* msg_buf = nullptr;
         FormatMessageA(0x1100, nullptr, err, 0x400,
-                       (char*)&msg_buf, 0, nullptr);
+                       reinterpret_cast<char*>(&msg_buf), 0, nullptr);
         MessageBoxA(this->hWnd, msg_buf, s_LEGO_LOCO_0047e1c0, 0x10);
         LocalFree(msg_buf);
 
@@ -2641,7 +2698,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
     }
 
     /* Step 2: read the 0x504-byte payload into the +0xE9 buffer. */
-    char* payload_buf = (char*)this + 0xE9;
+    char* payload_buf = reinterpret_cast<char*>(this) + 0xE9;
     DWORD bytes_read;
     BOOL read_ok = ReadFile(hFile, payload_buf, 0x504, &bytes_read, nullptr);
 
@@ -2651,7 +2708,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
 
         char* msg_buf = nullptr;
         FormatMessageA(0x1100, nullptr, err, 0x400,
-                       (char*)&msg_buf, 0, nullptr);
+                       reinterpret_cast<char*>(&msg_buf), 0, nullptr);
         MessageBoxA(this->hWnd, msg_buf, s_LEGO_LOCO_0047e1c0, 0x10);
         LocalFree(msg_buf);
 
@@ -2684,7 +2741,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
             DWORD err = GetLastError();
             char* msg_buf = nullptr;
             FormatMessageA(0x1100, nullptr, err, 0x400,
-                           (char*)&msg_buf, 0, nullptr);
+                           reinterpret_cast<char*>(&msg_buf), 0, nullptr);
             MessageBoxA(this->hWnd, msg_buf, s_LEGO_LOCO_0047e1c0, 0x10);
             LocalFree(msg_buf);
             return;
@@ -2700,7 +2757,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
         DWORD err = GetLastError();
         char* msg_buf = nullptr;
         FormatMessageA(0x1100, nullptr, err, 0x400,
-                       (char*)&msg_buf, 0, nullptr);
+                       reinterpret_cast<char*>(&msg_buf), 0, nullptr);
         MessageBoxA(this->hWnd, msg_buf, s_LEGO_LOCO_0047e1c0, 0x10);
         LocalFree(msg_buf);
     }
@@ -2711,7 +2768,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
         DWORD err = GetLastError();
         char* msg_buf = nullptr;
         FormatMessageA(0x1100, nullptr, err, 0x400,
-                       (char*)&msg_buf, 0, nullptr);
+                       reinterpret_cast<char*>(&msg_buf), 0, nullptr);
         MessageBoxA(this->hWnd, msg_buf, s_LEGO_LOCO_0047e1c0, 0x10);
         LocalFree(msg_buf);
     } else {
@@ -2722,7 +2779,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
             DWORD err = GetLastError();
             char* msg_buf = nullptr;
             FormatMessageA(0x1100, nullptr, err, 0x400,
-                           (char*)&msg_buf, 0, nullptr);
+                           reinterpret_cast<char*>(&msg_buf), 0, nullptr);
             MessageBoxA(this->hWnd, msg_buf, s_LEGO_LOCO_0047e1c0, 0x10);
             LocalFree(msg_buf);
         }
