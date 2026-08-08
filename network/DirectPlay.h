@@ -42,19 +42,61 @@
  *   +0xD6C: connection_list (void*) - linked list of connections
  *   +0xD70: player_name_buf[0x100] (char) - enumerated player name
  *   +0x1570: modem_settings[5] (int) - modem configuration
- *   +0x1584: dplay_dll_handle (void*) - DirectPlay DLL handle
- *   +0x1588: dplay_interface (void*) - IDirectPlay4* interface pointer
- *   +0x158C: session_desc (0x50 bytes) - DP Session desc structure
- *   +0x15DC: dplay_address (void*) - IDirectPlayAddress*
- *   +0x15E0: dplay_address2 (void*) - IDirectPlayAddress2*
- *   +0x15E4: addr_struct (0x28 bytes) - DP Address structure
+ *   +0x1584: dplay_create_obj (void*) - transient IDirectPlay-family object
+ *            returned by Ordinal_1; QueryInterface'd for IID_IDirectPlay4A
+ *            into dplay_interface, then Released. NOT a DLL handle (verified
+ *            via disassembly of DirectPlay_EnumConnections/GetSessionDesc:
+ *            this slot is always dereferenced through a vtable, never
+ *            passed to FreeLibrary).
+ *   +0x1588: dplay_interface (void*) - IDirectPlay4A* interface pointer
+ *   +0x158C: session_desc (0x50 bytes) - DPSESSIONDESC2 structure (ANSI
+ *            layout: dwSize,dwFlags,guidInstance,guidApplication,
+ *            dwMaxPlayers,dwCurrentPlayers,lpszSessionNameA,lpszPasswordA,
+ *            dwReserved1,dwReserved2,dwUser1-4 — see stubs/dplay.h)
+ *   +0x15DC: dplay_lobby_obj (void*) - transient object from Ordinal_4,
+ *            QueryInterface'd for IID_IDirectPlayLobby3A into
+ *            dplay_lobby3a, then Released. NOT an "IDirectPlayAddress"
+ *            (that interface does not exist in classic DirectPlay).
+ *   +0x15E0: dplay_lobby3a (void*) - IDirectPlayLobby3A* interface pointer,
+ *            used for EnumAddress-style calls (vtable slot 5 / +0x14).
+ *   +0x15E4: session_caps (0x28 bytes) - DPCAPS structure (dwSize=0x28,
+ *            10 dwords; confirmed via disassembly of
+ *            DirectPlay_ConnectToSession/0x45EA84-0x45EA90, which zeroes
+ *            10 dwords, sets dwSize=0x28, and calls vtable[14]/+0x38 =
+ *            IDirectPlay4A::GetCaps). NOT a "DP Address structure".
  *
  * === Known GUIDs from binary ===
- *   CLSID_DirectPlay     @ 0x478F88: {0AB1C531-4745-11D1-A7A1-0000F803ABFC}
- *   IID_IDirectPlayAddr2 @ 0x479048: {2DB72491-652C-11D1-A7A8-0000F803ABFC}
- *   DP Session GUID      @ 0x479158: {F9CD2546-577F-11D2-9426-00A0244BDA7A}
+ *   IID_IDirectPlay4A     @ 0x478F88: {0AB1C531-4745-11D1-A7A1-0000F803ABFC}
+ *     (byte-verified; used as the QueryInterface argument in
+ *      DirectPlay_GetSessionDesc/EnumConnections — NOT a CLSID, despite
+ *      the misleading `CLSID_DirectPlay` symbol name still used in
+ *      DirectPlay.cpp for this value)
+ *   CLSID_DirectPlay      @ 0x478F98: {D1EB6D20-8923-11D0-9D97-00A0C90A43CB}
+ *     (the real CLSID, immediately following IID_IDirectPlay4A in the
+ *      binary's GUID table; referenced only from the still-deferred body
+ *      of DirectPlay_HandleMessages — not yet used by any reconstructed
+ *      C++ in this file. See PROGRESS.md TODO.)
+ *   IID_IDirectPlayLobby3A @ 0x479048: {2DB72491-652C-11D1-A7A8-0000F803ABFC}
+ *     (byte-verified; mislabeled "IID_IDirectPlayAddr2" in earlier
+ *      revisions of this file — no such interface exists in classic
+ *      DirectPlay. Confirmed via disassembly: DirectPlay_CreateAddress
+ *      QueryInterfaces an Ordinal_4 object for this IID, matching
+ *      IDirectPlayLobby3A exactly.)
+ *   DP Session GUID (guidApplication) @ 0x479158: {F9CD2546-577F-11D2-9426-00A0244BDA7A}
+ *     (game-specific application GUID, not a standard SDK constant —
+ *      correctly documented already)
  *
- * All functions are C-linkage wrappers around DirectPlay COM interface.
+ * All functions are C-linkage wrappers around DirectPlay COM interfaces.
+ *
+ * NOTE: Several helper-function names and vtable offsets in DirectPlay.cpp
+ * do not match the real IDirectPlay4/IDirectPlay4A vtable order (cross-
+ * checked against the genuine DirectX 6.0 SDK (Aug 1998) dplay.h — see
+ * NOTE-directx-sdk.md, also mirrored by https://github.com/Olde-Skuul/directplay.
+ * See PROGRESS.md for the full
+ * corrected slot table and the specific confirmed mismatches — this is
+ * flagged but intentionally NOT fixed here pending a dedicated VALIDATED
+ * pass, since several of them change which real DirectPlay operation is
+ * being performed, not just its name.
  *
  * NOTE: This file uses free functions with explicit 'void* self' parameter
  * per the binary's __thiscall convention. These will be converted to C++ class

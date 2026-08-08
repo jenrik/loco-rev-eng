@@ -628,7 +628,7 @@ void __cdecl DDRAW_UnlockPrimary(void);
  *
  * Called by: DDRAW_GetSurface
  *
- * @param surface  IDirectDrawSurface7*
+ * @param surface  IDirectDrawSurface4*
  * @param fmt      DDPIXELFORMAT structure to fill
  */
 void __cdecl DDRAW_SetSurfaceFormat(int* surface, int* fmt);
@@ -637,12 +637,12 @@ void __cdecl DDRAW_SetSurfaceFormat(int* surface, int* fmt);
  * DDRAW_RestoreSurfaces — restore lost DirectDraw surfaces.
  * Address: 0x45BA50, __cdecl
  *
- * Calls IDirectDrawSurface7::Restore on the primary surface and
+ * Calls IDirectDrawSurface4::Restore on the primary surface and
  * re-sets pixel format. Called after display mode change or Alt+Tab.
  *
  * Called by: DDRAW_UnlockPrimary (on surface loss)
  *
- * @param surface  IDirectDrawSurface7* for primary surface
+ * @param surface  IDirectDrawSurface4* for primary surface
  * @param param2   (undefined)
  */
 void __cdecl DDRAW_RestoreSurfaces(int* surface, uint32_t param2);
@@ -802,11 +802,18 @@ void __fastcall DDRAW_SpriteDataDtor(SpriteData* data);
 
 /* ================================================================== */
 /* Global state — DirectDraw globals                                   */
+/*                                                                     */
+/* Interface version confirmed as IDirectDraw4/IDirectDrawSurface4     */
+/* (not 7): search_bytes against loco.exe finds IID_IDirectDraw,       */
+/* IDirectDraw2, IDirectDraw4, IDirectDrawSurface, Surface2/3/4 in a   */
+/* contiguous GUID table (0x4785C8-0x478628) but no IID_IDirectDraw7   */
+/* or IDirectDrawSurface7 anywhere in the binary. Consistent with the  */
+/* DirectX 6.0 SDK (Aug 1998) determination in NOTE-directx-sdk.md.    */
 /* ================================================================== */
 
-extern int*    g_ddraw;               /* 0x4A9908  IDirectDraw7*            */
-extern int*    g_primary_surface;     /* 0x4FF0D8  IDirectDrawSurface7*     */
-extern int*    g_backbuffer;          /* 0x4FF0DC  IDirectDrawSurface7*     */
+extern int*    g_ddraw;               /* 0x4A9908  IDirectDraw4*            */
+extern int*    g_primary_surface;     /* 0x4FF0D8  IDirectDrawSurface4*     */
+extern int*    g_backbuffer;          /* 0x4FF0DC  IDirectDrawSurface4*     */
 extern int16_t g_surface_bpp;         /* 0x485274  0x22B=555, 0x235=565    */
 extern int16_t g_surface_bshift;      /* 0x48527A  bit-shift mask           */
 

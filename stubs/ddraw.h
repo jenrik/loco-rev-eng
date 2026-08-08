@@ -15,13 +15,14 @@
 /* IDirectDraw4 / IDirectDrawSurface4 — versioned COM stubs           */
 /* (outside extern "C" because they have C++ member functions)        */
 /*                                                                     */
-/* When LOCO_SDL3 is defined, forward-declare IDirectDraw4/           */
-/* IDirectDrawSurface4 as typedefs so the bridge header can provide   */
-/* the actual definitions.  When not LOCO_SDL3, provide stub methods. */
+/* loco.exe's PE timestamp (1998-10-06) and its IID_IDirectDraw4 GUID  */
+/* (byte-verified in .rdata, absent any IDirectDraw7 GUID) place it in */
+/* the DirectX 6.0 SDK window — see NOTE-directx-sdk.md. These are     */
+/* empty no-op stub methods for the native (#ifndef _WIN32) build,     */
+/* which never links real ddraw.lib; the SDL3 host provides the real   */
+/* rendering path via graphics/sdl3_ddraw.h.                           */
 /* ================================================================== */
 
-  /* Stub mode: empty inline methods. The SDL3 host provides real
-   * implementations via src/sdl3_shims/sdl3_ddraw.h. */
   typedef struct IDirectDraw4 {
       void* vtable;
       int Release() { return 0; }

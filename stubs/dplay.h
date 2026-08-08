@@ -33,6 +33,18 @@ typedef DWORD DPID;
 /* DPSESSIONDESC2                                                     */
 /* ================================================================== */
 
+/*
+ * Real Microsoft layout (dplay.h, verified byte-for-byte against
+ * loco.exe's own desc[] index usage in DirectPlay_SetSessionDesc/
+ * DirectPlay_EnumPlayers): dwSize,dwFlags,guidInstance,guidApplication,
+ * dwMaxPlayers,dwCurrentPlayers,{lpszSessionName|lpszSessionNameA},
+ * {lpszPassword|lpszPasswordA},dwReserved1,dwReserved2,dwUser1-4 — 20
+ * dwords total (0x50 bytes). loco.exe queries IID_IDirectPlay4A (the
+ * ANSI interface), so the name/password fields are LPSTR (char*), not
+ * LPWSTR — a plain named field is used here instead of Microsoft's
+ * anonymous union since this header is reached from native/*.c and
+ * loco.exe never uses the wide variant.
+ */
 typedef struct _DPSESSIONDESC2 {
     DWORD  dwSize;
     DWORD  dwFlags;
@@ -40,13 +52,10 @@ typedef struct _DPSESSIONDESC2 {
     GUID   guidApplication;
     DWORD  dwMaxPlayers;
     DWORD  dwCurrentPlayers;
-    DWORD  dwSession;
+    LPSTR  lpszSessionNameA;
+    LPSTR  lpszPasswordA;
     DWORD  dwReserved1;
     DWORD  dwReserved2;
-    LPWSTR lpszSessionName;
-    LPWSTR lpszPassword;
-    LPWSTR lpszReserved;
-    LPWSTR lpszPlayerName;
     DWORD  dwUser1;
     DWORD  dwUser2;
     DWORD  dwUser3;

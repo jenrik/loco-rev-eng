@@ -5,11 +5,11 @@
  * Calling convention: __cdecl
  *
  * Allocates a DDSURFACEDESC2 (31 dwords, dwSize=0x7C) on the stack,
- * zero-fills it via REP STOSD, then calls IDirectDrawSurface7::GetSurfaceDesc
+ * zero-fills it via REP STOSD, then calls IDirectDrawSurface4::GetSurfaceDesc
  * at vtable slot 22 (byte offset 0x58). Extracts dwWidth and dwHeight as
  * 16-bit values and writes them to the caller-provided output pointers.
  *
- * @param surface     IDirectDrawSurface7* (nullable — stores skipped if null)
+ * @param surface     IDirectDrawSurface4* (nullable — stores skipped if null)
  * @param out_height  uint16_t* — receives dwHeight from DDSURFACEDESC2
  * @param out_width   uint16_t* — receives dwWidth from DDSURFACEDESC2
  *
