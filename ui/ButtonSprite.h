@@ -44,6 +44,12 @@ public:
     /* Fields (offsets from this)                                        */
     /* ================================================================ */
 /* vtable at +0x00 is compiler-managed */
+    /* x/y/sourceX/sourceY are also read as a hit-test RECT{left,top,right,bottom}
+     * by NETMAN_SetSessionInfo (0x441C80, native/NETMAN_NetworkUI.c) — same
+     * dual-use-as-bounding-box pattern as NameEntryPanel::gameMode/GameSetupPanel's
+     * textAlignMode. Construct a local RECT from these named fields rather than
+     * reinterpret-casting the object; do not add a literal RECT member here, since
+     * x/y/sourceX/sourceY are also written individually elsewhere (blit offsets). */
     int32_t    x;                      // +0x04  X position (set externally after ctor)
     int32_t    y;                      // +0x08  Y position (set externally after ctor)
     int32_t    sourceX;                // +0x0C  Source offset / width (used in blit)

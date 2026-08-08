@@ -111,7 +111,14 @@ void* __cdecl operator_new(size_t size);                    /* 0x465CE0 */
 void  __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 
 /* Game functions */
-void  __fastcall NETMAN_CreateSession(void* panelA);            /* 0x43C8C0 */
+/* Address corrected: was cited as 0x43C8C0 (wrong/stale); Ghidra confirms
+ * UI_MainMenu_Show (EditWindow::show, 0x4206B0) calls the real
+ * NETMAN_CreateSession at 0x4419C0 (native/NETMAN_NetworkUI.c), which takes
+ * a `NameEntryPanel*` (this->pPanelA, +0x21C), not `void*` — the previous
+ * `void*` declaration here silently bound to shared/defsym_stubs.cpp's
+ * no-op stub instead (call-0 landmine; see
+ * docs/landmine-sweep-worklist.md). */
+void  __fastcall NETMAN_CreateSession(NameEntryPanel* panelA);  /* 0x4419C0 */
 void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
 void  __thiscall NETMAN_SendPacket(void* netman);               /* 0x43CDF0 */
 void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x4616C0 */
@@ -808,8 +815,8 @@ void EditWindow::onPlayerNameChanged()
             /* Standard single-player or scenario */
             if (*reinterpret_cast<char*>(_g_netman_state + 0x24) != 0) {
                 const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x28);
-                if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
-                    (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
+                if ((gameMode == 4 && this->pPanelA->supportsTwoPlayerMode != 0) ||
+                    (gameMode == 2 && this->pPanelA->supportsFourPlayerMode != 0)) {
                     this->setState(4);     /* Single-player */
                     return;
                 }
@@ -818,8 +825,8 @@ void EditWindow::onPlayerNameChanged()
             /* Scenario select screen */
             if (*reinterpret_cast<char*>(_g_netman_state + 0x18) != 0) {
                 const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x1C);
-                if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
-                    (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
+                if ((gameMode == 4 && this->pPanelA->supportsTwoPlayerMode != 0) ||
+                    (gameMode == 2 && this->pPanelA->supportsFourPlayerMode != 0)) {
                     this->setState(5);     /* Multiplayer */
                     return;
                 }

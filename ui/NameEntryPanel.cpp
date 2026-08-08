@@ -82,11 +82,11 @@ void NameEntryPanel::init()
     this->field_E8 = 0;             /* +0xE8 (byte) */
     this->gameMode = 3;             /* +0x140 — default max players */
     this->textBuffer[0] = 0;        /* +0xF0 (null-terminate; buffer is 64 bytes) */
-    this->field_1D8 = 0;            /* +0x1D8 */
+    this->sessionNameEditHwnd = nullptr;   /* +0x1D8 */
     this->field_144 = 0;            /* +0x144 */
     this->hasSprites = 0;           /* +0x1AC (byte) */
-    this->field_1E0 = 0;            /* +0x1E0 (byte) */
-    this->field_1E1 = 0;            /* +0x1E1 (byte) */
+    this->supportsTwoPlayerMode = 0;   /* +0x1E0 (byte) */
+    this->supportsFourPlayerMode = 0;  /* +0x1E1 (byte) */
 
     /* Create background brush */
     this->backgroundBrush = CreateSolidBrush(0xA8C4D8);  /* +0x1D4 */
