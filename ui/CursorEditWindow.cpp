@@ -14,6 +14,7 @@
 
 #include "CursorEditWindow.h"
 #include "UI_ChildWindow.h"
+#include <cstring>  /* memcpy — aliasing-safe vtable pointer read */
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -250,7 +251,8 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
             *reinterpret_cast<const int*>(static_cast<uintptr_t>(0x479190)));
 
         /* Check if file is open by validating stream data */
-        const auto* stream_vtable = *reinterpret_cast<const int**>(localStream);
+        const int* stream_vtable;
+        std::memcpy(&stream_vtable, localStream, sizeof(stream_vtable));
         int vt4 = stream_vtable[4];
         const auto* stream_bytes = reinterpret_cast<const uint8_t*>(localStream);
         int offset_xx = *reinterpret_cast<const int*>(stream_bytes + vt4 + 0x4C);
