@@ -51,7 +51,7 @@ typedef struct {
  * @param flags        0x00 = raw read, 0x10 = search by ID
  * @return 0 on success, 0xFFFFFFFF if null stream, 0x109 on error/not-found
  */
-int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header,
+static int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header,
                            int param_3, int flags)
 {
     if (stream == NULL) {
@@ -78,14 +78,15 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
             int chunk_data_size = cur_header.chunk_size;
 
             /* Check if stream is at end (flag & 1) */
-            void* vt = *(void**)stream;
-            int flags_at = *(int*)((uint8_t*)stream + *(int*)((uint8_t*)vt + 4) + 8);
+            void* vt = *reinterpret_cast<void**>(stream);
+            int flags_at = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(stream) +
+                *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(vt) + 4) + 8);
             if (flags_at & 1) break;
 
             /* Lock critical section if active */
-            int sync_active = *(int*)((uint8_t*)stream + 0x34);
+            int sync_active = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(stream) + 0x34);
             if (sync_active < 0) {
-                WNDPROC_EnterCriticalSection((uint8_t*)stream + 0x38);
+                WNDPROC_EnterCriticalSection(reinterpret_cast<uint8_t*>(stream) + 0x38);
             }
 
             stream->position++;
@@ -95,7 +96,7 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
 
             /* Unlock critical section if active */
             if (sync_active < 0) {
-                WNDPROC_LeaveCriticalSection((uint8_t*)stream + 0x38);
+                WNDPROC_LeaveCriticalSection(reinterpret_cast<uint8_t*>(stream) + 0x38);
             }
 
             WIN32_StreamRead(stream, &cur_header, 8);
@@ -131,6 +132,12 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
     return 0;
 }
 
+/* File-scope prototype: no header declares this yet (its only intended
+ * caller, RESMGR_LoadSoundResource, is still an unimplemented stub — see
+ * resources/ResourceManager.h). Satisfies -Wmissing-declarations without
+ * introducing new cross-TU coupling; give it a real header entry once that
+ * caller is reconstructed. */
+int __cdecl Game_LoadWaveFile(const char* path, void* out_buf);
 
 /**
  * Game_LoadWaveFile — Load a RIFF/WAVE file into a buffer struct.
@@ -151,7 +158,7 @@ int __cdecl Game_ReadChunk(WNDPROC_Stream* stream, RiffChunkHeader* chunk_header
  */
 int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 {
-    extern void* g_asset_mgr;       /* 0x4AA5B0 — asset manager */
+    extern void* g_asset_mgr;       /* 0x485600 — asset manager */
     extern char  g_install_path[];  /* 0x4A99C8 */
     extern void* __cdecl operator_new(size_t size);
     extern void  __cdecl CRT_free(void* ptr);
@@ -182,24 +189,32 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
         asset_data = AssetMgr_LoadFile(&g_asset_mgr, rel_path, &data_size);
 
         if (asset_data != NULL) {
-            WNDPROC_Stream* stream_mem = (WNDPROC_Stream*)operator_new(0x5C);
+            WNDPROC_Stream* stream_mem = static_cast<WNDPROC_Stream*>(operator_new(0x5C));
             if (stream_mem != NULL) {
-                stream = WNDPROC_StreamFromMemory(stream_mem, (const char*)asset_data, data_size, 1);
+                stream = WNDPROC_StreamFromMemory(stream_mem, reinterpret_cast<const char*>(asset_data), data_size, 1);
             }
         }
     }
 
     /* Step 2: Fall back to direct file open */
     if (stream == NULL) {
-        WNDPROC_Stream* stream_file = (WNDPROC_Stream*)operator_new(0x5C);
+        WNDPROC_Stream* stream_file = static_cast<WNDPROC_Stream*>(operator_new(0x5C));
         if (stream_file != NULL) {
-            extern void* DAT_00479190;  /* read-mode string */
+            /* DAT_00479190 is a global void* holding the mode value/pointer
+             * itself (see shared/defsym_stubs.cpp's real definition and the
+             * disassembly at 0x41375B: `MOV EAX,[0x479190]` — a single
+             * dereference). Passing &DAT_00479190 here (as the old code did)
+             * would pass the address of the variable's storage slot instead
+             * of its stored value — a real bug, harmless only because this
+             * whole stream-open path is still a stub returning null. */
+            extern void* DAT_00479190;
             WIN32_StreamOpen(stream_file, 1);
-            WIN32_StreamOpenPath(stream_file, path, 0xA1, (const char*)&DAT_00479190);
+            WIN32_StreamOpenPath(stream_file, path, 0xA1, static_cast<const char*>(DAT_00479190));
 
             /* Check if stream opened successfully (flag test) */
-            void* vt = *(void**)stream_file;
-            int flags = *(int*)((uint8_t*)stream_file + *(int*)((uint8_t*)vt + 4) + 0x4C);
+            void* vt = *reinterpret_cast<void**>(stream_file);
+            int flags = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(stream_file) +
+                *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(vt) + 4) + 0x4C);
             if (flags != -1) {
                 stream = stream_file;
             }
@@ -238,14 +253,14 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     /* Read format data into out_buf+4 */
     {
         uint32_t fmt_size = chunk_hdr.chunk_size;
-        uint8_t* fmt_dest = (uint8_t*)out_buf + 4;
+        uint8_t* fmt_dest = reinterpret_cast<uint8_t*>(out_buf) + 4;
         uint8_t* fmt_ptr = fmt_dest;
 
         int read_ok = 0;
         if (fmt_size > 0) {
             // Read the format data from stream
             WIN32_StreamRead(stream, fmt_dest, fmt_size);
-            read_ok = (int)((WNDPROC_Stream*)stream)->size >= (int)fmt_size;
+            read_ok = stream->size >= static_cast<int>(fmt_size);
         }
 
         if (!read_ok) {
@@ -261,10 +276,10 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     }
 
     /* Allocate buffer for PCM data */
-    *(uint32_t*)((uint8_t*)out_buf + 0x18) = chunk_hdr.chunk_size;  /* data_size */
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(out_buf) + 0x18) = chunk_hdr.chunk_size;  /* data_size */
 
     void* pcm_data = CRT_malloc(chunk_hdr.chunk_size + 1);
-    *(void**)((uint8_t*)out_buf + 0x1C) = pcm_data;
+    *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(out_buf) + 0x1C) = pcm_data;
 
     if (pcm_data == NULL) {
         CRT_exit(&stream_result, "wave_io.c: PCM buffer alloc failed");
@@ -272,11 +287,11 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 
     /* Read PCM data (with error check) */
     {
-        uint8_t* pcm_ptr = (uint8_t*)pcm_data;
+        uint8_t* pcm_ptr = static_cast<uint8_t*>(pcm_data);
         uint32_t to_read = chunk_hdr.chunk_size;
 
         WIN32_StreamRead(stream, pcm_ptr, to_read);
-        if ((int)((WNDPROC_Stream*)stream)->size < (int)to_read) {
+        if (stream->size < static_cast<int>(to_read)) {
             CRT_exit(&stream_result, "wave_io.c: PCM data read failed");
         }
     }
@@ -292,8 +307,8 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
      * tracked separately from memory-stream path. */
     if (stream != NULL) {
         /* Destroy stream via its vtable[0] scalar deleting destructor */
-        void* vtable = *(void**)stream;
-        void (**dtor)(void*, int) = (void(**)(void*, int))vtable;
+        void* vtable = *reinterpret_cast<void**>(stream);
+        void (**dtor)(void*, int) = reinterpret_cast<void(**)(void*, int)>(vtable);
         dtor[0](stream, 1);
     }
 
