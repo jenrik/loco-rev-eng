@@ -219,10 +219,10 @@ EditWindow::EditWindow(HINSTANCE hInstance, UINT resourceId) :
 void PopupWindow::DestroyMCIChild()
 {
     if (hWnd != nullptr) {
-        SendMessageA(hWnd, 0x804, 0, 0); /* observed value; not a verified
+        SendMessageA(hWnd, 0x804, nullptr, nullptr); /* observed value; not a verified
                                              named WM_* constant — see the
                                              class doc comment in EditWindow.h */
-        SendMessageA(hWnd, 0x10 /* WM_CLOSE */, 0, 0);
+        SendMessageA(hWnd, 0x10 /* WM_CLOSE */, nullptr, nullptr);
         hWnd = nullptr;
     }
 }

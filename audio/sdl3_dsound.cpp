@@ -88,7 +88,7 @@ int IDirectSound::CreateSoundBuffer(DSBUFFERDESC* desc,
 
     /* Parse WAV header from wave_data to get format info */
     if (wave_data && desc->dwBufferBytes > sizeof(WavHeader)) {
-        WavHeader* hdr = (WavHeader*)wave_data;
+        WavHeader* hdr = reinterpret_cast<WavHeader*>(wave_data);
         buf->format.wFormatTag      = hdr->audio_format;
         buf->format.nChannels       = hdr->num_channels;
         buf->format.nSamplesPerSec  = hdr->sample_rate;
@@ -106,7 +106,7 @@ int IDirectSound::CreateSoundBuffer(DSBUFFERDESC* desc,
 
         buf->data_len = pcm_size;
         buf->audio_data = new uint8_t[pcm_size];
-        std::memcpy(buf->audio_data, (uint8_t*)wave_data + pcm_offset, pcm_size);
+        std::memcpy(buf->audio_data, reinterpret_cast<uint8_t*>(wave_data) + pcm_offset, pcm_size);
     } else if (desc->lpwfxFormat) {
         buf->format = *desc->lpwfxFormat;
     }
@@ -175,7 +175,7 @@ int IDirectSoundBuffer::Play(uint32_t reserved1, uint32_t reserved2,
     }
 
     /* Queue audio data */
-    if (!SDL_PutAudioStreamData(stream, audio_data, (int)data_len)) {
+    if (!SDL_PutAudioStreamData(stream, audio_data, static_cast<int>(data_len))) {
         fprintf(stderr, "SDL3: PutAudioStreamData failed: %s\n", SDL_GetError());
     }
 
@@ -202,7 +202,7 @@ int IDirectSoundBuffer::SetVolume(int32_t vol)
     if (vol > 0)       vol = 0;
 
     /* Linear mapping: -10000..0 → 0..128 */
-    volume = (int)(128.0 * (1.0 + (double)vol / 10000.0));
+    volume = static_cast<int>(128.0 * (1.0 + static_cast<double>(vol) / 10000.0));
     return DS_OK;
 }
 

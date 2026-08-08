@@ -154,7 +154,7 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
     if (RES_type(res) == 8) {
         this->animVariant = RES_variant(res);
     } else {
-        this->animVariant = (uint8_t)((uint32_t)CRT_rand() % 3 + 1);
+        this->animVariant = static_cast<uint8_t>(static_cast<uint32_t>(CRT_rand()) % 3 + 1);
     }
 
     /*
@@ -195,12 +195,12 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
                 /* offX * -2 + 1: total band width */
                 int bandTotal = offX * -2 + 1;
                 if (bandTotal != g_world_width) {
-                    this->worldX = (int)((uint32_t)CRT_rand() % (bandTotal - g_world_width)) +
+                    this->worldX = static_cast<int>(static_cast<uint32_t>(CRT_rand()) % (bandTotal - g_world_width)) +
                                    g_world_width + offX;
                 }
             } else {
                 if (g_world_width + 1 + offX * 2 != 0) {
-                    this->worldX = (int)((uint32_t)CRT_rand() % (g_world_width + 1 + offX * 2)) - offX;
+                    this->worldX = static_cast<int>(static_cast<uint32_t>(CRT_rand()) % (g_world_width + 1 + offX * 2)) - offX;
                 }
                 this->worldY = 0;
             }
@@ -218,19 +218,19 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
             this->worldX = offY + y;
         } else {
             /* Random Y within world minus resource height */
-            int avail = g_world_height - (int)resH;
+            int avail = g_world_height - static_cast<int>(resH);
             if (avail < offY) {
-                int overflow = (int)(resH - g_world_height) + 1 + offY;
+                int overflow = static_cast<int>(resH - g_world_height) + 1 + offY;
                 if (overflow != 0) {
-                    this->worldX = ((int)CRT_rand() % (int)((resH - g_world_height) + 1 + offY) +
-                                    g_world_height) - (int)resH;
+                    this->worldX = (static_cast<int>(CRT_rand()) % static_cast<int>((resH - g_world_height) + 1 + offY) +
+                                    g_world_height) - static_cast<int>(resH);
                 }
                 this->worldX -= offY;
-            } else if ((g_world_height - offY) - (int)resH == -1) {
+            } else if ((g_world_height - offY) - static_cast<int>(resH) == -1) {
                 this->worldX = 0;
             } else {
-                this->worldX = (int)CRT_rand() %
-                               (int)((g_world_height - (uint32_t)resH) - offY + 1);
+                this->worldX = static_cast<int>(CRT_rand()) %
+                               static_cast<int>((g_world_height - static_cast<uint32_t>(resH)) - offY + 1);
             }
         }
         goto position_and_randomize_x;
@@ -243,27 +243,27 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
         int16_t offY = RES_offsetY(res);
 
         /* Random Y */
-        if (g_world_height - (int)resH < offY) {
-            int overflow = (int)(resH - g_world_height) + 1 + offY;
+        if (g_world_height - static_cast<int>(resH) < offY) {
+            int overflow = static_cast<int>(resH - g_world_height) + 1 + offY;
             if (overflow != 0) {
-                this->worldY = ((int)CRT_rand() % ((int)offY - g_world_height + 1 + (uint32_t)resH) +
-                                g_world_height) - (uint32_t)resH;
+                this->worldY = (static_cast<int>(CRT_rand()) % (static_cast<int>(offY) - g_world_height + 1 + static_cast<uint32_t>(resH)) +
+                                g_world_height) - static_cast<uint32_t>(resH);
             }
-        } else if ((g_world_height - offY) - (int)resH != -1) {
-            this->worldY = (int)CRT_rand() %
-                           (int)((g_world_height - (uint32_t)resH) - offY + 1) + offY;
+        } else if ((g_world_height - offY) - static_cast<int>(resH) != -1) {
+            this->worldY = static_cast<int>(CRT_rand()) %
+                           static_cast<int>((g_world_height - static_cast<uint32_t>(resH)) - offY + 1) + offY;
         }
 
         /* Random X */
         if (g_world_width < offX) {
             if (offX - g_world_width != -1) {
-                this->worldX = (int)CRT_rand() % ((offX - g_world_width) + 1) + g_world_width;
+                this->worldX = static_cast<int>(CRT_rand()) % ((offX - g_world_width) + 1) + g_world_width;
             }
             this->worldX -= offX;
         } else if (g_world_width - offX == -1) {
             this->worldX = 0;
         } else {
-            this->worldX = (int)CRT_rand() % ((g_world_width - offX) + 1);
+            this->worldX = static_cast<int>(CRT_rand()) % ((g_world_width - offX) + 1);
         }
 
         /* Subtract offset_y to get final Y */
@@ -280,22 +280,22 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
         if (y >= 0) {
             this->worldX = y - offY;
         } else {
-            int avail = g_world_height - (int)resH;
+            int avail = g_world_height - static_cast<int>(resH);
             if (avail < offY) {
-                int overflow = (int)(resH - g_world_height) + 1 + offY;
+                int overflow = static_cast<int>(resH - g_world_height) + 1 + offY;
                 if (overflow != 0) {
-                    this->worldX = ((int)CRT_rand() % (int)(((uint32_t)resH - g_world_height) + 1 + offY) +
-                                    g_world_height) - (uint32_t)resH;
+                    this->worldX = (static_cast<int>(CRT_rand()) % static_cast<int>((static_cast<uint32_t>(resH) - g_world_height) + 1 + offY) +
+                                    g_world_height) - static_cast<uint32_t>(resH);
                 }
                 this->worldX -= offY;
-            } else if ((g_world_height - offY) - (int)resH == -1) {
+            } else if ((g_world_height - offY) - static_cast<int>(resH) == -1) {
                 this->worldX = 0;
             } else {
-                this->worldX = (int)CRT_rand() %
-                               (int)((g_world_height - (uint32_t)resH) - offY + 1);
+                this->worldX = static_cast<int>(CRT_rand()) %
+                               static_cast<int>((g_world_height - static_cast<uint32_t>(resH)) - offY + 1);
             }
         }
-        this->worldY = -(int32_t)resW;
+        this->worldY = -static_cast<int32_t>(resW);
         goto position_and_randomize_x;
     }
 
@@ -314,12 +314,12 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
             if (-rightEdge != offX && negW < rightEdge) {
                 int bandTotal = offX * -2 + 1;
                 if (bandTotal != g_world_width) {
-                    this->worldX = (int)CRT_rand() % (bandTotal - g_world_width) +
+                    this->worldX = static_cast<int>(CRT_rand()) % (bandTotal - g_world_width) +
                                    g_world_width + offX;
                 }
             } else {
                 if (g_world_width + 1 + offX * 2 != 0) {
-                    this->worldX = (int)CRT_rand() % (g_world_width + 1 + offX * 2) - offX;
+                    this->worldX = static_cast<int>(CRT_rand()) % (g_world_width + 1 + offX * 2) - offX;
                 }
             }
             this->worldY = g_world_height;
@@ -349,12 +349,12 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
             /* Randomize X if x was default */
             if (g_world_width < 0) {
                 if (g_world_width != -1) {
-                    this->worldX = (int)CRT_rand() % (1 - g_world_width) + g_world_width;
+                    this->worldX = static_cast<int>(CRT_rand()) % (1 - g_world_width) + g_world_width;
                 }
             } else if (g_world_width == -1) {
                 this->worldX = 0;
             } else {
-                this->worldX = (int)CRT_rand() % (g_world_width + 1);
+                this->worldX = static_cast<int>(CRT_rand()) % (g_world_width + 1);
             }
         }
         goto apply_world_pos;
@@ -376,7 +376,7 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
         if (RES_tooltipDur(res) <= 0) {
             /* No fixed duration: use random offset 0x28..0x46 */
             tooltipXOff = RES_tooltipX(res);
-            tooltipYOff = (int)CRT_rand() % 0x1F + 0x28;
+            tooltipYOff = static_cast<int>(CRT_rand()) % 0x1F + 0x28;
         } else {
             /* Fixed duration from resource */
             tooltipXOff = RES_tooltipX(res);

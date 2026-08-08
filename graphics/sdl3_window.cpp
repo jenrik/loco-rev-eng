@@ -68,7 +68,7 @@ static uintptr_t g_next_hwnd = 1;   /* HWNDs are opaque pointers */
 static Uint32 sdl_timer_callback(void* userdata, SDL_TimerID timer_id, Uint32 interval)
 {
     (void)timer_id; (void)interval;
-    TimerInfo* ti = (TimerInfo*)userdata;
+    TimerInfo* ti = reinterpret_cast<TimerInfo*>(userdata);
     if (ti && ti->callback) {
         ti->callback(ti->hwnd, WM_TIMER, ti->id, SDL_GetTicks());
         return ti->elapse; /* re-trigger every elapse ms */
@@ -196,13 +196,13 @@ HWND CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName,
     WindowData* wd = new WindowData();
     wd->class_name = lpClassName ? lpClassName : "";
     wd->title      = lpWindowName ? lpWindowName : "";
-    wd->wndproc    = (void*)it->second.lpfnWndProc;
+    wd->wndproc    = reinterpret_cast<void*>(it->second.lpfnWndProc);
     wd->userdata   = 0;
     wd->sdl_win    = nullptr;
     wd->x = X; wd->y = Y; wd->width = nWidth; wd->height = nHeight;
     wd->visible = (dwStyle & WS_VISIBLE) != 0;
 
-    HWND hwnd = (HWND)g_next_hwnd++;
+    HWND hwnd = reinterpret_cast<HWND>(g_next_hwnd++);
 
     /* Only the first top-level window gets the real SDL window */
     if (hWndParent == nullptr && g_sdl_window && !g_windows.empty()) {
@@ -262,7 +262,7 @@ BOOL SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y,
     if (!(uFlags & SWP_NOMOVE)) { wd->x = X; wd->y = Y; }
     if (!(uFlags & SWP_NOSIZE)) { wd->width = cx; wd->height = cy; }
 
-    if (g_sdl_window && hWnd == (HWND)1) {
+    if (g_sdl_window && hWnd == reinterpret_cast<HWND>(1)) {
         SDL_SetWindowSize(g_sdl_window, wd->width, wd->height);
         SDL_SetWindowPosition(g_sdl_window, wd->x, wd->y);
     }
@@ -325,7 +325,7 @@ BOOL SetWindowTextA(HWND hWnd, LPCSTR lpString)
 
 HWND GetDesktopWindow(void)
 {
-    return (HWND)1; /* return first window as "desktop" */
+    return reinterpret_cast<HWND>(1); /* return first window as "desktop" */
 }
 
 HWND FindWindowA(LPCSTR lpClassName, LPCSTR lpWindowName)
@@ -397,29 +397,29 @@ BOOL PeekMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin,
     while (SDL_PollEvent(&sdl_ev)) {
         switch (sdl_ev.type) {
             case SDL_EVENT_QUIT:
-                post_message((HWND)1, WM_CLOSE, 0, 0);
+                post_message(reinterpret_cast<HWND>(1), WM_CLOSE, 0, 0);
                 break;
             case SDL_EVENT_KEY_DOWN:
-                post_message((HWND)1, WM_KEYDOWN, sdl_ev.key.key, 0);
+                post_message(reinterpret_cast<HWND>(1), WM_KEYDOWN, sdl_ev.key.key, 0);
                 break;
             case SDL_EVENT_KEY_UP:
-                post_message((HWND)1, WM_KEYUP, sdl_ev.key.key, 0);
+                post_message(reinterpret_cast<HWND>(1), WM_KEYUP, sdl_ev.key.key, 0);
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                post_message((HWND)1,
+                post_message(reinterpret_cast<HWND>(1),
                     sdl_ev.button.button == SDL_BUTTON_LEFT  ? WM_LBUTTONDOWN :
                     sdl_ev.button.button == SDL_BUTTON_RIGHT ? WM_RBUTTONDOWN : 0,
-                    0, (((int)sdl_ev.button.y << 16) | (int)sdl_ev.button.x));
+                    0, (((static_cast<int>(sdl_ev.button.y) << 16) | static_cast<int>(sdl_ev.button.x))));
                 break;
             case SDL_EVENT_MOUSE_BUTTON_UP:
-                post_message((HWND)1,
+                post_message(reinterpret_cast<HWND>(1),
                     sdl_ev.button.button == SDL_BUTTON_LEFT  ? WM_LBUTTONUP :
                     sdl_ev.button.button == SDL_BUTTON_RIGHT ? WM_RBUTTONUP : 0,
-                    0, (((int)sdl_ev.button.y << 16) | (int)sdl_ev.button.x));
+                    0, (((static_cast<int>(sdl_ev.button.y) << 16) | static_cast<int>(sdl_ev.button.x))));
                 break;
             case SDL_EVENT_MOUSE_MOTION:
-                post_message((HWND)1, WM_MOUSEMOVE, 0,
-                    (((int)sdl_ev.motion.y << 16) | (int)sdl_ev.motion.x));
+                post_message(reinterpret_cast<HWND>(1), WM_MOUSEMOVE, 0,
+                    (((static_cast<int>(sdl_ev.motion.y) << 16) | static_cast<int>(sdl_ev.motion.x))));
                 break;
             default:
                 break;
@@ -446,7 +446,7 @@ BOOL GetMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
         if (SDL_WaitEvent(&sdl_ev)) {
             switch (sdl_ev.type) {
                 case SDL_EVENT_QUIT:
-                    lpMsg->hwnd = (HWND)1;
+                    lpMsg->hwnd = reinterpret_cast<HWND>(1);
                     lpMsg->message = WM_QUIT;
                     lpMsg->wParam = 0;
                     lpMsg->lParam = 0;
@@ -490,7 +490,7 @@ LONG DispatchMessageA(const MSG* lpMsg)
 
     /* Call the window procedure: LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM) */
     typedef LRESULT (*WNDPROC)(HWND, UINT, WPARAM, LPARAM);
-    return ((WNDPROC)wndproc)(lpMsg->hwnd, lpMsg->message, lpMsg->wParam, lpMsg->lParam);
+    return (reinterpret_cast<WNDPROC>(wndproc))(lpMsg->hwnd, lpMsg->message, lpMsg->wParam, lpMsg->lParam);
 }
 
 BOOL PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
@@ -520,7 +520,7 @@ LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
 HDC GetDC(HWND hWnd)
 {
     (void)hWnd;
-    return (HDC)1; /* non-null sentinel */
+    return reinterpret_cast<HDC>(1); /* non-null sentinel */
 }
 
 int ReleaseDC(HWND hWnd, HDC hDC)
@@ -534,14 +534,14 @@ HDC BeginPaint(HWND hWnd, PAINTSTRUCT* lpPaint)
     (void)hWnd;
     if (lpPaint) {
         memset(lpPaint, 0, sizeof(*lpPaint));
-        lpPaint->hdc = (HDC)1;
+        lpPaint->hdc = reinterpret_cast<HDC>(1);
         auto it = g_windows.find(hWnd);
         if (it != g_windows.end()) {
             lpPaint->rcPaint.right  = it->second->width;
             lpPaint->rcPaint.bottom = it->second->height;
         }
     }
-    return (HDC)1;
+    return reinterpret_cast<HDC>(1);
 }
 
 BOOL EndPaint(HWND hWnd, const PAINTSTRUCT* lpPaint)
@@ -569,7 +569,7 @@ BOOL StretchBlt(HDC hdcDest, int xDest, int yDest, int wDest, int hDest,
 HDC CreateCompatibleDC(HDC hdc)
 {
     (void)hdc;
-    return (HDC)2;
+    return reinterpret_cast<HDC>(2);
 }
 
 BOOL DeleteDC(HDC hdc)
@@ -593,7 +593,7 @@ BOOL DeleteObject(void* ho)
 HBRUSH CreateSolidBrush(COLORREF color)
 {
     (void)color;
-    return (HBRUSH)1;
+    return reinterpret_cast<HBRUSH>(1);
 }
 
 COLORREF SetTextColor(HDC hdc, COLORREF color)
@@ -650,13 +650,13 @@ BOOL PtInRect(const RECT* lprc, POINT pt)
 HCURSOR LoadCursorA(HINSTANCE hInstance, LPCSTR lpCursorName)
 {
     (void)hInstance; (void)lpCursorName;
-    return (HCURSOR)1;
+    return reinterpret_cast<HCURSOR>(1);
 }
 
 HICON LoadIconA(HINSTANCE hInstance, LPCSTR lpIconName)
 {
     (void)hInstance; (void)lpIconName;
-    return (HICON)1;
+    return reinterpret_cast<HICON>(1);
 }
 
 void SetCursor(HCURSOR hCursor)
@@ -731,7 +731,7 @@ int wsprintfA(char* buf, const char* fmt, ...)
 
 int lstrlenA(LPCSTR lpString)
 {
-    return lpString ? (int)strlen(lpString) : 0;
+    return lpString ? static_cast<int>(strlen(lpString)) : 0;
 }
 
 char* lstrcpyA(char* dst, LPCSTR src)
@@ -754,7 +754,7 @@ int LoadStringA(HINSTANCE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax)
      * the .exe's resource section. */
     if (lpBuffer && cchBufferMax > 0) {
         snprintf(lpBuffer, cchBufferMax, "STR_%u", uID);
-        return (int)strlen(lpBuffer);
+        return static_cast<int>(strlen(lpBuffer));
     }
     return 0;
 }
@@ -824,7 +824,7 @@ LONG RegOpenKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD ulOptions,
                     DWORD samDesired, HKEY* phkResult)
 {
     (void)hKey; (void)lpSubKey; (void)ulOptions; (void)samDesired;
-    if (phkResult) *phkResult = (HKEY)0x1000;
+    if (phkResult) *phkResult = reinterpret_cast<HKEY>(0x1000);
     return ERROR_SUCCESS;
 }
 
@@ -846,7 +846,7 @@ LONG RegCreateKeyExA(HKEY hKey, LPCSTR lpSubKey, DWORD Reserved,
 {
     (void)hKey; (void)lpSubKey; (void)Reserved; (void)lpClass;
     (void)dwOptions; (void)samDesired; (void)lpSecurityAttributes;
-    if (phkResult) *phkResult = (HKEY)0x1000;
+    if (phkResult) *phkResult = reinterpret_cast<HKEY>(0x1000);
     if (lpdwDisposition) *lpdwDisposition = 1; /* REG_CREATED_NEW_KEY */
     return ERROR_SUCCESS;
 }
@@ -905,8 +905,8 @@ void GetCursorPos(POINT* lpPoint)
     if (lpPoint) {
         float fx, fy;
         SDL_GetGlobalMouseState(&fx, &fy);
-        lpPoint->x = (int)fx;
-        lpPoint->y = (int)fy;
+        lpPoint->x = static_cast<int>(fx);
+        lpPoint->y = static_cast<int>(fy);
     }
 }
 
@@ -981,7 +981,7 @@ BOOL IntersectRect(RECT* lprcDst, const RECT* lprcSrc1, const RECT* lprcSrc2)
 HGDIOBJ GetStockObject(int fnObject)
 {
     (void)fnObject;
-    return (HGDIOBJ)1;  /* non-NULL dummy */
+    return reinterpret_cast<HGDIOBJ>(1);  /* non-NULL dummy */
 }
 
 BOOL DrawEdge(HDC hdc, RECT* qrc, UINT edge, UINT grfFlags)
@@ -1008,7 +1008,7 @@ HANDLE CreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode,
     (void)lpFileName; (void)dwDesiredAccess; (void)dwShareMode;
     (void)lpSecurityAttributes; (void)dwCreationDisposition;
     (void)dwFlagsAndAttributes; (void)hTemplateFile;
-    return (HANDLE)-1;  /* INVALID_HANDLE_VALUE */
+    return reinterpret_cast<HANDLE>(-1);  /* INVALID_HANDLE_VALUE */
 }
 
 DWORD GetFileSize(HANDLE hFile, DWORD* lpFileSizeHigh)
@@ -1061,7 +1061,7 @@ void Sleep(DWORD dwMilliseconds)
 
 void ExitProcess(UINT uExitCode)
 {
-    exit((int)uExitCode);
+    exit(static_cast<int>(uExitCode));
 }
 
 #endif /* _WIN32 */

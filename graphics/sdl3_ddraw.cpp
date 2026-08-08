@@ -117,8 +117,8 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
             SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
             SDL_SetRenderDrawColor(g_sdl_ddraw->renderer, r, g, b, 255);
             if (dst_rect) {
-                SDL_FRect fr = { (float)dst_rect->x, (float)dst_rect->y,
-                                 (float)dst_rect->w, (float)dst_rect->h };
+                SDL_FRect fr = { static_cast<float>(dst_rect->x), static_cast<float>(dst_rect->y),
+                                 static_cast<float>(dst_rect->w), static_cast<float>(dst_rect->h) };
                 SDL_RenderFillRect(g_sdl_ddraw->renderer, &fr);
             } else {
                 SDL_RenderFillRect(g_sdl_ddraw->renderer, nullptr);
@@ -132,15 +132,15 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
     SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
 
     SDL_FRect dst = dst_rect
-        ? SDL_FRect{ (float)dst_rect->x, (float)dst_rect->y,
-                      (float)dst_rect->w, (float)dst_rect->h }
-        : SDL_FRect{ 0.0f, 0.0f, (float)width, (float)height };
+        ? SDL_FRect{ static_cast<float>(dst_rect->x), static_cast<float>(dst_rect->y),
+                      static_cast<float>(dst_rect->w), static_cast<float>(dst_rect->h) }
+        : SDL_FRect{ 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height) };
 
     const SDL_FRect* src_frect = nullptr;
     SDL_FRect src_fr;
     if (src_rect) {
-        src_fr = { (float)src_rect->x, (float)src_rect->y,
-                   (float)src_rect->w, (float)src_rect->h };
+        src_fr = { static_cast<float>(src_rect->x), static_cast<float>(src_rect->y),
+                   static_cast<float>(src_rect->w), static_cast<float>(src_rect->h) };
         src_frect = &src_fr;
     }
 
@@ -210,8 +210,8 @@ int IDirectDrawSurface4::Lock(const SDL_Rect* rect,
     if (desc) {
         desc->lpSurface = cpu_surface->pixels;
         desc->lPitch    = cpu_surface->pitch;
-        desc->dwWidth   = (uint32_t)width;
-        desc->dwHeight  = (uint32_t)height;
+        desc->dwWidth   = static_cast<uint32_t>(width);
+        desc->dwHeight  = static_cast<uint32_t>(height);
     }
 
     return 0;
@@ -283,8 +283,8 @@ int IDirectDrawSurface4::GetSurfaceDesc(DDSURFACEDESC* desc)
     *desc = DDSURFACEDESC{};
     desc->dwSize   = sizeof(*desc);
     desc->dwFlags  = DDSD_WIDTH | DDSD_HEIGHT;
-    desc->dwWidth  = (uint32_t)width;
-    desc->dwHeight = (uint32_t)height;
+    desc->dwWidth  = static_cast<uint32_t>(width);
+    desc->dwHeight = static_cast<uint32_t>(height);
     return 0;
 }
 
@@ -333,8 +333,8 @@ int IDirectDraw4::CreateSurface(DDSURFACEDESC* desc,
     IDirectDrawSurface4* surf = new IDirectDrawSurface4();
     if (!surf) return -1;
 
-    surf->width  = (int)desc->dwWidth;
-    surf->height = (int)desc->dwHeight;
+    surf->width  = static_cast<int>(desc->dwWidth);
+    surf->height = static_cast<int>(desc->dwHeight);
 
     surf->texture = SDL_CreateTexture(renderer,
                                       SDL_PIXELFORMAT_XRGB8888,
@@ -611,8 +611,8 @@ IDirectDrawSurface4* DDRAW_LoadBmpToSurface(
     SDL_Surface* raw = loadBmpToSdlSurface(path, bpp);
     if (!raw) return nullptr;
 
-    g_last_bmp_width  = (uint32_t)raw->w;
-    g_last_bmp_height = (uint32_t)raw->h;
+    g_last_bmp_width  = static_cast<uint32_t>(raw->w);
+    g_last_bmp_height = static_cast<uint32_t>(raw->h);
 
     IDirectDrawSurface4* surf = new IDirectDrawSurface4();
     surf->width  = raw->w;
