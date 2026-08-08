@@ -21,7 +21,7 @@ extern void* __cdecl operator_new(size_t size);       /* 0x465CE0 */
 extern void  __cdecl GLOBAL_free(void* ptr);           /* 0x465CD0 */
 
 /* NETMAN_FreePacket — LoadSettings (standalone, declared in Netman.h) */
-extern void  __fastcall NETMAN_FreePacket(int32_t packetPtr);
+extern void  __fastcall NETMAN_FreePacket(GameConfig* packetPtr);
 
 /* Game globals */
 extern char  g_empty_string;           /* 0x4851D0 */
@@ -47,8 +47,16 @@ GameConfig::GameConfig()
     this->m_hostMode           = 0;                 /* +0x08 */
     this->m_timeout            = 0x1E;              /* +0x0C = 30 */
 
-    /* Load existing settings from NetSettings.dat (or create defaults) */
-    NETMAN_FreePacket(static_cast<int32_t>(reinterpret_cast<intptr_t>(this)));
+    /* Load existing settings from NetSettings.dat (or create defaults).
+     * Previously passed `this` truncated through a bogus
+     * static_cast<int32_t>(reinterpret_cast<intptr_t>(this)) that mangled
+     * to a symbol NETMAN_FreePacket never defined (landmine: an
+     * unresolved call masked only by this target's
+     * -Wl,--unresolved-symbols=ignore-all link flag; GameConfig is never
+     * actually constructed anywhere in-tree today, so this was inert, not
+     * yet crashing). Passing `this` directly now that the declaration is
+     * correctly typed GameConfig*. */
+    NETMAN_FreePacket(this);
 }
 
 /** GameConfig::~GameConfig — vtable[0] body

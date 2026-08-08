@@ -19,32 +19,56 @@
  * Size: 0x1E4 bytes
  * Vtable address in loco.exe: 0x4781D0
  *
- * Vtable layout (extends UI_WindowBase 12-slot vtable):
- *   [0] +0x00: scalar deleting destructor (NameEntryPanel_Dtor, 0x440F80)
- *   [1] +0x04: Hide                        (inherited: UI_WindowBase_Hide, 0x425990)
- *   [2] +0x08: Show                        OVERRIDDEN: NETMAN_JoinSession (0x441870),
- *                                           NOT the inherited UI_WindowBase_Show —
+ * Vtable layout (extends UI_WindowBase's full 37-slot vtable —
+ * ui/UI_WindowBase.h — not the 12-slot table this header previously
+ * described; re-derived by reading the raw vtable bytes at 0x4781D0 and
+ * matching slot [0] against NameEntryPanel_Dtor, 0x440F80, then indexing
+ * every other known override by ((address - 0x4781D0) / 4)). Only slots
+ * overridden by NameEntryPanel are listed; all others inherit
+ * UI_WindowBase's default exactly as documented there:
+ *   [0] +0x00: scalar deleting destructor  OVERRIDDEN: NameEntryPanel_Dtor, 0x440F80
+ *   [1] +0x04: hide()                      OVERRIDDEN: NETMAN_LeaveSession (0x441A00,
+ *                                           native/NETMAN_NetworkUI.c) — destroys the 7
+ *                                           sprites/child surface then calls the inherited
+ *                                           UI_WindowBase::hide(). Previously (wrongly)
+ *                                           documented as inherited/not overridden.
+ *   [2] +0x08: show()                      OVERRIDDEN: NETMAN_JoinSession (0x441870,
+ *                                           native/NETMAN_NetworkUI.c) —
  *                                           confirmed via the vtable data at 0x4781D8.
- *                                           NETMAN_JoinSession inits the 7 sprites,
- *                                           starts a timer, and ends by calling
- *                                           DPlayManager::RenderConnectionPanel (0x4421D0)
- *                                           on `this`, which is the concrete evidence that
- *                                           RenderConnectionPanel's `void* panel` parameter
- *                                           is really a `NameEntryPanel*` (see
+ *                                           Inits the 7 sprites, starts a timer, and ends
+ *                                           by calling DPlayManager::RenderConnectionPanel
+ *                                           (0x4421D0) on `this`, which is the concrete
+ *                                           evidence that RenderConnectionPanel's
+ *                                           `void* panel` parameter is really a
+ *                                           `NameEntryPanel*` (see
  *                                           network/DPlayManager.cpp / DPlayManager.h).
- *                                           NETMAN_JoinSession itself remains
- *                                           undecompiled/unimplemented (declared only,
- *                                           `network/Netman.h`'s `NETMAN_JoinSession`,
- *                                           dead: not defined or called anywhere in-tree).
- *   [3] +0x0C: virtual (default stub)      (inherited: 0x425FD0)
- *   [4] +0x10: virtual (default stub)      (inherited: 0x426020)
- *   [5] +0x14: virtual (default stub)      (inherited: 0x426130)
- *   [6] +0x18: CreateFullWindow            (inherited: UI_CreateFullWindow, 0x425B70)
- *   [7] +0x1C: OnCreate                    (inherited: UI_WindowBase_OnCreate, 0x425D30)
- *   [8] +0x20: virtual (default stub)      (inherited: 0x426130)
- *   [9] +0x24: virtual (default no-op)     (inherited: 0x4661A0)
- *   [10]+0x28: virtual (default stub)      (inherited: 0x426140)
- *   [11]+0x2C: WindowProc                  (inherited: UI_DefWndProc, 0x422EA0)
+ *   [7] +0x1C: on_create()                 OVERRIDDEN: sub_441360 (not yet decompiled;
+ *                                           called from NETMAN_JoinSession via
+ *                                           `panel->on_create()`). Previously (wrongly)
+ *                                           documented as inherited UI_WindowBase_OnCreate.
+ *   [8] +0x20: on_update(int32_t)           OVERRIDDEN: NETMAN_UpdateSessionInfo (0x441A90,
+ *                                           native/NETMAN_NetworkUI.c) — blits the child
+ *                                           surface, resets sprite states, refreshes
+ *                                           session info, ends paint. Previously (wrongly)
+ *                                           documented as inherited default no-op.
+ *   [11]+0x2C: window_proc()               OVERRIDDEN: sub_442150 (not yet decompiled).
+ *                                           Previously (wrongly) documented as inherited
+ *                                           UI_DefWndProc.
+ *   [12]+0x30: on_timer()                  OVERRIDDEN: sub_4423D0 (not yet decompiled;
+ *                                           plausibly drives the 50ms animation timer
+ *                                           NETMAN_JoinSession starts).
+ *   [14]+0x38: on_lbutton_down()           OVERRIDDEN: NETMAN_SetSessionInfo (0x441C80,
+ *                                           native/NETMAN_NetworkUI.c) — hit-tests the
+ *                                           WM_LBUTTONDOWN lParam (packed x/y) against the
+ *                                           7 sprites' rects + panelClickRect. Confirmed by
+ *                                           slot arithmetic from the 0x4781D0 base: the
+ *                                           real signature carries the full
+ *                                           (HWND, UINT, WPARAM, LPARAM) override params
+ *                                           (matching UI_WindowBase::on_lbutton_down), even
+ *                                           though only lParam's low/high words are read.
+ *
+ * All other slots (including [3]/[4]/[6]/[9]/[10]/[13]/[15]-[36]) inherit
+ * UI_WindowBase's defaults unmodified.
  *
  * Called by: UI_MainMenu_Create @ 0x42058D (alloc 0x1E4, ctor, createWindow)
  */
@@ -100,26 +124,52 @@ public:
 
     int32_t    field_144;              // +0x144  (unknown, init 0)
 
-    /* +0x148..+0x14B: unknown — not initialized by Init */
-    uint8_t    _gap_148[4];            // +0x148  gap (unnamed, unevidenced)
+    /* +0x148: "paint ready" gate byte. Evidence (native/NETMAN_NetworkUI.c,
+     * native/NETMAN_SessionSettings.c): NETMAN_JoinSession (0x441870) clears
+     * it to 0 unconditionally on (re)open; NETMAN_UpdateSessionInfo
+     * (0x441A90) sets it to 1 after blitting the child surface + resetting
+     * sprite states; NETMAN_SetSessionInfo (0x441C80, the panel's
+     * on_lbutton_down override) AND NETMAN_DestroySession (0x441F80) both
+     * gate all ENTER/ESC/click handling on `*(char*)(this+0x148) != 0` —
+     * makes the flag's name/lifecycle coherent for the first time
+     * (previously mistranscribed at a scaled ×4 offset, +0x52). */
+    uint8_t    paintReadyFlag;         // +0x148  1 once the panel has painted at least once
+    uint8_t    _gap_149[3];            // +0x149  gap (unnamed, unevidenced)
 
     /* +0x14C/+0x150: second scroll-offset pair, read by RenderConnectionPanel
      * and passed to OffsetRect() alongside UI_WindowBase::workRect's
      * left/top (+0xD4/+0xD8, the panel's "first" scroll offset pair) when
-     * blitting the child surface (+0x1D0, below). */
-    int32_t    scrollOffsetX2;         // +0x14C  second blit-offset X delta
-    int32_t    scrollOffsetY2;         // +0x150  second blit-offset Y delta
+     * blitting the child surface (+0x1D0, below). Also reused directly as
+     * the blit's destination X/Y by NETMAN_UpdateSessionInfo (0x441A90). */
+    int32_t    scrollOffsetX2;         // +0x14C  second blit-offset X delta / blit dest X
+    int32_t    scrollOffsetY2;         // +0x150  second blit-offset Y delta / blit dest Y
 
-    /* +0x154..+0x18B: unknown — not initialized by Init */
-    uint8_t    _gap_154[0x38];         // +0x154  gap (unnamed, unevidenced)
+    /* +0x154/+0x158: blit destination width/height. Evidence:
+     * NETMAN_UpdateSessionInfo (0x441A90) passes these as UIPANEL_Blit's
+     * clip_w/clip_h alongside scrollOffsetX2/Y2 above. */
+    int32_t    blitDestWidth;          // +0x154  child-surface blit destination width
+    int32_t    blitDestHeight;         // +0x158  child-surface blit destination height
+
+    /* +0x15C (16 bytes): session-name EDIT control's placement rect
+     * {left,top,right,bottom}. Evidence: NETMAN_EnumerateSessions (0x441720)
+     * reads left/top as CreateWindowExA's x/y and right-left/bottom-top as
+     * its width/height when creating sessionNameEditHwnd (below). */
+    RECT       editControlRect;        // +0x15C  session-name edit control placement
+
+    /* +0x16C..+0x18B: unknown — not initialized by Init */
+    uint8_t    _gap_16C[0x20];         // +0x16C  gap (unnamed, unevidenced)
 
     /* +0x18C (16 bytes): panel bounding RECT. Evidence: RenderConnectionPanel
      * reads it as {left,top,right,bottom} and passes it to UI_CenterWindow()
      * as the outer RECT*. */
     RECT       panelRect;              // +0x18C  panel bounding RECT
 
-    /* +0x19C..+0x1AB: unknown — not initialized by Init */
-    uint8_t    _gap_19C[16];           // +0x19C  gap (unnamed, unevidenced)
+    /* +0x19C (16 bytes): secondary hit-test RECT for the panel background.
+     * Evidence: NETMAN_SetSessionInfo (0x441C80) PtInRect()s this rect
+     * (distinct from panelRect above) to decide whether a click outside all
+     * sprites should play a random ambience sound. Previously modeled as
+     * an unnamed gap. */
+    RECT       panelClickRect;         // +0x19C  panel background click-test rect
 
     uint8_t    hasSprites;             // +0x1AC  Flag: non-zero when sprites are allocated
     uint8_t    _pad_1AD[3];            // +0x1AD  padding
@@ -134,26 +184,55 @@ public:
 
     void*        spriteTerminator;     // +0x1CC  Always 0 after Init() (terminator after
                                        //        sprite array) — but NETMAN_JoinSession
-                                       //        (0x441870, undecompiled) repurposes this slot
-                                       //        for a resource pointer (ResourceManager_GetById
-                                       //        0x439) the first time it runs.
+                                       //        (0x441870, now decompiled in
+                                       //        native/NETMAN_NetworkUI.c) repurposes this
+                                       //        slot for a resource pointer
+                                       //        (ResourceManager_GetById 0x439) the first
+                                       //        time it runs.
 
     /* +0x1D0: previously documented as padding — WRONG. RenderConnectionPanel
      * (0x4421D0) dereferences it as `*(void**)(this+0x1D0)` and passes it to
      * UIPANEL_Blit as the source surface for the child-window blit. Its
-     * writer is identified but not yet decompiled: NETMAN_JoinSession
-     * (0x441870) calls vtable slot [1] (+0x04) on the +0x1CC resource
-     * pointer above with (0,0) and stores the result here — evidently
-     * creating/fetching the child surface — but that call target isn't
-     * decompiled, so `void*` is kept rather than guessing a surface type. */
+     * writer: NETMAN_JoinSession (0x441870, native/NETMAN_NetworkUI.c) calls
+     * vtable slot [1] (+0x04, "Lock/GetSurface" per shared/types.h's RESDATA
+     * convention) on the +0x1CC resource pointer above with (0,0) and stores
+     * the result here — evidently creating/fetching the child surface. The
+     * resource object's real class still isn't modeled (ResourceManager_GetById
+     * returns `void*` everywhere in this tree), so `void*` is kept here too. */
     void*        childSurface;         // +0x1D0  child surface blitted by RenderConnectionPanel
 
     HBRUSH       backgroundBrush;      // +0x1D4  Solid brush for background (color 0xA8C4D8)
 
-    int32_t      field_1D8;            // +0x1D8  (unknown, init 0)
+    /* +0x1D8: session-name EDIT control HWND. Evidence: NETMAN_EnumerateSessions
+     * (0x441720) creates the child EDIT control and stores its HWND here;
+     * NETMAN_GetSessionInfo/NETMAN_SetSessionInfo (0x441B40/0x441C80) show/
+     * hide/focus/read it via this same slot; NETMAN_DestroySession (0x441F80)
+     * and NETMAN_SetSessionInfo also call GetWindowTextA(*(HWND*)(this+0x1D8),
+     * buf, 0x40) to copy the typed text into GameConfig::m_sessionName.
+     * Previously modeled as a plain `int32_t`, matching the original x86
+     * 4-byte HWND — retyped to `HWND` (a real pointer on this host; see
+     * AGENTS.md "Host deviations": exact x86 layout parity is a non-goal
+     * off-Windows, only the +0x1D8 provenance comment is preserved). */
+    HWND         sessionNameEditHwnd;  // +0x1D8  session-name EDIT control HWND
 
-    uint8_t      field_1E0;            // +0x1E0  (unknown byte, init 0)
-    uint8_t      field_1E1;            // +0x1E1  (unknown byte, init 0)
+    /* +0x1DC: previously undocumented gap. Evidence: NETMAN_EnumerateSessions
+     * (0x441720) subclasses sessionNameEditHwnd via
+     * SetWindowLongA(hwnd, GWL_WNDPROC, 0x4417E0) and stores the *previous*
+     * (original EDIT control) WndProc here, for chaining in the subclass
+     * procedure. */
+    void*        originalEditWndProc; // +0x1DC  EDIT control's original WndProc (pre-subclass)
+
+    /* +0x1E0/+0x1E1: session player-count mode-availability flags, set from
+     * GameConfig::m_providerList (game/GameConfig.h) entries' type field.
+     * Evidence: NETMAN_CreateSession (0x4419C0) and NETMAN_JoinSession
+     * (0x441870) both walk the provider list and set supportsTwoPlayerMode
+     * when a provider's type == 4, supportsFourPlayerMode when type == 2.
+     * NETMAN_GetSessionInfo/NETMAN_SetSessionInfo gate the 2-player/4-player
+     * sprite buttons (sprite2/sprite3) on these same flags; ui/EditWindow.cpp
+     * reads them directly (as the previous field_1E0/field_1E1 names) to
+     * decide the post-session game-mode transition. */
+    uint8_t      supportsTwoPlayerMode;  // +0x1E0  non-zero: a 2-player provider is available
+    uint8_t      supportsFourPlayerMode; // +0x1E1  non-zero: a 4-player provider is available
     /* Total: 0x1E4 bytes */
 
     static_assert(sizeof(RECT) == 16, "NameEntryPanel layout assumes 16-byte RECT");

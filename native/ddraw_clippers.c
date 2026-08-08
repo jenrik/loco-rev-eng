@@ -24,6 +24,15 @@ extern void* g_clipper_4;    /* 0x004FF10C — 5th clipper handle */
 extern void* g_clipper_5;    /* 0x004FF0F8 — 6th clipper handle */
 extern void* g_clipper_surf; /* 0x004FF110 — clipper surface/UIPANEL surface */
 
+/* Forward declarations (STRICT=2 -Wmissing-declarations). Self-contained
+ * rather than pulled from a header: graphics/DDRAW.h declares both of
+ * these with matching signatures, but several *other* DDRAW_* functions
+ * in that header have signatures that do NOT match their native/*.c
+ * definitions (pre-existing landmine, out of scope here — see commit
+ * message), so this file avoids depending on it entirely. */
+void __cdecl DDRAW_ReleaseClippers(void);
+void __fastcall DDRAW_FreeClipper(void* clipper);
+
 /* ================================================================== */
 /* DDRAW_ReleaseClippers — Release all clipper objects                 */
 /* Address: 0x45C970                                                   */
@@ -43,56 +52,56 @@ void __cdecl DDRAW_ReleaseClippers(void)
 {
     /* Release clipper 0 */
     if (g_clipper_0 != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_0;
-        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_0);
+        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
         release_fn(g_clipper_0);   /* vtable[2] = Release() */
         g_clipper_0 = NULL;
     }
 
     /* Release clipper 1 */
     if (g_clipper_1 != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_1;
-        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_1);
+        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
         release_fn(g_clipper_1);
         g_clipper_1 = NULL;
     }
 
     /* Release clipper 2 */
     if (g_clipper_2 != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_2;
-        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_2);
+        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
         release_fn(g_clipper_2);
         g_clipper_2 = NULL;
     }
 
     /* Release clipper 3 */
     if (g_clipper_3 != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_3;
-        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_3);
+        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
         release_fn(g_clipper_3);
         g_clipper_3 = NULL;
     }
 
     /* Release clipper 4 */
     if (g_clipper_4 != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_4;
-        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_4);
+        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
         release_fn(g_clipper_4);
         g_clipper_4 = NULL;
     }
 
     /* Release clipper 5 */
     if (g_clipper_5 != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_5;
-        int32_t (*release_fn)(void*) = *(int32_t (**)(void*))(vtbl + 2 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_5);
+        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
         release_fn(g_clipper_5);
         g_clipper_5 = NULL;
     }
 
     /* Destroy UIPANEL surface */
     if (g_clipper_surf != NULL) {
-        uint8_t* vtbl = *(uint8_t**)g_clipper_surf;
-        int32_t (*destroy_fn)(uint32_t) = *(int32_t (**)(uint32_t))(vtbl + 0 * sizeof(void*));
+        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_surf);
+        int32_t (*destroy_fn)(uint32_t) = *reinterpret_cast<int32_t (**)(uint32_t)>(vtbl + 0 * sizeof(void*));
         destroy_fn(1);   /* vtable[0] = scalar destructor with delete */
         g_clipper_surf = NULL;
     }
@@ -107,13 +116,13 @@ void __cdecl DDRAW_ReleaseClippers(void)
 /* Zeros three fields in a 16-byte struct: [0], [4], [0xC].            */
 /* Field at +0x08 is NOT touched (left intact).                        */
 /*                                                                     */
-/* Called by: ?                                                        */
+/* Called by: NET_Lock (0x445F77)                                       */
 /*                                                                     */
 /* @param clipper  Pointer to 16-byte clipper handle struct            */
 /* ================================================================== */
 void __fastcall DDRAW_FreeClipper(void* clipper)
 {
-    uint32_t* p = (uint32_t*)clipper;
+    uint32_t* p = static_cast<uint32_t*>(clipper);
     p[0] = 0;  /* +0x00 */
     p[1] = 0;  /* +0x04 */
     p[3] = 0;  /* +0x0C — note: +0x08 is NOT cleared */

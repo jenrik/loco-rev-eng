@@ -24,6 +24,16 @@ extern void*   g_primary_surface;   /* 0x4FD3C4 — primary surface */
 
 extern void* DAT_004A9908;          /* 0x4A9908 — DirectDraw module/something */
 
+/* Forward declarations (STRICT=2 -Wmissing-declarations). Self-contained
+ * rather than pulled from graphics/DDRAW.h: that header's own
+ * declarations for these two functions use different, non-matching
+ * parameter types (DDRAW_RestoreSurfaces(int*, uint32_t) vs. this
+ * file's (void*, void*); a stale/never-validated declaration, see
+ * commit message and the landmine doc's existing note that
+ * DDRAW_RestoreSurfaces has two genuinely distinct real overloads). */
+void __cdecl DDRAW_RestoreSurfaces(void* surface, void* unused);
+void __cdecl DDRAW_ReleaseSurfaces(void);
+
 /* ================================================================== */
 /* DDRAW_RestoreSurfaces — Restore a lost surface and re-apply colorkey*/
 /* Address: 0x45BA50                                                   */
@@ -48,8 +58,8 @@ extern void* DAT_004A9908;          /* 0x4A9908 — DirectDraw module/something 
 void __cdecl DDRAW_RestoreSurfaces(void* surface, void* unused)
 {
     /* COM interface vtable at +0x00. */
-    void** vtable = *(void***)surface;
-    ((void (*)(void*))vtable[22])(surface);
+    void** vtable = *static_cast<void***>(surface);
+    (reinterpret_cast<void (*)(void*)>(vtable[22]))(surface);
 
     /* Determine colour key mask based on pixel format */
     uint32_t color_key;
@@ -69,8 +79,8 @@ void __cdecl DDRAW_RestoreSurfaces(void* surface, void* unused)
 
     /* Call SetColorKey (vtable[0x74/4 = 29]) with DDCOLORKEY struct */
     /* DDCOLORKEY has dwColorSpaceLowValue + dwColorSpaceHighValue */
-    vtable = *(void***)surface;
-    ((void (*)(void*, uint32_t, uint32_t*))vtable[29])(surface, 8, key_buf);
+    vtable = *static_cast<void***>(surface);
+    (reinterpret_cast<void (*)(void*, uint32_t, uint32_t*)>(vtable[29]))(surface, 8, key_buf);
 }
 
 /* ================================================================== */
@@ -95,15 +105,15 @@ void __cdecl DDRAW_ReleaseSurfaces(void)
 
     /* Release backbuffer */
     if (g_backbuffer != NULL) {
-        void** vtable = *(void***)g_backbuffer;
-        ((void (*)(void*))vtable[2])(g_backbuffer);  /* Release() */
+        void** vtable = *static_cast<void***>(g_backbuffer);
+        (reinterpret_cast<void (*)(void*)>(vtable[2]))(g_backbuffer);  /* Release() */
         g_backbuffer = NULL;
     }
 
     /* Release primary surface */
     if (g_primary_surface != NULL) {
-        void** vtable = *(void***)g_primary_surface;
-        ((void (*)(void*))vtable[2])(g_primary_surface);
+        void** vtable = *static_cast<void***>(g_primary_surface);
+        (reinterpret_cast<void (*)(void*)>(vtable[2]))(g_primary_surface);
         g_primary_surface = NULL;
     }
 
@@ -112,16 +122,16 @@ void __cdecl DDRAW_ReleaseSurfaces(void)
 
     /* Release g_ddraw (IDirectDraw4) */
     if (g_ddraw != NULL) {
-        void** vtable = *(void***)g_ddraw;
+        void** vtable = *static_cast<void***>(g_ddraw);
         /* SetCooperativeLevel(NULL, 8) — restore normal coop level */
-        ((void (*)(void*, void*, uint32_t))vtable[20])(g_ddraw, NULL, 8);
+        (reinterpret_cast<void (*)(void*, void*, uint32_t)>(vtable[20]))(g_ddraw, NULL, 8);
         /* Release() */
-        ((void (*)(void*))vtable[2])(g_ddraw);
+        (reinterpret_cast<void (*)(void*)>(vtable[2]))(g_ddraw);
         g_ddraw = NULL;
     }
 
     /* Release the DD module wrapper */
-    void** vtable = *(void***)DAT_004A9908;
-    ((void (*)(void*))vtable[2])(DAT_004A9908);
+    void** vtable = *static_cast<void***>(DAT_004A9908);
+    (reinterpret_cast<void (*)(void*)>(vtable[2]))(DAT_004A9908);
     DAT_004A9908 = NULL;
 }

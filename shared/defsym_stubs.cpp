@@ -34,7 +34,11 @@ void ButtonSprite_Ctor() { /* host no-op */ }
 void DDRAW_RestoreSurfaces() { /* host no-op */ }
 void DDRAW_SetSurfaceFormat() { /* host no-op */ }
 void DDRAW_UnlockPrimary() { /* host no-op */ }
-void DPlayManager_RenderConnectionPanel() { /* host no-op */ }
+/* DPlayManager_RenderConnectionPanel — removed. It was a distinct, wrongly
+ * (0-arg) named stub that native/NETMAN_NetworkUI.c's NETMAN_JoinSession
+ * silently called instead of the real RenderConnectionPanel(NameEntryPanel*)
+ * (network/DPlayManager.cpp, 0x4421D0) — a call-0 landmine fixed by
+ * correcting that call site to the real name/signature. */
 void FormatResourceString() { /* host no-op */ }
 // PlayerRecord_constructor (0x452E10) calls GetUserNameA only after its
 // Configuration/PlayerName lookup is empty. Preserve the Win32 size contract
@@ -226,7 +230,6 @@ void GameWindow_SetPosition(void*, int, int) { /* host no-op */ }
 void GameWindow_Show(void*) { /* host no-op */ }
 void GameWindow_Hide(void*) { /* host no-op */ }
 void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
-void TileMap_Init(void**, unsigned char) { /* host no-op */ }
 void* TrainSubsystem_Ctor = nullptr;
 /* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
  * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
@@ -294,7 +297,12 @@ void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
 void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
-void NETMAN_CreateSession(void*) { /* host no-op */ }
+/* NETMAN_CreateSession(void*) — removed. ui/EditWindow.cpp's own
+ * `NETMAN_CreateSession` declaration was retyped from `void*` to the real
+ * `NameEntryPanel*` (native/NETMAN_NetworkUI.c, 0x4419C0), so this
+ * mismatched-signature stub is now dead: EditWindow::show()'s call binds
+ * to the real function instead (guarded internally against
+ * `_g_netman_data` being null on the host — see that file's comment). */
 void UI_WindowBase_Show(void*) { /* host no-op */ }
 void* BringWindowToTop = nullptr;
 void TrackPiece_Dtor(void*) { /* host no-op */ }
@@ -322,7 +330,15 @@ void* DPLAY_SetPlayerName = nullptr;
  * TODO), but now returns a well-defined value instead of UB. */
 struct UIPANEL_Surface;
 void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
-void NET_ComputeColor(unsigned char, unsigned char, unsigned char) { /* host no-op */ }
+/* NET_ComputeColor's real definition now lives in native/NET_Dtor.c
+ * (renamed from the stale Ghidra-default-label filename; 0x4441C0). This
+ * stub used to be a silent-wrong-stub of exactly the kind documented
+ * above for UIPANEL_CopySurface: network/NetworkPlayerList.cpp calls this
+ * exact name expecting a real uint32_t color, but got this always-empty
+ * `void`-returning no-op (Itanium mangling ignores return type, so it
+ * linked fine and every caller read an undefined register as the
+ * "color"). Removed now that a real, correctly-typed definition exists —
+ * keeping both would be a duplicate-definition link error. */
 void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
 void TileMap_GetTileRect(void*, void*) { /* host no-op */ }
@@ -501,7 +517,6 @@ void* PixelDataCache_Ctor(void* self) {
 void PixelDataCache_Load(void* self, int mode) {
     (void)self; (void)mode;
 }
-void TileMap_Init(void*, unsigned char) { /* host no-op */ }
 void GameAudio_StopFinished(void*) { /* host no-op */ }
 void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
 void Ordinal_2(void*) { /* host no-op */ }

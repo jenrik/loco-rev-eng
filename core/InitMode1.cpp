@@ -82,7 +82,7 @@ extern void  DirectPlay_Init(void);
 extern "C" void CGWND_Present(uint32_t flags);  /* original __cdecl 0x45E1E0 */
 extern void  CGWND_PumpMessages(char filter);
 extern void  WIN32_QueueAsyncTask(void* queue, void* callback, int param);
-extern void  RESMGR_SelectScreensaver(char* outBuf);
+extern void  __stdcall RESMGR_SelectScreensaver(char* outBuf); /* 0x4481B0 */
 extern char  INPUT_LoadWorld(InputMgr* input_mgr, const char* path);
 extern void  CGWND_SetMode(int mode);
 extern int   wsprintfA(char* buf, const char* fmt, ...);

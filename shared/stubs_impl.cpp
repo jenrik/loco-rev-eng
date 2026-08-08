@@ -573,13 +573,6 @@ void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", _
 /* DDRAW_Init — real implementation is native/ddraw_init.c (0x45C8A0);
  * this and link_stubs.cpp's no-op copy were the flagship LINK-001
  * nondeterminism bug (see PROGRESS.md). Removed. */
-/** TileMap_Init — Host no-op (SDL3 tilemap handles its own init).
- *  Address: 0x454E70. Binary zeroes occupancy bitmap, sets dimensions.
- *  The host path uses sdl3_tilemap; this stub satisfies the linker. */
-void  TileMap_Init(void* self, char mode) {
-    (void)self; (void)mode;
-    /* Host: tilemap already initialized by sdl3_tilemap/TileMap_Create */
-}
 void  UIPANEL_Hide(void*, void*) { /* host no-op */ }
 
 /* Per-frame updates */

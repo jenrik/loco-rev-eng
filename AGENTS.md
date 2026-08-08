@@ -146,7 +146,21 @@ sky), since the palette is baked in at load.
 Internal functions must be fully decompiled. Exceptions:
 
 1. OS/hardware APIs may be implemented in `stubs/` or as a host-only,
-   `#ifndef _WIN32`-guarded file beside the subsystem it belongs to.
+   `#ifndef _WIN32`-guarded file beside the subsystem it belongs to. This
+   applies only to functions that are genuinely thin wrappers — the body
+   consists essentially of marshaling arguments into 1-2 real Win32/
+   DirectDraw/DirectSound/DirectPlay calls, with no other original logic.
+   For those, document the real signature (so the project knows what to
+   link against) and delegate/stub rather than fully transcribing.
+   A function merely *calling* an OS API is not automatically exempt: if it
+   has real game-specific data structures, algorithms, or state beyond the
+   API call, it is original game logic and still needs full decompilation,
+   regardless of naming (`DDRAW_*`/`NETMAN_*`-style names in this codebase
+   usually mean "game code that touches that subsystem," not "Windows
+   plumbing" — verify by reading the body, don't infer from the name).
+   The same file can be mixed: split the bookkeeping (must be fully
+   reconstructed, host-independent) from the actual API marshaling calls
+   (stub/delegate) rather than treating the whole file one way.
 2. A temporarily deferred internal function must live in a dedicated stub file,
    say `// TODO: decompile 0xADDRESS`, and be tracked in `PROGRESS.md`.
 3. Compiler-generated deleting destructors, RTTI, EH, and similar helpers are

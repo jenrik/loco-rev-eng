@@ -11,23 +11,25 @@
 
 #include <stdint.h>
 
+#include "../audio/GameAudio.h"
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
 
-extern void* operator_new(uint32_t size);
-
-/* GameAudio methods */
-extern void* __fastcall GameAudio_Ctor(void* mem);         /* 0x412BD0 */
+/* GameAudio::Init (0x412C50) is a real, in-tree method
+ * (audio/GameAudio.h/.cpp), but its currently-transcribed signature
+ * (zero args) does not match the real one: disassembly of 0x412C50
+ * shows `RET 0x8` (two real __thiscall stack params — num_channels,
+ * hwnd), and the body genuinely uses both (hwnd flows into
+ * SetCooperativeLevel; num_channels flows into max_channels, gated by
+ * an untranscribed field pair inside GameAudio::pad_24 that the
+ * current header treats as opaque). Fixing that is a GameAudio.cpp
+ * validation task, not an old-style-cast cleanup, so this call is left
+ * as the pre-existing free-function extern (still call-0/unresolved —
+ * see commit message) rather than migrated to a typed call that would
+ * silently drop both real parameters. */
 extern uint32_t __cdecl GameAudio_Init(void* audio, int channels, void* hwnd); /* 0x412C50 */
-extern void __cdecl GameAudio_SetListenerPos(void* audio,    /* 0x4130A0 */
-                                              int32_t world_w,
-                                              int32_t world_h);
-extern uint32_t __cdecl GameAudio_SetBounds(void* audio,     /* 0x413630 */
-                                             uint32_t low,
-                                             uint32_t med,
-                                             uint32_t high,
-                                             uint32_t high2);
 
 /* Config reader */
 extern int32_t __cdecl Config_GetIniInt(void* config_ini,    /* 0x452D60 */
@@ -36,11 +38,18 @@ extern int32_t __cdecl Config_GetIniInt(void* config_ini,    /* 0x452D60 */
                                          int32_t default_val);
 
 /* Globals */
-extern void* g_audio;               /* 0x4FD3BC — global GameAudio* */
+extern GameAudio* g_audio;          /* 0x4FD3BC — global GameAudio* */
 extern void* g_config_ini;          /* 0x4A9EEC */
 extern void* g_main_window;         /* 0x4AA4A0 */
 extern int32_t g_world_width;       /* 0x4AAD10 */
 extern int32_t g_world_height;      /* 0x4AAD0C */
+
+/* Forward declaration (STRICT=2 -Wmissing-declarations); matches
+ * graphics/DDRAW.h's existing declaration exactly, but this file stays
+ * self-contained rather than including that header (which also
+ * declares several *other* DDRAW_* functions with signatures that do
+ * not match their native/*.c definitions — see commit message). */
+uint32_t __cdecl DDRAW_InitAudio(void);
 
 /* ================================================================== */
 /* DDRAW_InitAudio — Initialise the game audio system                  */
@@ -69,7 +78,6 @@ extern int32_t g_world_height;      /* 0x4AAD0C */
 /* ================================================================== */
 uint32_t __cdecl DDRAW_InitAudio(void)
 {
-    void* audio_mem;
     uint32_t result;
 
     /* Already initialised? */
@@ -77,37 +85,27 @@ uint32_t __cdecl DDRAW_InitAudio(void)
         return 0;
     }
 
-    /* Allocate GameAudio (0xB8 bytes) */
-    audio_mem = operator_new(0xB8);
-    if (audio_mem != NULL) {
-        g_audio = GameAudio_Ctor(audio_mem);
-    } else {
-        g_audio = NULL;
-    }
-
-    if (g_audio == NULL) {
-        return 0;
-    }
+    /* Allocate + construct GameAudio. GameAudio's real ctor (0x412BD0)
+     * only zero-initialises fields (no failure path), matching plain
+     * `new`; the original's separate operator_new(0xB8)+Ctor(mem) step
+     * is one call here, same as the established host idiom in
+     * core/HostMode3Bootstrap.cpp's own `g_audio = new GameAudio;`. */
+    g_audio = new GameAudio();
 
     /* Initialise DirectSound */
     {
-        void* hWnd = *(void**)((uint8_t*)g_main_window + 8);
+        void* hWnd = *reinterpret_cast<void**>(static_cast<uint8_t*>(g_main_window) + 8);
         result = GameAudio_Init(g_audio, 16, hWnd);
     }
 
     if (result == 0) {
-        if (g_audio != NULL) {
-            /* Scalar destructor via vtable[0] */
-            void* vtable = *(void**)g_audio;
-            void (*dtor)(uint32_t) = (void (*)(uint32_t))vtable;
-            dtor(1);
-        }
-        g_audio = NULL;
+        delete g_audio;
+        g_audio = nullptr;
         return 0;
     }
 
     /* Set listener position at world centre */
-    GameAudio_SetListenerPos(g_audio, g_world_width, g_world_height);
+    g_audio->SetListenerPos(g_world_width, g_world_height);
 
     /* Read volume levels from config */
     uint32_t vol_low, vol_med, vol_high;
@@ -123,7 +121,8 @@ uint32_t __cdecl DDRAW_InitAudio(void)
     }
 
     /* Apply volume bounds */
-    GameAudio_SetBounds(g_audio, vol_low, vol_med, vol_high, vol_high);
+    g_audio->SetBounds(static_cast<int32_t>(vol_low), static_cast<int32_t>(vol_med),
+                        static_cast<int32_t>(vol_high), static_cast<int32_t>(vol_high));
 
     return 1;
 }

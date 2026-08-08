@@ -111,7 +111,14 @@ void* __cdecl operator_new(size_t size);                    /* 0x465CE0 */
 void  __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 
 /* Game functions */
-void  __fastcall NETMAN_CreateSession(void* panelA);            /* 0x43C8C0 */
+/* Address corrected: was cited as 0x43C8C0 (wrong/stale); Ghidra confirms
+ * UI_MainMenu_Show (EditWindow::show, 0x4206B0) calls the real
+ * NETMAN_CreateSession at 0x4419C0 (native/NETMAN_NetworkUI.c), which takes
+ * a `NameEntryPanel*` (this->pPanelA, +0x21C), not `void*` — the previous
+ * `void*` declaration here silently bound to shared/defsym_stubs.cpp's
+ * no-op stub instead (call-0 landmine; see
+ * docs/landmine-sweep-worklist.md). */
+void  __fastcall NETMAN_CreateSession(NameEntryPanel* panelA);  /* 0x4419C0 */
 void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
 void  __thiscall NETMAN_SendPacket(void* netman);               /* 0x43CDF0 */
 void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x4616C0 */
@@ -138,7 +145,6 @@ void  __fastcall DDRAW_InitAudio(void);                         /* 0x4014C2 */
  * previous 0x448D50 annotation named no function at all. */
 extern "C" int Config_ReadInt(void* ini, const char* section,
                                const char* key, const char* def);  /* 0x452DF0 */
-void  __thiscall TileMap_Init(void** tilemap, byte flag);           /* 0x458380 */
 int   __thiscall ResourceManager_GetStringById(void** mgr, int id); /* 0x460AA0 */
 void  __thiscall RESMGR_ReleaseSoundResource(int res);              /* 0x44BB90 */
 void  __thiscall RESMGR_LoadSoundResource(int res);                 /* 0x44B8E0 */
@@ -163,7 +169,23 @@ extern void*   g_scripted_object;       /* 0x4AA5B8 */
 extern PlayerConfig* g_player_config;   /* 0x485160 */
 extern void*   g_config_ini;            /* 0x485484 */
 extern void*   g_resmgr;                /* 0x4855E8 */
-extern void**  g_tilemap;               /* 0x4855D0 */
+/* g_tilemap: the canonical global (world/tilemap.h) is a TileMap* singleton
+ * at address 0x4AAD08. The previous local declaration here -- extern
+ * void** g_tilemap at address 0x4855D0 -- was fabricated: that address has
+ * zero xrefs anywhere in the binary, while Ghidra's decompilation of this
+ * file's own EditWindow_OnPlayerNameChanged (0x422660) shows
+ * TileMap_Init(&g_tilemap, ...) against the real singleton at 0x4AAD08
+ * (120+ xrefs). Because it also mismatched the real TileMap_Init(TileMap*,
+ * char) signature, the two calls below silently bound to a
+ * TileMap_Init(void**, unsigned char) no-op overload
+ * (shared/defsym_stubs.cpp) instead of TileMap::Init. Forward-declared
+ * (rather than #include "../world/tilemap.h") because that header's Win32
+ * API redeclarations (SetRect/InvalidateRect/etc, missing extern "C" in
+ * some cases) collide with graphics/sdl3_window.h's when both land in one
+ * TU -- a pre-existing tilemap.h issue out of scope here; see PROGRESS.md. */
+class TileMap;
+extern TileMap* g_tilemap;
+extern void      TileMap_Init(TileMap* tm, char use_1024x768);
 extern int32_t g_screen_width;          /* 0x4AABE8 */
 extern int32_t g_screen_height;         /* 0x4AABEC */
 
@@ -793,8 +815,8 @@ void EditWindow::onPlayerNameChanged()
             /* Standard single-player or scenario */
             if (*reinterpret_cast<char*>(_g_netman_state + 0x24) != 0) {
                 const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x28);
-                if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
-                    (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
+                if ((gameMode == 4 && this->pPanelA->supportsTwoPlayerMode != 0) ||
+                    (gameMode == 2 && this->pPanelA->supportsFourPlayerMode != 0)) {
                     this->setState(4);     /* Single-player */
                     return;
                 }
@@ -803,8 +825,8 @@ void EditWindow::onPlayerNameChanged()
             /* Scenario select screen */
             if (*reinterpret_cast<char*>(_g_netman_state + 0x18) != 0) {
                 const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x1C);
-                if ((gameMode == 4 && this->pPanelA->field_1E0 != 0) ||
-                    (gameMode == 2 && this->pPanelA->field_1E1 != 0)) {
+                if ((gameMode == 4 && this->pPanelA->supportsTwoPlayerMode != 0) ||
+                    (gameMode == 2 && this->pPanelA->supportsFourPlayerMode != 0)) {
                     this->setState(5);     /* Multiplayer */
                     return;
                 }
@@ -1290,7 +1312,6 @@ void EditWindow::hostCommitPlayerName()
             extern void CGWND_SetMode(int mode);
             extern void NETMAN_SetGameMode(void* netman, int mode);
             extern void* _g_netman;
-            /* g_tilemap is declared void** at file scope (0x4855D0). */
             TileMap_Init(g_tilemap, 0);
             NETMAN_SetGameMode(_g_netman, 1);
             CGWND_SetMode(1);

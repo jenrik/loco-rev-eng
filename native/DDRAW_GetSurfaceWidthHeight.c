@@ -22,6 +22,16 @@
  */
 #include "../shared/types.h"
 
+/* Forward declaration (STRICT=2 -Wmissing-declarations). Self-contained
+ * rather than pulled from a header: graphics/sdl3_ddraw.h declares a
+ * *different*, 2-argument DDRAW_GetSurfaceWidthHeight (the real host
+ * SDL3-backed overload, operating on the primary surface singleton
+ * directly) — this file's 3-argument free function is the original
+ * x86-COM-vtable-shaped overload, a distinct symbol (see commit
+ * message; landmine doc already tracks resolving each call site to the
+ * right overload as open work, out of scope here). */
+void __cdecl DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_height, uint16_t* out_width);
+
 void __cdecl DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_height, uint16_t* out_width)
 {
     int ddsd_buf[31];        /* DDSURFACEDESC2 (124 bytes = 31 dwords) */
@@ -33,18 +43,18 @@ void __cdecl DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_height, ui
     }
     ddsd_buf[0] = 0x7C;     /* dwSize = sizeof(DDSURFACEDESC2) */
 
-    if (surface != 0) {
+    if (surface != nullptr) {
         /* Call vtable slot 22 — GetSurfaceDesc (byte offset 0x58) */
         /* Original: CALL [ECX + 0x58] where ECX = *surface (vtable ptr) */
-        ((int (*)(void*, int*))(*(void***)surface)[22])(
+        (reinterpret_cast<int (*)(void*, int*)>((*static_cast<void***>(surface))[22]))(
             surface, ddsd_buf);
 
         /* dwHeight at DDSURFACEDESC2 offset +0x0C (ddsd_buf[3]) */
         /* Original: MOV CX, [ESP + 0x10]; MOV [EAX], CX */
-        *out_height = (uint16_t)ddsd_buf[3];
+        *out_height = static_cast<uint16_t>(ddsd_buf[3]);
 
         /* dwWidth at DDSURFACEDESC2 offset +0x08 (ddsd_buf[2]) */
         /* Original: MOV AX, [ESP + 0x0c]; MOV [EDX], AX */
-        *out_width = (uint16_t)ddsd_buf[2];
+        *out_width = static_cast<uint16_t>(ddsd_buf[2]);
     }
 }

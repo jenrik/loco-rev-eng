@@ -290,7 +290,13 @@ int32_t NET_FindArchivedAsset(int32_t){return 0;}
 int32_t NET_GetAssetPath(int32_t){return 0;}
 int32_t NET_GetAttFilePath(int32_t){return 0;}
 int32_t NET_GetFilePath(int32_t){return 0;}
-int32_t NET_GetNextAttId(int32_t){return 0;}
+/* NET_GetNextAttId(int32_t) removed: this (int32_t)->int32_t shape had no
+ * real caller and mangled to a different symbol than either the real
+ * definition (native/NET_BaseDtor.c: NET_GetNextAttId(void), 0x445F20) or
+ * game/Train_network.cpp's call site — same "no real caller" situation
+ * documented for NET_FindPlayer above. Keeping it after adding the real
+ * definition would not conflict (different mangled name), but it was
+ * already dead weight even before that. */
 int32_t NET_MapSpecialAsset(int32_t){return 0;}
 int32_t NET_RegisterPlayer(int32_t){return 0;}
 int32_t NET_ResolveAddress(void*,int32_t){return 0;}

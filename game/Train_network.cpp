@@ -50,6 +50,15 @@ void NETMAN_QueueMessage(TrainMessage* message); /* 0x43F140 */
 int32_t NETMAN_HostLocalSlotIndex();
 #endif
 
+/* C++ linkage (not extern "C"): native/NET_BaseDtor.c's real definition has
+ * no extern "C" wrapper, so it mangles as a C++ symbol despite the .c
+ * filename (this project's native/*.c sources are compiled as C++ — see
+ * meson.build's common_c_args). Declaring it inside the extern "C" block
+ * below would give it C linkage, mismatching the real mangled symbol and
+ * reintroducing the exact call-0 landmine this declaration's own address/
+ * signature fix (see the comment below) was meant to close. */
+uint16_t NET_GetNextAttId(void);                                                 /* 0x00445F20 */
+
 extern "C" {
 
 /* CRT pattern helpers */
@@ -122,7 +131,15 @@ void   __thiscall NET_GetAttFilePath(uint32_t type, int mode, char* buffer);  /*
 void   __thiscall NET_GetFilePath(uint32_t type, int mode, char* buffer);      /* 0x004459A0 */
 int    __thiscall NET_FindPlayer(int mode, uint32_t player_id);                 /* 0x004461D0 */
 void   __thiscall NET_RegisterPlayer(void* dplay, void* player, int flag, int unknown); /* 0x00446260 */
-int    __thiscall NET_GetNextAttId(void);                                        /* 0x00445E70 */
+/* NET_GetNextAttId (0x445F20) declared above, outside this extern "C"
+ * block — see that comment. Address/signature corrected here from a
+ * previous, wrong 0x00445E70: that address is a mid-function address
+ * inside NET_UploadAsset (0x445BD0), not a callable entry point (zero
+ * xrefs to it in Ghidra) — NET_UploadAsset merely inlines the same
+ * NextAttId-counter logic locally instead of calling out to it. Returns
+ * uint16_t (matching `resp[3]` below and the counter's 0x7FFC wraparound),
+ * and takes no implicit `this` (it's a plain free function, not a method —
+ * __thiscall here was already a no-op on host either way). */
 
 /* Vehicle */
 void*  __thiscall Vehicle_Ctor(void* obj, int resource_id, int type,

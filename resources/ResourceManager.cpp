@@ -96,7 +96,12 @@ int32_t GameAudio_AllocChannel(                       /* @ 0x00413210 */
     void* pCallback, int32_t x, int32_t y,
     uint32_t priority, uint32_t flags);
 int32_t GameAudio_Play(GameAudio* audio, void* desc, void** buffer, int32_t flag); /* @ 0x004132F0 */
-uint32_t Game_LoadWaveFile(const char* path, void* waveDesc); /* @ 0x00412700 */
+/* NOTE: a `Game_LoadWaveFile` extern used to be declared here at
+ * "@ 0x00412700", but 0x00412700 is actually TrackPos_IsObjectBetween
+ * (confirmed via Ghidra decompile) — a stale/wrong-address leftover, unused
+ * anywhere in this file. Real Game_LoadWaveFile is at 0x413660, defined in
+ * native/wave_io.c; removed rather than fixed in place since nothing here
+ * calls it. */
 char* DDRAW_GetDsoundErrorString(int32_t error);      /* @ 0x0045BBC0 */
 
 /* Graphics system */
