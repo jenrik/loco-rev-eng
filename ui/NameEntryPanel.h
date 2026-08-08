@@ -124,13 +124,15 @@ public:
 
     int32_t    field_144;              // +0x144  (unknown, init 0)
 
-    /* +0x148: "paint ready" gate byte. Evidence (native/NETMAN_NetworkUI.c):
-     * NETMAN_JoinSession (0x441870) clears it, NETMAN_UpdateSessionInfo
+    /* +0x148: "paint ready" gate byte. Evidence (native/NETMAN_NetworkUI.c,
+     * native/NETMAN_SessionSettings.c): NETMAN_JoinSession (0x441870) clears
+     * it to 0 unconditionally on (re)open; NETMAN_UpdateSessionInfo
      * (0x441A90) sets it to 1 after blitting the child surface + resetting
-     * sprite states, and NETMAN_SetSessionInfo (0x441C80, the panel's
-     * on_lbutton_down override) refuses to hit-test clicks until it reads
-     * non-zero — makes the flag's name/lifecycle coherent for the first
-     * time (previously mistranscribed at a scaled ×4 offset, +0x52). */
+     * sprite states; NETMAN_SetSessionInfo (0x441C80, the panel's
+     * on_lbutton_down override) AND NETMAN_DestroySession (0x441F80) both
+     * gate all ENTER/ESC/click handling on `*(char*)(this+0x148) != 0` —
+     * makes the flag's name/lifecycle coherent for the first time
+     * (previously mistranscribed at a scaled ×4 offset, +0x52). */
     uint8_t    paintReadyFlag;         // +0x148  1 once the panel has painted at least once
     uint8_t    _gap_149[3];            // +0x149  gap (unnamed, unevidenced)
 
@@ -204,11 +206,13 @@ public:
     /* +0x1D8: session-name EDIT control HWND. Evidence: NETMAN_EnumerateSessions
      * (0x441720) creates the child EDIT control and stores its HWND here;
      * NETMAN_GetSessionInfo/NETMAN_SetSessionInfo (0x441B40/0x441C80) show/
-     * hide/focus/read it via this same slot. Previously modeled as a plain
-     * `int32_t`, matching the original x86 4-byte HWND — retyped to `HWND`
-     * (a real pointer on this host; see AGENTS.md "Host deviations": exact
-     * x86 layout parity is a non-goal off-Windows, only the +0x1D8
-     * provenance comment is preserved). */
+     * hide/focus/read it via this same slot; NETMAN_DestroySession (0x441F80)
+     * and NETMAN_SetSessionInfo also call GetWindowTextA(*(HWND*)(this+0x1D8),
+     * buf, 0x40) to copy the typed text into GameConfig::m_sessionName.
+     * Previously modeled as a plain `int32_t`, matching the original x86
+     * 4-byte HWND — retyped to `HWND` (a real pointer on this host; see
+     * AGENTS.md "Host deviations": exact x86 layout parity is a non-goal
+     * off-Windows, only the +0x1D8 provenance comment is preserved). */
     HWND         sessionNameEditHwnd;  // +0x1D8  session-name EDIT control HWND
 
     /* +0x1DC: previously undocumented gap. Evidence: NETMAN_EnumerateSessions

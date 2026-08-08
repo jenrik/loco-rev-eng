@@ -122,7 +122,18 @@ void   __thiscall NET_GetAttFilePath(uint32_t type, int mode, char* buffer);  /*
 void   __thiscall NET_GetFilePath(uint32_t type, int mode, char* buffer);      /* 0x004459A0 */
 int    __thiscall NET_FindPlayer(int mode, uint32_t player_id);                 /* 0x004461D0 */
 void   __thiscall NET_RegisterPlayer(void* dplay, void* player, int flag, int unknown); /* 0x00446260 */
-int    __thiscall NET_GetNextAttId(void);                                        /* 0x00445E70 */
+/* Address/signature corrected: 0x00445E70 was a mid-function address
+ * inside NET_UploadAsset (0x445BD0), not a callable entry point (zero
+ * xrefs to it in Ghidra) — NET_UploadAsset merely inlines the same
+ * NextAttId-counter logic locally instead of calling out to it. The real
+ * NET_GetNextAttId is 0x445F20 (native/NET_BaseDtor.c; Ghidra-confirmed
+ * name), returns uint16_t (matching `resp[3]` below and the counter's
+ * 0x7FFC wraparound), and takes no implicit `this` (it's a plain free
+ * function, not a method — __thiscall here was already a no-op on host
+ * either way). This was a genuine call-0 landmine: this file's old
+ * declaration's mangled name didn't match any real definition in-tree,
+ * masked only by this target's -Wl,--unresolved-symbols=ignore-all. */
+uint16_t NET_GetNextAttId(void);                                                 /* 0x00445F20 */
 
 /* Vehicle */
 void*  __thiscall Vehicle_Ctor(void* obj, int resource_id, int type,
