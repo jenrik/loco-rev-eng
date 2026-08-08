@@ -258,20 +258,30 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
     if (g_demo_mode != 1) {
         this->InitNetwork();
 
-        void* reversed = NULL;
-        for (uint32_t* item = (uint32_t*)DirectPlay_EnumConnections(g_dplay_peer);
-             item != NULL; item = (uint32_t*)(uintptr_t)item[0]) {
-            uint32_t* copy = (uint32_t*)operator_new(8);
-            copy[0] = (uint32_t)reversed;
+        void* reversed = nullptr;
+        for (auto* item = static_cast<uint32_t*>(DirectPlay_EnumConnections(g_dplay_peer));
+             item != nullptr;
+             item = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(item[0]))) {
+            uint32_t* copy = static_cast<uint32_t*>(operator_new(8));
+            /* TODO(DirectPlay pointer-width audit — see docs/landmine-sweep-worklist.md,
+             * "DirectPlay_* cluster in game/Train_network.cpp — investigated, reverted,
+             * blocked"): copy[0] truncates the 64-bit `reversed` pointer into a 32-bit
+             * slot, the same int32_t-as-pointer pattern documented as blocked there.
+             * Cast re-spelled only; truncation preserved verbatim, not fixed, as this
+             * site is downstream of DirectPlay_EnumConnections. Currently dead on host
+             * builds (the host bridge overload always returns nullptr, so this loop
+             * body never executes) — do not "fix" the truncation without doing the
+             * full session-list pointer-width audit that section calls for. */
+            copy[0] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(reversed));
             copy[1] = item[1];
             reversed = copy;
         }
-        *(void**)((uint8_t*)g_netSettings + 0x10) = reversed;
+        *reinterpret_cast<void**>(static_cast<uint8_t*>(g_netSettings) + 0x10) = reversed;
 
         char index[2] = {'0', 0};
         for (int i = 0; i < 4; ++i, ++index[0]) {
-            *(uint8_t*)((uint8_t*)g_netSettings + 0x14 + i) =
-                (uint8_t)DirectPlay_QueryConnection(index);
+            *(static_cast<uint8_t*>(g_netSettings) + 0x14 + i) =
+                static_cast<uint8_t>(DirectPlay_QueryConnection(index));
         }
     }
 }
@@ -322,7 +332,7 @@ void TrainSubsystem::BaseDtor()
      * (AL=0, EAX=0) from error (AL=0, upper bits set). Current check
      * conflates both as non-zero. Decompile 0x460D10 for exact ABI. */
     if (g_network_thread != NULL &&
-        (intptr_t)WIN32_GetThreadResult(g_network_thread) != 0) {
+        reinterpret_cast<intptr_t>(WIN32_GetThreadResult(g_network_thread)) != 0) {
         this->FlushMessages();
     }
 
@@ -333,24 +343,34 @@ void TrainSubsystem::BaseDtor()
         g_dplay_peer = NULL;
     }
 
+    /* Raw +0x70 byte offset preserved verbatim rather than converted to the
+     * named Vehicle::next field — see docs/landmine-sweep-worklist.md's
+     * Train_network.cpp raw-offset/host-layout note: Vehicle's `editors[4]`
+     * + `editor_state` pointer fields widen on this 64-bit host, so the
+     * real offsetof(Vehicle, next) here is not 0x70. Every raw Vehicle
+     * offset in this file shares that mismatch; converting only some of
+     * them to named-field access while others keep +0x70 arithmetic would
+     * silently split sprite_list_1/2/3 traversal onto two different
+     * addresses. Left uniform (byte arithmetic, -fpermissive Vehicle*<->
+     * void* narrowing unchanged) and dead-code-safe. */
     void** lists[] = {&sprite_list_1, &sprite_list_2, &sprite_list_3};
     for (unsigned i = 0; i < 3; ++i) {
         while (*lists[i] != NULL) {
             void* node = *lists[i];
-            *lists[i] = *(void**)((uint8_t*)node + 0x70);
-            void** vtable = *(void***)node;
-            ((void (__thiscall*)(void*, byte))vtable[0])(node, 1);
+            *lists[i] = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 0x70);
+            void** vtable = *reinterpret_cast<void***>(node);
+            reinterpret_cast<void(__thiscall*)(void*, byte)>(vtable[0])(node, 1);
         }
     }
 
     static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
     while (g_network_queue != NULL) {
-        NetworkMsg* msg = (NetworkMsg*)g_network_queue;
+        NetworkMsg* msg = static_cast<NetworkMsg*>(g_network_queue);
         g_network_queue = msg->next;
         if (msg->data != NULL) {
             if (msg->type == 0x0E) {
-                void** vtable = *(void***)msg->data;
-                ((void (__thiscall*)(void*, byte))vtable[0])(msg->data, 1);
+                void** vtable = *reinterpret_cast<void***>(msg->data);
+                reinterpret_cast<void(__thiscall*)(void*, byte)>(vtable[0])(msg->data, 1);
             } else {
                 GLOBAL_free(msg->data);
             }
@@ -359,18 +379,15 @@ void TrainSubsystem::BaseDtor()
     }
     static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
 
-    PlayerConnectionNode** handles[] = {
-        (PlayerConnectionNode**)&handle_list_1,
-        (PlayerConnectionNode**)&handle_list_2
-    };
+    PlayerConnectionNode** handles[] = {&handle_list_1, &handle_list_2};
     for (unsigned i = 0; i < 2; ++i) {
         while (*handles[i] != NULL) {
             PlayerConnectionNode* node = *handles[i];
             if (node->file_handle != 0) {
-                CloseHandle((void*)(uintptr_t)node->file_handle);
+                CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
                 node->file_handle = 0;
             }
-            *handles[i] = (PlayerConnectionNode*)node->next;
+            *handles[i] = static_cast<PlayerConnectionNode*>(node->next);
             GLOBAL_free(node);
         }
     }
@@ -429,11 +446,11 @@ void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
     return;
 #else
     void* entity = session;
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) != 1) return;
+    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) != 1) return;
 
     struct MissingAsset { uint8_t type, mode; uint8_t pad[2]; MissingAsset* next; };
     MissingAsset* missing = NULL;
-    uint8_t* record = (uint8_t*)entity + 0x96;
+    uint8_t* record = reinterpret_cast<uint8_t*>(entity) + 0x96;
 
     for (unsigned i = 0; i < 0x80 && record[1] != 0; ++i, record += 6) {
         bool duplicate = false;
@@ -469,8 +486,8 @@ void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
         if (!present && GetFileAttributesA(path) != 0xFFFFFFFFu) present = true;
 
         if (!present) {
-            uint8_t* request = (uint8_t*)operator_new(6);
-            *(uint16_t*)request = 0x3ED;
+            uint8_t* request = reinterpret_cast<uint8_t*>(operator_new(6));
+            *reinterpret_cast<uint16_t*>(request) = 0x3ED;
             request[4] = item->mode;
             request[5] = item->type;
             WIN32_SendNetworkData(g_dplay_peer, player_peer_id, request, 6, 1);
@@ -483,11 +500,11 @@ void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
 
     /* Two optional singleton assets at entity +0x94 and +0x93. */
     uint8_t special_modes[2] = {
-        *(uint8_t*)((uint8_t*)entity + 0x94),
-        *(uint8_t*)((uint8_t*)entity + 0x93)
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(entity) + 0x94)),
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(entity) + 0x93))
     };
     uint8_t special_types[2] = {
-        *(uint8_t*)((uint8_t*)entity + 0x95), 1
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(entity) + 0x95)), 1
     };
     uint8_t special_kinds[2] = {0x1E, 0x1F};
     for (int i = 0; i < 2; ++i) {
@@ -497,8 +514,8 @@ void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
         NET_GetAssetPath(type, special_modes[i], path);
         bool present = GetFileAttributesA(path) != 0xFFFFFFFFu;
         if (!present) {
-            uint8_t* request = (uint8_t*)operator_new(6);
-            *(uint16_t*)request = 0x3ED;
+            uint8_t* request = reinterpret_cast<uint8_t*>(operator_new(6));
+            *reinterpret_cast<uint16_t*>(request) = 0x3ED;
             request[4] = special_modes[i];
             request[5] = type;
             WIN32_SendNetworkData(g_dplay_peer, player_peer_id, request, 6, 1);
@@ -535,9 +552,13 @@ void TrainSubsystem::InitNetwork()
     g_dplay_peer = new_peer;
 
     if (g_dplay_peer != NULL) {
-        *(int32_t*)((uint8_t*)g_dplay_peer + 0x940) = 0;
-        *(uint8_t*)((uint8_t*)g_dplay_peer + 0x944) = 0;
-        *(int32_t*)((uint8_t*)g_dplay_peer + 0x938) = this->context_id_b;
+        /* DirectPlay-adjacent (docs/landmine-sweep-worklist.md, "DirectPlay_*
+         * cluster in game/Train_network.cpp"): casts re-spelled only. Do not
+         * retype g_dplay_peer or introduce a named struct for its internal
+         * layout here — that is exactly the deferred pointer-width audit. */
+        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_dplay_peer) + 0x940) = 0;
+        *(static_cast<uint8_t*>(g_dplay_peer) + 0x944) = 0;
+        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_dplay_peer) + 0x938) = this->context_id_b;
     }
 }
 
@@ -548,14 +569,14 @@ void TrainSubsystem::InitNetwork()
 /* ================================================================== */
 void TrainSubsystem::QueueMessage(void* msg)
 {
-    NetworkMsg* net_msg = (NetworkMsg*)msg;
+    NetworkMsg* net_msg = static_cast<NetworkMsg*>(msg);
 
     /* In multiplayer mode (g_game_mode==10), handle/discard immediately */
     if (g_game_mode == 10 && net_msg->type != 8) {
         if (net_msg->data != NULL) {
             if (net_msg->type == 0x0E || net_msg->type == 0x10) {
-                void** data_vt = *(void***)net_msg->data;
-                ((void (__thiscall*)(void*, byte))data_vt[0])(net_msg->data, 1);
+                void** data_vt = *reinterpret_cast<void***>(net_msg->data);
+                reinterpret_cast<void(__thiscall*)(void*, byte)>(data_vt[0])(net_msg->data, 1);
             } else {
                 GLOBAL_free(net_msg->data);
             }
@@ -579,17 +600,17 @@ void TrainSubsystem::QueueMessage(void* msg)
     static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Lock();
 
     if (g_network_queue == NULL) {
-        g_network_queue = (NetworkQueueNode*)net_msg;
+        g_network_queue = net_msg;
         static_cast<ScriptEngine*>(g_train_resources)->ScriptEngine::Unlock();
         return;
     }
 
     /* Walk to end, counting depth */
-    NetworkMsg* cursor = (NetworkMsg*)g_network_queue;
+    NetworkMsg* cursor = static_cast<NetworkMsg*>(g_network_queue);
     int depth = 1;
     while (cursor->next != NULL) {
         depth++;
-        cursor = (NetworkMsg*)cursor->next;
+        cursor = static_cast<NetworkMsg*>(cursor->next);
     }
 
     /* Throttle: if queue >= 6 and this is a 0-data SendNetworkData, drop it */
@@ -618,7 +639,7 @@ void TrainSubsystem::FlushMessages()
 
     thread_result = WIN32_GetThreadResult(g_network_thread);
 
-    if ((intptr_t)thread_result != 0) {
+    if (reinterpret_cast<intptr_t>(thread_result) != 0) {
         /* Thread active — queue DISCONNECT (type-8) message */
         NetworkMsg* msg = AllocateNetworkMessage();
         if (msg == NULL) {
@@ -639,7 +660,7 @@ void TrainSubsystem::FlushMessages()
 
     /* Spin-wait for thread to terminate */
     thread_result = WIN32_GetThreadResult(g_network_thread);
-    while ((intptr_t)thread_result != 0) {
+    while (reinterpret_cast<intptr_t>(thread_result) != 0) {
         Sleep(10);
         thread_result = WIN32_GetThreadResult(g_network_thread);
     }
@@ -652,7 +673,7 @@ void TrainSubsystem::FlushMessages()
 /* ================================================================== */
 void TrainSubsystem::DispatchMessage(void* msg)
 {
-    NetworkMsg* net_msg = (NetworkMsg*)msg;
+    NetworkMsg* net_msg = reinterpret_cast<NetworkMsg*>(msg);
 
     switch (net_msg->type) {
     case 0: /* HostSession */
@@ -693,7 +714,7 @@ void TrainSubsystem::DispatchMessage(void* msg)
         }
 #else
         if (g_dplay_peer != NULL &&
-            *(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
             WIN32_SendNetworkData(g_dplay_peer,
                                    net_msg->to_player,
                                    net_msg->data,
@@ -725,7 +746,7 @@ void TrainSubsystem::DispatchMessage(void* msg)
     case 0x19: /* UpdatePlayerCount + Reset */
     {
         /* netman[0x17].field_7cc at g_netman + 0x7D0 */
-        uint32_t player_count = *(uint32_t*)((uint8_t*)g_netman + 0x7D0);
+        uint32_t player_count = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
         this->UpdatePlayerCount(player_count);
         this->ResetMultiplayerState(0);
         return;
@@ -751,15 +772,15 @@ void TrainSubsystem::ProcessMessages()
         if (lpMem == NULL) break;
 
         /* lpMem layout: +0x00 = player_id (int), +0x04 = payload (void*) */
-        int32_t  player_id = *(int32_t*)lpMem;
-        void*    payload   = *(void**)((uint8_t*)lpMem + 4);
-        uint16_t msg_type  = *(uint16_t*)payload;
+        int32_t  player_id = *reinterpret_cast<int32_t*>(lpMem);
+        void*    payload   = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(lpMem) + 4));
+        uint16_t msg_type  = *reinterpret_cast<uint16_t*>(payload);
 
         /* === Low message types (0-20) === */
         if (msg_type < 0x15) {
             switch (msg_type) {
             case 0x14: /* 20 — PlayerLeave */
-                this->HandlePlayerLeave(*(int32_t*)((uint16_t*)payload + 2));
+                this->HandlePlayerLeave(*reinterpret_cast<int32_t*>((reinterpret_cast<uint16_t*>(payload) + 2)));
                 goto free_msg;
 
             case 10: /* 10 — Disconnect */
@@ -773,22 +794,22 @@ void TrainSubsystem::ProcessMessages()
                 }
 
                 /* If scenario mode, unlink all cars from sprite_list_1 */
-                if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 1) {
-                    uint8_t* car = (uint8_t*)this->sprite_list_1;
-                    while (car != 0) {
+                if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 1) {
+                    uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+                    while (car != nullptr) {
                         NetworkMsg* qmsg = AllocateNetworkMessage();
                         if (qmsg) {
                             qmsg->data = NULL; qmsg->next = NULL;
                             qmsg->type = 0x0F;
                             qmsg->data = this->sprite_list_1;
                         }
-                        *(uint8_t*)(car + 0x88) = 0;
-                        this->sprite_list_1 = *(void**)((uint8_t*)car + 0x70);
+                        *reinterpret_cast<uint8_t*>((car + 0x88)) = 0;
+                        this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70));
                         if (qmsg && qmsg->data) {
-                            *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
+                            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
                         }
                         NETMAN_QueueMessage(qmsg);
-                        car = (uint8_t*)this->sprite_list_1;
+                        car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
                     }
                 }
                 goto free_msg;
@@ -803,23 +824,23 @@ void TrainSubsystem::ProcessMessages()
 
                 /* Reset timeout on all controller cars */
                 {
-                    uint8_t* car = (uint8_t*)this->sprite_list_1;
-                    while (car != 0) {
-                        *(uint16_t*)(car + 0x74) = 32000;
-                        car = *(uint8_t**)(car + 0x70);
+                    uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+                    while (car != nullptr) {
+                        *reinterpret_cast<uint16_t*>((car + 0x74)) = 32000;
+                        car = *reinterpret_cast<uint8_t**>((car + 0x70));
                     }
                 }
 
                 /* Send player info response (0x3E9, 24 bytes) */
                 {
-                    uint16_t* resp = (uint16_t*)operator_new(0x18);
+                    uint16_t* resp = reinterpret_cast<uint16_t*>(operator_new(0x18));
                     if (resp) {
                         resp[0] = 0x3E9;
-                        *(int32_t*)(resp + 2) = *(int32_t*)((uint8_t*)g_player_config + 0x14);
-                        *(int32_t*)(resp + 4) = *(int32_t*)((uint8_t*)g_main_window + 0x18);
-                        *(int32_t*)(resp + 6) = *(int32_t*)((uint8_t*)g_main_window + 0x1C);
-                        *(int32_t*)(resp + 8) = *(int32_t*)((uint8_t*)g_main_window + 0x20);
-                        *(int32_t*)(resp + 10) = *(int32_t*)((uint8_t*)g_main_window + 0x24);
+                        *reinterpret_cast<int32_t*>((resp + 2)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_player_config) + 0x14));
+                        *reinterpret_cast<int32_t*>((resp + 4)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_main_window) + 0x18));
+                        *reinterpret_cast<int32_t*>((resp + 6)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_main_window) + 0x1C));
+                        *reinterpret_cast<int32_t*>((resp + 8)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_main_window) + 0x20));
+                        *reinterpret_cast<int32_t*>((resp + 10)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_main_window) + 0x24));
                         WIN32_SendNetworkData(g_dplay_peer, this->player_peer_id,
                                               resp, 0x18, 1);
                         GLOBAL_free(resp);
@@ -833,7 +854,7 @@ void TrainSubsystem::ProcessMessages()
                     qmsg->type = 0x0C;
                     qmsg->to_player = this->player_peer_id;
                 }
-                this->player_peer_id = *(int32_t*)((uint8_t*)g_dplay_peer + 0x924);
+                this->player_peer_id = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x924));
                 NETMAN_QueueMessage(qmsg);
             }
             goto free_msg;
@@ -842,15 +863,15 @@ void TrainSubsystem::ProcessMessages()
         /* === High message types (0x3EA-0x3FD) === */
         switch (msg_type - 0x3EA) {
         case 0: { /* 0x3EA — PlayerInfo */
-            uint16_t* p = (uint16_t*)payload;
-            uint8_t info_flag = (uint8_t)p[4];
-            int32_t config_val = *(int32_t*)(p + 2);
+            uint16_t* p = reinterpret_cast<uint16_t*>(payload);
+            uint8_t info_flag = static_cast<uint8_t>(p[4]);
+            int32_t config_val = *reinterpret_cast<int32_t*>((p + 2));
 
-            uint8_t* car = (uint8_t*)this->sprite_list_1;
-            while (car) { *(uint16_t*)(car + 0x74) = 32000; car = *(uint8_t**)(car + 0x70); }
+            uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+            while (car) { *reinterpret_cast<uint16_t*>((car + 0x74)) = 32000; car = *reinterpret_cast<uint8_t**>((car + 0x70)); }
 
             if (info_flag) this->field_30 = 1;
-            *(int32_t*)((uint8_t*)g_player_config + 0x14) = config_val;
+            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_player_config) + 0x14)) = config_val;
             /* PlayerConfig_Save is called inside Train_SendPlayerInfo */
             Train_SendPlayerInfo(this);
             break;
@@ -861,18 +882,18 @@ void TrainSubsystem::ProcessMessages()
             break;
 
         case 2: /* 0x3EC — HandleTrackBuild */
-            Train_HandleTrackBuild(this, (uint8_t*)payload);
+            Train_HandleTrackBuild(this, reinterpret_cast<uint8_t*>(payload));
             break;
 
         case 4: { /* 0x3EE — FileData (incoming asset) */
-            uint16_t* p = (uint16_t*)payload;
+            uint16_t* p = reinterpret_cast<uint16_t*>(payload);
             char path_buf[1284];
             uint32_t bytes_written;
 
-            NET_GetAssetPath(*(uint8_t*)((uint8_t*)p + 5), (uint8_t)p[2], path_buf);
-            void* hFile = (void*)(uintptr_t)CreateFileA(path_buf, 0x40000000, 0, NULL, 1, 0x80, NULL);
-            if (hFile != (void*)0xFFFFFFFF) {
-                WriteFile(hFile, p + 6, *(uint32_t*)(p + 4), &bytes_written, NULL);
+            NET_GetAssetPath(*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 5)), static_cast<uint8_t>(p[2]), path_buf);
+            void* hFile = reinterpret_cast<void*>(static_cast<uintptr_t>(CreateFileA(path_buf, 0x40000000, 0, NULL, 1, 0x80, NULL)));
+            if (hFile != reinterpret_cast<void*>(0xFFFFFFFF)) {
+                WriteFile(hFile, p + 6, *reinterpret_cast<uint32_t*>((p + 4)), &bytes_written, NULL);
                 CloseHandle(hFile);
                 this->request_count--;
             }
@@ -883,18 +904,18 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 6: { /* 0x3F0 — GameOver control signal */
-            if (*(uint8_t*)g_dplay_peer != 0) {
+            if (*reinterpret_cast<uint8_t*>(g_dplay_peer) != 0) {
                 NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) {
                     qmsg->data = NULL; qmsg->next = NULL;
                     qmsg->type = 4;
                     /* 0x439948 allocates the protocol's fixed 13-byte name
                      * buffer and copies the C string at payload +0x08. */
-                    char* str = (char*)operator_new(0x0D);
-                    if (str) strcpy(str, (char*)payload + 8);
+                    char* str = reinterpret_cast<char*>(operator_new(0x0D));
+                    if (str) strcpy(str, reinterpret_cast<char*>(payload) + 8);
                     qmsg->data = str;
                     qmsg->to_player = player_id;
-                    qmsg->flags = *(int32_t*)((uint16_t*)payload + 2);
+                    qmsg->flags = *reinterpret_cast<int32_t*>((reinterpret_cast<uint16_t*>(payload) + 2));
                 }
                 NETMAN_QueueMessage(qmsg);
             }
@@ -902,16 +923,16 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 7: { /* 0x3F1 — LobbyInfo/PlayerList */
-            uint16_t* p = (uint16_t*)payload;
+            uint16_t* p = reinterpret_cast<uint16_t*>(payload);
             this->player_peer_id = player_id;
 
             NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) {
                 qmsg->data = NULL; qmsg->next = NULL;
                 qmsg->type = 9;
-                qmsg->flags = *(int32_t*)(p + 2);
-                qmsg->setMetadata0((uint8_t)p[4]);
-                qmsg->setMetadata1(*(uint8_t*)((uint8_t*)p + 9));
+                qmsg->flags = *reinterpret_cast<int32_t*>((p + 2));
+                qmsg->setMetadata0(static_cast<uint8_t>(p[4]));
+                qmsg->setMetadata1(*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 9)));
 
 #ifndef _WIN32
                 qmsg->data = DPLAY_DecodePlayerSlots(
@@ -935,11 +956,11 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 8: /* 0x3F2 — ConnectionSetup */
-            this->HandleConnectionSetup((void*)((uint16_t*)payload));
+            this->HandleConnectionSetup(reinterpret_cast<void*>((reinterpret_cast<uint16_t*>(payload))));
             break;
 
         case 9: /* 0x3F3 — ControllerInit */
-            this->HandleControllerInit((void*)((uint16_t*)payload), player_id);
+            this->HandleControllerInit(reinterpret_cast<void*>((reinterpret_cast<uint16_t*>(payload))), player_id);
             break;
 
         case 10: { /* 0x3F4 — PlayerJoin request */
@@ -977,17 +998,17 @@ void TrainSubsystem::ProcessMessages()
         }
 
         case 0x0E: { /* 0x3F8 — PlayerCount/Update */
-            uint16_t* p = (uint16_t*)payload;
+            uint16_t* p = reinterpret_cast<uint16_t*>(payload);
             NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) {
                 qmsg->data = NULL; qmsg->next = NULL;
                 qmsg->type = 0x1A;
                 qmsg->size = 0;
-                qmsg->data = (void*)(uintptr_t)(uint32_t)((uint8_t)p[2]);
+                qmsg->data = reinterpret_cast<void*>(static_cast<uintptr_t>(static_cast<uint32_t>((static_cast<uint8_t>(p[2])))));
                 qmsg->to_player = player_id;
             }
             NETMAN_QueueMessage(qmsg);
-            this->UpdatePlayerCount((uint32_t)((uint8_t)p[2]));
+            this->UpdatePlayerCount(static_cast<uint32_t>((static_cast<uint8_t>(p[2]))));
             break;
         }
 
@@ -1026,7 +1047,7 @@ free_msg:
             void* hHeap = GetProcessHeap();
             if (msg_type < 0x3F6 ||
                 (msg_type > 0x3F7 && msg_type != 0x3F9)) {
-                void* heap_payload = *(void**)((uint8_t*)lpMem + 4);
+                void* heap_payload = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(lpMem) + 4));
                 if (heap_payload != NULL) HeapFree(hHeap, 0, heap_payload);
             }
             HeapFree(hHeap, 0, lpMem);
@@ -1044,14 +1065,13 @@ void TrainSubsystem::HandlePlayerJoin(void* data, int player_id)
     char path_buf[0x144] = {0};
     (void)path_buf; /* used below via NET_GetAttFilePath */
 
-    PlayerConnectionNode* node = (PlayerConnectionNode*)
-        operator_new(sizeof(PlayerConnectionNode));
+    PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(operator_new(sizeof(PlayerConnectionNode)));
     if (node == NULL) return;
 
     node->player_id      = player_id;
     node->file_handle    = 0;
-    node->sub_type       = *(uint16_t*)((uint8_t*)data + 4);
-    node->extra_info     = *(uint16_t*)((uint8_t*)data + 6);
+    node->sub_type       = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(data) + 4));
+    node->extra_info     = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(data) + 6));
     node->transfer_state = 0;
     node->sequence_num   = 0;
     node->throttle       = 0;
@@ -1062,9 +1082,9 @@ void TrainSubsystem::HandlePlayerJoin(void* data, int player_id)
         char att_path[0x144];
         att_path[0] = 0;
         NET_GetAttFilePath(node->sub_type, 4, att_path);
-        void* hFile = (void*)(uintptr_t)CreateFileA(att_path, 0x80000000, 1, NULL,
-                                          4, 0x8000000, NULL);
-        node->file_handle = (int32_t)hFile;
+        void* hFile = reinterpret_cast<void*>(static_cast<uintptr_t>(CreateFileA(att_path, 0x80000000, 1, NULL,
+                                          4, 0x8000000, NULL)));
+        node->file_handle = static_cast<int32_t>(reinterpret_cast<uintptr_t>(hFile));
     }
 
     if (node->file_handle != -1) {
@@ -1072,8 +1092,8 @@ void TrainSubsystem::HandlePlayerJoin(void* data, int player_id)
         if (this->handle_list_1 == NULL) {
             this->handle_list_1 = node;
         } else {
-            PlayerConnectionNode* tail = (PlayerConnectionNode*)this->handle_list_1;
-            while (tail->next) tail = (PlayerConnectionNode*)tail->next;
+            PlayerConnectionNode* tail = reinterpret_cast<PlayerConnectionNode*>(this->handle_list_1);
+            while (tail->next) tail = reinterpret_cast<PlayerConnectionNode*>(tail->next);
             tail->next = node;
         }
     } else {
@@ -1089,7 +1109,7 @@ void TrainSubsystem::HandlePlayerJoin(void* data, int player_id)
 void TrainSubsystem::UploadPendingAttachments()
 {
     PlayerConnectionNode* prev = NULL;
-    PlayerConnectionNode* node = (PlayerConnectionNode*)this->handle_list_1;
+    PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(this->handle_list_1);
 
     if (node == NULL) return;
 
@@ -1097,30 +1117,30 @@ void TrainSubsystem::UploadPendingAttachments()
         if (node->throttle > 0) {
             node->throttle--;
             prev = node;
-            node = (PlayerConnectionNode*)node->next;
+            node = reinterpret_cast<PlayerConnectionNode*>(node->next);
             continue;
         }
         node->throttle = 0x14; /* 20-tick throttle */
 
         if (node->transfer_state == 0) {
             /* FIRST block */
-            uint16_t* buf = (uint16_t*)operator_new(0x7FEC);
+            uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x7FEC));
             uint32_t bytes_read = 0;
 
-            if (!ReadFile((void*)(uintptr_t)node->file_handle,
-                           (void*)((uint8_t*)buf + 0x0D),
+            if (!ReadFile(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)),
+                           reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(buf) + 0x0D)),
                            0x7FDC, &bytes_read, NULL)) {
-                CloseHandle((void*)(uintptr_t)node->file_handle);
+                CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
                 node->file_handle = 0;
                 GLOBAL_free(buf);
                 goto remove_node;
             }
 
             buf[0] = 0x3FC;
-            *(int32_t*)(buf + 2) = bytes_read;
+            *reinterpret_cast<int32_t*>((buf + 2)) = bytes_read;
             buf[4] = node->sub_type;
             buf[5] = 0;
-            *(uint8_t*)(buf + 6) = 0; /* sub-type = FIRST */
+            *reinterpret_cast<uint8_t*>((buf + 6)) = 0; /* sub-type = FIRST */
             WIN32_SendNetworkData(g_dplay_peer, node->player_id,
                                   buf, bytes_read + 0x10, 1);
             GLOBAL_free(buf);
@@ -1130,13 +1150,13 @@ void TrainSubsystem::UploadPendingAttachments()
 
         if (node->transfer_state == 1) {
             /* INTERIM block */
-            uint16_t* buf = (uint16_t*)operator_new(0x7FEC);
+            uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x7FEC));
             uint32_t bytes_read = 0;
 
-            if (!ReadFile((void*)(uintptr_t)node->file_handle,
-                           (void*)((uint8_t*)buf + 0x0D),
+            if (!ReadFile(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)),
+                           reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(buf) + 0x0D)),
                            0x7FDC, &bytes_read, NULL)) {
-                CloseHandle((void*)(uintptr_t)node->file_handle);
+                CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
                 node->file_handle = 0;
                 GLOBAL_free(buf);
                 goto remove_node;
@@ -1145,10 +1165,10 @@ void TrainSubsystem::UploadPendingAttachments()
             if (bytes_read > 0) {
                 node->sequence_num++;
                 buf[0] = 0x3FC;
-                *(int32_t*)(buf + 2) = bytes_read;
+                *reinterpret_cast<int32_t*>((buf + 2)) = bytes_read;
                 buf[4] = node->sub_type;
                 buf[5] = node->sequence_num;
-                *(uint8_t*)(buf + 6) = 1; /* sub-type = INTERIM */
+                *reinterpret_cast<uint8_t*>((buf + 6)) = 1; /* sub-type = INTERIM */
                 WIN32_SendNetworkData(g_dplay_peer, node->player_id,
                                       buf, bytes_read + 0x10, 1);
                 GLOBAL_free(buf);
@@ -1157,39 +1177,39 @@ void TrainSubsystem::UploadPendingAttachments()
 
             /* Zero bytes -> move to FINAL */
             node->transfer_state = 2;
-            CloseHandle((void*)(uintptr_t)node->file_handle);
+            CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
             node->file_handle = 0;
             GLOBAL_free(buf);
             prev = node;
-            node = (PlayerConnectionNode*)node->next;
+            node = reinterpret_cast<PlayerConnectionNode*>(node->next);
             continue;
         }
 
         /* FINAL block */
         {
-            uint16_t* buf = (uint16_t*)operator_new(0x410);
+            uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x410));
             char att_path[0x144] = {0};
             uint32_t bytes_read = 0;
 
             NET_GetFilePath(node->sub_type, 4, att_path);
-            void* hFile = (void*)(uintptr_t)CreateFileA(att_path, 0x80000000, 1, NULL,
-                                              4, 0x8000000, NULL);
-            node->file_handle = (int32_t)hFile;
+            void* hFile = reinterpret_cast<void*>(static_cast<uintptr_t>(CreateFileA(att_path, 0x80000000, 1, NULL,
+                                              4, 0x8000000, NULL)));
+            node->file_handle = static_cast<int32_t>(reinterpret_cast<uintptr_t>(hFile));
 
-            if (hFile == (void*)0xFFFFFFFF) {
+            if (hFile == reinterpret_cast<void*>(0xFFFFFFFF)) {
                 node->file_handle = 0;
                 GLOBAL_free(buf);
                 goto remove_node;
             }
 
-            if (ReadFile(hFile, (void*)((uint8_t*)buf + 0x0D), 0x400,
+            if (ReadFile(hFile, reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(buf) + 0x0D)), 0x400,
                          &bytes_read, NULL)) {
                 node->sequence_num++;
                 buf[0] = 0x3FC;
-                *(int32_t*)(buf + 2) = bytes_read;
+                *reinterpret_cast<int32_t*>((buf + 2)) = bytes_read;
                 buf[4] = node->sub_type;
                 buf[5] = node->sequence_num;
-                *(uint8_t*)(buf + 6) = 2; /* sub-type = FINAL */
+                *reinterpret_cast<uint8_t*>((buf + 6)) = 2; /* sub-type = FINAL */
                 WIN32_SendNetworkData(g_dplay_peer, node->player_id,
                                       buf, bytes_read + 0x10, 1);
             }
@@ -1203,7 +1223,7 @@ void TrainSubsystem::UploadPendingAttachments()
 
 remove_node:
         {
-            PlayerConnectionNode* next = (PlayerConnectionNode*)node->next;
+            PlayerConnectionNode* next = reinterpret_cast<PlayerConnectionNode*>(node->next);
             if (prev == NULL) {
                 this->handle_list_1 = node->next;
             } else {
@@ -1222,17 +1242,17 @@ remove_node:
 /* ================================================================== */
 void TrainSubsystem::HandleAttachmentFileData(void* data)
 {
-    uint8_t  sub_type   = *(uint8_t*)((uint8_t*)data + 0x0C);
-    uint16_t train_type = *(uint16_t*)((uint8_t*)data + 8);
+    uint8_t  sub_type   = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(data) + 0x0C));
+    uint16_t train_type = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(data) + 8));
 
-    PlayerConnectionNode* node = (PlayerConnectionNode*)this->handle_list_2;
+    PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(this->handle_list_2);
     PlayerConnectionNode* prev = NULL;
 
     /* Find matching node */
     while (node != NULL) {
         if (node->sub_type == train_type) break;
         prev = node;
-        node = (PlayerConnectionNode*)node->next;
+        node = reinterpret_cast<PlayerConnectionNode*>(node->next);
     }
     if (node == NULL) return;
 
@@ -1243,13 +1263,13 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
 
         if (node->sequence_num == 0) {
             NET_GetAttFilePath(train_type, 5, path_buf);
-            void* hFile = (void*)(uintptr_t)CreateFileA(path_buf, 0x40000000, 1, NULL,
-                                              1, 0x8000000, NULL);
-            node->file_handle = (int32_t)hFile;
+            void* hFile = reinterpret_cast<void*>(static_cast<uintptr_t>(CreateFileA(path_buf, 0x40000000, 1, NULL,
+                                              1, 0x8000000, NULL)));
+            node->file_handle = static_cast<int32_t>(reinterpret_cast<uintptr_t>(hFile));
 
-            if (hFile != (void*)0xFFFFFFFF) {
-                WriteFile(hFile, (void*)((uint8_t*)data + 0x0D),
-                          *(uint32_t*)((uint8_t*)data + 4),
+            if (hFile != reinterpret_cast<void*>(0xFFFFFFFF)) {
+                WriteFile(hFile, reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(data) + 0x0D)),
+                          *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(data) + 4)),
                           &bytes_written, NULL);
                 return; /* success */
             }
@@ -1273,11 +1293,11 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
         /* INTERIM block */
         uint32_t bytes_written;
         node->sequence_num++;
-        uint16_t expected = *(uint16_t*)((uint8_t*)data + 10);
+        uint16_t expected = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(data) + 10));
 
         if (node->sequence_num != expected) {
             g_OutputDebugStringA("Attachment Interim Block out of sequence");
-            CloseHandle((void*)(uintptr_t)node->file_handle);
+            CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
             node->file_handle = 0;
 
             NetworkMsg* msg = AllocateNetworkMessage();
@@ -1289,11 +1309,11 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
             goto unlink_node;
         }
 
-        if (!WriteFile((void*)(uintptr_t)node->file_handle,
-                        (void*)((uint8_t*)data + 0x0D),
-                        *(uint32_t*)((uint8_t*)data + 4),
+        if (!WriteFile(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)),
+                        reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(data) + 0x0D)),
+                        *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(data) + 4)),
                         &bytes_written, NULL)) {
-            CloseHandle((void*)(uintptr_t)node->file_handle);
+            CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
             node->file_handle = 0;
         } else {
             return; /* success */
@@ -1306,21 +1326,21 @@ void TrainSubsystem::HandleAttachmentFileData(void* data)
         char path_buf[0x144] = {0};
 
         if (node->file_handle) {
-            CloseHandle((void*)(uintptr_t)node->file_handle);
+            CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
             node->file_handle = 0;
         }
 
         node->sequence_num++;
-        uint16_t expected = *(uint16_t*)((uint8_t*)data + 10);
+        uint16_t expected = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(data) + 10));
 
         if (node->sequence_num == expected) {
             NET_GetFilePath(train_type, 5, path_buf);
-            void* hFile = (void*)(uintptr_t)CreateFileA(path_buf, 0x40000000, 1, NULL,
-                                              1, 0x8000000, NULL);
-            node->file_handle = (int32_t)hFile;
-            if (hFile != (void*)0xFFFFFFFF) {
-                WriteFile(hFile, (void*)((uint8_t*)data + 0x0D),
-                          *(uint32_t*)((uint8_t*)data + 4),
+            void* hFile = reinterpret_cast<void*>(static_cast<uintptr_t>(CreateFileA(path_buf, 0x40000000, 1, NULL,
+                                              1, 0x8000000, NULL)));
+            node->file_handle = static_cast<int32_t>(reinterpret_cast<uintptr_t>(hFile));
+            if (hFile != reinterpret_cast<void*>(0xFFFFFFFF)) {
+                WriteFile(hFile, reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(data) + 0x0D)),
+                          *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(data) + 4)),
                           &bytes_written, NULL);
                 CloseHandle(hFile);
             }
@@ -1429,7 +1449,7 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
     /* Clean up receiver-side (handle_list_2) for this player */
     {
         PlayerConnectionNode* prev = NULL;
-        PlayerConnectionNode* node = (PlayerConnectionNode*)this->handle_list_2;
+        PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(this->handle_list_2);
 
         while (node != NULL) {
             if (node->player_id == player_id) {
@@ -1441,7 +1461,7 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
                 node->next = NULL;
 
                 if (node->file_handle != 0 && node->file_handle != -1) {
-                    CloseHandle((void*)(uintptr_t)node->file_handle);
+                    CloseHandle(reinterpret_cast<void*>(static_cast<uintptr_t>(node->file_handle)));
                     node->file_handle = 0;
                 }
 
@@ -1457,10 +1477,10 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
                 GLOBAL_free(node);
 
                 prev = NULL;
-                node = (PlayerConnectionNode*)this->handle_list_2;
+                node = reinterpret_cast<PlayerConnectionNode*>(this->handle_list_2);
             } else {
                 prev = node;
-                node = (PlayerConnectionNode*)node->next;
+                node = reinterpret_cast<PlayerConnectionNode*>(node->next);
             }
         }
     }
@@ -1483,33 +1503,33 @@ void TrainSubsystem::HandlePlayerLeave(int player_id)
 /* ================================================================== */
 void TrainSubsystem::UpdatePlayerCount(uint32_t player_index)
 {
-    uint32_t local_player = *(uint32_t*)((uint8_t*)g_netman + 0x7D0);
+    uint32_t local_player = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
 
     void*  prev = NULL;
     void*  node = this->sprite_list_3;
 
     while (node != NULL) {
-        uint8_t node_owner = *(uint8_t*)((uint8_t*)node + 0x7C);
-        void*   next_node = *(void**)((uint8_t*)node + 0x70);
+        uint8_t node_owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+        void*   next_node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
 
-        if (node_owner == (uint8_t)player_index) {
+        if (node_owner == static_cast<uint8_t>(player_index)) {
             /* Unlink this node */
             if (prev == NULL) {
-                this->sprite_list_3 = *(void**)((uint8_t*)node + 0x70);
+                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
             } else {
-                *(void**)((uint8_t*)prev + 0x70) = *(void**)((uint8_t*)node + 0x70);
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
             }
 
             if (player_index == local_player) {
                 /* Local player's slot: preserve on sprite_list_1 free list */
-                *(uint8_t*)((uint8_t*)node + 0x7C) = (uint8_t)local_player;
-                *(void**)((uint8_t*)node + 0x70) = this->sprite_list_1;
+                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) = static_cast<uint8_t>(local_player);
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70)) = this->sprite_list_1;
                 this->sprite_list_1 = node;
                 node = this->sprite_list_3;
             } else {
                 /* Remote player: destroy via vtable[0] */
-                void** vt = *(void***)node;
-                ((void (__thiscall*)(void*, byte))vt[0])(node, 1);
+                void** vt = *reinterpret_cast<void***>(node);
+                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
                 node = this->sprite_list_3;
             }
         } else {
@@ -1532,7 +1552,7 @@ void TrainSubsystem::ShutdownNetwork()
 
     this->player_peer_id = 0;
 
-    if (*(int*)((uint8_t*)g_dplay_peer + 0x1588) == 0) {
+    if (*reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x1588)) == 0) {
         /* No session — queue type-5 disconnect */
         NetworkMsg* msg = AllocateNetworkMessage();
         if (msg) { msg->data = NULL; msg->next = NULL; }
@@ -1542,52 +1562,52 @@ void TrainSubsystem::ShutdownNetwork()
     }
 
     /* Reconnect to session to send shutdown message */
-    if (*(uint8_t*)g_dplay_peer == 0) {
+    if (*reinterpret_cast<uint8_t*>(g_dplay_peer) == 0) {
         /* Host player */
-        if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 1) {
+        if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 1) {
             /* Scenario mode: read server name from config */
             char buf[1024];
             Config_GetIniString(g_config_ini, "Configuration", "ServerName",
                                 "LEGO International Train Server", buf, 0x400);
             DirectPlay_ConnectToSession(g_dplay_peer,
-                                         (char*)((uint8_t*)g_player_config + 6),
+                                         reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                          buf, NULL);
-            if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) == 0) {
+            if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) == 0) {
                 Sleep(1000);
                 DirectPlay_ConnectToSession(g_dplay_peer,
-                                             (char*)((uint8_t*)g_player_config + 6),
+                                             reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                              buf, NULL);
             }
-            if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) == 0) {
+            if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) == 0) {
                 Sleep(2000);
                 goto send_disconnect;
             }
         } else {
             /* Non-scenario: use UI address */
-            char* addr = *(char**)(*(uintptr_t*)((uint8_t*)g_ui_main + 0x220) + 0xF8);
+            char* addr = *reinterpret_cast<char**>((*reinterpret_cast<uintptr_t*>((reinterpret_cast<uint8_t*>(g_ui_main) + 0x220)) + 0xF8));
             DirectPlay_ConnectToSession(g_dplay_peer,
-                                         (char*)((uint8_t*)g_player_config + 6),
+                                         reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                          addr, NULL);
         }
     } else {
         /* Client player: format name pair */
         char name_buf[256];
         wsprintfA(name_buf, "%s %s",
-                  *(char**)(*(uintptr_t*)((uint8_t*)g_ui_main + 0x220) + 0xFC),
-                  (char*)((uint8_t*)g_player_config + 6));
+                  *reinterpret_cast<char**>((*reinterpret_cast<uintptr_t*>((reinterpret_cast<uint8_t*>(g_ui_main) + 0x220)) + 0xFC)),
+                  reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)));
         DirectPlay_ConnectToSession(g_dplay_peer,
-                                     (char*)((uint8_t*)g_player_config + 6),
+                                     reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                      name_buf, NULL);
     }
 
-    if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+    if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
         /* Connected — send type-3 shutdown */
         NetworkMsg* msg = AllocateNetworkMessage();
         if (msg) { msg->data = NULL; msg->next = NULL; }
         if (msg) {
             msg->type = 3;
             msg->data = NULL;
-            msg->to_player = *(int32_t*)((uint8_t*)g_dplay_peer + 0x924);
+            msg->to_player = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x924));
         }
         NETMAN_QueueMessage(msg);
         return;
@@ -1610,8 +1630,8 @@ void TrainSubsystem::HandleDisconnect()
 {
     if (g_dplay_peer != NULL) {
         /* Send game-over notification if connected in scenario mode */
-        if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0 &&
-            *(int32_t*)((uint8_t*)g_netman + 0x7C4) == 2) {
+        if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0 &&
+            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 2) {
             uint16_t msg = 0x3FD;
             WIN32_SendNetworkData(g_dplay_peer, 0, &msg, 4, 1);
             Sleep(10);
@@ -1628,15 +1648,15 @@ void TrainSubsystem::HandleDisconnect()
     }
 
     /* Only free lists in scenario mode or non-scenario */
-    int scenario = *(int32_t*)((uint8_t*)g_netman + 0x7C4);
+    int scenario = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4));
     if (scenario == 2 || scenario == 0) {
         /* Free sprite_list_1 (active) */
         {
             void* node = this->sprite_list_1;
             while (node != NULL) {
-                this->sprite_list_1 = *(void**)((uint8_t*)node + 0x70);
-                void** vt = *(void***)node;
-                ((void (__thiscall*)(void*, byte))vt[0])(node, 1);
+                this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+                void** vt = *reinterpret_cast<void***>(node);
+                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
                 node = this->sprite_list_1;
             }
         }
@@ -1645,9 +1665,9 @@ void TrainSubsystem::HandleDisconnect()
         {
             void* node = this->sprite_list_2;
             while (node != NULL) {
-                this->sprite_list_2 = *(void**)((uint8_t*)node + 0x70);
-                void** vt = *(void***)node;
-                ((void (__thiscall*)(void*, byte))vt[0])(node, 1);
+                this->sprite_list_2 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+                void** vt = *reinterpret_cast<void***>(node);
+                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
                 node = this->sprite_list_2;
             }
         }
@@ -1656,9 +1676,9 @@ void TrainSubsystem::HandleDisconnect()
         {
             void* node = this->sprite_list_3;
             while (node != NULL) {
-                this->sprite_list_3 = *(void**)((uint8_t*)node + 0x70);
-                void** vt = *(void***)node;
-                ((void (__thiscall*)(void*, byte))vt[0])(node, 1);
+                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+                void** vt = *reinterpret_cast<void***>(node);
+                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
                 node = this->sprite_list_3;
             }
         }
@@ -1672,39 +1692,39 @@ void TrainSubsystem::HandleDisconnect()
 /* ================================================================== */
 void TrainSubsystem::HandleFileTransfer(void* msg)
 {
-    NetworkMsg* net_msg = (NetworkMsg*)msg;
+    NetworkMsg* net_msg = reinterpret_cast<NetworkMsg*>(msg);
     void*       car     = net_msg->data;
     int         dir     = net_msg->flags;
 
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) != 2) {
+    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) != 2) {
         /* Not in multiplayer scenario — destroy car */
         if (car != NULL) {
-            void** vt = *(void***)car;
-            ((void (__thiscall*)(void*, byte))vt[0])(car, 1);
+            void** vt = *reinterpret_cast<void***>(car);
+            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
             net_msg->data = NULL;
         }
         return;
     }
 
     /* Check if this is a 'remove' message */
-    if (car && *(int32_t*)((uint8_t*)car + 4) == 1) {
+    if (car && *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 4)) == 1) {
         if (car) {
-            void** vt = *(void***)car;
-            ((void (__thiscall*)(void*, byte))vt[0])(car, 1);
+            void** vt = *reinterpret_cast<void***>(car);
+            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
         }
         net_msg->data = NULL;
         return;
     }
 
     /* Compute target town index from direction */
-    int local_player = *(int*)((uint8_t*)g_netman + 0x7D0);
+    int local_player = *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
     int target_town = local_player;
 
     if (dir < 0x5B) {
         if (dir == 0x5A)      target_town = local_player + 1;
-        else if (dir == 0)    target_town = local_player - *(int*)((uint8_t*)g_netman + 0xC);
+        else if (dir == 0)    target_town = local_player - *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0xC));
     } else {
-        if (dir == 0xB4)      target_town = *(int*)((uint8_t*)g_netman + 0xC) + local_player;
+        if (dir == 0xB4)      target_town = *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0xC)) + local_player;
         else if (dir == 0x10E) target_town = local_player - 1;
     }
 
@@ -1712,13 +1732,13 @@ void TrainSubsystem::HandleFileTransfer(void* msg)
     int* player_slot = NULL;
     if (target_town >= 0) {
         /* netman[0xF].playerIds + target_town * 0x13 + 6 */
-        player_slot = (int*)((uint8_t*)g_netman + 0x518 + target_town * 0x4C);
+        player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + target_town * 0x4C));
     }
 
     if (player_slot && *player_slot != 0) {
         /* Player exists at target — transfer the car */
         uint8_t result = this->MoveToNeighborTown(*player_slot, car, dir);
-        if ((char)result == 0) {
+        if (static_cast<char>(result) == 0) {
             /* Transfer succeeded — forward the train */
             goto forward_train;
         }
@@ -1733,14 +1753,14 @@ forward_train:
     /* Forward train to another player at the target */
     {
         if (this->sprite_list_2 != NULL) {
-            uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(uint8_t**)(tail + 0x70) != 0) {
-                tail = *(uint8_t**)(tail + 0x70);
+            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) {
+                tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
             }
-            *(void**)((uint8_t*)car + 0x70) = NULL;
-            *(void**)(tail + 0x70) = car;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
+            *reinterpret_cast<void**>((tail + 0x70)) = car;
         } else {
-            *(void**)((uint8_t*)car + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
             this->sprite_list_2 = car;
         }
         Train_RemoveAllTracks(this);
@@ -1755,43 +1775,43 @@ forward_train:
 /* ================================================================== */
 void TrainSubsystem::HandleConnectionSetup(void* data)
 {
-    uint16_t* p = (uint16_t*)data;
+    uint16_t* p = reinterpret_cast<uint16_t*>(data);
 
     /* Create a new Vehicle controller */
     void* vehicle_obj = operator_new(0x94);
     void* controller = NULL;
     if (vehicle_obj) {
-        controller = Vehicle_Ctor(vehicle_obj, *(int*)(p + 8), 2, 1, 1);
+        controller = Vehicle_Ctor(vehicle_obj, *reinterpret_cast<int*>((p + 8)), 2, 1, 1);
     }
     if (controller == NULL) return;
 
     /* Set direction and town info */
-    *(uint16_t*)((uint8_t*)controller + 0x74) = p[2];    /* direction */
-    *(uint16_t*)((uint8_t*)controller + 0x7A) = p[3];    /* resource ID */
-    *(uint8_t*)((uint8_t*)controller + 0x78) = *(uint8_t*)((uint8_t*)p + 10);  /* type */
-    Vehicle_CalcSpeed(controller, *(short*)((uint8_t*)p + 8));
+    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x74)) = p[2];    /* direction */
+    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A)) = p[3];    /* resource ID */
+    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 10));  /* type */
+    Vehicle_CalcSpeed(controller, *reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(p) + 8));
 
     /* Set parent/controller reference */
-    *(int32_t*)((uint8_t*)controller + 8) = *(int32_t*)(p + 6);
+    *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(controller) + 8)) = *reinterpret_cast<int32_t*>((p + 6));
 
     /* Process up to 3 track elements */
-    if (*(uint8_t*)((uint8_t*)p + 0x14) != 0) {
-        uint32_t* track_entry = (uint32_t*)(p + 0x16);
+    if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 0x14)) != 0) {
+        uint32_t* track_entry = reinterpret_cast<uint32_t*>((p + 0x16));
 
-        for (int i = 0; i < *(uint8_t*)((uint8_t*)p + 0x14); i++) {
+        for (int i = 0; i < *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 0x14)); i++) {
             Vehicle_InitRoute(controller, track_entry[-5], track_entry[-4], 1);
 
-            if (*(uint8_t*)(track_entry + -3) != 0) {
+            if (*reinterpret_cast<uint8_t*>((track_entry + -3)) != 0) {
                 /* Has DPLAY data — check if it matches local player */
-                uint16_t track_id = (uint16_t)track_entry[-1];
+                uint16_t track_id = static_cast<uint16_t>(track_entry[-1]);
                 int player_count = NETMAN_GetPlayerCount(g_netman);
 
-                uint8_t* player_name = (uint8_t*)track_entry;
+                uint8_t* player_name = reinterpret_cast<uint8_t*>(track_entry);
                 /* 2-byte stride name compare */
                 int match = -1;
                 for (int j = 0; j < player_count; j++) {
                     /* Compare player name from track_entry */
-                    uint8_t* pn = (uint8_t*)((uint8_t*)g_netman + 0x51D + j * 0x4C);
+                    uint8_t* pn = reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x51D + j * 0x4C));
                     uint8_t* tn = player_name;
                     int k = 0;
                     while (tn[k] == pn[k] && tn[k] != 0) { k++; }
@@ -1800,7 +1820,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 
                 if (match >= 0) {
                     /* Send PlayerJoin response for matching track */
-                    uint16_t* resp = (uint16_t*)operator_new(8);
+                    uint16_t* resp = reinterpret_cast<uint16_t*>(operator_new(8));
                     if (resp) {
                         resp[0] = 0x3FB;
                         resp[2] = track_id;
@@ -1809,12 +1829,12 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                         /* Find player by name match */
                         int* target_player = NULL;
                         for (int j = 0; j < player_count; j++) {
-                            uint8_t* pn = (uint8_t*)((uint8_t*)g_netman + 0x51D + j * 0x4C);
-                            uint8_t* tn = (uint8_t*)track_entry + 6; /* 2+ byte per char */
+                            uint8_t* pn = reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x51D + j * 0x4C));
+                            uint8_t* tn = reinterpret_cast<uint8_t*>(track_entry) + 6; /* 2+ byte per char */
                             int k = 0;
                             while (tn[k*2] == pn[k] && tn[k*2] != 0) { k++; }
                             if (tn[k*2] == pn[k]) {
-                                target_player = (int*)((uint8_t*)g_netman + 0x518 + j * 0x4C);
+                                target_player = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + j * 0x4C));
                                 break;
                             }
                         }
@@ -1825,22 +1845,21 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 
                             /* Create PlayerConnectionNode for attachment transfer */
                             track_id = resp[3]; /* att ID */
-                            *(uint8_t*)((uint8_t*)controller + 0x89) += 1;
+                            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x89)) += 1;
 
-                            PlayerConnectionNode* node = (PlayerConnectionNode*)
-                                operator_new(sizeof(PlayerConnectionNode));
+                            PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(operator_new(sizeof(PlayerConnectionNode)));
                             if (node) {
                                 node->player_id      = *target_player;
                                 node->file_handle    = 0;
                                 node->sub_type       = resp[3];
                                 node->extra_info     = resp[3];
-                                node->transfer_state = *(uint8_t*)((uint8_t*)controller + 0x78);
-                                node->notify_id      = *(uint16_t*)((uint8_t*)controller + 0x7A);
+                                node->transfer_state = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
+                                node->notify_id      = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
                                 node->sequence_num   = 0;
                                 node->throttle       = 0;
                                 node->next           = this->handle_list_2;
-                                *(uint8_t*)((uint8_t*)node + 8) = *(uint8_t*)((uint8_t*)controller + 0x78);
-                                *(uint16_t*)((uint8_t*)node + 10) = *(uint16_t*)((uint8_t*)controller + 0x7A);
+                                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 8)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
+                                *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 10)) = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
                                 this->handle_list_2 = node;
                             }
                         }
@@ -1849,8 +1868,8 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
                 }
 
                 /* Set DPLAY data for this track element */
-                VehicleEditor_SetDPlayData((void*)(uintptr_t)*(uint32_t*)((uint8_t*)controller + 0x14 + i * 4),
-                                            (int)&track_entry[-7]);
+                VehicleEditor_SetDPlayData(reinterpret_cast<void*>(static_cast<uintptr_t>(*reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(controller) + 0x14 + i * 4)))),
+                                            static_cast<int>(reinterpret_cast<uintptr_t>(&track_entry[-7])));
             }
             track_entry += 0x75; /* advance by 0xEA bytes / 4 = 0x75 dwords */
         }
@@ -1858,50 +1877,50 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 
     /* Call vtable[13] on the controller's 5th field (4 = +0x10 ptr) */
     {
-        void** vt = *(void***)(*(uintptr_t*)((uint8_t*)controller + 0x10));
-        ((void (__thiscall*)(void*, void*))vt[13])(*(void**)((uint8_t*)controller + 0x10),
-                                                     (void*)((uint8_t*)p + 0xB10));
+        void** vt = *reinterpret_cast<void***>((*reinterpret_cast<uintptr_t*>((reinterpret_cast<uint8_t*>(controller) + 0x10))));
+        (reinterpret_cast<void (__thiscall*)(void*, void*)>(vt[13]))(*reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(controller) + 0x10)),
+                                                     reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(p) + 0xB10)));
     }
 
     /* If this train belongs to the local player, remove from sprite_list_1 */
-    if (*(uint8_t*)((uint8_t*)controller + 0x78) ==
-        *(uint32_t*)((uint8_t*)g_netman + 0x7D0)) {
+    if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78)) ==
+        *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0))) {
         void* prev = NULL;
         void* node = this->sprite_list_1;
         while (node) {
-            if (*(uint16_t*)((uint8_t*)node + 0x7A) ==
-                *(uint16_t*)((uint8_t*)controller + 0x7A)) {
+            if (*reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7A)) ==
+                *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A))) {
                 if (prev == NULL) {
-                    this->sprite_list_1 = *(void**)((uint8_t*)node + 0x70);
+                    this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
                 } else {
-                    *(void**)((uint8_t*)prev + 0x70) = *(void**)((uint8_t*)node + 0x70);
+                    *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
                 }
-                void** vt = *(void***)node;
-                ((void (__thiscall*)(void*, byte))vt[0])(node, 1);
+                void** vt = *reinterpret_cast<void***>(node);
+                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
                 break;
             }
             prev = node;
-            node = *(void**)((uint8_t*)node + 0x70);
+            node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
         }
     }
 
     /* Broadcast MSG_CTRL_INIT (0x3F3) to all players */
     {
-        uint16_t* ctrl_init = (uint16_t*)operator_new(10);
+        uint16_t* ctrl_init = reinterpret_cast<uint16_t*>(operator_new(10));
         if (ctrl_init) {
             ctrl_init[0] = 0x3F3;
-            ctrl_init[2] = *(uint16_t*)((uint8_t*)controller + 0x7A);
-            *(uint8_t*)((uint8_t*)ctrl_init + 6) = *(uint8_t*)((uint8_t*)controller + 0x78);
-            *(uint8_t*)((uint8_t*)ctrl_init + 7) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
-            ctrl_init[4] = *(uint16_t*)((uint8_t*)controller + 0x74);
+            ctrl_init[2] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 6)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 7)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+            ctrl_init[4] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x74));
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
             GLOBAL_free(ctrl_init);
         }
     }
 
     /* Set controller owner and queue type-0x11 notification */
-    *(uint8_t*)((uint8_t*)controller + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
-    *(uint8_t*)((uint8_t*)controller + 0x8A) = 0;
+    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7C)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x8A)) = 0;
 
     {
         NetworkMsg* notify = AllocateNetworkMessage();
@@ -1910,7 +1929,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
             notify->type = 0x11;
             notify->data = controller;
         }
-        *(uint8_t*)((uint8_t*)controller + 0x88) = 0;
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x88)) = 0;
         NETMAN_QueueMessage(notify);
     }
 }
@@ -1922,23 +1941,23 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 /* ================================================================== */
 void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
 {
-    uint16_t* p = (uint16_t*)data;
+    uint16_t* p = reinterpret_cast<uint16_t*>(data);
     uint16_t  train_id = p[2];
-    uint8_t   color    = *(uint8_t*)((uint8_t*)p + 6);
-    uint8_t   owner    = *(uint8_t*)((uint8_t*)p + 7);
+    uint8_t   color    = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 6));
+    uint8_t   owner    = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 7));
     uint16_t  dir      = p[4];
 
     /* Find matching car in sprite_list_1 */
     {
-        uint8_t* car = (uint8_t*)this->sprite_list_1;
-        while (car != 0) {
-            if (*(uint16_t*)(car + 0x7A) == train_id &&
-                *(uint8_t*)(car + 0x78) == color) {
-                *(int32_t*)(car + 0x8C) = dplay_id;
-                *(uint8_t*)(car + 0x7C) = owner;
+        uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+        while (car != nullptr) {
+            if (*reinterpret_cast<uint16_t*>((car + 0x7A)) == train_id &&
+                *reinterpret_cast<uint8_t*>((car + 0x78)) == color) {
+                *reinterpret_cast<int32_t*>((car + 0x8C)) = dplay_id;
+                *reinterpret_cast<uint8_t*>((car + 0x7C)) = owner;
                 break;
             }
-            car = *(uint8_t**)(car + 0x70);
+            car = *reinterpret_cast<uint8_t**>((car + 0x70));
         }
     }
 
@@ -1963,16 +1982,16 @@ void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
 /* ================================================================== */
 void TrainSubsystem::ResetMultiplayerState(int player_id)
 {
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) != 2) return;
+    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) != 2) return;
 
     uint32_t player_index;
     if (player_id == 0) {
-        player_index = *(uint32_t*)((uint8_t*)g_netman + 0x7D0);
+        player_index = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
     } else {
         player_index = NETMAN_FindPlayerIndex(g_netman, player_id);
     }
 
-    if ((int)player_index < 0) return;
+    if (static_cast<int>(player_index) < 0) return;
 
     /* Walk sprite_list_1 and remove matching cars */
     {
@@ -1980,15 +1999,15 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
         void* node = this->sprite_list_1;
 
         while (node != NULL) {
-            uint8_t owner_byte = *(uint8_t*)((uint8_t*)node + 0x7C);
-            uint8_t color_byte = *(uint8_t*)((uint8_t*)node + 0x78);
-            int     dplay_id   = *(int32_t*)((uint8_t*)node + 0x8C);
+            uint8_t owner_byte = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+            uint8_t color_byte = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x78));
+            int     dplay_id   = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(node) + 0x8C));
 
             int match = 0;
-            if (player_id != 0 && owner_byte == (uint8_t)player_index) {
+            if (player_id != 0 && owner_byte == static_cast<uint8_t>(player_index)) {
                 match = 1;
             }
-            if (player_id == 0 && color_byte == (uint8_t)player_index) {
+            if (player_id == 0 && color_byte == static_cast<uint8_t>(player_index)) {
                 match = 1;
             }
             if (dplay_id == player_id) {
@@ -1996,17 +2015,17 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
             }
 
             if (match) {
-                void* next_node = *(void**)((uint8_t*)node + 0x70);
+                void* next_node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
 
                 /* Unlink from sprite_list_1 */
                 if (prev == NULL) {
                     this->sprite_list_1 = next_node;
                 } else {
-                    *(void**)((uint8_t*)prev + 0x70) = next_node;
+                    *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = next_node;
                 }
 
                 /* Reverse direction */
-                uint16_t dir = *(uint16_t*)((uint8_t*)node + 0x74);
+                uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74));
                 if (dir < 0x5B) {
                     if (dir == 0x5A)      dir = 0x10E;
                     else if (dir == 0)    dir = 0xB4;
@@ -2014,16 +2033,16 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
                     if (dir == 0xB4)      dir = 0;
                     else if (dir == 0x10E) dir = 0x5A;
                 }
-                *(uint16_t*)((uint8_t*)node + 0x74) = dir;
+                *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74)) = dir;
 
                 /* Set owner to local player */
-                *(uint8_t*)((uint8_t*)node + 0x7C) =
-                    *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
+                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) =
+                    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
 
                 /* Clear DPlay data on all carriages */
-                if (*(short*)((uint8_t*)node + 0x0C) != 0) {
-                    void** carriage = (void**)((uint8_t*)node + 0x14);
-                    for (int j = 0; j < *(uint16_t*)((uint8_t*)node + 0x0C); j++) {
+                if (*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(node) + 0x0C) != 0) {
+                    void** carriage = reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x14));
+                    for (int j = 0; j < *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x0C)); j++) {
                         VehicleEditor_SetDPlayData(carriage[j], 0);
                     }
                 }
@@ -2035,13 +2054,13 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
                     msg->type = 0x11;
                     msg->data = node;
                 }
-                *(uint8_t*)((uint8_t*)node + 0x88) = 0;
+                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x88)) = 0;
                 NETMAN_QueueMessage(msg);
 
                 node = this->sprite_list_1;
             } else {
                 prev = node;
-                node = *(void**)((uint8_t*)node + 0x70);
+                node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
             }
         }
     }
@@ -2057,56 +2076,56 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
     /* Check if player exists at target index */
     int* player_slot = NULL;
     if (player_index >= 0) {
-        player_slot = (int*)((uint8_t*)g_netman + 0x518 + player_index * 0x4C);
+        player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + player_index * 0x4C));
     }
 
     if (player_slot && player_slot[0x11] != 0) {
         /* === Multiplayer path: prepend to sprite_list_3, broadcast 0x3F3 === */
 
-        *(uint8_t*)((uint8_t*)car + 0x7C) = (uint8_t)player_index;
-        *(void**)((uint8_t*)car + 0x70) = this->sprite_list_3;
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C)) = static_cast<uint8_t>(player_index);
+        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = this->sprite_list_3;
         this->sprite_list_3 = car;
 
         /* Set movement direction in +0x76 */
         if (direction < 0x5B) {
-            if (direction == 0x5A)      *(uint16_t*)((uint8_t*)car + 0x76) = 0x5A;
-            else if (direction == 0)    *(uint16_t*)((uint8_t*)car + 0x76) = 0;
+            if (direction == 0x5A)      *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0x5A;
+            else if (direction == 0)    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0;
         } else {
-            if (direction == 0xB4)      *(uint16_t*)((uint8_t*)car + 0x76) = 0xB4;
-            else if (direction == 0x10E) *(uint16_t*)((uint8_t*)car + 0x76) = 0x10E;
+            if (direction == 0xB4)      *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0xB4;
+            else if (direction == 0x10E) *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0x10E;
         }
 
         /* Broadcast MSG_CTRL_INIT (0x3F3) */
-        uint16_t* ctrl_init = (uint16_t*)operator_new(10);
+        uint16_t* ctrl_init = reinterpret_cast<uint16_t*>(operator_new(10));
         if (ctrl_init) {
             ctrl_init[0] = 0x3F3;
-            ctrl_init[2] = *(uint16_t*)((uint8_t*)car + 0x7A);
-            *(uint8_t*)((uint8_t*)ctrl_init + 6) = *(uint8_t*)((uint8_t*)car + 0x78);
-            *(uint8_t*)((uint8_t*)ctrl_init + 7) = *(uint8_t*)((uint8_t*)car + 0x7C);
-            ctrl_init[4] = (uint16_t)direction;
+            ctrl_init[2] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x7A));
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 6)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x78));
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 7)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C));
+            ctrl_init[4] = static_cast<uint16_t>(direction);
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
 
             /* Also update local handler */
             this->HandleControllerInit(ctrl_init,
-                *(int32_t*)((uint8_t*)g_netman + 0x7D4)); /* field_7d0 */
+                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D4))); /* field_7d0 */
 
             GLOBAL_free(ctrl_init);
         }
 
         /* Compute tile offset from direction */
         int dx = 0, dy = 0;
-        uint16_t move_dir = *(uint16_t*)((uint8_t*)car + 0x76);
+        uint16_t move_dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76));
 
         if (move_dir == 0x5A) { dx = 1; dy = 0; }
         else if (move_dir == 0) { dx = 0; dy = -1; }
         else if (move_dir == 0xB4) { dx = 0; dy = 1; }
         else if (move_dir == 0x10E) { dx = -1; dy = 0; }
 
-        *(int16_t*)((uint8_t*)car + 0x7E) = (int16_t)(dx + 1);
-        *(int16_t*)((uint8_t*)car + 0x80) = (int16_t)(dy + (move_dir == 0x5A ? 1 : move_dir == 0 ? -1 : move_dir == 0xB4 ? 1 : 1));
-        *(uint16_t*)((uint8_t*)car + 0x84) = 0xFFFF;
-        *(uint16_t*)((uint8_t*)car + 0x86) = 0xFFFF;
-        *(uint8_t*)((uint8_t*)car + 0x82) = 0;
+        *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(car) + 0x7E)) = static_cast<int16_t>((dx + 1));
+        *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(car) + 0x80)) = static_cast<int16_t>((dy + (move_dir == 0x5A ? 1 : move_dir == 0 ? -1 : move_dir == 0xB4 ? 1 : 1)));
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x84)) = 0xFFFF;
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x86)) = 0xFFFF;
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x82)) = 0;
         return;
     }
 
@@ -2120,19 +2139,19 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
         if (direction == 0xB4)      direction = 0;
         else if (direction == 0x10E) direction = 0x5A;
     }
-    *(uint16_t*)((uint8_t*)car + 0x74) = (uint16_t)direction;
+    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = static_cast<uint16_t>(direction);
 
     /* Append to sprite_list_2 */
     if (this->sprite_list_2 == NULL) {
-        *(void**)((uint8_t*)car + 0x70) = NULL;
+        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
         this->sprite_list_2 = car;
     } else {
-        uint8_t* tail = (uint8_t*)this->sprite_list_2;
-        while (*(uint8_t**)(tail + 0x70) != 0) {
-            tail = *(uint8_t**)(tail + 0x70);
+        uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+        while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) {
+            tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
         }
-        *(void**)((uint8_t*)car + 0x70) = NULL;
-        *(void**)(tail + 0x70) = car;
+        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
+        *reinterpret_cast<void**>((tail + 0x70)) = car;
     }
     Train_RemoveAllTracks(this);
 }
@@ -2149,23 +2168,23 @@ void TrainSubsystem::UpdateTrainMovement()
     void*  node = this->sprite_list_3;
 
     while (node != NULL) {
-        void* next_node = *(void**)((uint8_t*)node + 0x70);
+        void* next_node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
 
         /* Check if player at node's town is still connected */
-        uint8_t owner = *(uint8_t*)((uint8_t*)node + 0x7C);
-        int* player_slot = (int*)((uint8_t*)g_netman + 0x518 + owner * 0x4C);
+        uint8_t owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+        int* player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + owner * 0x4C));
 
         if (player_slot[0x11] == 0 || *player_slot != 0) {
             /* Owner disconnected — move from sprite_list_3 to sprite_list_2 */
             if (prev == NULL) {
                 this->sprite_list_3 = next_node;
             } else {
-                *(void**)((uint8_t*)prev + 0x70) = next_node;
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = next_node;
             }
-            *(void**)((uint8_t*)node + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70)) = NULL;
 
             /* Mirror direction */
-            uint16_t dir = *(uint16_t*)((uint8_t*)node + 0x74);
+            uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74));
             if (dir < 0x5B) {
                 if (dir == 0x5A)      dir = 0x10E;
                 else if (dir == 0)    dir = 0xB4;
@@ -2173,34 +2192,34 @@ void TrainSubsystem::UpdateTrainMovement()
                 if (dir == 0xB4)      dir = 0;
                 else if (dir == 0x10E) dir = 0x5A;
             }
-            *(uint16_t*)((uint8_t*)node + 0x74) = dir;
+            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74)) = dir;
 
             /* Append to sprite_list_2 */
             if (this->sprite_list_2 == NULL) {
                 this->sprite_list_2 = node;
             } else {
-                uint8_t* tail = (uint8_t*)this->sprite_list_2;
-                while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
-                *(void**)(tail + 0x70) = node;
+                uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+                while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
+                *reinterpret_cast<void**>((tail + 0x70)) = node;
             }
 
             /* Re-notify all cars in sprite_list_2 */
-            uint8_t* car = (uint8_t*)this->sprite_list_2;
-            while (car != 0) {
+            uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+            while (car != nullptr) {
                 NetworkMsg* msg = AllocateNetworkMessage();
                 if (msg) { msg->data = NULL; msg->next = NULL;
                            msg->type = 0x11;
                            msg->data = this->sprite_list_2; }
-                ((Building*)this->sprite_list_2)->occupation_level = 0;
+                (reinterpret_cast<Building*>(this->sprite_list_2))->occupation_level = 0;
 
-                uint8_t* cur = (uint8_t*)this->sprite_list_2;
-                *(uint8_t*)(cur + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
-                *(void**)(cur + 0x70) = NULL;
-                *(uint8_t*)(cur + 0x88) = 0;
-                this->sprite_list_2 = *(void**)(cur + 0x70);
+                uint8_t* cur = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+                *reinterpret_cast<void**>((cur + 0x70)) = NULL;
+                *reinterpret_cast<uint8_t*>((cur + 0x88)) = 0;
+                this->sprite_list_2 = *reinterpret_cast<void**>((cur + 0x70));
 
                 NETMAN_QueueMessage(msg);
-                car = (uint8_t*)this->sprite_list_2;
+                car = reinterpret_cast<uint8_t*>(this->sprite_list_2);
             }
 
             node = this->sprite_list_3;
@@ -2208,10 +2227,10 @@ void TrainSubsystem::UpdateTrainMovement()
         }
 
         /* === Check map edge routing === */
-        int pos_x = *(int16_t*)((uint8_t*)node + 0x7E);
-        int pos_y = *(int16_t*)((uint8_t*)node + 0x80);
-        int map_width  = (int)(short)player_slot[0x10];
-        int map_height = (int)*(short*)((uint8_t*)player_slot + 0x42);
+        int pos_x = *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E));
+        int pos_y = *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80));
+        int map_width  = static_cast<int>(static_cast<short>(player_slot[0x10]));
+        int map_height = static_cast<int>(*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(player_slot) + 0x42));
 
         uint8_t routed = this->RouteTrainAtEdge(
             prev, node, pos_x, pos_y, map_width, map_height);
@@ -2223,28 +2242,28 @@ void TrainSubsystem::UpdateTrainMovement()
         }
 
         /* === Movement-steering: advance one tile === */
-        uint16_t move_dir = *(uint16_t*)((uint8_t*)node + 0x76);
+        uint16_t move_dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76));
         int new_x = pos_x;
         int new_y = pos_y;
         int tile_row_size = map_width;
-        uint8_t* tile_data_base = (uint8_t*)(uintptr_t)player_slot[0x11];
+        uint8_t* tile_data_base = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(player_slot[0x11]));
 
         if (move_dir == 0x5A) {
             /* Moving right */
-            if (*(uint8_t*)(tile_row_size * pos_y + pos_x + 1 + tile_data_base) == 0x05) {
+            if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x + 1 + tile_data_base)) == 0x05) {
                 new_x = pos_x + 1;
             } else {
                 new_y = pos_y - 1;
-                if (new_y >= 0 && *(uint8_t*)(tile_row_size * new_y + pos_x + 1 + tile_data_base) == 0x05) {
+                if (new_y >= 0 && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + 1 + tile_data_base)) == 0x05) {
                     new_x = pos_x + 1;
                 } else {
                     new_y = pos_y + 1;
-                    if (new_y < map_height && *(uint8_t*)(tile_row_size * new_y + pos_x + 1 + tile_data_base) == 0x05) {
+                    if (new_y < map_height && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + 1 + tile_data_base)) == 0x05) {
                         new_x = pos_x + 1;
-                    } else if (*(uint8_t*)(tile_row_size * (pos_y - 1) + pos_x + tile_data_base) == 0x05 && pos_y >= 1) {
+                    } else if (*reinterpret_cast<uint8_t*>((tile_row_size * (pos_y - 1) + pos_x + tile_data_base)) == 0x05 && pos_y >= 1) {
                         new_y = pos_y - 1;
-                    } else if (new_y < map_height && *(uint8_t*)(tile_row_size * new_y + pos_x + tile_data_base) == 0x05) {
-                        *(uint16_t*)((uint8_t*)node + 0x76) = 0xB4;
+                    } else if (new_y < map_height && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + tile_data_base)) == 0x05) {
+                        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0xB4;
                     } else {
                         new_y = pos_y;
                     }
@@ -2254,50 +2273,50 @@ void TrainSubsystem::UpdateTrainMovement()
             /* Moving up */
             new_y = pos_y - 1;
             if (new_y < 0) new_y = 0;
-            if (*(uint8_t*)(tile_row_size * new_y + pos_x + tile_data_base) != 0x05) {
-                if (*(uint8_t*)(tile_row_size * new_y + pos_x + 1 + tile_data_base) == 0x05 && pos_x < map_width - 1)
+            if (*reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + tile_data_base)) != 0x05) {
+                if (*reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + 1 + tile_data_base)) == 0x05 && pos_x < map_width - 1)
                     new_x = pos_x + 1;
-                else if (*(uint8_t*)(tile_row_size * new_y + pos_x - 1 + tile_data_base) == 0x05 && pos_x > 0)
+                else if (*reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x - 1 + tile_data_base)) == 0x05 && pos_x > 0)
                     new_x = pos_x - 1;
-                else if (*(uint8_t*)(tile_row_size * pos_y + pos_x - 1 + tile_data_base) == 0x05 && pos_x > 0) {
+                else if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x - 1 + tile_data_base)) == 0x05 && pos_x > 0) {
                     new_x = pos_x - 1; new_y = pos_y;
-                } else if (*(uint8_t*)(tile_row_size * pos_y + pos_x + 1 + tile_data_base) == 0x05 && pos_x < map_width - 1) {
+                } else if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x + 1 + tile_data_base)) == 0x05 && pos_x < map_width - 1) {
                     new_x = pos_x + 1; new_y = pos_y;
-                    *(uint16_t*)((uint8_t*)node + 0x76) = 0x5A;
+                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x5A;
                 } else { new_y = pos_y; }
             }
         } else if (move_dir == 0xB4) {
             /* Moving down */
             new_y = pos_y + 1;
             if (new_y >= map_height) new_y = map_height - 1;
-            if (*(uint8_t*)(tile_row_size * new_y + pos_x + tile_data_base) != 0x05) {
-                if (*(uint8_t*)(tile_row_size * new_y + pos_x + 1 + tile_data_base) == 0x05 && pos_x < map_width - 1)
+            if (*reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + tile_data_base)) != 0x05) {
+                if (*reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + 1 + tile_data_base)) == 0x05 && pos_x < map_width - 1)
                     new_x = pos_x + 1;
-                else if (*(uint8_t*)(tile_row_size * new_y + pos_x - 1 + tile_data_base) == 0x05 && pos_x > 0)
+                else if (*reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x - 1 + tile_data_base)) == 0x05 && pos_x > 0)
                     new_x = pos_x - 1;
-                else if (*(uint8_t*)(tile_row_size * pos_y + pos_x - 1 + tile_data_base) == 0x05 && pos_x > 0) {
+                else if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x - 1 + tile_data_base)) == 0x05 && pos_x > 0) {
                     new_x = pos_x - 1; new_y = pos_y;
-                } else if (*(uint8_t*)(tile_row_size * pos_y + pos_x + 1 + tile_data_base) == 0x05 && pos_x < map_width - 1) {
+                } else if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x + 1 + tile_data_base)) == 0x05 && pos_x < map_width - 1) {
                     new_x = pos_x + 1; new_y = pos_y;
-                    *(uint16_t*)((uint8_t*)node + 0x76) = 0x10E;
+                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x10E;
                 } else { new_y = pos_y; }
             }
         } else if (move_dir == 0x10E) {
             /* Moving left */
-            if (*(uint8_t*)(tile_row_size * pos_y + pos_x - 1 + tile_data_base) == 0x05) {
+            if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x - 1 + tile_data_base)) == 0x05) {
                 new_x = pos_x - 1;
             } else {
                 new_y = pos_y - 1;
-                if (new_y >= 0 && *(uint8_t*)(tile_row_size * new_y + pos_x - 1 + tile_data_base) == 0x05) {
+                if (new_y >= 0 && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x - 1 + tile_data_base)) == 0x05) {
                     new_x = pos_x - 1;
                 } else {
                     new_y = pos_y + 1;
-                    if (new_y < map_height && *(uint8_t*)(tile_row_size * new_y + pos_x - 1 + tile_data_base) == 0x05) {
+                    if (new_y < map_height && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x - 1 + tile_data_base)) == 0x05) {
                         new_x = pos_x - 1;
-                    } else if (*(uint8_t*)(tile_row_size * (pos_y - 1) + pos_x + tile_data_base) == 0x05 && pos_y >= 1) {
+                    } else if (*reinterpret_cast<uint8_t*>((tile_row_size * (pos_y - 1) + pos_x + tile_data_base)) == 0x05 && pos_y >= 1) {
                         new_y = pos_y - 1;
-                    } else if (new_y < map_height && *(uint8_t*)(tile_row_size * new_y + pos_x + tile_data_base) == 0x05) {
-                        *(uint16_t*)((uint8_t*)node + 0x76) = 0;
+                    } else if (new_y < map_height && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + tile_data_base)) == 0x05) {
+                        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0;
                     } else { new_y = pos_y; }
                 }
             }
@@ -2306,59 +2325,59 @@ void TrainSubsystem::UpdateTrainMovement()
         /* === Stuck detection === */
         if (new_x == pos_x && new_y == pos_y) {
             uint32_t rand_val = CRT_rand();
-            int r = (int)(rand_val / 0x1FFF);
+            int r = static_cast<int>((rand_val / 0x1FFF));
             switch (r % 4) {
-            case 0: *(uint16_t*)((uint8_t*)node + 0x76) = 0x5A;  break;
-            case 1: *(uint16_t*)((uint8_t*)node + 0x76) = 0x10E; break;
-            case 2: *(uint16_t*)((uint8_t*)node + 0x76) = 0;     break;
-            case 3: *(uint16_t*)((uint8_t*)node + 0x76) = 0xB4;  break;
+            case 0: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x5A;  break;
+            case 1: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x10E; break;
+            case 2: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0;     break;
+            case 3: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0xB4;  break;
             }
-            *(uint16_t*)((uint8_t*)node + 0x84) = 0xFFFF;
-            *(uint16_t*)((uint8_t*)node + 0x86) = 0xFFFF;
-            *(uint8_t*)((uint8_t*)node + 0x82) = 0;
+            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) = 0xFFFF;
+            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x86)) = 0xFFFF;
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) = 0;
         } else {
             /* Update position */
-            *(int16_t*)((uint8_t*)node + 0x7E) = (int16_t)new_x;
-            *(int16_t*)((uint8_t*)node + 0x80) = (int16_t)new_y;
-            *(uint8_t*)((uint8_t*)node + 0x82) += 1;
+            *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E)) = static_cast<int16_t>(new_x);
+            *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80)) = static_cast<int16_t>(new_y);
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) += 1;
 
             /* Check stuck counter loop */
             uint32_t rand_val = CRT_rand();
-            int threshold = (int)(rand_val / 0x1999) + 3;
-            if (threshold < (int)*(uint8_t*)((uint8_t*)node + 0x82)) {
-                if (*(int16_t*)((uint8_t*)node + 0x7E) == *(int16_t*)((uint8_t*)node + 0x84) &&
-                    *(int16_t*)((uint8_t*)node + 0x80) == *(int16_t*)((uint8_t*)node + 0x86)) {
+            int threshold = static_cast<int>((rand_val / 0x1999)) + 3;
+            if (threshold < static_cast<int>(*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)))) {
+                if (*reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E)) == *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) &&
+                    *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80)) == *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x86))) {
                     uint32_t rv = CRT_rand();
-                    int rr = (int)(rv / 0x1FFF);
+                    int rr = static_cast<int>((rv / 0x1FFF));
                     switch (rr % 4) {
-                    case 0: *(uint16_t*)((uint8_t*)node + 0x76) = 0x5A;  break;
-                    case 1: *(uint16_t*)((uint8_t*)node + 0x76) = 0x10E; break;
-                    case 2: *(uint16_t*)((uint8_t*)node + 0x76) = 0;     break;
-                    case 3: *(uint16_t*)((uint8_t*)node + 0x76) = 0xB4;  break;
+                    case 0: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x5A;  break;
+                    case 1: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x10E; break;
+                    case 2: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0;     break;
+                    case 3: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0xB4;  break;
                     }
-                    *(uint8_t*)((uint8_t*)node + 0x82) = 0;
-                    *(uint16_t*)((uint8_t*)node + 0x84) = 0xFFFF;
-                    *(uint16_t*)((uint8_t*)node + 0x86) = 0xFFFF;
+                    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) = 0;
+                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) = 0xFFFF;
+                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x86)) = 0xFFFF;
                 }
-                *(uint8_t*)((uint8_t*)node + 0x82) = 0;
-                *(uint32_t*)((uint8_t*)node + 0x84) = *(uint32_t*)((uint8_t*)node + 0x7E);
+                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) = 0;
+                *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E));
             }
 
             /* === Build and send type-0x3F6 position update message === */
             {
                 /* Allocate message buffer */
-                uint16_t* buf = (uint16_t*)operator_new(0x2000);
+                uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x2000));
                 if (buf) {
                     buf[0] = 0x3F6;
-                    *(uint8_t*)(buf + 1) = *(uint8_t*)((uint8_t*)node + 0x7C);
-                    *(uint8_t*)((uint8_t*)buf + 4) = 0;
-                    *(uint16_t*)((uint8_t*)buf + 6) = 1;
-                    uint8_t c1 = *(uint8_t*)((uint8_t*)node + 0x78);
-                    uint8_t c2 = *(uint8_t*)((uint8_t*)node + 0x7C);
-                    *(uint32_t*)((uint8_t*)buf + 9) =
-                        ((uint32_t)new_x << 16) | *(uint16_t*)((uint8_t*)node + 0x7A);
-                    *(uint32_t*)((uint8_t*)buf + 0x0D) =
-                        (c2 << 24) | (c1 << 16) | (uint16_t)new_y;
+                    *reinterpret_cast<uint8_t*>((buf + 1)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+                    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(buf) + 4)) = 0;
+                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(buf) + 6)) = 1;
+                    uint8_t c1 = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x78));
+                    uint8_t c2 = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+                    *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(buf) + 9)) =
+                        (static_cast<uint32_t>(new_x) << 16) | *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7A));
+                    *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(buf) + 0x0D)) =
+                        (c2 << 24) | (c1 << 16) | static_cast<uint16_t>(new_y);
 
                     /* Clone into heap allocation for queuing */
                     void* heap_buf = HeapAlloc(GetProcessHeap(), 0, 0x12);
@@ -2404,51 +2423,51 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
                                            int pos_x, int pos_y,
                                            int map_width, int map_height)
 {
-    uint8_t owner = *(uint8_t*)((uint8_t*)train + 0x7C);
+    uint8_t owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(train) + 0x7C));
 
     /* RIGHT edge (pos_x >= map_width - 1) */
     if (pos_x >= map_width - 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0xB4, owner);
-        if ((char)conn != 0) {
+        if (static_cast<char>(conn) != 0) {
             /* Track connection to neighbor exists — route the train */
             if (prev_node == NULL) {
-                this->sprite_list_3 = *(void**)((uint8_t*)train + 0x70);
+                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             } else {
-                *(void**)((uint8_t*)prev_node + 0x70) = *(void**)((uint8_t*)train + 0x70);
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             }
-            *(void**)((uint8_t*)train + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int target_town = (int)owner +
-                *(int32_t*)((uint8_t*)g_netman + 0x0C);
+            int target_town = static_cast<int>(owner) +
+                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x0C));
             int* player_slot = NULL;
             if (target_town >= 0) {
-                player_slot = (int*)((uint8_t*)g_netman + target_town * 0x4C + 0x518);
+                player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + target_town * 0x4C + 0x518));
             }
             if (player_slot && *player_slot != 0 &&
-                *(char*)((uint8_t*)player_slot + 4) != 0) {
+                *reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(player_slot) + 4)) != 0) {
                 return this->MoveToNeighborTown(*player_slot, train, 0xB4);
             }
             this->AddTrainCar(train, 0xB4, target_town);
             return 1;
         }
-        *(uint16_t*)((uint8_t*)train + 0x76) = 0; /* Bounce left */
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0; /* Bounce left */
     }
     /* LEFT edge (pos_x <= 0) */
     else if (pos_x < 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0, owner);
-        if ((char)conn != 0) {
+        if (static_cast<char>(conn) != 0) {
             if (prev_node == NULL) {
-                this->sprite_list_3 = *(void**)((uint8_t*)train + 0x70);
+                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             } else {
-                *(void**)((uint8_t*)prev_node + 0x70) = *(void**)((uint8_t*)train + 0x70);
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             }
-            *(void**)((uint8_t*)train + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int target_town = (int)owner -
-                *(int32_t*)((uint8_t*)g_netman + 0x0C);
+            int target_town = static_cast<int>(owner) -
+                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x0C));
             int* player_slot = NULL;
             if (target_town >= 0) {
-                player_slot = (int*)((uint8_t*)g_netman + target_town * 0x4C + 0x518);
+                player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + target_town * 0x4C + 0x518));
             }
             if (player_slot && *player_slot != 0) {
                 return this->MoveToNeighborTown(*player_slot, train, 0);
@@ -2456,23 +2475,23 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             this->AddTrainCar(train, 0, target_town);
             return 1;
         }
-        *(uint16_t*)((uint8_t*)train + 0x76) = 0xB4; /* Bounce right */
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0xB4; /* Bounce right */
     }
     /* TOP edge (pos_y <= 0) */
     else if (pos_y < 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0x10E, owner);
-        if ((char)conn != 0) {
+        if (static_cast<char>(conn) != 0) {
             if (prev_node == NULL) {
-                this->sprite_list_3 = *(void**)((uint8_t*)train + 0x70);
+                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             } else {
-                *(void**)((uint8_t*)prev_node + 0x70) = *(void**)((uint8_t*)train + 0x70);
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             }
-            *(void**)((uint8_t*)train + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int target_town = (int)owner - 1;
+            int target_town = static_cast<int>(owner) - 1;
             int* player_slot = NULL;
             if (target_town >= 0) {
-                player_slot = (int*)((uint8_t*)g_netman + 0x518 + target_town * 0x4C);
+                player_slot = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + target_town * 0x4C));
             }
             if (player_slot && *player_slot != 0) {
                 return this->MoveToNeighborTown(*player_slot, train, 0x10E);
@@ -2480,36 +2499,36 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             this->AddTrainCar(train, 0x10E, target_town);
             return 1;
         }
-        *(uint16_t*)((uint8_t*)train + 0x76) = 0x5A; /* Bounce down */
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0x5A; /* Bounce down */
     }
     /* BOTTOM edge (pos_y >= map_height - 1) */
     else if (pos_y >= map_height - 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0x5A, owner);
-        if ((char)conn != 0) {
+        if (static_cast<char>(conn) != 0) {
             if (prev_node == NULL) {
-                this->sprite_list_3 = *(void**)((uint8_t*)train + 0x70);
+                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             } else {
-                *(void**)((uint8_t*)prev_node + 0x70) = *(void**)((uint8_t*)train + 0x70);
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
             }
-            *(void**)((uint8_t*)train + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
 
-            int* player_ptr = (int*)((uint8_t*)g_netman + 0x518 + (owner + 1) * 0x4C);
+            int* player_ptr = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x518 + (owner + 1) * 0x4C));
             if (*player_ptr != 0) {
                 return this->MoveToNeighborTown(*player_ptr, train, 0x5A);
             }
             this->AddTrainCar(train, 0x5A, owner + 1);
             return 1;
         }
-        *(uint16_t*)((uint8_t*)train + 0x76) = 0x10E; /* Bounce up */
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0x10E; /* Bounce up */
     } else {
         /* Not at any edge — continue normal movement */
         return 0;
     }
 
     /* Bounce (no track connection): clear stuck counter */
-    *(uint8_t*)((uint8_t*)train + 0x82) = 0;
-    *(uint16_t*)((uint8_t*)train + 0x84) = 0xFFFF;
-    *(uint16_t*)((uint8_t*)train + 0x86) = 0xFFFF;
+    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(train) + 0x82)) = 0;
+    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x84)) = 0xFFFF;
+    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x86)) = 0xFFFF;
     return 0xFFFFFF01u;
 }
 
@@ -2521,7 +2540,7 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
 /* ================================================================== */
 uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direction)
 {
-    int local_player = *(int*)((uint8_t*)g_netman + 0x7D0);
+    int local_player = *reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
     int target_idx = NETMAN_FindPlayerIndex(g_netman, to_player);
 
     if (local_player == target_idx) {
@@ -2535,41 +2554,41 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             if (direction == 0xB4)      direction = 0;
             else if (direction == 0x10E) direction = 0x5A;
         }
-        *(uint16_t*)((uint8_t*)car + 0x74) = (uint16_t)direction;
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = static_cast<uint16_t>(direction);
 
         /* Append to sprite_list_2 */
         if (this->sprite_list_2 == NULL) {
-            *(void**)((uint8_t*)car + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
             this->sprite_list_2 = car;
         } else {
-            uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
-            *(void**)((uint8_t*)car + 0x70) = NULL;
-            *(void**)(tail + 0x70) = car;
+            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
+            *reinterpret_cast<void**>((tail + 0x70)) = car;
         }
         Train_RemoveAllTracks(this);
         return 1;
     }
 
     /* === Remote player: serialize into 0xB1C-byte MSG_CONN_SETUP === */
-    uint8_t* buf = (uint8_t*)operator_new(0xB1C);
+    uint8_t* buf = reinterpret_cast<uint8_t*>(operator_new(0xB1C));
     if (buf == NULL) return 0;
 
     memset(buf, 0, 0xB1C);
 
-    *(uint16_t*)buf = 0x3F2;                        /* message type */
-    *(uint16_t*)(buf + 4) = (uint16_t)direction;     /* direction */
-    *(uint16_t*)(buf + 6) = *(uint16_t*)((uint8_t*)car + 0x7A);  /* resource ID */
-    *(uint8_t*)(buf + 10) = *(uint8_t*)((uint8_t*)car + 0x78);   /* type */
-    *(uint16_t*)(buf + 8) = *(uint16_t*)((uint8_t*)car + 0x58);  /* speed parameter */
+    *reinterpret_cast<uint16_t*>(buf) = 0x3F2;                        /* message type */
+    *reinterpret_cast<uint16_t*>((buf + 4)) = static_cast<uint16_t>(direction);     /* direction */
+    *reinterpret_cast<uint16_t*>((buf + 6)) = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x7A));  /* resource ID */
+    *reinterpret_cast<uint8_t*>((buf + 10)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x78));   /* type */
+    *reinterpret_cast<uint16_t*>((buf + 8)) = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x58));  /* speed parameter */
 
     /* Copy parent data */
-    *(int32_t*)(buf + 0x0C) = *(int32_t*)((uint8_t*)car + 8);
+    *reinterpret_cast<int32_t*>((buf + 0x0C)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 8));
 
     /* Copy player name (up to 10 bytes from +0x7C) */
     {
-        const char* name_src = (const char*)((uint8_t*)car + 0x7C);
-        char* name_dst = (char*)(buf + 0xB10);
+        const char* name_src = reinterpret_cast<const char*>((reinterpret_cast<uint8_t*>(car) + 0x7C));
+        char* name_dst = reinterpret_cast<char*>((buf + 0xB10));
         for (int i = 0; i < 10 && name_src[i] != 0; i++) {
             name_dst[i] = name_src[i];
         }
@@ -2577,28 +2596,28 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
 
     /* Process carriages */
     uint8_t carriage_count = 0;
-    if (*(short*)((uint8_t*)car + 0x0C) != 0) {
-        int* carriage_ptr = (int*)((uint8_t*)car + 0x14);
-        for (int i = 0; i < *(uint16_t*)((uint8_t*)car + 0x0C); i++) {
+    if (*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(car) + 0x0C) != 0) {
+        int* carriage_ptr = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(car) + 0x14));
+        for (int i = 0; i < *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x0C)); i++) {
             if (carriage_ptr[i] == 0) continue;
 
-            int res_id = VehicleEditor_GetResourceId((void*)(uintptr_t)carriage_ptr[i]);
-            *(int32_t*)(buf + 6 + carriage_count * 0xEA) = res_id;
-            *(int32_t*)(buf + 6 + carriage_count * 0xEA + 4) =
-                *(int32_t*)((uint8_t*)(uintptr_t)carriage_ptr[i] + 0x42C);
+            int res_id = VehicleEditor_GetResourceId(reinterpret_cast<void*>(static_cast<uintptr_t>(carriage_ptr[i])));
+            *reinterpret_cast<int32_t*>((buf + 6 + carriage_count * 0xEA)) = res_id;
+            *reinterpret_cast<int32_t*>((buf + 6 + carriage_count * 0xEA + 4)) =
+                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(carriage_ptr[i])) + 0x42C));
 
-            void* dplay_data = VehicleEditor_GetDPlayData((void*)(uintptr_t)carriage_ptr[i]);
+            void* dplay_data = VehicleEditor_GetDPlayData(reinterpret_cast<void*>(static_cast<uintptr_t>(carriage_ptr[i])));
             if (dplay_data) {
-                *(uint8_t*)(buf + 6 + carriage_count * 0xEA + 8) = 1;
+                *reinterpret_cast<uint8_t*>((buf + 6 + carriage_count * 0xEA + 8)) = 1;
                 memcpy(buf + 6 + carriage_count * 0xEA + 9, dplay_data, 0x39C);
                 /* 0x39C = 0xE7 * 4 bytes */
             } else {
-                *(uint8_t*)(buf + 6 + carriage_count * 0xEA + 8) = 0;
+                *reinterpret_cast<uint8_t*>((buf + 6 + carriage_count * 0xEA + 8)) = 0;
             }
             carriage_count++;
         }
     }
-    *(uint8_t*)(buf + 0x14) = carriage_count;
+    *reinterpret_cast<uint8_t*>((buf + 0x14)) = carriage_count;
 
     /* Send the message */
     int send_result = WIN32_SendNetworkData(g_dplay_peer, to_player, buf, 0xB1C, 1);
@@ -2608,7 +2627,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
         GLOBAL_free(buf);
 
         /* Mirror direction */
-        uint16_t dir = *(uint16_t*)((uint8_t*)car + 0x74);
+        uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74));
         if (dir < 0x5B) {
             if (dir == 0x5A)      dir = 0x10E;
             else if (dir == 0)    dir = 0xB4;
@@ -2616,37 +2635,37 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
             if (dir == 0xB4)      dir = 0;
             else if (dir == 0x10E) dir = 0x5A;
         }
-        *(uint16_t*)((uint8_t*)car + 0x74) = dir;
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = dir;
 
         /* Append to sprite_list_2 */
         if (this->sprite_list_2 == NULL) {
-            *(void**)((uint8_t*)car + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
             this->sprite_list_2 = car;
         } else {
-            uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
-            *(void**)((uint8_t*)car + 0x70) = NULL;
-            *(void**)(tail + 0x70) = car;
+            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
+            *reinterpret_cast<void**>((tail + 0x70)) = car;
         }
 
         /* Notify UI for all cars in sprite_list_2 */
         {
-            uint8_t* c = (uint8_t*)this->sprite_list_2;
-            while (c != 0) {
+            uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+            while (c != nullptr) {
                 NetworkMsg* msg = AllocateNetworkMessage();
                 if (msg) { msg->data = NULL; msg->next = NULL;
                            msg->type = 0x11;
                            msg->data = this->sprite_list_2; }
-                ((Building*)this->sprite_list_2)->occupation_level = 0;
+                (reinterpret_cast<Building*>(this->sprite_list_2))->occupation_level = 0;
 
-                uint8_t* cur = (uint8_t*)this->sprite_list_2;
-                *(uint8_t*)(cur + 0x7C) = *(uint8_t*)((uint8_t*)g_netman + 0x7D0);
-                *(void**)(cur + 0x70) = NULL;
-                *(uint8_t*)(cur + 0x88) = 0;
-                this->sprite_list_2 = *(void**)(cur + 0x70);
+                uint8_t* cur = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7D0));
+                *reinterpret_cast<void**>((cur + 0x70)) = NULL;
+                *reinterpret_cast<uint8_t*>((cur + 0x88)) = 0;
+                this->sprite_list_2 = *reinterpret_cast<void**>((cur + 0x70));
 
                 NETMAN_QueueMessage(msg);
-                c = (uint8_t*)this->sprite_list_2;
+                c = reinterpret_cast<uint8_t*>(this->sprite_list_2);
             }
         }
     } else {
@@ -2654,7 +2673,7 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
 
         /* Mirror direction for local tracking */
         {
-            uint16_t dir = *(uint16_t*)((uint8_t*)car + 0x74);
+            uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74));
             if (dir < 0x5B) {
                 if (dir == 0x5A)      dir = 0x10E;
                 else if (dir == 0)    dir = 0xB4;
@@ -2662,23 +2681,23 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
                 if (dir == 0xB4)      dir = 0;
                 else if (dir == 0x10E) dir = 0x5A;
             }
-            *(uint16_t*)((uint8_t*)car + 0x74) = dir;
+            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = dir;
         }
 
         /* Set owner to target player */
         int target_idx2 = NETMAN_FindPlayerIndex(g_netman, to_player);
-        *(uint8_t*)((uint8_t*)car + 0x7C) = (uint8_t)target_idx2;
-        *(uint8_t*)((uint8_t*)car + 0x8A) = 0;
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C)) = static_cast<uint8_t>(target_idx2);
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x8A)) = 0;
 
         /* Append to sprite_list_2 with owner tracking */
         if (this->sprite_list_2 == NULL) {
-            *(void**)((uint8_t*)car + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
             this->sprite_list_2 = car;
         } else {
-            uint8_t* tail = (uint8_t*)this->sprite_list_2;
-            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
-            *(void**)((uint8_t*)car + 0x70) = NULL;
-            *(void**)(tail + 0x70) = car;
+            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
+            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
+            *reinterpret_cast<void**>((tail + 0x70)) = car;
         }
 
         GLOBAL_free(buf);
@@ -2695,77 +2714,77 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
 /* ================================================================== */
 void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 {
-    NetworkMsg* net_msg = (NetworkMsg*)msg;
+    NetworkMsg* net_msg = reinterpret_cast<NetworkMsg*>(msg);
     void*       car     = net_msg->data;
 
     if (car == NULL) return;
 
-    if (*(int32_t*)((uint8_t*)g_netman + 0x7C4) == 1) {
+    if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_netman) + 0x7C4)) == 1) {
         /* === Scenario mode: append car to sprite_list_1 === */
-        *(uint16_t*)((uint8_t*)car + 0x74) = 32000; /* max timeout */
+        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = 32000; /* max timeout */
 
-        if (*(int32_t*)((uint8_t*)car + 4) == 1) {
+        if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 4)) == 1) {
             /* Remove message: destroy car */
-            void** vt = *(void***)car;
-            ((void (__thiscall*)(void*, byte))vt[0])(car, 1);
+            void** vt = *reinterpret_cast<void***>(car);
+            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
             net_msg->data = NULL;
             return;
         }
 
         /* Append to end of sprite_list_1 */
         if (this->sprite_list_1 == NULL) {
-            *(void**)((uint8_t*)car + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
             this->sprite_list_1 = car;
         } else {
-            uint8_t* tail = (uint8_t*)this->sprite_list_1;
-            while (*(uint8_t**)(tail + 0x70) != 0) tail = *(uint8_t**)(tail + 0x70);
-            *(void**)((uint8_t*)car + 0x70) = NULL;
-            *(void**)(tail + 0x70) = car;
+            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
+            *reinterpret_cast<void**>((tail + 0x70)) = car;
         }
 
         if (g_demo_mode == 1) {
             /* Demo mode: remove all existing cars from sprite_list_1 */
-            uint8_t* c = (uint8_t*)this->sprite_list_1;
-            while (c != 0) {
+            uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+            while (c != nullptr) {
                 NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                            qmsg->type = 0x0F;
                            qmsg->data = this->sprite_list_1; }
-                *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
-                this->sprite_list_1 = *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
+                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
+                this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
                 if (qmsg && qmsg->data) {
-                    *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
+                    *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
                 }
                 NETMAN_QueueMessage(qmsg);
-                c = (uint8_t*)this->sprite_list_1;
+                c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
             }
         }
         return;
     }
 
     /* === Free-play mode === */
-    if (car && *(int32_t*)((uint8_t*)car + 4) == 1) {
-        void** vt = *(void***)car;
-        ((void (__thiscall*)(void*, byte))vt[0])(car, 1);
+    if (car && *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 4)) == 1) {
+        void** vt = *reinterpret_cast<void***>(car);
+        (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
         net_msg->data = NULL;
         return;
     }
 
     if (g_demo_mode == 1 || this->byte_flags != 0) {
         /* Demo mode or flag set — remove all cars */
-        uint8_t* c = (uint8_t*)this->sprite_list_1;
-        while (c != 0) {
+        uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+        while (c != nullptr) {
             NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                        qmsg->type = 0x0F;
                        qmsg->data = this->sprite_list_1; }
-            *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
-            this->sprite_list_1 = *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
+            this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
             if (qmsg && qmsg->data) {
-                *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
             }
             NETMAN_QueueMessage(qmsg);
-            c = (uint8_t*)this->sprite_list_1;
+            c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
         }
         return;
     }
@@ -2778,13 +2797,13 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
         g_dplay_peer = new_peer;
 
         if (g_dplay_peer) {
-            *(int32_t*)((uint8_t*)g_dplay_peer + 0x940) = 0;
-            *(uint8_t*)((uint8_t*)g_dplay_peer + 0x944) = 0;
-            *(int32_t*)((uint8_t*)g_dplay_peer + 0x938) = this->context_id_b;
+            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x940)) = 0;
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x944)) = 0;
+            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x938)) = this->context_id_b;
         }
     }
 
-    if (g_dplay_peer && *(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+    if (g_dplay_peer && *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
         Train_SendPlayerInfo(this);
         return;
     }
@@ -2796,7 +2815,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
     DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
     Train_StartMultiplayer();
 
-    if (*(int*)((uint8_t*)g_dplay_peer + 0x1588) != 0) {
+    if (*reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x1588)) != 0) {
         /* Get server name from config and connect */
         char server_name[0x200];
         Config_GetIniString(g_config_ini, "Configuration", "ServerName",
@@ -2804,10 +2823,10 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
                             server_name, 0x200);
 
         DirectPlay_ConnectToSession(g_dplay_peer,
-                                     (char*)((uint8_t*)g_player_config + 6),
+                                     reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                      server_name, NULL);
 
-        if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+        if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
             Train_SendPlayerInfo(this);
             return;
         }
@@ -2818,11 +2837,11 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
         DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
         Train_StartMultiplayer();
         DirectPlay_ConnectToSession(g_dplay_peer,
-                                     (char*)((uint8_t*)g_player_config + 6),
+                                     reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                      server_name, NULL);
     }
 
-    if (g_dplay_peer && *(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+    if (g_dplay_peer && *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
         Train_SendPlayerInfo(this);
         return;
     }
@@ -2842,39 +2861,39 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
             char name_buf[0x50];
             FormatResourceString(&g_resmgr, 0xDF, name_buf, 0x50);
             /* Copy name into player struct at appropriate offset */
-            memcpy((uint8_t*)player + 0x43, name_buf, 0x50);
+            memcpy(reinterpret_cast<uint8_t*>(player) + 0x43, name_buf, 0x50);
 
             DPLAY_InitPlayer(player, 5, 1, 5, 0x94, 99, 0x48, 0x48);
-            *(uint8_t*)((uint8_t*)player + 0x41) = 0xFF;
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(player) + 0x41)) = 0xFF;
 
             /* Copy player name from g_player_config + 6 */
-            memcpy((uint32_t*)((uint8_t*)player + 0x10),
-                   (uint32_t*)((uint8_t*)g_player_config + 6), 0x14);
+            memcpy(reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(player) + 0x10)),
+                   reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)), 0x14);
             /* Copy "LEGO LOCO" as session name at +0x25 */
-            memcpy((uint8_t*)player + 0x25, "LEGO LOCO", 10);
+            memcpy(reinterpret_cast<uint8_t*>(player) + 0x25, "LEGO LOCO", 10);
 
             NET_RegisterPlayer(g_dplay, player, 1, 0);
 
-            void** vt = *(void***)player;
-            ((void (__thiscall*)(void*, byte))vt[0])(player, 1);
+            void** vt = *reinterpret_cast<void***>(player);
+            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(player, 1);
         }
     }
 
     /* Remove all existing cars from sprite_list_1 to join fresh */
     {
-        uint8_t* c = (uint8_t*)this->sprite_list_1;
-        while (c != 0) {
+        uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+        while (c != nullptr) {
             NetworkMsg* qmsg = AllocateNetworkMessage();
             if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
                        qmsg->type = 0x0F;
                        qmsg->data = this->sprite_list_1; }
-            *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
-            this->sprite_list_1 = *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
+            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
+            this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
             if (qmsg && qmsg->data) {
-                *(void**)((uint8_t*)qmsg->data + 0x70) = NULL;
+                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
             }
             NETMAN_QueueMessage(qmsg);
-            c = (uint8_t*)this->sprite_list_1;
+            c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
         }
     }
 }
@@ -2895,10 +2914,10 @@ void TrainSubsystem::RemoveAllCars()
         /* 0x43CC0B writes through msg unconditionally, matching the binary. */
         msg->type = 0x0F;
         msg->data = this->sprite_list_1;
-        *(uint8_t*)((uint8_t*)this->sprite_list_1 + 0x88) = 0;
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
         this->sprite_list_1 =
-            *(void**)((uint8_t*)this->sprite_list_1 + 0x70);
-        *(void**)((uint8_t*)msg->data + 0x70) = NULL;
+            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
+        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(msg->data) + 0x70)) = NULL;
         NETMAN_QueueMessage(msg);
     }
 }
@@ -2913,7 +2932,18 @@ void TrainSubsystem::RemoveAllCars()
 /* and every call jumped to address 0 (silent crash when reached — the */
 /* ready-Go handoff's NETMAN_SendDisconnect).  The real binary body is  */
 /* TrainSubsystem::QueueMessage; forward to it.                        */
+/*                                                                      */
+/* Forward-declared here (matching network/Netman.h's C++-linkage      */
+/* declaration exactly) rather than via #include: Netman.h's own       */
+/* extern "C" block redeclares several symbols this file already       */
+/* declares with different signatures (CreateFileA, DPLAY_CreatePlayer, */
+/* NET_RegisterPlayer, etc.), so including it here would trade one     */
+/* -Werror=missing-declarations site for a pile of ambiguating/         */
+/* conflicting-declaration errors. See docs/landmine-sweep-worklist.md */
+/* for that finding. */
 /* ================================================================== */
+void Train_QueueMessage(void* train, TrainMessage* msg);
+
 void Train_QueueMessage(void* train, TrainMessage* msg)
 {
     if (train != nullptr && msg != nullptr) {
@@ -2984,16 +3014,16 @@ void Train_ConnectToServer(void* subsystem, void* payload)
             int32_t protocol = Config_GetIniInt(g_config_ini, "Configuration", "Protocol", 2);
             DirectPlay_HandleMessages(protocol, address, 0);
 
-            if (*(int32_t*)((uint8_t*)g_dplay_peer + 0x1588) != 0) {
+            if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x1588)) != 0) {
                 char server_name[0x4B4];
                 Config_GetIniString(g_config_ini, "Configuration", "ServerName",
                                      "LEGO International Train Server",
                                      server_name, 0x4B4);
                 DirectPlay_ConnectToSession(g_dplay_peer,
-                                             (char*)((uint8_t*)g_player_config + 6),
+                                             reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                              server_name, NULL);
 
-                if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) == 0) {
+                if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) == 0) {
                     /* Retry once: close, wait, re-host, reconnect. Reuses
                      * the same protocol/address values (never recomputed). */
                     DirectPlay_Close(g_dplay_peer);
@@ -3001,11 +3031,11 @@ void Train_ConnectToServer(void* subsystem, void* payload)
                     DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
                     DirectPlay_HandleMessages(protocol, address, 0);
                     DirectPlay_ConnectToSession(g_dplay_peer,
-                                                 (char*)((uint8_t*)g_player_config + 6),
+                                                 reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
                                                  server_name, NULL);
                 }
 
-                if (*(uint8_t*)((uint8_t*)g_dplay_peer + 0xd50) != 0) {
+                if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
                     return;  /* connected — no cleanup */
                 }
             }
@@ -3077,7 +3107,7 @@ void Train_ConnectToServer(void* subsystem, void* payload)
         FormatResourceString(&g_resmgr, 0xDF, player->m_playerName, 0x50);
         player->m_flag41 = 0xFF;
         strcpy(reinterpret_cast<char*>(player->m_sessionBlk1),
-               (char*)((uint8_t*)g_player_config + 6));
+               reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)));
         strcpy(reinterpret_cast<char*>(player->m_sessionBlk2), "LEGO LOCO");
 
         NET_RegisterPlayer(g_dplay, player, 1, 0);
@@ -3093,9 +3123,9 @@ void Train_ConnectToServer(void* subsystem, void* payload)
         if (msg) { msg->data = NULL; msg->next = NULL; }
         msg->type = 0x0F;
         msg->data = self->sprite_list_1;
-        *(uint8_t*)((uint8_t*)self->sprite_list_1 + 0x88) = 0;
-        self->sprite_list_1 = *(void**)((uint8_t*)self->sprite_list_1 + 0x70);
-        *(void**)((uint8_t*)msg->data + 0x70) = NULL;
+        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(self->sprite_list_1) + 0x88)) = 0;
+        self->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(self->sprite_list_1) + 0x70));
+        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(msg->data) + 0x70)) = NULL;
         NETMAN_QueueMessage(msg);
     }
 }
@@ -3153,16 +3183,16 @@ void Train_RemoveAllTracks(void* subsystem)
         msg->type = 0x11;
         msg->data = self->sprite_list_2;
 
-        uint8_t* node = (uint8_t*)self->sprite_list_2;
+        uint8_t* node = reinterpret_cast<uint8_t*>(self->sprite_list_2);
         node[0x88] = 0;
-        node[0x7C] = *((uint8_t*)g_netman + 0x7D0);
+        node[0x7C] = *(reinterpret_cast<uint8_t*>(g_netman) + 0x7D0);
 
         /* BUG (0x43CC8D clears +0x70 before 0x43CC96-0x43CC99 re-reads it
          * to advance the head) — preserved as-is; see doc comment above. */
-        *(void**)(node + 0x70) = NULL;
+        *reinterpret_cast<void**>((node + 0x70)) = NULL;
         node[0x88] = 0;  /* redundant with the write above; matches the binary. */
 
-        self->sprite_list_2 = *(void**)(node + 0x70);
+        self->sprite_list_2 = *reinterpret_cast<void**>((node + 0x70));
         NETMAN_QueueMessage(msg);
     }
 }

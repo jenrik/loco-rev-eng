@@ -638,6 +638,99 @@ for other call-0 sites in the same function), `TrainSubsystem::ProcessMessages`,
 `Town::on_lbutton_down` (PtInRect sites done — check for other call-0 sites
 remaining in this function).
 
+## `Train_network.cpp` raw-offset/host-layout mismatch (2026-08-08)
+
+Found while doing the STRICT=2 old-style-cast cluster fix for
+`game/Train_network.cpp` (see PROGRESS.md's `train-network-cpp-cast-cluster`
+entry for the full writeup). Recorded here, separately from that commit,
+because fixing it is out of scope for a cast-respelling pass and needs its
+own dedicated session — same shape as the DirectPlay_* entry above.
+
+**The finding**: `game/Train_network.cpp` accesses both `Vehicle*` objects
+(via `sprite_list_1/2/3`, `car`/`node`/`tail`/`train`/`controller` locals) and
+the `Netman*` singleton (`g_netman`) almost entirely through raw byte-offset
+arithmetic hardcoded to the *original x86* field offsets documented as
+comments in `Vehicle.h`/`Netman.h` (`+0x70`, `+0x7C4`, `+0x518 + j*0x4C`,
+etc.), rather than through the named C++ fields those headers already
+declare. On this 64-bit host, several pointer fields in both classes are
+native-width (8 bytes) where the original x86 layout used 4-byte pointers —
+`Vehicle::editors[4]` and `Vehicle::editor_state` before the `+0x70` union;
+`PlayerSlot::msg_queue`/`pixel_buffer` inside `Netman::m_slots[9]`. That
+widening pushes every real (compiler-computed) offset after those fields
+forward, so the hardcoded x86 offsets no longer point at the fields they're
+named for. Verified directly with `static_assert`/`offsetof` in a scratch
+translation unit against the real headers:
+
+```cpp
+static_assert(sizeof(PlayerSlot) == 0x4C, ...);              // fails: actual 88
+static_assert(offsetof(Netman, m_slots) == 0x518, ...);      // holds: 1304 (no pointer fields before it)
+static_assert(offsetof(Netman, m_gameMode) == 0x7C4, ...);   // fails: actual 2104 (0x7C4 = 1988)
+static_assert(offsetof(Netman, m_mySlotIndex) == 0x7D0, ...);// fails: actual 2120 (0x7D0 = 2000)
+```
+
+So every raw `g_netman + 0x7C4`/`+0x7D0`/`+0x518 + j*0x4C` site in
+`Train_network.cpp` reads/writes the wrong host memory today, and the same
+applies to every raw `Vehicle*` + `0x70`..`0x8A` site. This is (almost
+certainly) currently dormant: `TrainSubsystem`'s whole multiplayer call
+chain is gated behind `InitNetwork()` → `DirectPlay_CreatePeer`, which the
+DirectPlay_* entry above already established is call-0/unreachable in the
+shipped binary, so nothing exercises these reads/writes yet. `meson test`
+(30/30 incl. 12/12 GUI integration) passing before and after the cast fix
+is consistent with "dead code," not with "verified correct."
+
+**Why it wasn't fixed this session**: `Vehicle.cpp`/`Building.cpp`/`World.cpp`
+already converted their own raw-offset sites to named-field access
+specifically because doing so is *safe* there (the compiler-computed offset
+is simply correct, whatever it is). Converting only *some* of
+`Train_network.cpp`'s sites the same way — while others (necessarily, since
+grepping the raw hex offsets tree-wide returns mostly unrelated structs and
+can't reliably distinguish every remaining site's base type) keep the old
+byte arithmetic — would silently split live traversal of `sprite_list_1/2/3`
+or `g_netman` across two different addresses. That is a strictly worse bug
+than the current uniformly-wrong-but-dead byte arithmetic. Fixing it for
+real needs: (1) a full per-site audit of every `Vehicle*`/`Netman*` base
+variable in this file (tracing assignment origin, not variable name) to
+confirm none are actually `PlayerConnectionNode*` or something else; (2)
+resolving the `network/Netman.h` `#include` collision below, since named
+`Netman*` field access requires the complete type; (3) a test plan that
+actually exercises the converted paths (today's 30/30 + 12/12 don't, since
+the code is dead) to catch any dormant behavioral bug the conversion fixes
+or introduces once `InitNetwork()` becomes reachable.
+
+**Adjacent, smaller finding — `#include "network/Netman.h"` collision**:
+`Train_network.cpp` declares its own local `extern "C"` prototypes for
+several symbols that `Netman.h` also declares, with different signatures/
+linkage: `CreateFileA` (`int __stdcall` here vs. `HANDLE`/`void*` in
+`Netman.h` and ~6 other TUs — see the `CreateFileA` finding just below),
+`DPLAY_CreatePlayer`, `DPLAY_CopyPlayerData`, `DPLAY_DecodePlayerSlots`,
+`NET_RegisterPlayer`, `VehicleEditor_SetDPlayData`, `Config_GetIniInt`,
+`CRT_rand`, `CRT_itoa`, and a `g_resmgr` global with a conflicting type.
+Simply adding `#include "../network/Netman.h"` to get the `Netman` class
+definition (needed for any named-field fix above) trades one
+`-Werror=missing-declarations` site for ~10 `-Werror` ambiguating/
+conflicting-declaration errors. Whoever picks up the `Netman`/`Vehicle`
+host-offset fix above will need to reconcile these declarations first (or
+work around them the way this session did for the one symbol it needed —
+`Train_QueueMessage` — by forward-declaring it locally instead of
+including the header).
+
+**`CreateFileA` return-type mismatch** (its own small, separate finding):
+declared `int __stdcall CreateFileA(...)` in `game/Train_network.cpp` and
+`int32_t __stdcall CreateFileA(...)` in `network/DirectPlay.cpp`, but
+`HANDLE`/`void* __stdcall CreateFileA(...)` (the correct type — `HANDLE` is
+`typedef void*` in `stubs/windows.h`) in `game/PlayerConfig.cpp`,
+`town/Town.cpp`, `native/NETMAN_SessionSettings.c`,
+`network/NetworkPlayerList.cpp`, and others. Since this is `extern "C"`,
+the linker resolves all call sites to one real definition returning a
+64-bit `HANDLE`; the two files declaring `int`/`int32_t` only read the low
+32 bits of the return value at their call sites, silently truncating any
+handle value that doesn't fit in 32 bits. Same "call-0/signature-mismatch"
+landmine class as the rest of this document, scoped as its own future
+"silent-wrong-stub cluster" fix (grep every `CreateFileA` declaration
+tree-wide, pick the correct `HANDLE` signature, fix the two wrong ones,
+verify call sites) rather than folded into the cast-cleanup commit that
+found it.
+
 ## Raw data
 
 The full alignment run's intermediate files (per-symbol caller lists, the
