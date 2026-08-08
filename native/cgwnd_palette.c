@@ -21,7 +21,7 @@
 extern void*  __cdecl operator_new(size_t size);                    /* 0x465CE0 */
 extern void   __cdecl CRT_free(void* ptr);                          /* 0x466C70 */
 extern void   __cdecl CRT_sprintf_buf(char* buf, const char* fmt);  /* 0x466D60 */
-extern int    g_asset_mgr;                                          /* 0x4AA5B0 — global asset manager */
+extern void*  g_asset_mgr;                                          /* 0x485600 — global asset manager */
 extern char   g_install_path[];                                     /* 0x4A99C8 — install directory path */
 extern int*   __stdcall AssetMgr_LoadFile(int* mgr, byte* path, int* outSize);   /* 0x45CD00 */
 extern void*  __thiscall WNDPROC_StreamFromMemory(void* stream, char* data,
@@ -30,7 +30,14 @@ extern void*  __thiscall WIN32_StreamOpenFile(void* stream, char* path,
                                                int mode, const char* flags,
                                                int flag2);                        /* 0x463970 */
 extern void   __thiscall WNDPROC_StreamReadLine(void* stream, short* buf);        /* 0x464BC0 */
-extern char   DAT_00479190[];  /* file open mode flags string */
+/* DAT_00479190 is a global void* holding the mode value itself (confirmed via
+ * disassembly of this function and of Game_LoadWaveFile in native/wave_io.c:
+ * both do a single `MOV reg,[0x479190]` load before pushing it as an
+ * argument — one dereference, not a fixed byte array). shared/defsym_stubs.cpp
+ * defines the real host stub as `void* DAT_00479190 = nullptr;`, matching.
+ * The previous `extern char DAT_00479190[];` declaration here was the wrong
+ * type for the same reason wave_io.c's `&DAT_00479190` was wrong there. */
+extern void*  DAT_00479190;
 
 /* ================================================================== */
 /* Internal: destroy a stream object via its vtable[4] scalar dtor     */
@@ -40,13 +47,25 @@ static void destroy_stream(void* stream)
     if (stream == NULL) return;
     /* The stream object has a complex indirection. Its vtable is at
        *(*((int*)stream + 1) + (int)stream). vtable[4] is the scalar dtor. */
-    int* inner = *(int**)(uintptr_t)(*(int*)((uintptr_t)(*(int*)stream + 4)) + (int)stream);
+    int* inner = *reinterpret_cast<int**>(static_cast<uintptr_t>(
+        *reinterpret_cast<int*>(static_cast<uintptr_t>(*reinterpret_cast<int*>(stream) + 4)) +
+        static_cast<int>(reinterpret_cast<uintptr_t>(stream))));
     if (inner != NULL) {
         typedef void (__thiscall* DtorFn)(void*, byte);
-        DtorFn dtor = (DtorFn)(*(void***)inner)[4];  /* vtable[4] */
-        dtor((void*)inner, 1);
+        DtorFn dtor = reinterpret_cast<DtorFn>((*reinterpret_cast<void***>(inner))[4]);  /* vtable[4] */
+        dtor(static_cast<void*>(inner), 1);
     }
 }
+
+/* ================================================================== */
+/* File-scope prototypes: neither function has a header of its own yet   */
+/* with a caller to satisfy; core/CGWND.h documents both addresses but   */
+/* nothing currently includes it or calls these (display/DDraw init and  */
+/* the route editor callers are still unreconstructed). Local prototypes */
+/* satisfy -Wmissing-declarations without new cross-TU coupling.         */
+/* ================================================================== */
+byte __fastcall CGWND_ValidatePaletteData(void* obj);
+int  __cdecl    CGWND_MapResourceToDirection(int resourceId);
 
 /* ================================================================== */
 /* CGWND_ValidatePaletteData — Load and validate palette data          */
@@ -77,13 +96,13 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
 
     /* Step 1: Zero two 200-entry (800 byte) arrays */
     {
-        int* buf = (int*)((uint8_t*)obj + 0x168);
+        int* buf = reinterpret_cast<int*>(static_cast<uint8_t*>(obj) + 0x168);
         for (int i = 0; i < 200; i++) {
             buf[i] = 0;
         }
     }
     {
-        int* buf = (int*)((uint8_t*)obj + 0x488);
+        int* buf = reinterpret_cast<int*>(static_cast<uint8_t*>(obj) + 0x488);
         for (int i = 0; i < 200; i++) {
             buf[i] = 0;
         }
@@ -103,7 +122,7 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
     CRT_sprintf_buf(filePath, "%s/%s/%s");
 
     /* Step 3: Try loading from asset manager first */
-    if (g_asset_mgr != 0) {
+    if (g_asset_mgr != NULL) {
         /* Compute relative path offset within sprintf'd buffer */
         pathLen = -1;
         {
@@ -117,14 +136,14 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
         int relOffset = ~pathLen;  /* strlen(g_install_path) */
 
         int initialSize = 0x800;
-        loadedData = AssetMgr_LoadFile(&g_asset_mgr,
-                                        (byte*)(filePath + relOffset - 1),
+        loadedData = AssetMgr_LoadFile(reinterpret_cast<int*>(&g_asset_mgr),
+                                        reinterpret_cast<byte*>(filePath + relOffset - 1),
                                         &initialSize);  /* initial size = 2048 */
         if (loadedData != NULL) {
             streamMem = operator_new(0x5C);  /* stream object: 92 bytes */
             if (streamMem != NULL) {
-                streamObj = WNDPROC_StreamFromMemory(streamMem, (char*)loadedData,
-                                                      *(int*)(loadedData - 1), 1);
+                streamObj = WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<char*>(loadedData),
+                                                      *(loadedData - 1), 1);
             }
         }
     }
@@ -134,7 +153,7 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
         streamMem = operator_new(0x5C);
         if (streamMem != NULL) {
             streamObj = WIN32_StreamOpenFile(streamMem, filePath, 0xA0,
-                                              DAT_00479190, 1);
+                                              static_cast<const char*>(DAT_00479190), 1);
         }
         if (streamObj == NULL) {
             successFlag = 0;
@@ -146,11 +165,13 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
         /* Check end-of-stream flag via vtable indirection:
            status_byte = *(base + vtable[4] + obj_offset + 8) & 6
            Non-zero = EOF or error */
-        int* sv = *(int**)streamObj;
-        byte* status_ptr = (byte*)(uintptr_t)(*(int*)((uintptr_t)(sv[1] + (int)streamObj)) + 8);
+        int* sv = *reinterpret_cast<int**>(streamObj);
+        byte* status_ptr = reinterpret_cast<byte*>(static_cast<uintptr_t>(
+            *reinterpret_cast<int*>(static_cast<uintptr_t>(
+                sv[1] + static_cast<int>(reinterpret_cast<uintptr_t>(streamObj)))) + 8));
 
         if (*status_ptr == 0) {
-            dataPtr = (short*)((uint8_t*)obj + 0x16A);
+            dataPtr = reinterpret_cast<short*>(static_cast<uint8_t*>(obj) + 0x16A);
             for (lineIdx = 0; lineIdx < 0xA0; lineIdx++) {
                 /* Read 4 short values per palette entry.
                    Values are read into slots at dataPtr[-1], dataPtr[0],

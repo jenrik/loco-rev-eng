@@ -22,8 +22,11 @@
  *     ChunkNode* next;          // +0x0C  next node in singly-linked list
  * };
  *
- * The file format is: [chunk_name:4B][data_size:4B][chunk_id:4B][data:...]
- * repeated until end-of-file.
+ * Per-chunk read order (confirmed against the 0x45CAA0 disassembly): a
+ * 4-byte length, that many bytes of name/data, then two more 4-byte
+ * fields (data_size, then chunk_id) — see the read loop below for exactly
+ * which raw read feeds which ChunkNode field; a from-memory guess at "the
+ * file format" here previously did not match the actual value flow.
  *
  * DDRAW_LoadFile is __thiscall — it's a C++ method on a FileData struct.
  * DDRAW_FileData_Dtor is __fastcall — the destructor/cleanup for the same.
@@ -42,6 +45,16 @@ extern void   __cdecl CRT_free(void* ptr);              /* 0x466C70 */
 extern void*  __cdecl CRT_malloc_zero(uint32_t size);   /* 0x4673C0 */
 
 /* CRT file read helpers */
+/* mode stays void* to match the real definition's signature exactly
+ * (shared/stubs_impl.cpp: `void CRT_0x468480(char*, void*) {}` — also
+ * matched by graphics/DDRAW.cpp/resources/AssetMgr.h's OTHER, differently
+ * mangled `(const char*, const char*)` declaration of the same name,
+ * itself a separate pre-existing landmine not touched here). Changing
+ * this to `const char*` would change the mangled symbol this TU calls,
+ * silently creating a new call-0 site against the void* stub — verified
+ * by objdump before/after. DAT_00481190 is a real read-only string, so
+ * passing it to a void* parameter still needs a cast; const_cast (not a
+ * lossy C-style cast) makes the const-stripping explicit. */
 extern int32_t __cdecl CRT_0x468480(char* filename, void* mode);  /* fopen-like open */
 extern void   __cdecl CRT_0x4681D0(int32_t handle);               /* fclose-like close */
 extern int32_t __cdecl CRT_0x468610(void* buf, uint32_t size,      /* fread-like read */
@@ -76,6 +89,19 @@ typedef struct {
 extern const char DAT_00481190[4];     /* fopen mode "rb" */
 extern const char DAT_0048118c[4];     /* ".RES" extension */
 extern const char DAT_00481194[4];     /* ".PKG" extension */
+
+/* ================================================================== */
+/* File-scope prototypes: graphics/DDRAW.h documents a `struct FileData`
+ * and declarations for both functions, but with a different FileData
+ * layout (void* file_handle/block_list vs. this file's int32_t/ChunkNode*)
+ * and mismatched return/param types; network/NetHelpers.cpp has yet a
+ * third (`DDRAW_FileData_Dtor(void*)`) that nothing here defines. None of
+ * those are currently wired to an actual call using THIS file's types, so
+ * a local prototype satisfies -Wmissing-declarations without adopting or
+ * fixing that separately-tracked, pre-existing cluster. */
+/* ================================================================== */
+void __fastcall DDRAW_FileData_Dtor(FileData* fd);
+uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename);
 
 /* ================================================================== */
 /* DDRAW_FileData_Dtor — Destructor for FileData struct               */
@@ -134,8 +160,8 @@ void __fastcall DDRAW_FileData_Dtor(FileData* fd)
 /* Calling convention: __thiscall (ECX = FileData*, 1 stack param)    */
 /*                                                                     */
 /* Opens a resource file (.PKG or .RES), reads the extension to        */
-/* determine file type, then reads chunks in a loop:                   */
-/*   [chunk_name:4B][data_size:4B][chunk_id:4B][data:data_size]       */
+/* determine file type, then reads chunks in a loop. Each iteration    */
+/* does 4 raw reads — see the read loop below for the exact value flow.*/
 /* Each chunk is stored as a ChunkNode appended to a singly-linked     */
 /* list at fd->chunk_list (+0x04).                                     */
 /*                                                                     */
@@ -188,11 +214,22 @@ uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
 
         ext_ptr++;  /* skip the '.' */
 
-        /* Build extension name (starting from ext_ptr) */
-        CRT_sprintf_buf(ext_ptr, (char*)&DAT_00481194);  /* ".PKG" */
+        /* Build extension name (starting from ext_ptr). DAT_00481194 is a
+         * real 4-byte ASCII constant (".PKG", verified via Ghidra memory
+         * read), so it decays to `const char*` on its own — no cast, and
+         * no `&` (taking its address would give `const char(*)[4]`, the
+         * wrong type, which is what forced the previous const-discarding
+         * C-style cast here). */
+        CRT_sprintf_buf(ext_ptr, DAT_00481194);  /* ".PKG" */
 
-        /* Open file for reading */
-        fd->file_handle = CRT_0x468480(local_name, (void*)&DAT_00481190);  /* "rb" */
+        /* Open file for reading. DAT_00481190 ("rb") is a real ASCII
+         * string constant (verified via Ghidra memory read) — unlike
+         * DAT_00479190 in wave_io.c/cgwnd_palette.c, which is a plain
+         * scalar, not a string. const_cast (rather than a lossy C-style
+         * cast) makes the const-stripping explicit; CRT_0x468480 never
+         * writes through this pointer (it's a no-op stub on the host, and
+         * the real fopen-like function only reads a mode string). */
+        fd->file_handle = CRT_0x468480(local_name, const_cast<char*>(DAT_00481190));  /* "rb" */
 
         if (fd->file_handle == 0) {
             return 0;
@@ -201,29 +238,50 @@ uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
 
     /* Read chunk data loop */
     {
-        uint32_t chunk_size;
-        uint32_t chunk_id;
+        while ((*reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(fd->file_handle + 0xC)) & 0x10) == 0) {
+            /* Read #1: 4 bytes -> name_len. This value is BOTH the byte
+             * count for read #2 AND the allocation size for node->data
+             * below — it must survive unmodified until both of those
+             * happen (Ghidra's decompile captures &puVar4[2] before
+             * puVar4 is ever reused, keeping this value distinct from the
+             * one captured by read #4 below; a prior version of this file
+             * used a single `chunk_size` variable for both reads #1 and
+             * #4, so by the time of the malloc/field-assignment below it
+             * was already overwritten by read #4's value). */
+            uint32_t name_len;
+            uint32_t bytes_read = CRT_0x468610(&name_len, 1, 4, fd->file_handle);
+            if (bytes_read == 0) {
+                /* Ghidra: a short/zero read here falls through to the
+                 * same EOF re-check the loop condition performs (disasm
+                 * 0x45CB93 -> 0x45CC59 -> back to 0x45CB78, or out to the
+                 * close+reopen tail if the EOF flag really is set) — it
+                 * does not abort chunk parsing outright. A bare `break`
+                 * would stop early on a transient short read that isn't
+                 * actually end-of-file. */
+                continue;
+            }
 
-        while ((*(uint8_t*)(uintptr_t)(fd->file_handle + 0xC) & 0x10) == 0) {
-            /* Read chunk name (4 bytes) */
-            uint32_t bytes_read = CRT_0x468610((char*)&chunk_size, 1, 4, fd->file_handle);
-            if (bytes_read == 0) break;
+            /* Read #2: name_len bytes -> chunk_name (variable-length
+             * name/data blob; the original does not bounds-check
+             * name_len against the 400-byte buffer either — preserved
+             * as-is). */
+            CRT_0x468610(chunk_name, 1, name_len, fd->file_handle);
 
-            /* Read data size (4 bytes) */
-            CRT_0x468610(chunk_name, 1, chunk_size, fd->file_handle);
+            /* Read #3: 4 bytes -> data_size field (ChunkNode +0x08). */
+            uint32_t data_size_val;
+            CRT_0x468610(&data_size_val, 1, 4, fd->file_handle);
 
-            /* Read chunk ID (4 bytes) */
-            CRT_0x468610((char*)&chunk_id, 1, 4, fd->file_handle);
+            /* Read #4: 4 bytes -> chunk_id field (ChunkNode +0x04). */
+            uint32_t chunk_id_val;
+            CRT_0x468610(&chunk_id_val, 1, 4, fd->file_handle);
 
-            /* Read total data (4 bytes for original size + data) */
-            CRT_0x468610((char*)&chunk_size, 1, 4, fd->file_handle);
-
-            /* Allocate and populate chunk node */
-            ChunkNode* node = (ChunkNode*)operator_new(0x10);
-            char* node_data = (char*)CRT_malloc_zero(chunk_size);
+            /* Allocate and populate chunk node. node->data is sized off
+             * name_len (read #1's untouched value). */
+            ChunkNode* node = static_cast<ChunkNode*>(operator_new(0x10));
+            char* node_data = static_cast<char*>(CRT_malloc_zero(name_len));
 
             node->data = node_data;
-            node->data_size = chunk_size;
+            node->data_size = static_cast<int32_t>(data_size_val);
 
             /* Copy chunk name */
             {
@@ -235,7 +293,7 @@ uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
                 *dst2 = '\0';
             }
 
-            node->chunk_id = chunk_id;
+            node->chunk_id = static_cast<int32_t>(chunk_id_val);
             node->next = NULL;
 
             /* Append to linked list (tail insert) */
@@ -262,10 +320,10 @@ uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
         /* Back up to extension */
         while (p2 > local_name && *p2 != '.') p2--;
         if (*p2 == '.') p2++;
-        CRT_sprintf_buf(p2, (char*)&DAT_0048118c);  /* ".RES" */
+        CRT_sprintf_buf(p2, DAT_0048118c);  /* ".RES" */
 
         /* Open second file */
-        fd->file_handle = CRT_0x468480(local_name, (void*)&DAT_00481190);
+        fd->file_handle = CRT_0x468480(local_name, const_cast<char*>(DAT_00481190));
     }
 
     /* Store filename */
@@ -273,7 +331,7 @@ uint8_t __thiscall DDRAW_LoadFile(FileData* fd, char* filename)
         const char* src3 = local_name;
         uint32_t len = 0;
         while (src3[len] != '\0') len++;
-        char* name_copy = (char*)CRT_malloc_zero(len + 1);
+        char* name_copy = static_cast<char*>(CRT_malloc_zero(len + 1));
         fd->filename = name_copy;
 
         src3 = local_name;
