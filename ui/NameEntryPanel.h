@@ -22,7 +22,20 @@
  * Vtable layout (extends UI_WindowBase 12-slot vtable):
  *   [0] +0x00: scalar deleting destructor (NameEntryPanel_Dtor, 0x440F80)
  *   [1] +0x04: Hide                        (inherited: UI_WindowBase_Hide, 0x425990)
- *   [2] +0x08: Show                        (inherited: UI_WindowBase_Show, 0x4259C0)
+ *   [2] +0x08: Show                        OVERRIDDEN: NETMAN_JoinSession (0x441870),
+ *                                           NOT the inherited UI_WindowBase_Show —
+ *                                           confirmed via the vtable data at 0x4781D8.
+ *                                           NETMAN_JoinSession inits the 7 sprites,
+ *                                           starts a timer, and ends by calling
+ *                                           DPlayManager::RenderConnectionPanel (0x4421D0)
+ *                                           on `this`, which is the concrete evidence that
+ *                                           RenderConnectionPanel's `void* panel` parameter
+ *                                           is really a `NameEntryPanel*` (see
+ *                                           network/DPlayManager.cpp / DPlayManager.h).
+ *                                           NETMAN_JoinSession itself remains
+ *                                           undecompiled/unimplemented (declared only,
+ *                                           `network/Netman.h`'s `NETMAN_JoinSession`,
+ *                                           dead: not defined or called anywhere in-tree).
  *   [3] +0x0C: virtual (default stub)      (inherited: 0x425FD0)
  *   [4] +0x10: virtual (default stub)      (inherited: 0x426020)
  *   [5] +0x14: virtual (default stub)      (inherited: 0x426130)
@@ -55,21 +68,58 @@ public:
     /* (see UI_WindowBase.h for full layout) */
     /* ---- NameEntryPanel-specific fields (0xE8..0x1E3) ---- */
 
-    uint8_t    field_E8;               // +0xE8  (unknown byte, init 0)
+    uint8_t    field_E8;               // +0xE8  (unknown byte, init 0) — read/set as a
+                                       //        "text dirty" flag by
+                                       //        DPlayManager::RenderConnectionPanel (0x4421D0)
     uint8_t    _pad_E9[3];             // +0xE9  padding
 
-    int32_t    field_EC;               // +0xEC  (unknown, init 0)
+    int32_t    field_EC;               // +0xEC  (unknown, init 0) — receives the SetTimer()
+                                       //        result in NETMAN_JoinSession (0x441870)
 
-    uint8_t    field_F0;               // +0xF0  (unknown byte, init 0)
-    uint8_t    _pad_F1[3];             // +0xF1  padding
+    /* +0xF0 (64 bytes): join-panel text buffer. Evidence: NETMAN_JoinSession
+     * (0x441870) fills it via FormatResourceString(&g_resmgr, 0x79, this+0xF0, 0x40);
+     * DPlayManager::RenderConnectionPanel (0x4421D0) renders it with
+     * DrawTextA(hdc, this+0xF0, -1, ...). Previously modeled as a lone byte
+     * (field_F0) plus an "unknown, not initialized by Init" gap through
+     * +0x13F — Init only ever clears byte [0] (null-terminates the buffer),
+     * which is why the gap looked uninitialized. */
+    char       textBuffer[64];         // +0xF0  join-session text (null-terminated)
 
-    /* +0xF4..+0x13F: unknown — not initialized by Init */
+    /* +0x130 (16 bytes): scratch RECT used while laying out textBuffer's
+     * drawn position. Evidence: RenderConnectionPanel builds it from the
+     * panel RECT (below) via DrawTextA(..., &textDrawRect, ...), then
+     * OffsetRect()s it per the alignment mode (gameMode, below). */
+    RECT       textDrawRect;           // +0x130  text draw/layout RECT
 
-    int32_t    gameMode;               // +0x140  Game mode / max players count (init 3)
+    int32_t    gameMode;               // +0x140  Game mode / max players count (init 3).
+                                       //        Also read by RenderConnectionPanel as a
+                                       //        text-alignment selector (0=right, 1=left,
+                                       //        2=bottom, else=top) — same dual-use pattern
+                                       //        already documented on GameSetupPanel's
+                                       //        textAlignMode (+0x1B0 there).
 
     int32_t    field_144;              // +0x144  (unknown, init 0)
 
-    /* +0x148..+0x1AB: unknown — not initialized by Init */
+    /* +0x148..+0x14B: unknown — not initialized by Init */
+    uint8_t    _gap_148[4];            // +0x148  gap (unnamed, unevidenced)
+
+    /* +0x14C/+0x150: second scroll-offset pair, read by RenderConnectionPanel
+     * and passed to OffsetRect() alongside UI_WindowBase::workRect's
+     * left/top (+0xD4/+0xD8, the panel's "first" scroll offset pair) when
+     * blitting the child surface (+0x1D0, below). */
+    int32_t    scrollOffsetX2;         // +0x14C  second blit-offset X delta
+    int32_t    scrollOffsetY2;         // +0x150  second blit-offset Y delta
+
+    /* +0x154..+0x18B: unknown — not initialized by Init */
+    uint8_t    _gap_154[0x38];         // +0x154  gap (unnamed, unevidenced)
+
+    /* +0x18C (16 bytes): panel bounding RECT. Evidence: RenderConnectionPanel
+     * reads it as {left,top,right,bottom} and passes it to UI_CenterWindow()
+     * as the outer RECT*. */
+    RECT       panelRect;              // +0x18C  panel bounding RECT
+
+    /* +0x19C..+0x1AB: unknown — not initialized by Init */
+    uint8_t    _gap_19C[16];           // +0x19C  gap (unnamed, unevidenced)
 
     uint8_t    hasSprites;             // +0x1AC  Flag: non-zero when sprites are allocated
     uint8_t    _pad_1AD[3];            // +0x1AD  padding
@@ -82,9 +132,21 @@ public:
     ButtonSprite* sprite5;             // +0x1C4  ButtonSprite for res 0x420
     ButtonSprite* sprite6;             // +0x1C8  ButtonSprite for res 0x421
 
-    void*        spriteTerminator;     // +0x1CC  Always 0 (terminator after sprite array)
+    void*        spriteTerminator;     // +0x1CC  Always 0 after Init() (terminator after
+                                       //        sprite array) — but NETMAN_JoinSession
+                                       //        (0x441870, undecompiled) repurposes this slot
+                                       //        for a resource pointer (ResourceManager_GetById
+                                       //        0x439) the first time it runs.
 
-    /* +0x1D0: padding */
+    /* +0x1D0: previously documented as padding — WRONG. RenderConnectionPanel
+     * (0x4421D0) dereferences it as `*(void**)(this+0x1D0)` and passes it to
+     * UIPANEL_Blit as the source surface for the child-window blit. Its
+     * writer is identified but not yet decompiled: NETMAN_JoinSession
+     * (0x441870) calls vtable slot [1] (+0x04) on the +0x1CC resource
+     * pointer above with (0,0) and stores the result here — evidently
+     * creating/fetching the child surface — but that call target isn't
+     * decompiled, so `void*` is kept rather than guessing a surface type. */
+    void*        childSurface;         // +0x1D0  child surface blitted by RenderConnectionPanel
 
     HBRUSH       backgroundBrush;      // +0x1D4  Solid brush for background (color 0xA8C4D8)
 
@@ -93,6 +155,8 @@ public:
     uint8_t      field_1E0;            // +0x1E0  (unknown byte, init 0)
     uint8_t      field_1E1;            // +0x1E1  (unknown byte, init 0)
     /* Total: 0x1E4 bytes */
+
+    static_assert(sizeof(RECT) == 16, "NameEntryPanel layout assumes 16-byte RECT");
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */

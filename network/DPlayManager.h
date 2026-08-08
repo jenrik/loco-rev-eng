@@ -433,6 +433,7 @@ struct DPLAY_SessionData {
 /* ================================================================== */
 
 class PlayerConfig;
+class NameEntryPanel;
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern char  g_empty_string;    /* 0x4851D0 — empty string constant  */
 extern void* g_primary_surface; /* 0x4FD3C4 — primary DDraw surface  */
@@ -442,16 +443,16 @@ extern void* g_primary_surface; /* 0x4FD3C4 — primary DDraw surface  */
  * Address: 0x4421D0 (originally "DPLAY_Ctor")
  *
  * WARNING: This is a UI rendering method, NOT a player slot method.
- * The panel pointer must point to a Panel-derived window structure
- * created by NETMAN_JoinSession. Field offsets referenced:
- *   +0x08 HWND, +0xD4 scrollX1, +0xD8 scrollY1, +0xE8 dirty flag,
- *   +0xF0 text buffer, +0x130 text RECT, +0x140 alignment mode,
- *   +0x18C panel RECT, +0x1AC loaded flag, +0x1B0 sprites, +0x1D0 surface
- *
- * TODO: move to ConnectionPanel class when Panel hierarchy is decompiled.
+ * `panel` is the singleton join-session/name-entry lobby panel — confirmed
+ * via Ghidra: NameEntryPanel's own vtable slot [2] (+0x08) is overridden
+ * with NETMAN_JoinSession (0x441870), which ends by calling this function
+ * on `this`. See ui/NameEntryPanel.h for the full field layout; the fields
+ * this function reads/writes are documented there (textBuffer, textDrawRect,
+ * gameMode, scrollOffsetX2/Y2, panelRect, hasSprites, childSurface) plus
+ * UI_WindowBase::hWnd/workRect (+0x08/+0xD4).
  *
  * Called by:
- *   NETMAN_JoinSession (0x4419AC)
+ *   NETMAN_JoinSession (0x441870)
  *   0x00442677 (unnamed, within DPLAY creation)
  */
-void RenderConnectionPanel(void* panel);
+void RenderConnectionPanel(NameEntryPanel* panel);

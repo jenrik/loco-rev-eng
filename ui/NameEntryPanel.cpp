@@ -81,7 +81,7 @@ void NameEntryPanel::init()
     this->field_EC = 0;             /* +0xEC */
     this->field_E8 = 0;             /* +0xE8 (byte) */
     this->gameMode = 3;             /* +0x140 — default max players */
-    this->field_F0 = 0;             /* +0xF0 (byte) */
+    this->textBuffer[0] = 0;        /* +0xF0 (null-terminate; buffer is 64 bytes) */
     this->field_1D8 = 0;            /* +0x1D8 */
     this->field_144 = 0;            /* +0x144 */
     this->hasSprites = 0;           /* +0x1AC (byte) */
