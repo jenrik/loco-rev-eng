@@ -224,7 +224,11 @@ extern int  __thiscall GameObject_GetRelPos(void* self, int* out, int x, int y);
 extern void __stdcall SetRect(void* rect, int left, int top, int right, int bottom);
 extern void __stdcall OffsetRect(void* rect, int dx, int dy);
 extern int  __stdcall IntersectRect(RECT* out, RECT* a, RECT* b);
-extern void __cdecl DDRAW_DimSurfaceRect(int left, int top, int right, int bottom);
+/* Always returns 1 (see native/DDRAW_DimSurfaceRect.c); every caller
+ * discards it. Address corrected to 0x401540 (confirmed via Ghidra
+ * disassembly/decompile) -- 0x469A50 had zero xrefs anywhere in the
+ * binary. */
+extern int __cdecl DDRAW_DimSurfaceRect(int left, int top, int right, int bottom); /* 0x401540 */
 extern void* __cdecl operator_new(size_t size);                     /* 0x465CE0 */
 extern void  __cdecl GLOBAL_free(void* ptr);                         /* 0x465CD0 */
 extern int   __thiscall UI_IsBitmapReady(int handle);                /* 0x424C30 */

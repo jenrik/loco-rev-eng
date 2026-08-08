@@ -226,7 +226,6 @@ void GameWindow_SetPosition(void*, int, int) { /* host no-op */ }
 void GameWindow_Show(void*) { /* host no-op */ }
 void GameWindow_Hide(void*) { /* host no-op */ }
 void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
-void TileMap_Init(void**, unsigned char) { /* host no-op */ }
 void* TrainSubsystem_Ctor = nullptr;
 /* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
  * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
@@ -501,7 +500,6 @@ void* PixelDataCache_Ctor(void* self) {
 void PixelDataCache_Load(void* self, int mode) {
     (void)self; (void)mode;
 }
-void TileMap_Init(void*, unsigned char) { /* host no-op */ }
 void GameAudio_StopFinished(void*) { /* host no-op */ }
 void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
 void Ordinal_2(void*) { /* host no-op */ }

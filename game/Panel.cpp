@@ -78,8 +78,8 @@ extern void __stdcall OffsetRect(void* rect, int dx, int dy);
 extern int __stdcall IntersectRect(RECT* out, RECT* a, RECT* b);
 
 /* DDRAW */
-extern void __cdecl DDRAW_DimSurfaceRect(int left, int top,
-                                          int right, int bottom);          /* 0x469A50 */
+extern int __cdecl DDRAW_DimSurfaceRect(int left, int top,
+                                         int right, int bottom);           /* 0x401540 */
 extern void __cdecl CGWND_SetMode(void* mode);                             /* 0x407AF0 */
 extern void __thiscall Town_SelectBuilding(void* town_view, int building); /* 0x42C9C0 */
 /* Unused in this file. Address corrected: 0x46AA80 did not disassemble to
