@@ -127,7 +127,7 @@ void TrainEntity::Update(void* next_entity)
         g_selected_building != this) {
         /* Binary: uVar3 = CRT_rand(); iVar2 = (int)uVar3 % 0x29 + 0x3400.
          * The cast-to-int BEFORE modulo matches the raw signed division. */
-        const int object_id = ((int)CRT_rand() % 0x29) + 0x3400;
+        const int object_id = (static_cast<int>(CRT_rand()) % 0x29) + 0x3400;
         GameObject* target = static_cast<GameObject*>(
             INPUT_FindObjectAt(&g_input_mgr, object_id));
 
