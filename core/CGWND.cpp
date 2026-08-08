@@ -839,11 +839,11 @@ void CGWND_EnterMode3(int old_mode)
             CGWND_SetFullscreenMode(go_windowed);   /* 0x407D20 */
 
             HWND hWnd = static_cast<CGWND*>(g_main_window)->hWnd;  /* +0x08 */
-            KillTimer(hWnd, (uintptr_t)g_timer_id); /* IAT */
+            KillTimer(hWnd, static_cast<uintptr_t>(g_timer_id)); /* IAT */
             g_timer_id = 0;
 
             NETMAN_SendMapData(g_netman, 0);            /* 0x43D350 */
-            PostMessageA(hWnd, 0x406, (uint32_t)g_game_time, 0);  /* WM_USER+6 */
+            PostMessageA(hWnd, 0x406, static_cast<uint32_t>(g_game_time), 0);  /* WM_USER+6 */
 
             if (g_demo_mode == 1 && g_audio != nullptr) {
                 extern int Config_GetIniInt(void* config, const char* section,
@@ -883,7 +883,7 @@ void CGWND_EnterMode3(int old_mode)
     case 4:
         {
             HWND hWnd = static_cast<CGWND*>(g_main_window)->hWnd;  /* +0x08 */
-            PostMessageA(hWnd, 0x406, (uint32_t)g_game_time, 0);
+            PostMessageA(hWnd, 0x406, static_cast<uint32_t>(g_game_time), 0);
             NETMAN_SendMapData(g_netman, 0);
             static_cast<Game*>(g_game)->SetScreenMode(1, 1, 0);
             UI_ProcessObjectTimers();              /* 0x420000 */

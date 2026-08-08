@@ -463,8 +463,8 @@ void Game::Update()
         /* Mouse move conversion. */
         if (this->mouse_move_flag != 0) {
             int32_t wx, wy;
-            this->ScreenToWorld(&wx, (int)(this->mouse_move_screen_pos & 0xFFFF),
-                                (int)(this->mouse_move_screen_pos >> 16));
+            this->ScreenToWorld(&wx, static_cast<int>(this->mouse_move_screen_pos & 0xFFFF),
+                                static_cast<int>(this->mouse_move_screen_pos >> 16));
             this->mouse_move_world_x = wx;
             this->mouse_move_world_y = wy;
             this->mouse_move_flag = 0;
@@ -475,8 +475,8 @@ void Game::Update()
         /* Mouse drag conversion. */
         if (this->mouse_drag_flag != 0) {
             int32_t wx, wy;
-            this->ScreenToWorld(&wx, (int)(this->mouse_drag_screen_pos & 0xFFFF),
-                                (int)(this->mouse_drag_screen_pos >> 16));
+            this->ScreenToWorld(&wx, static_cast<int>(this->mouse_drag_screen_pos & 0xFFFF),
+                                static_cast<int>(this->mouse_drag_screen_pos >> 16));
             this->mouse_drag_world_x = wx;
             this->mouse_drag_world_y = wy;
             this->right_click_flag = 0;
@@ -694,8 +694,8 @@ play_action:
 void Game::HandleLeftClick()
 {
     int32_t wx, wy;
-    this->ScreenToWorld(&wx, (int)(this->left_click_screen_pos & 0xFFFF),
-                        (int)(this->left_click_screen_pos >> 16));
+    this->ScreenToWorld(&wx, static_cast<int>(this->left_click_screen_pos & 0xFFFF),
+                        static_cast<int>(this->left_click_screen_pos >> 16));
     this->left_click_world_x = wx;
     this->left_click_world_y = wy;
 
@@ -777,8 +777,8 @@ void Game::HandleLeftClick()
 void Game::HandleRightClick()
 {
     int32_t wx, wy;
-    this->ScreenToWorld(&wx, (int)(this->right_click_screen_pos & 0xFFFF),
-                        (int)(this->right_click_screen_pos >> 16));
+    this->ScreenToWorld(&wx, static_cast<int>(this->right_click_screen_pos & 0xFFFF),
+                        static_cast<int>(this->right_click_screen_pos >> 16));
     this->right_click_world_x = wx;
     this->right_click_world_y = wy;
 
@@ -791,7 +791,7 @@ void Game::HandleRightClick()
         /* Same resource type: cycle animation or apply override. */
         if (resource_sound_override(parent) == 0) {
             uint16_t anim_count = to_resdata(parent)->anim_count;   /* +0x1A */
-            if (this->anim_index + 1 < (int)anim_count) {
+            if (this->anim_index + 1 < static_cast<int>(anim_count)) {
                 this->StopSound(static_cast<int16_t>(this->anim_index + 1));
             } else {
                 this->StopSound(0);
@@ -931,8 +931,8 @@ void Game::ClearMouseMode()
                                 -1 : (this->mouse_world_y >> 4));
                         void* obj = TileMap_GetObjectAt(
                             g_tilemap,
-                            static_cast<int16_t>(tx + (int16_t)row),
-                            static_cast<int16_t>(ty + (int16_t)col), 0);
+                            static_cast<int16_t>(tx + static_cast<int16_t>(row)),
+                            static_cast<int16_t>(ty + static_cast<int16_t>(col)), 0);
                         if (obj != nullptr) {
                             Building* tile = static_cast<Building*>(obj);
                             if (tile->initialized == 1) {
@@ -1248,11 +1248,11 @@ int Game::IsScreensaverActive()
 {
     uint32_t packed = this->packed_mouse_pos;  /* +0x90 */
 
-    if ((int)(uint16_t)packed <= g_client_offset_x &&
-        (int)(packed >> 16) <= g_client_offset_y) {
+    if (static_cast<int>(static_cast<uint16_t>(packed)) <= g_client_offset_x &&
+        static_cast<int>(packed >> 16) <= g_client_offset_y) {
         POINT screen_pt;
-        screen_pt.x = (int)(packed & 0xFFFF);
-        screen_pt.y = (int)(packed >> 16);
+        screen_pt.x = static_cast<int>(packed & 0xFFFF);
+        screen_pt.y = static_cast<int>(packed >> 16);
         ClientToScreen(main_window_handle(), &screen_pt);
         this->mouse_screen_x = screen_pt.x;    /* +0x94 */
         this->mouse_screen_y = screen_pt.y;    /* +0x98 */
@@ -1260,8 +1260,8 @@ int Game::IsScreensaverActive()
         HWND under = WindowFromPoint(screen_pt);
         if (under == main_window_handle() || this->visible == 0) {
             int32_t wx = 0, wy = 0;
-            this->ScreenToWorld(&wx, (int)(packed & 0xFFFF),
-                                (int)(packed >> 16));
+            this->ScreenToWorld(&wx, static_cast<int>(packed & 0xFFFF),
+                                static_cast<int>(packed >> 16));
 
             bool moved = (wx != this->mouse_world_x) ||
                          (wy != this->mouse_world_y);
@@ -1358,16 +1358,16 @@ void Game::ScreenToWorld(int32_t* out_xy, int screen_x, int screen_y)
     uint32_t x = static_cast<uint32_t>(screen_x + g_viewport_x);
     uint32_t y = static_cast<uint32_t>(screen_y + g_viewport_y);
 
-    if ((int32_t)x < 0) {
+    if (static_cast<int32_t>(x) < 0) {
         x = 0;
     }
-    if ((g_player_id + 1) * 0x10 <= (int32_t)x) {
+    if ((g_player_id + 1) * 0x10 <= static_cast<int32_t>(x)) {
         x = static_cast<uint32_t>(g_player_id * 0x10 + 0xF);
     }
-    if ((int32_t)y < 0) {
+    if (static_cast<int32_t>(y) < 0) {
         y = 0;
     }
-    if ((g_player_color + 1) * 0x10 <= (int32_t)y) {
+    if ((g_player_color + 1) * 0x10 <= static_cast<int32_t>(y)) {
         y = static_cast<uint32_t>(g_player_color * 0x10 + 0xF);
     }
 
@@ -1376,15 +1376,15 @@ void Game::ScreenToWorld(int32_t* out_xy, int screen_x, int screen_y)
         /* Clamp to the resource play area. */
         uint32_t w = static_cast<uint32_t>(g_world_width) -
                      to_resdata(parent)->frame_width;
-        if ((int32_t)w < (int32_t)x) {
+        if (static_cast<int32_t>(w) < static_cast<int32_t>(x)) {
             x = w;
         }
-        if ((int32_t)y < resource_low_y(parent)) {
+        if (static_cast<int32_t>(y) < resource_low_y(parent)) {
             y = resource_low_y(parent);
         }
         uint32_t h = static_cast<uint32_t>(g_world_height) -
                      resource_play_rows(parent) * 0x10;
-        if ((int32_t)h < (int32_t)y) {
+        if (static_cast<int32_t>(h) < static_cast<int32_t>(y)) {
             y = h;
         }
         /* Snap to the 16px grid when the scripted object does not claim
