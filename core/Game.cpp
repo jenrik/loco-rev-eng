@@ -114,8 +114,23 @@ extern int32_t  g_town_overlay_threshold;   /* 0x004AA744 */
 extern uint8_t  g_has_town_overlay;         /* 0x004AA7B8 */
 extern uint8_t  g_has_second_overlay;       /* 0x004AA8A0 */
 
-/* DDRAW drag-rect hit-test object (embedded at its global) */
-extern uint8_t  g_ddraw_drag_rect[];        /* 0x004A9FD0 */
+/* DDRAW drag-rect hit-test object — 0x004A9FD0. Ghidra's only xref to
+ * this address in the whole binary is Game_UpdateInputState's own read
+ * (0x411B4C, a direct — not vtable — call into GameObject_PtInRect);
+ * nothing else in the binary ever writes or constructs it, so its
+ * zero-initialized BSS storage always yields an empty screen_rect and
+ * bounds_hit() is a permanent no-op there in retail. This was declared
+ * `extern uint8_t[]` with no defining translation unit anywhere in the
+ * tree — a link-time dangling reference (permitted to link by
+ * -Wl,--unresolved-symbols=ignore-all, meson.build's tracked LINK-001)
+ * resolving to a null GOT slot, so the first real UpdateInputState call
+ * dereferenced null and crashed (BUG-mode-3-render-freeze.md: this was
+ * unreachable — and thus undiscovered — until the fix in this same
+ * commit made mode-3 mouse input reach Game for the first time). A
+ * default-constructed GameObject reproduces the always-zero screen_rect
+ * (GameObject::GameObject(), 0x4369D0, zeroes it) and gives PtInRect's
+ * virtual dispatch a real vtable instead of a null `this`. */
+static GameObject g_ddraw_drag_rect_obj;
 
 /* Byte flags read by the cursor engine (names unconfirmed) */
 extern uint8_t  g_mouse_capture;      /* 0x004855AE — byte flag cleared by
@@ -649,8 +664,8 @@ void Game::UpdateInputState()
     if (g_scripted_object->GetDragOffset(this->mouse_world_x,
                                         this->mouse_world_y) == 0) {
     if (g_ddraw_active != 0) {
-            if (bounds_hit(g_ddraw_drag_rect, this->mouse_world_x,
-                           this->mouse_world_y)) {
+            if (bounds_hit(reinterpret_cast<uint8_t*>(&g_ddraw_drag_rect_obj),
+                           this->mouse_world_x, this->mouse_world_y)) {
                 goto play_action;
             }
         }
