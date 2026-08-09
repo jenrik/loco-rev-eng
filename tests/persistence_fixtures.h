@@ -234,9 +234,22 @@ void* TileMap::FindNearestObject(unsigned short, int, int, int)
  * instance is a safe stand-in because every fixture method above never
  * touches `this`.  g_fixture_netman is pre-set to m_gameMode == 2 so
  * INPUT_LoadWorld's scenario-2 block runs. */
-TileMap::TileMap() { std::memset(static_cast<void*>(this), 0, sizeof(TileMap)); }
+TileMap::TileMap()
+    : width(0), height(0), viewport_rect{}, viewport_x(0), viewport_y(0),
+      center_x(0), center_y(0), viewport_center_x(0), viewport_center_y(0),
+      drag_start_x(0), drag_start_y(0), scroll_drag_active(0), _pad_3D(0),
+      tile_count_x(0), tile_count_y(0), occupancy_bitmap(nullptr),
+      asset_load_ptr(nullptr), asset_enum_ptr(nullptr), update_complete(0),
+      surface_locked(0)
+{ std::memset(static_cast<void*>(this), 0, sizeof(TileMap)); }
 TileMap::~TileMap() {}
 Netman::Netman()
+    : m_bInit(0), m_playerSlotCount(0), m_playerRows(0), m_playerCols(0),
+      m_gameMode(0), m_bFlag1(0), m_currentSlot(nullptr), m_mySlotIndex(0),
+      m_myDpId(0), m_field_7D8(0), m_buildingList(nullptr),
+      m_vehicleList(nullptr), m_field_7E4(0), m_hostLastSerializedVehicle(nullptr),
+      m_field_7E8(0), m_tickCounter(0), m_timeout(0), m_sendTimer(0),
+      m_visibility(0), m_tickInterval(0), m_timeoutState(0)
 {
     std::memset(static_cast<void*>(this), 0, sizeof(Netman));
     m_gameMode = 2;   /* scenario 2 — joined game */
@@ -328,6 +341,7 @@ Building* BuildingMgr::CreateFromResource(int, int, int, int)
 /* PlaySound (0x447930): the persistence path only plays 0x5026 (new-game
  * jingle).  Record the call so tests can assert INPUT_NewWorld fired it. */
 int  g_last_play_sound_id = 0;
+void PlaySound(int id);
 void PlaySound(int id)
 { g_last_play_sound_id = id; }
 
@@ -338,6 +352,7 @@ LOUD_FIXTURE(UI_CleanupTooltips)
 LOUD_FIXTURE(UI_HideTooltip)
 void UI_CleanupTooltips(void*)
 { fixture_reached_UI_CleanupTooltips(); }
+void UI_HideTooltip(void*);
 void UI_HideTooltip(void*)
 { fixture_reached_UI_HideTooltip(); }
 
@@ -350,6 +365,7 @@ unsigned int GetResourceType(unsigned int id)
     uint8_t type_byte = static_cast<uint8_t>(raw);
     return (type_byte < 0x10) ? static_cast<unsigned int>(type_byte) : 0;
 }
+unsigned int GetResourceType(int id);
 unsigned int GetResourceType(int id)
 {
     return GetResourceType(static_cast<unsigned int>(id));
@@ -365,6 +381,7 @@ uint8_t __fastcall RESDATA_IsBuildingTile(int32_t)
 { fixture_reached_RESDATA_IsBuildingTile(); return 0; }
 int RESDATA_IsRoadTile(int)
 { fixture_reached_RESDATA_IsRoadTile(); return 0; }
+int RESDATA_IsRoadTile(void*);
 int RESDATA_IsRoadTile(void*)
 { fixture_reached_RESDATA_IsRoadTile(); return 0; }
 
@@ -380,11 +397,13 @@ int RESDATA_IsRoadTile(void*)
  * never constructs a Building). */
 struct AssetMgr;
 LOUD_FIXTURE(AssetMgr_ReadPairValue)
+uint8_t AssetMgr_ReadPairValue(AssetMgr*, uint32_t, uint32_t);
 uint8_t AssetMgr_ReadPairValue(AssetMgr*, uint32_t, uint32_t)
 { fixture_reached_AssetMgr_ReadPairValue(); return 0xFF; }
 
 /* Host resource bridge: no resources are loaded in the persistence
  * tests, so GetById returns nullptr (a fresh host manager). */
+void* ResourceManager_GetById(void*, int);
 void* ResourceManager_GetById(void*, int) { return nullptr; }
 void* ResourceManager_GetById(void*, unsigned int) { return nullptr; }
 
@@ -408,6 +427,7 @@ extern "C" int32_t CRT_rand_c_symbol(void) { return crt_rand_impl(); }
 /* CRT_wcsstr (0x471480) — byte-wise substring search (the name is a
  * legacy misnomer; Building.cpp and UIPANEL_Draw.cpp use it on bytes).
  * The decompiled TUs declare it in extern "C" blocks. */
+extern "C" const wchar_t* CRT_wcsstr(const wchar_t* a, const wchar_t* b);
 extern "C" const wchar_t* CRT_wcsstr(const wchar_t* a, const wchar_t* b)
 {
     if (a == nullptr || b == nullptr || *b == L'\0') return a;
@@ -437,8 +457,10 @@ LOUD_FIXTURE(LoadStringA)
 LOUD_FIXTURE(TileMap_InvalidateRect)
 LOUD_FIXTURE(strncpy_crt)
 extern "C" {
+void SetRect(void*, int, int, int, int);
 void SetRect(void*, int, int, int, int)
 { fixture_reached_SetRect(); }
+void SetRectEmpty(void*);
 void SetRectEmpty(void*)
 { fixture_reached_SetRectEmpty(); }
 /* OffsetRect is declared by Netman.h's Win32 block as
@@ -447,6 +469,7 @@ void SetRectEmpty(void*)
  * overloaded). */
 int32_t __stdcall OffsetRect(RECT*, int32_t, int32_t)
 { fixture_reached_OffsetRect(); return 0; }
+int IsRectEmpty(const void*);
 int IsRectEmpty(const void*)
 { fixture_reached_IsRectEmpty(); return 1; }
 /* Must match world/tilemap.h's extern "C" declaration exactly
@@ -454,18 +477,23 @@ int IsRectEmpty(const void*)
  * overloaded, and this fixture is linked alongside tilemap.h's callers. */
 int IntersectRect(RECT*, const RECT*, const RECT*)
 { fixture_reached_IntersectRect(); return 0; }
+int IsCharAlphaNumericA(char);
 int IsCharAlphaNumericA(char)
 { fixture_reached_IsCharAlphaNumericA(); return 0; }
+int LoadStringA(void*, unsigned int, char*, int);
 int LoadStringA(void*, unsigned int, char*, int)
 { fixture_reached_LoadStringA(); return 0; }
+void TileMap_InvalidateRect(void*, int, int, int, int);
 void TileMap_InvalidateRect(void*, int, int, int, int)
 { fixture_reached_TileMap_InvalidateRect(); }
 /* MSVC CRT _strncpy referenced by GameObject.cpp (C linkage). */
+char* _strncpy(char* dst, const char* src, size_t n);
 char* _strncpy(char* dst, const char* src, size_t n)
 { (void)src; (void)n; fixture_reached_strncpy_crt(); return dst; }
 }
 
 /* Function-pointer globals the Building cone uses (real trivial impls). */
+int g_OffsetRect_impl(void* r, int dx, int dy);
 int g_OffsetRect_impl(void* r, int dx, int dy)
 {
     char* b = static_cast<char*>(r);
@@ -473,6 +501,7 @@ int g_OffsetRect_impl(void* r, int dx, int dy)
     v[0] += dx; v[1] += dy; v[2] += dx; v[3] += dy;
     return 1;
 }
+int g_IsRectEmpty_impl(const void* r);
 int g_IsRectEmpty_impl(const void* r)
 {
     const int* v = static_cast<const int*>(r);
@@ -503,10 +532,14 @@ LOUD_FIXTURE(CGWND_AudioChannel_Stop)
 LOUD_FIXTURE(CGWND_AudioChannel_Release)
 LOUD_FIXTURE(CGWND_AudioChannel_UpdatePosition)
 LOUD_FIXTURE(RESMGR_ReleaseSoundResource)
+void GameObject_DtorBody(void*);
 void GameObject_DtorBody(void*) { fixture_reached_GameObject_DtorBody(); }
+void GameObject_Update(void*);
 void GameObject_Update(void*) { fixture_reached_GameObject_Update(); }
+void GameObject_StopSound(void*, int);
 void GameObject_StopSound(void*, int) { fixture_reached_GameObject_StopSound(); }
 int Game_CheckTimeInRange(int*, int*, int*) { fixture_reached_Game_CheckTimeInRange(); return 0; }
+void Game_SelectGameObject(void*, void*);
 void Game_SelectGameObject(void*, void*) { fixture_reached_Game_SelectGameObject(); }
 /* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
  * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t). Was a
@@ -517,29 +550,46 @@ void Game_SelectGameObject(void*, void*) { fixture_reached_Game_SelectGameObject
 bool UIPANEL_Blit(void*, uint32_t, uint32_t, int32_t, uint32_t, void*, uint32_t, uint32_t, int32_t, uint32_t, uint32_t)
 { fixture_reached_UIPANEL_Blit(); return false; }
 int Math_DistSquared(int, int, int, int) { fixture_reached_Math_DistSquared(); return 0; }
+int Math_PointOnLineSegment(int, int, int, int, int, int);
 int Math_PointOnLineSegment(int, int, int, int, int, int)
 { fixture_reached_Math_PointOnLineSegment(); return 0; }
+tm* CRT_localtime(unsigned int*);
 tm* CRT_localtime(unsigned int*) { fixture_reached_CRT_localtime(); return nullptr; }
+tm* CRT_localtime(const long*);
 tm* CRT_localtime(const long*) { fixture_reached_CRT_localtime(); return nullptr; }
+void* TileMap_GetObjectAt(TileMap*, int, int, int);
 void* TileMap_GetObjectAt(TileMap*, int, int, int)
 { fixture_reached_TileMap_GetObjectAt(); return nullptr; }
+int TileMap_FindTileByType(void*, int, int, int, int);
 int TileMap_FindTileByType(void*, int, int, int, int)
 { fixture_reached_TileMap_FindTileByType(); return 0; }
+void World_DeserializeMap(void*, int);
 void World_DeserializeMap(void*, int) { fixture_reached_World_DeserializeMap(); }
+unsigned int AssetMgr_ReadPairValue(void*, unsigned int, unsigned int);
 unsigned int AssetMgr_ReadPairValue(void*, unsigned int, unsigned int)
 { fixture_reached_AssetMgr_ReadPairValue(); return 0; }
+int Building_CheckPlacement(Building*, int, int);
 int Building_CheckPlacement(Building*, int, int)
 { fixture_reached_Building_CheckPlacement(); return 0; }
+void Vehicle_SetState(void*, int);
 void Vehicle_SetState(void*, int) { fixture_reached_Vehicle_SetState_free(); }
+void Vehicle_LoadSounds(void*, int*, char);
 void Vehicle_LoadSounds(void*, int*, char) { fixture_reached_Vehicle_LoadSounds(); }
+int Vehicle_GetOccupantCount(void*);
 int Vehicle_GetOccupantCount(void*) { fixture_reached_Vehicle_GetOccupantCount(); return 0; }
+int GameAudio_AllocChannel(void*, int, void**, int, int, int, int);
 int GameAudio_AllocChannel(void*, int, void**, int, int, int, int)
 { fixture_reached_GameAudio_AllocChannel(); return 0; }
+void CGWND_AudioChannel_Play(void*);
 void CGWND_AudioChannel_Play(void*) { fixture_reached_CGWND_AudioChannel_Play(); }
+void CGWND_AudioChannel_Stop(void*);
 void CGWND_AudioChannel_Stop(void*) { fixture_reached_CGWND_AudioChannel_Stop(); }
+void CGWND_AudioChannel_Release(void*);
 void CGWND_AudioChannel_Release(void*) { fixture_reached_CGWND_AudioChannel_Release(); }
+void CGWND_AudioChannel_UpdatePosition(void*, int, int);
 void CGWND_AudioChannel_UpdatePosition(void*, int, int)
 { fixture_reached_CGWND_AudioChannel_UpdatePosition(); }
+void RESMGR_ReleaseSoundResource(void*);
 void RESMGR_ReleaseSoundResource(void*) { fixture_reached_RESMGR_ReleaseSoundResource(); }
 
 /* ---- Temp-dir helpers ---- */
