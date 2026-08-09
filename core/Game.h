@@ -120,7 +120,11 @@ public:
     int32_t    mouse_drag_world_y;      /* +0xE0  world Y from drag conversion */
     uint8_t    mouse_drag_mode;         /* +0xE4  1=currently in drag/resize operation */
     uint8_t    mouse_drag_handled;      /* +0xE5  1=drag already processed this frame */
-    uint8_t    click_on_selected;       /* +0xE6  1=re-clicked on already-selected object */
+    uint8_t    click_on_selected;       /* +0xE6  1=left button currently held down;
+                                            set 1 by WM_LBUTTONDOWN/DBLCLK (0x462387),
+                                            cleared by WM_LBUTTONUP (0x4623B2) — despite
+                                            the name, MainWndProc doesn't gate this on
+                                            hitting the selected object, just button state */
     uint8_t    _pad_E7;                 /* +0xE7 */
 
     /* ---- Selection state (+0xE8..+0xEF) ---- */

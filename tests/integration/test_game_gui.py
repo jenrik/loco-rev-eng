@@ -133,6 +133,49 @@ def test_singleplayer_accept_reaches_mode3_without_crashing(game):
     game.screenshot("singleplayer-mode3-stable")
 
 
+def test_singleplayer_mode3_mouse_input_reaches_game(game):
+    """Regression for BUG-mode-3-render-freeze.md: PumpMessages_SDL3 only
+    forwarded SDL input while active_host_menu() was non-null (mode 2), so
+    every mouse event was silently dropped once Accept transitioned to mode
+    3 — Game::Update()'s has_event gate (core/Game.cpp:427) never went true
+    and the screen looked frozen forever. CGWND_sdl3.cpp now translates SDL
+    mouse motion/click/release into Game's input fields for modes 3/9,
+    mirroring MainWndProc's (0x4618C0) WM_MOUSEMOVE/WM_LBUTTONDOWN/
+    WM_LBUTTONUP/WM_RBUTTONDOWN/WM_RBUTTONUP dispatch. Assert the
+    town_input_dispatched host_test event fires for a move, with the
+    packed position it decoded matching the logical coordinate moved to
+    (within display/canvas round-trip rounding) — not just that some
+    dispatch happened, but that host_pack_game_lparam's projection is
+    correct, the only genuinely new coordinate-math logic in the fix.
+
+    Deliberately does NOT click or otherwise assert the game survives past
+    this point: any mode-3 input now reaches the long-dormant
+    Game::UpdateInputState()/RESDATA_ScriptedObject::IsDragging() path for
+    the first time ever, which has its own, separate, pre-existing crash
+    (BUG-mode3-input-processing-crashes.md) — the wiring bug this test
+    guards is fixed independent of that follow-up."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    game.click_logical(600, 550, "select single player")
+    game.click_logical(600, 720, "player-name field")
+    game.clear_text()
+    game.type_text("test")
+    game.click_logical(925, 700, "main-menu accept/ok")
+    game.wait_for_event("mode_changed", new_mode=3, timeout=10)
+    time.sleep(1)
+
+    before = latest_sequence(game)
+    game.move_logical(400, 300, "town view hover")
+    move_event = game.wait_for_event(
+        "town_input_dispatched", after_sequence=before, kind="mouse_move"
+    )
+    assert move_event["game_mode"] == 3
+    # Display/canvas round-trip (logical -> display px -> canvas px) can be
+    # off by rounding; a couple of pixels is noise, a wrong axis or a
+    # broken scale factor is not.
+    assert abs(move_event["x"] - 400) <= 2, move_event
+    assert abs(move_event["y"] - 300) <= 2, move_event
+
+
 @pytest.mark.parametrize(
     "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
 )

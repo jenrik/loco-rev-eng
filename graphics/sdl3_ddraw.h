@@ -124,6 +124,16 @@ bool SDL3_PresentPrimarySurface();
 bool SDL3_DisplayToPrimaryCanvas(float display_x, float display_y,
                                  float* canvas_x, float* canvas_y);
 
+/** Same projection as SDL3_DisplayToPrimaryCanvas, but clamps into the
+ * canvas instead of rejecting letterbox/pillarbox margins — for host
+ * input paths (e.g. mode-3/9 WM_LBUTTONUP/WM_RBUTTONUP translation,
+ * core/CGWND_sdl3.cpp) whose original writes are unconditional and would
+ * receive an out-of-client-rect lParam under real Win32 mouse capture
+ * rather than have the message dropped. Returns false only when
+ * canvas/window setup is unavailable (same as the strict variant). */
+bool SDL3_DisplayToPrimaryCanvasClamped(float display_x, float display_y,
+                                        float* canvas_x, float* canvas_y);
+
 /** Clear the SDL primary render target to an XRGB color. */
 bool SDL3_ClearPrimarySurface(uint32_t xrgb);
 

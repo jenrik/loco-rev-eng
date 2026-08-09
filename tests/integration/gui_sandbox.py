@@ -226,6 +226,23 @@ class GameSession:
         )
         self.assert_alive(f"click {label}")
 
+    def move_logical(self, x: float, y: float, label: str) -> None:
+        # See click_logical: refresh geometry every action rather than
+        # trusting the launch-time tree snapshot.
+        self.content_rect = self._query_content_rect()
+        assert self.tag is not None
+        display_x, display_y = self._logical_to_display(
+            x, y, *self.content_rect
+        )
+        self._record(
+            "move", label=label, logical=[x, y], display=[display_x, display_y],
+            content_rect=self.content_rect
+        )
+        self._run(
+            ["gui-sandbox", "move", self.tag, str(display_x), str(display_y)]
+        )
+        self.assert_alive(f"move {label}")
+
     def type_text(self, text: str) -> None:
         assert self.tag is not None
         self._record("type", byte_count=len(text.encode("utf-8")))

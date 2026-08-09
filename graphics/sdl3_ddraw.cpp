@@ -10,6 +10,7 @@
 
 #include "sdl3_ddraw.h"
 #include "sdl3_window.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -594,6 +595,40 @@ bool SDL3_DisplayToPrimaryCanvas(float display_x, float display_y,
 
     *canvas_x = (output_x - destination.x) * SDL3_PRIMARY_CANVAS_WIDTH / destination.w;
     *canvas_y = (output_y - destination.y) * SDL3_PRIMARY_CANVAS_HEIGHT / destination.h;
+    return true;
+}
+
+bool SDL3_DisplayToPrimaryCanvasClamped(float display_x, float display_y,
+                                        float* canvas_x, float* canvas_y)
+{
+    if (!canvas_x || !canvas_y || !SDL3_EnsurePrimarySurface()) return false;
+
+    SDL_FRect destination{};
+    int output_width = 0;
+    int output_height = 0;
+    if (!primary_presentation_rect(g_sdl_ddraw->renderer, &destination,
+                                   &output_width, &output_height)) return false;
+
+    int window_width = 0;
+    int window_height = 0;
+    if (!SDL_GetWindowSize(g_sdl_ddraw->window, &window_width, &window_height) ||
+        window_width <= 0 || window_height <= 0) return false;
+    const float output_x = display_x * output_width / window_width;
+    const float output_y = display_y * output_height / window_height;
+
+    // Unlike SDL3_DisplayToPrimaryCanvas, never reject: MainWndProc's
+    // WM_LBUTTONUP/WM_RBUTTONUP handlers (0x4623A7/0x462404) write
+    // unconditionally, and Windows would happily deliver an out-of-client-
+    // rect lParam under mouse capture. Clamp into the letterboxed canvas
+    // instead of dropping the release, matching that unconditional write
+    // as closely as a host without real capture/grab semantics can.
+    const float clamped_output_x =
+        std::clamp(output_x, destination.x, destination.x + destination.w - 1.0f);
+    const float clamped_output_y =
+        std::clamp(output_y, destination.y, destination.y + destination.h - 1.0f);
+
+    *canvas_x = (clamped_output_x - destination.x) * SDL3_PRIMARY_CANVAS_WIDTH / destination.w;
+    *canvas_y = (clamped_output_y - destination.y) * SDL3_PRIMARY_CANVAS_HEIGHT / destination.h;
     return true;
 }
 

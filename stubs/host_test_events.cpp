@@ -159,6 +159,12 @@ public:
               multiplayer ? "true" : "false");
     }
 
+    void town_input_dispatched(const char* kind, int game_mode, int x, int y)
+    {
+        write("town_input_dispatched",
+              ",\"kind\":\"%s\",\"game_mode\":%d,\"x\":%d,\"y\":%d",
+              kind ? kind : "", game_mode, x, y);
+    }
     void intro_video_started(int index, const char* path)
     {
         write("intro_video_started", ",\"index\":%d,\"path\":\"%s\"", index, path ? path : "");
@@ -294,6 +300,9 @@ void emit_intro_video_finished(int index, bool skipped) { sink().intro_video_fin
 void emit_intro_video_failed(int index, const char* message) { sink().intro_video_failed(index, message); }
 void emit_intro_sequence_complete() { sink().event("intro_sequence_complete"); }
 void emit_clean_shutdown() { sink().event("clean_shutdown"); }
+void emit_town_input_dispatched(const char* kind, int game_mode, int x, int y) {
+    sink().town_input_dispatched(kind, game_mode, x, y);
+}
 
 }  // namespace loco::host_test
 

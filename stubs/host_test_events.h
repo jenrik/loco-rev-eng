@@ -53,6 +53,14 @@ void emit_intro_video_finished(int index, bool skipped);
 void emit_intro_video_failed(int index, const char* message);
 void emit_intro_sequence_complete();
 void emit_clean_shutdown();
+// Passive record that an SDL input event was translated into Game's (0x4854C8)
+// per-frame input fields — see CGWND_sdl3.cpp's mode-3/9 input dispatch.
+// kind is one of "mouse_move", "left_click", "left_release", "right_click",
+// "right_release". x/y are the unpacked primary-canvas pixel coordinates
+// written into the corresponding *_screen_pos field (or packed_mouse_pos),
+// so callers can assert the actual projected position, not just that some
+// dispatch happened.
+void emit_town_input_dispatched(const char* kind, int game_mode, int x, int y);
 
 }  // namespace loco::host_test
 
