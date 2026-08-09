@@ -602,16 +602,19 @@ void UI_Manager::resetTooltips(int param)
 /* previously omitted; every caller passes literal 1 for it and the      */
 /* body never reads it. */
 /* ================================================================== */
+void UI_SetTooltipText(int x, int y, int w, int h);
 void UI_SetTooltipText(int x, int y, int w, int h)
 {
     static_cast<UI_Manager*>(g_tooltip_mgr)->setTooltipText(x, y, w, h, 1);
 }
 
+void UI_SetTooltipPos(int x, int y, int w, int h, int flag);
 void UI_SetTooltipPos(int x, int y, int w, int h, int flag)
 {
     static_cast<UI_Manager*>(g_tooltip_mgr)->setTooltipPos(x, y, w, h, flag);
 }
 
+void UI_UpdateTooltip(int x, int y, int w, int h, int flag);
 void UI_UpdateTooltip(int x, int y, int w, int h, int flag)
 {
     static_cast<UI_Manager*>(g_tooltip_mgr)->updateTooltip(x, y, w, h, flag);

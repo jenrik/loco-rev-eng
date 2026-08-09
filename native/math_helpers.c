@@ -31,6 +31,8 @@
 /* @return    (x1-x2)^2 + (y1-y2)^2 as int32                           */
 /* ================================================================== */
 int32_t __cdecl Math_DistSquared(int32_t x1, int32_t y1,
+                                 int32_t x2, int32_t y2);
+int32_t __cdecl Math_DistSquared(int32_t x1, int32_t y1,
                                  int32_t x2, int32_t y2)
 {
     int32_t dx = x1 - x2;
@@ -58,6 +60,10 @@ int32_t __cdecl Math_DistSquared(int32_t x1, int32_t y1,
 /* @param y2  Segment end Y                                            */
 /* @return    1 if point lies on the segment, 0 otherwise              */
 /* ================================================================== */
+uint8_t __cdecl Math_PointOnLineSegment(
+    int32_t px, int32_t py,
+    int32_t x1, int32_t y1,
+    int32_t x2, int32_t y2);
 uint8_t __cdecl Math_PointOnLineSegment(
     int32_t px, int32_t py,
     int32_t x1, int32_t y1,

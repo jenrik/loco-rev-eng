@@ -34,6 +34,11 @@ static_assert(offsetof(LegacyFindData, filename) == 0x2C,
 /** DPLAY_ReceiveMessage — remove non-dot files matching a PostBag wildcard.
  *  Address: 0x443550 */
 #ifdef _WIN32
+void __stdcall DPLAY_ReceiveMessage(const char* wildcard_path);
+#else
+void DPLAY_ReceiveMessage(const char* wildcard_path);
+#endif
+#ifdef _WIN32
 void __stdcall DPLAY_ReceiveMessage(const char* wildcard_path)
 #else
 void DPLAY_ReceiveMessage(const char* wildcard_path)
@@ -86,6 +91,7 @@ void DPLAY_ReceiveMessage(const char* wildcard_path)
 
 /** DPLAY_SendMessages — clean four transient PostBag directories.
  *  Address: 0x443470 */
+void DPLAY_SendMessages();
 void DPLAY_SendMessages()
 {
 #ifdef _WIN32

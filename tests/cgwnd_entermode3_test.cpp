@@ -37,11 +37,17 @@
 #include <cstdint>
 
 extern "C" {
+uint32_t GetFileVersionInfoSizeA(const char*, uint32_t*);
 uint32_t GetFileVersionInfoSizeA(const char*, uint32_t*) { return 0; }
+int GetFileVersionInfoA(const char*, uint32_t, uint32_t, void*);
 int GetFileVersionInfoA(const char*, uint32_t, uint32_t, void*) { return 0; }
+int VerQueryValueA(void*, const char*, void**, uint32_t*);
 int VerQueryValueA(void*, const char*, void**, uint32_t*) { return 0; }
+char* lstrcpyA(char* dst, const char* src);
 char* lstrcpyA(char* dst, const char* src) { return dst && src ? strcpy(dst, src) : dst; }
+char* lstrcatA(char* dst, const char* src);
 char* lstrcatA(char* dst, const char* src) { return dst && src ? strcat(dst, src) : dst; }
+int lstrlenA(const char* s);
 int lstrlenA(const char* s) { return s ? (int)strlen(s) : 0; }
 }
 

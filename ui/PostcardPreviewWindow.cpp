@@ -75,6 +75,7 @@ extern int     g_viewport_rect_bottom;/* 0x4AAD20 — Viewport bottom */
  * (Win32 API declaration conflicts), so the field is read by its
  * canonical offset; 0=waiting, 1=hosting, 2=joined, 3=error.
  */
+int32_t netman_m_game_mode();
 int32_t netman_m_game_mode()
 {
     return *reinterpret_cast<const int32_t*>(

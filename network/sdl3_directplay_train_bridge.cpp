@@ -10,18 +10,21 @@
 
 #ifndef _WIN32
 
+void* DirectPlay_CreatePeer(void* peer, int /*context_a*/, int /*context_b*/);
 void* DirectPlay_CreatePeer(void* peer, int /*context_a*/, int /*context_b*/)
 {
     // Address: 0x45E490. The host has no DirectPlayAddress COM object.
     return peer;
 }
 
+void* DirectPlay_EnumConnections(void* /*peer*/);
 void* DirectPlay_EnumConnections(void* /*peer*/)
 {
     // Address: 0x45EAB0. No DirectPlay transports are available on SDL.
     return nullptr;
 }
 
+int DirectPlay_QueryConnection(const char* /*index*/);
 int DirectPlay_QueryConnection(const char* /*index*/)
 {
     // Address: 0x45EE60. Provider capability is false when no provider exists.

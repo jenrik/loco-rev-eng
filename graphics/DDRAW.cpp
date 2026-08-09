@@ -564,6 +564,7 @@ uint8_t DDRAW_Building::SelectBuilding(Building* entity)
 /* loudly rather than truncated into a bad pointer.                     */
 /* ================================================================== */
 
+int DDRAW_SelectBuilding(void* ddraw_building, int building);
 int DDRAW_SelectBuilding(void* ddraw_building, int building)
 {
     if (building == 0) {
@@ -1251,6 +1252,7 @@ void DDRAW_Building::UpdateBuilding()
 /* g_ddraw_building is already typed DDRAW_Building* above, unlike the  */
 /* other globals this sweep touched. */
 /* ================================================================== */
+void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag);
 void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag)
 {
     g_ddraw_building->DispatchToSubObjects(x, y, w, h, flag);

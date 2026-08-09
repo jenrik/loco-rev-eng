@@ -1363,11 +1363,13 @@ void RESDATA_ScriptedObject_Dispatch(int x, int y, int w, int h, int flag)
 /* BuildingCollectionLock use; this pair is only for a real, full-sized */
 /* standalone ScriptEngine object. */
 /* ================================================================== */
+size_t ScriptEngine_HostSize();
 size_t ScriptEngine_HostSize()
 {
     return sizeof(ScriptEngine);
 }
 
+void* ScriptEngine_HostConstruct(void* mem);
 void* ScriptEngine_HostConstruct(void* mem)
 {
     return new (mem) ScriptEngine();

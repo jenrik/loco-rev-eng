@@ -377,6 +377,8 @@ void BuildingMgr::HandleClick(const BuildingClickCommand* command, int left,
 extern void* g_building_mgr; /* 0x485448 */
 
 void BuildingMgr_DispatchAll(int dispatch_flags, int left, int top,
+                             int right, int bottom);
+void BuildingMgr_DispatchAll(int dispatch_flags, int left, int top,
                              int right, int bottom)
 {
     static_cast<BuildingMgr*>(g_building_mgr)->DispatchAll(dispatch_flags, left,

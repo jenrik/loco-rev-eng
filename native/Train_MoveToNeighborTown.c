@@ -62,6 +62,7 @@ extern void CRT_free_pattern(void* dst, int size, int count, void* dtor_f);
 extern byte _TrainMessageTemplate_CarSlot;  /* 0x43B230 */
 
 int __thiscall
+Train_MoveToNeighborTown(void* train, int player, void* car_node, int direction);
 Train_MoveToNeighborTown(void* train, int player, void* car_node, int direction)
 {
     /* NOTE: Full decompiled implementation is in the legacy C decompilation

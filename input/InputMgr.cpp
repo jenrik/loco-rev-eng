@@ -1711,6 +1711,7 @@ void INPUT_SetMouse(void* self)      /* 0x41F970 — egg record / season date */
     input_events_deferred("INPUT_SetMouse", 0x41F970);
 }
 
+void INPUT_SwitchToLocomotiveTab(void* self, int tab) /* 0x41A210 — Cursor tab-switch */;
 void INPUT_SwitchToLocomotiveTab(void* self, int tab) /* 0x41A210 — Cursor tab-switch */
 {
     (void)self;

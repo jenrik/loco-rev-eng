@@ -1146,6 +1146,8 @@ render:
 /* Address: 0x401280                                                   */
 /* ================================================================== */
 void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2],
+                               uint8_t use_color_key);
+void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2],
                                uint8_t use_color_key)
 {
     BOOL result;

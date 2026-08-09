@@ -41,11 +41,13 @@ HostDdrawBuildingStorage s_ddraw_building_storage;
 namespace loco {
 namespace host {
 
+bool Mode3FrameDependenciesReady();
 bool Mode3FrameDependenciesReady()
 {
     return g_town_view != nullptr && g_ddraw_building != nullptr;
 }
 
+void BootstrapTownMode3Objects();
 void BootstrapTownMode3Objects()
 {
     /* This is the required host-only mode-3 frame dependency boundary.
@@ -68,6 +70,7 @@ void BootstrapTownMode3Objects()
 /* Address: 0x42D1A0                                                   */
 /* ================================================================== */
 
+void Town_TrackBuilding(void* self_ptr);
 void Town_TrackBuilding(void* self_ptr)
 {
     uint8_t* bytes = static_cast<uint8_t*>(self_ptr);
@@ -146,6 +149,7 @@ extern int   g_cursor_world_x, g_cursor_world_y;
 extern void* g_audio_mgr;
 extern uint32_t g_game_time;
 
+void DDRAW_UpdateBuilding(void* self_ptr);
 void DDRAW_UpdateBuilding(void* self_ptr)
 {
     uint8_t* bytes = static_cast<uint8_t*>(self_ptr);

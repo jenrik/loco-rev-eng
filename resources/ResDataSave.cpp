@@ -362,6 +362,7 @@ size_t host_stream_bytes_remaining(void* stream)
  * writes in place.  Declared in PersistenceAdapter.h. */
 namespace loco {
 namespace host {
+bool host_save_commit(RESDATA* resdata);
 bool host_save_commit(RESDATA* resdata)
 {
     if (resdata == nullptr || resdata->secondary_stream == nullptr) {

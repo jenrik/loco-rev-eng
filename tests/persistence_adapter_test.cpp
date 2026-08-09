@@ -36,7 +36,9 @@ static void fixture_reached_INPUT_NewWorld(void)
 static void fixture_reached_INPUT_SaveCurrentWorld(void)
 { std::fprintf(stderr, "FAIL: INPUT_SaveCurrentWorld reached in adapter test\n"); std::abort(); }
 class InputMgr;
+void INPUT_NewWorld(InputMgr*);
 void INPUT_NewWorld(InputMgr*) { fixture_reached_INPUT_NewWorld(); }
+void INPUT_SaveCurrentWorld(InputMgr*, const char*);
 void INPUT_SaveCurrentWorld(InputMgr*, const char*) { fixture_reached_INPUT_SaveCurrentWorld(); }
 
 static int failures = 0;

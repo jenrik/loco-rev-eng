@@ -46,6 +46,7 @@ extern const char g_thumbpal_bmp_name[];  /* "2__smisc_thumbpal_bmp" at 0x4A99C8
 /*                                                                     */
 /* @return  1 if surface was created successfully, 0 on failure        */
 /* ================================================================== */
+uint32_t __cdecl DDRAW_Init(void);
 uint32_t __cdecl DDRAW_Init(void)
 {
     void* surface_mem = operator_new(0x20);

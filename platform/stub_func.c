@@ -13,6 +13,7 @@ __attribute__((constructor)) static void early_init(void) {
     setvbuf(stderr, NULL, _IONBF, 0);
 }
 
+extern "C" void __attribute__((used)) stub_crash_handler(void);
 extern "C" void __attribute__((used)) stub_crash_handler(void) {
     void* retaddr = __builtin_return_address(0);
     Dl_info info;

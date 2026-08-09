@@ -71,6 +71,7 @@ namespace host {
 /* first (TileMap::FullReset calls Game_DeselectGameObject), then World, */
 /* BuildingMgr, ScriptedObject, TileMap (+Init), GameAudio.             */
 /* ================================================================== */
+void BootstrapMode3Core();
 void BootstrapMode3Core()
 {
     /* g_input_mgr is a typed static object (InputMgr g_input_mgr; —
@@ -211,8 +212,10 @@ void BootstrapMode3Core()
 static void*    s_pending_callback = nullptr;
 static intptr_t s_pending_param    = 0;
 
+bool HasPendingAsyncTask();
 bool HasPendingAsyncTask() { return s_pending_callback != nullptr; }
 
+void QueuePendingAsyncTask(void* callback, intptr_t param);
 void QueuePendingAsyncTask(void* callback, intptr_t param)
 {
     std::fprintf(stderr, "[HOST] async task queued: %p(param=%ld)\n",
@@ -222,6 +225,7 @@ void QueuePendingAsyncTask(void* callback, intptr_t param)
     s_pending_param = param;
 }
 
+void RunPendingAsyncTask();
 void RunPendingAsyncTask()
 {
     if (s_pending_callback == nullptr) return;
@@ -250,6 +254,7 @@ void RunPendingAsyncTask()
 /* typed PersistenceAdapter; the record-set model and its explicit      */
 /* placement limitation are documented in PersistenceAdapter.h).        */
 /* ================================================================== */
+void HostLoadingSequence(void* /*param*/);
 void HostLoadingSequence(void* /*param*/)
 {
     /* A fresh single-player host world: INPUT_NewWorld (real game init),
@@ -301,6 +306,7 @@ void HostLoadingSequence(void* /*param*/)
 /* then loop while mode stays 3.  The SDL pump already loops, so the    */
 /* host runs the one-shot portion once.                                 */
 /* ================================================================== */
+void HostPostLoadWorker(void* /*param*/);
 void HostPostLoadWorker(void* /*param*/)
 {
     /* Host-only deviation: World_EnumeratePostLoadAssets (0x457380)
@@ -338,6 +344,7 @@ void HostPostLoadWorker(void* /*param*/)
 /* The original spawns a worker thread; the host defers the callback    */
 /* to the next SDL pump iteration (loco::host::RunPendingAsyncTask).    */
 /* ================================================================== */
+void WIN32_QueueAsyncTask(void* queue, void* callback, int param);
 void WIN32_QueueAsyncTask(void* queue, void* callback, int param)
 {
     (void)queue;

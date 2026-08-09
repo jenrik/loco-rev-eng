@@ -16,6 +16,7 @@ using namespace std::chrono_literals;
 namespace lego_loco::network {
 // discovery_runtime.cpp references the process-wide registry even though this
 // test constructs its worker with injected factories.
+std::vector<DiscoveryBackendFactory> PlatformDiscoveryBackendFactories();
 std::vector<DiscoveryBackendFactory> PlatformDiscoveryBackendFactories() {
     return {};
 }

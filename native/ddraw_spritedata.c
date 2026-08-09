@@ -49,6 +49,7 @@ typedef struct {
 /*                                                                     */
 /* @param resource_id  Resource identifier for _this sprite layer       */
 /* ================================================================== */
+void __thiscall DDRAW_SpriteDataCtor(SpriteData* _this, uint16_t resource_id);
 void __thiscall DDRAW_SpriteDataCtor(SpriteData* _this, uint16_t resource_id)
 {
     _this->tree_ptr     = NULL;   /* +0x00 */
@@ -68,6 +69,7 @@ void __thiscall DDRAW_SpriteDataCtor(SpriteData* _this, uint16_t resource_id)
 /*                                                                     */
 /* @param data  SpriteData to clean up                                  */
 /* ================================================================== */
+void __fastcall DDRAW_SpriteDataDtor(SpriteData* data);
 void __fastcall DDRAW_SpriteDataDtor(SpriteData* data)
 {
     /* Free resource tree (MISNAMED: AssetMgr_ReadFile at 0x45D8C0

@@ -40,6 +40,7 @@ extern void __fastcall AssetMgr_EnumerateCategory(uint32_t* param_1); /* @ 0x45D
 /*                                                                      */
 /* Called by: mode-3 loading worker thread (0x42CC7C, g_tilemap)       */
 /* ================================================================== */
+void __fastcall World_EnumeratePostLoadAssets(TileMap* tilemap);
 void __fastcall World_EnumeratePostLoadAssets(TileMap* tilemap)
 {
     if (g_game_mode != 3) {

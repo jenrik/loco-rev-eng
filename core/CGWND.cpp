@@ -1468,6 +1468,7 @@ int CGWND::InitAllSubsystems()
 /* bool in AL (true unless the demo-mode early-out is taken); every real  */
 /* caller discards it, so this is declared void here, matching all three  */
 /* existing call sites' `void WIN32_PostQuit(void);` declarations. */
+void WIN32_PostQuit(void);
 void WIN32_PostQuit(void)
 {
     if (g_demo_mode == 1) {
