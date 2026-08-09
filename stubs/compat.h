@@ -98,7 +98,7 @@ typedef void*               LPOFNHOOKPROC;
 #define FILE_SHARE_WRITE        0x00000002
 #define OPEN_EXISTING           3
 #define FILE_ATTRIBUTE_NORMAL   0x00000080
-#define INVALID_HANDLE_VALUE    ((HANDLE)(intptr_t)-1)
+#define INVALID_HANDLE_VALUE    (reinterpret_cast<HANDLE>(static_cast<intptr_t>(-1)))
 
 typedef DWORD*              LPDWORD;
 

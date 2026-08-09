@@ -122,11 +122,21 @@ void Collection_Sort(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, _
 void RESMGR_PlaySound(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /** ScriptEngine_constructor — ABI bridge (address: 0x4493A0)
  *  Sets vtable to 0x4782A4, calls InitializeCriticalSection at +0x04.
- *  Called by: GameLoop_Setup (0x406C26), BuildingComplex_Ctor (0x434523) */
+ *  Called by: BuildingComplex_Ctor (0x434523) on an embedded
+ *  BuildingCollectionLock (game/BuildingMgr.h, 0x1C bytes) — genuinely
+ *  narrower than a full host ScriptEngine (sizeof(ScriptEngine) == 64 on
+ *  this 64-bit host), so placement-constructing a real ScriptEngine there
+ *  would overflow; this bridge intentionally replicates only the +0x00
+ *  vtable write and +0x04 critical-section init that ScriptEngine::
+ *  ScriptEngine() itself does, matching the original 0x1C-byte object's
+ *  real footprint. GameLoop_Setup's own, unrelated, full-sized
+ *  ScriptEngine allocation (g_train_resources) now placement-constructs
+ *  the real class directly instead of calling through here — see
+ *  core/GameLoop.cpp. */
 void* ScriptEngine_constructor(void* self) {
     extern void InitializeCriticalSection(void*);
     extern const void* PTR_RESDATA_ScriptEngine_Cleanup_004782a4;
-    *(const void**)self = &PTR_RESDATA_ScriptEngine_Cleanup_004782a4;
+    *static_cast<const void**>(self) = &PTR_RESDATA_ScriptEngine_Cleanup_004782a4;
     InitializeCriticalSection(static_cast<char*>(self) + 4);
     return self;
 }
@@ -567,8 +577,6 @@ void* GameConfig_constructor(void* memory)
 }
 void* NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
-// PixelDataCache_Ctor now implemented in defsym_stubs.cpp (address: 0x401620)
-
 /* Subsystem init */
 /* DDRAW_Init — real implementation is native/ddraw_init.c (0x45C8A0);
  * this and link_stubs.cpp's no-op copy were the flagship LINK-001

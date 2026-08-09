@@ -154,14 +154,14 @@ int main()
         int32_t out = 0;
         /* Up:   X = id - 3 = 15, Y = (color>>1)-1 = -1 */
         INPUT_DirToOffset_Up(&out);
-        CHECK(out == (int32_t)(0xFFFF0000u | 0x0Fu),
+        CHECK(out == static_cast<int32_t>(0xFFFF0000u | 0x0Fu),
               "DirToOffset_Up packs (Y<<16)|X");
         /* Left: X = 0, Y = -1 */
         INPUT_DirToOffset_Left(&out);
-        CHECK(out == (int32_t)0xFFFF0000u, "DirToOffset_Left packs Y<<16");
+        CHECK(out == static_cast<int32_t>(0xFFFF0000u), "DirToOffset_Left packs Y<<16");
         /* Down: X = (id>>1)-1 = 8, Y = color-2 = -2 */
         INPUT_DirToOffset_Down(&out);
-        CHECK(out == (int32_t)(0xFFFE0000u | 0x08u),
+        CHECK(out == static_cast<int32_t>(0xFFFE0000u | 0x08u),
               "DirToOffset_Down packs (Y<<16)|X");
         /* Right: X = 8, Y = 0 */
         INPUT_DirToOffset_Right(&out);

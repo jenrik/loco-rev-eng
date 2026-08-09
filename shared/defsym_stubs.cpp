@@ -208,7 +208,7 @@ char* CRT_itoa(int value, char* buf, int radix) {
     if (radix < 2 || radix > 36) { buf[0] = '\0'; return buf; }
     char tmp[36];
     int i = 0;
-    unsigned u = (value < 0 && radix == 10) ? -value : (unsigned)value;
+    unsigned u = (value < 0 && radix == 10) ? -value : static_cast<unsigned>(value);
     int neg = (value < 0 && radix == 10);
     do {
         int d = u % radix;
@@ -424,10 +424,20 @@ extern "C" int WritePrivateProfileStringA(const char* section, const char* key,
             value ? value : "(null)", filename ? filename : "(null)");
     return 1; /* non-zero = success */
 }
+/* NOTE: this C++-linkage Config_WriteInt overload coexists with at least
+ * five other declarations of the same name across the tree (game/
+ * ConfigIni.cpp's extern "C" real implementation, network/Netman.h,
+ * native/{NET_BaseDtor,ddraw_audio_destroy}.c, core/CGWND.cpp's own
+ * static-inline no-op) — different linkage/signatures mean these don't
+ * all collide at the linker, so which one a given caller reaches depends
+ * on how that caller declared it. `config`'s real type was not
+ * re-verified here; cast style only, no semantic change. Left for a
+ * dedicated Config_WriteInt linkage-cluster session, not this STRICT=2
+ * pass. */
 void __thiscall Config_WriteInt(void* config, const char* section, const char* key, int value) {
     char buf[100];
     CRT_itoa(value, buf, 10);
-    WritePrivateProfileStringA(section, key, buf, (const char*)((char*)config + 4));
+    WritePrivateProfileStringA(section, key, buf, static_cast<char*>(config) + 4);
 }
 void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
 /* NET_UpdatePlayerList: real body now in network/NetworkPlayerList.cpp
@@ -499,24 +509,13 @@ void CGWND_RegisterWindowClass(void*) { /* host no-op */ }
  * correctly-typed, loud `void* NETMAN_constructor(void*)` stub
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
 void DirectPlay_constructor(void*) { /* host no-op */ }
-/** PixelDataCache_Ctor — PixelDataCache constructor (address: 0x401620)
- *  Sets vtable=0x4773E8, album_index=-1, buffer=NULL, calls Load(1). */
-void* PixelDataCache_Ctor(void* self) {
-    extern void PixelDataCache_Load(void*, int);
-    extern const void* PTR_PixelDataCache_Dtor_004773e8;
-    *(const void**)self = &PTR_PixelDataCache_Dtor_004773e8;
-    ((int*)self)[1] = -1;  /* current_album_index */
-    ((int*)self)[2] = 0;   /* buffer NULL */
-    ((int*)self)[4] = -1;
-    ((int*)self)[5] = -1;
-    PixelDataCache_Load(self, 1);
-    return self;
-}
-/** PixelDataCache_Load — Host stub: no-op (cache initialized empty).
- *  TODO: decompile 0x401650 for real implementation. */
-void PixelDataCache_Load(void* self, int mode) {
-    (void)self; (void)mode;
-}
+/* PixelDataCache_Ctor/PixelDataCache_Load removed (2026-08-08): both were
+ * a duplicate ABI-bridge reimplementation of the already-real, already-
+ * correct PixelDataCache::Create/Load (graphics/PixelDataCache.h/.cpp,
+ * same address 0x401620) — the manual vtable/field poke matched
+ * PixelDataCache::Create field-for-field, and PixelDataCache::Load has a
+ * real implementation (this stub's Load was a no-op). The one caller
+ * (core/GameLoop.cpp) now calls PixelDataCache::Create directly. */
 void GameAudio_StopFinished(void*) { /* host no-op */ }
 void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
 void Ordinal_2(void*) { /* host no-op */ }

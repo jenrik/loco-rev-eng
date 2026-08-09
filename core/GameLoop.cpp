@@ -19,6 +19,7 @@
 #include "../network/NetworkPlayerList.h"
 #include "../shared/types.h"
 #include "../world/tilemap.h"
+#include "../graphics/PixelDataCache.h"
 #ifndef _WIN32
 #include "sdl3_net_game_bridge.h"
 #include "sdl3_town_mode3.h"
@@ -39,11 +40,15 @@ unsigned int CRT_timeGetTime(void);
 void* operator_new(size_t size);
 
 /* Subsystem constructors (C++ linkage) */
-void* ScriptEngine_constructor(void* mem);       /* 0x4493A0 */
+/* Narrow factory pair for a full-sized ScriptEngine (world/scriptengine.
+ * cpp) -- declared narrowly rather than #include-ing scriptengine.h,
+ * which would pull in that header's own, separately-tracked
+ * g_scripted_object redeclaration conflict. */
+size_t ScriptEngine_HostSize();
+void*  ScriptEngine_HostConstruct(void* mem);
 void* GameConfig_constructor(void* mem);         /* 0x440C60 */
 void* NETMAN_constructor(void* mem);             /* 0x43D0A0 */
 PlayerConfig* PlayerRecord_constructor(PlayerConfig* config); /* 0x452E10 */
-void* PixelDataCache_Ctor(void* mem);            /* 0x401620 */
 
 /* Subsystem init/update (C++ linkage) */
 int   Config_GetIniInt(void* cfg, const char* section, const char* key, int def); /* 0x452D60 */
@@ -173,10 +178,15 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     DAT_004fd3a0     = 0;
     g_train          = nullptr;
 
-    /* Allocate ScriptEngine (0x1C bytes) */
+    /* Allocate ScriptEngine. Was operator_new(0x1C) (the original x86
+     * sizeof(ScriptEngine)) placement-constructed via the ScriptEngine_
+     * constructor ABI bridge — an undersized-allocation landmine on this
+     * 64-bit host, where sizeof(ScriptEngine) is 64 bytes, not 0x1C
+     * (pointer-widened members past the +0x04 critical-section block).
+     * Fixed to allocate and construct the real class directly. */
     trace_setup_stage("step 3a: ScriptEngine");
-    mem = operator_new(0x1C);
-    g_train_resources = mem ? ScriptEngine_constructor(mem) : nullptr;
+    mem = operator_new(ScriptEngine_HostSize());
+    g_train_resources = mem ? ScriptEngine_HostConstruct(mem) : nullptr;
 
     /* Allocate GameConfig (0xB0 bytes) */
     trace_setup_stage("step 3b: GameConfig");
@@ -206,10 +216,19 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     g_player_config = mem ? PlayerRecord_constructor(static_cast<PlayerConfig*>(mem))
                           : nullptr;
 
-    /* Allocate PixelDataCache (0x18 bytes) */
+    /* Allocate PixelDataCache. Was operator_new(0x18) (the original x86
+     * sizeof(PixelDataCache)) -- another undersized-allocation landmine on
+     * this 64-bit host, where sizeof(PixelDataCache) is 32 bytes, not 0x18
+     * (pointer-widened pixel_buffer member plus alignment padding). The old
+     * manual-poke stub never wrote past +0x14 so it fit in 24 bytes
+     * harmlessly; PixelDataCache::Create writes saved_album_index at +0x20,
+     * 8 bytes past the old allocation -- confirmed via a live repro
+     * (coredumpctl backtrace: SIGSEGV inside vsnprintf during the
+     * subsequent Load(1) call, a classic corrupted-heap-surfaces-later
+     * symptom, not a fault at the allocation site itself). */
     trace_setup_stage("step 3f: PixelDataCache");
-    mem = operator_new(0x18);
-    g_dplay_config = mem ? PixelDataCache_Ctor(mem) : nullptr;
+    mem = operator_new(sizeof(PixelDataCache));
+    g_dplay_config = mem ? PixelDataCache::Create(mem) : nullptr;
 
     trace_setup_stage("step 4: config");
     /* Step 4: Read mouse settings from lego.ini */

@@ -50,7 +50,7 @@ int main(int argc, char* argv[])
     TRACE("Constructing CGWND...");
     CGWND* cgwnd = new (cgwnd_mem) CGWND(nullptr);
     g_main_window = cgwnd;
-    TRACE("CGWND constructed at %p", (void*)cgwnd);
+    TRACE("CGWND constructed at %p", static_cast<void*>(cgwnd));
 
     TRACE("Calling CoInitializeEx...");
     CoInitializeEx(nullptr, 0);

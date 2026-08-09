@@ -113,10 +113,21 @@ PixelDataCache* g_pixel_cache;   /* defined somewhere; actual storage at 0x4FD3B
 extern uint8_t* g_player_config;  /* @0x4AA4A8 */
 
 /**
- * g_install_path -- string pointer for game install path.
+ * g_install_path -- game install path string.
  * Address: 0x4A99C8
+ *
+ * Was declared here as `extern const char*` (a pointer) against the real
+ * definition's `char[256]` (shared/stubs_impl.cpp) -- an array-vs-pointer
+ * extern mismatch: reading "g_install_path" through the wrong declaration
+ * loads the array's own first 8 bytes of string data as if they were a
+ * stored pointer value, so any %s use of it dereferences garbage. Dormant
+ * here only because this file's real PixelDataCache::Load/Flush were
+ * never reachable before (the old code path called a no-op stub) --
+ * confirmed live via a SIGSEGV repro (coredumpctl backtrace: strlen inside
+ * vsnprintf's %s handling, `g_install_path` printing as an
+ * unaccessible-memory pointer instead of a string).
  */
-extern const char* g_install_path;
+extern const char g_install_path[256];
 
 /* Format strings for album index filename construction */
 static const char kFormatPath[] = "%s%s%s_%03d_%04d.ind";  /* @0x47E0B0 */

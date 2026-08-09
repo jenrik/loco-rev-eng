@@ -1347,3 +1347,28 @@ void RESDATA_ScriptedObject_Dispatch(int x, int y, int w, int h, int flag)
 {
     g_scripted_object->Dispatch(x, y, w, h, flag);
 }
+
+/* ================================================================== */
+/* ScriptEngine_HostSize/HostConstruct — narrow factory pair for        */
+/* GameLoop_Setup's standalone ScriptEngine allocation (core/GameLoop.  */
+/* cpp). Declared narrowly there rather than #include-ing this file's   */
+/* own scriptengine.h, which would pull in that header's (separately    */
+/* tracked, address-mismatched) g_scripted_object redeclaration.        */
+/* GameLoop_Setup previously allocated a literal 0x1C bytes (the        */
+/* original x86 sizeof(ScriptEngine)) and placement-constructed via the */
+/* narrower ScriptEngine_constructor ABI bridge (shared/stubs_impl.cpp) */
+/* -- an undersized-operator_new landmine on this 64-bit host, where    */
+/* sizeof(ScriptEngine) is 64 bytes, not 0x1C. That bridge is still      */
+/* correct for game/BuildingComplex.cpp's embedded, genuinely-0x1C-byte */
+/* BuildingCollectionLock use; this pair is only for a real, full-sized */
+/* standalone ScriptEngine object. */
+/* ================================================================== */
+size_t ScriptEngine_HostSize()
+{
+    return sizeof(ScriptEngine);
+}
+
+void* ScriptEngine_HostConstruct(void* mem)
+{
+    return new (mem) ScriptEngine();
+}
