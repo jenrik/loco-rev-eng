@@ -762,14 +762,14 @@ void __fastcall RESDATA_ScriptedObject::Update()
         int32_t y = this->y;                  /* +0x0C */
 
         /* Clamp to world bounds. objPtr[4]/[15] (raw int32_t* indices into
-         * `this`) are this->field_10/+0x3C — already named fields in
+         * `this`) are this->right/+0x3C — already named fields in
          * scriptengine.h; using them directly instead of re-deriving a raw
          * pointer removes the cast rather than just re-spelling it. */
         if (x < 0) {
             panel_view(this)->set_position(x - 1, y);
         }
-        if (g_world_width < this->field_10) {                /* +0x10 */
-            panel_view(this)->set_position(this->field_10 - 1 + x, y);
+        if (g_world_width < this->right) {                   /* +0x10 */
+            panel_view(this)->set_position(this->right - 1 + x, y);
         }
         if (y < 0) {
             panel_view(this)->set_position(x, y - 1);
@@ -976,11 +976,29 @@ void __thiscall RESDATA_ScriptedObject::Dispatch(int32_t x1, int32_t y1,
 /* Address: 0x449CE0                                                   */
 /* __thiscall (this, x, y)                                              */
 /*                                                                      */
-/* Delegates to GameObject_PtInRect.                                    */
+/* BUG-mode3-input-processing-crashes.md Crash 3: this previously called */
+/* panel_view(this)->point_in_rect(x, y) — a VIRTUAL dispatch through a  */
+/* fabricated 22-slot PanelDispatchView vtable. RESDATA_ScriptedObject   */
+/* only declares 2 real virtuals (scriptengine.h), so the compiler-      */
+/* generated vtable is far shorter than PanelDispatchView assumes; slot  */
+/* [2] read past it, producing a garbage function pointer that crashed   */
+/* the instant real mode-3 mouse input started reaching this path.       */
+/*                                                                      */
+/* Ghidra 0x449CE0 decompiles to a DIRECT (non-virtual) call:            */
+/*   GameObject_PtInRect(this, x, y);                                   */
+/* i.e. the original applies GameObject::PtInRect's field layout         */
+/* (+0x08 left, +0x0C top, +0x10 right, +0x14 bottom — verified by       */
+/* decompiling 0x436A10) directly to RESDATA_ScriptedObject's OWN base   */
+/* address; not real inheritance, just structural field-layout reuse —   */
+/* which is exactly this->x/this->y/this->right/this->bottom (see the    */
+/* field comment in scriptengine.h). Reproduce the same half-open        */
+/* interval test (left <= x < right, top <= y < bottom) directly rather  */
+/* than resurrecting a virtual call the original doesn't make.           */
 /* ==================================================================== */
 bool __thiscall RESDATA_ScriptedObject::IsDragging(int32_t x, int32_t y)
 {
-    return panel_view(this)->point_in_rect(x, y) != 0;
+    return x >= this->x && x < this->right &&
+           y >= this->y && y < this->bottom;
 }
 
 /* ==================================================================== */

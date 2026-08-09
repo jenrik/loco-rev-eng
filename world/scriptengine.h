@@ -212,8 +212,15 @@ public:
     int32_t     type;                    /* +0x04  type = 10 */
     int32_t     x;                       /* +0x08  screen X */
     int32_t     y;                       /* +0x0C  screen Y */
-    int32_t     field_10;               /* +0x10  world width bounds ref */
-    int32_t     field_14;               /* +0x14  world height bounds ref */
+    /* +0x08 x/+0x0C y/+0x10 right/+0x14 bottom form a RECT-shaped bounding
+     * box (matches GameObject::screen_rect's own +0x08 left/+0x0C top/
+     * +0x10 right/+0x14 bottom layout exactly). RESDATA_ScriptedObject_
+     * IsDragging (0x449CE0) calls GameObject_PtInRect(this, x, y) directly
+     * — a non-virtual call reusing GameObject's own field offsets against
+     * this object's own base address, not real inheritance — confirmed by
+     * decompiling both 0x449CE0 and 0x436A10 in Ghidra. */
+    int32_t     right;                  /* +0x10  bounding-box right edge */
+    int32_t     bottom;                 /* +0x14  bounding-box bottom edge */
     uint8_t     _pad_18[0x0C];           /* +0x18..+0x23 */
 
     /* ---- Input / drag state (+0x24..+0x33) ---- */
