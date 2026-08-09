@@ -14,6 +14,14 @@
 
 #pragma once
 
+/* Vendored third-party code (public domain, mjansson/mdns) — quote-included
+ * from network/, so meson's dependency(include_type: 'system') treatment for
+ * pkg-config deps doesn't reach it (GCC's quoted-include search resolves
+ * relative to the includer's directory before any -isystem path). Marking
+ * it a system header directly exempts it from this project's STRICT=2
+ * -Werror set the same way the pkg-config deps are exempted. */
+#pragma GCC system_header
+
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>

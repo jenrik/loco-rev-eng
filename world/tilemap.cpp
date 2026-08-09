@@ -203,7 +203,7 @@ static int TileMap_LockPrimarySurface(void* desc)
 {
     void** vtable = *reinterpret_cast<void***>(g_primary_surface);
     return (*(reinterpret_cast<DDrawSurfaceLockFn>(vtable[25])))(
-        g_primary_surface, NULL, desc, 0, 0);
+        g_primary_surface, NULL, desc, 0, nullptr);
 }
 
 static int TileMap_UnlockPrimarySurface()
