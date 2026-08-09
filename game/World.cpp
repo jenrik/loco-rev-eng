@@ -25,6 +25,7 @@
 #include "../game/Building.h"
 #include "../game/GameVehicle.h"
 #include "../game/PlayerConfig.h"
+#include "../ui/HelpPageNode.h"
 
 #include <cstdint>
 #include <new>
@@ -66,11 +67,11 @@ extern uint   __cdecl   CGWND_MapResourceToDirection(int resource_id);/* @ 0x40E
 extern void*  __thiscall TileMap_GetObjectAt(void* tilemap, short x,
                                              short y, short layer);    /* @ 0x455620 */
 extern void*  INPUT_FindObjectAt(InputMgr* input_mgr, int param); /* @ 0x41E1F0 */
-extern void   __thiscall ArrivalQueue_AddVehicle(void* building,
-                                                 void* vehicle);       /* @ 0x44F3A0 */
-extern void   __thiscall ArrivalQueue_RemoveVehicle(void* building,
-                                                     uint16_t player_id,
-                                                     uint8_t color);   /* @ 0x44F410 */
+/* ArrivalQueue_AddVehicle/RemoveVehicle (formerly free functions taking
+ * an untyped void* self) are now HelpPageNode::AddVehicle/RemoveVehicle
+ * (ui/HelpPageNode.h, 0x44F3A0/0x44F410) — see
+ * docs/landmine-sweep-worklist.md's ArrivalQueue section for the
+ * evidence chain that identified self's real type. */
 extern void*  __thiscall UI_CreateMessageBox(void* mgr, int res_id, short type,
                                              char anchor, int x, int y,
                                              char flags);             /* @ 0x423AB0 */
@@ -581,7 +582,16 @@ char World::FinalizeLoad(Vehicle* vehicle, int packed_coords, char mp_flag)
 {
     uint slot;
     short dest_x, dest_y;
-    void* building;
+    /* HelpPageNode* — see docs/landmine-sweep-worklist.md's ArrivalQueue
+     * section. The INPUT_FindObjectAt(mode 0/1) branches are proven
+     * HelpPageNode by the vehicle_kind==3 filter (only HelpPageNode's
+     * constructor ever sets that value). The mp_gameMode==2 branch below
+     * uses TileMap_GetObjectAt directly, which applies no kind filter at
+     * all — weaker evidence, but the original binary funnels all three
+     * paths into the same ArrivalQueue_AddVehicle call on `building`
+     * unconditionally, so the type is kept uniform here rather than
+     * introduced as a new special case. */
+    HelpPageNode* building;
 
     /* Bounds check */
     if (this->vehicle_count > 3) {
@@ -611,21 +621,21 @@ char World::FinalizeLoad(Vehicle* vehicle, int packed_coords, char mp_flag)
        Assembly: MOV ECX,[0x004fd3ac]; MOV EAX,[ECX+0x7C4] — no NULL check. */
     if (g_netman->m_gameMode == 1) {
         /* Multiplayer scenario 1 */
-        building = INPUT_FindObjectAt(&g_input_mgr, 1);
+        building = static_cast<HelpPageNode*>(INPUT_FindObjectAt(&g_input_mgr, 1));
     } else if (g_netman->m_gameMode == 2) {
         /* Multiplayer scenario 2: adjust destination Y based on mp_flag */
         if (mp_flag == 1 || mp_flag == 2) {
             dest_y++;
         }
-        building = TileMap_GetObjectAt(g_tilemap, dest_x, dest_y, 0);
+        building = static_cast<HelpPageNode*>(TileMap_GetObjectAt(g_tilemap, dest_x, dest_y, 0));
     } else {
         /* Single player */
-        building = INPUT_FindObjectAt(&g_input_mgr, 0);
+        building = static_cast<HelpPageNode*>(INPUT_FindObjectAt(&g_input_mgr, 0));
     }
 
     /* Fallback: try INPUT_FindObjectAt with param=1 */
     if (building == NULL) {
-        building = INPUT_FindObjectAt(&g_input_mgr, 1);
+        building = static_cast<HelpPageNode*>(INPUT_FindObjectAt(&g_input_mgr, 1));
     }
 
     if (building == NULL) {
@@ -635,7 +645,7 @@ char World::FinalizeLoad(Vehicle* vehicle, int packed_coords, char mp_flag)
     }
 
     /* Link vehicle to destination building */
-    ArrivalQueue_AddVehicle(building, vehicle);
+    building->AddVehicle(vehicle);
     return 1;
 }
 
@@ -1188,9 +1198,9 @@ bool __stdcall World_SerializeMap(GameVehicle* game_vehicle, int* route_data)
 /*                                                                      */
 /* Steps:                                                              */
 /*   1. Vehicle::UpdatePosition(0)                                     */
-/*   2. Find destination GameVehicle at current tile (tile_y+1)        */
+/*   2. Find destination HelpPageNode at current tile (tile_y+1)       */
 /*   3. If found:                                                      */
-/*      - direction 2 or 3: ArrivalQueue_RemoveVehicle, fall thru     */
+/*      - direction 2 or 3: HelpPageNode::RemoveVehicle, fall thru    */
 /*      - direction 0,1,2,3,4,5: clear occupant_state (+0x11C)        */
 /*   4. Clear current tile coords                                      */
 /*   5. If occupancy in {1,2,4,5}:                                     */
@@ -1210,22 +1220,29 @@ void __stdcall World_RenderAll(Vehicle* vehicle)
     /* Step 1: Update position */
     vehicle->UpdatePosition(0);
 
-    /* Step 2: Find destination game vehicle at current tile */
-    GameVehicle* building = static_cast<GameVehicle*>(TileMap_GetObjectAt(
+    /* Step 2: Find destination node at current tile.
+     * HelpPageNode* — see docs/landmine-sweep-worklist.md's ArrivalQueue
+     * section. TileMap::GetObjectAt applies no kind filter here; this
+     * rests on direction==2 being set exclusively by
+     * HelpPageNode::AddVehicle, not on a runtime type check. A bare
+     * RESDATA_GameVehicle (0x11C bytes) reaching this call would read
+     * +0x124 out of its own allocation — an original-binary hazard the
+     * assembly does not guard against. */
+    HelpPageNode* building = static_cast<HelpPageNode*>(TileMap_GetObjectAt(
         g_tilemap, vehicle->tile_x, static_cast<short>(vehicle->tile_y + 1), 0));
 
     if (building != NULL) {
         switch (vehicle->direction) {                 /* +0x60 */
         case 2:   /* EDGE_OF_MAP */
         case 3:   /* DEPOT */
-            ArrivalQueue_RemoveVehicle(building,
+            building->RemoveVehicle(
                 vehicle->network_id, vehicle->slot_index);
             /* Fall through to clear occupancy state */
         case 0:   /* FORWARD */
         case 1:   /* REVERSE */
         case 4:   /* ALT_FRONT */
         case 5:
-            building->occupant_state = 0;             /* +0x11C */
+            building->update_flag = 0;                /* +0x11C */
             break;
         }
     }

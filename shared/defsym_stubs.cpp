@@ -486,8 +486,6 @@ void VehicleEditor_GetResourceId(int);
 void VehicleEditor_GetResourceId(int) { /* host no-op */ }
 void VehicleEditor_RemoveVehicle(void*, int);
 void VehicleEditor_RemoveVehicle(void*, int) { /* host no-op */ }
-void ArrivalQueue_RemoveVehicle(void*, unsigned int, char);
-void ArrivalQueue_RemoveVehicle(void*, unsigned int, char) { /* host no-op */ }
 void GameVehicle_RemoveDestination(void*, unsigned int, char);
 void GameVehicle_RemoveDestination(void*, unsigned int, char) { /* host no-op */ }
 void GAMESTATE_EditorState_Detach(int);
@@ -543,8 +541,6 @@ void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsi
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) { /* host no-op */ }
 void* g_game_instance = nullptr;
 int32_t g_OutputDebugStringA = 0;
-void ArrivalQueue_AddVehicle(void*, void*);
-void ArrivalQueue_AddVehicle(void*, void*) { /* host no-op */ }
 void VehicleEditor_Update(void*);
 void VehicleEditor_Update(void*) { /* host no-op */ }
 void VehicleEditor_IsInBounds(void*, short, short, short);

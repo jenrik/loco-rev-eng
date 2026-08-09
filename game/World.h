@@ -214,7 +214,10 @@ public:
      * Unpacks destination coordinates from packed_coords.
      * Finds destination building via INPUT_FindObjectAt or
      * TileMap_GetObjectAt (depending on netman scenario).
-     * Links vehicle to building via ArrivalQueue_AddVehicle.
+     * Links vehicle to building via HelpPageNode::AddVehicle
+     * (ui/HelpPageNode.h; see docs/landmine-sweep-worklist.md's
+     * ArrivalQueue section for the evidence that identified the
+     * destination's real type).
      *
      * @param vehicle        Initialized vehicle to register
      * @param packed_coords  Packed destination coordinates (x in low 16 bits, y in high 16)
@@ -377,7 +380,7 @@ bool __stdcall World_SerializeMap(GameVehicle* game_vehicle, int* route_data);
  *
  * Steps:
  *   1. Vehicle::UpdatePosition(0)
- *   2. Check destination tile, remove from ArrivalQueue if direction 2-3
+ *   2. Check destination tile, remove via HelpPageNode::RemoveVehicle if direction 2-3
  *   3. Clear current_vehicle on destination GameVehicle
  *   4. Detach editor states via StopSound (vtable[7]) on building refs
  *   5. Detach via EditorState::Detach on all sub-obj editors

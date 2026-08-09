@@ -250,7 +250,7 @@ calls where it's harmless) and flagged for a dedicated future pass.
 | 1 | `Train_SendPlayerInfo` | Train_SendPlayerInfo | Train_HandleTrackBuild(void*, int) |
 | 1 | `DDRAW_SetSurfaceFormat` | DDRAW_SetSurfaceFormat, DDRAW_SetSurfaceFormat(void*, int) | GameWindow::create(...) |
 | 1 | `World_SerializeObject` | World_SerializeObject | Netman::RemoveInboundTrain(int) |
-| 1 | `ArrivalQueue_RemoveVehicle` | ArrivalQueue_RemoveVehicle, ArrivalQueue_RemoveVehicle(void*, unsigned int, char) | World_RenderAll(Vehicle*) |
+| 1 | `ArrivalQueue_RemoveVehicle` — **FIXED (2026-08-09, ArrivalQueue self-type session, see dedicated section below)** | ArrivalQueue_RemoveVehicle, ArrivalQueue_RemoveVehicle(void*, unsigned int, char) | World_RenderAll(Vehicle*) |
 | 1 | `InvalidateRect` | InvalidateRect, GameObject::InvalidateRect(), World::InvalidateRect(int, int, int, int, short) | TileMap::FullReset() |
 | 1 | `UpdateWindow` | UpdateWindow | TileMap::FullReset() |
 | 1 | `AssetMgr_LoadFile` | AssetMgr_LoadFile, AssetMgr_LoadFile(int*, unsigned char*, int*), AssetMgr_LoadFile(void*, unsigned char*, int*) | GameSetupPanel::loadLayouts(bool) |
@@ -919,6 +919,232 @@ remaining ~280 cast sites — the recovered diff is saved as
 apply docs/town-strict2-wip.patch` then delete it) for the next session,
 which should run in an isolated `git worktree`, not this shared tree, to
 avoid a repeat.
+
+## ArrivalQueue_AddVehicle/RemoveVehicle — self identified as HelpPageNode (2026-08-09)
+
+**Note on this session's starting point**: this session was briefed to read
+an existing "ArrivalQueue_AddVehicle/RemoveVehicle — self's real class
+unidentified, deferred (2026-08-09)" section in this file first. That
+section does not exist on this branch (checked via `git log` and grep for
+`ArrivalQueue`/`occupation_level`/`0x124`/`queue_head` — no match, and the
+worktree's HEAD is `00285a68`, "Finish STRICT=2 old-style-cast cleanup").
+It likely exists only in a different, not-yet-merged worktree from the
+same investigation. This session re-derived the type identification from
+scratch using the struct-layout facts given directly in the task prompt
+(`Building` static_asserts at `sizeof==0xF4`, `occupation_level`
+offset `0x88`; `BuildingMgr.cpp` allocates `operator_new(0xF4)`) plus fresh
+Ghidra evidence below. `Building.h`'s asserts and `BuildingMgr.cpp`'s
+allocation size were **not** touched.
+
+### Evidence chain
+
+1. **`self` is not `Building`.** Disassembly of `ArrivalQueue_AddVehicle`
+   (0x44F3A0) shows `MOV EAX, dword ptr [EDI+0x88]` — a full 4-byte dword
+   read at `+0x88`. `Building::occupation_level` at that offset is
+   `uint8_t` (confirmed by `game/Building.h`'s own `static_assert`), so a
+   dword read there would pull in 3 bytes of unrelated padding/`disabled`/
+   `_pad_8a` — inconsistent with a real field access. `self` must be a
+   different, unrelated class that happens to place a real dword-sized
+   field at the same offset.
+
+2. **Two real callers, three call sites, dispatched via `TileMap_GetObjectAt`
+   / `INPUT_FindObjectAt`.** `get_xrefs_to` on both addresses plus
+   decompilation of all three caller functions (`World_FinalizeLoad`
+   0x44DF40, `VehicleEditor_Update` 0x44C3A0 — not yet ported into the C++
+   tree, `World_RenderAll` 0x44E630) shows `self` always comes from either
+   `TileMap::GetObjectAt` (no type filter) or `INPUT_FindObjectAt` in
+   mode ∈ {0,1,4}.
+
+3. **`INPUT_FindObjectAt`'s mode-0/1/4 filter uniquely identifies the
+   producing constructor.** That branch (0x41E1F0) keeps only entities
+   where `resource->object_type == 3` **and** `entity->vehicle_kind
+   (+0x10C) == 3` **and** `mode==4 || entity->+0x120 == mode`. Chasing
+   every constructor that can set `vehicle_kind`:
+   - `GameVehicle::GameVehicle` (0x412870) unconditionally forces
+     `vehicle_kind = 4` after the base constructor runs — never 3.
+   - `RESDATA_GameVehicle::RESDATA_GameVehicle` (0x44AE80) sets
+     `vehicle_kind = 3` only inside its `RESDATA_IsRoadTile` branch — but
+     `INPUT_PlaceObject` (0x41DD80) never reaches a *bare*
+     `RESDATA_GameVehicle` for road tiles; it special-cases them.
+   - `INPUT_PlaceObject`'s own dispatch (decompiled): building tiles →
+     `operator_new(300==0x12C)` + `GameVehicle::GameVehicle` (matches
+     `sizeof(GameVehicle)==0x12C`); road tiles → `operator_new(0x128)` +
+     the constructor at **0x44F210** (Ghidra-labeled `HelpWnd_FindPage`,
+     a stale label collision); everything else (pedestrian/other) →
+     `operator_new(0x11C)` + bare `RESDATA_GameVehicle::RESDATA_GameVehicle`.
+   - `get_xrefs_to 0x44F210` confirms `INPUT_PlaceObject` (0x41DE43) is its
+     **only** caller.
+   - Disassembly of 0x44F210 shows it chains to `RESDATA_GameVehicle_Ctor`,
+     then unconditionally sets `vehicle_kind (+0x10C) = 3`, zeros
+     `+0x11C`, and — based on `resource_id ∈ {0xC42,0xC44,0xC46,0xC48}` —
+     sets `+0x120` to 1 or 0, and `+0x124` to 0. `0x11C + 0xC == 0x128`,
+     matching the allocation size exactly, with `+0x124` (the queue head
+     the caller reads) landing as the *last* field, ending precisely at
+     the allocation boundary.
+   - This constructor (0x44F210), both destructors (0x44F2A0/0x44F2C0),
+     `Update` (0x44F340), `AddVehicle` (0x44F3A0), and `RemoveVehicle`
+     (0x44F410) are one unbroken address range — consistent with a single
+     1998 MSVC translation unit emitting one class's members, and matching
+     an **already-integrated** class in the tree: `ui/HelpPageNode.h`/
+     `.cpp` (`class HelpPageNode : public RESDATA_GameVehicle`, vtable
+     `0x4783D8`, exactly `0x128` bytes, with `update_flag`@+0x11C,
+     `overlay_flag`@+0x120, `dest_list_head`@+0x124 already documented at
+     the right offsets — it just didn't have `AddVehicle`/`RemoveVehicle`
+     as methods yet).
+   - `RESDATA_GameVehicle::tile_target()` (`game/ResdataGameVehicle.h`)
+     already documents the dword at `+0x88` as the packed
+     `sub_pos_x`/`sub_pos_y` tile position — exactly the field
+     `ArrivalQueue_AddVehicle` reads, resolving point 1 above without
+     touching `Building.h`.
+
+4. **`World_RenderAll`'s `RemoveVehicle` call site has weaker evidence** —
+   noted explicitly rather than glossed over. It reaches the object via
+   `TileMap::GetObjectAt`, which applies **no** kind filter at all (unlike
+   `INPUT_FindObjectAt`). The typing rests on `vehicle->direction == 2`
+   being set **exclusively** by `HelpPageNode::AddVehicle`, not on a
+   runtime type check — i.e. by construction, any vehicle whose direction
+   reads 2 here was queued by that exact method. A bare
+   `RESDATA_GameVehicle` (0x11C bytes, no room for `+0x124`) reaching this
+   call would read out of its own allocation; that would be an
+   **original-binary hazard**, not something introduced or fixed by this
+   session — the assembly does not guard against it either.
+
+5. **`World::FinalizeLoad`'s `mp_gameMode==2` branch is the weakest link**
+   — it also uses `TileMap::GetObjectAt` directly (no kind filter), so
+   whatever is on that tile is passed to `AddVehicle` unconditionally, same
+   as the original binary does. Typed as `HelpPageNode*` for consistency
+   with the other two (proven) branches rather than introduced as a new
+   special case, since the original funnels all three into the same call.
+
+### Ruled out
+
+- **`Building`** — ruled out by the dword-vs-byte mismatch above (point 1);
+  `Building.h`'s `static_assert`s and `BuildingMgr.cpp`'s
+  `operator_new(0xF4)` were left untouched, as required.
+- **`GameVehicle`** — a plausible early guess (it already has a
+  `dest_list_head` at `+0x124`, and `game/World.cpp` had it pre-existing at
+  the `dest_building`/`TileMap_GetObjectAt` call sites for
+  `GameVehicle::RemoveDestination`) but ruled out: its constructor forces
+  `vehicle_kind=4`, never 3, so it can never satisfy
+  `INPUT_FindObjectAt`'s mode-0/1/4 filter. `GameVehicle::AddDestination`
+  (0x412AF0) / `RemoveDestination` (0x412B50) are real, structurally
+  similar, but **distinct compiled functions** at different addresses from
+  `ArrivalQueue_AddVehicle`/`RemoveVehicle` — `AddDestination` does not
+  prime the vehicle (direction/tile position/state) the way
+  `ArrivalQueue_AddVehicle` does. Not merged, per CLAUDE.md ("do not
+  simplify assembly unless equivalence is proven and documented").
+  `World_RenderAll`'s pre-existing `dest_building`
+  (`GameVehicle::RemoveDestination`) call site was **left untouched** —
+  it's a genuinely different call, not part of this fix.
+- **A new shared base class for `+0x11C`/`+0x120`/`+0x124`** — considered
+  and rejected. `GameVehicle` is `RESDATA_GameVehicle` (0x11C) + 0x10;
+  `HelpPageNode` is `RESDATA_GameVehicle` + 0xC. Both derive directly from
+  `RESDATA_GameVehicle` with their own distinct vtables (0x477848 vs
+  0x4783D8) and no intermediate base exists in the binary — introducing
+  one would be inventing hierarchy the binary doesn't have.
+
+### Conversion made
+
+- Added `HelpPageNode::AddVehicle(Vehicle*)` (0x44F3A0) and
+  `HelpPageNode::RemoveVehicle(uint16_t, uint8_t)` (0x44F410) as real,
+  non-virtual methods (`ui/HelpPageNode.h`/`.cpp`) — both are direct calls
+  in the binary, not vtable dispatch.
+- Retyped `HelpPageNode::dest_list_head` from `int32_t` (previously stored
+  a pointer via manual `uint32_t`/`reinterpret_cast<uintptr_t>` round-trips
+  — truncates real 64-bit addresses on a 64-bit host) to a proper nested
+  `HelpPageNode::DestNode*`, mirroring `GameVehicle::DestNode`'s existing
+  pattern. Updated the constructor, destructor, and `Update()` (all of
+  which already touched this field) to use it directly; removed the old
+  `DestinationNode32` helper struct, which itself had a landmine (`next`
+  stored as `uint32_t` instead of a pointer).
+- Deleted `game/ArrivalQueue.{h,cpp}` entirely (the free functions, the
+  `extern "C"` block CLAUDE.md flags as a C++-methods-in-C-linkage
+  anti-pattern, and the raw `VEHICLE_OFFSET_*` macros it used instead of
+  `Vehicle.h`'s already-named fields).
+- Updated `game/World.cpp`'s two real call sites (`World::FinalizeLoad`,
+  `World_RenderAll`) to call the typed methods; removed the stale
+  `extern "C"`-mismatched local declarations. `VehicleEditor_Update`
+  (0x44C736/0x44C84A), the other two binary callers, is not yet ported
+  into the C++ tree at all — nothing to update there this session.
+- Removed both now-orphaned stub definitions
+  (`ArrivalQueue_AddVehicle`/`ArrivalQueue_RemoveVehicle`) from
+  `shared/defsym_stubs.cpp`.
+- Added `HelpPageNode(const HelpPageNode&) = delete;`/`operator=` (the
+  retyped pointer member tripped `-Weffc++` at `-Dstrict=2`; `GameVehicle`/
+  `RESDATA_GameVehicle` have the same latent pattern but were left
+  untouched — out of this session's file scope).
+- **Not renamed**: `HelpPageNode`'s name is very likely a misnomer.
+  `get_xrefs_to 0x44F210` proves `INPUT_PlaceObject` is its **only**
+  construction site — reached for every ordinary road/junction tile placed
+  during normal play (`RESDATA_IsRoadTile`), not just tutorial content.
+  `overlay_flag` (+0x120) is 1 only for the specific tutorial resource IDs
+  (0xC42/0xC44/0xC46/0xC48); every other road tile still gets a real
+  `HelpPageNode` instance that now also participates in vehicle-arrival
+  queuing. Renaming would touch `ui/HelpWnd.{h,cpp}`,
+  `shared/vtable_addrs.h`, and `shared/core_stubs.cpp`, and first needs
+  establishing whether `HelpWnd` genuinely uses this class or the name is
+  pure Ghidra-label residue — left as a follow-up, documented in
+  `ui/HelpPageNode.h`'s own top comment.
+
+### Two real bugs found and fixed as a side effect
+
+Converting the call sites changed which binary symbol they resolve to,
+surfacing two distinct, previously-invisible defects (verified via
+`objdump -d build/lego_loco | grep -c "call *0 "` before/after, on this
+worktree's actual baseline of **266**, not the 259 given in the task brief
+— stale relative to this branch tip, `00285a68`):
+
+1. **`ArrivalQueue_RemoveVehicle`'s call site in `World_RenderAll` was a
+   genuine call-0.** `World.cpp`'s local declaration
+   (`uint16_t player_id, uint8_t color`, C++ linkage) mangled to a symbol
+   nothing defined — neither the real `extern "C"` definition (unmangled)
+   nor `defsym_stubs.cpp`'s stub (`unsigned int, char` — different
+   mangled types) matched. Confirmed via disassembly: `call 0
+   <_init-0x40a000>` before the fix, `call ... <_ZN12HelpPageNode13RemoveVehicleEth>`
+   after.
+2. **`ArrivalQueue_AddVehicle`'s call site in `World::FinalizeLoad` was a
+   silent-wrong-stub, not call-0.** Its declaration
+   (`void*, void*`, C++ linkage, no `extern "C"`) happened to
+   **mangle-match** `defsym_stubs.cpp`'s no-op stub
+   (`void ArrivalQueue_AddVehicle(void*, void*)`, also plain C++ linkage)
+   exactly — so every vehicle load in the original single-player/
+   multiplayer-scenario-1 path was silently **not** being queued onto its
+   destination building at all; `World::FinalizeLoad` always returned
+   success and the arrival-queue side effects (vehicle direction, tile
+   position, enqueue) never ran. Confirmed via disassembly: `call
+   5213a1 <_Z23ArrivalQueue_AddVehiclePvS_>` (the no-op stub) before the
+   fix, `call ... <_ZN12HelpPageNode10AddVehicleEP7Vehicle>` (the real
+   logic) after. This is exactly the "silent-wrong-stub" bug class this
+   file documents elsewhere (distinct from call-0: it had a body, just an
+   empty one) — not previously listed as such because the near-match
+   table above only tracked it as a linkage/declaration mismatch, not as
+   reachable-but-wrong.
+
+Net `call 0` count: **266 → 265** (only `RemoveVehicle` was call-0; the
+`AddVehicle` fix is the silent-wrong-stub class instead, which the
+`call 0` count doesn't measure). Two pre-existing, unrelated `call 0`
+sites remain inside `World::FinalizeLoad`/`World_RenderAll` — both are
+`TileMap_GetObjectAt`, already tracked in this file's near-match table
+("`TileMap_GetObjectAt` (cluster B)") — untouched, out of this session's
+scope.
+
+### Verification
+
+- `meson setup build && meson compile -C build`: succeeds.
+- `objdump -d build/lego_loco | grep -c "call *0 "`: 266 → 265 (see above).
+- `meson test -C build`: 28/30 (the 2 known pre-existing failures,
+  `embedded-mdns-discovery` and `sdl3-net-discovery-transport`, both
+  "Unknown device type" — sandbox limitation, unrelated to this change).
+- `meson test -C build --suite integration`: 1/1 (12/12 sub-tests).
+- `meson setup build-strict2 -Dstrict=2 && ninja -C build-strict2 -k 0`:
+  baseline (this branch, before this session's changes) is **1266**
+  errors, not 0 — the "must exit 0" expectation in the task brief does not
+  hold for this branch's actual tip either. After this session's changes:
+  **1264** errors (net improvement of 2; the 3 new `HelpPageNode`
+  `-Weffc++` diagnostics from retyping `dest_list_head` were fixed with
+  the deleted copy-ctor/assignment above, and deleting
+  `game/ArrivalQueue.{h,cpp}` removed a few now-nonexistent-file
+  diagnostics). `build-strict2` deleted afterward per instructions.
 
 ## Raw data
 
