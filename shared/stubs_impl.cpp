@@ -96,6 +96,16 @@ int32_t  g_town_selection_rect_right = 0;  /* 0x4854D8 */
 int32_t  g_town_selection_rect_bottom = 0; /* 0x4854DC */
 uint8_t  g_has_selection = 0;              /* 0x4854EC */
 uint8_t  g_placement_valid = 0;            /* 0x4AA648 */
+/* g_flag_4A9F80 — 0x4A9F80, read once by Game::UpdateInputState
+ * (core/Game.cpp:643). Declared extern in Game.cpp but never defined
+ * anywhere: a link-time dangling reference resolved to a null GOT slot,
+ * so the first real Game_UpdateInputState call (i.e. the first mouse
+ * click ever routed into mode-3 Town gameplay) segfaulted dereferencing
+ * it — undiscovered until the BUG-mode-3-render-freeze.md fix made SDL
+ * input reach Game for the first time. In the original binary this
+ * address has exactly one xref (that same read); nothing ever writes
+ * it, so it is always zero in retail — a vestigial/dev-only flag. */
+uint8_t  g_flag_4A9F80 = 0;                /* 0x4A9F80 */
 uint8_t  g_placement_blocked = 0;          /* 0x48558C */
 char     g_install_path[256] = ".";
 char     g_current_save_path[0x108] = "";  /* 0x4AA8F8 — current save name */
