@@ -215,6 +215,13 @@ else
   obj_sdl3_town_mode3   = lego_loco.extract_objects('town/sdl3_town_mode3.cpp')
   obj_game_object       = lego_loco.extract_objects('core/GameObject.cpp')
   obj_entity            = lego_loco.extract_objects('core/Entity.cpp')
+  # GameView/Panel/DDRAW_Building — needed by host_mode3_bootstrap_test now
+  # that BootstrapTownMode3Objects() placement-new constructs both
+  # singletons for real (BUG-mode3-input-processing-crashes.md) instead of
+  # leaving their storage as raw zeroed bytes.
+  obj_game_view         = lego_loco.extract_objects('core/GameView.cpp')
+  obj_panel             = lego_loco.extract_objects('game/Panel.cpp')
+  obj_ddraw             = lego_loco.extract_objects('graphics/DDRAW.cpp')
   obj_building_mgr_grp  = lego_loco.extract_objects('core/BuildingMgrObjectGroup.cpp')
   obj_resdata_vehicle   = lego_loco.extract_objects('game/ResdataGameVehicle.cpp')
   obj_game_vehicle      = lego_loco.extract_objects('game/GameVehicle.cpp')

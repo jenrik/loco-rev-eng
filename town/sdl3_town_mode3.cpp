@@ -11,30 +11,33 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <new>
 
 extern void* g_town_view;
 
 namespace {
 
-/* The original instances are BSS-backed.  These host-only backing stores are
- * deliberately zero-initialized and remain alive for the process lifetime.
- * Constructors cannot be run: their recovered x86 layouts write through
- * incompatible host offsets. */
+/* The original instances are BSS-backed; these host-only backing stores
+ * mirror that (static storage, permanent process lifetime), but are now
+ * actually placement-new constructed into (see BootstrapTownMode3Objects
+ * below) rather than left as raw zeroed bytes.
+ *
+ * BUG-mode3-input-processing-crashes.md: leaving these as raw zeroed
+ * bytes (this comment previously read "Constructors cannot be run: their
+ * recovered x86 layouts write through incompatible host offsets") meant
+ * every vtable pointer in both objects — including the compiler-managed
+ * GameObject/Panel base vtable, not just the classes' own x86-specific
+ * fields — stayed null forever, so any virtual call on g_town_view or
+ * g_ddraw_building (e.g. GameObject::PtInRect via DDRAW_Building::HitTest,
+ * or Panel::HitTestChildren via HitTestWithDrag) crashed the instant
+ * real mode-3 mouse input started reaching them. Both classes' actual
+ * `#ifndef _WIN32` constructors (GameView::GameView, already
+ * Status: INTEGRATED and used correctly this way for other Panel-family
+ * classes; DDRAW_Building::DDRAW_Building, verified host-safe — its host
+ * branch only writes its own plain fields, no x86-offset pokes) are safe
+ * to actually run. */
 alignas(GameView) std::array<std::byte, sizeof(GameView)> s_game_view_storage{};
-
-struct HostDdrawBuildingStorage {
-    alignas(DDRAW_Building) std::array<std::byte, sizeof(DDRAW_Building)> bytes{};
-
-    HostDdrawBuildingStorage()
-    {
-        constexpr std::size_t kOriginalTypeOffset = 0x04;
-        const std::int32_t type = 0x0D;
-        std::memcpy(bytes.data() + kOriginalTypeOffset, &type, sizeof(type));
-    }
-};
-
-HostDdrawBuildingStorage s_ddraw_building_storage;
+alignas(DDRAW_Building) std::array<std::byte, sizeof(DDRAW_Building)> s_ddraw_building_storage{};
 
 } // namespace
 
@@ -54,11 +57,10 @@ void BootstrapTownMode3Objects()
      * The first GameLoop_FrameUpdate after the menu transition dispatches
      * both objects unconditionally (0x45C4E1/0x45C4E6). */
     if (g_town_view == nullptr) {
-        g_town_view = s_game_view_storage.data();
+        g_town_view = ::new (s_game_view_storage.data()) GameView();
     }
     if (g_ddraw_building == nullptr) {
-        g_ddraw_building = reinterpret_cast<DDRAW_Building*>(
-            s_ddraw_building_storage.bytes.data());
+        g_ddraw_building = ::new (s_ddraw_building_storage.data()) DDRAW_Building();
     }
 }
 

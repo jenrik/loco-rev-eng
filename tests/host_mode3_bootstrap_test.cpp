@@ -14,7 +14,15 @@
 #include <cstdio>
 
 void* g_town_view = nullptr;
-DDRAW_Building* g_ddraw_building = nullptr;
+/* g_ddraw_building is now defined in graphics/DDRAW.cpp (linked in via
+ * obj_ddraw, tests/meson.build) since BootstrapTownMode3Objects()
+ * placement-new constructs a real DDRAW_Building — see
+ * BUG-mode3-input-processing-crashes.md. Real construction (GameView →
+ * Panel → GameObject; Entity, via GameView's embedded game_object_sub)
+ * also needs g_empty_string (canonically defined in
+ * shared/stubs_impl.cpp, not linked into this isolated-object test) —
+ * defined locally rather than pulling that whole stub file in. */
+char g_empty_string = 0;
 
 void Town_TrackBuilding(void* self);
 void DDRAW_UpdateBuilding(void* self);
