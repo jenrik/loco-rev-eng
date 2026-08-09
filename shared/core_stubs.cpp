@@ -41,43 +41,59 @@ struct WNDPROC_Stream;
  * _Z12UIPANEL_BlitPvjjijPPijjijj`. See docs/landmine-sweep-worklist.md. */
 
 /* AssetMgr_LoadFile — two overloads */
+void AssetMgr_LoadFile(int*, unsigned char*, int*);
 void AssetMgr_LoadFile(int*, unsigned char*, int*) {}
+void AssetMgr_LoadFile(void*, char const*, int*);
 void AssetMgr_LoadFile(void*, char const*, int*) {}
 
 /* GameWindow_Create — two overloads */
+void GameWindow_Create(void*, int, void*, int, int, int, int, void*, void*, unsigned int, int, int, unsigned char);
 void GameWindow_Create(void*, int, void*, int, int, int, int, void*, void*, unsigned int, int, int, unsigned char) {}
+void GameWindow_Create(void*, int, void*, int, int, int, int, void*, void*, unsigned int, unsigned int, unsigned int, unsigned char);
 void GameWindow_Create(void*, int, void*, int, int, int, int, void*, void*, unsigned int, unsigned int, unsigned int, unsigned char) {}
 
 /* Vehicle_LoadSounds */
+void Vehicle_LoadSounds(void*, int*, char);
 void Vehicle_LoadSounds(void*, int*, char) {}
 
 /* GameObject_SetFrame — Address: 0x405DE0 */
+void GameObject_SetFrame(void*, int, bool);
 void GameObject_SetFrame(void*, int, bool) {}
 
 /* UIPANEL_StretchBlit — two overloads, Address: 0x42AB10 */
+void UIPANEL_StretchBlit(void*, char*, unsigned int, int, int);
 void UIPANEL_StretchBlit(void*, char*, unsigned int, int, int) {}
+void UIPANEL_StretchBlit(void*, char const*, int, int, int);
 void UIPANEL_StretchBlit(void*, char const*, int, int, int) {}
 
 /* FormatResourceString — Address: referenced from UI_WindowBase ctor */
+void FormatResourceString(void*, unsigned int, char*, unsigned int);
 void FormatResourceString(void*, unsigned int, char*, unsigned int) {}
 
 /* RESMGR_RemoveResource is real code in resources/ResDataSave.cpp */
 
 /* GameAudio_UpdateVolume — two overloads, Address: 0x4135B0 */
+void GameAudio_UpdateVolume(void*, char);
 void GameAudio_UpdateVolume(void*, char) {}
+void GameAudio_UpdateVolume(void*, int);
 void GameAudio_UpdateVolume(void*, int) {}
 
 /* Building_CheckPlacement */
+void Building_CheckPlacement(Building*, int, int);
 void Building_CheckPlacement(Building*, int, int) {}
 
 /* CGWND_AudioChannel_Play */
+void CGWND_AudioChannel_Play(void*);
 void CGWND_AudioChannel_Play(void*) {}
 
 /* GameAudio_PlayResourceEx — two overloads, Address: 0x4131C0 */
+void GameAudio_PlayResourceEx(void*, int, unsigned int*);
 void GameAudio_PlayResourceEx(void*, int, unsigned int*) {}
+void GameAudio_PlayResourceEx(void*, unsigned int, int*);
 void GameAudio_PlayResourceEx(void*, unsigned int, int*) {}
 
 /* RESMGR_AllocResourceEntry */
+void RESMGR_AllocResourceEntry(ResourceEntry*, int, int);
 void RESMGR_AllocResourceEntry(ResourceEntry*, int, int) {}
 
 /* =========================================================== */
@@ -269,8 +285,10 @@ struct IDirectDrawSurface4_Stub {
 /* =========================================================== */
 
 /* Collection::GetAt — separate from Collection_Stub vtable */
+void* Collection_GetAt(void*, int32_t);
 void* Collection_GetAt(void*, int32_t) { return nullptr; }
 
 /* Building::Building(int) — separate from Building_Stub */
+void Building_Building(void*, int32_t);
 void Building_Building(void*, int32_t) {}
 

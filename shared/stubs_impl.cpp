@@ -26,6 +26,7 @@ class Entity;
 #include <cmath>
 
 /* ---- Allocation ---- */
+void* operator_new(size_t size);
 void* operator_new(size_t size) {
     static int call_count = 0;
     call_count++;
@@ -42,23 +43,35 @@ void* operator_new(size_t size) {
     }
     return p;
 }
+void GLOBAL_free(void* ptr);
 void GLOBAL_free(void* ptr) { free(ptr); }
+void* CRT_malloc_zero(size_t size);
 void* CRT_malloc_zero(size_t size) { return operator_new(size); }
+void CRT_free(void* ptr);
 void CRT_free(void* ptr) { free(ptr); }
 
 /* ---- Math ---- */
+int CRT_rand(void);
 int CRT_rand(void) { return rand(); }
+void CRT_srand(unsigned int s);
 void CRT_srand(unsigned int s) { srand(s); }
+void OutputDebugStringA(const char* s);
 void OutputDebugStringA(const char* s) { if (s) fprintf(stderr, "DEBUG: %s\n", s); }
 
 /* ---- String ---- */
+int CRT_strlen(const char* s);
 int CRT_strlen(const char* s) { return s ? static_cast<int>(strlen(s)) : 0; }
+int CRT_memmove(void* d, const void* s, size_t n);
 int CRT_memmove(void* d, const void* s, size_t n) { memmove(d, s, n); return 0; }
+int CRT_wcsstr(const char* a, const char* b);
 int CRT_wcsstr(const char* a, const char* b) { return (a && b && strstr(a, b)) ? 1 : 0; }
+int CRT_sprintf_buf(char* b, const char* f, ...);
 int CRT_sprintf_buf(char* b, const char* f, ...) { return 0; }
 
 /* ---- Time ---- */
+unsigned int CRT_timeGetTime(void);
 unsigned int CRT_timeGetTime(void) { return 0; }
+unsigned int CRT_time(unsigned int* t);
 unsigned int CRT_time(unsigned int* t) {
     return static_cast<unsigned int>(time(reinterpret_cast<time_t*>(t)));
 }
@@ -116,9 +129,13 @@ BOOL (*g_PtInRect)(const RECT*, int, int) = nullptr;
 BOOL (*g_OffsetRect)(RECT*, int, int) = nullptr;
 
 /* ---- Helper stubs ---- */
+void Timer_Resize(void*, unsigned int);
 void Timer_Resize(void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Timer_Resize(void*, int);
 void Timer_Resize(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Collection_Sort(void*);
 void Collection_Sort(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void RESMGR_PlaySound(int);
 void RESMGR_PlaySound(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /** ScriptEngine_constructor — ABI bridge (address: 0x4493A0)
  *  Sets vtable to 0x4782A4, calls InitializeCriticalSection at +0x04.
@@ -133,6 +150,7 @@ void RESMGR_PlaySound(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __
  *  ScriptEngine allocation (g_train_resources) now placement-constructs
  *  the real class directly instead of calling through here — see
  *  core/GameLoop.cpp. */
+void* ScriptEngine_constructor(void* self);
 void* ScriptEngine_constructor(void* self) {
     extern void InitializeCriticalSection(void*);
     extern const void* PTR_RESDATA_ScriptEngine_Cleanup_004782a4;
@@ -142,11 +160,13 @@ void* ScriptEngine_constructor(void* self) {
 }
 /** RESDATA_ScriptEngine_Dtor — ABI bridge to ScriptEngine destructor.
  *  TODO: decompile full cleanup at 0x4493D0 */
+void RESDATA_ScriptEngine_Dtor(void* self);
 void RESDATA_ScriptEngine_Dtor(void* self) {
     (void)self;
     fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — RESDATA_ScriptEngine_Dtor needs decompilation");
 }
+int  Vehicle_SetState(void*, int);
 int  Vehicle_SetState(void*, int) { return 0; }
 /** UI_CenterWindow — Center inner rect within outer rect
  *  Address: 0x425A50
@@ -155,6 +175,7 @@ int  Vehicle_SetState(void*, int) { return 0; }
  *  Modifies inner rect in place to be centered within outer rect.
  *  Preserves inner rect width and height; only adjusts left/top.
  *  __cdecl, 49 instructions. */
+void UI_CenterWindow(int* outer, int* inner);
 void UI_CenterWindow(int* outer, int* inner)
 {
     int inner_w = inner[2] - inner[0];   /* inner width = right - left */
@@ -170,12 +191,19 @@ void UI_CenterWindow(int* outer, int* inner)
     inner[1] = outer[1] + (outer_h - inner_h) / 2;
     inner[3] = inner[1] + inner_h;
 }
+void Sprite_Destroy(void*);
 void Sprite_Destroy(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void* ButtonSprite_Ctor(void*, int, int, int);
 void* ButtonSprite_Ctor(void*, int, int, int) { return nullptr; }
+void NETMAN_QueueMessage(void*, int, void*);
 void NETMAN_QueueMessage(void*, int, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Sprite_SetState(void*, int);
 void Sprite_SetState(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void CopyRect(RECT* d, const RECT* s);
 void CopyRect(RECT* d, const RECT* s) { if(d&&s) *d=*s; }
+void OffsetRect(RECT* r, int dx, int dy);
 void OffsetRect(RECT* r, int dx, int dy) { if(r){r->left+=dx;r->top+=dy;r->right+=dx;r->bottom+=dy;} }
+int  IsRectEmpty(const RECT* r);
 int  IsRectEmpty(const RECT* r) { return !r || r->left>=r->right || r->top>=r->bottom; }
 
 
@@ -212,6 +240,7 @@ void* g_world_vehicles[4] = {nullptr,nullptr,nullptr,nullptr};
 
 
 /* ---- More stubs ---- */
+int wsprintfA(char* buf, const char* fmt, ...);
 int wsprintfA(char* buf, const char* fmt, ...) {
     if (!buf || !fmt) return 0;
     va_list args; va_start(args, fmt);
@@ -219,33 +248,51 @@ int wsprintfA(char* buf, const char* fmt, ...) {
     va_end(args); return ret;
 }
 
+int CRT_atoi(const char* s);
 int CRT_atoi(const char* s) { return s ? atoi(s) : 0; }
+    void CRT_sprintf(char* buf, const char* fmt, ...);
     void CRT_sprintf(char* buf, const char* fmt, ...) {}
 
+void Cursor_Render(void*, int, int, char);
 void Cursor_Render(void*, int, int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void CGWND_TrackPiece_SetZoom(void*, int);
 void CGWND_TrackPiece_SetZoom(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void WNDPROC_CriticalSectionLock(int*, char*);
 void WNDPROC_CriticalSectionLock(int*, char*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* Stream I/O stubs — called from BuildingDescriptorEditor and wave_io; may be unreachable on host in normal paths */
+void* WNDPROC_StreamPrintf(void*, void*);
 void* WNDPROC_StreamPrintf(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  WNDPROC_StreamReadLine(void*, void*);
 void  WNDPROC_StreamReadLine(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void* WNDPROC_StreamWrite(void*, void*);
 void* WNDPROC_StreamWrite(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+int   WNDPROC_StreamSeekForward(void*, int, int, int);
 int   WNDPROC_StreamSeekForward(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  Stream_BeginEnum(void*);
 void  Stream_BeginEnum(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  Stream_BeginRead(void*, int, int);
 void  Stream_BeginRead(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* Math/CRT stubs — signatures inferred from usage, likely misidentified by decompiler */
+void* CRT_fabs(void*, void*);
 void* CRT_fabs(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void  CRT_fmod(void*, void*);
 void  CRT_fmod(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
+int  Config_GetIniInt(void*, const char*, const char*, int def);
 int  Config_GetIniInt(void*, const char*, const char*, int def) { return def; }
 
 /* Win32 stubs */
+void* GetProcessHeap(void);
 void* GetProcessHeap(void) {
     return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
 }
+int   CloseHandle(void*);
 int   CloseHandle(void*) { return 1; }
+void  Sleep(unsigned int ms);
 void  Sleep(unsigned int ms) { usleep(ms * 1000); }
+void  SetPixel(void*, int, int, unsigned int);
 void  SetPixel(void*, int, int, unsigned int) {}
 
 
@@ -296,31 +343,52 @@ int DAT_00481194 = 0;
 int s_AW_Blit_failure_reported_0047e0d8 = 0;
 
 /* Win32 stubs */
+void GetWindowTextA(void*, char*, int);
 void GetWindowTextA(void*, char*, int) {}
+int GetLastError(void);
 int GetLastError(void) { return 0; }
+int FormatMessageA(int, void*, int, int, char*, int, void*);
 int FormatMessageA(int, void*, int, int, char*, int, void*) { return 0; }
+void* LocalFree(void*);
 void* LocalFree(void*) { return nullptr; }
+void* FindFirstFileA(const char*, void*);
 void* FindFirstFileA(const char*, void*) { return nullptr; }
+int FindNextFileA(void*, void*);
 int FindNextFileA(void*, void*) { return 0; }
+int FindClose(void*);
 int FindClose(void*) { return 0; }
+int CreateDirectoryA(const char*, void*);
 int CreateDirectoryA(const char*, void*) { return 0; }
+int DeleteFileA(const char*);
 int DeleteFileA(const char*) { return 0; }
+int GetFileAttributesA(const char*);
 int GetFileAttributesA(const char*) { return -1; }
+int ClientToScreen(void*, void*);
 int ClientToScreen(void*, void*) { return 0; }
+int SetCursorPos(int, int);
 int SetCursorPos(int, int) { return 0; }
 
 /* Critical section stubs */
 void InitializeCriticalSection(void*) {}
+void EnterCriticalSection(void*);
 void EnterCriticalSection(void*) {}
+void LeaveCriticalSection(void*);
 void LeaveCriticalSection(void*) {}
+void DeleteCriticalSection(void*);
 void DeleteCriticalSection(void*) {}
 
 /* CRT stubs */
+void CRT_strncpy(void*, void*, int);
 void CRT_strncpy(void*, void*, int) {}
+void CRT_0x4681D0(int);
 void CRT_0x4681D0(int) {}
+void CRT_0x468480(char*, void*);
 void CRT_0x468480(char*, void*) {}
+void CRT_0x468610(void*, unsigned int, unsigned int, int);
 void CRT_0x468610(void*, unsigned int, unsigned int, int) {}
+void* CRT_malloc_zero(unsigned int sz);
 void* CRT_malloc_zero(unsigned int sz) { return operator_new(static_cast<size_t>(sz)); }
+void* operator_new(unsigned int sz);
 void* operator_new(unsigned int sz) { return operator_new(static_cast<size_t>(sz)); }
 
 /* vtable globals (needed for some UI classes) */
@@ -329,16 +397,23 @@ void* vtable_for_Collection = nullptr;
 int growth_factor = 2;
 
 /* DDRAW stubs */
+void Cursor_SetCapture(void*, unsigned char);
 void Cursor_SetCapture(void*, unsigned char) {}
+void DDRAW_UnlockPrimary();
 void DDRAW_UnlockPrimary() {}
+void Cursor_InitSprites(void*);
 void Cursor_InitSprites(void*) {}
+void Cursor_UnlockAllSurfaces(void*);
 void Cursor_UnlockAllSurfaces(void*) {}
 /* DDRAW_GetSurfaceWidthHeight/DDRAW_RestoreSurfaces: real, Ghidra-verified
  * implementations now canonical in native/DDRAW_GetSurfaceWidthHeight.c
  * (0x4014E0, see PROGRESS.md raw-073) and native/ddraw_surface_ops.c;
  * these no-op duplicates removed (LINK-001). */
+void DDRAW_SetSurfaceFormat(void*, int);
 void DDRAW_SetSurfaceFormat(void*, int) {}
+void DDRAW_SpriteDataCtor(void*, int);
 void DDRAW_SpriteDataCtor(void*, int) {}
+void DDRAW_SpriteDataDtor(void*);
 void DDRAW_SpriteDataDtor(void*) {}
 /* DDRAW_SelectBuilding(void*, int) — real implementation now in
  * graphics/DDRAW.cpp (0x459180), as a bridge to
@@ -349,8 +424,11 @@ void DDRAW_SpriteDataDtor(void*) {}
 
 /* RESOURCE stubs (RESMGR_IsSaveHeader/LoadResource/ReleaseResource/
  * ResourceData_Init are real code in resources/ResDataSave.cpp) */
+void RESDATA_SetPosition(void*, int, int);
 void RESDATA_SetPosition(void*, int, int) {}
+void RESDATA_BaseInit(void*);
 void RESDATA_BaseInit(void*) {}
+void RESDATA_DtorBase(void*);
 void RESDATA_DtorBase(void*) {}
 /* RESDATA tile-type predicates — verified from Ghidra disassembly.
  * Each checks byte at resource+0x63A against known type ranges.
@@ -375,6 +453,7 @@ void RESDATA_DtorBase(void*) {}
  * (0x44BD30) now canonical in world/tilemap.cpp; this was a duplicate
  * (LINK-001). */
 
+uint8_t RESDATA_IsRoadTile(int32_t tile_obj);
 uint8_t RESDATA_IsRoadTile(int32_t tile_obj)
 {
     /* 0x44BD10: check byte at +0x63A for {0x01,0x02,0x03,0x04} */
@@ -384,6 +463,7 @@ uint8_t RESDATA_IsRoadTile(int32_t tile_obj)
     return (b == 0x01 || b == 0x02 || b == 0x03 || b == 0x04) ? 1 : 0;
 }
 
+uint8_t RESDATA_IsWaterTile(int32_t tile_obj);
 uint8_t RESDATA_IsWaterTile(int32_t tile_obj)
 {
     /* 0x44BD50: check byte at +0x63A for {0x0E,0x0F} */
@@ -393,6 +473,7 @@ uint8_t RESDATA_IsWaterTile(int32_t tile_obj)
     return (b == 0x0E || b == 0x0F) ? 1 : 0;
 }
 
+uint8_t RESDATA_IsTrackTile(int32_t tile_obj);
 uint8_t RESDATA_IsTrackTile(int32_t tile_obj)
 {
     /* 0x44BD70: check byte at +0x63A for {0x10,0x11} */
@@ -402,6 +483,7 @@ uint8_t RESDATA_IsTrackTile(int32_t tile_obj)
     return (b == 0x10 || b == 0x11) ? 1 : 0;
 }
 
+uint8_t RESDATA_IsSceneryTile(int32_t tile_obj);
 uint8_t RESDATA_IsSceneryTile(int32_t tile_obj)
 {
     /* 0x44BD90: check byte at +0x63A for {0x12,0x13} */
@@ -411,6 +493,7 @@ uint8_t RESDATA_IsSceneryTile(int32_t tile_obj)
     return (b == 0x12 || b == 0x13) ? 1 : 0;
 }
 
+uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b);
 uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
 {
     /* 0x44BDB0: dispatches on type byte at +0x63A.
@@ -437,11 +520,15 @@ uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
  * (void*, int32_t, int32_t, int32_t) declaration of this same overload.
  * Already loud (unlike the sibling overload was) and already
  * unreachable today (RESDATA_ScriptedObject::Start has zero callers). */
+void* RESDATA_CreateChildSprite(void*, int, int, int);
 void* RESDATA_CreateChildSprite(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+void RESDATA_HitTestChildren(void*, int, int);
 void RESDATA_HitTestChildren(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Panel_DtorBody(void*);
 void Panel_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* Game stubs */
+void Game_SetScreenMode(void*, char, char, char);
 void Game_SetScreenMode(void*, char, char, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /**
@@ -456,31 +543,53 @@ void Game_SetScreenMode(void*, char, char, char) { fprintf(stderr, "STUB: %s at 
  * NET_FindPlayer's gate checks it either. Loud stubs per CLAUDE.md's
  * stub policy (never a silent no-op for missing internal logic).
  */
+int NET_FindPlayer(int, int);
 int NET_FindPlayer(int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); return 0; }
+uint16_t NET_UploadAsset(int, char*);
 uint16_t NET_UploadAsset(int, char*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); return 0; }
+void PlaySoundFile(char*, int, int, int);
 void PlaySoundFile(char*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); }
+void Game_CheckScreensaverTimeout(int*);
 void Game_CheckScreensaverTimeout(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /** Game_DeselectGameObject — Host no-op (no selection state to clear).
  *  Binary sets selected building to null. */
+void Game_DeselectGameObject(int);
 void Game_DeselectGameObject(int) { /* host no-op */ }
+void Game_SelectGameObject(void*, void*);
 void Game_SelectGameObject(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void GameObject_StopSound(void*, int);
 void GameObject_StopSound(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void GameObject_Update(void*);
 void GameObject_Update(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void GameObject_Draw(void*);
 void GameObject_Draw(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void GameObject_PtInRect(void*, int, int);
 void GameObject_PtInRect(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void GameObject_DtorBody(void*);
 void GameObject_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void GameObject_BaseCtor(void*, int, int, int, int);
 void GameObject_BaseCtor(void*, int, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void Entity_GetSubObjectPosition(void*, int*, int);
 void Entity_GetSubObjectPosition(void*, int*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* UI stubs */
+void UI_WindowBase_Ctor(void*, void*, unsigned int);
 void UI_WindowBase_Ctor(void*, void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UI_WindowBase_BaseDtor(void*);
 void UI_WindowBase_BaseDtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UI_WindowBase_Hide(void*);
 void UI_WindowBase_Hide(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int);
 void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int) { /* host no-op */ }
+void UI_CreateChildWindow(void*, int, int);
 void UI_CreateChildWindow(void*, int, int) { /* host no-op */ }
+void UI_CleanupTooltips(void* self);
 void UI_CleanupTooltips(void* self) { (void)self; }
+void UI_DestroyTooltip(void* self, int i);
 void UI_DestroyTooltip(void* self, int i) { (void)self; (void)i; }
+void UI_CreateTooltip(void* self, int a, int b, int c, int d);
 void UI_CreateTooltip(void* self, int a, int b, int c, int d) { (void)self; (void)a; (void)b; (void)c; (void)d; }
+void UI_IsBitmapReady(int);
 void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /* UI_Window_UpdateScroll — Address: 0x423560. Real function (a UIEntity
  * per-frame scroll/animation tick method, confirmed via a 15-slot
@@ -500,15 +609,18 @@ void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __
  * as this session's earlier WIN32_SendNetworkData/NET_UpdatePlayerList
  * fixes. Loud now, and return-type-correct, so if this ever becomes
  * reachable it fails immediately instead of silently misbehaving. */
+char UI_Window_UpdateScroll(int* p);
 char UI_Window_UpdateScroll(int* p) {
     (void)p;
     fprintf(stderr, "STUB: %s at %s:%d (0x423560, not yet ported)\n", __func__, __FILE__, __LINE__);
     assert(0 && "stub reached — UI_Window_UpdateScroll");
     return 0;
 }
+void UIEntity_Ctor(void);
 void UIEntity_Ctor(void) { /* host no-op */ }
 /* UIPANEL_Blit(void*,int...int) and UIPANEL_BeginPaint(void*): duplicates
  * of shared/link_stubs.cpp / ui/UIPANEL.cpp (LINK-001); removed here. */
+void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*);
 void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { /* host no-op */ }
 /* Returns `self` (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
  * cluster): the real definition (0x42A110, graphics/LOCOBITMAP.cpp
@@ -522,38 +634,66 @@ void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { /* host no-op
  * previously `void`-returning, which is UB read by every caller (Itanium
  * mangling ignores return type, so it linked clean). Still a host no-op
  * (init logic itself not ported), but now well-defined. */
+void* UIPANEL_CreateSurface(void* self);
 void* UIPANEL_CreateSurface(void* self) { return self; }
+void UIPANEL_StretchBlit(void*, void*, int, int, int);
 void UIPANEL_StretchBlit(void*, void*, int, int, int) { /* host no-op */ }
+void UIPANEL_SetClipRect(void* self, int a, int b);
 void UIPANEL_SetClipRect(void* self, int a, int b) { (void)self; (void)a; (void)b; }
+void UIPANEL_ScrollPanel_HandleDrag(void*, int, int);
 void UIPANEL_ScrollPanel_HandleDrag(void*, int, int) { /* host no-op */ }
+void UIPANEL_ScrollPanel_Dtor(void* self);
 void UIPANEL_ScrollPanel_Dtor(void* self) { (void)self; }
+void UIPANEL_InitScrollPanel(void* self);
 void UIPANEL_InitScrollPanel(void* self) { (void)self; }
+void UIPANEL_FillRect(void* self, int a, int b);
 void UIPANEL_FillRect(void* self, int a, int b) { (void)self; (void)a; (void)b; }
 
 /* Various other stubs */
+void Sprite_Init(void* self);
 void Sprite_Init(void* self) { (void)self; }
+void Sprite_SetState(void*, int, int*);
 void Sprite_SetState(void*, int, int*) { /* host no-op */ }
+void Sprite_Destroy(void);
 void Sprite_Destroy(void) { }
 /* ButtonSprite_Ctor(void*,int) / TileMap_InvalidateRect(void*,int,int,int,int) /
  * CGWND_SetMode(void*): duplicates of shared/link_stubs.cpp (LINK-001);
  * removed here. */
+void HelpWnd_PlayNarration(void*, int, int);
 void HelpWnd_PlayNarration(void*, int, int) { /* host no-op */ }
+void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int);
 void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int) { /* host no-op */ }
+void Town_SelectBuilding(void* self, int i);
 void Town_SelectBuilding(void* self, int i) { (void)self; (void)i; }
+void TileMap_InvalidateDirtyRects(void*, char);
 void TileMap_InvalidateDirtyRects(void*, char) { /* host no-op */ }
+void ScriptEngine_Call(void* self);
 void ScriptEngine_Call(void* self) { (void)self; }
+void ScriptEngine_Init(void* self);
 void ScriptEngine_Init(void* self) { (void)self; }
+void CGWND_SetPause(void* self, char c);
 void CGWND_SetPause(void* self, char c) { (void)self; (void)c; }
+void CGWND_SetBuildMode(int i);
 void CGWND_SetBuildMode(int i) { (void)i; }
+void World_Init(void* self);
 void World_Init(void* self) { (void)self; /* host no-op */ }
+void PixelDataCache_LookupAsset(void* self, int a, int b);
 void PixelDataCache_LookupAsset(void* self, int a, int b) { (void)self; (void)a; (void)b; }
+void PixelDataCache_GetEntryCount(void* self);
 void PixelDataCache_GetEntryCount(void* self) { (void)self; }
+void PixelDataCache_Unlock(void* self, int i);
 void PixelDataCache_Unlock(void* self, int i) { (void)self; (void)i; }
+void DPLAY_RenderPlayer(void*, void*, int, void*, int, int, unsigned int, RECT*);
 void DPLAY_RenderPlayer(void*, void*, int, void*, int, int, unsigned int, RECT*) { /* host no-op */ }
+void PlaySoundAt(int, int, int, int);
 void PlaySoundAt(int, int, int, int) { /* host no-op */ }
+void Collection_Resize(int);
 void Collection_Resize(int) { /* host no-op */ }
+void Collection_GetAt(int);
 void Collection_GetAt(int) { /* host no-op */ }
+void SortedCollection_Compare(void*, void*);
 void SortedCollection_Compare(void*, void*) { /* host no-op */ }
+void SortedCollection_SortRange(int, int);
 void SortedCollection_SortRange(int, int) { /* host no-op */ }
 
 /* ================================================================== */
@@ -561,6 +701,7 @@ void SortedCollection_SortRange(int, int) { /* host no-op */ }
 /* ================================================================== */
 
 /* Subsystem constructors */
+void* GameConfig_constructor(void* memory);
 void* GameConfig_constructor(void* memory)
 {
     // GameConfig_constructor @ 0x440C60 initializes the 0xB0-byte DPlayConfig
@@ -575,19 +716,27 @@ void* GameConfig_constructor(void* memory)
     g_netSettings = config->binary_data();
     return config;
 }
+void* NETMAN_constructor(void*);
 void* NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+void* PlayerRecord_constructor(void*);
 void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 /* Subsystem init */
 /* DDRAW_Init — real implementation is native/ddraw_init.c (0x45C8A0);
  * this and link_stubs.cpp's no-op copy were the flagship LINK-001
  * nondeterminism bug (see PROGRESS.md). Removed. */
+void  UIPANEL_Hide(void*, void*);
 void  UIPANEL_Hide(void*, void*) { /* host no-op */ }
 
 /* Per-frame updates */
+void  NETMAN_Update(void* self);
 void  NETMAN_Update(void* self) { (void)self; }
+void  RESMGR_VehicleAnimationTick(void* self);
 void  RESMGR_VehicleAnimationTick(void* self) { (void)self; }
+void  World_UpdateTick(void* self);
 void  World_UpdateTick(void* self) { (void)self; }
+void  UI_HideTooltip(void* self);
 void  UI_HideTooltip(void* self) { (void)self; }
+void  RESDATA_ScriptedObject_Update(void* self);
 void  RESDATA_ScriptedObject_Update(void* self) { (void)self; }
 /* Town_TrackBuilding (0x42D1A0) and DDRAW_UpdateBuilding (0x459DA0) are
  * implemented in src/sdl3_shims/sdl3_town_mode3.cpp for the host build.
@@ -597,17 +746,22 @@ extern void DDRAW_UpdateBuilding(void*);
 /* INPUT_GetSaveFileName / INPUT_SaveCurrentWorld / INPUT_FindObjectAt /
  * INPUT_PlaceObject / INPUT_RemoveObject: canonical definitions moved to
  * input/InputMgr.cpp (0x41DD40 real, the rest loud deferred stubs). */
+void  BuildingMgr_UpdateAll(void* self);
 void  BuildingMgr_UpdateAll(void* self) { (void)self; }
 
 /* Asset enumeration */
+void  AssetMgr_EnumerateCategory(unsigned int** p);
 void  AssetMgr_EnumerateCategory(unsigned int** p) { (void)p; }
 
 /* Timer callback */
+extern "C" void LAB_0045c520(void);
 extern "C" void LAB_0045c520(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached — LAB_0045c520"); }
 
 /* Windows API extras */
 extern "C" {
+void* CreateEventA(void*, int, int, const char*);
 void* CreateEventA(void*, int, int, const char*) { return (void*)1; }
 /* timeBeginPeriod: duplicate of shared/link_stubs.cpp (LINK-001); removed. */
+int   timeSetEvent(unsigned int, unsigned int, void*, unsigned int, unsigned int);
 int   timeSetEvent(unsigned int, unsigned int, void*, unsigned int, unsigned int) { return 1; }
 }

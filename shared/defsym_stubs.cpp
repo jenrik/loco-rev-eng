@@ -15,8 +15,11 @@
 #endif
 
 extern "C" {
+void AudioChannel_Pause();
 void AudioChannel_Pause() { /* host no-op */ }
+void AudioChannel_Play();
 void AudioChannel_Play() { /* host no-op */ }
+void ButtonSprite_Ctor();
 void ButtonSprite_Ctor() { /* host no-op */ }
 /* CGWND_SetMode() (0-arg extern "C") removed (2026-08-06, cross-validation
  * session): was the wrong stub graphics/LOCOBITMAP.cpp silently bound to
@@ -31,18 +34,23 @@ void ButtonSprite_Ctor() { /* host no-op */ }
  * wants a 0-arg shape. ButtonSprite_Ctor() above is the same 0-arg-landmine
  * pattern but doesn't currently collide with anything (untouched — out of
  * LINK-001's scope; tracked separately in docs/landmine-sweep-worklist.md). */
+void DDRAW_RestoreSurfaces();
 void DDRAW_RestoreSurfaces() { /* host no-op */ }
+void DDRAW_SetSurfaceFormat();
 void DDRAW_SetSurfaceFormat() { /* host no-op */ }
+void DDRAW_UnlockPrimary();
 void DDRAW_UnlockPrimary() { /* host no-op */ }
 /* DPlayManager_RenderConnectionPanel — removed. It was a distinct, wrongly
  * (0-arg) named stub that native/NETMAN_NetworkUI.c's NETMAN_JoinSession
  * silently called instead of the real RenderConnectionPanel(NameEntryPanel*)
  * (network/DPlayManager.cpp, 0x4421D0) — a call-0 landmine fixed by
  * correcting that call site to the real name/signature. */
+void FormatResourceString();
 void FormatResourceString() { /* host no-op */ }
 // PlayerRecord_constructor (0x452E10) calls GetUserNameA only after its
 // Configuration/PlayerName lookup is empty. Preserve the Win32 size contract
 // for the POSIX host instead of silently forcing its "LEGO LOCO" fallback.
+uint32_t GetUserNameA(char* buffer, uint32_t* size);
 uint32_t GetUserNameA(char* buffer, uint32_t* size)
 {
 #ifndef _WIN32
@@ -64,16 +72,27 @@ uint32_t GetUserNameA(char* buffer, uint32_t* size)
     return 0;
 #endif
 }
+void NETMAN_SendPacket();
 void NETMAN_SendPacket() { /* host no-op */ }
+void PlaySound();
 void PlaySound() { /* host no-op */ }
+void PlaySoundAt();
 void PlaySoundAt() { /* host no-op */ }
+void RESMGR_LoadSoundResource();
 void RESMGR_LoadSoundResource() { /* host no-op */ }
+void RESMGR_ReleaseSoundResource();
 void RESMGR_ReleaseSoundResource() { /* host no-op */ }
+void Sprite_Init();
 void Sprite_Init() { /* host no-op */ }
+void Sprite_SetState();
 void Sprite_SetState() { /* host no-op */ }
+void TileMap_InvalidateRect();
 void TileMap_InvalidateRect() { /* host no-op */ }
+void UIEntity_Ctor();
 void UIEntity_Ctor() { /* host no-op */ }
+void UI_MainMenu_SetState();
 void UI_MainMenu_SetState() { /* host no-op */ }
+void UIPANEL_BeginPaint();
 void UIPANEL_BeginPaint() { /* host no-op */ }
 /* UIPANEL_Blit() (zero-arg, extern "C") removed: this is the unrelated
  * wrong stub town/Town.cpp used to silently bind to before the
@@ -82,39 +101,67 @@ void UIPANEL_BeginPaint() { /* host no-op */ }
  * session — confirmed zero referrers via `nm --print-file-name
  * build/lego_loco.p/*.o | grep "U UIPANEL_Blit$"`. See
  * docs/landmine-sweep-worklist.md. */
+void UIPANEL_CreateSurface();
 void UIPANEL_CreateSurface() { /* host no-op */ }
+void UIPANEL_EndPaintEx();
 void UIPANEL_EndPaintEx() { /* host no-op */ }
+void UI_WindowBase_BaseDtor();
 void UI_WindowBase_BaseDtor() { /* host no-op */ }
+void UI_WindowBase_Ctor();
 void UI_WindowBase_Ctor() { /* host no-op */ }
+void VehicleEditor_CheckEditBounds1();
 void VehicleEditor_CheckEditBounds1() { /* host no-op */ }
+void WIN32_StreamOpen();
 void WIN32_StreamOpen() { /* host no-op */ }
+void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t);
 void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t) { return nullptr; }
+void WNDPROC_EnterCriticalSection();
 void WNDPROC_EnterCriticalSection() { /* host no-op — single-threaded */ }
+void WNDPROC_LeaveCriticalSection();
 void WNDPROC_LeaveCriticalSection() { /* host no-op — single-threaded */ }
 /* Same family, used by resources/WndProcStreamBuf.cpp's constructor/
  * destructor (originally thin IAT forwarders to Win32 Initialize/
  * DeleteCriticalSection at 0x464D70/0x464D80). */
+void WNDPROC_InitializeCriticalSection();
 void WNDPROC_InitializeCriticalSection() { /* host no-op — single-threaded */ }
+void WNDPROC_DeleteCriticalSection();
 void WNDPROC_DeleteCriticalSection() { /* host no-op — single-threaded */ }
+void* WNDPROC_StreamFromMemory(void*, const char*, int, int);
 void* WNDPROC_StreamFromMemory(void*, const char*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+void RESDATA_DtorBase();
 void RESDATA_DtorBase() { /* host no-op */ }
+void ScriptEngine_Init();
 void ScriptEngine_Init() { /* host no-op */ }
+void UIPANEL_InitScrollPanel();
 void UIPANEL_InitScrollPanel() { /* host no-op */ }
+void UIPANEL_ScrollPanel_Dtor();
 void UIPANEL_ScrollPanel_Dtor() { /* host no-op */ }
+void ScriptEngine_Call();
 void ScriptEngine_Call() { /* host no-op */ }
+void RESDATA_SetPosition();
 void RESDATA_SetPosition() { /* host no-op */ }
+void HelpWnd_PlayNarration();
 void HelpWnd_PlayNarration() { /* host no-op */ }
+void CGWND_SetBuildMode();
 void CGWND_SetBuildMode() { /* host no-op */ }
+void GameAudio_UpdateVolume();
 void GameAudio_UpdateVolume() { /* host no-op */ }
+void UIPANEL_ScrollPanel_HandleDrag();
 void UIPANEL_ScrollPanel_HandleDrag() { /* host no-op */ }
+void Panel_DtorBody();
 void Panel_DtorBody() { /* host no-op */ }
 /* CRT_localtime(): this 0-arg landmine collided with shared/link_stubs.cpp's
  * real (unsigned int*) -> void* body (LINK-001); removed — link_stubs.cpp's
  * survives. */
+void CRT_wcsstr();
 void CRT_wcsstr() { /* host no-op */ }
+void GameObject_GetBoundingRect();
 void GameObject_GetBoundingRect() { /* host no-op */ }
+void TileMap_GetObjectAt();
 void TileMap_GetObjectAt() { /* host no-op */ }
+void UI_MainMenu_SetState_void();
 void UI_MainMenu_SetState_void() { /* host no-op */ }
+void Vehicle_GetOccupantCount();
 void Vehicle_GetOccupantCount() { /* host no-op */ }
 void* DAT_00479190 = nullptr;
 void* DAT_004A9908 = nullptr;
@@ -141,29 +188,40 @@ void* s_VolumeLow_0047f164 = nullptr;
 void* s_VolumeMed_0047f158 = nullptr;
 void* __imp_SystemParametersInfoA = nullptr;
 void* g_scene_name = nullptr;
+void Cursor_BlitEditPreview();
 void Cursor_BlitEditPreview() { /* host no-op */ }
+void Cursor_UpdateScrollButtons();
 void Cursor_UpdateScrollButtons() { /* host no-op */ }
+void Cursor_DrawColorPalette();
 void Cursor_DrawColorPalette() { /* host no-op */ }
+void Cursor_HandleTabChange();
 void Cursor_HandleTabChange() { /* host no-op */ }
 /* GetOpenFileNameA(): this 0-arg landmine collided with graphics/
  * sdl3_window.cpp's real (void* lpofn) -> BOOL body (LINK-001); removed —
  * sdl3_window.cpp's survives. */
+void NET_GetOrCreateSurface();
 void NET_GetOrCreateSurface() { /* host no-op */ }
 /* NET_UploadAsset and PlaySoundFile moved to shared/stubs_impl.cpp as loud
  * stubs with their real (int, char*)/(char*, int, int, int) signatures —
  * these 0-arg shapes had no real caller (see
  * docs/landmine-sweep-worklist.md "Cursor family"). */
+void TileMap_CreateOverlay();
 void TileMap_CreateOverlay() { /* host no-op */ }
+void FMT_LAYOUT_PATH();
 void FMT_LAYOUT_PATH() { /* host no-op */ }
+void GAMESTATE_StartGameTimer();
 void GAMESTATE_StartGameTimer() { /* host no-op */ }
 void* _g_netman = nullptr;
 } /* extern "C" */
+void CGWND_PumpMessages(char);
 void CGWND_PumpMessages(char) { /* host no-op */ }  /* loading-transition pump — C++ linkage */
 extern "C" {
 void* _g_netman_data = nullptr;
 void* STR_LEGO_LOCO = nullptr;
+void CGWND_QuitToMenu();
 void CGWND_QuitToMenu() { /* host no-op */ }
 void* MessageBeep = nullptr;
+void IsWindowVisible();
 void IsWindowVisible() { /* host no-op */ }
 void* World_FinalizeLoad = nullptr;
 void* World_GetObjectAt = nullptr;
@@ -173,11 +231,17 @@ void* CGWND_GameSetup_DrawGrid_Thunk = nullptr;
 
 /* C++-linkage stubs */
 void* g_scripted_object = nullptr;
+void RESDATA_GameObject_UpdateAnimation(void*);
 void RESDATA_GameObject_UpdateAnimation(void*) { /* host no-op */ }
+void RESDATA_SoundObject_GetState(int);
 void RESDATA_SoundObject_GetState(int) { /* host no-op */ }
+void RESDATA_SoundObject_GetTextLength(int);
 void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
+void NETMAN_SendAck(void*);
 void NETMAN_SendAck(void*) { /* host no-op */ }
+void UI_CreateTooltip(void*, int, short, int, int);
 void UI_CreateTooltip(void*, int, short, int, int) { /* host no-op */ }
+void UIPANEL_LockSurface(void*);
 void UIPANEL_LockSurface(void*) { /* host no-op */ }
 /* RESDATA_CreateChildSprite(void*, void*, int, int) — 0x4546D0.
  * Ghidra confirms one real function (`void* __thiscall
@@ -199,11 +263,15 @@ void UIPANEL_LockSurface(void*) { /* host no-op */ }
  * return nullptr, per this file's own precedent one entry up
  * (WNDPROC_StreamFromMemory) and CLAUDE.md's stub policy: a future
  * caller must fail loudly, not read a plausible-looking null forever. */
+void* RESDATA_CreateChildSprite(void*, void*, int, int);
 void* RESDATA_CreateChildSprite(void*, void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached — RESDATA_CreateChildSprite(void*, void*, int, int) 0x4546D0, verified unreachable but must not silently return garbage if that changes"); return nullptr; }
+void UI_DefWndProc(void*, unsigned int, unsigned int, int);
 void UI_DefWndProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
+void Cursor_HandleWindowPaint(void*, int);
 void Cursor_HandleWindowPaint(void*, int) { /* host no-op */ }
 /** CRT_itoa — Convert integer to string in given radix (base 2-36).
  *  Standard C runtime function. Returns buf. */
+char* CRT_itoa(int value, char* buf, int radix);
 char* CRT_itoa(int value, char* buf, int radix) {
     if (radix < 2 || radix > 36) { buf[0] = '\0'; return buf; }
     char tmp[36];
@@ -221,19 +289,29 @@ char* CRT_itoa(int value, char* buf, int radix) {
     buf[j] = '\0';
     return buf;
 }
+void Cursor_WaitForBlit(void*);
 void Cursor_WaitForBlit(void*) { /* host no-op */ }
+void AudioChannel_IsActive(int);
 void AudioChannel_IsActive(int) { /* host no-op */ }
+void GAMESTATE_ConnectToNetworkGame(void*);
 void GAMESTATE_ConnectToNetworkGame(void*) { /* host no-op */ }
+void GameWindow_BaseDtor(void*);
 void GameWindow_BaseDtor(void*) { /* host no-op */ }
+void CGWND_SetFullscreenMode(char);
 void CGWND_SetFullscreenMode(char) { /* host no-op */ }
+void GameWindow_SetPosition(void*, int, int);
 void GameWindow_SetPosition(void*, int, int) { /* host no-op */ }
+void GameWindow_Show(void*);
 void GameWindow_Show(void*) { /* host no-op */ }
+void GameWindow_Hide(void*);
 void GameWindow_Hide(void*) { /* host no-op */ }
+void ResourceManager_GetStringById(void*, unsigned int);
 void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
 void* TrainSubsystem_Ctor = nullptr;
 /* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
  * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
  * core/HostMode3Bootstrap.cpp's pending-async-task pump). */
+void Train_ProcessMessages(void*);
 void Train_ProcessMessages(void*) { /* host no-op */ }
 /* WIN32_GetSystemMetrics(void*) / WIN32_RecvNetworkData(void*,uint32_t,
  * const char*) — C++-mangled overloads network/DirectPlay.cpp declares
@@ -249,6 +327,7 @@ void Train_ProcessMessages(void*) { /* host no-op */ }
  * warns once rather than a bare assert(0).
  * TODO: decompile 0x460360 (GetSystemMetrics) / 0x460EA0
  * (RecvNetworkData) for real DirectPlay-backed bodies. */
+uint32_t WIN32_GetSystemMetrics(void*);
 uint32_t WIN32_GetSystemMetrics(void*) {
     static bool warned = false;
     if (!warned) {
@@ -258,6 +337,7 @@ uint32_t WIN32_GetSystemMetrics(void*) {
     }
     return 0;
 }
+uint32_t WIN32_RecvNetworkData(void*, uint32_t, const char*);
 uint32_t WIN32_RecvNetworkData(void*, uint32_t, const char*) {
     static bool warned = false;
     if (!warned) {
@@ -276,26 +356,41 @@ uint32_t WIN32_RecvNetworkData(void*, uint32_t, const char*) {
  * "quit-message post dropped" framing mischaracterized what the original
  * function does. See core/CGWND.cpp's WIN32_PostQuit for the real body
  * and PROGRESS.md for this correction's date-stamped entry. */
+void EditWindow_render(void*);
 void EditWindow_render(void*) { /* host no-op */ }
+void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int);
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
+void CRT_exit(char const**, char const**);
 void CRT_exit(char const**, char const**) { /* host no-op */ }
 void* _g_netman_state = nullptr;
+void WIN32_ResumeThread(void*, int);
 void WIN32_ResumeThread(void*, int) { /* host no-op */ }
+void UI_WindowBase_OnCreate(void*);
 void UI_WindowBase_OnCreate(void*) { /* host no-op */ }
+void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int);
 void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
+void PlayerConfig_SetName(void*, char const*);
 void PlayerConfig_SetName(void*, char const*) { /* host no-op */ }
+void PlayerConfig_Save(void*);
 void PlayerConfig_Save(void*) { /* host no-op */ }
+void NETMAN_SendPacket(void*);
 void NETMAN_SendPacket(void*) { /* host no-op */ }
 void* CreateHatchBrush = nullptr;
 void* g_editwindow_ptr = nullptr;
+void EditWindow_cleanupSprites(void*);
 void EditWindow_cleanupSprites(void*) { /* host no-op */ }
 /* RESDATA_FreeWindow removed: its only caller (ui/EditWindow.cpp) now calls
  * the real PopupWindow::DestroyMCIChild() (0x4544A0) instead — see
  * PROGRESS.md. This stub was orphaned dead code, not a live no-op. */
+void ResourceManager_GetStringById(void**, int);
 void ResourceManager_GetStringById(void**, int) { /* host no-op */ }
+void NameEntryPanel_Ctor(void*, void*, unsigned int);
 void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
+void NameEntryPanel_CreateWindow(void*, void*);
 void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
+void CGWND_GameSetup_Ctor(void*, void*, unsigned int);
 void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { /* host no-op */ }
+void CGWND_GameSetup_Create(void*, void*);
 void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
 /* NETMAN_CreateSession(void*) — removed. ui/EditWindow.cpp's own
  * `NETMAN_CreateSession` declaration was retyped from `void*` to the real
@@ -303,20 +398,34 @@ void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
  * mismatched-signature stub is now dead: EditWindow::show()'s call binds
  * to the real function instead (guarded internally against
  * `_g_netman_data` being null on the host — see that file's comment). */
+void UI_WindowBase_Show(void*);
 void UI_WindowBase_Show(void*) { /* host no-op */ }
 void* BringWindowToTop = nullptr;
+void TrackPiece_Dtor(void*);
 void TrackPiece_Dtor(void*) { /* host no-op */ }
+void __ftol(double);
 void __ftol(double) { /* host no-op */ }
+void WIN32_StreamDestroy(void*);
 void WIN32_StreamDestroy(void*) { /* host no-op */ }
+void WNDPROC_StreamCleanup(void*);
 void WNDPROC_StreamCleanup(void*) { /* host no-op */ }
+void WIN32_StreamDestroyImmediate(void*);
 void WIN32_StreamDestroyImmediate(void*) { /* host no-op */ }
+void TileMap_SetViewport(void*, void*);
 void TileMap_SetViewport(void*, void*) { /* host no-op */ }
+void TileMap_GetTileAt(void*, void*);
 void TileMap_GetTileAt(void*, void*) { /* host no-op */ }
+void DDRAW_GetSurface();
 void DDRAW_GetSurface() { /* host no-op */ }
+void DDRAW_LoadFile(int*, char const*);
 void DDRAW_LoadFile(int*, char const*) { /* host no-op */ }
+void RESDATA_ScriptedObject_AddChild(void*, int, int);
 void RESDATA_ScriptedObject_AddChild(void*, int, int) { /* host no-op */ }
+void CGWND_CursorEditWindow_Ctor(void*, int, int);
 void CGWND_CursorEditWindow_Ctor(void*, int, int) { /* host no-op */ }
+void TrainStation_Ctor(void*, int, int);
 void TrainStation_Ctor(void*, int, int) { /* host no-op */ }
+void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int);
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) { /* host no-op */ }
 void* DPLAY_SetPlayerName = nullptr;
 /* Signature corrected (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
@@ -329,6 +438,7 @@ void* DPLAY_SetPlayerName = nullptr;
  * host no-op (the real deep-copy body at 0x42A1C0 was never transcribed —
  * TODO), but now returns a well-defined value instead of UB. */
 struct UIPANEL_Surface;
+void* UIPANEL_CopySurface(void*, UIPANEL_Surface*);
 void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
 /* NET_ComputeColor's real definition now lives in native/NET_Dtor.c
  * (renamed from the stale Ghidra-default-label filename; 0x4441C0). This
@@ -339,15 +449,21 @@ void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
  * linked fine and every caller read an undefined register as the
  * "color"). Removed now that a real, correctly-typed definition exists —
  * keeping both would be a duplicate-definition link error. */
+void DPLAY_SetPlayerData(void*, char const*);
 void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
+void TileMap_UpdateViewport(void*, void*, short);
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
+void TileMap_GetTileRect(void*, void*);
 void TileMap_GetTileRect(void*, void*) { /* host no-op */ }
+void SetRect(void*, int, int, int, int);
 void SetRect(void*, int, int, int, int) { /* host no-op */ }
 void* GAMESTATE_LoadExistingGame = nullptr;
 void* World_SerializeObject = nullptr;
 void* STR_REMOVED = nullptr;
 void* DPLAY_InitPlayerSlot = nullptr;
+void NETMAN_ReceiveFileTransfer(int);
 void NETMAN_ReceiveFileTransfer(int) { /* host no-op */ }
+void NETMAN_SendAck(int);
 void NETMAN_SendAck(int) { /* host no-op */ }
 void* GAMESTATE_SetDifficulty = nullptr;
 void* DPLAY_EnumeratePlayers = nullptr;
@@ -356,19 +472,33 @@ void* NET_SendFile = nullptr;
  * core/GameLoop.cpp etc. declare `int`) — collided with shared/
  * stubs_impl.cpp's correctly-typed `int Vehicle_SetState(void*, int)`
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
+void NETMAN_ReceiveLayoutSelect(int);
 void NETMAN_ReceiveLayoutSelect(int) { /* host no-op */ }
+void PlayerConfig_SaveToFile(void*);
 void PlayerConfig_SaveToFile(void*) { /* host no-op */ }
+void ResourceManager_Shutdown(int);
 void ResourceManager_Shutdown(int) { /* host no-op */ }
+void DDRAW_FileData_Dtor(void*);
 void DDRAW_FileData_Dtor(void*) { /* host no-op */ }
+void GAMESTATE_HandleNetworkGame();
 void GAMESTATE_HandleNetworkGame() { /* host no-op */ }
+void VehicleEditor_GetResourceId(int);
 void VehicleEditor_GetResourceId(int) { /* host no-op */ }
+void VehicleEditor_RemoveVehicle(void*, int);
 void VehicleEditor_RemoveVehicle(void*, int) { /* host no-op */ }
+void ArrivalQueue_RemoveVehicle(void*, unsigned int, char);
 void ArrivalQueue_RemoveVehicle(void*, unsigned int, char) { /* host no-op */ }
+void GameVehicle_RemoveDestination(void*, unsigned int, char);
 void GameVehicle_RemoveDestination(void*, unsigned int, char) { /* host no-op */ }
+void GAMESTATE_EditorState_Detach(int);
 void GAMESTATE_EditorState_Detach(int) { /* host no-op */ }
+void CRT_memset_pattern(void*, int, int, void*, void*);
 void CRT_memset_pattern(void*, int, int, void*, void*) { /* host no-op */ }
+void CRT_free_pattern(void*, int, int, void*);
 void CRT_free_pattern(void*, int, int, void*) { /* host no-op */ }
+void RESDATA_DtorBody(void*);
 void RESDATA_DtorBody(void*) { /* host no-op */ }
+void DDRAW_PresentRect(void*, void*, int*, unsigned char);
 void DDRAW_PresentRect(void*, void*, int*, unsigned char) { /* host no-op */ }
 /* WIN32_RecvNetworkData/WIN32_GetSystemMetrics: these C++-mangled overloads
  * existed only because network/DirectPlay.cpp declared the two functions
@@ -377,38 +507,67 @@ void DDRAW_PresentRect(void*, void*, int*, unsigned char) { /* host no-op */ }
  * (matching game/Train_network.cpp's existing extern "C" declarations for
  * the sibling WIN32_SendNetworkData/WIN32_PeekMessageLoop), so nothing
  * requests these mangled symbols anymore. */
+void Ordinal_4(void*, void**, void*, void*, void*);
 void Ordinal_4(void*, void**, void*, void*, void*) { /* host no-op */ }
+void CRT_memcpy(void*, void const*, unsigned long);
 void CRT_memcpy(void*, void const*, unsigned long) { /* host no-op */ }
+void CRT_malloc(unsigned long);
 void CRT_malloc(unsigned long) { /* host no-op */ }
+void CRT_sprintf_buf(char*, char const*);
 void CRT_sprintf_buf(char*, char const*) { /* host no-op */ }
+void CRT_toupper(int);
 void CRT_toupper(int) { /* host no-op */ }
+void CRT_timeGetTime(int*);
 void CRT_timeGetTime(int*) { /* host no-op */ }
+void CRT_FindClose(void*);
 void CRT_FindClose(void*) { /* host no-op */ }
+void CRT_FindFirstFile(char const*, void*);
 void CRT_FindFirstFile(char const*, void*) { /* host no-op */ }
+void CRT_FindNextFile(void*, void*);
 void CRT_FindNextFile(void*, void*) { /* host no-op */ }
+void RESDATA_UpdateChild(void*);
 void RESDATA_UpdateChild(void*) { /* host no-op */ }
+void Game_IsPositionBetween(int, int, int);
 void Game_IsPositionBetween(int, int, int) { /* host no-op */ }
+void PlayerConfig_GetName(void*, char*, int);
 void PlayerConfig_GetName(void*, char*, int) { /* host no-op */ }
+void CRT_memset(void*, int, unsigned long);
 void CRT_memset(void*, int, unsigned long) { /* host no-op */ }
+void World_CheckActive(void*);
 void World_CheckActive(void*) { /* host no-op */ }
+void TrackPiece_SetZoom(void*, short);
 void TrackPiece_SetZoom(void*, short) { /* host no-op */ }
+void Town_BlitViewport(void*,int,int,int,int,int,int);
 void Town_BlitViewport(void*,int,int,int,int,int,int) { /* host no-op */ }
+void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int);
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) { /* host no-op */ }
 void* g_game_instance = nullptr;
 int32_t g_OutputDebugStringA = 0;
+void ArrivalQueue_AddVehicle(void*, void*);
 void ArrivalQueue_AddVehicle(void*, void*) { /* host no-op */ }
+void VehicleEditor_Update(void*);
 void VehicleEditor_Update(void*) { /* host no-op */ }
+void VehicleEditor_IsInBounds(void*, short, short, short);
 void VehicleEditor_IsInBounds(void*, short, short, short) { /* host no-op */ }
+void VehicleEditor_BlitBackground(void*, int, int);
 void VehicleEditor_BlitBackground(void*, int, int) { /* host no-op */ }
 
 
+void Vehicle_InitRoute(void*, int, unsigned int, char);
 void Vehicle_InitRoute(void*, int, unsigned int, char) { /* host no-op */ }
+void Vehicle_Ctor(void*, int, int, char, char);
 void Vehicle_Ctor(void*, int, int, char, char) { /* host no-op */ }
+void Vehicle_UpdatePosition(void*, char);
 void Vehicle_UpdatePosition(void*, char) { /* host no-op */ }
+void Building_RemoveOccupant(int*);
 void Building_RemoveOccupant(int*) { /* host no-op */ }
+void TrackPiece_Ctor(void*, int, int, unsigned short);
 void TrackPiece_Ctor(void*, int, int, unsigned short) { /* host no-op */ }
+void GameObject_SetWorldPos(void*, int, int);
 void GameObject_SetWorldPos(void*, int, int) { /* host no-op */ }
+void GameObject_InvalidateRect(void*);
 void GameObject_InvalidateRect(void*) { /* host no-op */ }
+void GameObject_GetRelPos(void*, int*, int, int);
 void GameObject_GetRelPos(void*, int*, int, int) { /* host no-op */ }
 /** Config_WriteInt — Write integer to INI file section:key
  *  Address: 0x452DB0. __thiscall (ECX=config, stack=section,key,value).
@@ -417,6 +576,8 @@ void GameObject_GetRelPos(void*, int*, int, int) { /* host no-op */ }
 /** WritePrivateProfileStringA — Win32 INI file write.
  *  Host stub: logs and returns success (non-zero).
  *  TODO: implement actual INI file persistence. */
+extern "C" int WritePrivateProfileStringA(const char* section, const char* key,
+                                           const char* value, const char* filename);
 extern "C" int WritePrivateProfileStringA(const char* section, const char* key,
                                            const char* value, const char* filename) {
     fprintf(stderr, "HOST: WritePrivateProfileStringA(%s, %s, %s, %s) — stub\n",
@@ -434,11 +595,13 @@ extern "C" int WritePrivateProfileStringA(const char* section, const char* key,
  * re-verified here; cast style only, no semantic change. Left for a
  * dedicated Config_WriteInt linkage-cluster session, not this STRICT=2
  * pass. */
+void __thiscall Config_WriteInt(void* config, const char* section, const char* key, int value);
 void __thiscall Config_WriteInt(void* config, const char* section, const char* key, int value) {
     char buf[100];
     CRT_itoa(value, buf, 10);
     WritePrivateProfileStringA(section, key, buf, static_cast<char*>(config) + 4);
 }
+void LOCOBITMAP_ColorKeyBlit_thunk(void*);
 void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
 /* NET_UpdatePlayerList: real body now in network/NetworkPlayerList.cpp
  * (0x445170, returns short). This used to be a wrong-signature (void
@@ -446,68 +609,123 @@ void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
  * silently resolved to instead of the (previously nonexistent) real
  * function; keeping both would now be a duplicate-definition/ODR
  * violation since C++ mangling does not encode return type. */
+void Town_CheckOccupied(void*, int, int, int, int);
 void Town_CheckOccupied(void*, int, int, int, int) { /* host no-op */ }
+void Town_SelectBuilding(void*, void*);
 void Town_SelectBuilding(void*, void*) { /* host no-op */ }
+void UIPANEL_BlitSurface(void*, int, int, void*, int, int);
 void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { /* host no-op */ }
+void DDRAW_SelectBuilding(void*, void*);
 void DDRAW_SelectBuilding(void*, void*) { /* host no-op */ }
 /* WIN32_PostQuit: real implementation now in core/CGWND.cpp (0x463670). */
+void RESDATA_GameVehicle_Ctor(void*, int);
 void RESDATA_GameVehicle_Ctor(void*, int) { /* host no-op */ }
+void RESDATA_GameVehicle_BaseDtor(void*);
 void RESDATA_GameVehicle_BaseDtor(void*) { /* host no-op */ }
+void Vehicle_InitOccupant(void*, int);
 void Vehicle_InitOccupant(void*, int) { /* host no-op */ }
+void Vehicle_IsMoving(void*);
 void Vehicle_IsMoving(void*) { /* host no-op */ }
+void Vehicle_Stop(void*, int, unsigned char);
 void Vehicle_Stop(void*, int, unsigned char) { /* host no-op */ }
+void Entity_StopSound(void*, int);
 void Entity_StopSound(void*, int) { /* host no-op */ }
+void GameObject_InitBase(void*, int, int, unsigned char);
 void GameObject_InitBase(void*, int, int, unsigned char) { /* host no-op */ }
+void UIPANEL_UnlockSurface(void*);
 void UIPANEL_UnlockSurface(void*) { /* host no-op */ }
 void* DAT_00485270 = nullptr;
+void NETMAN_SetGameMode(void*, int);
 void NETMAN_SetGameMode(void*, int) { /* host no-op */ }
+void GAMESTATE_FindAdjacentTrack(void*);
 void GAMESTATE_FindAdjacentTrack(void*) { /* host no-op */ }
+void RESDATA_IsValidTrackIndex(void*, short);
 void RESDATA_IsValidTrackIndex(void*, short) { /* host no-op */ }
+void Vehicle_GetNearestTrack(int);
 void Vehicle_GetNearestTrack(int) { /* host no-op */ }
+void GAMESTATE_FindTrackPosition(void*, int, int);
 void GAMESTATE_FindTrackPosition(void*, int, int) { /* host no-op */ }
+void DPLAY_CreatePlayer(void*);
 void DPLAY_CreatePlayer(void*) { /* host no-op */ }
+void GAMESTATE_EditorState_Ctor(void*, char);
 void GAMESTATE_EditorState_Ctor(void*, char) { /* host no-op */ }
+void DPLAY_CleanupPlayer(void*);
 void DPLAY_CleanupPlayer(void*) { /* host no-op */ }
+void GAMESTATE_InitTrackAtPosition(void*, int, int);
 void GAMESTATE_InitTrackAtPosition(void*, int, int) { /* host no-op */ }
+void GameObject_HitTest(void*, int, int);
 void GameObject_HitTest(void*, int, int) { /* host no-op */ }
+void Vehicle_DetachAll(int);
 void Vehicle_DetachAll(int) { /* host no-op */ }
+void CGWND_InitAllSubsystems(void*);
 void CGWND_InitAllSubsystems(void*) { /* host no-op */ }
+void timeBeginPeriod(unsigned int);
 void timeBeginPeriod(unsigned int) { /* host no-op */ }
 /* CGWND_PumpMessages(void*,unsigned char) — now in CGWND_sdl3.cpp */
+void CGWND_AudioChannel_UpdatePosition(void*, int, int);
 void CGWND_AudioChannel_UpdatePosition(void*, int, int) { /* host no-op */ }
+void CGWND_AudioChannel_Stop(void*);
 void CGWND_AudioChannel_Stop(void*) { /* host no-op */ }
+void NETMAN_ResetNetworkState(void*);
 void NETMAN_ResetNetworkState(void*) { /* host no-op */ }
+void NETMAN_StopSession(void*);
 void NETMAN_StopSession(void*) { /* host no-op */ }
+void NETMAN_StartClientSession(void*);
 void NETMAN_StartClientSession(void*) { /* host no-op */ }
+void Train_QueueMessage(void*, void*);
 void Train_QueueMessage(void*, void*) { /* host no-op */ }
+void NETMAN_Init(void*, unsigned char);
 void NETMAN_Init(void*, unsigned char) { /* host no-op */ }
+void GameSetupPanel_loadLayouts(void*, unsigned char);
 void GameSetupPanel_loadLayouts(void*, unsigned char) { /* host no-op */ }
+void GameSetupPanel_updateTitle(void*);
 void GameSetupPanel_updateTitle(void*) { /* host no-op */ }
+void GameSetupPanel_drawGrid(void*);
 void GameSetupPanel_drawGrid(void*) { /* host no-op */ }
+void Game_Shutdown(int*);
 void Game_Shutdown(int*) { /* host no-op */ }
+void RESMGR_Shutdown(int);
 void RESMGR_Shutdown(int) { /* host no-op */ }
+void CRT_0x470650();
 void CRT_0x470650() { /* host no-op */ }
+void* UI_MainMenu_Ctor(void* mem, void*, unsigned int);
 void* UI_MainMenu_Ctor(void* mem, void*, unsigned int) { return mem; }
+void UI_MainMenu_Create(void*, void*);
 void UI_MainMenu_Create(void*, void*) { /* host no-op */ }
+void* Town_Ctor(void* mem, void*, unsigned int);
 void* Town_Ctor(void* mem, void*, unsigned int) { return mem; }
+void Town_InitSprites(void*, void*);
 void Town_InitSprites(void*, void*) { /* host no-op */ }
+void* PostcardPreviewWindow_Ctor(void* mem, void*, unsigned int);
 void* PostcardPreviewWindow_Ctor(void* mem, void*, unsigned int) { return mem; }
+void LOCOBITMAP_InitWindow(void*, void*);
 void LOCOBITMAP_InitWindow(void*, void*) { /* host no-op */ }
+void* TrainStationWindow_Ctor(void* mem, void*, unsigned int);
 void* TrainStationWindow_Ctor(void* mem, void*, unsigned int) { return mem; }
+void TrainStationWindow_Create(void*, void*);
 void TrainStationWindow_Create(void*, void*) { /* host no-op */ }
+void* LOCOBITMAP_CreateFromResource(void* mem, void*, unsigned int);
 void* LOCOBITMAP_CreateFromResource(void* mem, void*, unsigned int) { return mem; }
+void* Cursor_Ctor(void* mem, void*, unsigned int);
 void* Cursor_Ctor(void* mem, void*, unsigned int) { return mem; }
+void Cursor_Create(void*, void*);
 void Cursor_Create(void*, void*) { /* host no-op */ }
+void* AudioMgr_Ctor(void* mem, void*, unsigned int);
 void* AudioMgr_Ctor(void* mem, void*, unsigned int) { return mem; }
+void HelpWnd_Create(void*, void*);
 void HelpWnd_Create(void*, void*) { /* host no-op */ }
+void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int);
 void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int) { return mem; }
+void CGWND_AboutDialog_Create(void*, void*);
 void CGWND_AboutDialog_Create(void*, void*) { /* host no-op */ }
+void CGWND_RegisterWindowClass(void*);
 void CGWND_RegisterWindowClass(void*) { /* host no-op */ }
 /* NETMAN_constructor(void*): silent no-op returning void, but
  * core/GameLoop.cpp's caller (`g_netman = NETMAN_constructor(mem)`)
  * expects and uses a void* return — collided with shared/stubs_impl.cpp's
  * correctly-typed, loud `void* NETMAN_constructor(void*)` stub
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
+void DirectPlay_constructor(void*);
 void DirectPlay_constructor(void*) { /* host no-op */ }
 /* PixelDataCache_Ctor/PixelDataCache_Load removed (2026-08-08): both were
  * a duplicate ABI-bridge reimplementation of the already-real, already-
@@ -516,48 +734,92 @@ void DirectPlay_constructor(void*) { /* host no-op */ }
  * PixelDataCache::Create field-for-field, and PixelDataCache::Load has a
  * real implementation (this stub's Load was a no-op). The one caller
  * (core/GameLoop.cpp) now calls PixelDataCache::Create directly. */
+void GameAudio_StopFinished(void*);
 void GameAudio_StopFinished(void*) { /* host no-op */ }
+void DDRAW_GetDsoundErrorString(int);
 void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
+void Ordinal_2(void*);
 void Ordinal_2(void*) { /* host no-op */ }
+void RESMGR_GetById(void*, unsigned int);
 void RESMGR_GetById(void*, unsigned int) { /* host no-op */ }
+void CGWND_AudioChannel_Play(unsigned int);
 void CGWND_AudioChannel_Play(unsigned int) { /* host no-op */ }
+void CGWND_AudioChannel_Pause(int);
 void CGWND_AudioChannel_Pause(int) { /* host no-op */ }
+void Game_SetScreenMode(void*, int, int, int);
 void Game_SetScreenMode(void*, int, int, int) { /* host no-op */ }
+void BuildingMgr_DestroyAll(void*, int);
 void BuildingMgr_DestroyAll(void*, int) { /* host no-op */ }
+void UI_ResetTooltips(void*, int);
 void UI_ResetTooltips(void*, int) { /* host no-op */ }
+void World_Reset(void*, int);
 void World_Reset(void*, int) { /* host no-op */ }
+void Cursor_Show(void*);
 void Cursor_Show(void*) { /* host no-op */ }
+void NETMAN_SendMapData(void*, int);
 void NETMAN_SendMapData(void*, int) { /* host no-op */ }
+void CGWND_AudioChannel_IsActive(unsigned int);
 void CGWND_AudioChannel_IsActive(unsigned int) { /* host no-op */ }
+void CGWND_AudioChannel_Release(void*);
 void CGWND_AudioChannel_Release(void*) { /* host no-op */ }
+void WIN32_CloseHandle(void*);
 void WIN32_CloseHandle(void*) { /* host no-op */ }
+void WIN32_timeKillEvent(unsigned int);
 void WIN32_timeKillEvent(unsigned int) { /* host no-op */ }
+void GameAudio_StopFinished();
 void GameAudio_StopFinished() { /* host no-op */ }
+void DDRAW_GetDsoundErrorString();
 void DDRAW_GetDsoundErrorString() { /* host no-op */ }
+void Ordinal_2();
 void Ordinal_2() { /* host no-op */ }
+void RESMGR_GetById();
 void RESMGR_GetById() { /* host no-op */ }
+void CGWND_AudioChannel_Play();
 void CGWND_AudioChannel_Play() { /* host no-op */ }
+void CGWND_AudioChannel_Pause();
 void CGWND_AudioChannel_Pause() { /* host no-op */ }
+void Game_SetScreenMode();
 void Game_SetScreenMode() { /* host no-op */ }
+void BuildingMgr_DestroyAll();
 void BuildingMgr_DestroyAll() { /* host no-op */ }
+void UI_ResetTooltips();
 void UI_ResetTooltips() { /* host no-op */ }
+void World_Reset();
 void World_Reset() { /* host no-op */ }
+void Cursor_Show();
 void Cursor_Show() { /* host no-op */ }
+void NETMAN_SendMapData();
 void NETMAN_SendMapData() { /* host no-op */ }
+void CGWND_AudioChannel_IsActive();
 void CGWND_AudioChannel_IsActive() { /* host no-op */ }
+void CGWND_AudioChannel_Release();
 void CGWND_AudioChannel_Release() { /* host no-op */ }
+void WIN32_CloseHandle();
 void WIN32_CloseHandle() { /* host no-op */ }
+void WIN32_timeKillEvent();
 void WIN32_timeKillEvent() { /* host no-op */ }
+int WIN32_GetThreadResult(void*);
 int WIN32_GetThreadResult(void*) { return 0; }
+void World_Shutdown(int);
 void World_Shutdown(int) { /* host no-op */ }
+void Train_FlushMessages(void*);
 void Train_FlushMessages(void*) { /* host no-op */ }
+void WIN32_Sleep(unsigned int);
 void WIN32_Sleep(unsigned int) { /* host no-op */ }
+void Sprite_UnlockAll(int);
 void Sprite_UnlockAll(int) { /* host no-op */ }
+void UIPANEL_FreeAllSurfaces();
 void UIPANEL_FreeAllSurfaces() { /* host no-op */ }
+void WIN32_timeEndPeriod(unsigned int);
 void WIN32_timeEndPeriod(unsigned int) { /* host no-op */ }
+void Sprite_Shutdown(int);
 void Sprite_Shutdown(int) { /* host no-op */ }
+void Town_GameView_Cleanup(int*);
 void Town_GameView_Cleanup(int*) { /* host no-op */ }
+void DDRAW_InvalidateAll(int*);
 void DDRAW_InvalidateAll(int*) { /* host no-op */ }
+void RESDATA_ScriptedObject_Shutdown(int*);
 void RESDATA_ScriptedObject_Shutdown(int*) { /* host no-op */ }
+void UI_FreeMessageBox(int);
 void UI_FreeMessageBox(int) { /* host no-op */ }
 
