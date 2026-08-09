@@ -1,100 +1,40 @@
 /**
- * UI_ScrollBar.h — Scroll bar and list management functions
+ * UI_ScrollBar.h — historical location of the scroll-bar item-list logic
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * These functions operate on TimerList/Collection-like structures to
- * manage scrollable content in UI panels. They handle:
- *   - Scroll bar rendering (deep-copy draw context, delegate to vtable[10])
- *   - Item removal dispatch (HandleScrollMessage)
- *   - Tail-based item draining (GetScrollPos, SetScrollPos)
- *   - TimerList initialization and cleanup (InitScrollBar, FreeScrollBar)
- *   - Iteration over items (EnableScrollBar)
+ * As of 2026-08-09 the 7 free functions that used to live in this file
+ * (each taking an explicit `void* self` — the CLAUDE.md free-function-
+ * with-explicit-self anti-pattern) were converted into real C++ methods
+ * on `ScrollCollection` in shared/collections.h — the class turned out to
+ * be a genuinely shared base used well beyond ui/ (also by
+ * game/BuildingComplex.cpp's two TimerCollections; not modified here).
+ * See docs/landmine-sweep-worklist.md for the full evidence trail.
  *
- * Each function operates on an object with a vtable and TimerList-like
- * field layout: vtable(+0x00), items(+0x04), count(+0x08), capacity(+0x0C).
+ * Mapping from the old free functions to their new home:
+ *
+ *   UI_DrawScrollBar      (0x424040) -> ScrollCollection::DrawScrollBar
+ *   UI_HandleScrollMessage(0x4241E0) -> ScrollCollection::RemoveAt (override)
+ *   UI_GetScrollPos       (0x424250) -> ScrollCollection::RemoveAll (override)
+ *   UI_SetScrollPos       (0x424270) -> ScrollCollection::DestroyAll (override)
+ *   UI_InitScrollBar      (0x424460) -> ScrollCollection::Destructor
+ *   UI_FreeScrollBar      (0x424490) -> ScrollCollection::SetKey
+ *   UI_EnableScrollBar    (0x424510) -> Collection::DestroyAll (base body;
+ *                                        ScrollCollection overrides it —
+ *                                        see UI_SetScrollPos above)
+ *
+ * UI_GetScrollPos/UI_SetScrollPos/UI_EnableScrollBar/UI_FreeScrollBar were
+ * all dispositively mis-named in the original transcription — none of them
+ * reads or writes anything resembling a scroll position or enable flag, or
+ * frees memory. Renamed based on confirmed behavior (see collections.h);
+ * where original intent beyond the confirmed mechanism was not
+ * recoverable, that is stated explicitly there rather than guessed.
+ *
+ * This file is kept (rather than deleted) as the historical landmark for
+ * anyone grepping the old names; it declares nothing.
  */
 
 #pragma once
 
-#include "../shared/types.h"
-
-// Status: TRANSCRIBED
-/* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
-/* ================================================================== */
-/* UI DrawScrollBar — Render scrollbar with thumb proportional to       */
-/* content/visible range.                                               */
-/* Address: 0x424040                                                    */
-/*                                                                     */
-/* Allocates 0x88-byte DrawContext, deep-copies 0x86 bytes from param2, */
-/* constructs an Entity descriptor, then inserts it through the        */
-/* collection's virtual InsertAt operation (binary slot 10).           */
-/*                                                                     */
-/* @param this     UI object (vtable dispatch target)                   */
-/* @param param1   First parameter passed to vtable[10]                */
-/* @param param2   Source DrawContext (0x88 bytes of frame data)       */
-/* ================================================================== */
-void __thiscall UI_DrawScrollBar(void* self, int param1, int param2);
-
-/* ================================================================== */
-/* UI HandleScrollMessage — Dispatch scroll removal and shift items     */
-/* Address: 0x4241E0                                                    */
-/*                                                                     */
-/* Calls the virtual InternalExtract method on param1. If handled and   */
-/* param1 < count-1, shifts subsequent items left by copying memory.    */
-/* Sets last slot to NULL and decrements count. Returns handled flag.  */
-/*                                                                     */
-/* @param this    Collection-like object                               */
-/* @param param1  Index to remove                                      */
-/* @return        1 if handled, 0 otherwise                            */
-/* ================================================================== */
-int __thiscall UI_HandleScrollMessage(void* self, uint param1);
-
-/* ================================================================== */
-/* UI GetScrollPos — Drain items from tail (vtable[3] loop)            */
-/* Address: 0x424250                                                    */
-/*                                                                     */
-/* Processes items from end of collection via vtable[3](count-1)        */
-/* repeatedly until count reaches 0. Drains all items from tail.       */
-/* ================================================================== */
-void __fastcall UI_GetScrollPos(void* self);
-
-/* ================================================================== */
-/* UI SetScrollPos — Drain items from tail (vtable[4] loop)            */
-/* Address: 0x424270                                                   */
-/*                                                                     */
-/* Same drain pattern as GetScrollPos but dispatches via vtable[4]     */
-/* instead of vtable[3].                                               */
-/* ================================================================== */
-void __fastcall UI_SetScrollPos(void* self);
-
-/* ================================================================== */
-/* UI InitScrollBar — Initialize/reset TimerList                       */
-/* Address: 0x424460                                                    */
-/*                                                                     */
-/* Sets vtable to VTBL_TIMERLIST_A (0x477BD0), count=0, capacity=0,    */
-/* frees old items array, sets items=NULL. Used as SEH unwind handler  */
-/* and from ListBox constructors.                                      */
-/* ================================================================== */
-void __fastcall UI_InitScrollBar(void* self);
-
-/* ================================================================== */
-/* UI FreeScrollBar — Store params and delegate to vtable[20]          */
-/* Address: 0x424490                                                    */
-/*                                                                     */
-/* Stores two parameters at +0x10 and +0x14, then calls vtable[20]     */
-/* (offset 0x50 — Compact/cleanup). Always returns 0.                  */
-/* ================================================================== */
-int __thiscall UI_FreeScrollBar(void* self, int param1, int param2);
-
-/* ================================================================== */
-/* UI EnableScrollBar — Iterate items calling vtable[4] on each        */
-/* Address: 0x424510                                                    */
-/*                                                                     */
-/* Iterates from 0 to count-1, calling vtable[4] on each index.        */
-/* Used to enable/disable all scrollbar items.                         */
-/* ================================================================== */
-void __fastcall UI_EnableScrollBar(void* self);
-
-/* #endif removed — header uses #pragma once */
+/* Nothing declared here — see shared/collections.h for ScrollCollection. */

@@ -1146,6 +1146,194 @@ scope.
   `game/ArrivalQueue.{h,cpp}` removed a few now-nonexistent-file
   diagnostics). `build-strict2` deleted afterward per instructions.
 
+## UI_ScrollBar/UI_ListBox free-function anti-pattern → ScrollCollection (2026-08-09)
+
+**Task**: convert the 7 free functions in `ui/UI_ScrollBar.{h,cpp}` and the 2
+remaining free functions in `ui/UI_ListBox.{h,cpp}` (`UI_DrawListBox`,
+`UI_ListBox_Clear`) — all taking an explicit `void* self`, the CLAUDE.md
+free-function-with-explicit-self anti-pattern — into real C++ methods on the
+shared `Collection`-family base class.
+
+**Correction to this task's own framing**: the "already investigated this
+session, findings recorded in this file's 'UI_ScrollBar/UI_ListBox shared
+TimerList base' section" pointer did not resolve to anything — no such
+section existed in this file, at this worktree's branch tip OR at `main`'s
+tip after fast-forwarding to it (`git merge main --ff-only`, `00285a6` ->
+`c42a8b0`). Everything below was independently (re-)derived from Ghidra in
+this session, not recovered from a prior one.
+
+### Field layout: `collections.h`'s Collection struct had count/capacity swapped
+
+Confirmed via **five independent sources agreeing**: disassembly of
+`Timer::Resize` (0x435D10, writes the grown array's size to real offset
++0x08), `Collection::RemoveAt` (0x4356B0, bound-checks against +0x08),
+`SortedCollection::SetAt`/`SortedCollection2::SetAt` (0x435A10/0x4360B0,
+grow-trigger at +0x08, reject-bound at +0x0C), `Timer::IsSorted` (0x435CD0,
+loop limit from +0x0C), and the sub-object construction sequences in
+`UI_Ctor` (0x4238C0) and `BuildingComplex::BuildingComplex` (0x434500, both
+zero +0x08 before `Resize()` and +0x0C after). Real x86 layout: vtable+0x00,
+items+0x04, **capacity+0x08, count+0x0C** — opposite the field *declaration*
+order in `collections.h` (count declared 2nd, capacity 3rd). Declaration
+order was deliberately left alone (see the FIELD OFFSET NOTE now in
+`collections.h`) since every access in this hierarchy is symbolic — only the
+semantic *role* each field plays needed fixing, not its physical byte offset.
+
+**Five real bugs found and fixed** where the code's SEMANTIC role (not just
+the physical offset) was backwards, all newly discovered while re-deriving
+the above (not part of the original task's known-facts list):
+- `Collection::RemoveAt` bound-checked `this->count`; real body checks
+  capacity. Loosens the bound whenever count < capacity — if a test's
+  behavior moved after this fix, this is why.
+- `SortedCollection::SetAt` and `SortedCollection2::SetAt` had their outer
+  reject-bound (count) and growth-trigger (capacity) checks swapped.
+- `Timer::IsSorted` used `this->capacity` for its loop limit; real body uses
+  count.
+- `UI_EnableScrollBar` (see below) used `this->count` for its sweep bound;
+  real body uses capacity.
+
+### The "three drain variants" were two shared virtual slots, not three ad-hoc functions
+
+`UI_GetScrollPos`/`UI_SetScrollPos`/`UI_EnableScrollBar` are dispositively
+not get/set/enable operations (void return, no position parameter, no
+enable flag, in every case). A full non-spillover slot-by-slot
+`get_xrefs_from` dump of every offset 0x00-0x54 across 6 concrete vtables
+(the two UI_Manager sub-object final-stage tables B=0x477B78/
+WRAPPER=0x477AE8, their base-stage counterparts A=0x477BD0/C=0x477B40, and
+BuildingComplex's two TimerCollection final-stage tables 0x478018/0x477F88 —
+read-only cross-check of `game/BuildingComplex.cpp`, not modified) showed:
+
+- Slot 3 (RemoveAt): generic `Collection::RemoveAt` (0x4356B0) in the
+  base-stage tables; `UI_HandleScrollMessage` (0x4241E0) is literally the
+  SAME SLOT's override in the final-stage tables — not a separate concept.
+- Slot 4 (RemoveElement): **uniform** across all 10 vtables sampled —
+  0x4356E0, never overridden. Real body: `RemoveAt(index)` then destroy the
+  extracted element via its virtual destructor. Was a silent no-op stub;
+  now implemented for real.
+- Slot 5: base-stage default 0x4244F0 (nulls `items[0..capacity)`, no
+  cleanup, no count change — no prior name anywhere); final-stage override
+  is `UI_GetScrollPos` (0x424250, count-bounded drain via RemoveAt).
+- Slot 6: base-stage default is `UI_EnableScrollBar` (0x424510,
+  capacity-bounded forward sweep via RemoveElement); final-stage override
+  is `UI_SetScrollPos` (0x424270, count-bounded tail drain via
+  RemoveElement).
+
+Modeled as `Collection::RemoveAll`/`Collection::DestroyAll` (base bodies)
+overridden by `ScrollCollection::RemoveAll`/`ScrollCollection::DestroyAll`.
+Named for confirmed mechanism (bulk-clear without vs. with destruction);
+original slot purpose within the class's lifecycle beyond that mechanism is
+NOT claimed as recovered.
+
+### `ScrollCollection` — the new subclass
+
+Landed in `shared/collections.h`/`.cpp` as instructed (a new subclass, no
+change to `Collection`'s own field layout). Carries the two extra fields at
++0x10/+0x14, confirmed by construction: in all three sub-objects `UI_Ctor`
+builds (text/pos/update) AND both of `BuildingComplex`'s TimerCollections,
+the two words immediately after the FINAL vtable install are zeroed again —
+matching exactly what `SetKey` (was `UI_FreeScrollBar`) writes there.
+Genuinely shared beyond `ui/`, as this task's own known-facts list predicted.
+
+Field names `key_offset`/`key_size` were adopted from `ui/UI_Utils.h`'s
+`UITimerList` — a **pre-existing, independently-derived duplicate** of this
+exact same class (same field layout, same two extra fields, and its
+`UI_Manager` ctor comment corroborates the same 0x477BD0->0x477B78 /
+0x477B40->0x477AE8 vtable staging re-derived here). `ui/UI_Utils.h`/`.cpp`
+were **not modified** by this change (out of scope) — flagging for a future
+session: `UITimerList` should eventually be unified with `ScrollCollection`
+per CLAUDE.md's "flat inherited structs or duplicate/partial layouts ->
+actual inheritance and one canonical definition," but that touches
+`ui/UI_Utils.cpp`'s `UI_Manager` construction/destruction paths, which is
+real surface area beyond this task's scope.
+
+### `Compact` — body implemented, name deliberately NOT changed
+
+`Compact` (slot 20, offset +0x50) resolved to 0x4244D0 via the SAME
+non-spillover full-table dump above (confirmed independently in 4 different
+final-stage tables, all valid through slot 21). Real mechanism: if
+count > 1, calls `QuickSortRangeImpl(0, count-1)` — a full re-sort, not a
+compaction (no gap removal, no shrink). This makes `Compact` a
+dispositively-wrong name by the same standard applied to
+`UI_GetScrollPos`/etc. above. **Body is implemented for real** (was a no-op
+stub); **name is intentionally left as `Compact`**, flagged rather than
+renamed, because an earlier, narrower probe (short base-stage tables only)
+produced spillover garbage at this same offset, and this file's own
+mid-session advisor consult explicitly cautioned against renaming on that
+evidence. The stronger, later evidence (4-way agreement across long,
+non-spillover tables) resolves the original caution, but the rename itself
+is left for whoever owns this file next to make deliberately, not as a side
+effect of an unrelated task. See `Collection::Compact`'s doc comment in
+`shared/collections.h` for the full instruction-level trail.
+
+### `Collection::InsertAt` — still unverified
+
+The addresses a prior pass of this file cited for `InsertAt` (0x424010,
+0x424760) are real functions but occupy DIFFERENT, uniform-ish slots (11 and
+12, +0x2C/+0x30) — not slot 10 (+0x28), which is where `InsertAt` actually
+lives (confirmed: `DrawScrollBar`/`DrawListBox` both dispatch through it).
+Every one of the 7 concrete vtables sampled has its own distinct body at
+slot 10 (0x424170, 0x424290, 0x4246F0, 0x424790, 0x4359A0, and the two
+already-integrated `SortedCollection`/`SortedCollection2::SetAt`). No
+generic base-Collection body was identified. `Collection::InsertAt`'s
+current body (grow-then-store) is a plausible generic default, consistent
+with the confirmed capacity/count semantic roles, but is NOT
+instruction-validated against any specific original address — left exactly
+that way rather than guessing further.
+
+### `SortedCollection::FindItem` — reconciled with `UI_ListBox_FindItem`
+
+`UI_ListBox_FindItem` (the free-function transcription in `ui/UI_ListBox.cpp`)
+and `SortedCollection::FindItem` (the already-integrated version in
+`collections.cpp`) had silently diverged at the same original address
+(0x424820): the original's `cmp >= 0` recursive branch passes `target`
+itself as the new high bound (`(target, mid, target)`, not `(target, mid,
+high)`) — `UI_ListBox_FindItem` preserved this (with an explicit `BUG:`
+comment) but `collections.cpp` had quietly "fixed" it to `high`. Per
+CLAUDE.md ("do not simplify assembly unless equivalence is proven"),
+`collections.cpp`'s version was reverted to match the original, and
+`UI_ListBox_FindItem` (dead duplicate code — not part of this task's 2
+named remaining ListBox functions) was deleted.
+
+### Verification
+
+```
+meson setup build && meson compile -C build     # succeeds, 0 errors
+objdump -d build/lego_loco | grep -cE "call\s+0 "   # 260 before AND after
+                                                      # (this task's cited
+                                                      # baseline of 259 was
+                                                      # stale relative to
+                                                      # what this worktree
+                                                      # needed to fast-
+                                                      # forward through to
+                                                      # reach main's tip;
+                                                      # measured directly
+                                                      # via `git stash`)
+meson test -C build                              # 28/30 — the 2 known
+                                                    # pre-existing sandbox
+                                                    # failures only
+meson setup build-strict2 -Dstrict=2 && ninja -C build-strict2 -k 0
+                                                    # exit 0, 0 errors
+```
+
+### Deferred / not resolved
+
+- `UITimerList` (`ui/UI_Utils.h`) duplicates `ScrollCollection` — not
+  unified (out of scope; touches `UI_Manager`'s construction/destruction).
+- `Collection::InsertAt`'s original address is unidentified; body unverified.
+- `Compact`'s name (see above) — body fixed, rename deliberately deferred.
+- Slot 9 ("Draw") is a real, confirmed shared virtual (DrawScrollBar/
+  DrawListBox both dispatch through it in their respective base+final
+  table pairs) but is NOT part of `ScrollCollection`'s own vtable —
+  BuildingComplex's two TimerCollection finals don't have it at all.
+  Modeled as two plain non-virtual methods on `ScrollCollection` rather
+  than reconstructing the two further leaf subclasses that would be needed
+  to model it as a true shared virtual — nothing in the current C++ tree
+  dispatches through slot 9 virtually, so this is a documented
+  simplification, not a behavioral gap.
+- Slots 11/12 (offsets +0x2C/+0x30, addresses 0x424010/0x424760 uniform-ish
+  across every table sampled) are real, unidentified virtual methods —
+  out of scope, not implemented, flagging so a future pass doesn't
+  rediscover them from scratch.
+
 ## Raw data
 
 The full alignment run's intermediate files (per-symbol caller lists, the
