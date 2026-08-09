@@ -759,10 +759,6 @@ extern void DDRAW_UpdateBuilding(void*);
 void  BuildingMgr_UpdateAll(void* self);
 void  BuildingMgr_UpdateAll(void* self) { (void)self; }
 
-/* Asset enumeration */
-void  AssetMgr_EnumerateCategory(unsigned int** p);
-void  AssetMgr_EnumerateCategory(unsigned int** p) { (void)p; }
-
 /* Timer callback */
 extern "C" void LAB_0045c520(void);
 extern "C" void LAB_0045c520(void) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached — LAB_0045c520"); }

@@ -236,15 +236,9 @@ extern char g_install_path[];       /* 0x4A99C8 */
 /* 0x481218: byte is 0x00 (null terminator before "Direct Play Initiali..." string) */
 extern const char g_device_path_null[4];  /* 4 zero bytes at 0x481218 */
 
-/* ================================================================== */
-/* DirectPlay_SessionMgr — Walk tree storing IDs and directions       */
-/* Address: 0x45DA70                                                   */
-/*                                                                     */
-/* Delegate to AssetMgr's implementation in AssetMgr.cpp              */
-/* ================================================================== */
-/* NOTE: Implemented in AssetMgr.cpp:805.
- * This function logically belongs to AssetMgr (tree walk).
- * Declaration kept here for cross-reference purposes only. */
+/* DirectPlay_SessionMgr (0x45DA70) was a Ghidra auto-analysis mislabel —
+ * not a DirectPlay function at all. It's AssetMgr::RecordPath now (see
+ * resources/AssetMgr.h/.cpp). Nothing in this file calls it. */
 
 /* ================================================================== */
 /* DirectPlay_Init — Initialize DirectPlay/compositing                */

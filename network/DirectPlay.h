@@ -113,17 +113,12 @@
 /* DirectPlay functions                                                */
 /* ================================================================== */
 
-/**
- * DirectPlay_SessionMgr — Walk 4-ary tree and store path.
- * Address: 0x45DA70
- *
- * Walks the 4-ary tree from startNode to targetId, storing IDs and
- * direction bytes into the AssetMgr's path/direction buffers.
- *
- * NOTE: Implemented in AssetMgr.cpp:805 per binary layout.
- * Called by: AssetMgr_GetFileInfo (0x45DD27)
- */
-void DirectPlay_SessionMgr(void* self, int32_t* startNode, int32_t targetId);
+/* DirectPlay_SessionMgr (0x45DA70) is NOT a DirectPlay function — a Ghidra
+ * auto-analysis mislabel. It's AssetMgr's own tree-walk helper, now
+ * AssetMgr::RecordPath in resources/AssetMgr.{h,cpp} (converted to a real
+ * __thiscall method 2026-08-09). This dead cross-reference declaration
+ * (never defined here, never called via this signature) has been removed;
+ * see AssetMgr.h for the real declaration. */
 
 /**
  * DirectPlay_Init — Initialize DirectPlay/compositing.

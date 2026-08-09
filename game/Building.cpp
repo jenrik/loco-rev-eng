@@ -103,14 +103,19 @@ extern uint8_t  Math_PointOnLineSegment(int px, int py, int ax, int ay, int bx, 
 
 /* Asset manager — used by StepToward, FindNearestConnectionNode.
  * g_asset_mgr is declared void* almost everywhere in this tree (matching
- * the original C-style opaque handle); AssetMgr_ReadPairValue's one real
- * definition (resources/AssetMgr.cpp/.h) takes a typed AssetMgr* first
- * arg, so callers here static_cast at the call site rather than widen
- * the global's declared type. Building.cpp previously declared this
- * extern with a `void*` first param — a landmine (worklist
+ * the original C-style opaque handle); AssetMgr_ReadPairValue takes a
+ * typed AssetMgr* first arg, so callers here static_cast at the call site
+ * rather than widen the global's declared type. Building.cpp previously
+ * declared this extern with a `void*` first param — a landmine (worklist
  * "AssetMgr_ReadPairValue", callers Building::StepToward /
  * Building::FindNearestConnectionNode): the real symbol takes AssetMgr*,
- * so every call here was silently unresolved (call 0). */
+ * so every call here was silently unresolved (call 0).
+ *
+ * 2026-08-09: the real implementation is now AssetMgr::ReadPairValue (a
+ * genuine __thiscall method, resources/AssetMgr.h/.cpp); the declaration
+ * below is a free-function compatibility shim over it, kept specifically
+ * so this file doesn't have to include resources/AssetMgr.h (see that
+ * header's own comment on the shim for why). */
 extern void*    g_asset_mgr;                                                       /* asset manager singleton */
 extern uint8_t  AssetMgr_ReadPairValue(AssetMgr* self, uint32_t a, uint32_t b);    /* 0x45DD80 */
 
