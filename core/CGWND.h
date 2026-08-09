@@ -32,6 +32,9 @@
 
 class CGWND {
 public:
+    CGWND(const CGWND&) = delete;
+    CGWND& operator=(const CGWND&) = delete;
+
     /* ================================================================ */
     /* Fields (offsets from this)                                        */
     /* ================================================================ */

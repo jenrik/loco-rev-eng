@@ -57,6 +57,9 @@ class Vehicle;
  */
 class RESDATA_GameVehicle : public ResourceGameObject {
 public:
+    RESDATA_GameVehicle(const RESDATA_GameVehicle&) = delete;
+    RESDATA_GameVehicle& operator=(const RESDATA_GameVehicle&) = delete;
+
     /* ================================================================ */
     /* Fields (+0x10C..+0x11B, extending ResourceGameObject's 0x10C)    */
     /* ================================================================ */

@@ -203,6 +203,9 @@ struct PlayerSlot {
 /* ================================================================== */
 class Netman {
 public:
+    Netman(const Netman&) = delete;
+    Netman& operator=(const Netman&) = delete;
+
     /* ================================================================ */
     /* Fields (offsets from this)                                        */
     /* ================================================================ */

@@ -102,6 +102,9 @@ struct FileData {
 
 class DDRAW_Building {
 public:
+    DDRAW_Building(const DDRAW_Building&) = delete;
+    DDRAW_Building& operator=(const DDRAW_Building&) = delete;
+
     /* ================================================================ */
     /* Fields                                                           */
     /* ================================================================ */

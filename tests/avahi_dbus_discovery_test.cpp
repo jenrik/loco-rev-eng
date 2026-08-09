@@ -56,6 +56,9 @@ bool AppendTxt(DBusMessageIter& iter, const std::vector<std::string>& txt) {
 
 class FakeAvahiService {
 public:
+    FakeAvahiService(const FakeAvahiService&) = delete;
+    FakeAvahiService& operator=(const FakeAvahiService&) = delete;
+
     explicit FakeAvahiService(bool server2) : server2_(server2) {
         thread_ = std::thread([this] { Run(); });
         std::unique_lock<std::mutex> lock(mutex_);

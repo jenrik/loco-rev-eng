@@ -56,6 +56,9 @@ class Vehicle;
 
 class GameVehicle : public RESDATA_GameVehicle {
 public:
+    GameVehicle(const GameVehicle&) = delete;
+    GameVehicle& operator=(const GameVehicle&) = delete;
+
     /* ================================================================ */
     /* Singly-linked list node for destination queue                     */
     /* ================================================================ */

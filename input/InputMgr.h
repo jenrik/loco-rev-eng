@@ -76,6 +76,9 @@ class Entity;
 
 class InputMgr {
 public:
+    InputMgr(const InputMgr&) = delete;
+    InputMgr& operator=(const InputMgr&) = delete;
+
     /* ---- Lifecycle ------------------------------------------------- */
 
     /**

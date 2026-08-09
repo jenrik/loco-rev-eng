@@ -45,6 +45,8 @@ struct IDirectDrawSurface4 {
 
     IDirectDrawSurface4();
     ~IDirectDrawSurface4();
+    IDirectDrawSurface4(const IDirectDrawSurface4&) = delete;
+    IDirectDrawSurface4& operator=(const IDirectDrawSurface4&) = delete;
 
     int  Release();
     int  Blt(const SDL_Rect* dst_rect, IDirectDrawSurface4* src,
@@ -78,6 +80,8 @@ struct IDirectDraw4 {
 
     IDirectDraw4();
     ~IDirectDraw4();
+    IDirectDraw4(const IDirectDraw4&) = delete;
+    IDirectDraw4& operator=(const IDirectDraw4&) = delete;
 
     int  Release();
     int  CreateSurface(DDSURFACEDESC* desc, IDirectDrawSurface4** out,

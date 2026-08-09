@@ -14,6 +14,9 @@ class Building;
 
 class ResourceGameObject : public Entity {
 public:
+    ResourceGameObject(const ResourceGameObject&) = delete;
+    ResourceGameObject& operator=(const ResourceGameObject&) = delete;
+
     int16_t sub_pos_x;                // +0x88
     int16_t sub_pos_y;                // +0x8a
     uint8_t member_limit;             // +0x8c, random 1..resource[0x522]

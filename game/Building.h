@@ -63,6 +63,9 @@
 
 class Building : public Entity {
 public:
+    Building(const Building&) = delete;
+    Building& operator=(const Building&) = delete;
+
     /* ================================================================ */
     /* Building-specific fields (start at offset +0x88)                  */
     /* Fields at +0x00..+0x87 are inherited from Entity/GameObject       */

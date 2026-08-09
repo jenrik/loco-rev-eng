@@ -151,6 +151,9 @@ typedef int (*TileMap_FindObjCallback)(int tile_resource_id, int target_resource
 /* ================================================================== */
 class TileMap {
 public:
+    TileMap(const TileMap&) = delete;
+    TileMap& operator=(const TileMap&) = delete;
+
     /** Constructor — Address: 0x454CF0 */
     TileMap();
 

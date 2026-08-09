@@ -77,6 +77,9 @@ class Building;      /* game/Building.h — selected object type */
 /* ================================================================== */
 class Game : public Entity {
 public:
+    Game(const Game&) = delete;
+    Game& operator=(const Game&) = delete;
+
     /* ================================================================ */
     /* Game-specific fields (offsets from 'this', Entity ends at +0x88)  */
     /* ================================================================ */

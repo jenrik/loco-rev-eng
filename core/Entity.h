@@ -26,6 +26,15 @@
 // Status: TRANSCRIBED
 class Entity : public GameObject {
 public:
+    /* Copy constructor is real behavior, not incidental: ui/UI_ListBox.cpp
+     * and ui/UI_ScrollBar.cpp placement-new-copy an Entity/UIEntity to
+     * install the compiler-managed vtable over a raw byte snapshot
+     * (0x424040/0x424550) -- deleting it would break that. Defaulting it
+     * is behavior-neutral (identical to the previously-implicit
+     * memberwise copy this code already relied on). */
+    Entity(const Entity&) = default;
+    Entity& operator=(const Entity&) = delete;
+
     uint8_t visible;                    // +0x24
     uint8_t _pad_25[3];                 // +0x25
     int32_t anim_index;                 // +0x28

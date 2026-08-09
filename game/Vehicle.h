@@ -66,6 +66,9 @@ struct HostNetworkVehicleTag {};
 /* ================================================================ */
 class Vehicle {
 public:
+    Vehicle(const Vehicle&) = delete;
+    Vehicle& operator=(const Vehicle&) = delete;
+
     /* ================================================================ */
     /* Fields (offsets from this pointer)                                 */
     /* ================================================================ */
