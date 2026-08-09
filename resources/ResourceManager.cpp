@@ -115,14 +115,21 @@ int32_t Config_GetIniInt(void* config, const char* section,
     const char* key, int32_t defaultValue);           /* @ 0x00452D60 */
 
 void* UI_CreateChildWindow(void* obj, int32_t resId, int32_t strPtr); /* @ 0x00424AF0 */
-void* INPUT_ExitGame(void* obj, int32_t resId, int32_t strPtr);       /* @ 0x0041E570 —
-                                                                       *   event-list
-                                                                       *   window ctor
-                                                                       *   (legacy
-                                                                       *   misnomer);
-                                                                       *   loud deferred
-                                                                       *   stub in
-                                                                       *   InputMgr.cpp */
+/* BUG-mode3-input-processing-crashes.md: this used to declare a
+ * `void* INPUT_ExitGame(void*, int32_t, int32_t)` free function with no
+ * definition anywhere in the tree (a stale comment here claimed "loud
+ * deferred stub in InputMgr.cpp" — no such definition actually exists
+ * there either, just a comment referencing the address) — a dangling
+ * extern, permitted to link by -Wl,--unresolved-symbols=ignore-all,
+ * that crashed calling through a null function pointer the instant
+ * AddString's odd-resId type-0/2/4/12/13 branches were ever actually
+ * reached (Game::PlaySound → ResourceManager::GetById → AddString).
+ * input/BuildingDescriptorEditor.h's BuildingDescriptorEditor_Ctor is
+ * the real, already-implemented placement-new bridge for this exact
+ * 0x630-byte allocation (its own doc comment already names this file's
+ * AddString and cites the same "INPUT_ExitGame" Ghidra misnomer) —
+ * these call sites just hadn't been updated to use it. */
+void* BuildingDescriptorEditor_Ctor(void* memory, int32_t resId, int32_t strPtr); /* @ 0x0041E570 */
 void* TrainStation_Ctor(void* obj, int32_t resId, int32_t strPtr);    /* @ 0x00436400 */
 void* CGWND_CursorEditWindow_Ctor(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0040E600 */
 void* RESDATA_ScriptedObject_AddChild(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0044B190 */
@@ -678,7 +685,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             } else {
                 newObj = operator_new(0x630);
                 if (newObj != nullptr) {
-                    result = INPUT_ExitGame(newObj, resId, strPtr);
+                    result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
                 }
             }
             break;
@@ -700,7 +707,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             } else {
                 newObj = operator_new(0x630);
                 if (newObj != nullptr) {
-                    result = INPUT_ExitGame(newObj, resId, strPtr);
+                    result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
                 }
             }
             break;
@@ -773,7 +780,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 13:
             newObj = operator_new(0x630);
             if (newObj != nullptr) {
-                result = INPUT_ExitGame(newObj, resId, strPtr);
+                result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
             }
             break;
 
