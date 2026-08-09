@@ -295,7 +295,7 @@ private:
     }
 
     bool server2_ = false;
-    std::thread thread_;
+    std::thread thread_{};
     DBusConnection* connection_ = nullptr;
     std::atomic<bool> stop_{false};
     std::atomic<bool> emit_remove_{false};
@@ -304,10 +304,10 @@ private:
     std::atomic<int> free_count_{0};
     std::atomic<int> prepare_count_{0};
     std::atomic<int> browser_new_count_{0};
-    std::mutex mutex_;
-    std::condition_variable ready_cv_;
+    std::mutex mutex_{};
+    std::condition_variable ready_cv_{};
     bool ready_ = false;
-    std::string start_error_;
+    std::string start_error_{};
 };
 
 SessionAdvertisement Publication(std::uint8_t players = 1) {

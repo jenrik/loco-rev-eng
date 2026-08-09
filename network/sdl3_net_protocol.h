@@ -43,8 +43,8 @@ struct TransportFrame {
 };
 
 struct ClientHello {
-    std::string player_name;
-    std::string expected_session_uuid;
+    std::string player_name{};
+    std::string expected_session_uuid{};
 };
 
 struct ServerWelcome {
@@ -52,13 +52,13 @@ struct ServerWelcome {
     VirtualPlayerId host_player_id = 0;
     std::uint8_t current_players = 0;
     std::uint8_t maximum_players = 0;
-    std::string session_uuid;
-    std::string host_player_name;
+    std::string session_uuid{};
+    std::string host_player_name{};
 };
 
 struct PlayerNotice {
     VirtualPlayerId player_id = 0;
-    std::string player_name;
+    std::string player_name{};
 };
 
 struct LegacyTrainPositionAck {
@@ -93,7 +93,7 @@ public:
     std::size_t buffered_bytes() const noexcept { return bytes_.size(); }
 
 private:
-    std::vector<std::uint8_t> bytes_;
+    std::vector<std::uint8_t> bytes_{};
     bool failed_ = false;
 };
 

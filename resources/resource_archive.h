@@ -47,9 +47,9 @@ private:
                                std::vector<uint8_t>* output,
                                std::string* error);
 
-    std::string data_path_;
-    std::vector<ArchiveEntry> entries_;
-    std::unordered_map<std::string, size_t> by_name_;
+    std::string data_path_{};
+    std::vector<ArchiveEntry> entries_{};
+    std::unordered_map<std::string, size_t> by_name_{};
 };
 
 }  // namespace loco::assets

@@ -87,10 +87,10 @@ static_assert(sizeof(VehicleRecord) == 0x2C, "VehicleRecord must be 0x2C bytes")
 
 /** A complete parsed .loco save document. */
 struct SaveDocument {
-    SaveRegion             header;     /* 0x114-byte header (typed) */
-    std::vector<uint8_t>   preview;    /* header.player_id * player_color bytes */
-    std::vector<EntityRecord>  entities;
-    std::vector<VehicleRecord> vehicles;
+    SaveRegion             header{};   /* 0x114-byte header (typed) */
+    std::vector<uint8_t>   preview{};  /* header.player_id * player_color bytes */
+    std::vector<EntityRecord>  entities{};
+    std::vector<VehicleRecord> vehicles{};
 };
 
 /* ================================================================== */

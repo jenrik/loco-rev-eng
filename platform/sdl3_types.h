@@ -47,7 +47,13 @@ struct DDSURFACEDESC {
     uint32_t dwCKSrcBltColorSpaceLowValue;
     uint32_t dwCKSrcBltColorSpaceHighValue;
 
-    DDSURFACEDESC() { std::memset(this, 0, sizeof(*this)); dwSize = sizeof(*this); }
+    DDSURFACEDESC()
+        : dwSize(0), dwFlags(0), dwWidth(0), dwHeight(0), lPitch(0),
+          dwBackBufferCount(0), dwMipMapCount(0), dwAlphaBitDepth(0),
+          dwReserved(0), lpSurface(nullptr), dwCKDestBltColorSpaceLowValue(0),
+          dwCKDestBltColorSpaceHighValue(0), dwCKSrcBltColorSpaceLowValue(0),
+          dwCKSrcBltColorSpaceHighValue(0)
+    { std::memset(this, 0, sizeof(*this)); dwSize = sizeof(*this); }
 };
 
 /* Blit effects — matches DDBLTFX from ddraw.h */
@@ -71,7 +77,14 @@ struct DDBLTFX {
     uint32_t dwFillColor;
     uint32_t dwDDDestColorBitDepth;
 
-    DDBLTFX() { std::memset(this, 0, sizeof(*this)); dwSize = sizeof(*this); }
+    DDBLTFX()
+        : dwSize(0), dwDDFX(0), dwROP(0), dwDDROP(0), dwRotationAngle(0),
+          dwZBufferOpCode(0), dwZBufferLow(0), dwZBufferHigh(0),
+          dwZBufferBaseDest(0), dwZDestConstBitDepth(0), dwZSrcConstBitDepth(0),
+          dwAlphaEdgeBlendBitDepth(0), dwAlphaEdgeBlend(0), dwReserved(0),
+          dwAlphaDestConstBitDepth(0), dwAlphaSrcConstBitDepth(0),
+          dwFillColor(0), dwDDDestColorBitDepth(0)
+    { std::memset(this, 0, sizeof(*this)); dwSize = sizeof(*this); }
 };
 
 /* Color key — matches DDCOLORKEY from ddraw.h */

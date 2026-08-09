@@ -32,8 +32,8 @@ struct EndpointCandidate {
 };
 
 struct SessionAdvertisement {
-    std::string session_uuid;
-    std::string display_name;
+    std::string session_uuid{};
+    std::string display_name{};
     std::uint16_t transport_version = 0;
     std::uint16_t legacy_version = 0;
     std::uint8_t current_players = 0;
@@ -42,13 +42,13 @@ struct SessionAdvertisement {
 };
 
 struct DiscoveredSession {
-    SessionAdvertisement metadata;
-    std::vector<EndpointCandidate> endpoints;
+    SessionAdvertisement metadata{};
+    std::vector<EndpointCandidate> endpoints{};
 };
 
 struct DiscoveryRequest {
     bool browse = false;
-    std::optional<SessionAdvertisement> publication;
+    std::optional<SessionAdvertisement> publication{};
 };
 
 enum class BackendEventKind {
@@ -83,8 +83,8 @@ struct BackendUpdateResult {
 
 struct BackendPollResult {
     BackendHealth health = BackendHealth::Running;
-    std::vector<BackendEvent> events;
-    std::string error;
+    std::vector<BackendEvent> events{};
+    std::string error{};
 };
 
 /** One platform discovery implementation.

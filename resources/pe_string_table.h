@@ -23,7 +23,7 @@ public:
     size_t size() const { return strings_.size(); }
 
 private:
-    std::unordered_map<uint32_t, std::string> strings_;
+    std::unordered_map<uint32_t, std::string> strings_{};
 };
 
 }  // namespace loco::assets

@@ -48,7 +48,7 @@ struct TransportClientConfig {
 };
 
 struct DirectConnectEndpoint {
-    std::string host;
+    std::string host{};
     std::uint16_t port = kDefaultLegoLocoPort;
 };
 

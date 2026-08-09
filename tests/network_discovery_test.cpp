@@ -18,12 +18,12 @@ struct FakeState {
     DiscoveryBackendKind kind = DiscoveryBackendKind::None;
     BackendStartResult start_result{true, {}};
     BackendUpdateResult update_result{true, false, {}};
-    std::deque<BackendPollResult> polls;
+    std::deque<BackendPollResult> polls{};
     int starts = 0;
     int updates = 0;
     int stops = 0;
-    DiscoveryRequest last_request;
-    SessionAdvertisement last_update;
+    DiscoveryRequest last_request{};
+    SessionAdvertisement last_update{};
 };
 
 class FakeBackend final : public IDiscoveryBackend {
