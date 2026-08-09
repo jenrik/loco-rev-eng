@@ -15,7 +15,8 @@
  *
  * Class hierarchy:
  *   GameObject (vtable 0x477820)
- *     └─ UIEntity  ← this class
+ *     └─ Entity (vtable 0x477488)
+ *          └─ UIEntity  ← this class
  *
  * Direction codes:
  *   0x43 ('C') = Center — place at world center
@@ -100,14 +101,48 @@ public:
      * Correction: the vtable at 0x477A90 is NOT a bare GameObject-shaped
      * table with only a destructor — it is a full 15-slot Entity-shaped
      * table (confirmed via a live slot-by-slot dump) that reuses Entity's
-     * function pointers for every slot except three real overrides:
-     *   [7]  (StopSound slot)  -> UI_ShowWindow   (0x423840)
-     *   [9]  (SetVisible slot) -> UI_EnableWindow  (0x423890)
-     *   [10] (Update slot)     -> UI_HideWindow    (0x423870)
-     * These three overrides are not yet reconstructed as UIEntity
-     * methods (see UI_Window_UpdateScroll's dispatch through the same
-     * slots in ui/UI_Utils.cpp's dead UI_Manager::hideTooltip, and
-     * PROGRESS.md).
+     * function pointers for every slot except three real overrides,
+     * reconstructed below as StopSound/SetVisible/Update (2026-08-09;
+     * were previously free functions UI_ShowWindow/UI_EnableWindow/
+     * UI_HideWindow taking an explicit `self` — see each override's own
+     * doc comment for why those names didn't match the real behavior).
      */
     ~UIEntity() override;
+
+    /**
+     * StopSound override — vtable[7]. Address: 0x423840 (previously
+     * transcribed as the free function UI_ShowWindow — misnamed; this
+     * doesn't show anything, it forwards to the tooltip child's own
+     * StopSound then calls Entity::StopSound on itself).
+     *
+     * Propagates to the tooltip child at +0x98 (if any) via its own
+     * overridden vtable[7] slot, then calls the base Entity
+     * implementation (same address, 0x405A20, as this override's own
+     * post-child-handling call in the original binary).
+     */
+    void StopSound(int param) override;
+
+    /**
+     * SetVisible override — vtable[9]. Address: 0x423890 (previously
+     * transcribed as the free function UI_EnableWindow — misnamed; it
+     * doesn't set a visibility flag).
+     *
+     * Propagates to the tooltip child's own SetVisible, then pauses/
+     * unpauses the game window via CGWND_SetPause — does NOT call
+     * Entity::SetVisible (a different address, 0x4061B0; this override
+     * replaces the base behavior entirely rather than extending it).
+     */
+    void SetVisible(bool visible) override;
+
+    /**
+     * Update override — vtable[10]. Address: 0x423870 (previously
+     * transcribed as the free function UI_HideWindow — misnamed; it
+     * doesn't hide anything).
+     *
+     * Propagates to the tooltip child's own Update, then invalidates
+     * this entity's screen rect (GameObject::InvalidateRect, 0x436AB0)
+     * — does NOT call Entity::Update (a different address, 0x405C40;
+     * this override replaces the base behavior entirely).
+     */
+    void Update() override;
 };

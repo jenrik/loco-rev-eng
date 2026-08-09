@@ -224,36 +224,13 @@ public:
     void resetTooltips(int param);
 };
 
-/* ================================================================== */
-/* UIEntity helper methods (accessed through tooltip child at +0x98)   */
-/* ================================================================== */
-
-/**
- * UI_ShowWindow — Show tooltip child window.
- * Address: 0x423840
- *
- * Calls child at +0x98 vtable+0x1C (show method), then calls
- * GameObject_StopSound. __thiscall on UI_WindowBase/CGWND.
- */
-void __thiscall UI_ShowWindow(void* self, int param);
-
-/**
- * UI_HideWindow — Hide tooltip child window.
- * Address: 0x423870
- *
- * Calls child at +0x98 vtable+0x28 (hide method), then calls
- * GameObject_Update. __fastcall.
- */
-void __fastcall UI_HideWindow(void* self);
-
-/**
- * UI_EnableWindow — Enable/disable tooltip child window.
- * Address: 0x423890
- *
- * Calls child at +0x98 vtable+0x24 (enable method), then calls
- * CGWND_SetPause. __thiscall.
- */
-void __thiscall UI_EnableWindow(void* self, int enable);
+/* UI_ShowWindow/UI_HideWindow/UI_EnableWindow (0x423840/0x423870/
+ * 0x423890) converted 2026-08-09 to real UIEntity virtual overrides —
+ * StopSound/Update/SetVisible respectively (vtable[7]/[10]/[9], each
+ * confirmed via a live slot-by-slot vtable dump — see ui/UIEntity.h).
+ * The free-function names didn't match their real behavior (none of them
+ * show/hide/enable anything); see each override's doc comment in
+ * ui/UIEntity.h for the evidence and the real per-slot semantics. */
 
 /* ================================================================== */
 /* UI_DefWndProc — Default passthrough WindowProc                      */

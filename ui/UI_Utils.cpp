@@ -22,9 +22,6 @@ extern "C" {
     void  __stdcall DefWindowProcA(HWND hWnd, UINT Msg,
                                    void* wParam, void* lParam);  /* USER32 */
 }
-    void  __fastcall GameObject_StopSound(void* self, int param); /* 0x405A20 */
-    void  __fastcall GameObject_Update(void* self);              /* 0x436AB0 */
-    void  __fastcall CGWND_SetPause(void* self, char pause);     /* 0x408130 */
     void  __thiscall GameObject_BaseCtor(void* self, int a, int b,
                                           int c, int d);          /* 0x405790 */
     int   __thiscall ResourceManager_GetById(void** mgr, int id); /* 0x460A30 */
@@ -67,64 +64,9 @@ void __stdcall UI_DefWndProc(HWND hWnd, UINT msg, void* wParam, void* lParam)
     DefWindowProcA(hWnd, msg, wParam, lParam);
 }
 
-/* ================================================================== */
-/* UI_ShowWindow — Show tooltip child window                            */
-/* Address: 0x423840 (used as vtable[7] of some class)                  */
-/* ================================================================== */
-void __thiscall UI_ShowWindow(void* self, int param)
-{
-    /* Access child/tooltip object at +0x98 */
-    void* child = *(void**)((uint8_t*)self + 0x98);
-    if (child != NULL) {
-        /* Call child's vtable[7] (offset 0x1C) — show method */
-        void** vtbl = *(void***)child;
-        typedef void (__thiscall* ShowFn)(void*, int);
-        ShowFn showFn = (ShowFn)vtbl[7];
-        showFn(child, param);
-    }
-    /* Call GameObject_StopSound on self */
-    GameObject_StopSound(self, param);
-}
-
-/* ================================================================== */
-/* UI_HideWindow — Hide tooltip child window                           */
-/* Address: 0x423870 (used as vtable[10] of some class)                */
-/* ================================================================== */
-void __fastcall UI_HideWindow(void* self)
-{
-    int** selfInt = (int**)self;
-
-    /* Access child/tooltip object at index 0x26 (+0x98) */
-    int* child = selfInt[0x26];  /* selfInt[0x26] = *(void**)(self + 0x98) */
-    if (child != NULL) {
-        /* Call child's vtable[10] (offset 0x28) — hide method */
-        void** vtbl = *(void***)child;
-        typedef void (__fastcall* HideFn)(void*);
-        HideFn hideFn = (HideFn)vtbl[10];
-        hideFn(child);
-    }
-    /* Call GameObject_Update on self */
-    GameObject_Update(self);
-}
-
-/* ================================================================== */
-/* UI_EnableWindow — Enable/disable tooltip child window               */
-/* Address: 0x423890 (used as vtable[9] of some class)                 */
-/* ================================================================== */
-void __thiscall UI_EnableWindow(void* self, int enable)
-{
-    /* Access child/tooltip object at +0x98 */
-    void* child = *(void**)((uint8_t*)self + 0x98);
-    if (child != NULL) {
-        /* Call child's vtable[9] (offset 0x24) — enable method */
-        void** vtbl = *(void***)child;
-        typedef void (__thiscall* EnableFn)(void*, int);
-        EnableFn enableFn = (EnableFn)vtbl[9];
-        enableFn(child, enable);
-    }
-    /* Call CGWND_SetPause on self */
-    CGWND_SetPause(self, (char)enable);
-}
+/* UI_ShowWindow/UI_HideWindow/UI_EnableWindow (0x423840/0x423870/
+ * 0x423890) converted 2026-08-09 to real UIEntity::StopSound/Update/
+ * SetVisible overrides — see ui/UIEntity.cpp. */
 
 /* ================================================================== */
 /* UI_Manager Constructor                                              */

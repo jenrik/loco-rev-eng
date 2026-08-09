@@ -53,6 +53,9 @@ int*  __thiscall UI_CreateTooltip(void* tooltipMgr,
  * definition of their own. Match the real one exactly here. */
 void  UI_DestroyTooltip(void* tooltipMgr, int tooltip);  /* @ 0x423D20 */
 
+/* Game pause toggle — called by SetVisible below. */
+void  __fastcall CGWND_SetPause(void* self, char pause);  /* @ 0x408130 */
+
 /* ================================================================== */
 /* Global variables                                                     */
 /* ================================================================== */
@@ -424,4 +427,46 @@ UIEntity::~UIEntity()
         UI_DestroyTooltip(&g_tooltip_mgr,
                            static_cast<int>(reinterpret_cast<intptr_t>(this->pTooltip)));
     }
+}
+
+/* ================================================================== */
+/* UIEntity::StopSound — vtable[7] override                            */
+/* Address: 0x423840 (previously the free function UI_ShowWindow)      */
+/*                                                                     */
+/* pTooltip (+0x98) is created via GameObject_BaseCtor as a plain      */
+/* 0x88-byte object (see UI_Manager::createTooltip's doc comment,      */
+/* ui/UI_Utils.h) — exactly Entity's size — and dispatched through its */
+/* own vtable[7]/[9]/[10] slots by the original manual-vtable code     */
+/* this replaces, so it is evidenced as an Entity*.                    */
+/* ================================================================== */
+void UIEntity::StopSound(int param)
+{
+    if (this->pTooltip != nullptr) {
+        static_cast<Entity*>(this->pTooltip)->StopSound(param);
+    }
+    Entity::StopSound(param);
+}
+
+/* ================================================================== */
+/* UIEntity::SetVisible — vtable[9] override                           */
+/* Address: 0x423890 (previously the free function UI_EnableWindow)    */
+/* ================================================================== */
+void UIEntity::SetVisible(bool visible)
+{
+    if (this->pTooltip != nullptr) {
+        static_cast<Entity*>(this->pTooltip)->SetVisible(visible);
+    }
+    CGWND_SetPause(this, static_cast<char>(visible));
+}
+
+/* ================================================================== */
+/* UIEntity::Update — vtable[10] override                              */
+/* Address: 0x423870 (previously the free function UI_HideWindow)      */
+/* ================================================================== */
+void UIEntity::Update()
+{
+    if (this->pTooltip != nullptr) {
+        static_cast<Entity*>(this->pTooltip)->Update();
+    }
+    this->InvalidateRect();
 }
