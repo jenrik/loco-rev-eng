@@ -24,6 +24,7 @@
 #include "../audio/GameAudio.h"
 #include "../town/Town.h"
 #include "../world/scriptengine.h"
+#include "../graphics/DDRAW_Building.h"
 #include "CGWND.h"
 
 #include <cstring>   /* memmove — the original uses CRT_memmove (0x466EA0) */
@@ -97,6 +98,16 @@ extern void**   g_object_array;        /* 0x004A9998 object array */
 /* g_scripted_object is canonically declared in world/scriptengine.h */
 extern BuildingMgr*    g_building_mgr;     /* 0x00485448 — host-constructed singleton */
 extern World*          g_world;            /* 0x004A98B0 — host-constructed singleton */
+
+/* g_ddraw_building is declared void* here (world/tilemap.h) since
+ * graphics/DDRAW.h itself can't be included in this TU — it redeclares
+ * g_tilemap/g_primary_surface with different types than world/tilemap.h
+ * (a pre-existing, documented ODR split; PROGRESS.md's "second latent
+ * ODR collision"). DDRAW_Building.h (just the class, none of DDRAW.h's
+ * conflicting globals) is included below so this file can still call
+ * DDRAW_Building's real methods directly instead of through a bridge —
+ * see BUG-mode3-input-processing-crashes.md for the crash a previous,
+ * declared-but-never-defined local stub caused here. */
 
 /* Overlay subsystems (each is an object embedded at its global) */
 extern void*    g_town;                /* Town window object */
@@ -296,27 +307,6 @@ protected:
 inline SortedListSlotsView* list_ops(BuildingCollection& list)
 {
     return reinterpret_cast<SortedListSlotsView*>(&list);
-}
-
-/* ================================================================== */
-/* DDRAW_Building hit-test view                                         */
-/*                                                                     */
-/* Game calls the two direct hit-test methods (0x459D60 / 0x45A740) on  */
-/* the g_ddraw_building singleton (0x4A9EF0, declared void* in         */
-/* world/tilemap.h).  graphics/DDRAW.h cannot be included here because  */
-/* it redeclares g_tilemap / g_ddraw_building / g_primary_surface with */
-/* different types than world/tilemap.h; this minimal view declares    */
-/* only the two methods used.  TODO: reconcile the two headers' global  */
-/* declarations so graphics/DDRAW.h can be used directly.              */
-/* ================================================================== */
-struct DDRAW_BuildingView {
-    int32_t HitTest(int32_t x, int32_t y);        /* 0x00459D60 */
-    uint8_t HitTestWithDrag(int32_t x, int32_t y);/* 0x0045A740 */
-};
-
-inline DDRAW_BuildingView* ddraw_building()
-{
-    return static_cast<DDRAW_BuildingView*>(g_ddraw_building);
 }
 
 /* The town view is an object embedded at the g_town_view global
@@ -675,8 +665,8 @@ void Game::UpdateInputState()
             return;
         }
         if (g_ddraw_active != 0) {
-            if (ddraw_building()->HitTest(this->mouse_world_x,
-                                          this->mouse_world_y) != 0) {
+            if (static_cast<DDRAW_Building*>(g_ddraw_building)->HitTest(
+                    this->mouse_world_x, this->mouse_world_y) != 0) {
                 this->PlaySound(0x1400);
                 return;
             }
@@ -737,8 +727,9 @@ void Game::HandleLeftClick()
 
     /* Build chain (LAB_004110a0): DDRAW → scripted object → selection
      * placement → BuildingMgr/TileMap. */
-    if (g_ddraw_active != 0 && ddraw_building()->HitTest(wx, wy) != 0) {
-        if (ddraw_building()->HitTestWithDrag(wx, wy) != 0) {
+    DDRAW_Building* const ddraw_building = static_cast<DDRAW_Building*>(g_ddraw_building);
+    if (g_ddraw_active != 0 && ddraw_building->HitTest(wx, wy) != 0) {
+        if (ddraw_building->HitTestWithDrag(wx, wy) != 0) {
             PlaySoundAt(0x5015, wx, wy, 4);
             this->left_click_flag = 0;
             return;

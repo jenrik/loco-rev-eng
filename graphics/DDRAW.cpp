@@ -117,8 +117,14 @@ extern uint32_t __thiscall RESDATA_TextInput_HandleChar(void* self, uint32_t ch)
 /* GameObject base functions */
 extern void __fastcall GameObject_BaseCtor(void* obj, int a, int b, int c, int d); /* @ 0x405790 */
 extern void __fastcall GameObject_DtorBody(void* obj);       /* @ 0x405870 */
-extern int  __fastcall GameObject_PtInRect(void* obj, int x, int y); /* @ 0x436A10 */
-extern void __fastcall GameObject_GetRelPos(void* obj, int* out, int x, int y); /* @ 0x436A40 */
+/* GameObject_PtInRect/GetRelPos free-function declarations removed: this
+ * file now calls the real GameObject::PtInRect method directly
+ * (DDRAW_Building : public Panel : public GameObject — see
+ * DDRAW_Building.h), and never called GetRelPos to begin with. Their old
+ * declarations here conflicted with game/Panel.h's (now transitively
+ * included via DDRAW_Building.h) on GetRelPos's return type/calling
+ * convention — a pre-existing, previously-silent mismatch that only
+ * became a hard compile error once both were visible in one TU. */
 extern void __cdecl   CRT_memset_pattern(void* dst, int size, int count, void* ctor_callback, void* dtor_callback); /* @ 0x4671E0, RET 0x14 = 5 args */
 extern void __cdecl   CRT_free_pattern(void* dst, int size, int count, void* dtor); /* @ 0x467280 */
 
@@ -249,10 +255,12 @@ DDRAW_Building::DDRAW_Building()
      * original x86 binary layout.  The Ghidra decomp (0x4589B0) shows
      * embedded GameObjects at +0x38, +0xE8, +0x10A, +0x12C and pattern
      * sprites at +0x5A, but the C++ class uses native pointer-sized
-     * fields and different padding.  Until the class is properly
-     * ported with layout-correct inheritance (RESDATA base), we skip
-     * the binary-emulating construction and just zero-initialize.
-     * operator_new already zeroes the allocation. */
+     * fields and different padding.  GameObject::GameObject() (run
+     * implicitly before this body, per real C++ inheritance — see the
+     * class comment in DDRAW.h) already zeroes screen_rect and sets
+     * type=1; we just skip the binary-emulating sub-object construction
+     * below and zero-initialize the rest (operator_new already zeroes
+     * the allocation). */
     type = 0xD;
     selected_entity = nullptr;
     station_list_offset = 0;
@@ -664,7 +672,10 @@ void DDRAW_Building::UpdateSubObject()
 
 int32_t DDRAW_Building::HitTest(int32_t x, int32_t y)
 {
-    if (GameObject_PtInRect(this, x, y)) return 1;
+    /* 0x459D60: direct (non-virtual) call to GameObject_PtInRect(this, x,
+     * y) — now a real inherited base-class call (DDRAW_Building : public
+     * GameObject, see DDRAW.h) instead of the free-function stub. */
+    if (GameObject::PtInRect(x, y)) return 1;
     if (sprite_view(static_cast<void*>(&this->sub_object_1))->hit_test(x, y)) return 1;
     return 0;
 }
@@ -676,7 +687,21 @@ int32_t DDRAW_Building::HitTest(int32_t x, int32_t y)
 
 uint8_t DDRAW_Building::HitTestWithDrag(int32_t x, int32_t y)
 {
-    return RESDATA_HitTestChildren(this, x, y);
+    /* BUG-mode3-input-processing-crashes.md: this called a free-function
+     * RESDATA_HitTestChildren(this, x, y) that several files (this one,
+     * town/Town.cpp, world/scriptengine.cpp) separately and
+     * inconsistently declare (three different addresses/signatures
+     * between them) but only shared/stubs_impl.cpp actually defines —
+     * as an assert(0) stub, guaranteed to crash. Panel::HitTestChildren
+     * (0x4549E0, game/Panel.h/.cpp) is the real, already-implemented
+     * inherited method (DDRAW_Building : public Panel, see
+     * DDRAW_Building.h). This function's own doc comment describes
+     * additional child-entity/pattern-container/track-sprite drag
+     * checks beyond a single HitTestChildren call — HitTestWithDrag
+     * itself (0x45A740) has never been fully transcribed from the
+     * disassembly, only this one-call delegation; tracked as a
+     * follow-up, not attempted here. */
+    return this->HitTestChildren(x, y);
 }
 
 /* ================================================================== */
