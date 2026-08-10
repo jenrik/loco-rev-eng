@@ -21,6 +21,7 @@
 #include "Train.h"
 #include "../network/TrainMessage.h"
 #include "../network/DPlayManager.h"
+#include "../network/DirectPlay.h"
 /* NetmanTypes.h (not the full Netman.h) — gets the complete Netman/
  * PlayerSlot types for named-field access (g_netman->m_gameMode, etc.)
  * without pulling in Netman.h's extern "C" Win32 block or its ~13
@@ -66,19 +67,23 @@ void   __cdecl CRT_memset_pattern(void* dst, int pattern, int count, void* callb
 void   __cdecl CRT_free_pattern(void* ptr, int pattern, int count, void* cleanup);   /* 0x004660F0 */
 char*  __cdecl CRT_itoa(int value, char* str, int radix);  /* CRT */
 
-/* DirectPlay */
-void   DirectPlay_Close(void* peer);          /* 0x00461990 */
-int    DirectPlay_HostSession(void* peer, int enable, int max_players, int a, int b); /* 0x0045EDE0 */
-int    DirectPlay_ConnectToSession(void* peer, char* player_name, char* session_name, char* pwd); /* 0x0045F050 */
-int    DirectPlay_SetSessionDesc(void* peer, char* desc); /* 0x0045FB70 */
-/* Real signature has 3 args the DB previously hid (decompiler dropped them
+/* DirectPlay — Close/HostSession/ConnectToSession/SetSessionDesc are now
+ * real DirectPlaySession:: methods (network/DirectPlay.h), called directly
+ * below via g_dplay_peer-> — no free-function declarations needed for them
+ * here. DirectPlay_HandleMessages (0x45F390) is used below but not
+ * redeclared here either — network/DirectPlay.h's own declaration (now
+ * transitively included) is C++-linkage, matching its real definition in
+ * network/DirectPlay.cpp; this file's own prior extern "C" declaration of
+ * it (removed here) gave it the wrong linkage, silently binding every call
+ * below to an undefined C symbol instead of the real function — a landmine
+ * from the same class CLAUDE.md's C-vs-C++-linkage rule targets, only
+ * caught now that both declarations are visible in the same TU. Real
+ * signature has 3 args the DB previously hid (decompiler dropped them
  * because the function's stored signature said void(void)): disassembly at
  * 0x43C8EE-0x43C8F2 and 0x43C98D-0x43C991 (both inside Train_ConnectToServer)
  * push (protocol, address, 0) — matches this function's OWN internal calls
  * at 0x45E88C-0x45E88E / 0x45E987-0x45E989 in DirectPlay_ConnectToSession,
- * which use (0, 0, 0). See network/DirectPlay.h/.cpp for the shared
- * declaration and the still-deferred (~2076 byte) body. */
-uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_t flags); /* 0x45F390 */
+ * which use (0, 0, 0). */
 
 /* Win32 I/O */
 int    __stdcall CreateFileA(const char* lpFileName, uint32_t dwDesiredAccess,
@@ -174,11 +179,11 @@ void   __fastcall Train_RemoveAllTracks(void* subsystem);            /* 0x43CC40
 
 /* OutputDebugStringA is available as g_OutputDebugStringA from main file */
 
-/* DirectPlay helpers */
-void   __thiscall DirectPlay_DestroyPeer(void* peer);  /* 0x461A00 */
-void*  __thiscall DirectPlay_CreatePeer(void* peer, int ctx_a, int ctx_b); /* 0x45E490 */
-void*  __thiscall DirectPlay_EnumConnections(void* peer);                 /* 0x45EAB0 */
-int    __cdecl DirectPlay_QueryConnection(const char* index);             /* 0x45EE60 */
+/* DirectPlay helpers — DestroyPeer/CreatePeer/EnumConnections are now real
+ * DirectPlaySession:: methods; DirectPlay_QueryConnection was a duplicate,
+ * differently-named declaration for the same address (0x45EE60) as the
+ * real DirectPlay_GetConnectionCaps(uint8_t*) in network/DirectPlay.h —
+ * declared correctly there, not redeclared here. */
 
 /* Resource locking */
 
@@ -218,7 +223,7 @@ extern void* g_network_queue;    /* network message queue head */
 /* ================================================================== */
 
 extern int      g_demo_mode;       /* 0x004A9918 */
-extern void*    g_dplay_peer;      /* 0x0048525C */
+extern DirectPlaySession* g_dplay_peer;  /* 0x0048525C */
 extern void*    g_train;           /* 0x004FD3A4 */
 extern void*    g_network_thread;  /* 0x004FD398 */
 extern Netman*  g_netman;          /* 0x004FD3AC — matches the extern Netman*
@@ -297,22 +302,19 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
     if (g_demo_mode != 1) {
         this->InitNetwork();
 
-        void* reversed = nullptr;
-        for (auto* item = static_cast<uint32_t*>(DirectPlay_EnumConnections(g_dplay_peer));
+        /* Reverse EnumConnections's list into g_netSettings+0x10. Real typed
+         * pointers throughout now (DirectPlaySession::EnumConnections
+         * returns a genuine DirectPlayConnectionNode* list) — the previous
+         * int32_t-truncating-pointer TODO here no longer applies, since
+         * nothing here round-trips a pointer through a narrower integer
+         * anymore. */
+        DirectPlayConnectionNode* reversed = nullptr;
+        for (DirectPlayConnectionNode* item = g_dplay_peer->EnumConnections();
              item != nullptr;
-             item = reinterpret_cast<uint32_t*>(static_cast<uintptr_t>(item[0]))) {
-            uint32_t* copy = static_cast<uint32_t*>(operator_new(8));
-            /* TODO(DirectPlay pointer-width audit — see docs/landmine-sweep-worklist.md,
-             * "DirectPlay_* cluster in game/Train_network.cpp — investigated, reverted,
-             * blocked"): copy[0] truncates the 64-bit `reversed` pointer into a 32-bit
-             * slot, the same int32_t-as-pointer pattern documented as blocked there.
-             * Cast re-spelled only; truncation preserved verbatim, not fixed, as this
-             * site is downstream of DirectPlay_EnumConnections. Currently dead on host
-             * builds (the host bridge overload always returns nullptr, so this loop
-             * body never executes) — do not "fix" the truncation without doing the
-             * full session-list pointer-width audit that section calls for. */
-            copy[0] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(reversed));
-            copy[1] = item[1];
+             item = item->next) {
+            auto* copy = static_cast<DirectPlayConnectionNode*>(operator_new(sizeof(DirectPlayConnectionNode)));
+            copy->next = reversed;
+            copy->type = item->type;
             reversed = copy;
         }
         *reinterpret_cast<void**>(static_cast<uint8_t*>(g_netSettings) + 0x10) = reversed;
@@ -320,7 +322,7 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
         char index[2] = {'0', 0};
         for (int i = 0; i < 4; ++i, ++index[0]) {
             *(static_cast<uint8_t*>(g_netSettings) + 0x14 + i) =
-                static_cast<uint8_t>(DirectPlay_QueryConnection(index));
+                static_cast<uint8_t>(DirectPlay_GetConnectionCaps(reinterpret_cast<uint8_t*>(index)));
         }
     }
 }
@@ -376,8 +378,8 @@ void TrainSubsystem::BaseDtor()
     }
 
     if (g_dplay_peer != NULL) {
-        void* peer = g_dplay_peer;
-        DirectPlay_DestroyPeer(peer);
+        DirectPlaySession* peer = g_dplay_peer;
+        peer->DestroyPeer();
         GLOBAL_free(peer);
         g_dplay_peer = NULL;
     }
@@ -571,33 +573,34 @@ void TrainSubsystem::DownloadMissingAssets(DPlayManager* session)
 /* ================================================================== */
 void TrainSubsystem::InitNetwork()
 {
-    void* old_peer;
-
-    old_peer = g_dplay_peer;
+    DirectPlaySession* old_peer = g_dplay_peer;
 
     if (g_dplay_peer != NULL) {
-        DirectPlay_DestroyPeer(g_dplay_peer);
+        g_dplay_peer->DestroyPeer();
         GLOBAL_free(old_peer);
         g_dplay_peer = NULL;
         Sleep(1);
     }
 
-    void* new_peer = operator_new(0x160c);
-    if (new_peer == NULL) {
-        new_peer = NULL;
-    } else {
-        new_peer = DirectPlay_CreatePeer(new_peer, this->context_id_a, 0);
+    /* Sized to the real class (sizeof), not the original x86 struct's
+     * hardcoded 0x160c bytes — DirectPlaySession's COM-interface/list
+     * pointers are native (8-byte) width on this host, so it no longer
+     * fits in 0x160c; CLAUDE.md treats x86 layout parity as a non-goal
+     * off-Windows, so sizeof() here rather than re-deriving a packed size. */
+    auto* new_peer = static_cast<DirectPlaySession*>(operator_new(sizeof(DirectPlaySession)));
+    if (new_peer != NULL) {
+        new_peer->CreatePeer(this->context_id_a, 0);
     }
     g_dplay_peer = new_peer;
 
     if (g_dplay_peer != NULL) {
-        /* DirectPlay-adjacent (docs/landmine-sweep-worklist.md, "DirectPlay_*
-         * cluster in game/Train_network.cpp"): casts re-spelled only. Do not
-         * retype g_dplay_peer or introduce a named struct for its internal
-         * layout here — that is exactly the deferred pointer-width audit. */
-        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_dplay_peer) + 0x940) = 0;
-        *(static_cast<uint8_t*>(g_dplay_peer) + 0x944) = 0;
-        *reinterpret_cast<int32_t*>(static_cast<uint8_t*>(g_dplay_peer) + 0x938) = this->context_id_b;
+        /* Overrides CreateAddress's own error_callback/show_dialogs/hwnd
+         * initialization — a deliberate caller-side policy (dialogs off,
+         * a different hwnd) for this particular network-init path, not a
+         * bug; preserved exactly via named fields instead of raw offsets. */
+        g_dplay_peer->error_callback = nullptr;
+        g_dplay_peer->show_dialogs = 0;
+        g_dplay_peer->hwnd = reinterpret_cast<void*>(static_cast<uintptr_t>(this->context_id_b));
     }
 }
 
@@ -719,10 +722,9 @@ void TrainSubsystem::DispatchMessage(void* msg)
         if (g_dplay_peer == NULL) {
             this->InitNetwork();
         }
-        DirectPlay_Close(g_dplay_peer);
-        DirectPlay_HostSession(g_dplay_peer,
-                                net_msg->data != NULL ? 1 : 0,
-                                net_msg->flags, 0, 1);
+        g_dplay_peer->Close();
+        g_dplay_peer->HostSession(net_msg->data != NULL ? 1 : 0,
+                                   net_msg->flags, 0, 1);
         net_msg->data = NULL;
         return;
 
@@ -752,8 +754,7 @@ void TrainSubsystem::DispatchMessage(void* msg)
                 std::move(payload));
         }
 #else
-        if (g_dplay_peer != NULL &&
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
+        if (g_dplay_peer != NULL && g_dplay_peer->session_ready != 0) {
             WIN32_SendNetworkData(g_dplay_peer,
                                    net_msg->to_player,
                                    net_msg->data,
@@ -895,7 +896,7 @@ void TrainSubsystem::ProcessMessages()
                     qmsg->type = 0x0C;
                     qmsg->to_player = this->player_peer_id;
                 }
-                this->player_peer_id = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x924));
+                this->player_peer_id = g_dplay_peer->player_dpid;
                 NETMAN_QueueMessage(qmsg);
             }
             goto free_msg;
@@ -939,13 +940,13 @@ void TrainSubsystem::ProcessMessages()
                 this->request_count--;
             }
             if (this->request_count == 0) {
-                DirectPlay_Close(g_dplay_peer);
+                g_dplay_peer->Close();
             }
             break;
         }
 
         case 6: { /* 0x3F0 — GameOver control signal */
-            if (*reinterpret_cast<uint8_t*>(g_dplay_peer) != 0) {
+            if (g_dplay_peer->session_state != 0) {
                 NetworkMsg* qmsg = AllocateNetworkMessage();
                 if (qmsg) {
                     qmsg->data = NULL; qmsg->next = NULL;
@@ -1593,7 +1594,7 @@ void TrainSubsystem::ShutdownNetwork()
 
     this->player_peer_id = 0;
 
-    if (*reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x1588)) == 0) {
+    if (g_dplay_peer->dplay_interface == nullptr) {
         /* No session — queue type-5 disconnect */
         NetworkMsg* msg = AllocateNetworkMessage();
         if (msg) { msg->data = NULL; msg->next = NULL; }
@@ -1603,32 +1604,32 @@ void TrainSubsystem::ShutdownNetwork()
     }
 
     /* Reconnect to session to send shutdown message */
-    if (*reinterpret_cast<uint8_t*>(g_dplay_peer) == 0) {
+    if (g_dplay_peer->session_state == 0) {
         /* Host player */
         if (g_netman->m_gameMode == 1) {
             /* Scenario mode: read server name from config */
             char buf[1024];
             Config_GetIniString(g_config_ini, "Configuration", "ServerName",
                                 "LEGO International Train Server", buf, 0x400);
-            DirectPlay_ConnectToSession(g_dplay_peer,
-                                         reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                         buf, NULL);
-            if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) == 0) {
+            g_dplay_peer->ConnectToSession(
+                reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                buf, NULL);
+            if (g_dplay_peer->session_ready == 0) {
                 Sleep(1000);
-                DirectPlay_ConnectToSession(g_dplay_peer,
-                                             reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                             buf, NULL);
+                g_dplay_peer->ConnectToSession(
+                    reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                    buf, NULL);
             }
-            if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) == 0) {
+            if (g_dplay_peer->session_ready == 0) {
                 Sleep(2000);
                 goto send_disconnect;
             }
         } else {
             /* Non-scenario: use UI address */
             char* addr = *reinterpret_cast<char**>((*reinterpret_cast<uintptr_t*>((reinterpret_cast<uint8_t*>(g_ui_main) + 0x220)) + 0xF8));
-            DirectPlay_ConnectToSession(g_dplay_peer,
-                                         reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                         addr, NULL);
+            g_dplay_peer->ConnectToSession(
+                reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                addr, NULL);
         }
     } else {
         /* Client player: format name pair */
@@ -1636,19 +1637,19 @@ void TrainSubsystem::ShutdownNetwork()
         wsprintfA(name_buf, "%s %s",
                   *reinterpret_cast<char**>((*reinterpret_cast<uintptr_t*>((reinterpret_cast<uint8_t*>(g_ui_main) + 0x220)) + 0xFC)),
                   reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)));
-        DirectPlay_ConnectToSession(g_dplay_peer,
-                                     reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                     name_buf, NULL);
+        g_dplay_peer->ConnectToSession(
+            reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+            name_buf, NULL);
     }
 
-    if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
+    if (g_dplay_peer->session_ready != 0) {
         /* Connected — send type-3 shutdown */
         NetworkMsg* msg = AllocateNetworkMessage();
         if (msg) { msg->data = NULL; msg->next = NULL; }
         if (msg) {
             msg->type = 3;
             msg->data = NULL;
-            msg->to_player = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x924));
+            msg->to_player = g_dplay_peer->player_dpid;
         }
         NETMAN_QueueMessage(msg);
         return;
@@ -1671,18 +1672,17 @@ void TrainSubsystem::HandleDisconnect()
 {
     if (g_dplay_peer != NULL) {
         /* Send game-over notification if connected in scenario mode */
-        if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0 &&
-            g_netman->m_gameMode == 2) {
+        if (g_dplay_peer->session_ready != 0 && g_netman->m_gameMode == 2) {
             uint16_t msg = 0x3FD;
             WIN32_SendNetworkData(g_dplay_peer, 0, &msg, 4, 1);
             Sleep(10);
         }
 
         /* Close and destroy DirectPlay peer */
-        DirectPlay_Close(g_dplay_peer);
-        void* old_peer = g_dplay_peer;
+        g_dplay_peer->Close();
+        DirectPlaySession* old_peer = g_dplay_peer;
         if (old_peer != NULL) {
-            DirectPlay_DestroyPeer(old_peer);
+            old_peer->DestroyPeer();
             GLOBAL_free(old_peer);
         }
         g_dplay_peer = NULL;
@@ -2838,19 +2838,25 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 
     /* Create DirectPlay session and connect to train server */
     if (g_dplay_peer == NULL) {
-        void* new_peer = operator_new(0x160c);
-        if (new_peer == NULL) new_peer = NULL;
-        else new_peer = DirectPlay_CreatePeer(new_peer, this->context_id_a, 0);
+        /* Sized to the real class — see TrainSubsystem::InitNetwork's own
+         * comment on why sizeof(DirectPlaySession) replaces the original
+         * x86 struct's hardcoded 0x160c bytes. */
+        auto* new_peer = static_cast<DirectPlaySession*>(operator_new(sizeof(DirectPlaySession)));
+        if (new_peer != NULL) {
+            new_peer->CreatePeer(this->context_id_a, 0);
+        }
         g_dplay_peer = new_peer;
 
         if (g_dplay_peer) {
-            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x940)) = 0;
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x944)) = 0;
-            *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x938)) = this->context_id_b;
+            /* See InitNetwork's identical override — deliberate caller-side
+             * policy, not a bug. */
+            g_dplay_peer->error_callback = nullptr;
+            g_dplay_peer->show_dialogs = 0;
+            g_dplay_peer->hwnd = reinterpret_cast<void*>(static_cast<uintptr_t>(this->context_id_b));
         }
     }
 
-    if (g_dplay_peer && *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
+    if (g_dplay_peer && g_dplay_peer->session_ready != 0) {
         Train_SendPlayerInfo(this);
         return;
     }
@@ -2858,37 +2864,37 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
     if (g_dplay_peer == NULL) return;
 
     /* Host a new session */
-    DirectPlay_Close(g_dplay_peer);
-    DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
+    g_dplay_peer->Close();
+    g_dplay_peer->HostSession(0, 1, 0, 0);
     Train_StartMultiplayer();
 
-    if (*reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x1588)) != 0) {
+    if (g_dplay_peer->dplay_interface != nullptr) {
         /* Get server name from config and connect */
         char server_name[0x200];
         Config_GetIniString(g_config_ini, "Configuration", "ServerName",
                             "LEGO International Train Server",
                             server_name, 0x200);
 
-        DirectPlay_ConnectToSession(g_dplay_peer,
-                                     reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                     server_name, NULL);
+        g_dplay_peer->ConnectToSession(
+            reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+            server_name, NULL);
 
-        if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
+        if (g_dplay_peer->session_ready != 0) {
             Train_SendPlayerInfo(this);
             return;
         }
 
         /* Retry after close+re-host */
-        DirectPlay_Close(g_dplay_peer);
+        g_dplay_peer->Close();
         Sleep(1000);
-        DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
+        g_dplay_peer->HostSession(0, 1, 0, 0);
         Train_StartMultiplayer();
-        DirectPlay_ConnectToSession(g_dplay_peer,
-                                     reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                     server_name, NULL);
+        g_dplay_peer->ConnectToSession(
+            reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+            server_name, NULL);
     }
 
-    if (g_dplay_peer && *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
+    if (g_dplay_peer && g_dplay_peer->session_ready != 0) {
         Train_SendPlayerInfo(this);
         return;
     }
@@ -3055,34 +3061,34 @@ void Train_ConnectToServer(void* subsystem, void* payload)
 
         if ((flags & 1) == 1) {
             /* Host mode: re-host and connect to the configured train server. */
-            DirectPlay_Close(g_dplay_peer);
+            g_dplay_peer->Close();
             Sleep(10);
-            DirectPlay_HostSession(g_dplay_peer, 0, 0, 0, 0);
+            g_dplay_peer->HostSession(0, 0, 0, 0);
             int32_t protocol = Config_GetIniInt(g_config_ini, "Configuration", "Protocol", 2);
             DirectPlay_HandleMessages(protocol, address, 0);
 
-            if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0x1588)) != 0) {
+            if (g_dplay_peer->dplay_interface != nullptr) {
                 char server_name[0x4B4];
                 Config_GetIniString(g_config_ini, "Configuration", "ServerName",
                                      "LEGO International Train Server",
                                      server_name, 0x4B4);
-                DirectPlay_ConnectToSession(g_dplay_peer,
-                                             reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                             server_name, NULL);
+                g_dplay_peer->ConnectToSession(
+                    reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                    server_name, NULL);
 
-                if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) == 0) {
+                if (g_dplay_peer->session_ready == 0) {
                     /* Retry once: close, wait, re-host, reconnect. Reuses
                      * the same protocol/address values (never recomputed). */
-                    DirectPlay_Close(g_dplay_peer);
+                    g_dplay_peer->Close();
                     Sleep(1000);
-                    DirectPlay_HostSession(g_dplay_peer, 0, 1, 0, 0);
+                    g_dplay_peer->HostSession(0, 1, 0, 0);
                     DirectPlay_HandleMessages(protocol, address, 0);
-                    DirectPlay_ConnectToSession(g_dplay_peer,
-                                                 reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-                                                 server_name, NULL);
+                    g_dplay_peer->ConnectToSession(
+                        reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                        server_name, NULL);
                 }
 
-                if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(g_dplay_peer) + 0xd50)) != 0) {
+                if (g_dplay_peer->session_ready != 0) {
                     return;  /* connected — no cleanup */
                 }
             }
@@ -3117,7 +3123,7 @@ void Train_ConnectToServer(void* subsystem, void* payload)
     }
 
     /* --- Shared cleanup --- */
-    DirectPlay_Close(g_dplay_peer);
+    g_dplay_peer->Close();
     self->player_peer_id = 0;
 
     {
