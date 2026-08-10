@@ -379,22 +379,15 @@ void WIN32_CloseHandle(void*);
 void WIN32_CloseHandle(void*){}
 void WIN32_timeEndPeriod(uint32_t); void WIN32_timeKillEvent(uint32_t);
 void WIN32_timeEndPeriod(uint32_t){}void WIN32_timeKillEvent(uint32_t){}
-void DirectPlay_Close(void*,int32_t);
-void DirectPlay_Close(void*,int32_t){}
-void DirectPlay_ConnectToSession(void*,const char*,const char*,const char*);
-void DirectPlay_ConnectToSession(void*,const char*,const char*,const char*){}
-void DirectPlay_constructor(void*);
-void DirectPlay_constructor(void*){}
-void DirectPlay_CreatePeer(void*,void*);
-void DirectPlay_CreatePeer(void*,void*){}
-void DirectPlay_DestroyPeer(void*,int32_t);
-void DirectPlay_DestroyPeer(void*,int32_t){}
-void DirectPlay_EnumConnections(void*,int32_t);
-void DirectPlay_EnumConnections(void*,int32_t){}
-void DirectPlay_HostSession(void*,const char*,const char*);
-void DirectPlay_HostSession(void*,const char*,const char*){}
-void DirectPlay_QueryConnection(void*,void*);
-void DirectPlay_QueryConnection(void*,void*){}
+/* DirectPlay_Close/ConnectToSession/CreatePeer/DestroyPeer/EnumConnections/
+ * HostSession/QueryConnection decoy stubs removed 2026-08-10: their
+ * extern "C" signatures matched nothing anywhere in the tree even before
+ * this pass (confirmed via grep), and now that game/Train_network.cpp and
+ * town/Town.cpp call real DirectPlaySession:: methods directly (see
+ * network/DirectPlay.h), there is no remaining reason for a decoy of any
+ * shape to exist. DirectPlay_constructor (0x443000) was always a bogus
+ * address — see network/DirectPlay.h's file-header note: that address is
+ * NetworkPlayerList::NetworkPlayerList_ctor, unrelated to DirectPlay. */
 int32_t NET_CheckAssetExists(void*,int32_t);
 int32_t NET_CheckAssetExists(void*,int32_t){return 0;}
 int32_t NET_FindArchivedAsset(int32_t);

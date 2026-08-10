@@ -46,6 +46,7 @@
 #include "../game/Train.h"
 #include "../game/PlayerConfig.h"
 #include "../network/DPlayManager.h"
+#include "../network/DirectPlay.h"
 #include "../network/NetworkPlayerList.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
@@ -289,8 +290,9 @@ extern void  __thiscall VehicleEditor_SetDPlayData(void* vehicle,
                                                     int data);       /* 0x40D770 */
 extern void  __fastcall Train_SendPlayerInfo(void* subsystem);       /* 0x43CCC0 */
 extern uint32_t __cdecl CRT_rand(void);                              /* 0x466150 */
-extern void  __cdecl DirectPlay_Close(void* peer);                   /* 0x45FC30 */
-extern void* g_dplay_peer;               /* 0x48525C */
+/* DirectPlay_Close (0x45FC30) is now DirectPlaySession::Close() —
+ * see network/DirectPlay.h. g_dplay_peer retyped alongside it 2026-08-10. */
+extern DirectPlaySession* g_dplay_peer;  /* 0x48525C */
 extern PlayerConfig* g_player_config;     /* canonical singleton */
 extern void  NETMAN_QueueMessage(TrainMessage* message);             /* 0x43F140 */
 
@@ -2896,7 +2898,7 @@ void Train_HandleTrackBuild(void* subsystem, int msg)
 
     if (sub->sprite_list_1 == nullptr) {
         if (sub->request_count == 0) {
-            DirectPlay_Close(g_dplay_peer);
+            g_dplay_peer->Close();
         }
 
         /* Drain any remaining pending vehicles into the queue. */

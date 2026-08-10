@@ -12,6 +12,7 @@
 #include "types.h"
 #include "../network/DPlayConfig.h"
 #include "../network/NetworkPlayerList.h"
+#include "../network/DirectPlay.h"
 #include <new>
 #include <cstdlib>
 #include <cassert>
@@ -226,7 +227,7 @@ int  IsRectEmpty(const RECT* r) { return !r || r->left>=r->right || r->top>=r->b
 void* g_player_config = nullptr;
 void* g_config_ini = nullptr;
 void* g_trainstation_window = nullptr;
-void* g_dplay_peer = nullptr;
+DirectPlaySession* g_dplay_peer = nullptr;
 int   g_world_width = 0;
 int   g_world_height = 0;
 void* g_second_overlay = nullptr;

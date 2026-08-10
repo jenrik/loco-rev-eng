@@ -5,7 +5,12 @@
 #ifndef STUBS_DPLAY_H
 #define STUBS_DPLAY_H
 
-#include "windows.h"
+/* Types only (GUID, DWORD, LPSTR, HANDLE, STDMETHODCALLTYPE, ...) — this
+ * header never needed windows.h's ~100 Win32 API function declarations,
+ * only pulled them in as a side effect of including the whole thing. See
+ * windows_types.h's header comment for why that matters to callers of
+ * this header. */
+#include "windows_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,11 +61,20 @@ typedef const DPSESSIONDESC2* LPCDPSESSIONDESC2;
 /* DPNAME                                                             */
 /* ================================================================== */
 
+/*
+ * Real Microsoft layout has an anonymous union of wide/ANSI name pointers,
+ * same as DPSESSIONDESC2 above. loco.exe's DirectPlay_ConnectToSession
+ * (network/DirectPlay.cpp) builds this struct on the stack and assigns
+ * plain ANSI `char*` values (a shared empty string, a player-name buffer)
+ * into these fields via the IDirectPlay4A::CreatePlayer call — so, as with
+ * DPSESSIONDESC2, a plain LPSTR field is used instead of Microsoft's wide
+ * default.
+ */
 typedef struct _DPNAME {
     DWORD  dwSize;
     DWORD  dwFlags;
-    LPWSTR lpszShortName;
-    LPWSTR lpszLongName;
+    LPSTR  lpszShortName;
+    LPSTR  lpszLongName;
 } DPNAME, *LPDPNAME;
 
 /* ================================================================== */
@@ -146,11 +160,17 @@ typedef struct _DPCAPS {
 #define DPENDSESSION_ABORT             0x00000004
 #define DPENDSESSION_KEEPALIVE         0x00000008
 
-/* Service provider GUIDs — minimal set */
-/* {EBFE7BA0-628D-11D2-AE0F-006097B01411} — TCP/IP */
-/* {685BC400-9D2C-11CF-A9CD-00AA006886E3} — IPX */
-/* {44EAA760-CB68-11CF-9C4E-00A0C905425E} — Modem */
-/* {0F1D6860-88D9-11CF-9C4E-00A0C905425E} — Serial */
+/* Service provider GUIDs — minimal set.
+ * IPX/Modem/Serial below are byte-verified against loco.exe's own .rdata
+ * (network/DirectPlay.cpp's DPSPGUID_* constants, read directly from the
+ * binary at 0x478fa8-0x478fe7). The previous TCP/IP entry here
+ * ({EBFE7BA0-628D-11D2-AE0F-006097B01411}) was the later DirectPlay 8
+ * DP8SP_TCPIP GUID, not the classic DirectPlay 3-6 DPSPGUID_TCPIP loco.exe
+ * actually uses — corrected below. */
+/* {36E95EE0-8577-11CF-960C-0080C7534E82} — TCP/IP (DPSPGUID_TCPIP) */
+/* {685BC400-9D2C-11CF-A9CD-00AA006886E3} — IPX (DPSPGUID_IPX) */
+/* {44EAA760-CB68-11CF-9C4E-00A0C905425E} — Modem (DPSPGUID_MODEM) */
+/* {0F1D6860-88D9-11CF-9C4E-00A0C905425E} — Serial (DPSPGUID_SERIAL) */
 
 /* ================================================================== */
 /* Error codes                                                         */
