@@ -17,13 +17,18 @@
  * Host note: `Ordinal_1`/`Ordinal_4` (dynamically loaded DirectPlay/
  * DirectPlayLobby ordinal exports) have no implementation anywhere in this
  * tree — there is no DirectPlay service-provider DLL on a non-Windows host.
- * Every call site that touches them is guarded `#ifdef _WIN32`; the host
- * side is the same no-op behavior previously implemented as free-function
- * overloads in network/sdl3_directplay_train_bridge.cpp (now folded into
- * the methods themselves, since callers now call real DirectPlaySession
- * methods instead of overload-resolving to a separate host-only free
- * function — see network/DirectPlay.h and PROGRESS.md's directplay-cluster
- * entry).
+ * Every call site that touches them is guarded `#ifdef _WIN32`. Most of the
+ * host side is the same no-op behavior previously implemented as
+ * free-function overloads in network/sdl3_directplay_train_bridge.cpp (now
+ * folded into the methods themselves, since callers now call real
+ * DirectPlaySession methods instead of overload-resolving to a separate
+ * host-only free function — see network/DirectPlay.h and
+ * PROGRESS.md's directplay-cluster entry). One exception:
+ * EnumConnections's TCP/IP provider (see its `try_provider` lambda) reports
+ * present on host, since the host build always ships an SDL_net-backed TCP
+ * transport (network/sdl3_net_transport.cpp) as its native equivalent of
+ * that provider — matching real DirectPlay, where the TCP/IP provider
+ * registers whenever Winsock is present, without probing connectivity.
  */
 
 #include "DirectPlay.h"
@@ -652,14 +657,33 @@ DirectPlayConnectionNode* DirectPlaySession::EnumConnections()
         connection_list = entry;
         return true;
 #else
-        /* Host: no DirectPlay service-provider DLL to create an object
-         * from. Matches network/sdl3_directplay_train_bridge.cpp's prior
-         * DirectPlay_EnumConnections no-op (returned nullptr unconditionally
-         * — reproduced here since neither provider ever succeeds, leaving
-         * connection_list untouched). */
-        (void)provider;
-        (void)type;
-        return false;
+        /* Host: no DirectPlay COM service-provider DLL exists to instantiate
+         * via Ordinal_1 — but what Ordinal_1+QueryInterface establish here is
+         * "is this transport's provider installed", not "is there an active
+         * network link". Real DirectPlay's TCP/IP provider registers
+         * unconditionally once Winsock is present; it never probes actual
+         * connectivity (same as the COM-port loop below, which checks device
+         * *presence*, not a live modem/null-modem connection). The host
+         * build always ships an SDL_net-backed TCP transport compiled in
+         * (network/sdl3_net_transport.cpp) as the host-native equivalent of
+         * the TCP/IP provider, so it is unconditionally present the same way
+         * the original Windows TCP/IP provider was; IPX and Serial have no
+         * host-native equivalent and stay genuinely unavailable. Previously
+         * this returned false unconditionally for every provider (matching
+         * network/sdl3_directplay_train_bridge.cpp's old no-op), which left
+         * `session_flags`/g_netSettings+0x10 permanently null on host and
+         * made the multiplayer button correctly, but unhelpfully, always
+         * inert — see docs/landmine-sweep-worklist.md's DirectPlay_* cluster
+         * entry (2026-08-10) for the investigation. */
+        if (type != 2) {
+            (void)provider;
+            return false;
+        }
+        auto* entry = static_cast<DirectPlayConnectionNode*>(operator_new(sizeof(DirectPlayConnectionNode)));
+        entry->next = connection_list;
+        entry->type = type;
+        connection_list = entry;
+        return true;
 #endif
     };
 
