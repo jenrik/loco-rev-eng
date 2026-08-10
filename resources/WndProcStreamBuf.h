@@ -31,6 +31,11 @@
  *     after confirming it is vtable+0x28 on WIN32_StreamFile's own vtable at
  *     0x4791AC, read directly via read_bytes: dword at +0x28 == 0x004656F0.)
  *   WNDPROC_StreamBuf_SetBuffer           0x465730  -> SetBufferPtrs()
+ *   StreamBuf_ReadChar                    0x4652A0  -> ReadChar()  (peek,
+ *     found + validated while reverse engineering WNDPROC_Stream — see
+ *     WndProcStream.h)
+ *   StreamBuf_GetChar                     0x4651A0  -> GetChar()  (get +
+ *     advance; same discovery as ReadChar())
  *
  * Field layout (verified against WNDPROC_StreamBuf_Ctor's disassembly,
  * which zero-initializes +0x04..+0x2C and sets +0x0C/+0x30 = -1, plus
@@ -44,12 +49,17 @@
  *                                by this object (via operator_new) and must
  *                                be freed on replacement/destruction
  *   +0x08 unbuffered_           nonzero => bypass buffering entirely
- *   +0x0C reserved0C_           initialized/reset to -1; no other read
- *                                observed in Ctor/DtorBody/CheckFlush/
- *                                SetBuffer or WIN32_StreamFile's WriteChar/
- *                                Flush/SetBuffer/CloseHandle — likely an
- *                                ungetc/pushback slot exercised only by
- *                                get-side methods not yet reverse engineered
+ *   +0x0C peekCache_            get-side one-character cache, initialized
+ *                                to -1 ("empty"). Read/written only by the
+ *                                newly reconstructed ReadChar()/GetChar()
+ *                                below (0x4652A0/0x4651A0, found while
+ *                                reverse engineering WNDPROC_Stream — see
+ *                                WndProcStream.h) — not read anywhere in
+ *                                Ctor/DtorBody/CheckFlush/SetBuffer or
+ *                                WIN32_StreamFile's WriteChar/Flush/
+ *                                SetBuffer/CloseHandle, confirming it is
+ *                                exclusively an unbuffered_-mode peek slot,
+ *                                not a general pushback/ungetc buffer.
  *   +0x10 bufferStart_          allocated/caller buffer base
  *   +0x14 bufferEnd_            one past the end of the buffer
  *   +0x18 writeBase_            start of the pending (unflushed) write run
@@ -111,10 +121,51 @@ public:
      * with its real WriteChar (0x463CB0). */
     virtual int32_t WriteChar(int32_t ch) = 0;
 
+    /* vtable +0x20 ("underflow"-equivalent get-side refill/peek hook,
+     * called by ReadChar()/GetChar() below). No base implementation
+     * address has been located — WIN32_StreamFile.h documents its
+     * WriteChar/Flush/SetBuffer overrides but not this slot, so its real
+     * override address is still unconfirmed. TODO: locate and decompile
+     * WIN32_StreamFile's vtable+0x20 override. */
+    virtual int32_t Underflow() = 0;
+
     /* vtable +0x28 ("doallocate"). Base class supplies a real, concrete
      * implementation (0x4656F0); WIN32_StreamFile does not override this
      * slot (confirmed by direct vtable read — see file header). */
     virtual int32_t AllocateDefaultBuffer();
+
+    /* StreamBuf_ReadChar, 0x4652A0. Peeks the next character without
+     * consuming it: unbuffered mode caches the result in peekCache_ (so
+     * repeated peeks don't re-invoke Underflow()); buffered mode just
+     * calls Underflow() every time (which itself refills/peeks via
+     * readPtr_/readHigh_ without advancing). Returns -1 on EOF/error. */
+    int32_t ReadChar();
+
+    /* StreamBuf_GetChar, 0x4651A0. Reads and consumes the next character,
+     * advancing the read cursor. Unbuffered mode always forces a fresh
+     * Underflow() call (unlike ReadChar(), which reuses a cached peek).
+     * Buffered mode refills via Underflow() when the get-region is
+     * exhausted, advances readPtr_, and returns *readPtr_ (or calls
+     * Underflow() once more if still exhausted). Returns -1 on EOF/error. */
+    uint32_t GetChar();
+
+    /* Bytes already buffered and available to read without a fresh
+     * Underflow() call. Matches the space check WNDPROC_Stream::
+     * InputPrefix performs inline before deciding whether to flush a
+     * tied stream (readHigh_ - readPtr_, floored at 0). */
+    int32_t AvailableToRead() const {
+        return (readPtr_ < readHigh_) ? static_cast<int32_t>(readHigh_ - readPtr_) : 0;
+    }
+
+    /* Enter/leave this buffer's own CRITICAL_SECTION if syncActive_ is
+     * negative. Matches the StreamObject_Lock/Unlock pattern (StreamObject.h)
+     * applied to this class's own syncActive_/cs_ pair; inlined at every
+     * call site in the original (InputPrefix, SkipWhitespace, Flush — see
+     * WndProcStream.h) rather than calling out to a shared helper there,
+     * but consolidated here since WNDPROC_Stream can't reach the
+     * protected syncActive_/cs_ fields directly. */
+    void Lock();
+    void Unlock();
 
 protected:
     /* WNDPROC_StreamBuf_CheckFlush, 0x4656D0. Despite the address's original
@@ -133,7 +184,7 @@ protected:
 
     int32_t ownsBuffer_;
     int32_t unbuffered_;
-    int32_t reserved0C_;
+    int32_t peekCache_;
     uint8_t* bufferStart_;
     uint8_t* bufferEnd_;
     uint8_t* writeBase_;

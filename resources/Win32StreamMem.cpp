@@ -38,7 +38,7 @@
 /*     ctor alone — confirmed by WndProcStreamBuf.h's independent        */
 /*     naming, which this matches exactly).                              */
 /*   - Then branches on bufferCapacity:                                  */
-/*       == 0: readHigh_ = end; reserved0C_ = -1; writeBase_ = writePtr_ */
+/*       == 0: readHigh_ = end; peekCache_ = -1; writeBase_ = writePtr_ */
 /*             = nullptr; writeHigh_ = nullptr.  (read-only view: no     */
 /*             write region.)                                            */
 /*       != 0: readHigh_ = (uint8_t*)(intptr_t)bufferCapacity (the raw   */
@@ -46,7 +46,7 @@
 /*             original's "undefined4" field exactly; not a real         */
 /*             pointer until something else interprets it, mirroring    */
 /*             the lazy-buffer-allocation design documented in           */
-/*             WndProcStreamBuf.h); reserved0C_ = -1 (redundant with the */
+/*             WndProcStreamBuf.h); peekCache_ = -1 (redundant with the */
 /*             base ctor — the original re-sets it too, preserved for    */
 /*             fidelity); writeBase_ = writePtr_ = the same raw-int-as-  */
 /*             pointer value; writeHigh_ = end.                          */
@@ -71,7 +71,7 @@ WIN32_StreamMem::WIN32_StreamMem(char* data, int32_t dataLen, int32_t bufferCapa
 
     if (bufferCapacity == 0) {
         readHigh_   = reinterpret_cast<uint8_t*>(end);
-        reserved0C_ = -1;
+        peekCache_ = -1;
         writeBase_  = nullptr;
         writePtr_   = nullptr;
         writeHigh_  = nullptr;
@@ -79,7 +79,7 @@ WIN32_StreamMem::WIN32_StreamMem(char* data, int32_t dataLen, int32_t bufferCapa
         uint8_t* const capacityAsPointer =
             reinterpret_cast<uint8_t*>(static_cast<intptr_t>(bufferCapacity));
         readHigh_   = capacityAsPointer;
-        reserved0C_ = -1;
+        peekCache_ = -1;
         writeBase_  = capacityAsPointer;
         writePtr_   = capacityAsPointer;
         writeHigh_  = reinterpret_cast<uint8_t*>(end);

@@ -66,8 +66,13 @@ extern "C" {
     void* CRT_fabs(void* a, void* b);                            /* TODO: identity unresolved — likely misdecompiled */
 }
 
-/* WNDPROC_CriticalSectionLock has C++ mangled linkage (real def at 0x4647A0:
- * _Z27WNDPROC_CriticalSectionLockPiPc, i.e. (int*, char*)).
+/* WNDPROC_CriticalSectionLock has C++ mangled linkage (real def at 0x4649F0
+ * -- NOT 0x4647A0, an earlier session's transcription error; that address
+ * is actually inside the unrelated WNDPROC_StreamPrintf. Corrected
+ * 2026-08-10, see PROGRESS.md "WNDPROC_Stream facade recovery":
+ * _Z27WNDPROC_CriticalSectionLockPiPc, i.e. (int*, char*); real
+ * definition now in resources/WndProcStream.cpp, forwarding to
+ * WNDPROC_Stream::ExtractToken).
  * Declared outside extern "C" to match the real definition. */
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 

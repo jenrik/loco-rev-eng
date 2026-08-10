@@ -10,6 +10,11 @@
  *   WNDPROC_StreamBuf_CheckFlush           0x4656D0
  *   WNDPROC_StreamBuf_AllocateDefaultBuffer 0x4656F0
  *   WNDPROC_StreamBuf_SetBuffer            0x465730
+ *   StreamBuf_ReadChar                     0x4652A0
+ *   StreamBuf_GetChar                      0x4651A0
+ * Lock()/Unlock() have no dedicated original address — they consolidate
+ * logic inlined at every call site inside WNDPROC_Stream's methods (see
+ * WndProcStream.cpp).
  */
 
 // Status: VALIDATED
@@ -33,6 +38,13 @@ extern "C" {
  * defsym_stubs.cpp). Declared __stdcall(void*) to match that precedent. */
 void __stdcall WNDPROC_InitializeCriticalSection(void* cs);  /* 0x464D70 */
 void __stdcall WNDPROC_DeleteCriticalSection(void* cs);      /* 0x464D80 */
+
+/* Same family, used by Lock()/Unlock() below (0x464D90/0x464DA0 — already
+ * declared/stubbed in resources/StreamObject.cpp; redeclaring the
+ * identical extern "C" signature here is fine ODR-wise, both are
+ * declarations only). */
+void __stdcall WNDPROC_EnterCriticalSection(void* cs);
+void __stdcall WNDPROC_LeaveCriticalSection(void* cs);
 }
 
 /* ================================================================== */
@@ -41,7 +53,7 @@ void __stdcall WNDPROC_DeleteCriticalSection(void* cs);      /* 0x464D80 */
 WNDPROC_StreamBuf::WNDPROC_StreamBuf()
     : ownsBuffer_(0),
       unbuffered_(0),
-      reserved0C_(-1),
+      peekCache_(-1),
       bufferStart_(nullptr),
       bufferEnd_(nullptr),
       writeBase_(nullptr),
@@ -126,4 +138,62 @@ void WNDPROC_StreamBuf::SetBufferPtrs(uint8_t* bufferStart, uint8_t* bufferEnd, 
     bufferStart_ = bufferStart;
     ownsBuffer_ = owns;
     bufferEnd_ = bufferEnd;
+}
+
+/* ================================================================== */
+/* StreamBuf_ReadChar — 0x4652A0                                        */
+/* ================================================================== */
+int32_t WNDPROC_StreamBuf::ReadChar()
+{
+    if (unbuffered_ != 0) {
+        if (peekCache_ == -1) {
+            peekCache_ = Underflow();
+        }
+        return peekCache_;
+    }
+    return Underflow();
+}
+
+/* ================================================================== */
+/* StreamBuf_GetChar — 0x4651A0                                         */
+/* ================================================================== */
+uint32_t WNDPROC_StreamBuf::GetChar()
+{
+    if (unbuffered_ != 0) {
+        if (peekCache_ == -1) {
+            Underflow();          /* prime; result intentionally discarded */
+        }
+        uint32_t c = static_cast<uint32_t>(Underflow());
+        peekCache_ = static_cast<int32_t>(c);
+        return c;
+    }
+
+    if (readHigh_ == nullptr || readPtr_ >= readHigh_) {
+        Underflow();               /* refill; result intentionally discarded */
+    }
+    readPtr_ = readPtr_ + 1;
+    if (readPtr_ < readHigh_) {
+        return *readPtr_;
+    }
+    return static_cast<uint32_t>(Underflow());
+}
+
+/* ================================================================== */
+/* Lock/Unlock — inlined at every call site in the original            */
+/* (InputPrefix/SkipWhitespace/Flush, see WndProcStream.cpp); given a  */
+/* single home here since WNDPROC_Stream can't reach the protected     */
+/* syncActive_/cs_ fields directly.                                    */
+/* ================================================================== */
+void WNDPROC_StreamBuf::Lock()
+{
+    if (syncActive_ < 0) {
+        WNDPROC_EnterCriticalSection(&cs_);
+    }
+}
+
+void WNDPROC_StreamBuf::Unlock()
+{
+    if (syncActive_ < 0) {
+        WNDPROC_LeaveCriticalSection(&cs_);
+    }
 }

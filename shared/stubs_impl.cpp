@@ -268,8 +268,10 @@ void Cursor_Render(void*, int, int, char);
 void Cursor_Render(void*, int, int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void CGWND_TrackPiece_SetZoom(void*, int);
 void CGWND_TrackPiece_SetZoom(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void WNDPROC_CriticalSectionLock(int*, char*);
-void WNDPROC_CriticalSectionLock(int*, char*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/* WNDPROC_CriticalSectionLock(int*, char*) is no longer stubbed here —
+ * real definition (adapter over WNDPROC_Stream::ExtractToken) lives in
+ * resources/WndProcStream.cpp. See PROGRESS.md "WNDPROC_Stream facade
+ * recovery" (2026-08-10). */
 
 /* Stream I/O stubs — called from BuildingDescriptorEditor and wave_io; may be unreachable on host in normal paths */
 void* WNDPROC_StreamPrintf(void*, void*);

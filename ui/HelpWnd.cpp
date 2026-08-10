@@ -76,7 +76,6 @@ extern "C" {
     extern void   WIN32_StreamOpenPath(void* stream, const char* path, int mode, int unknown);
     extern void   WIN32_StreamDestroy(void* stream);
     extern void   WIN32_StreamDestroyImmediate(void* stream);
-    extern void   WNDPROC_CriticalSectionLock(int* stream, char* buf);
     extern void   WNDPROC_StreamCleanup(void* stream);
     extern void*  WNDPROC_StreamFromMemory(void* self, char* data, int size, int mode);
     extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
@@ -94,6 +93,19 @@ extern "C" {
     extern int Config_ReadInt(void* config, const char* section,
                                const char* key, const char* value);
 }
+
+/* WNDPROC_CriticalSectionLock has C++ mangled linkage (matches every other
+ * file in this tree that calls it — see input/BuildingDescriptorEditor.cpp,
+ * game/TrainStation.cpp, ui/UI_ChildWindow.cpp; real def in
+ * resources/WndProcStream.cpp, forwarding to WNDPROC_Stream::ExtractToken,
+ * 0x4649F0). Previously declared inside the extern "C" block above by
+ * mistake — that gave it C (unmangled) linkage, which had no matching
+ * definition anywhere in the tree and silently null-called on every one
+ * of this file's 13 call sites (verified via `nm`: `U WNDPROC_CriticalSectionLock`
+ * with no defined counterpart, before this fix). Moved out to restore the
+ * intended C++ linkage; see PROGRESS.md "WNDPROC_Stream facade recovery"
+ * (2026-08-10). */
+extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 
     /* Game functions (C++ linkage or typed APIs) */
     extern void   Sprite_Init(void* sprite);                /* 0x454BF0 */

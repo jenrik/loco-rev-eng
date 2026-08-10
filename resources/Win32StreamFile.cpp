@@ -253,7 +253,7 @@ int32_t WIN32_StreamFile::Flush()
     readBase_ = nullptr;
     readPtr_ = nullptr;
     readHigh_ = nullptr;
-    reserved0C_ = -1;
+    peekCache_ = -1;
     return 0;
 }
 

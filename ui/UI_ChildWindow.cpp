@@ -54,7 +54,9 @@ extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
 
 /* WNDPROC_CriticalSectionLock has C++ mangled linkage (matches every other
  * file in this tree that calls it — see input/BuildingDescriptorEditor.cpp,
- * game/TrainStation.cpp; real def at 0x4647A0,
+ * game/TrainStation.cpp; real def at 0x4649F0 -- NOT 0x4647A0, an earlier
+ * session's transcription error, corrected 2026-08-10, see PROGRESS.md
+ * "WNDPROC_Stream facade recovery" --
  * _Z27WNDPROC_CriticalSectionLockPiPc). Used only by Render() below. */
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 
