@@ -315,12 +315,24 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 /* ================================================================== */
 void CursorEditWindow::cleanup()
 {
-    /* Binary: LEA ESI, [ECX + 0x0C]; CALL WIN32_StreamDestroy(ESI)
-       Equivalent: pass address of streamData field (inherited at +0x0C)
-       to the stream cleanup functions. */
-    void* streamFieldAddr = reinterpret_cast<void*>(&this->streamData);
-    WIN32_StreamDestroy(streamFieldAddr);
-    WNDPROC_StreamCleanup(streamFieldAddr);
+    /* Passes the address of the inherited field at +0x0C to the stream
+     * cleanup functions, as if a stream object lives there — same address
+     * as ChildWindow's `shadowId` (int32_t, +0x0C). This is a genuine,
+     * currently-unresolved tension: ChildWindow::Render's "ShadowId"
+     * directive independently writes a plain int32 there via
+     * WNDPROC_StreamWrite(stream, this+0xC) (confirmed this session,
+     * disassembly-verified, matching the field name directly), while THIS
+     * function (0x40E8B0, independently re-decompiled this session too)
+     * treats the same address as an embedded stream object. Not resolved
+     * here — the physical address passed is identical either way (this
+     * cast changes nothing about runtime behavior, only which C++ name
+     * refers to the same 4 bytes); flagged for whoever investigates next
+     * whether the field is genuinely reused for two purposes at different
+     * points in the object's lifetime, or one of these two call sites is
+     * simply wrong. */
+    void* const shadowIdFieldAddr = reinterpret_cast<void*>(&this->shadowId);
+    WIN32_StreamDestroy(shadowIdFieldAddr);
+    WNDPROC_StreamCleanup(shadowIdFieldAddr);
 }
 
 /* ================================================================== */

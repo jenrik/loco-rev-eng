@@ -23,7 +23,7 @@
  *              Real cleanup body @ 0x424BA0 — use only this in ~ChildWindow()
  *   [1] +0x04: OnMouseMove(int32_t x, int32_t y) → void* (0x425670)
  *   [2] +0x08: OnMouseLeave() (0x4257F0)
- *   [3] +0x0C: Render(void* stream) → uint8_t (0x424E00) — TODO: decompile
+ *   [3] +0x0C: Render(void* stream) → uint8_t (0x424E00)
  *   [4] +0x10: Constructor init body (0x424BF0) — NOT a virtual method, reachable
  *              during base construction via vtable dispatch to slot[3]; compiler
  *              manages vtable progression in real C++.
@@ -80,41 +80,95 @@ public:
 
     uint32_t   resourceId;         // +0x04  resource ID for this child window
     uint8_t    resourceType;       // +0x08  type byte from GetResourceType(resourceId)
-    uint8_t    _pad_09[3];         // +0x09  padding to align streamData
-    void*      streamData;         // +0x0C  stream buffer pointer (zeroed)
+    uint8_t    _pad_09[3];         // +0x09  padding to align shadowId
+    int32_t    shadowId;           // +0x0C  "ShadowId" .dat directive (zeroed; was misnamed
+                                     //        `streamData` — a Render() cross-check this session
+                                     //        showed it's a WNDPROC_StreamWrite(stream, &this+0xC)
+                                     //        target for the "ShadowId" keyword, a plain int32, not
+                                     //        a stream/void* pointer)
     void*      renderSurface;      // +0x10  render surface / child object (released in dtor)
     int16_t    field_14;           // +0x14  zeroed; purpose not evidenced
     int16_t    field_16;           // +0x16  zeroed; purpose not evidenced
     uint8_t    sticky;             // +0x18  sticky flag; OnMouseLeave checks (!= 1) before releasing
     uint8_t    _pad_19;            // +0x19  padding
-    uint16_t   subWindowCount;     // +0x1A  number of sub-windows (zeroed)
-    int16_t    field_1C;           // +0x1C  zeroed; purpose not evidenced
-    int16_t    field_1E;           // +0x1E  zeroed; purpose not evidenced
-    void*      heapBuffer;         // +0x20  GLOBAL_free'd in dtor; also entry-table pointer when
-                                     //        subWindowCount != 0 (dual role confirmed in Paint/OnMouseLeave)
-    void*      subObject;          // +0x24  sub-object pointer (released in dtor via vtable slot 0, flags=1)
-    int16_t    field_28;           // +0x28  zeroed; purpose not evidenced
-    int16_t    field_2A;           // +0x2A  zeroed; purpose not evidenced
-    int16_t    frameCount;         // +0x2C  zeroed; read by IsBitmapReady()
-    int16_t    _reserved_2E[2];    // +0x2E  4 bytes, no writer evidenced
-    int16_t    roadOffsetX;        // +0x32  zeroed; x-offset for road overlay
-    int16_t    roadOffsetY;        // +0x34  zeroed; y-offset for road overlay
+    uint16_t   frameSetCount;      // +0x1A  "number_of_frame_sets" .dat directive (zeroed; was
+                                     //        misnamed `subWindowCount`). Drives the heapBuffer
+                                     //        entry-table allocation size (frameSetCount * 0x18)
+                                     //        in Render().
+    int16_t    cursorFrameSetIndex;   // +0x1C  "cursor_frame_set" directive's frame-set index
+                                        //        (zeroed; was `field_1C`), validated against
+                                        //        frameSetCount in Render().
+    int16_t    defaultFrameSetIndex;  // +0x1E  "cursor_default_frame_set" directive's frame-set
+                                        //        index (zeroed; was `field_1E`), same validation.
+    void*      heapBuffer;         // +0x20  GLOBAL_free'd in dtor; frame-set entry-table pointer
+                                     //        (frameSetCount entries, 0x18 bytes each — populated
+                                     //        by Render()'s cursor_frame_set branch, read by
+                                     //        OnMouseMove/OnMouseLeave via entry+0x0E "stringId")
+    void*      bitmapSurface;      // +0x24  static bitmap surface for this window's own frame
+                                     //        image (was misnamed `subObject`; created in Render()
+                                     //        via operator_new(0x20)+UIPANEL_CreateSurface, the
+                                     //        same construction idiom as OnMouseMove's overlay
+                                     //        `renderSurface` at +0x10 but for a *different*,
+                                     //        statically-loaded surface — released in dtor via its
+                                     //        own vtable slot 0, flags=1, same as renderSurface).
+    int16_t    field_28;           // +0x28  computed in Render()'s tail as
+                                     //        bitmapSurface[0x08](dword)/frameCount — same
+                                     //        "per-frame width" role as OnMouseMove's field_14 for
+                                     //        the overlay surface, but for bitmapSurface.
+    int16_t    field_2A;           // +0x2A  copied from bitmapSurface+0xC in Render()'s tail —
+                                     //        same role as OnMouseMove's field_16 for the overlay
+                                     //        surface, but for bitmapSurface.
+    int16_t    frameCount;         // +0x2C  "button" directive's 3rd value (default 3 — a button's
+                                     //        state count: up/hover/down); read by IsBitmapReady()
+                                     //        and used as bitmapSurface's per-frame-width divisor.
+    int16_t    buttonParam1;       // +0x2E  "button" directive's 1st value (zeroed; was part of
+                                     //        an undocumented `_reserved_2E[2]` gap — exact
+                                     //        semantic beyond "part of a button line" unresolved).
+    int16_t    buttonParam2;       // +0x30  "button" directive's 2nd value (zeroed; same gap).
+    int16_t    hotspotX;           // +0x32  "hotspot" .dat directive, x (zeroed; was misnamed
+                                     //        `roadOffsetX` from TrainStation's own, DIFFERENT
+                                     //        reinterpretation of this same storage as a road-
+                                     //        connection offset — ChildWindow's own Render() is
+                                     //        the base-level authority: this is a cursor/bitmap
+                                     //        hotspot coordinate, read via WNDPROC_StreamReadLine
+                                     //        for the "hotspot" keyword. TrainStation's reuse is a
+                                     //        legitimate derived-class reinterpretation of the same
+                                     //        bytes, not a contradiction — see game/TrainStation.cpp).
+    int16_t    hotspotY;           // +0x34  "hotspot" .dat directive, y (zeroed; was `roadOffsetY`).
     int16_t    _reserved_36;       // +0x36  2 bytes, no writer evidenced
-    int32_t    field_38;           // +0x38  zeroed; purpose not evidenced
-    int32_t    field_3C;           // +0x3C  zeroed; purpose not evidenced
-    int32_t    depResourceId1;     // +0x40  dependent resource ID #1 (default -1)
-    int32_t    depResourceId2;     // +0x44  dependent resource ID #2 (default -1)
+    int32_t    shadowOffsetX;      // +0x38  "ShadowOffset" directive, x (zeroed; was `field_38`)
+    int32_t    shadowOffsetY;      // +0x3C  "ShadowOffset" directive, y (zeroed; was `field_3C`)
+    int32_t    depResourceId1;     // +0x40  "must/cant_have" directive, 1st value (default -1)
+    int32_t    depResourceId2;     // +0x44  "must/cant_have" directive, 2nd value (default -1)
     char       bmpPath[0x105];     // +0x48  261-byte buffer for bitmap path (sprintf target)
-    uint8_t    field_14D;          // +0x14D zeroed before sprintf; purpose not evidenced
-    uint8_t    _reserved_14E[10];  // +0x14E no writer evidenced
+    char       name[10];           // +0x14D "Name" .dat directive (was misnamed `field_14D`, a
+                                     //        single byte — Render()'s "Name" branch does
+                                     //        `strncpy(this+0x14D, line+1, 10)`, proving it's a
+                                     //        10-byte buffer, not one byte). Trailing \r/\n
+                                     //        trimmed by Render(); not null-terminated by strncpy
+                                     //        alone if the source fills all 10 bytes.
+    uint8_t    field_157;          // +0x157 zeroed unconditionally by the "Name" branch right
+                                     //        after the strncpy above (was part of an
+                                     //        undocumented `_reserved_14E[10]` gap); no other
+                                     //        writer or reader evidenced yet.
     int16_t    overlayRefCount;    // +0x158 incremented in OnMouseMove, decremented in OnMouseLeave;
                                      //        renderSurface released when == 0 && !sticky
     uint8_t    _reserved_15A[2];   // +0x15A no writer evidenced
-    int32_t    field_15C;          // +0x15C default -1; purpose not evidenced
-    int16_t    field_160;          // +0x160 default 1; used as divisor in OnMouseMove
+    int32_t    maxInstances;       // +0x15C  "MaxInstances" .dat directive (default -1 = no
+                                     //        limit; was misnamed `field_15C`). Populated via a
+                                     //        call Ghidra decompiles as `CRT_fabs(stream, &this+
+                                     //        0x15C)` — already flagged elsewhere in this codebase
+                                     //        (input/BuildingDescriptorEditor.cpp) as a likely-
+                                     //        misidentified thunk, since CRT_fabs really takes a
+                                     //        double; the exact callee is unresolved, but the
+                                     //        keyword-to-offset mapping itself is direct and solid.
+    int16_t    totalFrameCount;    // +0x160  "total_number_of_frames" .dat directive (default 1;
+                                     //        was misnamed `field_160`); used as OnMouseMove's
+                                     //        per-frame-width divisor for the overlay surface.
     uint8_t    loaded;             // +0x162 zero until resource loads via Render()
     uint8_t    ready;              // +0x163 default 1; "ready" / "easter-egg" flag
-    int32_t    animFlags;          // +0x164 animation metadata flags (zeroed)
+    int32_t    animFlags;          // +0x164 animation metadata flags (zeroed); Render() sets bit
+                                     //        0x400 for "semi-transparent", bit 0x2 for "shadows"
 
     /* Total: 0x168 bytes (including compiler-managed vtable at +0x00) */
 
@@ -144,7 +198,7 @@ public:
      * Address: 0x424B40 (scalar-deleting-destructor thunk, compiler-generated)
      * Body: 0x424BA0 (UI_ChildWindow_Dtor — real cleanup logic)
      *
-     * Clears the loaded flag (+0x162), releases renderSurface and subObject
+     * Clears the loaded flag (+0x162), releases renderSurface and bitmapSurface
      * sub-resources (each via its own vtable slot 0, flags=1), and frees
      * heapBuffer.
      */
@@ -183,17 +237,61 @@ public:
     virtual void OnMouseLeave();
 
     /**
-     * Render — Parse .dat descriptor stream and load bitmap resource.
-     * Address: 0x424E00 (UI_ChildWindow_Render)
+     * Render — Parse a .dat descriptor stream and load this window's
+     * static bitmap resource.
+     * Address: 0x424E00 (UI_ChildWindow_Render), 2032 bytes / ~150 lines.
      * Vtable slot: [3] +0x0C
      *
-     * TODO: decompile 0x424E00. Ghidra's decompilation (2032 bytes, ~150
-     * lines, deeply nested string-keyword dispatch with internal gotos) is
-     * available but depends on three stream helpers (WNDPROC_StreamReadLine,
-     * WNDPROC_StreamPrintf, WNDPROC_StreamWrite) that have no other callers
-     * to evidence their real signatures. Tracked in PROGRESS.md. Not
-     * currently reachable (no current caller uses nameParam != 0 in
-     * constructor).
+     * Decompiled for real this session — the "no other callers to evidence
+     * WNDPROC_StreamReadLine/Printf/Write's signatures" blocker recorded
+     * earlier no longer applied: TrainStation::Render and
+     * BuildingDescriptorEditor::Render (both decompiled in the same earlier
+     * pass that built this class hierarchy) already established real
+     * call-site evidence for all three, which this function's own
+     * decompilation independently confirmed byte-for-byte against
+     * disassembly (the WNDPROC_Stream* calls, the CRT_wcsstr inverted-match
+     * convention, and the "-9" terminator sentinel all match the sibling
+     * Render overrides exactly).
+     *
+     * Reads keyword-prefixed directive lines from the stream in a loop
+     * until a terminator line ("-9") or the stream's own "ended" bit is
+     * hit. Recognized directives: "button" (buttonParam1/buttonParam2/
+     * frameCount, default 3), "Name" (10-byte `name` buffer, trailing
+     * \r/\n trimmed), "hotspot" (hotspotX/hotspotY), "ShadowId"
+     * (shadowId), "ShadowOffset" (shadowOffsetX/shadowOffsetY), and —
+     * only on lines that do NOT match the literal keyword "animation"
+     * (a recognized-but-otherwise-inert section marker, confirmed via the
+     * disassembly's `!= 0` polarity flip at this one branch, unlike every
+     * other keyword check in this function) — "semi-transparent"
+     * (animFlags |= 0x400), "shadows" (animFlags |= 0x2), "must/cant_have"
+     * (depResourceId1/depResourceId2), "MaxInstances" (maxInstances),
+     * "total_number_of_frames" (totalFrameCount, default 1),
+     * "number_of_frame_sets" (frameSetCount, allocates the heapBuffer
+     * entry table sized frameSetCount*0x18 — an early, clean return on
+     * allocation failure, matching the original exactly), and finally
+     * "cursor_frame_set"/"cursor_default_frame_set", which populate
+     * cursorFrameSetIndex/defaultFrameSetIndex and then fill every
+     * heapBuffer entry from the stream (a section-terminator line that
+     * matches NEITHER of those two keywords breaks the outer loop
+     * entirely, per the disassembly's double-negative check).
+     *
+     * After the loop, skips forward past any leading '/'-prefixed comment
+     * lines, then — if bmpPath is non-trivial (length > 2) — composes a
+     * scratch copy of bmpPath with its last 2 characters replaced by the
+     * literal suffix "ut" (traced precisely via raw disassembly at
+     * 0x4254C5-0x425542, since the decompiler's own stack-variable
+     * splitting was internally inconsistent here; the net byte-level
+     * effect — confirmed algebraically independent of exactly which
+     * stack-relative offset the compiler's inlined strcat-style routine
+     * started scanning from — is unambiguous), allocates bitmapSurface via
+     * UIPANEL_CreateSurface, stretch-blits that composed path into it via
+     * UIPANEL_StretchBlit, releases it immediately if empty (matching
+     * OnMouseMove's identical "surface[6]==0 && surface[7]==0" dead-
+     * surface check), and — if frameCount is non-zero — computes field_28/
+     * field_2A from bitmapSurface's header (the same "surface[8]/count"
+     * and "surface+0xC" pattern OnMouseMove already uses for the overlay
+     * surface, just against bitmapSurface/frameCount instead of
+     * renderSurface/totalFrameCount).
      *
      * @param stream  Open .dat stream pointer
      * @return        Non-zero if load succeeds (set to loaded flag +0x162)
@@ -209,7 +307,7 @@ public:
      * Address: 0x4255F0 (UI_IsBitmapReady)
      * NOT a virtual method (plain member, non-virtual).
      *
-     * Checks: ready flag (+0x163), subObject pointer (+0x24), frameCount
+     * Checks: ready flag (+0x163), bitmapSurface pointer (+0x24), frameCount
      * (+0x2C), and two dependent resource IDs (+0x40/+0x44) via
      * ResourceManager_GetById, with a scenario-mode special case for
      * resource 0xC42.
@@ -287,42 +385,52 @@ static_assert(offsetof(ChildWindow, resourceId) == 0x04,
     "ChildWindow::resourceId offset mismatch");
 static_assert(offsetof(ChildWindow, resourceType) == 0x08,
     "ChildWindow::resourceType offset mismatch");
-static_assert(offsetof(ChildWindow, streamData) == 0x0C,
-    "ChildWindow::streamData offset mismatch");
+static_assert(offsetof(ChildWindow, shadowId) == 0x0C,
+    "ChildWindow::shadowId offset mismatch");
 static_assert(offsetof(ChildWindow, renderSurface) == 0x10,
     "ChildWindow::renderSurface offset mismatch");
 static_assert(offsetof(ChildWindow, sticky) == 0x18,
     "ChildWindow::sticky offset mismatch");
-static_assert(offsetof(ChildWindow, subWindowCount) == 0x1A,
-    "ChildWindow::subWindowCount offset mismatch");
+static_assert(offsetof(ChildWindow, frameSetCount) == 0x1A,
+    "ChildWindow::frameSetCount offset mismatch");
+static_assert(offsetof(ChildWindow, cursorFrameSetIndex) == 0x1C,
+    "ChildWindow::cursorFrameSetIndex offset mismatch");
+static_assert(offsetof(ChildWindow, defaultFrameSetIndex) == 0x1E,
+    "ChildWindow::defaultFrameSetIndex offset mismatch");
 static_assert(offsetof(ChildWindow, heapBuffer) == 0x20,
     "ChildWindow::heapBuffer offset mismatch");
-static_assert(offsetof(ChildWindow, subObject) == 0x24,
-    "ChildWindow::subObject offset mismatch");
+static_assert(offsetof(ChildWindow, bitmapSurface) == 0x24,
+    "ChildWindow::bitmapSurface offset mismatch");
 static_assert(offsetof(ChildWindow, frameCount) == 0x2C,
     "ChildWindow::frameCount offset mismatch");
-static_assert(offsetof(ChildWindow, roadOffsetX) == 0x32,
-    "ChildWindow::roadOffsetX offset mismatch");
-static_assert(offsetof(ChildWindow, roadOffsetY) == 0x34,
-    "ChildWindow::roadOffsetY offset mismatch");
-static_assert(offsetof(ChildWindow, field_38) == 0x38,
-    "ChildWindow::field_38 offset mismatch");
-static_assert(offsetof(ChildWindow, field_3C) == 0x3C,
-    "ChildWindow::field_3C offset mismatch");
+static_assert(offsetof(ChildWindow, buttonParam1) == 0x2E,
+    "ChildWindow::buttonParam1 offset mismatch");
+static_assert(offsetof(ChildWindow, buttonParam2) == 0x30,
+    "ChildWindow::buttonParam2 offset mismatch");
+static_assert(offsetof(ChildWindow, hotspotX) == 0x32,
+    "ChildWindow::hotspotX offset mismatch");
+static_assert(offsetof(ChildWindow, hotspotY) == 0x34,
+    "ChildWindow::hotspotY offset mismatch");
+static_assert(offsetof(ChildWindow, shadowOffsetX) == 0x38,
+    "ChildWindow::shadowOffsetX offset mismatch");
+static_assert(offsetof(ChildWindow, shadowOffsetY) == 0x3C,
+    "ChildWindow::shadowOffsetY offset mismatch");
 static_assert(offsetof(ChildWindow, depResourceId1) == 0x40,
     "ChildWindow::depResourceId1 offset mismatch");
 static_assert(offsetof(ChildWindow, depResourceId2) == 0x44,
     "ChildWindow::depResourceId2 offset mismatch");
 static_assert(offsetof(ChildWindow, bmpPath) == 0x48,
     "ChildWindow::bmpPath offset mismatch");
-static_assert(offsetof(ChildWindow, field_14D) == 0x14D,
-    "ChildWindow::field_14D offset mismatch");
+static_assert(offsetof(ChildWindow, name) == 0x14D,
+    "ChildWindow::name offset mismatch");
+static_assert(offsetof(ChildWindow, field_157) == 0x157,
+    "ChildWindow::field_157 offset mismatch");
 static_assert(offsetof(ChildWindow, overlayRefCount) == 0x158,
     "ChildWindow::overlayRefCount offset mismatch");
-static_assert(offsetof(ChildWindow, field_15C) == 0x15C,
-    "ChildWindow::field_15C offset mismatch");
-static_assert(offsetof(ChildWindow, field_160) == 0x160,
-    "ChildWindow::field_160 offset mismatch");
+static_assert(offsetof(ChildWindow, maxInstances) == 0x15C,
+    "ChildWindow::maxInstances offset mismatch");
+static_assert(offsetof(ChildWindow, totalFrameCount) == 0x160,
+    "ChildWindow::totalFrameCount offset mismatch");
 static_assert(offsetof(ChildWindow, loaded) == 0x162,
     "ChildWindow::loaded offset mismatch");
 static_assert(offsetof(ChildWindow, ready) == 0x163,

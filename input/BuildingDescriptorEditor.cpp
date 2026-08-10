@@ -241,11 +241,16 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
     }
 
     /* If neither default edit-origin field was set by the .dat, derive a
-     * default from the parsed occupancy dimensions (disassembly-evidenced,
-     * see the field comment on roadOffsetX/roadOffsetY in ChildWindow.h). */
-    if (this->roadOffsetX == 0 && this->roadOffsetY == 0) {
-        this->roadOffsetX = static_cast<int16_t>((this->bitmap_occupancy_width >> 1) << 4);
-        this->roadOffsetY = static_cast<int16_t>(this->bitmap_occupancy_height * 0x10 - 0x10);
+     * default from the parsed occupancy dimensions (disassembly-evidenced).
+     * This class's own reinterpretation of ChildWindow's base-level
+     * hotspotX/hotspotY fields (its own Render() sets them from the
+     * generic .dat "hotspot" directive) as an editor origin offset — a
+     * legitimate derived-class reuse of the same storage, not a naming
+     * contradiction; see the field comment on hotspotX/hotspotY in
+     * ui/UI_ChildWindow.h. */
+    if (this->hotspotX == 0 && this->hotspotY == 0) {
+        this->hotspotX = static_cast<int16_t>((this->bitmap_occupancy_width >> 1) << 4);
+        this->hotspotY = static_cast<int16_t>(this->bitmap_occupancy_height * 0x10 - 0x10);
     }
 }
 

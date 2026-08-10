@@ -434,8 +434,8 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     }
 
     /* Step 4c: Reset road connection offsets for sub-window entries */
-    /* Loop: for i = 0; (uint16_t)subWindowCount > 0 && i < 4; ++i */
-    if (this->subWindowCount != 0) {                    /* +0x1A, unsigned compare */
+    /* Loop: for i = 0; (uint16_t)frameSetCount > 0 && i < 4; ++i */
+    if (this->frameSetCount != 0) {                    /* +0x1A, unsigned compare */
         for (i = 0; i < 4; ++i) {
             if (this->heapBuffer == nullptr) {          /* +0x20 */
                 break;
@@ -451,8 +451,8 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     }
 
     /* Step 4d: Adjust animation frame indices */
-    /* Loop: for i = 0; (uint16_t)subWindowCount > 0 && i < 8; ++i */
-    if (this->subWindowCount != 0) {                    /* +0x1A, unsigned compare */
+    /* Loop: for i = 0; (uint16_t)frameSetCount > 0 && i < 8; ++i */
+    if (this->frameSetCount != 0) {                    /* +0x1A, unsigned compare */
         for (i = 0; i < 8; ++i) {
             if (this->heapBuffer == nullptr) {          /* +0x20, re-read each iteration */
                 break;
@@ -468,10 +468,15 @@ void TrainStation::Init(int32_t param1, int32_t param2)
         }
     }
 
-    /* Step 4e: Set default road offset if none configured */
-    if (this->roadOffsetX == 0 && this->roadOffsetY == 0) {   /* +0x32, +0x34 */
-        this->roadOffsetX = 0;   /* no horizontal offset */
-        this->roadOffsetY = 8;   /* default vertical offset (8 pixels) */
+    /* Step 4e: Set default road offset if none configured. TrainStation's
+     * own reinterpretation of ChildWindow's base-level hotspotX/hotspotY
+     * fields (its own Render() sets them from the generic .dat "hotspot"
+     * directive) as a road-connection offset — a legitimate derived-class
+     * reuse of the same storage, not a naming contradiction; see the
+     * field comment on hotspotX/hotspotY in ui/UI_ChildWindow.h. */
+    if (this->hotspotX == 0 && this->hotspotY == 0) {   /* +0x32, +0x34 */
+        this->hotspotX = 0;   /* no horizontal offset */
+        this->hotspotY = 8;   /* default vertical offset (8 pixels) */
     }
 
     /* Step 5: Clean up stream */

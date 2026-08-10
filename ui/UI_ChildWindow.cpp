@@ -9,6 +9,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 
 // Status: INTEGRATED
 
@@ -23,10 +24,39 @@ void*  __thiscall ResourceManager_GetById(void* mgr, int32_t resId); /* 0x446EA0
 void*  __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id); /* 0x4472B0 */
 int    __thiscall RESMGR_LoadSoundResource(void* resHandle);  /* 0x448D60 */
 void   __thiscall RESMGR_ReleaseSoundResource(void* resHandle); /* 0x448EE0 */
+
+/* Used only by Render() below. Matches the same real symbols already
+ * declared (and, for the stream-family ones, called unconditionally on
+ * both platforms) in input/BuildingDescriptorEditor.cpp and
+ * game/TrainStation.cpp. NOTE: WNDPROC_StreamReadLine is declared `void`-
+ * returning in BuildingDescriptorEditor.cpp (whose call sites never use
+ * the return value) — this function's "button" directive genuinely
+ * chains the return through a second call
+ * (`WNDPROC_StreamPrintf(WNDPROC_StreamReadLine(WNDPROC_StreamReadLine(...)))`),
+ * so it's declared `void*`-returning here instead; the real x86 ABI
+ * returns the value in EAX regardless of either declaration, so this is
+ * safe — each caller just chooses whether to read it. */
+void*  WNDPROC_StreamReadLine(void* stream, void* outBuf);
+void*  WNDPROC_StreamPrintf(void* stream, void* outBuf);
+void*  WNDPROC_StreamWrite(void* stream, void* outBuf);
+void*  CRT_wcsstr(const void* haystack, const void* needle);
+void   WNDPROC_EnterCriticalSection(void* cs);
+void   WNDPROC_LeaveCriticalSection(void* cs);
+void   WNDPROC_StreamSeekForward(void* stream, void* buf, int32_t size, int ch);
+/* Ghidra mislabels this call CRT_fabs (which really takes a double) —
+ * same unresolved-identity caveat already flagged for the identical call
+ * shape in input/BuildingDescriptorEditor.cpp's edit_key_handler_parse. */
+void*  CRT_fabs(void* stream, void* outBuf);
 }
 /* GetResourceType has plain C++ linkage (resources/ResourceManager.h) —
  * declared outside the extern "C" block above, not inside it. */
 extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
+
+/* WNDPROC_CriticalSectionLock has C++ mangled linkage (matches every other
+ * file in this tree that calls it — see input/BuildingDescriptorEditor.cpp,
+ * game/TrainStation.cpp; real def at 0x4647A0,
+ * _Z27WNDPROC_CriticalSectionLockPiPc). Used only by Render() below. */
+extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 
 #ifdef _WIN32
 extern void*  __thiscall UIPANEL_CreateSurface(void* panel);                    /* 0x42A110 */
@@ -70,6 +100,54 @@ void ReleaseSubObject(void* obj)
 }
 #endif
 
+/* Directive-keyword string literals used only by Render() below — read
+ * directly from the binary's .rdata this session via Ghidra's read_bytes,
+ * not guessed. Two contain a literal '/', not '_': "cursor/default_frame_set"
+ * and "must/cant_have" — confirmed via raw byte dump, not a typo. */
+const char s_button[]                   = "button";                    /* 0x47E870 */
+const char s_Name[]                     = "Name";                      /* 0x47E73C */
+const char s_hotspot[]                  = "hotspot";                   /* 0x47E868 */
+const char s_ShadowId[]                 = "ShadowId";                  /* 0x47E85C */
+const char s_ShadowOffset[]             = "ShadowOffset";              /* 0x47E84C */
+const char s_animation[]                = "animation";                 /* 0x47E840 */
+const char s_semi_transparent[]         = "semi-transparent";          /* 0x47E82C */
+const char s_shadows[]                  = "shadows";                   /* 0x47E824 */
+const char s_must_cant_have[]           = "must/cant_have";            /* 0x47E814 */
+const char s_MaxInstances[]             = "MaxInstances";              /* 0x47E804 */
+const char s_total_number_of_frames[]   = "total_number_of_frames";    /* 0x47E7EC */
+const char s_number_of_frame_sets[]     = "number_of_frame_sets";      /* 0x47E7D4 */
+const char s_cursor_frame_set[]         = "cursor_frame_set";          /* 0x47E7C0 */
+const char s_cursor_default_frame_set[] = "cursor/default_frame_set";  /* 0x47E7A4 */
+/* Section-terminator sentinel string ("-9"), same DAT_0047e3cc address and
+ * role as game/TrainStation.cpp's s_terminator. */
+const char s_terminator[] = "-9";  /* 0x47E3CC */
+/* Literal 2-character suffix Render()'s tail overwrites the composed
+ * bitmap path's last 2 characters with — traced via raw disassembly
+ * (0x425520-0x425542), not guessed; exact semantic purpose beyond "a
+ * fixed suffix the original replaces the tail of bmpPath with" is not
+ * otherwise evidenced. */
+const char s_ut_suffix[] = "ut";  /* 0x47E7A0 */
+
+/* Stream-state bit test used by Render()'s main loop — same raw
+ * `*(byte*)(*(int*)(*stream+4) + 8 + (int)stream)` idiom already used by
+ * game/TrainStation.cpp's trainstation_stream_flags() and
+ * input/BuildingDescriptorEditor.cpp's dat_stream_state_ok(): an internal
+ * WNDPROC_Stream-hierarchy detail not yet reconstructed with a typed
+ * accessor (see resources/WndProcStreamBuf.h). This function tests both
+ * bit 0x1 ("stream ended") and bit 0x4 ("stream error"), like
+ * TrainStation's version, not BuildingDescriptorEditor's single-bit 0x7
+ * check — each preserved verbatim from its own disassembly rather than
+ * assumed to match.
+ * TODO: replace with a typed accessor once that reconstruction extends to
+ * this slot. */
+uint8_t childwindow_stream_flags(void* stream)
+{
+    int32_t vtable = *reinterpret_cast<int32_t*>(stream);
+    int32_t slot1  = *reinterpret_cast<int32_t*>(static_cast<intptr_t>(vtable) + 4);
+    return *reinterpret_cast<uint8_t*>(
+        static_cast<intptr_t>(slot1) + 8 + reinterpret_cast<intptr_t>(stream));
+}
+
 } // namespace
 
 /* ================================================================== */
@@ -91,29 +169,32 @@ void ChildWindow::InitFields(uint32_t resourceId, int32_t nameParam)
     /* Common field initialization (both _WIN32 and host) */
     this->resourceId = resourceId;
     this->resourceType = static_cast<uint8_t>(GetResourceType(resourceId));
-    this->streamData = nullptr;
+    this->shadowId = 0;
     this->renderSurface = nullptr;
     this->field_14 = 0;
     this->field_16 = 0;
     this->sticky = 0;
-    this->subWindowCount = 0;
-    this->field_1C = 0;
-    this->field_1E = 0;
+    this->frameSetCount = 0;
+    this->cursorFrameSetIndex = 0;
+    this->defaultFrameSetIndex = 0;
     this->heapBuffer = nullptr;
-    this->subObject = nullptr;
+    this->bitmapSurface = nullptr;
     this->field_28 = 0;
     this->field_2A = 0;
     this->frameCount = 0;
-    this->roadOffsetX = 0;
-    this->roadOffsetY = 0;
-    this->field_38 = 0;
-    this->field_3C = 0;
+    this->buttonParam1 = 0;
+    this->buttonParam2 = 0;
+    this->hotspotX = 0;
+    this->hotspotY = 0;
+    this->shadowOffsetX = 0;
+    this->shadowOffsetY = 0;
     this->depResourceId1 = -1;
     this->depResourceId2 = -1;
-    this->field_14D = 0;
+    this->name[0] = 0;
+    this->field_157 = 0;
     this->overlayRefCount = 0;
-    this->field_15C = -1;
-    this->field_160 = 1;
+    this->maxInstances = -1;
+    this->totalFrameCount = 1;
     this->loaded = 0;
     this->ready = 1;
     this->animFlags = 0;
@@ -156,10 +237,10 @@ ChildWindow::~ChildWindow()
         heapBuffer = nullptr;
     }
 
-    /* Release subObject sub-object (if present) — Windows x86 ABI specific */
-    if (subObject != nullptr) {
-        ReleaseSubObject(subObject);
-        subObject = nullptr;
+    /* Release bitmapSurface sub-object (if present) — Windows x86 ABI specific */
+    if (bitmapSurface != nullptr) {
+        ReleaseSubObject(bitmapSurface);
+        bitmapSurface = nullptr;
     }
 #else
     /* Host-path: The sub-object releases require the scalar-deleting-
@@ -182,7 +263,7 @@ ChildWindow::~ChildWindow()
 void* ChildWindow::OnMouseMove(int32_t x, int32_t y)
 {
 #ifdef _WIN32
-    if (field_160 == 0) {
+    if (totalFrameCount == 0) {
         return nullptr;
     }
 
@@ -206,7 +287,7 @@ void* ChildWindow::OnMouseMove(int32_t x, int32_t y)
 
     field_14 = static_cast<int16_t>(
         static_cast<uint32_t>(surfaceWords[2]) /
-        static_cast<uint16_t>(field_160));
+        static_cast<uint16_t>(totalFrameCount));
     const int16_t surfaceField0C = *reinterpret_cast<const int16_t*>(&surfaceWords[3]);
     overlayRefCount += 1;
     field_16 = surfaceField0C;
@@ -215,9 +296,9 @@ void* ChildWindow::OnMouseMove(int32_t x, int32_t y)
         INPUT_EditScrollHandler(&DAT_004a99b0, resourceId);
     }
 
-    if (subWindowCount != 0) {
+    if (frameSetCount != 0) {
         const uint8_t* const entryTable = static_cast<const uint8_t*>(heapBuffer);
-        for (uint16_t i = 0; i < subWindowCount; ++i) {
+        for (uint16_t i = 0; i < frameSetCount; ++i) {
             const uint16_t stringId =
                 *reinterpret_cast<const uint16_t*>(entryTable + i * 0x18 + 0x0E);
             void* const strRes = ResourceManager_GetStringById(&g_resmgr, stringId);
@@ -259,9 +340,9 @@ void ChildWindow::OnMouseLeave()
         ReleaseSubObject(renderSurface);
         renderSurface = nullptr;
 
-        if (subWindowCount != 0) {
+        if (frameSetCount != 0) {
             const uint8_t* const entryTable = static_cast<const uint8_t*>(heapBuffer);
-            for (uint16_t i = 0; i < subWindowCount; ++i) {
+            for (uint16_t i = 0; i < frameSetCount; ++i) {
                 const uint16_t stringId =
                     *reinterpret_cast<const uint16_t*>(entryTable + i * 0x18 + 0x0E);
                 void* const strRes = ResourceManager_GetStringById(&g_resmgr, stringId);
@@ -284,13 +365,266 @@ void ChildWindow::OnMouseLeave()
 /* ================================================================== */
 uint8_t ChildWindow::Render(void* stream)
 {
-    (void)stream;
-    std::fprintf(stderr,
-        "STUB: ChildWindow::Render (0x424E00) reached — TODO: decompile "
-        "0x424E00 (see ui/UI_ChildWindow.h and PROGRESS.md for why this "
-        "one is deferred rather than transcribed).\n");
-    assert(false && "ChildWindow::Render: not yet ported (TODO: decompile 0x424E00)");
-    return 0;
+    /* SEH prologue/epilogue (compiler-managed) not transcribed. */
+    char lineBuf[264];
+
+    /* Reads a raw line via the lower-level Enter/SeekForward/Leave triple
+     * the original uses for this function's own re-reads (distinct from
+     * WNDPROC_CriticalSectionLock, used only for the main directive-line
+     * reads below) — matches input/BuildingDescriptorEditor.cpp's
+     * identical established idiom for the same call shape. */
+    const auto readLineRaw = [&]() {
+        WNDPROC_EnterCriticalSection(stream);
+        WNDPROC_StreamSeekForward(stream, lineBuf, 0x104, 10);
+        WNDPROC_LeaveCriticalSection(stream);
+    };
+
+    uint8_t result = 1;
+
+    WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+
+    /* Main directive loop: continues while the current line is NOT the
+     * terminator ("-9" — CRT_wcsstr's inverted-match convention, already
+     * documented in input/BuildingDescriptorEditor.cpp and
+     * game/TrainStation.cpp: a MATCH returns NULL) and the stream's own
+     * "ended" bit (0x1) is not set. */
+    while (CRT_wcsstr(lineBuf, s_terminator) != nullptr &&
+           (childwindow_stream_flags(stream) & 0x1) == 0) {
+        if (CRT_wcsstr(lineBuf, s_button) == nullptr) {
+            void* const s1 = WNDPROC_StreamReadLine(stream, &buttonParam1);
+            void* const s2 = WNDPROC_StreamReadLine(s1, &buttonParam2);
+            WNDPROC_StreamPrintf(s2, &frameCount);
+            if (frameCount == 0) {
+                frameCount = 3;
+            }
+        } else if (CRT_wcsstr(lineBuf, s_Name) == nullptr) {
+            readLineRaw();
+            /* Source is lineBuf+1, not lineBuf+0 — matches the original's
+             * `_strncpy(this+0x14D, local_21b, 10)`, where local_21b is
+             * exactly 1 byte into the same 264-byte line buffer Ghidra
+             * split as local_21c(1)+local_21b(260)+acStack_117(3). */
+            std::strncpy(name, &lineBuf[1], sizeof(name));
+            field_157 = 0;
+            /* Trim up to 2 trailing \r/\n characters (handles \r\n, \n\r,
+             * or a lone \r or \n). Equivalent to the original's goto-based
+             * double check-then-trim of the last character, traced
+             * exhaustively: the original always trims exactly 0, 1, or 2
+             * trailing characters, re-checking the (possibly already
+             * trimmed) last character up to twice. */
+            std::size_t len = std::strlen(name);
+            if (len > 0 && (name[len - 1] == '\r' || name[len - 1] == '\n')) {
+                name[len - 1] = '\0';
+                len = std::strlen(name);
+                if (len > 0 && (name[len - 1] == '\r' || name[len - 1] == '\n')) {
+                    name[len - 1] = '\0';
+                }
+            }
+        } else if (CRT_wcsstr(lineBuf, s_hotspot) == nullptr) {
+            WNDPROC_StreamReadLine(stream, &hotspotX);
+            WNDPROC_StreamReadLine(stream, &hotspotY);
+        } else if (CRT_wcsstr(lineBuf, s_ShadowId) == nullptr) {
+            WNDPROC_StreamWrite(stream, &shadowId);
+        } else if (CRT_wcsstr(lineBuf, s_ShadowOffset) == nullptr) {
+            WNDPROC_StreamWrite(stream, &shadowOffsetX);
+            WNDPROC_StreamWrite(stream, &shadowOffsetY);
+        } else if (CRT_wcsstr(lineBuf, s_animation) != nullptr) {
+            /* NOTE: inverted polarity vs every other keyword check in this
+             * function — preserved verbatim from disassembly. "animation"
+             * itself is a recognized-but-otherwise-inert section marker;
+             * every keyword below is only checked on lines that are NOT
+             * literally "animation" (i.e. this whole nested cascade is
+             * skipped for a bare "animation" line). */
+            if (CRT_wcsstr(lineBuf, s_semi_transparent) == nullptr) {
+                animFlags |= 0x400;
+            } else if (CRT_wcsstr(lineBuf, s_shadows) == nullptr) {
+                animFlags |= 2;
+            } else if (CRT_wcsstr(lineBuf, s_must_cant_have) == nullptr) {
+                void* const s1 = WNDPROC_StreamWrite(stream, &depResourceId1);
+                WNDPROC_StreamWrite(s1, &depResourceId2);
+            } else if (CRT_wcsstr(lineBuf, s_MaxInstances) == nullptr) {
+                CRT_fabs(stream, &maxInstances);
+            } else if (CRT_wcsstr(lineBuf, s_total_number_of_frames) == nullptr) {
+                WNDPROC_StreamPrintf(stream, &totalFrameCount);
+                if (totalFrameCount == 0) {
+                    totalFrameCount = 1;
+                }
+            } else if (CRT_wcsstr(lineBuf, s_number_of_frame_sets) == nullptr) {
+                WNDPROC_StreamPrintf(stream, &frameSetCount);
+                if (frameSetCount != 0) {
+                    void* const alloc = operator_new(static_cast<size_t>(frameSetCount) * 0x18);
+                    heapBuffer = alloc;
+                    if (alloc == nullptr) {
+                        /* Matches the original exactly: allocation failure
+                         * is a clean, immediate return (not a fallthrough
+                         * into the rest of the loop). */
+                        return result;
+                    }
+                }
+            } else {
+                const bool matchesCursorFrameSet =
+                    CRT_wcsstr(lineBuf, s_cursor_frame_set) == nullptr;
+                const bool matchesDefaultFrameSet =
+                    CRT_wcsstr(lineBuf, s_cursor_default_frame_set) == nullptr;
+                if (!matchesCursorFrameSet && !matchesDefaultFrameSet) {
+                    /* Neither "cursor_frame_set" nor
+                     * "cursor/default_frame_set" matched — this line is
+                     * the section terminator; stop the whole directive
+                     * loop (not just this branch). */
+                    break;
+                }
+
+                void* const s1 = WNDPROC_StreamReadLine(stream, &cursorFrameSetIndex);
+                WNDPROC_StreamReadLine(s1, &defaultFrameSetIndex);
+
+                if (cursorFrameSetIndex != -1 &&
+                    static_cast<int>(frameSetCount) <= static_cast<int>(cursorFrameSetIndex)) {
+                    result = 0;
+                }
+                if (defaultFrameSetIndex != -1 &&
+                    static_cast<int>(frameSetCount) <= static_cast<int>(defaultFrameSetIndex)) {
+                    result = 0;
+                }
+
+                /* Populate every heapBuffer entry (frameSetCount entries,
+                 * 0x18 bytes each — same entry table OnMouseMove/
+                 * OnMouseLeave already read entry+0x0E "stringId" from). */
+                uint8_t* const entryTable = static_cast<uint8_t*>(heapBuffer);
+                for (uint16_t i = 0; i < frameSetCount; ++i) {
+                    uint8_t* const entry = entryTable + i * 0x18;
+
+                    std::memset(entry, 0, 0x18);
+
+                    WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+                    WNDPROC_StreamPrintf(stream, entry + 0x00);
+                    WNDPROC_StreamPrintf(stream, entry + 0x02);
+                    WNDPROC_StreamPrintf(stream, entry + 0x04);
+                    int16_t temp = 0;
+                    WNDPROC_StreamPrintf(stream, &temp);
+                    entry[0x17] = static_cast<uint8_t>(temp);
+                    WNDPROC_StreamWrite(stream, entry + 0x08);
+                    WNDPROC_StreamReadLine(stream, entry + 0x0C);
+                    WNDPROC_StreamReadLine(stream, entry + 0x0E);
+                    WNDPROC_StreamWrite(stream, entry + 0x10);
+                    WNDPROC_StreamPrintf(stream, entry + 0x14);
+                    WNDPROC_StreamPrintf(stream, &temp);
+                    entry[0x16] = static_cast<uint8_t>(temp);
+
+                    int16_t* const entry04 = reinterpret_cast<int16_t*>(entry + 0x04);
+                    if (*entry04 == 0) {
+                        *entry04 = 1;
+                    }
+
+                    const int16_t entry00 = *reinterpret_cast<int16_t*>(entry + 0x00);
+                    const int16_t entry02 = *reinterpret_cast<int16_t*>(entry + 0x02);
+                    int16_t* const entry0C = reinterpret_cast<int16_t*>(entry + 0x0C);
+                    /* Self-reference detection: if entry[0]==entry[2] and
+                     * entry[0xC] (as a frame-set index) equals this
+                     * entry's own position in the array, clear it to
+                     * -1/0xffff — a sentinel that also always passes the
+                     * bounds check just below (frameSetCount, always
+                     * non-negative, is never <= -1). */
+                    if (entry00 == entry02 && *entry0C == static_cast<int16_t>(i)) {
+                        *entry0C = -1;
+                    }
+
+                    if (static_cast<uint16_t>(totalFrameCount) <= static_cast<uint16_t>(entry00) ||
+                        static_cast<uint16_t>(totalFrameCount) <= static_cast<uint16_t>(entry02)) {
+                        result = 0;
+                    }
+                    if (static_cast<int>(frameSetCount) <= static_cast<int>(*entry0C)) {
+                        result = 0;
+                    }
+                }
+            }
+        }
+        /* No matching keyword: fall through and read the next line —
+         * matches the original (no "unknown keyword" terminator branch
+         * here, unlike BuildingDescriptorEditor::Render). */
+
+        WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+    }
+
+    /* If the final line read is NOT the terminator, the loop exited via
+     * the stream-ended bit rather than a genuine terminator match — mark
+     * as failure (matches every sibling Render override's identical
+     * post-loop check). */
+    if (CRT_wcsstr(lineBuf, s_terminator) != nullptr) {
+        result = 0;
+    }
+
+    /* Skip forward past any leading '/'-prefixed comment/path lines before
+     * the final bitmap load — a raw-idiom line read, then two do-while-
+     * shaped skip loops (skip until a '/' line, then skip while '/'
+     * lines), each bailing out immediately if the stream ends first. */
+    readLineRaw();
+
+    bool foundSlashLine = (lineBuf[0] == '/');
+    if (!foundSlashLine) {
+        for (;;) {
+            if ((childwindow_stream_flags(stream) & 0x1) != 0) {
+                break;
+            }
+            readLineRaw();
+            if (lineBuf[0] == '/') {
+                foundSlashLine = true;
+                break;
+            }
+        }
+    }
+    if (foundSlashLine) {
+        for (;;) {
+            if ((childwindow_stream_flags(stream) & 0x1) != 0) {
+                break;
+            }
+            readLineRaw();
+            if (lineBuf[0] != '/') {
+                break;
+            }
+        }
+    }
+
+    /* Compose a scratch copy of bmpPath with its last 2 characters
+     * replaced by "ut", then load+blit the resulting bitmap into
+     * bitmapSurface — only when bmpPath holds a non-trivial path
+     * (length > 2, matching the original's exact threshold). */
+    const std::size_t bmpPathLen = std::strlen(bmpPath);
+    if (bmpPathLen > 2) {
+        char composedPath[264];
+        std::strncpy(composedPath, bmpPath, sizeof(composedPath) - 1);
+        composedPath[sizeof(composedPath) - 1] = '\0';
+        const std::size_t composedLen = std::strlen(composedPath);
+        if (composedLen >= 2) {
+            std::strcpy(&composedPath[composedLen - 2], s_ut_suffix);
+        }
+
+#ifdef _WIN32
+        void* const raw = operator_new(0x20);
+        bitmapSurface = (raw != nullptr) ? UIPANEL_CreateSurface(raw) : nullptr;
+        if (bitmapSurface != nullptr) {
+            UIPANEL_StretchBlit(bitmapSurface, composedPath, 0, 0, 0);
+            int32_t* const surfaceWords = static_cast<int32_t*>(bitmapSurface);
+            if (surfaceWords[6] == 0 && surfaceWords[7] == 0) {
+                ReleaseSubObject(bitmapSurface);
+                bitmapSurface = nullptr;
+            }
+        }
+        if (bitmapSurface != nullptr && frameCount != 0) {
+            const int32_t* const surfaceWords = static_cast<const int32_t*>(bitmapSurface);
+            field_28 = static_cast<int16_t>(
+                static_cast<uint32_t>(surfaceWords[2]) / static_cast<uint16_t>(frameCount));
+            field_2A = *reinterpret_cast<const int16_t*>(&surfaceWords[3]);
+        }
+#else
+        (void)composedPath;
+        std::fprintf(stderr,
+            "TODO: ChildWindow::Render (0x424E00) bitmap-surface load on "
+            "host build — requires Windows UIPANEL rendering API (see "
+            "PROGRESS.md, matches ChildWindow::OnMouseMove's identical "
+            "gap).\n");
+#endif
+    }
+
+    return result;
 }
 
 /* ================================================================== */
@@ -304,7 +638,7 @@ bool ChildWindow::IsBitmapReady() const
     if (ready == 0) {
         return false;
     }
-    if (subObject == nullptr) {
+    if (bitmapSurface == nullptr) {
         return false;
     }
     if (frameCount == 0) {
