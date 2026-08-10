@@ -129,15 +129,24 @@ public:
      */
     void init(uint32_t resourceId, int32_t nameParam);
 
-    /**
-     * cleanup — Clean up stream resources.
-     * Address: 0x40E8B0
-     *
-     * Destroys the stream at +0x0C and cleans up the WNDPROC stream
-     * state. Called externally to release stream resources without
-     * destroying the entire window.
-     */
-    void cleanup();
+    /* NOTE: 0x40E8B0 ("cleanup") was previously declared here as a public
+     * method ("Destroys the stream at +0x0C... Called externally..."),
+     * but investigated and removed this session: `get_xrefs_to(0x40E8B0)`
+     * shows its ONLY 9 callers are all `Unwind@...` SEH funclets (part of
+     * `__except_handler4`-style scope tables, identifiable via their
+     * `0x19930520` magic cookie at 0x47A76C+), never a real call site
+     * anywhere in the binary or in this codebase. Each funclet computes
+     * its `this`-equivalent argument as `EBP + <offset>` — a raw local
+     * stack address in whatever function each funclet belongs to (three
+     * distinct offsets across the 9 funclets: -0x278 ×7, -0xC8 ×1,
+     * -0x170 ×1) — NOT a `CursorEditWindow*`. This is a shared,
+     * compiler/linker-folded exception-safety helper
+     * ("release the stream object embedded at [pointer]+0xC") reused by
+     * several unrelated functions' exception-unwind paths, not a genuine
+     * per-class CursorEditWindow method — matches CLAUDE.md's stub
+     * exemption for compiler-generated EH helpers ("documented but not
+     * reimplemented"). It has zero normal-control-flow callers, so it
+     * was never reachable as a real API even in the original binary. */
 };
 
 /* ================================================================== */

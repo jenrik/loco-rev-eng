@@ -306,34 +306,17 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 }
 
 /* ================================================================== */
-/* CursorEditWindow::cleanup                                           */
-/* Address: 0x40E8B0                                                   */
-/*                                                                      */
-/* Destroys the stream at +0x0C (inherited streamData) and cleans up   */
-/* the WNDPROC stream state. Called externally to release stream       */
-/* resources without destroying the entire window.                     */
+/* 0x40E8B0 — NOT a real CursorEditWindow method; see the removal note */
+/* in ui/CursorEditWindow.h for the full evidence trail. Its only 9    */
+/* callers are SEH `Unwind@...` funclets belonging to unrelated        */
+/* functions (confirmed via get_xrefs_to + disassembly of each         */
+/* funclet, which compute their argument as a raw `EBP + <offset>`     */
+/* stack address, never a `CursorEditWindow*`), and it has zero        */
+/* normal-control-flow callers anywhere in the binary — a shared,      */
+/* compiler/linker-folded exception-safety helper, not part of this    */
+/* class's real API. Deliberately not reimplemented (CLAUDE.md's stub  */
+/* exemption for compiler-generated EH helpers).                       */
 /* ================================================================== */
-void CursorEditWindow::cleanup()
-{
-    /* Passes the address of the inherited field at +0x0C to the stream
-     * cleanup functions, as if a stream object lives there — same address
-     * as ChildWindow's `shadowId` (int32_t, +0x0C). This is a genuine,
-     * currently-unresolved tension: ChildWindow::Render's "ShadowId"
-     * directive independently writes a plain int32 there via
-     * WNDPROC_StreamWrite(stream, this+0xC) (confirmed this session,
-     * disassembly-verified, matching the field name directly), while THIS
-     * function (0x40E8B0, independently re-decompiled this session too)
-     * treats the same address as an embedded stream object. Not resolved
-     * here — the physical address passed is identical either way (this
-     * cast changes nothing about runtime behavior, only which C++ name
-     * refers to the same 4 bytes); flagged for whoever investigates next
-     * whether the field is genuinely reused for two purposes at different
-     * points in the object's lifetime, or one of these two call sites is
-     * simply wrong. */
-    void* const shadowIdFieldAddr = reinterpret_cast<void*>(&this->shadowId);
-    WIN32_StreamDestroy(shadowIdFieldAddr);
-    WNDPROC_StreamCleanup(shadowIdFieldAddr);
-}
 
 /* ================================================================== */
 /* CursorEditWindow_Ctor — Bridge Constructor (C linkage)              */
