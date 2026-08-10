@@ -1,5 +1,5 @@
 /**
- * CursorEditWindow.h — Cursor editing/tool window
+ * CursorEditWindow.h — Cursor editing/tool window (derived from ChildWindow)
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
@@ -7,8 +7,8 @@
  * CursorEditWindow is a child window that loads cursor data (a .dat file
  * containing cursor metrics + a .bmp file containing cursor pixel data)
  * from the game installation directory or AssetMgr archive. It is created
- * as a resource-manager child window (via ResourceManager_AddString) and
- * renders the loaded cursor via UI_ChildWindow_Render.
+ * as a resource-manager child window (via ResourceManager::AddString) and
+ * renders the loaded cursor via Render().
  *
  * The cursor filename is derived from the resource string parameter.
  * For example, resource ID 0x1863 might correspond to "ArrowCursor",
@@ -19,67 +19,40 @@
  *     +-- CursorEditWindow (+0x644 bytes subclass data)
  *
  * Size: 0x7AC bytes
- * Vtable: 0x477610
+ * Vtable: 0x477610 (6 slots)
  *
- * Vtable layout (extends ChildWindow vtable):
- *   [0] +0x00: scalar deleting destructor (CGWND_CursorEditWindow_Dtor, 0x40E660)
- *   [1] +0x04: unknown (inherited or overridden)
- *   [2] +0x08: unknown (inherited or overridden)
- *   [3] +0x0C: loadCursorData (virtual — processes a stream; returns byte success)
+ * Vtable layout (inherits ChildWindow, overrides slot [3]):
+ *   [0] +0x00: scalar deleting destructor (compiler-generated @ 0x40E660)
+ *   [1] +0x04: OnMouseMove (inherited from ChildWindow @ 0x425670)
+ *   [2] +0x08: OnMouseLeave (inherited from ChildWindow @ 0x4257F0)
+ *   [3] +0x0C: Render — CursorEditWindow override (@ 0x40E8D0)
+ *   [4] +0x10: (reserved)
+ *   [5] +0x14: NULL
  *
- * Called by: ResourceManager_AddString @ 0x446A55 (alloc 0x7AC, ctor)
+ * Called by: ResourceManager::AddString @ 0x446840 (alloc 0x7AC, ctor)
  */
 
 #pragma once
 
-#include "../shared/types.h"
+#include "UI_ChildWindow.h"
 
-// Status: TRANSCRIBED
-/* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
-class CursorEditWindow {
+// Status: INTEGRATED
+
+class CursorEditWindow : public ChildWindow {
 public:
     /* ================================================================ */
-    /* Fields (offsets from this)                                        */
+    /* Fields (derived-specific; base fields are inherited)             */
     /* ================================================================ */
 
-    /* ---- Inherited from ChildWindow (0x00..0x167) ---- */
-/* vtable at +0x00 is compiler-managed */
-    int32_t    resourceId;             // +0x04  Resource ID (set by ChildWindow::Create)
-    int32_t    resourceType;           // +0x08  Resource type byte (set by ChildWindow::Create)
-    void*      streamData;             // +0x0C  Stream data object (used by Cleanup)
-    int32_t    childObj;               // +0x10  Sub-object pointer (released via vtable[0] in dtor)
-    int16_t    field_14;               // +0x14  (init 0)
-    int16_t    field_16;               // +0x16  (init 0)
-    uint8_t    field_18;               // +0x18  (byte, init 0, set to 1 for some resource types)
-    int16_t    field_1A;               // +0x1A  (init 0)
-    int16_t    field_1C;               // +0x1C  (init 0)
-    int16_t    field_1E;               // +0x1E  (init 0)
-    void*      heapBuf;                // +0x20  Heap-allocated buffer (freed in dtor)
-    int32_t    field_24;               // +0x24  Sub-object pointer (released via vtable[0] in dtor)
-    int16_t    field_28;               // +0x28  (init 0)
-    int16_t    field_2A;               // +0x2A  (init 0)
-    int16_t    field_2C;               // +0x2C  (init 0)
-    /* +0x2E..+0x37: gap/padding */
-    int32_t    field_38;               // +0x38  (init 0 in Create)
-    int32_t    field_3C;               // +0x3C  (init 0 in Create)
-    int32_t    field_40;               // +0x40  (init -1 in Create)
-    int32_t    field_44;               // +0x44  (init -1 in Create)
+    /* +0x00..+0x167: inherited from ChildWindow (vtable, resourceId,
+       resourceType, streamData, renderSurface, etc.) — see UI_ChildWindow.h */
 
-    /* Cursor paths: built by Create and Init */
-    char       bmpPath[280];           // +0x48  .bmp file path buffer (sprintf'd during init)
+    /* +0x168..+0x7A7: reserved/padding for derived-specific state */
+    uint8_t    _reserved[0x7A8 - sizeof(ChildWindow)];  // +0x168
 
-    /* +0x160..+0x167: ChildWindow flags */
-    int16_t    field_160;              // +0x160 (init 1 in Create)
-    uint8_t    loaded;                 // +0x162 Cursor data loaded flag (0=failed, 1=loaded)
-    uint8_t    field_163;              // +0x163 (init 1 in Create)
-    int32_t    field_164;              // +0x164 (init 0 in Create)
-
-    /* ---- CursorEditWindow-specific fields (0x168..0x7AB) ---- */
-    /* (Mostly unknown, large gap — the init sets only two shorts at
-        +0x7A8 and +0x7AA to 0) */
-
-    int16_t    field_7A8;              // +0x7A8  (short, init 0 by Init)
-    int16_t    field_7AA;              // +0x7AA  (short, init 0 by Init)
+    /* +0x7A8..+0x7AB: derived-specific fields */
+    int16_t    field_7A8;                 // +0x7A8  (short, init 0 by init())
+    int16_t    field_7AA;                 // +0x7AA  (short, init 0 by init())
 
     /* Total: 0x7AC bytes */
 
@@ -91,44 +64,53 @@ public:
      * CursorEditWindow constructor.
      * Address: 0x40E600
      *
-     * Chains to ChildWindow constructor (UI_CreateChildWindow), sets
-     * vtable to 0x477610, then calls Init() to load cursor data.
+     * Chains to ChildWindow constructor (with nameParam=0 to defer loading),
+     * then calls init() to load cursor data.
      * Allocation size: 0x7AC bytes.
      *
-     * Called by: ResourceManager_AddString @ 0x446A55
+     * Called by: ResourceManager::AddString @ 0x446840
      *
      * @param resourceId  Resource ID (unique ID for this cursor)
-     * @param nameParam   Non-zero = load cursor data from disk/asset mgr
+     * @param nameParam   Pointer to cursor name (e.g., "ArrowCursor");
+     *                    non-zero to load cursor data from disk/asset mgr
      */
     CursorEditWindow(uint32_t resourceId, int32_t nameParam);
 
     /**
-     * Scalar deleting destructor (vtable[0]).
-     * Address: 0x40E660
+     * Virtual destructor (vtable[0]).
+     * Address: 0x40E660 (scalar-deleting-destructor thunk)
+     * Base dtor at: 0x40E680
      *
-     * Calls BaseDtor to release resources, then optionally frees
-     * the heap allocation.
-     *
-     * @param flags  Delete flag (bit 0 = free heap memory)
+     * Compiler-managed; no user-defined cleanup needed beyond base dtor.
      */
     virtual ~CursorEditWindow();
 
     /* ================================================================ */
-    /* Methods                                                           */
+    /* Virtual Methods (overrides)                                      */
     /* ================================================================ */
 
     /**
-     * Base destructor — Release ChildWindow resources.
-     * Address: 0x40E680
+     * Render — Load cursor metrics from a .dat stream.
+     * Address: 0x40E8D0
+     * Vtable slot: [3] +0x0C
      *
-     * Resets vtable to 0x477610 and calls UI_ChildWindow_Dtor to
-     * release sub-objects at +0x10, buffer at +0x20, and sub-object
-     * at +0x24.
+     * Reads cursor dimensions (width, height) and hotspot coordinates (X, Y)
+     * from the .dat stream into field_7A8 and field_7AA. The stream data
+     * is first parsed for validity (checking stream error flags), then
+     * cursor-specific values are extracted via helper functions. A final
+     * validation/palette data load is performed via CGWND_ValidatePaletteData.
+     *
+     * @param stream  Open .dat stream pointer
+     * @return        1 if load succeeds and no errors occurred; 0 on failure
      */
-    void base_destructor();
+    virtual uint8_t Render(void* stream) override;
+
+    /* ================================================================ */
+    /* Non-Virtual Methods                                              */
+    /* ================================================================ */
 
     /**
-     * Init — Initialize and load cursor data.
+     * init — Initialize and load cursor data.
      * Address: 0x40E690
      *
      * Builds filenames from the resource name parameter:
@@ -136,12 +118,14 @@ public:
      *   sprintf(datPath, "%s\\%s.dat", install_path, nameParam)
      *
      * Attempts to load the .dat file via AssetMgr first, then falls
-     * back to direct file open. Validates the data via vtable[3]
-     * (loadCursorData), then renders via UI_ChildWindow_Render.
-     * Stores success/failure in loaded flag (+0x162).
+     * back to direct file open. Validates the data via Render() (virtual
+     * dispatch), then calls ChildWindow::Render() directly, combining
+     * results. Stores success/failure in loaded flag (+0x162).
+     *
+     * Called by: Constructor
      *
      * @param resourceId  Resource ID
-     * @param nameParam   Non-zero to load; zero for no-op initialization
+     * @param nameParam   Pointer to cursor name; non-zero to load
      */
     void init(uint32_t resourceId, int32_t nameParam);
 
@@ -154,14 +138,46 @@ public:
      * destroying the entire window.
      */
     void cleanup();
-
-    /**
-     * loadCursorData — Virtual method (vtable[3]) for loading data
-     *                  from a stream.
-     * Address: (varies per class, dispatched through vtable)
-     */
-    virtual byte loadCursorData(void* stream);
 };
 
-/* Vtable address */
-#define VTBL_CURSOREDITWINDOW 0x00477610
+/* ================================================================== */
+/* Bridge Constructor (C linkage for ResourceManager)                 */
+/* ================================================================== */
+
+extern "C" {
+
+/**
+ * CursorEditWindow_Ctor — Placement-new constructor bridge.
+ * Address: (this file, new definition)
+ *
+ * Bridges from C-style allocation in ResourceManager::AddString
+ * (which uses operator_new) to C++ construction via placement-new.
+ * Replaced a dangling extern declaration (`CGWND_CursorEditWindow_Ctor`)
+ * that had no body — renamed to this class's own convention (matching
+ * `TrainStation_Ctor`/`BuildingDescriptorEditor_Ctor`'s sibling naming)
+ * once resources/ResourceManager.cpp was wired to call it directly via
+ * this header instead of a mismatched local forward declaration.
+ *
+ * @param memory      Pre-allocated 0x7AC-byte buffer (from operator_new)
+ * @param resId       Resource ID
+ * @param strPtr      Pointer to cursor name string (cast from int32_t ABI)
+ * @return            Pointer to constructed CursorEditWindow (== memory)
+ */
+void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr);
+
+} // extern "C"
+
+/* ================================================================== */
+/* Layout verification (x86 32-bit only)                              */
+/* ================================================================== */
+
+#if UINTPTR_MAX == 0xffffffffu
+
+static_assert(offsetof(CursorEditWindow, field_7A8) == 0x7A8,
+    "CursorEditWindow::field_7A8 offset mismatch");
+static_assert(offsetof(CursorEditWindow, field_7AA) == 0x7AA,
+    "CursorEditWindow::field_7AA offset mismatch");
+static_assert(sizeof(CursorEditWindow) == 0x7AC,
+    "CursorEditWindow must match the 32-bit loco.exe layout (0x7AC bytes)");
+
+#endif

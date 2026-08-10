@@ -16,64 +16,49 @@
  * placement tool.
  *
  * Evidence trail:
- *   - INPUT_CreateEditControl (0x41E620) writes `*this = &<vtable at 0x4779E0>`,
- *     frees 3 heap buffers at +0x564/+0x598/+0x5CC (the KeySequenceRecord
- *     key-id arrays below), re-inits the two embedded TrackPos sub-objects at
- *     +0x534/+0x548, then calls the free function UI_ChildWindow_Dtor(this).
- *     This is the destructor BODY, not a "create" function.
- *   - INPUT_ExitGame (0x41E570, misnomer — see below) is the REAL constructor:
- *     calls UI_CreateChildWindow(this, resId, 0), TrackPos_Init at +0x534/+0x548,
- *     sets `*this = &<vtable at 0x4779E0>`, zeroes the same 3 buffer pointers,
- *     then calls HandleEditMessage(this, resId, nameParam). It is not part of
- *     the assigned function list but is required to construct the class; it
- *     is included here for completeness. resources/ResourceManager.cpp already
- *     calls it live (3 call sites, resource types 0/2/4 odd ids and 12/13,
- *     alloc size exactly 0x630 — confirming this class's total size).
- *   - The vtable at 0x4779E0 has a confirmed DATA xref at +0xC (0x4779EC) to
- *     0x41E9F0 (parse_dat_directive_line): slot[3]. INPUT_HandleEditMessage
- *     dispatches through `(*this)[3]` with exactly that signature. No other
- *     slot has been confirmed in this pass (no static call/xref evidence found
- *     for slots [1]/[2]); they are not modeled here rather than invented.
+ *   - Constructor (0x41E570, Ghidra label "INPUT_ExitGame" — misnomer) calls
+ *     ChildWindow's base constructor, re-inits the two embedded TrackPos
+ *     sub-objects at +0x534/+0x548, sets the vtable at 0x4779E0, zeroes the
+ *     3 KeySequenceRecord key-id array pointers, then calls
+ *     handle_edit_message(resId, nameParam).
+ *   - Destructor body (0x41E620, Ghidra label "INPUT_CreateEditControl") frees
+ *     the 3 heap buffers at +0x564/+0x598/+0x5CC and re-inits the TrackPos
+ *     objects. The scalar-deleting-destructor wrapper at 0x41E600 (Ghidra label
+ *     "INPUT_DtorWrapper") becomes the compiler-generated vtable[0].
+ *   - Vtable 0x4779E0 slot [1]=0x425670 (OnMouseMove) and slot [2]=0x4257F0
+ *     (OnMouseLeave) are identical addresses to ChildWindow's base slots,
+ *     confirming they are inherited verbatim, not overridden. Slot [0]=0x41E600
+ *     (this class's destructor thunk) and slot [3]=0x41E9F0 (Render override).
+ *   - resources/ResourceManager.cpp allocates exactly operator_new(0x630) before
+ *     calling BuildingDescriptorEditor_Ctor, confirming this class's total size.
  *   - game/ScriptedObject.cpp's RESDATA_ScriptedObject_HandleEvent (0x44B290)
- *     is near-identical to HandleEditMessage (same %s%s.dat/%s%s.bmp path
+ *     is near-identical to handle_edit_message (same %s%s.dat/%s%s.bmp path
  *     build, same AssetMgr-then-disk fallback, same +0x162 loaded flag) and
- *     calls parse_dat_directive_line (0x41E9F0) directly (not through any
- *     vtable) against its OWN `this`. This means the .dat-directive parser
- *     and its 3 helper functions are reused across at least two different host
- *     objects that happen to lay out the same descriptor fields at the same
- *     absolute offsets — evidence of a shared data-layout convention, not of
- *     inheritance. This header does not attempt to reconcile with
- *     ScriptedObject (out of scope; see game/ScriptedObject.cpp/ScriptedObject.h
- *     and world/scriptengine.h's AddChild/DtorChain, which independently
- *     documents an 0x63C-byte "child ScriptedObject" whose construction also
- *     starts by calling this class's constructor as a "base").
- *   - Earlier this session, a sibling cluster (UI_ChildWindow) was found to
- *     have NO real C++ inheritance despite its naming. The free functions
- *     UI_CreateChildWindow/UI_ChildWindow_Dtor/UI_ChildWindow_Render are reused
- *     by composition/convention across several unrelated classes in this tree
- *     (see ui/CursorEditWindow.h, game/TrainStation.h) — never as a true C++
- *     base class. This class follows the same established precedent: it calls
- *     those free functions directly rather than inheriting from anything.
- *   - ui/CursorEditWindow.h documents an extremely similar sibling class
- *     (a ChildWindow-family .dat/.bmp loader for CURSOR data, vtable 0x477610,
- *     with its own "loaded" flag at the SAME +0x162 offset). That confirms
- *     +0x162 is a shared ChildWindow-family convention, not something specific
- *     to this class or to ScriptedObject.
+ *     calls the Render function (0x41E9F0) directly (not through any vtable)
+ *     against its OWN `this`. This means the .dat-directive parser and its 3
+ *     helper functions are reused across at least two different host objects
+ *     that happen to lay out the same descriptor fields at the same absolute
+ *     offsets — evidence of a shared data-layout convention, not of inheritance.
+ *   - ui/CursorEditWindow.h documents a sibling class (a ChildWindow-family
+ *     .dat/.bmp loader for CURSOR data) with its own "loaded" flag at the same
+ *     +0x162 offset, confirming +0x162 is a shared ChildWindow-family convention.
+ *
+ * Class hierarchy:
+ *   ChildWindow (ui/UI_ChildWindow.h, vtable 0x477C18)
+ *     └─ BuildingDescriptorEditor (this class, vtable 0x4779E0)
  *
  * Size: 0x630 bytes (confirmed: resources/ResourceManager.cpp allocates
  *       exactly operator_new(0x630) before calling the constructor bridge).
- * Vtable: 0x4779E0 (slot[0] destructor, slot[3] parse_dat_directive_line;
- *         slots [1]/[2] unconfirmed, not modeled).
  *
- * Class hierarchy: standalone (no evidenced C++ base — see note above).
+ * Status: INTEGRATED
  */
 
 #pragma once
 
 #include "../shared/types.h"
+#include "../ui/UI_ChildWindow.h"
 #include "../game/TrackPos.h"
 
-// Status: TRANSCRIBED
 /* ================================================================== */
 /* KeySequenceRecord — InsertSeq/MobileSeq/TotalVisits sub-record       */
 /* Address of parser: INPUT_EditKeyHandler, 0x41F2B0                    */
@@ -116,34 +101,9 @@ struct KeySequenceRecord {
 /* BuildingDescriptorEditor class                                      */
 /* ================================================================== */
 
-class BuildingDescriptorEditor {
+class BuildingDescriptorEditor : public ChildWindow {
 public:
-    /* ---- +0x000..+0x161: shared ChildWindow-family base ------------ */
-    /* Not decompiled in this pass (the constructor only calls
-     * UI_CreateChildWindow(this, resId, 0) as an opaque free function —
-     * see UI_CreateChildWindow, 0x424AF0). ui/CursorEditWindow.h documents
-     * named fields at these offsets for a SIBLING class, but this class's
-     * own field-level evidence for <0x162 is not established, so this is
-     * left as an explicit opaque region rather than copying unverified names —
-     * EXCEPT for the two fields immediately below, which handle_edit_message()
-     * (0x41E6E0, one of this pass's assigned functions) directly evidences. */
-    uint8_t  _child_window_base_a[0x32];             // +0x000
-
-    /* Default edit-origin offset pair. handle_edit_message() derives these
-     * from the occupancy dimensions (bitmap_occupancy_width/height) only
-     * when both are still zero: edit_origin_x = (bitmap_occupancy_width >> 1) << 4,
-     * edit_origin_y = bitmap_occupancy_height * 0x10 - 0x10. Evidenced
-     * directly from 0x41E6E0's disassembly (tail, +0x32/+0x34). */
-    int16_t  edit_origin_x;                          // +0x032
-    int16_t  edit_origin_y;                          // +0x034
-
-    uint8_t  _child_window_base_b[0x162 - 0x36];     // +0x036
-
-    /* ---- +0x162..+0x62F: this class's own descriptor fields --------- */
-    uint8_t  loaded_flag;                            // +0x162  0/1, set by handle_edit_message()
-    uint8_t  button_visible;                         // +0x163  [ButtonVisible] keyword
-    uint8_t  _pad_164[4];                             // +0x164  not touched by any decompiled method in this pass
-
+    /* ---- +0x168..+0x62F: this class's own descriptor fields --------- */
     uint8_t  border_width;                            // +0x168  physical-occupancy grid width  ([physical_occupancy] section)
     uint8_t  border_height;                           // +0x169  physical-occupancy grid height
     uint8_t  border_depth;                            // +0x16A  physical-occupancy grid depth
@@ -207,10 +167,10 @@ public:
      * Constructor. Address: 0x41E570 (Ghidra label "INPUT_ExitGame" — a
      * legacy misnomer; the body has nothing to do with exiting a game).
      *
-     * Calls UI_CreateChildWindow(this, resId, 0), re-inits the two
-     * embedded TrackPos sub-objects, installs the vtable, zeroes the 3
-     * KeySequenceRecord key-array pointers, then calls
-     * handle_edit_message(resId, nameParam) to load the .dat descriptor.
+     * Initializes the ChildWindow base via member-initializer-list, re-inits
+     * the two embedded TrackPos sub-objects, installs the vtable, zeroes the
+     * 3 KeySequenceRecord key-array pointers, then calls handle_edit_message
+     * to load the .dat descriptor.
      *
      * @param resId      Resource ID for this descriptor
      * @param nameParam  Non-zero = load descriptor data from disk/asset mgr
@@ -218,9 +178,13 @@ public:
     BuildingDescriptorEditor(uint32_t resId, int32_t nameParam);
 
     /**
-     * Scalar deleting destructor (vtable[0]). Address: 0x41E600
-     * (Ghidra label "INPUT_DtorWrapper"). Calls the destructor body then
-     * optionally frees the heap allocation.
+     * Virtual destructor (vtable[0]). Address: 0x41E600
+     * (Ghidra label "INPUT_DtorWrapper" — scalar-deleting-destructor thunk).
+     * Body at 0x41E620 (Ghidra label "INPUT_CreateEditControl" — misnomer).
+     *
+     * Frees the 3 KeySequenceRecord key-array heap buffers and re-inits the
+     * TrackPos objects. Base class ~ChildWindow() runs automatically as part
+     * of the compiler-generated destructor chain.
      */
     virtual ~BuildingDescriptorEditor();
 
@@ -235,9 +199,8 @@ public:
      * Resets all descriptor fields to their sentinel defaults, then (if
      * nameParam != 0) builds "%s%s.dat"/"%s%s.bmp" paths, tries the
      * AssetMgr archive first, falls back to WIN32_StreamOpenPath, and
-     * dispatches to parse_dat_directive_line() through vtable slot [3]
-     * for both the archive and disk-fallback cases. Called by the
-     * constructor.
+     * dispatches to Render() (vtable slot [3]) for both the archive and
+     * disk-fallback cases. Called by the constructor.
      *
      * @param resId     Resource ID (used to build the descriptor filename)
      * @param nameParam Non-zero to actually load; zero for no-op reset only
@@ -245,7 +208,7 @@ public:
     void handle_edit_message(uint32_t resId, int32_t nameParam);
 
     /**
-     * parse_dat_directive_line — vtable slot [3]. Address: 0x41E9F0
+     * Render — vtable slot [3]. Address: 0x41E9F0
      * (Ghidra label "INPUT_EditWndProc" — not a window procedure at all).
      *
      * Reads one directive line from the stream and dispatches on a
@@ -258,39 +221,47 @@ public:
      *
      * Also called directly (not through any vtable) by
      * game/ScriptedObject.cpp's RESDATA_ScriptedObject_HandleEvent
-     * (0x44B290) against its own, differently-typed `this` — see the
-     * class-level doc comment above.
+     * (0x44B290) against its own, differently-typed `this` — the shared
+     * data-layout convention described in the class-level doc comment above.
+     *
+     * Overrides ChildWindow::Render (vtable slot [3]).
      *
      * @param stream  WNDPROC stream object positioned at the next line
-     * @return        true = keep processing this section, false = section complete
+     * @return        Non-zero (1) = keep processing this section,
+     *                zero (0) = section complete
      */
-    virtual bool parse_dat_directive_line(void* stream);
+    virtual uint8_t Render(void* stream) override;
 
     /**
      * draw_border_grid — Address: 0x41EFA0 (Ghidra label
      * "INPUT_DrawEditBorder"). Reads border_width/height/depth from the
      * stream and (re)fills physical_occupancy_grid. Called from
-     * parse_dat_directive_line() when the current line is not the
-     * physical_occupancy terminator.
+     * Render() when the current line is not the physical_occupancy terminator.
      */
     bool draw_border_grid(void* stream);
 
     /**
      * paint_edit_regions — Address: 0x41F0C0 (Ghidra label
      * "INPUT_PaintEdit"). Reads 4 margin values from the stream and
-     * computes edit_region[8]. Called from parse_dat_directive_line()
-     * when the current line is not the entry_exit terminator.
+     * computes edit_region[8]. Called from Render() when the current
+     * line is not the entry_exit terminator.
      */
     bool paint_edit_regions(void* stream);
 };
 
-/* No x86-layout-parity static_assert here either, for the same reason as
- * KeySequenceRecord above: this class embeds three KeySequenceRecords
- * (each with a native pointer field) plus TrackPos sub-objects, so its
- * real host sizeof() is inflated past the documented 0x630 x86 allocation
- * by the same 4-vs-8-byte pointer-width delta, compounded. The 0x630
- * figure remains correct documentation of the original allocation size
- * (see the class header comment) — just not a host-buildable invariant. */
+/* No x86-layout-parity static_assert here: this class embeds three
+ * KeySequenceRecords (each with a native pointer field) plus TrackPos
+ * sub-objects, so its real host sizeof() is inflated past the documented
+ * 0x630 x86 allocation by the 4-vs-8-byte pointer-width delta, compounded.
+ * The 0x630 figure remains correct documentation of the original allocation
+ * size (see the class header comment) — just not a host-buildable invariant. */
+
+#if UINTPTR_MAX == 0xffffffffu
+
+static_assert(sizeof(BuildingDescriptorEditor) == 0x630,
+    "BuildingDescriptorEditor must match the 32-bit loco.exe layout (0x630 bytes)");
+
+#endif
 
 /* ================================================================== */
 /* Free functions                                                       */
@@ -301,9 +272,9 @@ public:
  * "INPUT_EditKeyHandler"). NOT a member: takes the stream and a pointer
  * to one of the owner's KeySequenceRecord sub-objects directly (the
  * decompiled signature has no `this`/owner parameter at all — only the
- * stream and the sub-record pointer). Called from
- * parse_dat_directive_line() for the InsertSeq/MobileSeq/TotalVisits
- * keywords, passing &insert_seq / &mobile_seq / &total_visits.
+ * stream and the sub-record pointer). Called from Render() for the
+ * InsertSeq/MobileSeq/TotalVisits keywords, passing &insert_seq /
+ * &mobile_seq / &total_visits.
  *
  * Allocates key_count key_ids entries, reads the record's remaining
  * fields from the stream, then validates resource_id_0 (expected type

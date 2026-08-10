@@ -148,12 +148,15 @@ def test_singleplayer_mode3_mouse_input_reaches_game(game):
     dispatch happened, but that host_pack_game_lparam's projection is
     correct, the only genuinely new coordinate-math logic in the fix.
 
-    Deliberately does NOT click or otherwise assert the game survives past
-    this point: any mode-3 input now reaches the long-dormant
-    Game::UpdateInputState()/RESDATA_ScriptedObject::IsDragging() path for
-    the first time ever, which has its own, separate, pre-existing crash
-    (BUG-mode3-input-processing-crashes.md) — the wiring bug this test
-    guards is fixed independent of that follow-up."""
+    Also asserts the game survives a real click past this point.
+    BUG-mode3-input-processing-crashes.md tracked a chain of crashes on
+    this exact path (Game::UpdateInputState -> ... -> ChildWindow
+    construction), stopping at UI_CreateChildWindow's host
+    assert(false) reached via BuildingDescriptorEditor's constructor.
+    That assert is gone now that ChildWindow/CursorEditWindow/
+    TrainStation/BuildingDescriptorEditor are real derived classes with
+    working host-path constructors (see ui/UI_ChildWindow.h's class
+    hierarchy) — this is the regression test for that fix."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.click_logical(600, 550, "select single player")
     game.click_logical(600, 720, "player-name field")
@@ -174,6 +177,10 @@ def test_singleplayer_mode3_mouse_input_reaches_game(game):
     # broken scale factor is not.
     assert abs(move_event["x"] - 400) <= 2, move_event
     assert abs(move_event["y"] - 300) <= 2, move_event
+
+    game.click_logical(400, 300, "town view click")
+    time.sleep(1)
+    game.assert_alive("mode-3 click past ChildWindow construction")
 
 
 @pytest.mark.parametrize(

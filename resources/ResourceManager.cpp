@@ -30,6 +30,12 @@
 #include <new>
 #include <cstdio>
 
+/* Class headers for placement-new constructor dispatch in AddString */
+#include "../ui/UI_ChildWindow.h"
+#include "../ui/CursorEditWindow.h"
+#include "../game/TrainStation.h"
+#include "../input/BuildingDescriptorEditor.h"
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -114,7 +120,6 @@ void Config_GetIniString(void* config, const char* section,
 int32_t Config_GetIniInt(void* config, const char* section,
     const char* key, int32_t defaultValue);           /* @ 0x00452D60 */
 
-void* UI_CreateChildWindow(void* obj, int32_t resId, int32_t strPtr); /* @ 0x00424AF0 */
 /* BUG-mode3-input-processing-crashes.md: this used to declare a
  * `void* INPUT_ExitGame(void*, int32_t, int32_t)` free function with no
  * definition anywhere in the tree (a stale comment here claimed "loud
@@ -129,10 +134,10 @@ void* UI_CreateChildWindow(void* obj, int32_t resId, int32_t strPtr); /* @ 0x004
  * 0x630-byte allocation (its own doc comment already names this file's
  * AddString and cites the same "INPUT_ExitGame" Ghidra misnomer) —
  * these call sites just hadn't been updated to use it. */
-void* BuildingDescriptorEditor_Ctor(void* memory, int32_t resId, int32_t strPtr); /* @ 0x0041E570 */
-void* TrainStation_Ctor(void* obj, int32_t resId, int32_t strPtr);    /* @ 0x00436400 */
-void* CGWND_CursorEditWindow_Ctor(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0040E600 */
-void* RESDATA_ScriptedObject_AddChild(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0044B190 */
+extern "C" {
+    void* RESDATA_ScriptedObject_AddChild(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0044B190 */
+    void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr);        /* @ 0x0040E600 */
+}
 
 void Town_CopyTiles8bpp_Transparent(
     void* surface, int32_t srcX, int32_t srcY,
@@ -672,7 +677,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         /* Fallthrough for type > 14 */
         newObj = operator_new(0x168);
         if (newObj != nullptr) {
-            result = UI_CreateChildWindow(newObj, resId, strPtr);
+            result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
         }
     } else {
         switch (resourceType) {
@@ -680,7 +685,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x168);
                 if (newObj != nullptr) {
-                    result = UI_CreateChildWindow(newObj, resId, strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
                 newObj = operator_new(0x630);
@@ -693,7 +698,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 1:
             newObj = operator_new(0x168);
             if (newObj != nullptr) {
-                result = UI_CreateChildWindow(newObj, resId, strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
             break;
 
@@ -702,7 +707,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x168);
                 if (newObj != nullptr) {
-                    result = UI_CreateChildWindow(newObj, resId, strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
                 newObj = operator_new(0x630);
@@ -716,7 +721,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(0x168);
                 if (newObj != nullptr) {
-                    result = UI_CreateChildWindow(newObj, resId, strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
                 newObj = operator_new(0x63C);
@@ -730,7 +735,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             /* Type 5: ChildWindow with persistence enabled */
             newObj = operator_new(0x168);
             if (newObj != nullptr) {
-                result = UI_CreateChildWindow(newObj, resId, strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
             this->resource_ptrs[resId] = handle_from_pointer(result);
             if (result != nullptr) {
@@ -742,12 +747,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if (resId == 0x1802 || (resId >= 0x1866 && (resId & 1) == 1)) {
                 newObj = operator_new(0x7AC);
                 if (newObj != nullptr) {
-                    result = CGWND_CursorEditWindow_Ctor(newObj, resId, strPtr);
+                    result = CursorEditWindow_Ctor(newObj, resId, strPtr);
                 }
             } else {
                 newObj = operator_new(0x168);
                 if (newObj != nullptr) {
-                    result = UI_CreateChildWindow(newObj, resId, strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             }
             break;
@@ -762,7 +767,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             } else {
                 newObj = operator_new(0x168);
                 if (newObj != nullptr) {
-                    result = UI_CreateChildWindow(newObj, resId, strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             }
             break;
@@ -772,7 +777,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 11:
             newObj = operator_new(0x168);
             if (newObj != nullptr) {
-                result = UI_CreateChildWindow(newObj, resId, strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
             break;
 
@@ -787,7 +792,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 14:
             newObj = operator_new(0x168);
             if (newObj != nullptr) {
-                result = UI_CreateChildWindow(newObj, resId, strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
             this->resource_ptrs[resId] = handle_from_pointer(result);
             if (resId > 0x3801 && result != nullptr) {
@@ -799,7 +804,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             /* Fallthrough for types not explicitly handled */
             newObj = operator_new(0x168);
             if (newObj != nullptr) {
-                result = UI_CreateChildWindow(newObj, resId, strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
             break;
         }

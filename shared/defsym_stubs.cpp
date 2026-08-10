@@ -421,10 +421,6 @@ void DDRAW_LoadFile(int*, char const*);
 void DDRAW_LoadFile(int*, char const*) { /* host no-op */ }
 void RESDATA_ScriptedObject_AddChild(void*, int, int);
 void RESDATA_ScriptedObject_AddChild(void*, int, int) { /* host no-op */ }
-void CGWND_CursorEditWindow_Ctor(void*, int, int);
-void CGWND_CursorEditWindow_Ctor(void*, int, int) { /* host no-op */ }
-void TrainStation_Ctor(void*, int, int);
-void TrainStation_Ctor(void*, int, int) { /* host no-op */ }
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int);
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) { /* host no-op */ }
 void* DPLAY_SetPlayerName = nullptr;

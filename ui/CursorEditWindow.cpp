@@ -10,48 +10,49 @@
  * name derived from the resource ID's text string.
  */
 
-// Status: TRANSCRIBED
+// Status: INTEGRATED
 
 #include "CursorEditWindow.h"
-#include "UI_ChildWindow.h"
-#include <cstring>  /* memcpy — aliasing-safe vtable pointer read */
-/* vtable_addrs.h removed — compiler manages vtables via virtual methods */
+#include <cstring>
+#include <cassert>
+#include <cstdio>
+#include <new>
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
 
 /* Heap management */
-    extern void* __cdecl operator_new(size_t size);     /* 0x465CE0 */
-    extern void  __cdecl GLOBAL_free(void* ptr);         /* 0x465CD0 */
-    extern void  __cdecl CRT_free(void* ptr);            /* 0x466C70 */
-    extern void  __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D60 */
-    extern void  __cdecl CRT_exit(const char** msg, const char** fileLine); /* 0x466CE0 */
+extern void* __cdecl operator_new(size_t size);     /* 0x465CE0 */
+extern void  __cdecl GLOBAL_free(void* ptr);        /* 0x465CD0 */
+extern void  __cdecl CRT_free(void* ptr);           /* 0x466C70 */
+extern int   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D60 */
 
-    /* Win32 APIs */
-extern "C" {
-    extern int   __stdcall wsprintfA(char* buf, const char* fmt, ...); /* 0x477370 */
-}
+/* Stream / WNDPROC helpers */
+extern void   __thiscall WIN32_StreamOpen(void* stream, int mode);        /* 0x463890 */
+extern void   __thiscall WIN32_StreamDestroy(void* stream);                /* 0x463A80 */
+extern void   __thiscall WIN32_StreamDestroyImmediate(void* stream);       /* 0x463B10 */
+extern void   __thiscall WNDPROC_StreamCleanup(void* stream);              /* 0x464620 */
+extern int*   __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data,
+                                                   int size, int mode);    /* 0x464490 */
 
-    /* WIN32_StreamOpenPath's only real definition (shared/link_stubs.cpp)
-     * is extern "C" (unmangled) — unlike its WIN32_Stream and WNDPROC_Stream
-     * siblings below, no C++-mangled twin exists in shared/defsym_stubs.cpp,
-     * so this one must stay out of default C++ linkage or it call-0s. */
+/* Cursor data parsing helpers */
+extern void*  __thiscall WNDPROC_CriticalSectionLock(void* stream,
+                                                      int* errorCode,
+                                                      int16_t* fieldY,
+                                                      int16_t* fieldX,
+                                                      int* tempBuf);      /* 0x4649F0 */
+extern void*  __thiscall WNDPROC_StreamPrintf(void* stream, int* outVal);  /* 0x464750 */
+extern void*  __thiscall WNDPROC_StreamWrite(void* stream, int* outVal);   /* 0x4646C0 */
+extern uint8_t __fastcall CGWND_ValidatePaletteData(int classPtr);        /* 0x40E950 */
+
+/* Asset manager */
+extern int*   __thiscall AssetMgr_LoadFile(void* mgr, const char* path,
+                                            int* outSize);                 /* 0x45CD00 */
+
 extern "C" {
     void WIN32_StreamOpenPath(void* stream, const char* path, int32_t mode, int32_t fileType); /* 0x463AA0 */
 }
-
-    /* Stream / WNDPROC helpers */
-    extern void   __thiscall WIN32_StreamOpen(void* stream, int mode);        /* 0x463890 */
-    extern void   __thiscall WIN32_StreamDestroy(void* stream);                /* 0x463A80 */
-    extern void   __thiscall WIN32_StreamDestroyImmediate(void* stream);       /* 0x463B10 */
-    extern void   __thiscall WIN32_StreamRead(void* stream, void* buf, int sz); /* 0x463810 */
-    extern void   __thiscall WNDPROC_StreamCleanup(void* stream);              /* 0x464620 */
-    extern int*   __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data,
-                                                       int size, int mode);    /* 0x464490 */
-
-    /* Asset manager */
-    extern int*   __thiscall AssetMgr_LoadFile(void* mgr, const char* path,
-                                                int* outSize);                 /* 0x45CD00 */
 
 namespace {
 using StreamDestructor = void (__fastcall *)(void*);
@@ -79,164 +80,194 @@ extern char  g_install_path[];        /* 0x4A99C8 — install directory path */
 /* CursorEditWindow Constructor                                        */
 /* Address: 0x40E600                                                   */
 /*                                                                      */
-/* Called by: ResourceManager_AddString @ 0x446A55                     */
-/*   with: operator_new(0x7AC), then this(this, resId, nameParam)     */
-/*                                                                      */
-/* Flow:                                                                */
-/*   1. Call ChildWindow base constructor with nameParam=0              */
-/*      (skips loading in base — the derived Init handles it)          */
-/*   2. Override vtable to CursorEditWindow's vtable                    */
-/*   3. Call Init() to load cursor data                                 */
+/* Initializes as a ChildWindow (with nameParam=0 to defer loading     */
+/* in base), then calls init() to load cursor data in derived context. */
 /* ================================================================== */
 CursorEditWindow::CursorEditWindow(uint32_t resourceId, int32_t nameParam)
+    : ChildWindow(resourceId, 0)  /* Base constructor with nameParam=0 */
 {
-    /* Step 1: Call ChildWindow base constructor */
-    /* UI_CreateChildWindow(this, resourceId, 0) — pass 0 for nameParam
-       to skip loading in base class (Init handles it) */
-    UI_CreateChildWindow(this, resourceId, 0);
-
-    /* Step 2: Override vtable */
-/* In the binary: sets vtable here. Compiler-managed in natural C++. */
-
-    /* Step 3: Initialize and load cursor data */
+    /* Load cursor data via derived init() */
     this->init(resourceId, nameParam);
 }
 
 /* ================================================================== */
-/* CursorEditWindow::scalar deleting destructor (vtable[0])            */
-/* Address: 0x40E660                                                   */
+/* CursorEditWindow::~CursorEditWindow (destructor)                    */
+/* Address: 0x40E660 (scalar-deleting-destructor thunk)                */
+/* Base cleanup: 0x40E680                                              */
 /*                                                                      */
-/* Standard MSVC scalar deleting destructor: call base dtor,            */
-/* conditionally free heap.                                             */
+/* Virtual destructor. Compiler-managed; base class destructor         */
+/* ~ChildWindow() is called automatically.                             */
 /* ================================================================== */
 CursorEditWindow::~CursorEditWindow()
 {
-    this->base_destructor();
+    /* Compiler-managed destruction chain: this->~CursorEditWindow() →
+       base->~ChildWindow(). No explicit body needed. */
 }
 
 /* ================================================================== */
-/* CursorEditWindow::base_destructor                                   */
-/* Address: 0x40E680                                                   */
+/* CursorEditWindow::Render                                            */
+/* Address: 0x40E8D0                                                   */
+/* Vtable slot: [3] +0x0C                                              */
 /*                                                                      */
-/* Resets vtable and delegates to ChildWindow's base destructor.       */
+/* Reads cursor metrics from a .dat stream. Initializes field_7A8      */
+/* (width/X coordinate) and field_7AA (height/Y coordinate) by calling */
+/* helper functions to parse and validate stream data.                 */
+/*                                                                      */
+/* Called by: CursorEditWindow::init() [virtual dispatch]              */
 /* ================================================================== */
-void CursorEditWindow::base_destructor()
+uint8_t CursorEditWindow::Render(void* stream)
 {
-/* In the binary: sets vtable here. Compiler-managed in natural C++. */
-    UI_ChildWindow_Dtor(this);
+    /* Local variable for error tracking: initialized to 0, may be set by
+       parsing functions. Value 0xfffffff7 (-9) indicates success. */
+    int errorCode = 0;
+
+    /* Local variable for temp storage during read operations */
+    int tempBuf = 0;
+
+    /* Result flag: starts as failure (0), set to success (1) if processing
+       occurs without stream errors */
+    uint8_t resultFlag = 0;
+
+    /* Validate stream is not null */
+    if (stream == nullptr) {
+        return 0;
+    }
+
+    /* Check stream validity via vtable. Stream object layout:
+       [0] = vtable pointer
+       vtable[1] = offset to stream control data
+       At [vtable[1] + stream + 0x8] is a flag byte where bit 0x4 indicates
+       the stream has an error condition. */
+    int* streamVtable = *(int**)stream;
+    if (streamVtable == nullptr) {
+        return 0;
+    }
+
+    int vtableOffset = streamVtable[1];  /* +0x4 in vtable */
+    uint8_t* flagPtr = (uint8_t*)((uintptr_t)vtableOffset + (uintptr_t)stream + 0x8);
+    uint8_t streamFlags = *flagPtr;     /* +0x8 relative to vtableOffset */
+
+    /* If stream error flag (bit 0x4) is already set, skip processing */
+    if ((streamFlags & 0x4) != 0) {
+        return 0;
+    }
+
+    /* Set result to success; may be cleared below if error detected */
+    resultFlag = 1;
+
+    /* Call helper function to read cursor data from stream.
+       WNDPROC_CriticalSectionLock acquires stream lock, reads whitespace-
+       delimited values, and populates the cursor field data. */
+    WNDPROC_CriticalSectionLock(
+        stream,
+        &errorCode,
+        &this->field_7AA,    /* +0x7AA — cursor field (Y/height) */
+        &this->field_7A8,    /* +0x7A8 — cursor field (X/width) */
+        &tempBuf);
+
+    /* Chain three more stream read operations. Each function returns a
+       stream pointer (or derived object) that becomes the this pointer
+       (in ECX) for the next call. */
+    void* streamPtr1 = WNDPROC_StreamPrintf(stream, &tempBuf);
+    void* streamPtr2 = WNDPROC_StreamPrintf(streamPtr1, nullptr);
+    WNDPROC_StreamWrite(streamPtr2, nullptr);
+
+    /* Validate error code: if errorCode was set to -9 (0xfffffff7) by the
+       parsing functions, it indicates parsing succeeded. Any other value
+       (including 0) indicates an error or parsing failure. */
+    if (errorCode != (int)0xfffffff7) {
+        resultFlag = 0;
+    }
+
+    /* Call palette validation function on this object. This validates or
+       loads palette data associated with the cursor. Return value is not
+       used for Render success status. */
+    CGWND_ValidatePaletteData((int)(uintptr_t)this);
+
+    return resultFlag;
 }
 
 /* ================================================================== */
 /* CursorEditWindow::init                                              */
 /* Address: 0x40E690                                                   */
 /*                                                                      */
-/* Loads cursor data from disk or AssetMgr. The nameParam controls     */
-/* whether loading occurs (0 = no-op). When non-zero:                   */
+/* Loads cursor data from disk or AssetMgr. The nameParam (cast from   */
+/* int32_t ABI) controls whether loading occurs (0 = no-op).           */
+/* When non-zero:                                                       */
 /*                                                                      */
 /*   1. Build file paths:                                               */
-/*        local_dat_path = "%s\\<name>.dat"                             */
-/*        this->bmpPath   = "%s\\<name>.bmp"  (+0x48)                  */
+/*        datPath    = "%s\\<name>.dat"                                 */
+/*        bmpPath    = "%s\\<name>.bmp"  (inherited +0x48)              */
 /*                                                                      */
 /*   2. Try AssetMgr first: load "<name>.dat" from archive             */
-/*      - If found: create memory stream, call vtable[3] to load,      */
-/*        call UI_ChildWindow_Render to render, mark loaded flag       */
+/*      - If found: create memory stream, call Render() to load,       */
+/*        call ChildWindow::Render() to render, mark loaded flag       */
 /*                                                                      */
 /*   3. Fall back to direct file:                                      */
 /*      - Open "%s\\<name>.dat" from install dir                       */
-/*      - If valid: vtable[3] load, UI_ChildWindow_Render              */
+/*      - If valid: Render() load, ChildWindow::Render()               */
 /*                                                                      */
 /*   4. Store success/failure in loaded (+0x162)                       */
-/*                                                                      */
-/* @param resourceId  Resource ID                                      */
-/* @param nameParam   Non-zero to load cursor data                     */
 /* ================================================================== */
 void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 {
     /* Local stream for file operations */
-    int localStream[22];  /* WIN32_Stream object */
-    WIN32_StreamOpen(localStream, 1);
+    int localStream[22];  /* WIN32_Stream object (88 bytes) */
+    WIN32_StreamOpen(&localStream[0], 1);
 
-    int* pLoadedData = NULL;  /* AssetMgr loaded data pointer */
+    int* pLoadedData = nullptr;  /* AssetMgr loaded data pointer */
     int  dataSize = 0;
 
-    /* Clear cursor state fields */
-    this->field_7A8 = 0;       /* +0x7A8 (short) */
-    this->field_7AA = 0;       /* +0x7AA (short) */
-    this->loaded = 0;          /* +0x162 (byte) */
+    /* Clear cursor-specific state fields */
+    this->field_7A8 = 0;           /* +0x7A8 (short) */
+    this->field_7AA = 0;           /* +0x7AA (short) */
+    this->loaded = 0;              /* +0x162 (inherited, byte) */
 
-    /* If nameParam is 0, skip all loading */
+    /* If nameParam is 0 (null pointer cast), skip all loading */
     if (nameParam == 0) {
-        WIN32_StreamDestroy(static_cast<void*>(localStream + 2));
-        WNDPROC_StreamCleanup(static_cast<void*>(localStream + 2));
+        WIN32_StreamDestroy(&localStream[2]);
+        WNDPROC_StreamCleanup(&localStream[2]);
         return;
     }
 
-    /* Build file paths */
-    char datPath[264];   /* 0x108 bytes on stack */
-    char fullDatPath[264]; /* 0x108 bytes on stack */
-
-    /* Build: "%s\\<name>.dat" */
-    CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path,
-                    reinterpret_cast<const char*>(
-                        static_cast<uintptr_t>(resourceId)));
-    /* Wait — resourceId is an integer, not a string pointer. Let me re-read the Init code... */
-
-    /* Actually, looking at the disassembly more carefully:
-       0x40E70A: PUSH EDI              ; EDI = param_2 from ctor = nameParam (an int/resource string index)
-       0x40E70B: PUSH 0x4A99C8         ; g_install_path
-       0x40E710: LEA EAX, [ESP+0x184]  ; local buffer
-       0x40E717: PUSH 0x47E368         ; format string "%s\\%s.dat"
-       0x40E71C: PUSH EAX
-       0x40E71D: CALL 0x466D60         ; CRT_sprintf_buf
-
-       Then:
-       0x40E725: LEA ECX, [ESI+0x48]   ; this->bmpPath at +0x48
-       0x40E728: PUSH EDI              ; nameParam
-       0x40E729: PUSH 0x4A99C8         ; g_install_path
-       0x40E72E: PUSH 0x47E35C         ; format string "%s\\%s.bmp"
-       0x40E733: PUSH ECX
-       0x40E734: CALL 0x466D60         ; CRT_sprintf_buf
-    */
-
-    /* So: sprintf(fullDatPath, "%s\\%s.dat", install_path, nameParam) */
-    /*     sprintf(this->bmpPath, "%s\\%s.bmp", install_path, nameParam) */
-    /* where nameParam is actually treated as a string pointer! */
+    /* nameParam is passed as int32_t but is actually a string pointer */
     const char* cursorName = reinterpret_cast<const char*>(
         static_cast<uintptr_t>(static_cast<uint32_t>(nameParam)));
-    CRT_sprintf_buf(fullDatPath, "%s\\%s.dat", g_install_path, cursorName);
-    CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, cursorName);
+
+    /* Build file paths */
+    char datPath[264];   /* local buffer for .dat path */
+
+    /* Build: "%s\\<name>.dat" and "%s\\<name>.bmp" */
+    CRT_sprintf_buf(datPath, "%s\\%s.dat", g_install_path, cursorName);
+    CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, cursorName);  /* +0x48 */
 
     /* --- Attempt 1: Load from AssetMgr (game archive) --- */
-    if (g_asset_mgr != NULL) {
-        char shortPath[264];  /* local_21c on stack */
+    if (g_asset_mgr != nullptr) {
+        char shortPath[264];  /* local buffer for just "<name>.dat" */
         CRT_sprintf_buf(shortPath, "%s.dat", cursorName);
 
         pLoadedData = AssetMgr_LoadFile(&g_asset_mgr, shortPath, &dataSize);
-        if (pLoadedData != NULL) {
+        if (pLoadedData != nullptr) {
             /* Create memory stream from loaded data */
-            char streamObj[0x5C];  /* on stack */
-            int* streamResult = NULL;
-
-            /* Allocate stream */
             void* streamAlloc = operator_new(0x5C);
-            if (streamAlloc != NULL) {
-                streamResult = WNDPROC_StreamFromMemory(
+            if (streamAlloc != nullptr) {
+                int* streamResult = WNDPROC_StreamFromMemory(
                     streamAlloc, reinterpret_cast<const char*>(pLoadedData),
                     dataSize, 1);
-            }
 
-            if (streamResult != NULL) {
-                /* Call loadCursorData to process data from stream */
-                this->loaded = this->loadCursorData(streamResult);
+                if (streamResult != nullptr) {
+                    /* Call Render() (virtual dispatch to slot[3], this class or base) */
+                    this->loaded = this->Render(streamResult);
 
-                if (this->loaded != 0) {
-                    /* Render the loaded cursor */
-                    byte renderResult = UI_ChildWindow_Render(this, streamResult);
-                    this->loaded = (renderResult != 0) ? 1 : 0;
+                    if (this->loaded != 0) {
+                        /* Call base ChildWindow::Render() directly (0x424E00) */
+                        uint8_t baseRenderResult = ChildWindow::Render(streamResult);
+                        this->loaded = (baseRenderResult != 0) ? 1 : 0;
+                    }
+
+                    /* Destroy the memory stream via its vtable[0] */
+                    destroy_memory_stream(streamResult);
                 }
-
-                /* Close/destroy the stream via vtable[0] with flags=1 */
-                destroy_memory_stream(streamResult);
             }
 
             /* Free the asset manager data */
@@ -247,60 +278,63 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     /* --- Attempt 2: Fall back to direct file open --- */
     if (this->loaded == 0) {
         WIN32_StreamOpenPath(
-            localStream, fullDatPath, 0x20,
+            &localStream[0], datPath, 0x20,
             *reinterpret_cast<const int*>(static_cast<uintptr_t>(0x479190)));
 
-        /* Check if file is open by validating stream data */
+        /* Check if file is open by validating stream data pointer */
         const int* stream_vtable;
-        std::memcpy(&stream_vtable, localStream, sizeof(stream_vtable));
+        std::memcpy(&stream_vtable, &localStream[0], sizeof(stream_vtable));
         int vt4 = stream_vtable[4];
-        const auto* stream_bytes = reinterpret_cast<const uint8_t*>(localStream);
+        const auto* stream_bytes = reinterpret_cast<const uint8_t*>(&localStream[0]);
         int offset_xx = *reinterpret_cast<const int*>(stream_bytes + vt4 + 0x4C);
         if (offset_xx != -1) {   /* valid file handle */
-            /* Call loadCursorData to process data from the file stream */
-            this->loaded = this->loadCursorData(localStream);
+            /* Call Render() to process data from the file stream */
+            this->loaded = this->Render(&localStream[0]);
 
             if (this->loaded != 0) {
-                byte renderResult = UI_ChildWindow_Render(this, localStream);
-                this->loaded = (renderResult != 0) ? 1 : 0;
+                uint8_t baseRenderResult = ChildWindow::Render(&localStream[0]);
+                this->loaded = (baseRenderResult != 0) ? 1 : 0;
             }
 
-            WIN32_StreamDestroyImmediate(localStream);
+            WIN32_StreamDestroyImmediate(&localStream[0]);
         }
     }
 
     /* Clean up local stream */
-    WIN32_StreamDestroy(static_cast<void*>(localStream + 2));
-    WNDPROC_StreamCleanup(static_cast<void*>(localStream + 2));
+    WIN32_StreamDestroy(&localStream[2]);
+    WNDPROC_StreamCleanup(&localStream[2]);
 }
 
 /* ================================================================== */
 /* CursorEditWindow::cleanup                                           */
 /* Address: 0x40E8B0                                                   */
 /*                                                                      */
-/* Destroys the stream at +0x0C and cleans up the WNDPROC stream       */
-/* state. Called externally to release stream resources without         */
-/* full destruction.                                                    */
+/* Destroys the stream at +0x0C (inherited streamData) and cleans up   */
+/* the WNDPROC stream state. Called externally to release stream       */
+/* resources without destroying the entire window.                     */
 /* ================================================================== */
 void CursorEditWindow::cleanup()
 {
-    void* stream = reinterpret_cast<uint8_t*>(this) + 0x0C;
-    WIN32_StreamDestroy(stream);
-    WNDPROC_StreamCleanup(stream);
+    /* Binary: LEA ESI, [ECX + 0x0C]; CALL WIN32_StreamDestroy(ESI)
+       Equivalent: pass address of streamData field (inherited at +0x0C)
+       to the stream cleanup functions. */
+    void* streamFieldAddr = reinterpret_cast<void*>(&this->streamData);
+    WIN32_StreamDestroy(streamFieldAddr);
+    WNDPROC_StreamCleanup(streamFieldAddr);
 }
 
 /* ================================================================== */
-/* CursorEditWindow::loadCursorData (vtable[3])                        */
-/* Address: (virtual — dispatched through vtable slot [3])            */
+/* CursorEditWindow_Ctor — Bridge Constructor (C linkage)              */
+/* Address: 0x40E600 (exported C function for compatibility)           */
 /*                                                                      */
-/* Processes cursor data from a stream. The actual implementation is    */
-/* inherited from ChildWindow or overridden. This entry exists to       */
-/* document the virtual dispatch signature.                            */
+/* Bridges from ResourceManager's C-style allocation (operator_new)    */
+/* to C++ placement-new constructor.                                   */
 /* ================================================================== */
-byte CursorEditWindow::loadCursorData(void* stream)
+extern "C"
+void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr)
 {
-    /* Implementation varies by class. For ChildWindow base, this is
-       the default load handler. For CursorEditWindow, it may parse
-       cursor-specific data from the loaded .dat file. */
-    return 0;
+    if (memory == nullptr) {
+        return nullptr;
+    }
+    return new (memory) CursorEditWindow(static_cast<uint32_t>(resId), strPtr);
 }

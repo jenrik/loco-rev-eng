@@ -4,9 +4,9 @@
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
+ *
+ * Status: INTEGRATED
  */
-
-// Status: TRANSCRIBED
 
 #include "BuildingDescriptorEditor.h"
 
@@ -21,14 +21,6 @@ extern void GLOBAL_free(void* ptr);                     /* 0x465CD0 */
 
 /* GetResourceType also has plain C++ linkage (resources/ResourceManager.h). */
 #include "../resources/ResourceManager.h"
-
-/* UI_CreateChildWindow/UI_ChildWindow_Dtor/UI_ChildWindow_Render — the
- * canonical declarations now live in ui/UI_ChildWindow.h (a separate,
- * independently-verified pass this same session concluded the same thing
- * this class's header documents: no real C++ inheritance, free functions
- * shared by composition). Included rather than re-declared locally to
- * avoid a second, possibly-drifting declaration of the same symbols. */
-#include "../ui/UI_ChildWindow.h"
 
 /* ================================================================== */
 /* External helpers (extern "C" — original Win32/CRT/internal ABI)     */
@@ -54,13 +46,13 @@ extern "C" {
     void* WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
 
     /* .dat directive-line scanning primitives. These are callees of
-     * parse_dat_directive_line/draw_border_grid/paint_edit_regions/
-     * edit_key_handler_parse — not part of this pass's assigned function
-     * list. Their exact identity (return semantics, real names) is NOT
-     * resolved here; signatures match the decompiler's own inferred call
-     * shape exactly (chained pointer return = an advancing stream/token
-     * cursor). TODO: decompile these directly in a follow-up pass instead
-     * of trusting the inferred shape below. */
+     * Render/draw_border_grid/paint_edit_regions/edit_key_handler_parse —
+     * not part of this pass's assigned function list. Their exact identity
+     * (return semantics, real names) is NOT resolved here; signatures match
+     * the decompiler's own inferred call shape exactly (chained pointer
+     * return = an advancing stream/token cursor). TODO: decompile these
+     * directly in a follow-up pass instead of trusting the inferred shape
+     * below. */
     void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
     void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
     void* WNDPROC_StreamWrite(void* stream, void* outBuf);
@@ -104,9 +96,8 @@ static const char s_TotalVisits[]        = "TotalVisits";          /* 0x0047E504
 /* Address: 0x41E570 (Ghidra label "INPUT_ExitGame" — misnomer)         */
 /* ================================================================== */
 BuildingDescriptorEditor::BuildingDescriptorEditor(uint32_t resId, int32_t nameParam)
+    : ChildWindow(resId, 0)
 {
-    UI_CreateChildWindow(this, resId, 0);
-
     TrackPos_Init(&this->track_pos_a);
     TrackPos_Init(&this->track_pos_b);
 
@@ -143,7 +134,8 @@ BuildingDescriptorEditor::~BuildingDescriptorEditor()
     TrackPos_BaseInit(&this->track_pos_a);
     TrackPos_BaseInit(&this->track_pos_b);
 
-    UI_ChildWindow_Dtor(this);
+    /* Base class ~ChildWindow() runs automatically via compiler-generated
+     * destructor chain; no manual call needed. */
 }
 
 /* ================================================================== */
@@ -175,7 +167,7 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
 
     SetRectEmpty(&this->free_to_roam_rect);
     this->leisure_destination = 0;
-    this->loaded_flag = 0;
+    this->loaded = 0;  /* +0x162 — inherited from ChildWindow */
 
     if (nameParam == 0) {
         return;
@@ -184,9 +176,9 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
     /* The original builds "%s%s.dat" / "%s%s.bmp" paths from the
      * install path and the resource-name string, tries the AssetMgr
      * archive first, then falls back to WIN32_StreamOpenPath. Both
-     * paths dispatch through vtable slot [3] (parse_dat_directive_line)
-     * and then UI_ChildWindow_Render. This host reconstruction preserves
-     * that two-path structure faithfully; the exact sprintf/path-buffer
+     * paths dispatch through Render (vtable slot [3]) and then
+     * ChildWindow::Render. This host reconstruction preserves that
+     * two-path structure faithfully; the exact sprintf/path-buffer
      * plumbing (CRT_sprintf_buf's chained-call shape) is not
      * independently re-verified in this pass beyond matching the
      * decompiled call sequence.
@@ -215,13 +207,16 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
                 int* stream = reinterpret_cast<int*>(
                     WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<const char*>(fileData), fileSize, 1));
                 if (stream != nullptr) {
-                    bool ok = parse_dat_directive_line(stream);
-                    this->loaded_flag = ok ? 1 : 0;
+                    uint8_t ok = this->Render(stream);  /* Virtual call — derived override */
+                    this->loaded = ok;
                     if (ok) {
-                        bool rendered = UI_ChildWindow_Render(this, stream) != 0;
-                        this->loaded_flag = rendered ? 1 : 0;
+                        /* Call base class Render (0x424E00) using qualified call
+                         * to avoid infinite recursion through the virtual method.
+                         * Note: on host build, this will assert (see UI_ChildWindow.cpp:292). */
+                        uint8_t rendered = this->ChildWindow::Render(stream);
+                        this->loaded = rendered;
                     }
-                    loadedFromArchive = (this->loaded_flag != 0);
+                    loadedFromArchive = (this->loaded != 0);
                     /* Original tail dispatches the stream's own scalar deleting
                      * destructor (vtable[0](1)) here; not reproduced with a raw
                      * vtable call per project policy — the stream is a
@@ -236,26 +231,26 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
     if (!loadedFromArchive) {
         int streamHandle[2];
         WIN32_StreamOpenPath(streamHandle, datPath, 0x20, 0 /* DAT_00479190 */);
-        bool ok = parse_dat_directive_line(streamHandle);
-        this->loaded_flag = ok ? 1 : 0;
+        uint8_t ok = this->Render(streamHandle);  /* Virtual call — derived override */
+        this->loaded = ok;
         if (ok) {
-            bool rendered = UI_ChildWindow_Render(this, streamHandle) != 0;
-            this->loaded_flag = rendered ? 1 : 0;
+            uint8_t rendered = this->ChildWindow::Render(streamHandle);
+            this->loaded = rendered;
         }
         WIN32_StreamDestroyImmediate(streamHandle);
     }
 
     /* If neither default edit-origin field was set by the .dat, derive a
      * default from the parsed occupancy dimensions (disassembly-evidenced,
-     * see the field comment on edit_origin_x/edit_origin_y above). */
-    if (this->edit_origin_x == 0 && this->edit_origin_y == 0) {
-        this->edit_origin_x = static_cast<int16_t>((this->bitmap_occupancy_width >> 1) << 4);
-        this->edit_origin_y = static_cast<int16_t>(this->bitmap_occupancy_height * 0x10 - 0x10);
+     * see the field comment on roadOffsetX/roadOffsetY in ChildWindow.h). */
+    if (this->roadOffsetX == 0 && this->roadOffsetY == 0) {
+        this->roadOffsetX = static_cast<int16_t>((this->bitmap_occupancy_width >> 1) << 4);
+        this->roadOffsetY = static_cast<int16_t>(this->bitmap_occupancy_height * 0x10 - 0x10);
     }
 }
 
 /* ================================================================== */
-/* parse_dat_directive_line — vtable slot [3]                          */
+/* Render — vtable slot [3]                                            */
 /* Address: 0x41E9F0 (Ghidra label "INPUT_EditWndProc")                 */
 /*                                                                      */
 /* Preserves the exact cascading keyword-check control flow from the   */
@@ -287,7 +282,7 @@ bool dat_stream_state_ok(void* stream)
 
 } // namespace
 
-bool BuildingDescriptorEditor::parse_dat_directive_line(void* stream)
+uint8_t BuildingDescriptorEditor::Render(void* stream)
 {
     bool keepProcessing = true;
     int minifigsFound = 0;
@@ -394,7 +389,11 @@ bool BuildingDescriptorEditor::parse_dat_directive_line(void* stream)
         } else if (CRT_wcsstr(lineBuf, s_ButtonVisible) == nullptr) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
-            this->button_visible = static_cast<uint8_t>(v);
+            /* ButtonVisible writes to the same offset ChildWindow's `ready`
+             * flag occupies (+0x163) — this class has no separate field for
+             * it; the .dat directive and the inherited flag are the same
+             * storage. */
+            this->ready = static_cast<uint8_t>(v);
         } else if (CRT_wcsstr(lineBuf, s_InsertSeq) == nullptr) {
             edit_key_handler_parse(stream, &this->insert_seq);
         } else if (CRT_wcsstr(lineBuf, s_MobileSeq) == nullptr) {
@@ -420,7 +419,7 @@ bool BuildingDescriptorEditor::parse_dat_directive_line(void* stream)
         this->ee_replay_delay = 0;
     }
 
-    return keepProcessing;
+    return keepProcessing ? 1 : 0;
 }
 
 /* ================================================================== */

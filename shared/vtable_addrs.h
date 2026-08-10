@@ -512,14 +512,75 @@
     operate on the TileMap global struct despite "Sprite" naming.       */
 
 /* ================================================================== */
-/* ChildWindow — Generic child window widget                            */
+/* ChildWindow — Root base class (no parent) for resource-loading child */
+/* windows. Confirmed real single inheritance (not a field-layout        */
+/* convention — see ui/UI_ChildWindow.h's evidence trail) via vtable-    */
+/* patch-after-base-ctor disassembly, matching object sizes, and         */
+/* standalone (unpatched) instantiation at 9 sites in                    */
+/* ResourceManager::AddString.                                           */
 /* ================================================================== */
-#define VTBL_CHILD_WINDOW              0x00477C18  /* ChildWindow vtable          */
+#define VTBL_CHILD_WINDOW              0x00477C18  /* ChildWindow vtable, 6 slots (24 bytes)
+    [0] +0x00: ~ChildWindow (scalar-deleting-dtor thunk 0x424B40; real body 0x424BA0)
+    [1] +0x04: OnMouseMove   (0x425670, Ghidra label "UI_PaintWindow")
+    [2] +0x08: OnMouseLeave  (0x4257F0)
+    [3] +0x0C: Render        (0x424E00 — TODO: decompile, deferred; blocked on
+                               unresolved WNDPROC_Stream* signatures)
+    [4] +0x10: constructor init body (0x424BF0, Ghidra label "UI_ChildWindow_Create")
+               — NOT a runtime-dispatched slot; folded into ChildWindow's own
+               constructor. Reachable via vtable dispatch during base
+               construction only (a virtual Render call inside it resolves to
+               the base's own Render at that point, since the derived vtable
+               isn't installed yet — normal C++ semantics).
+    [5] +0x14: reserved/NULL (confirmed empty in this table and in all three
+               known derived tables below)
+    IsBitmapReady (0x4255F0) is NOT in this vtable — non-virtual member.     */
 
 /* ================================================================== */
-/* CursorEditWindow — In-game cursor-connected edit window              */
+/* CursorEditWindow : public ChildWindow — cursor .dat/.bmp loader       */
 /* ================================================================== */
-#define VTBL_CURSOREDITWINDOW          0x00477610  /* CursorEditWindow vtable     */
+#define VTBL_CURSOREDITWINDOW          0x00477610  /* CursorEditWindow vtable, size 0x7AC
+    [0] +0x00: ~CursorEditWindow (own scalar-deleting-dtor, 0x40E660)
+    [1] +0x04: OnMouseMove   (0x425670 — INHERITED verbatim from ChildWindow)
+    [2] +0x08: OnMouseLeave  (0x4257F0 — INHERITED verbatim from ChildWindow)
+    [3] +0x0C: Render        (0x40E8D0 — own override, decompiled)
+    [4] +0x10: init body     (0x40E690, "CursorEditWindow__init")
+    [5] +0x14: reserved/NULL                                                */
+
+/* ================================================================== */
+/* TrainStation : public ChildWindow — city-view station interaction obj */
+/* ================================================================== */
+#define VTBL_TRAIN_STATION              0x00478118  /* TrainStation vtable, size 0x178
+    [0] +0x00: ~TrainStation (own scalar-deleting-dtor, 0x436460; body 0x436480)
+    [1] +0x04: OnMouseMove   (0x436960 — own override, plays hover sound then
+                               chains to ChildWindow::OnMouseMove)
+    [2] +0x08: OnMouseLeave  (0x4369A0 — own override, releases hover sound then
+                               chains to ChildWindow::OnMouseLeave)
+    [3] +0x0C: Render        (0x436750 — own override, decompiled; parses
+                               "walk_speed"/"Employable"/"sex"/"groundwidth"/
+                               "SpawnLimit"/"PickUpSoundId" directives)
+    [4] +0x10: Init body     (0x436490, "TrainStation_Init")
+    [5] +0x14: reserved/NULL
+    Do not confuse with VTBL_TRAIN_STATION_WINDOW (0x478130) above — that is
+    a different, GameWindow-derived popup class showing animated train car
+    sprites, unrelated to this ChildWindow-derived view-level object.       */
+
+/* ================================================================== */
+/* BuildingDescriptorEditor : public ChildWindow — building/tile         */
+/* placement .dat descriptor loader (see input/BuildingDescriptorEditor.h */
+/* for the full name-evidence trail — no original symbol names it).      */
+/* ================================================================== */
+#define VTBL_BUILDING_DESCRIPTOR_EDITOR 0x004779E0  /* BuildingDescriptorEditor vtable, size 0x630
+    [0] +0x00: ~BuildingDescriptorEditor (own scalar-deleting-dtor, 0x41E600,
+                               Ghidra label "INPUT_DtorWrapper")
+    [1] +0x04: OnMouseMove   (0x425670 — INHERITED verbatim from ChildWindow,
+                               confirmed via direct vtable-slot check)
+    [2] +0x08: OnMouseLeave  (0x4257F0 — INHERITED verbatim from ChildWindow)
+    [3] +0x0C: Render        (0x41E9F0 — own override, Ghidra label
+                               "INPUT_EditWndProc"; a cascading .dat-directive
+                               keyword parser, substantially decompiled)
+    [4] +0x10: ctor body     (0x41E570, Ghidra label "INPUT_ExitGame" — a
+                               misnomer; this is the real constructor)
+    [5] +0x14: reserved/NULL                                                */
 
 /* ================================================================== */
 /* UI Manager — UI component manager singleton                           */

@@ -4,186 +4,339 @@
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * TrainStation is the city-view train station interaction object,
- * extending UI_ChildWindow. Handles mouse events (hover sound via string
- * resource ID at +0x174), sprite/resource loading, and road connection
- * configuration.
- *
- * DIFFERENT from TrainStationWindow (vtable 0x478130), which is the
- * UI popup window showing animated train car sprites.
+ * Conversion from C struct with free functions to C++ derived class.
+ * Implements real constructors, destructors, and virtual methods
+ * that delegate to the original function bodies.
  */
 
-// Status: TRANSCRIBED
-
 #include "TrainStation.h"
-#include "../ui/UI_ChildWindow.h"
-/* vtable_addrs.h removed — compiler manages vtables via virtual methods */
-/* ================================================================== */
-/* External functions and globals                                      */
-/* ================================================================== */
+#include <cassert>
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <new>
 
-void*  __cdecl operator_new(size_t size);       /* 0x465CE0 */
-void   __cdecl GLOBAL_free(void* ptr);          /* 0x465CD0 */
+/* ================================================================== */
+/* External references (original C functions and globals)             */
+/* ================================================================== */
 
 extern "C" {
 
 /* Memory management */
-void   __cdecl CRT_free(void* ptr);             /* 0x465CD0 alias */
-void   __cdecl CRT_sprintf_buf(void* buf, const char* fmt); /* va_list wrapper */
+void* __cdecl operator_new(size_t size);               /* 0x465CE0 */
+void  __cdecl GLOBAL_free(void* ptr);                  /* 0x465CD0 */
+void  __cdecl CRT_free(void* ptr);                     /* 0x466C70 */
 
 /* Resource Manager */
-void*  __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id); /* 0x4472B0 */
-int    __thiscall RESMGR_LoadSoundResource(void* res_handle);            /* 0x448D60 */
-void   __thiscall RESMGR_ReleaseSoundResource(void* res_handle);         /* 0x448EE0 */
+void* __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id);
+int   __thiscall RESMGR_LoadSoundResource(void* res_handle);
+void  __thiscall RESMGR_ReleaseSoundResource(void* res_handle);
 
 /* Win32 stream helpers */
-int    __fastcall WIN32_StreamOpen(int* stream, int mode);                    /* 0x461nnn */
-int    __fastcall WIN32_StreamOpenPath(int* stream, char* path,
-                                        int mode, int flags);                 /* 0x461nnn */
-void   __fastcall WIN32_StreamDestroy(int* stream);                           /* 0x461nnn */
-void   __fastcall WIN32_StreamDestroyImmediate(int* stream);                  /* 0x461nnn */
-void*  __thiscall WNDPROC_StreamFromMemory(void* stream, char* data,
-                                             int size, int mode);             /* 0x47nnnn */
-void   __fastcall WNDPROC_StreamCleanup(void* stream);                        /* 0x47nnnn */
+int   __fastcall WIN32_StreamOpen(int* stream, int mode);
+int   __fastcall WIN32_StreamOpenPath(int* stream, char* path, int mode, int flags);
+void  __fastcall WIN32_StreamDestroy(int* stream);
+void  __fastcall WIN32_StreamDestroyImmediate(int* stream);
+void* __thiscall WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
+void  __fastcall WNDPROC_StreamCleanup(void* stream);
 
 /* Asset manager */
-void*  __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path,
-                                      int* out_size);                         /* 0x45CD00 */
+void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
 
-} /* extern "C" */
+/* Format string construction (sprintf wrapper) */
+void __cdecl sprintf_wrapper(char* buffer, const char* format, ...);  /* 0x466D60 */
 
+/* Used only by TrainStation::Render (0x436750) below — matches
+ * input/BuildingDescriptorEditor.cpp's existing declarations for these
+ * same real symbols (extern "C" linkage there too). */
+void* CRT_wcsstr(const void* haystack, const void* needle);
+void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
+void* WNDPROC_StreamWrite(void* stream, void* outBuf);
+
+}  // extern "C"
+
+/* WNDPROC_CriticalSectionLock has C++ mangled linkage in this tree (matches
+ * input/BuildingDescriptorEditor.cpp's declaration of the same real symbol,
+ * _Z27WNDPROC_CriticalSectionLockPiPc) — declared outside extern "C". */
+extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 
 /* ================================================================== */
-/* Global variables                                                     */
+/* Global variables referenced                                        */
 /* ================================================================== */
 
-extern void*  g_resmgr;              /* 0x4855E8 */
-extern void*  g_asset_mgr;           /* 0x485600 */
-extern int    g_exception_state;     /* SEH global */
+extern void* g_resmgr;                              /* 0x4855E8 */
+extern void* g_asset_mgr;                           /* 0x485600 */
+extern char g_install_path[];                       /* 0x4A99C8 — install directory path */
 
+/* Directive-keyword string literals used only by TrainStation::Render
+ * (0x436750) below — read directly from the binary's .rdata this session
+ * via Ghidra's read_bytes, not guessed. */
+static const char s_walk_speed[]    = "walk_speed";     /* 0x47E990 */
+static const char s_Employable[]    = "Employable";     /* 0x47E984 */
+static const char s_sex[]           = "sex";             /* 0x47E980 */
+static const char s_groundwidth[]   = "groundwidth";    /* 0x47E974 */
+static const char s_SpawnLimit[]    = "SpawnLimit";     /* 0x47E968 */
+static const char s_PickUpSoundId[] = "PickUpSoundId";  /* 0x47E958 */
+
+/* Section-terminator sentinel string ("-9") tested via CRT_wcsstr against
+ * each read line — matches DAT_0047e3cc's real bytes, read via read_bytes
+ * this session (earlier files' "&DAT_..." usage of this exact address
+ * speculated it was an empty marker string; it is not). */
+static const char s_terminator[] = "-9";  /* 0x47E3CC */
+extern void* g_resource_dir_path;                   /* 0x479190 — resource directory path pointer */
 
 /* ================================================================== */
-/* TrainStation_Ctor — Constructor                                     */
-/* Address: 0x436400                                                    */
-/* Size: 98 bytes (24 instructions)                                     */
-/* Calling convention: __thiscall (ECX = this, 2 stack args), RET 0x8  */
+/* TrainStation::TrainStation — Constructor                           */
+/* Address: 0x436400                                                   */
+/* Size: 98 bytes (24 instructions)                                    */
 /*                                                                     */
-/* Standard MSVC SEH-guarded constructor:                               */
-/*   1. Calls UI_CreateChildWindow(this, param1, 0) for base init.     */
-/*   2. Overrides vtable to VTBL_TRAIN_STATION_VIEW (0x478118).        */
-/*   3. Calls TrainStation_Init(this, param1, param2).                 */
-/*                                                                     */
-/* Called by: CGWND init path during station creation.                 */
+/* Initializes base class (ChildWindow), then calls Init for           */
+/* TrainStation-specific setup (sprite/resource loading and config).  */
 /* ================================================================== */
-void* __thiscall
-TrainStation_Ctor(TrainStation* window, int32_t param1, int32_t param2)
+TrainStation::TrainStation(uint32_t resourceId, int32_t param2)
+    : ChildWindow(resourceId, 0)  /* Base ctor with nameParam=0 */
 {
-    /* SEH prologue */
-
-    /* Step 1: Create base child window */
-    UI_CreateChildWindow(window, param1, 0);  /* 0x425nnn */
-
-    /* Step 2: The binary installs the TrainStation dispatch table here;
-     * natural C++ makes that compiler-managed. */
-
-    /* Step 3: Initialize train-station-specific configuration */
-    TrainStation_Init(window, param1, param2);  /* 0x436490 */
-
-    /* SEH epilogue */
-    return window;
+    /* SEH is compiler-managed in real C++ */
+    Init(resourceId, param2);
 }
 
-
 /* ================================================================== */
-/* TrainStation_Dtor — Scalar deleting destructor (vtable[0])          */
-/* Address: 0x436460                                                    */
-/* Size: 30 bytes (11 instructions)                                     */
-/* Calling convention: __thiscall (ECX = this, 1 byte arg), RET 0x4   */
+/* TrainStation::~TrainStation — Virtual destructor                   */
+/* Address: 0x436460 (scalar-deleting-destructor entry point)         */
+/* Body: 0x436480 (base-dtor, delegates to base class dtor)           */
 /*                                                                     */
-/* Standard MSVC scalar-deleting destructor pattern:                    */
-/*   1. Call TrainStation_BaseDtor for cleanup.                         */
-/*   2. If (flags & 1): free memory via GLOBAL_free(this).             */
-/*   3. Return this.                                                    */
+/* Compiler-managed: ~ChildWindow() handles inherited cleanup         */
+/* (renderSurface, heapBuffer, etc.). Scalar-deleting-destructor       */
+/* calling convention and vtable restore at 0x436480 are compiler     */
+/* artifacts.                                                          */
 /* ================================================================== */
-void* __thiscall
-TrainStation_Dtor(TrainStation* window, byte flags)
-{
-    /* Step 1: Base destructor for real cleanup */
-    TrainStation_BaseDtor(window);  /* 0x436480 */
+TrainStation::~TrainStation() = default;
 
-    /* Step 2: Conditionally free memory */
-    if (flags & 1) {
-        GLOBAL_free(window);
+/* ================================================================== */
+/* TrainStation::OnMouseMove — Handle mouse motion (vtable[1])        */
+/* Address: 0x436960                                                   */
+/* Size: 52 bytes (18 instructions)                                    */
+/* Calling convention: __thiscall (ECX = this), RET 0x8               */
+/*                                                                     */
+/* Reads sound_string_id (+0x174). If non-zero, loads hover sound     */
+/* via ResourceManager and RESMGR_LoadSoundResource. Then chains      */
+/* to base class OnMouseMove for standard UI processing.              */
+/*                                                                     */
+/* NOTE: sound_string_id is initialized to 0 in Init, so the sound    */
+/* load is a no-op unless set externally. The sex_code field          */
+/* (+0x170, set to 'M'=0x4D by default) is never read by this or any  */
+/* known function. */
+/* ================================================================== */
+void* TrainStation::OnMouseMove(int32_t x, int32_t y)
+{
+    /* Load and play the hover sound if a string resource is configured */
+    if (this->sound_string_id != 0) {                   /* +0x174 */
+        void* res_handle = ResourceManager_GetStringById(
+            &g_resmgr, this->sound_string_id);
+        if (res_handle != nullptr) {
+            RESMGR_LoadSoundResource(res_handle);
+        }
     }
 
-    return window;
+    /* Standard mouse-move processing (renders/refreshes the UI surface) */
+    return ChildWindow::OnMouseMove(x, y);
 }
 
-
 /* ================================================================== */
-/* TrainStation_BaseDtor — Base destructor body                        */
-/* Address: 0x436480                                                    */
-/* Size: 11 bytes                                                       */
-/* Calling convention: __fastcall (ECX = this), RET                    */
+/* TrainStation::OnMouseLeave — Handle mouse leaving (vtable[2])      */
+/* Address: 0x4369A0                                                   */
+/* Size: 40 bytes (14 instructions)                                    */
+/* Calling convention: __fastcall (ECX = this), RET                   */
 /*                                                                     */
-/* Restores the vtable defensively, then tail-calls UI_ChildWindow_Dtor*/
-/* for inherited cleanup.                                               */
+/* Reads sound_string_id (+0x174). If non-zero, releases hover sound  */
+/* via ResourceManager and RESMGR_ReleaseSoundResource. Then chains   */
+/* to base class OnMouseLeave for inherited cleanup.                  */
+/*                                                                     */
+/* NOTE: Same caveat as OnMouseMove — sound_string_id is initialized  */
+/* to 0, making this a no-op unless set externally.                   */
 /* ================================================================== */
-void __fastcall
-TrainStation_BaseDtor(TrainStation* window)
+void TrainStation::OnMouseLeave()
 {
-    /* The binary restores the TrainStation dispatch table defensively for
-     * partial destruction; natural C++ makes that compiler-managed. */
+    /* Release the hover sound if a string resource is configured */
+    if (this->sound_string_id != 0) {                   /* +0x174 */
+        void* res_handle = ResourceManager_GetStringById(
+            &g_resmgr, this->sound_string_id);
+        if (res_handle != nullptr) {
+            RESMGR_ReleaseSoundResource(res_handle);
+        }
+    }
 
-    /* Delegate to UI_ChildWindow base destructor for inherited cleanup */
-    UI_ChildWindow_Dtor(window);  /* 0x424nnn */
+    /* Standard mouse-leave processing */
+    ChildWindow::OnMouseLeave();
 }
 
+namespace {
+
+/* Stream-state bit tests used by TrainStation::Render below. Same raw
+ * `*(byte*)(*(int*)(*stream+4) + 8 + (int)stream)` idiom already used by
+ * input/BuildingDescriptorEditor.cpp's dat_stream_state_ok() helper — an
+ * internal WNDPROC_Stream-hierarchy detail not yet reconstructed with a
+ * typed accessor (see resources/WndProcStreamBuf.h). TrainStation::Render
+ * tests two distinct bits of this same flags byte (bit 0x4 = stream error,
+ * bit 0x1 = stream ended), unlike BuildingDescriptorEditor's single-bit
+ * (0x7) check — both preserved verbatim from their own disassembly rather
+ * than assumed to match.
+ * TODO: replace with a typed accessor once that reconstruction extends to
+ * this slot. */
+uint8_t trainstation_stream_flags(void* stream)
+{
+    int32_t vtable = *reinterpret_cast<int32_t*>(stream);
+    int32_t slot1  = *reinterpret_cast<int32_t*>(static_cast<intptr_t>(vtable) + 4);
+    return *reinterpret_cast<uint8_t*>(
+        static_cast<intptr_t>(slot1) + 8 + reinterpret_cast<intptr_t>(stream));
+}
+
+} // namespace
 
 /* ================================================================== */
-/* TrainStation_Init — Initialize train station with sprites and config*/
-/* Address: 0x436490                                                    */
-/* Size: 717 bytes (207 instructions)                                   */
-/* Calling convention: __thiscall (ECX = this, 2 stack args), RET 0x8  */
+/* TrainStation::Render — Parse stream for TrainStation config        */
+/* Address: 0x436750 (vtable slot [3])                                */
+/* Size: 513 bytes (150 x86 instructions)                              */
+/* Calling convention: __thiscall (ECX = this), RET 4                 */
 /*                                                                     */
-/* Comprehensive initialization:                                        */
-/*   1. Open Win32 stream for resource loading.                         */
-/*   2. Initialize all TrainStation-specific fields to defaults.        */
-/*   3. If param2 == 0: clean up and return immediately.               */
-/*   4. If param2 != 0:                                                */
-/*      - Construct .dat/.bmp filenames and load resources.            */
-/*      - Load and render the sprite data window.                      */
-/*      - Adjust road connection offsets and animation frame indices.   */
-/*      - Set default vertical road offset if both offsets are zero.   */
-/*   5. Clean up stream and return.                                    */
+/* TrainStation's OWN override — a distinct function from              */
+/* ChildWindow::Render (0x424E00), not a delegation to it. Ghidra's    */
+/* auto-analysis never followed the vtable pointer here, so this       */
+/* function had no defined bounds until decompiled directly for this   */
+/* pass (create_function + decompile_function against 0x436750).      */
+/*                                                                     */
+/* Reads directive lines via WNDPROC_CriticalSectionLock until a       */
+/* terminator line is hit (same CRT_wcsstr(line, sentinel) idiom as    */
+/* the sibling ChildWindow-family parsers — a MATCH is a NULL return,  */
+/* per the inverted-return convention documented in                    */
+/* input/BuildingDescriptorEditor.cpp). Recognized directives:         */
+/* "walk_speed" (two values -> field_168/field_169), "Employable"      */
+/* (-> removable_flag), "sex" (first char, uppercased, 'M' else 'F'    */
+/* -> sex_code), "groundwidth" (-> z_threshold), "SpawnLimit"          */
+/* (-> spawn_limit), "PickUpSoundId" (raw 4-byte stream write ->       */
+/* sound_string_id).                                                    */
+/*                                                                     */
+/* Returns 1 if the loop exited via a genuine terminator match, 0 if   */
+/* it exited early because the stream's "ended" bit (0x1) was set.     */
+/*                                                                     */
+/* Called by: TrainStation::Init, during sprite/config loading.        */
 /* ================================================================== */
-void __thiscall
-TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
+uint8_t TrainStation::Render(void* stream)
+{
+    char lineBuf[264];
+
+    /* Bit 0x4 = stream already in an error state; bail out immediately
+     * (matches the original's early-out — result stays 0). */
+    if ((trainstation_stream_flags(stream) & 0x4) != 0) {
+        return 0;
+    }
+
+    uint8_t result = 1;
+
+    WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+
+    /* Loop while NOT at the terminator line (CRT_wcsstr's inverted
+     * convention: 0/NULL == matched) and the stream's "ended" bit (0x1)
+     * is not set. */
+    while (CRT_wcsstr(lineBuf, s_terminator) != nullptr &&
+           (trainstation_stream_flags(stream) & 0x1) == 0) {
+        if (CRT_wcsstr(lineBuf, s_walk_speed) == nullptr) {
+            uint16_t v0 = 0, v1 = 0;
+            WNDPROC_StreamPrintf(stream, &v0);
+            this->field_168 = static_cast<uint8_t>(v0);
+            WNDPROC_StreamPrintf(stream, &v1);
+            this->field_169 = static_cast<uint8_t>(v1);
+        } else if (CRT_wcsstr(lineBuf, s_Employable) == nullptr) {
+            uint16_t v = 0;
+            WNDPROC_StreamPrintf(stream, &v);
+            this->removable_flag = static_cast<uint8_t>(v);
+        } else if (CRT_wcsstr(lineBuf, s_sex) == nullptr) {
+            /* Re-reads a line (matches the original: a second
+             * WNDPROC_CriticalSectionLock call here, distinct from the
+             * loop's own line reads), then takes just the first
+             * character. */
+            WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+            int upper = std::toupper(static_cast<unsigned char>(lineBuf[0]));
+            this->sex_code = (upper == 'M') ? 0x4D : 0x46;
+        } else if (CRT_wcsstr(lineBuf, s_groundwidth) == nullptr) {
+            uint16_t v = 0;
+            WNDPROC_StreamPrintf(stream, &v);
+            this->z_threshold = static_cast<uint8_t>(v);
+        } else if (CRT_wcsstr(lineBuf, s_SpawnLimit) == nullptr) {
+            uint16_t v = 0;
+            WNDPROC_StreamPrintf(stream, &v);
+            this->spawn_limit = static_cast<uint8_t>(v);
+        } else if (CRT_wcsstr(lineBuf, s_PickUpSoundId) == nullptr) {
+            WNDPROC_StreamWrite(stream, &this->sound_string_id);
+        }
+        /* No matching keyword: fall through and read the next line
+         * (matches the original — no "unknown keyword" terminator
+         * branch here, unlike BuildingDescriptorEditor::Render). */
+
+        WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+    }
+
+    /* If the final line read is NOT the terminator, the loop exited via
+     * the stream-ended bit rather than a genuine terminator match —
+     * mark as failure. */
+    if (CRT_wcsstr(lineBuf, s_terminator) != nullptr) {
+        result = 0;
+    }
+
+    return result;
+}
+
+/* ================================================================== */
+/* TrainStation::Init — Initialize train station with sprites/config  */
+/* Address: 0x436490                                                   */
+/* Size: 717 bytes (207 instructions)                                  */
+/* Calling convention: __thiscall (ECX = this, 1 stack arg), RET 0x8  */
+/*                                                                     */
+/* Comprehensive initialization:                                       */
+/*   1. Open Win32 stream for resource loading.                        */
+/*   2. Initialize all TrainStation-specific fields to defaults.       */
+/*   3. If param2 == 0: clean up stream and return immediately.       */
+/*   4. If param2 != 0:                                                */
+/*      a. Construct .dat/.bmp filenames via sprintf.                 */
+/*      b. Load .dat file via AssetMgr_LoadFile.                      */
+/*      c. Render via virtual Render method.                          */
+/*      d. Load .bmp file via WIN32_StreamOpenPath and render.        */
+/*      e. Reset road connection offsets for sub-window entries.       */
+/*      f. Adjust animation frame indices (frame ID = array index).   */
+/*      g. Set default road offset (Y=8) if both offsets are zero.    */
+/*   5. Clean up stream and return.                                   */
+/*                                                                     */
+/* NOTE: param1 (resourceId) is read in constructor but not used      */
+/* within Init itself; the actual sprite resources are driven by      */
+/* param2 (passed as format string argument to sprintf).              */
+/* ================================================================== */
+void TrainStation::Init(int32_t param1, int32_t param2)
 {
     int     stream_handle[2];       /* local stream handle pair */
     char    dat_filename[264];      /* .dat filename buffer */
-    char    bmp_filename[264];      /* .bmp filename buffer (also mapped to +0x48) */
+    char    bmp_filename[264];      /* .bmp filename buffer */
     int     file_size;
     void*   file_data;
     void*   mem_stream;
-    void*   render_result;
     int16_t sub_window_count;
     int16_t i;
 
-    /* SEH prologue */
+    /* SEH prologue (compiler-managed) */
 
     /* Step 1: Open Win32 stream */
     WIN32_StreamOpen(stream_handle, 1);  /* mode 1 = read */
 
     /* Step 2: Initialize all TrainStation-specific fields to defaults */
-    window->field_168       = 0;       /* +0x168 */
-    window->field_169       = 0;       /* +0x169 */
-    window->sound_string_id = 0;       /* +0x174 — default 0 = no-op for OnMouseMove/OnMouseLeave */
-    window->hover_sound_id  = 0x4D;    /* +0x170 — set to 'M'=77 but NEVER READ by known functions */
-    window->z_threshold     = 8;       /* +0x16A */
-    window->field_16B       = 0xFF;    /* +0x16B */
-    window->removable_flag  = 0;       /* +0x16C */
-    window->sprites_loaded  = 0;       /* +0x162 */
+    this->field_168       = 0;                          /* +0x168 */
+    this->field_169       = 0;                          /* +0x169 */
+    this->sound_string_id = 0;                          /* +0x174 */
+    this->sex_code        = 0x4D;                       /* +0x170 */
+    this->z_threshold     = 8;                          /* +0x16A */
+    this->spawn_limit     = 0xFF;                       /* +0x16B */
+    this->removable_flag  = 0;                          /* +0x16C */
+    this->loaded          = 0;                          /* +0x162 (inherited from ChildWindow) */
 
     /* Step 3: Early return if param2 is 0 (no sprite loading) */
     if (param2 == 0) {
@@ -192,197 +345,159 @@ TrainStation_Init(TrainStation* window, int32_t param1, int32_t param2)
         return;
     }
 
-    /* Step 4: Construct filenames for sprite resources */
-    /* The format string (at 0x47E368) is something like "%s_%s.dat" */
-    /* and (at 0x47E35C) "%s_%s.bmp", where %s comes from param info */
-    CRT_sprintf_buf(dat_filename, "%s_%s.dat");   /* 0x47E354 format */
-    CRT_sprintf_buf(bmp_filename, "%s_%s.bmp");   /* 0x47E35C format */
+    /* Step 4: Construct filenames and load sprite resources */
+    /* ======================================================
+     * Three sprintf calls build filenames for sprite/resource loading:
+     *
+     * 1. dat_filename (full path): "%s%s.dat" with g_install_path + resource name
+     * 2. bmpPath (full path): "%s%s.bmp" with g_install_path + resource name
+     * 3. short name: "%s.dat" with just resource name (for AssetMgr archive lookup)
+     *
+     * Addresses and format strings from Ghidra disassembly:
+     *   - 0x43653B: sprintf(dat_filename, "%s%s.dat", ...) @ 0x47E368
+     *   - 0x436552: sprintf(bmpPath, "%s%s.bmp", ...) @ 0x47E35C
+     *   - 0x43657A: sprintf(short_name, "%s.dat", ...) @ 0x47E354
+     *
+     * Arguments determined by disassembly analysis:
+     *   - g_install_path (0x4A99C8) = address of install directory path string
+     *   - param2 (via EDI) = resource name pointer (e.g., "trainsta" or similar)
+     * ==================================================== */
 
-    /* Copy bmp filename into window+0x48 buffer */
-    /* The buffer at +0x48 holds the .bmp filename for later use */
-    {
-        char* dst = reinterpret_cast<char*>(window) + 0x48;
-        const char* src = bmp_filename;
-        while (*src) { *dst++ = *src++; }
-        *dst = '\0';
-    }
+    /* First sprintf: build full .dat path (buffer at local [ESP+0x184]) */
+    sprintf_wrapper(dat_filename, "%s%s.dat", g_install_path,
+                    reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
 
-    /* Step 4a: Load .dat file via AssetMgr */
+    /* Second sprintf: build full .bmp path (buffer at this->bmpPath +0x48) */
+    sprintf_wrapper(this->bmpPath, "%s%s.bmp", g_install_path,
+                    reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
+
+    /* Third sprintf: build short .dat name for archive lookup (buffer at local [ESP+0x78]) */
+    char short_dat_name[264];  /* Local buffer for short filename */
+    sprintf_wrapper(short_dat_name, "%s.dat",
+                    reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
+
+    /* Step 4a: Load .dat file via AssetMgr (using short archive-relative name) */
     if (g_asset_mgr != nullptr) {
-        /* The .dat format string (at 0x47E354) is "%s.dat" */
-        char* dat_path = dat_filename;  /* already formatted */
-        file_data = AssetMgr_LoadFile(g_asset_mgr, dat_path, &file_size);
+        file_data = AssetMgr_LoadFile(&g_asset_mgr, short_dat_name, &file_size);
         if (file_data != nullptr) {
             /* Create sub-stream from the loaded data */
             mem_stream = operator_new(0x5C);  /* 92-byte stream object */
             if (mem_stream != nullptr) {
-                render_result = WNDPROC_StreamFromMemory(
+                void* render_stream = WNDPROC_StreamFromMemory(
                     mem_stream, static_cast<char*>(file_data), file_size, 1);
-            } else {
-                render_result = nullptr;
+
+                if (render_stream != nullptr) {
+                    /* Call virtual Render method */
+                    uint8_t render_ok = this->Render(render_stream);
+                    this->loaded = render_ok;                    /* 0x4365E0 */
+
+                    /* Release the memory stream */
+                    void** stream_vt = *reinterpret_cast<void***>(render_stream);
+                    using StreamDestructor = void (__thiscall*)(int);
+                    StreamDestructor destroy = reinterpret_cast<StreamDestructor>(stream_vt[0]);
+                    destroy(1);  /* dtor with free */
+                }
             }
 
-            if (render_result != nullptr) {
-                /* Named implementation of UI_ChildWindow's virtual render slot. */
-                uint8_t render_ok = static_cast<uint8_t>(
-                    UI_ChildWindow_Render(window, render_result));
-
-                window->sprites_loaded = render_ok;
-
-                /* Release the memory stream */
-                void** stream_vt = *reinterpret_cast<void***>(render_result);
-                using StreamDestructor = void (__thiscall*)(int);
-                StreamDestructor destroy = reinterpret_cast<StreamDestructor>(stream_vt[0]);
-                destroy(1);  /* dtor with free */
-            }
-
-            CRT_free(file_data);
+            CRT_free(file_data);  /* 0x466C70, not GLOBAL_free */
         }
     }
 
-    /* Step 4b: Load .bmp file via stream path */
+    /* Step 4b: Fall back to re-opening the .dat file from disk using full path
+       (address 0x436619: MOV EAX,[0x00479190] loads resource directory reference) */
     {
-        /* Format: "%s\0" concatenated with the .dat name as a path */
-        char* path_buffer = dat_filename;  /* re-use local buffer */
-        WIN32_StreamOpenPath(stream_handle, path_buffer, 0x20, 0x479190);
+        WIN32_StreamOpenPath(stream_handle, dat_filename, 0x20,
+                            static_cast<int>(reinterpret_cast<uintptr_t>(g_resource_dir_path)));
 
-        /* Check if stream has data (offset +0x4C in stream object) */
+        /* Check if stream has data (stream field at +0x4C) */
         const uint8_t* stream_bytes = reinterpret_cast<const uint8_t*>(stream_handle);
-        const int stream_data_offset = *reinterpret_cast<const int*>(
-            stream_bytes + stream_handle[1]);
-        int stream_data_available = *reinterpret_cast<const int*>(
-            reinterpret_cast<const uint8_t*>(
-                static_cast<uintptr_t>(static_cast<uint32_t>(stream_data_offset))) + 0x4C);
-        if (stream_data_available != -1) {
-            uint8_t render_ok = static_cast<uint8_t>(UI_ChildWindow_Render(
-                window, stream_handle));
+        const int* stream_offset = reinterpret_cast<const int*>(stream_bytes + 0x4C);
 
-            window->sprites_loaded = render_ok;
-            WIN32_StreamDestroyImmediate(stream_handle);
+        /* Guard: skip rendering if stream.offset == -1 */
+        if (*stream_offset != -1) {
+            /* Call virtual Render method */
+            uint8_t render_ok = this->Render(stream_handle);
+            this->loaded = render_ok;                    /* 0x4365E0 or 0x436653 */
+
+            /* If render succeeded, call base Render directly for additional processing */
+            if (render_ok != 0) {
+                uint8_t base_render_ok = ChildWindow::Render(stream_handle);
+                this->loaded = (base_render_ok != 0) ? 1 : 0;  /* 0x4365FD */
+            }
+
+            /* Clean up the stream */
+            void** stream_vt = *reinterpret_cast<void***>(stream_handle);
+            using StreamDestructor = void (__thiscall*)(int);
+            StreamDestructor destroy = reinterpret_cast<StreamDestructor>(stream_vt[0]);
+            destroy(1);  /* dtor with free */
         }
     }
 
     /* Step 4c: Reset road connection offsets for sub-window entries */
-    sub_window_count = *reinterpret_cast<const int16_t*>(
-        reinterpret_cast<const uint8_t*>(window) + 0x1A);
-    for (i = 0; i < sub_window_count; i++) {
-        if (i >= 4) break;  /* only process first 4 entries */
+    /* Loop: for i = 0; (uint16_t)subWindowCount > 0 && i < 4; ++i */
+    if (this->subWindowCount != 0) {                    /* +0x1A, unsigned compare */
+        for (i = 0; i < 4; ++i) {
+            if (this->heapBuffer == nullptr) {          /* +0x20 */
+                break;
+            }
 
-        /* Each sub-window entry is at [window+0x20+8 + n*0x18]:
-           +0x00..+0x07: header/type
-           +0x08: offset_x (int32) — clear when > 0 */
-        void* entry = *reinterpret_cast<void* const*>(
-            reinterpret_cast<const uint8_t*>(window) + 0x20);
-        if (entry == nullptr) break;
-
-        int* offset_x = reinterpret_cast<int*>(
-            static_cast<uint8_t*>(entry) + 8 + i * 0x18);
-        if (*offset_x > 0) {
-            *offset_x = 0;
-            window->sprites_loaded = 0;  /* re-mark as needing refresh */
+            int* offset_x = reinterpret_cast<int*>(
+                static_cast<uint8_t*>(this->heapBuffer) + 8 + i * 0x18);
+            if (*offset_x > 0) {
+                *offset_x = 0;
+                this->loaded = 0;                       /* 0x4366A4 */
+            }
         }
     }
 
     /* Step 4d: Adjust animation frame indices */
-    for (i = 0; i < sub_window_count; i++) {
-        if (i >= 8) break;  /* only process first 8 entries */
+    /* Loop: for i = 0; (uint16_t)subWindowCount > 0 && i < 8; ++i */
+    if (this->subWindowCount != 0) {                    /* +0x1A, unsigned compare */
+        for (i = 0; i < 8; ++i) {
+            if (this->heapBuffer == nullptr) {          /* +0x20, re-read each iteration */
+                break;
+            }
 
-        void* entry = *reinterpret_cast<void* const*>(
-            reinterpret_cast<const uint8_t*>(window) + 0x20);
-        if (entry == nullptr) break;
+            int16_t* frame_id = reinterpret_cast<int16_t*>(
+                static_cast<uint8_t*>(this->heapBuffer) + 0x0C + i * 0x18);
+            int16_t current_id = *frame_id;
 
-        /* Frame ID at [entry + 0x0C + n*0x18] */
-        int16_t* frame_id = reinterpret_cast<int16_t*>(
-            static_cast<uint8_t*>(entry) + 0x0C + i * 0x18);
-        int16_t current_id = *frame_id;
-
-        if (current_id != i && current_id != -1) {
-            *frame_id = i;  /* set to match array index */
+            if (current_id != i && current_id != -1) {
+                *frame_id = static_cast<int16_t>(i);  /* set to match array index */
+            }
         }
     }
 
     /* Step 4e: Set default road offset if none configured */
-    int16_t* road_offset_x = reinterpret_cast<int16_t*>(
-        reinterpret_cast<uint8_t*>(window) + 0x32);
-    int16_t* road_offset_y = reinterpret_cast<int16_t*>(
-        reinterpret_cast<uint8_t*>(window) + 0x34);
-
-    if (*road_offset_x == 0 && *road_offset_y == 0) {
-        *road_offset_x = 0;   /* no horizontal offset */
-        *road_offset_y = 8;   /* default vertical offset (8 pixels) */
+    if (this->roadOffsetX == 0 && this->roadOffsetY == 0) {   /* +0x32, +0x34 */
+        this->roadOffsetX = 0;   /* no horizontal offset */
+        this->roadOffsetY = 8;   /* default vertical offset (8 pixels) */
     }
 
     /* Step 5: Clean up stream */
     WIN32_StreamDestroy(stream_handle);
     WNDPROC_StreamCleanup(stream_handle);
+
+    /* SEH epilogue (compiler-managed) */
 }
 
-
 /* ================================================================== */
-/* TrainStation_OnMouseMove — Mouse-move event handler (vtable[1])     */
-/* Address: 0x436960                                                    */
-/* Size: 18 instructions                                                */
-/* Calling convention: __thiscall (ECX = this, 2 stack args), RET 0x8  */
+/* TrainStation_Ctor — Placement-new constructor bridge               */
+/* Address: 0x436400 (exported C function for compatibility)          */
 /*                                                                     */
-/* Reads string resource ID from sound_string_id (+0x174). If non-zero,*/
-/* looks it up via ResourceManager_GetStringById and loads the sound   */
-/* resource via RESMGR_LoadSoundResource to play the hover sound.      */
-/* Then chains to UI_PaintWindow for standard mouse-move processing.   */
-/*                                                                     */
-/* NOTE: sound_string_id (+0x174) is initialized to 0 in Init, so the  */
-/* sound load is a no-op unless set externally. The field at +0x170    */
-/* (hover_sound_id = 0x4D = 'M') is SET by Init but NEVER READ by this */
-/* or any other known function — possibly dead code or an externally    */
-/* triggered feature.                                                   */
-/*                                                                     */
-/* BUG: The original binary reads from +0x174, NOT +0x170. The field   */
-/* at +0x170 (hover_sound_id) is never read by OnMouseMove. If hover   */
-/* sounds were intended to work, sound_string_id needed to be set to a */
-/* valid string resource ID (0x5000-0x605F range) by external code.   */
+/* Replaces the original free-function TrainStation_Ctor. Calls the   */
+/* C++ constructor via placement-new. Callers (e.g., ResourceManager) */
+/* pass a pre-allocated memory block and expect it to be initialized  */
+/* in-place, then return the same pointer.                            */
 /* ================================================================== */
-void __thiscall
-TrainStation_OnMouseMove(TrainStation* window, int32_t param1, int32_t param2)
+extern "C"
+void* TrainStation_Ctor(void* memory, uint32_t resId, int32_t strPtr)
 {
-    /* Load and play the hover sound if a string resource is configured */
-    uint32_t string_id = window->sound_string_id;  /* +0x174 */
-    if (string_id != 0) {
-        void* res_handle = ResourceManager_GetStringById(&g_resmgr, string_id);  /* 0x4472B0 */
-        if (res_handle != nullptr) {
-            RESMGR_LoadSoundResource(res_handle);  /* 0x448D60 */
-        }
+    if (memory == nullptr) {
+        return nullptr;
     }
 
-    /* Standard mouse-move processing (renders/refreshes the UI surface) */
-    UI_PaintWindow(window, param1, param2);  /* 0x425670 */
-}
-
-
-/* ================================================================== */
-/* TrainStation_OnMouseLeave — Mouse-leave event handler (vtable[2])   */
-/* Address: 0x4369A0                                                    */
-/* Size: 14 instructions                                                */
-/* Calling convention: __fastcall (ECX = this), RET                    */
-/*                                                                     */
-/* Reads string resource ID from sound_string_id (+0x174). If non-zero,*/
-/* looks it up via ResourceManager_GetStringById and releases the      */
-/* sound resource via RESMGR_ReleaseSoundResource.                     */
-/* Then chains to UI_OnMouseLeave for standard mouse-leave processing. */
-/*                                                                     */
-/* NOTE: Same caveat as OnMouseMove — sound_string_id initialized to 0 */
-/* makes this a no-op unless set externally.                            */
-/* ================================================================== */
-void __fastcall
-TrainStation_OnMouseLeave(TrainStation* window)
-{
-    /* Release the hover sound if a string resource is configured */
-    uint32_t string_id = window->sound_string_id;  /* +0x174 */
-    if (string_id != 0) {
-        void* res_handle = ResourceManager_GetStringById(&g_resmgr, string_id);  /* 0x4472B0 */
-        if (res_handle != nullptr) {
-            RESMGR_ReleaseSoundResource(res_handle);  /* 0x448EE0 */
-        }
-    }
-
-    /* Standard mouse-leave processing */
-    UI_OnMouseLeave(window);  /* 0x4257F0 */
+    /* Construct the TrainStation object at the given address */
+    TrainStation* obj = new (memory) TrainStation(resId, strPtr);
+    return obj;
 }
