@@ -36,14 +36,29 @@ extern void   __thiscall WNDPROC_StreamCleanup(void* stream);              /* 0x
 extern int*   __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data,
                                                    int size, int mode);    /* 0x464490 */
 
-/* Cursor data parsing helpers */
-extern void*  __thiscall WNDPROC_CriticalSectionLock(void* stream,
-                                                      int* errorCode,
-                                                      int16_t* fieldY,
-                                                      int16_t* fieldX,
-                                                      int* tempBuf);      /* 0x4649F0 */
-extern void*  __thiscall WNDPROC_StreamPrintf(void* stream, int* outVal);  /* 0x464750 */
-extern void*  __thiscall WNDPROC_StreamWrite(void* stream, int* outVal);   /* 0x4646C0 */
+/* Cursor data parsing helpers.
+ *
+ * Real signatures re-derived from disassembly of the call site at 0x40E8D0
+ * (CursorEditWindow::Render) after the previous declaration below proved
+ * disassembly-impossible: 0x4649F0 is __thiscall and ends in `RET 0x4`
+ * (this + exactly ONE stack dword), not four output pointers. Matches the
+ * canonical declarations already used for the same real symbols in
+ * game/TrainStation.cpp, input/BuildingDescriptorEditor.cpp, and
+ * ui/UI_ChildWindow.cpp:
+ *   - WNDPROC_CriticalSectionLock(int*, char*) — free-function adapter for
+ *     WNDPROC_Stream::ExtractToken (0x4649F0, operator>>(char*)); C++
+ *     mangled linkage, matches _Z27WNDPROC_CriticalSectionLockPiPc.
+ *   - WNDPROC_StreamPrintf/StreamWrite(void*, void*) — despite the
+ *     misleading Ghidra-inherited names, disassembly of 0x464750/0x4646C0
+ *     from this exact call site proves both are stream *extractors*
+ *     (operator>>(int16_t*) and operator>>(int32_t*) respectively), not
+ *     output/write functions: each parses a formatted number via a CRT
+ *     numeric-parse call and stores it into its single output pointer,
+ *     with ERANGE-based overflow handling. Not renamed here (that's a
+ *     Ghidra-side follow-up), only correctly typed. */
+extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);         /* 0x4649F0 */
+extern void*  __thiscall WNDPROC_StreamPrintf(void* stream, void* outVal); /* 0x464750 — operator>>(int16_t*) */
+extern void*  __thiscall WNDPROC_StreamWrite(void* stream, void* outVal);  /* 0x4646C0 — operator>>(int32_t*) */
 extern uint8_t __fastcall CGWND_ValidatePaletteData(int classPtr);        /* 0x40E950 */
 
 /* Asset manager */
@@ -109,29 +124,60 @@ CursorEditWindow::~CursorEditWindow()
 /* Address: 0x40E8D0                                                   */
 /* Vtable slot: [3] +0x0C                                              */
 /*                                                                      */
-/* Reads cursor metrics from a .dat stream. Initializes field_7A8      */
-/* (width/X coordinate) and field_7AA (height/Y coordinate) by calling */
-/* helper functions to parse and validate stream data.                 */
-/*                                                                      */
+/* Reads one text line's worth of cursor metrics from a .dat stream,   */
+/* via the same WNDPROC_Stream extraction chain used by                */
+/* game/TrainStation.cpp, input/BuildingDescriptorEditor.cpp, and       */
+/* ui/UI_ChildWindow.cpp for their own directive-line parsing:          */
+/*   1. WNDPROC_CriticalSectionLock/ExtractToken — skips a leading      */
+/*      token into a scratch line buffer (discarded; the original       */
+/*      reserves exactly 264 bytes of stack for it here, matching every */
+/*      sibling call site's `char lineBuf[264]`).                       */
+/*   2. WNDPROC_StreamPrintf/operator>>(int16_t*) x2 — extracts          */
+/*      field_7A8 (X) then field_7AA (Y).                                */
+/*   3. WNDPROC_StreamWrite/operator>>(int32_t*) — extracts a full int   */
+/*      that must equal -9 for the line to be considered valid.          */
+/* game/TrainStation.cpp independently recovered a literal "-9" string   */
+/* (0x47E3CC, s_terminator) used as a section-terminator sentinel        */
+/* tested against parsed lines in this same class of .dat text format —  */
+/* corroborating that the -9 check here is that same end-of-record       */
+/* marker, not an ad hoc "error code".                                   */
+/*                                                                        */
+/* Re-derived by direct disassembly after the previous version's 5-      */
+/* argument WNDPROC_CriticalSectionLock call was disassembly-disproven    */
+/* (see the extern declarations above) and had misrouted the parsed      */
+/* fields (field_7AA/field_7A8/tempBuf) relative to the real call order.  */
+/*                                                                        */
+/* BUG (preserved, not fixed): the original never sets the stream's       */
+/* `width` field before step 1's ExtractToken call, and ExtractToken      */
+/* zeroes it on every use — so width is whatever a prior use left it as.  */
+/* If it's 0 (WNDPROC_StreamGetSize's constructor path zeroes it), the    */
+/* character limit wraps to unbounded and a leading token longer than     */
+/* 263 characters overflows this 264-byte stack buffer, in the original   */
+/* binary as much as here. Not hardened per CLAUDE.md's stub policy —     */
+/* faithful to the assembly.                                              */
+/*                                                                        */
 /* Called by: CursorEditWindow::init() [virtual dispatch]              */
 /* ================================================================== */
 uint8_t CursorEditWindow::Render(void* stream)
 {
-    /* Local variable for error tracking: initialized to 0, may be set by
-       parsing functions. Value 0xfffffff7 (-9) indicates success. */
-    int errorCode = 0;
+    /* Extracted 4th field; must equal -9 (the section-terminator
+       sentinel, see above) for the line to be considered valid. */
+    int lineTerminatorValue = 0;
 
-    /* Local variable for temp storage during read operations */
-    int tempBuf = 0;
+    /* Scratch line buffer for the discarded leading token (step 1);
+       264 bytes matches every sibling WNDPROC_CriticalSectionLock call
+       site's `char lineBuf[264]` and this function's own real stack
+       frame size (0x10C bytes total, minus 4 for lineTerminatorValue). */
+    char lineBuf[264];
 
-    /* Result flag: starts as failure (0), set to success (1) if processing
-       occurs without stream errors */
+    /* Single shared exit in the original (both the early-out below and
+       the -9 check reconverge on the same tail block that always calls
+       CGWND_ValidatePaletteData and returns this flag) — no separate
+       early `return 0;`s. Starts false; the original never null-checks
+       `stream` or its vtable pointer here (dereferences both
+       unconditionally), matching the fact that every real caller
+       (CursorEditWindow::init) already passes a validated pointer. */
     uint8_t resultFlag = 0;
-
-    /* Validate stream is not null */
-    if (stream == nullptr) {
-        return 0;
-    }
 
     /* Check stream validity via vtable. Stream object layout:
        [0] = vtable pointer
@@ -139,47 +185,37 @@ uint8_t CursorEditWindow::Render(void* stream)
        At [vtable[1] + stream + 0x8] is a flag byte where bit 0x4 indicates
        the stream has an error condition. */
     int* streamVtable = *(int**)stream;
-    if (streamVtable == nullptr) {
-        return 0;
-    }
-
     int vtableOffset = streamVtable[1];  /* +0x4 in vtable */
     uint8_t* flagPtr = (uint8_t*)((uintptr_t)vtableOffset + (uintptr_t)stream + 0x8);
     uint8_t streamFlags = *flagPtr;     /* +0x8 relative to vtableOffset */
 
-    /* If stream error flag (bit 0x4) is already set, skip processing */
-    if ((streamFlags & 0x4) != 0) {
-        return 0;
+    /* If stream error flag (bit 0x4) is already set, skip straight to the
+       shared tail below with resultFlag still false. */
+    if ((streamFlags & 0x4) == 0) {
+        /* Set result to success; may be cleared below if the -9 check fails. */
+        resultFlag = 1;
+
+        /* Step 1: skip a leading token (discarded). */
+        WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
+
+        /* Steps 2-4: chain three extractions. Each real function always
+           returns `this` (the same stream object) unchanged — verified
+           against disassembly — so threading the return value through is
+           behaviorally a no-op, kept only to match the original's chained-
+           call structure and this codebase's established idiom for it
+           (see e.g. input/BuildingDescriptorEditor.cpp's identical pattern). */
+        void* s1 = WNDPROC_StreamPrintf(stream, &this->field_7A8);  /* X */
+        void* s2 = WNDPROC_StreamPrintf(s1, &this->field_7AA);      /* Y */
+        WNDPROC_StreamWrite(s2, &lineTerminatorValue);
+
+        /* Validate the 4th field against the -9 section-terminator sentinel. */
+        if (lineTerminatorValue != (int)0xfffffff7) {
+            resultFlag = 0;
+        }
     }
 
-    /* Set result to success; may be cleared below if error detected */
-    resultFlag = 1;
-
-    /* Call helper function to read cursor data from stream.
-       WNDPROC_CriticalSectionLock acquires stream lock, reads whitespace-
-       delimited values, and populates the cursor field data. */
-    WNDPROC_CriticalSectionLock(
-        stream,
-        &errorCode,
-        &this->field_7AA,    /* +0x7AA — cursor field (Y/height) */
-        &this->field_7A8,    /* +0x7A8 — cursor field (X/width) */
-        &tempBuf);
-
-    /* Chain three more stream read operations. Each function returns a
-       stream pointer (or derived object) that becomes the this pointer
-       (in ECX) for the next call. */
-    void* streamPtr1 = WNDPROC_StreamPrintf(stream, &tempBuf);
-    void* streamPtr2 = WNDPROC_StreamPrintf(streamPtr1, nullptr);
-    WNDPROC_StreamWrite(streamPtr2, nullptr);
-
-    /* Validate error code: if errorCode was set to -9 (0xfffffff7) by the
-       parsing functions, it indicates parsing succeeded. Any other value
-       (including 0) indicates an error or parsing failure. */
-    if (errorCode != (int)0xfffffff7) {
-        resultFlag = 0;
-    }
-
-    /* Call palette validation function on this object. This validates or
+    /* Shared tail: reached on every path (error-flag early-out included).
+       Call palette validation function on this object. This validates or
        loads palette data associated with the cursor. Return value is not
        used for Render success status. */
     CGWND_ValidatePaletteData((int)(uintptr_t)this);
