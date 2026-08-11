@@ -124,6 +124,11 @@ extern "C" {
     int32_t __stdcall HeapFree(void* hHeap, uint32_t dwFlags, void* lpMem);
     int32_t __stdcall DialogBoxParamA(void* hInstance, const char* lpTemplateName,
                                        void* hWndParent, void* lpDialogFunc, int32_t dwInitParam);
+    /* Used by DirectPlay_ChooseConnectionDlgProc (below) to read/set the
+     * connection-type radio buttons and to close the dialog. */
+    LRESULT __stdcall SendDlgItemMessageA(HWND hDlg, int32_t nIDDlgItem, UINT Msg,
+                                           WPARAM wParam, LPARAM lParam);
+    BOOL    __stdcall EndDialog(HWND hDlg, int32_t nResult);
     /* CreateFileA, PlaySoundA, GetSystemMetrics, wsprintfA, LoadStringA,
      * MessageBoxA, CloseHandle, Sleep: declared in stubs/windows.h (pulled
      * in transitively via stubs/dplay.h for the GUID/DPID types below),
@@ -921,6 +926,100 @@ uint32_t DirectPlaySession::SetSessionDesc(const char* password)
      * EnumConnections's shim — see DirectPlay_EnumConnections below). Not
      * a session count despite a prior revision's comment claiming so. */
     return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(player_list));
+}
+
+/* ================================================================== */
+/* DirectPlay_ChooseConnectionDlgProc — "Choose Connection" dialog      */
+/* proc (dialog template resource ID 0x7D0A, MAKEINTRESOURCE'd).        */
+/* Address: 0x461020, __stdcall DLGPROC (HWND, UINT, WPARAM, LPARAM)   */
+/*                                                                     */
+/* Confirmed via disassembly (RET 0x10 = 4 stdcall params popped by     */
+/* the callee, matching DLGPROC's real ABI exactly). Its one caller is  */
+/* DirectPlay_HandleMessages (0x45F390, at 0x45F42D) via                */
+/* `DialogBoxParamA(NULL, MAKEINTRESOURCE(0x7D0A), hwnd,                */
+/*  DirectPlay_ChooseConnectionDlgProc, 0)` — offered when the caller    */
+/* was not given an explicit connection_type override.                  */
+/*                                                                      */
+/* Dialog has 4 mutually-exclusive radio buttons (item IDs 0x7D32-      */
+/* 0x7D35) selecting the connection type, plus standard OK (IDOK=1) and  */
+/* Cancel (IDCANCEL=2) push buttons — confirmed by the WM_COMMAND        */
+/* branch testing LOWORD(wParam) (the control ID) against 1 and 2, not   */
+/* a notification code (the AND 0xffff at 0x46103C masks LOWORD, not     */
+/* a shifted HIWORD; there is no notification-code check anywhere in    */
+/* this function).                                                      */
+/*                                                                      */
+/* WM_INITDIALOG (0x110): checks radio 0x7D32 (BM_SETCHECK, 1) and       */
+/* unchecks 0x7D33-0x7D35 (BM_SETCHECK, 0) — 0x7D32 is the dialog's       */
+/* default selection.                                                   */
+/*                                                                       */
+/* WM_COMMAND (0x111), IDOK (1): queries each radio's checked state       */
+/* (BM_GETCHECK) in order 0x7D32/0x7D33/0x7D34/0x7D35 and writes           */
+/* g_dplay_peer->connection_type accordingly: 4/2/1/3. This mapping is    */
+/* consistent with the field's documented encoding in DirectPlay.h        */
+/* (0=IPX, 1=TCP/IP, 2=Modem, 3=Serial, 4=DirectModem) — i.e. the dialog's */
+/* radio order is DirectModem, Modem, TCP/IP, Serial. The 4th radio's     */
+/* write (connection_type = 3) is only performed if it reads back          */
+/* checked; if none of the 4 radios read as checked (should not happen     */
+/* given mutually-exclusive radios always leave exactly one checked),      */
+/* connection_type is left unchanged. Every path ends with                 */
+/* EndDialog(hDlg, 1).                                                      */
+/*                                                                          */
+/* WM_COMMAND (0x111), IDCANCEL (2): EndDialog(hDlg, 0), connection_type    */
+/* untouched.                                                               */
+/*                                                                          */
+/* Any other message: returns 0 (unhandled), matching a real DLGPROC's      */
+/* convention.                                                              */
+/* ================================================================== */
+static LRESULT CALLBACK DirectPlay_ChooseConnectionDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    (void)lParam;
+
+    static const int32_t kRadioDirectModem = 0x7d32;
+    static const int32_t kRadioModem       = 0x7d33;
+    static const int32_t kRadioTcpIp       = 0x7d34;
+    static const int32_t kRadioSerial      = 0x7d35;
+
+    if (msg == WM_INITDIALOG) {
+        SendDlgItemMessageA(hDlg, kRadioDirectModem, BM_SETCHECK, 1, 0);
+        SendDlgItemMessageA(hDlg, kRadioModem,       BM_SETCHECK, 0, 0);
+        SendDlgItemMessageA(hDlg, kRadioTcpIp,       BM_SETCHECK, 0, 0);
+        SendDlgItemMessageA(hDlg, kRadioSerial,      BM_SETCHECK, 0, 0);
+        return 0;
+    }
+
+    if (msg == WM_COMMAND) {
+        const int32_t controlId = static_cast<int32_t>(wParam & 0xffff);
+
+        if (controlId == IDOK) {
+            if (SendDlgItemMessageA(hDlg, kRadioDirectModem, BM_GETCHECK, 0, 0) == 1) {
+                g_dplay_peer->connection_type = 4;  /* DirectModem */
+                EndDialog(hDlg, 1);
+                return 1;
+            }
+            if (SendDlgItemMessageA(hDlg, kRadioModem, BM_GETCHECK, 0, 0) == 1) {
+                g_dplay_peer->connection_type = 2;  /* Modem */
+                EndDialog(hDlg, 1);
+                return 1;
+            }
+            if (SendDlgItemMessageA(hDlg, kRadioTcpIp, BM_GETCHECK, 0, 0) == 1) {
+                g_dplay_peer->connection_type = 1;  /* TCP/IP */
+                EndDialog(hDlg, 1);
+                return 1;
+            }
+            if (SendDlgItemMessageA(hDlg, kRadioSerial, BM_GETCHECK, 0, 0) == 1) {
+                g_dplay_peer->connection_type = 3;  /* Serial */
+            }
+            EndDialog(hDlg, 1);
+            return 1;
+        }
+
+        if (controlId == IDCANCEL) {
+            EndDialog(hDlg, 0);
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 /* ================================================================== */

@@ -125,6 +125,15 @@ typedef DWORD*              LPDWORD;
 #define WM_SIZE             0x0005
 #define WM_TIMER            0x0113
 #define WM_COMMAND          0x0111
+#define WM_INITDIALOG       0x0110
+
+/* Button control messages (subset used by Lego Loco's dialog procs) */
+#define BM_GETCHECK         0x00F0
+#define BM_SETCHECK         0x00F1
+
+/* Standard dialog control IDs (OK/Cancel push buttons) */
+#define IDOK                1
+#define IDCANCEL            2
 
 /* OPENFILENAMEA structure (minimal) — uses basic types since windows.h types not yet available */
 typedef struct tagOFNA {
