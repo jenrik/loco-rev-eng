@@ -527,7 +527,14 @@ struct UIPANEL_Surface {
                                   //        DrawTile below.
     uint8_t*    pixels;          // +0x18  width*height byte buffer (mode 0 only)
     void*       ddraw_surf;      // +0x1C  IDirectDrawSurface* (mode 1 only)
-    void*       palette;         // shared/borrowed palette pointer (distinct from owned palette_ptr)
+    /* total: 0x20 bytes on x86 (vtable+mode+width+height+has_palette+flags+
+     * palette_ptr+pixels+ddraw_surf = 4+4+4+4+1+1+2+4+4+4 = 0x20 exactly) —
+     * confirmed no room for a further field in the original layout. A
+     * trailing `void* palette;` here (no offset comment, zero readers/
+     * writers tree-wide per a 2026-08-11 grep) was dead weight, likely a
+     * stale duplicate of palette_ptr left over from the TownTileRenderer
+     * merge documented above; removed rather than kept as an unexplained
+     * 8-byte host-only widening. */
 
     /* ================================================================ */
     /* Tile rendering methods (all __thiscall, RET 0x28 in the original) */
