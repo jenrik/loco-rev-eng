@@ -123,7 +123,11 @@ extern uint8_t g_surface_lost;              /* 0x004FD198 -- DDraw surface lost 
 extern void*   g_font_small;                /* 0x004855F4 -- small font handle */
 extern void*   g_dplay_config;              /* 0x004FD390 -- DPLAY config */
 extern void*   g_dplay;                     /* 0x004FD394 -- DPLAY handle */
-extern uint8_t g_resmgr;                    /* 0x004855E8 -- ResourceManager singleton */
+class ResourceManager;
+extern ResourceManager g_resmgr;            /* 0x004855E8 -- object, not a byte/pointer
+                                              * (was uint8_t, a widespread cross-TU
+                                              * landmine -- see PROGRESS.md's g_resmgr
+                                              * sweep) */
 
 /* Tilemap & viewport globals for DDRAW_PresentRect */
 extern void*   g_tilemap;                                          /* @0x004FD0C8 */
@@ -545,7 +549,7 @@ void PostcardAlbum::InitWindowSurface()
     }
 
     /* Load background RESDATA and create surface */
-    void* resdata = ResourceManager_GetById(static_cast<void*>(&g_resmgr), res_id);
+    void* resdata = ResourceManager_GetById(&g_resmgr, res_id);
     this->background_resdata = resdata;                 /* +0x138 */
 
     /* Call the typed RESDATA surface accessor. */
@@ -586,7 +590,7 @@ void PostcardAlbum::InitSprites()
     }
 
     /* Load paint resource 0x3CFA and create surface */
-    void* resdata = ResourceManager_GetById(static_cast<void*>(&g_resmgr), 0x3CFA);
+    void* resdata = ResourceManager_GetById(&g_resmgr, 0x3CFA);
     this->paint_resdata = resdata;                       /* +0x140 */
 
     void* surface = resource_surface(resdata);

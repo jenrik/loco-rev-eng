@@ -168,7 +168,10 @@ extern void*   g_primary_surface;       /* 0x4FD3C4 */
 extern void*   g_scripted_object;       /* 0x4AA5B8 */
 extern PlayerConfig* g_player_config;   /* 0x485160 */
 extern void*   g_config_ini;            /* 0x485484 */
-extern void*   g_resmgr;                /* 0x4855E8 */
+class ResourceManager;
+extern ResourceManager g_resmgr;        /* 0x4855E8 — object, not a pointer (was void*,
+                                          * a widespread cross-TU landmine — see
+                                          * PROGRESS.md's g_resmgr sweep) */
 /* g_tilemap: the canonical global (world/tilemap.h) is a TileMap* singleton
  * at address 0x4AAD08. The previous local declaration here -- extern
  * void** g_tilemap at address 0x4855D0 -- was fabricated: that address has
