@@ -23,7 +23,7 @@
  * Cursor-specific reinterpretations. Field access uses inline accessor
  * methods that return references to the base class storage cast to
  * the Cursor-specific type. For example, cursor_state() overlays
- * field_14, primary_surface() overlays field_38, etc.
+ * field_14, primary_surface() overlays lastCursorY (base offset +0x38), etc.
  *
  * Vtable layout (verified against the raw PE bytes at 0x477930; the
  * Cursor vtable ends at slot [37] with a NULL terminator at 0x4779C4 —
@@ -161,8 +161,12 @@ public:
     /* +0x28: timer_id aliases timerId */
     UINT_PTR&   timer_id()       { return this->timerId; }
 
-    /* +0x38: primary_surface aliases field_38 */
-    void*&      primary_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_38)->value; }
+    /* +0x38: primary_surface aliases UI_WindowBase::lastCursorY (was field_38;
+     * renamed in the base class once dispatch_message's WM_TIMER (0x113) fast
+     * path proved that offset's meaning for the base UI_WindowBase codepath —
+     * see ui/UI_WindowBase.h/.cpp. Cursor overlays the same storage with its
+     * own interpretation, as it does throughout this class.) */
+    void*&      primary_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->lastCursorY)->value; }
 
     /* +0x3C: sprite_width (uint32_t) overlays captureFlag + _pad_3E */
     uint32_t&   sprite_width()   { return reinterpret_cast<CursorOverlayValue<uint32_t>*>(&this->captureFlag)->value; }

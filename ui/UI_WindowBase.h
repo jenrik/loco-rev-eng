@@ -131,22 +131,48 @@ public:
     UINT       resourceId;             // +0x10  window/dialog resource ID
 
     /* Zeroed by constructor, usage varies by subclass */
-    int32_t    field_14;               // +0x14  (unknown, zeroed by ctor)
+    int32_t    field_14;               // +0x14  set by set_render_surface() to the active surface
+                                        //         address/identity; dispatch_message's WM_TIMER
+                                        //         (0x113) and WM_CAPTURECHANGED (0x215) handlers
+                                        //         gate on `field_14 != 0` ("a render surface is
+                                        //         configured"). See 0x426140.
     int32_t    field_18;               // +0x18  (unknown, zeroed by ctor)
     int32_t    field_1C;               // +0x1C  (unknown, zeroed by ctor)
-    int32_t    field_20;               // +0x20  (unknown, zeroed by ctor)
-    int32_t    field_24;               // +0x24  (unknown, zeroed by ctor)
+    int32_t    field_20;               // +0x20  frame divisor / animation-tick threshold, set by
+                                        //         set_render_surface(); compared against field_24
+                                        //         in dispatch_message's WM_TIMER fast path (0x426140)
+    int32_t    field_24;               // +0x24  animation-tick counter, wraps at field_20, reset by
+                                        //         set_render_surface(); incremented by dispatch_message's
+                                        //         WM_TIMER fast path (0x426140)
 
     UINT_PTR   timerId;                // +0x28  window timer ID (set by Show via SetTimer)
     int32_t    field_2C;               // +0x2C  (unknown, zeroed by ctor)
     int32_t    field_30;               // +0x30  (unknown, zeroed by ctor)
-    int32_t    field_34;               // +0x34  (unknown, NOT zeroed by ctor — set by subclass)
-    int32_t    field_38;               // +0x38  (unknown, NOT zeroed by ctor — set by subclass)
+
+    /** Last observed cursor position (screen coords), used by dispatch_message's
+     *  WM_TIMER (0x113) fast path to detect "cursor has not moved since the
+     *  last tick" and re-render the idle-hover animation. Reset to -1
+     *  (sentinel: "unknown/invalidate") by UIPANEL_Render (0x426EB0) after
+     *  every render pass. NOT zeroed by the constructor — set by subclass /
+     *  first WM_TIMER tick. Confirmed at 0x426140 (dispatch_message) and
+     *  0x426EB0 (UIPANEL_Render). */
+    int32_t    lastCursorX;            // +0x34  (was field_34)
+    int32_t    lastCursorY;            // +0x38  (was field_38)
 
     uint8_t    captureFlag;            // +0x3C  mouse capture flag (byte, zeroed by ctor, set by show/hide)
-    uint8_t    field_3D;               // +0x3D  (unknown byte, zeroed by ctor)
+                                        //         0 = SetCapture'd / OS cursor hidden (dragging over
+                                        //         this window); 1 = ReleaseCapture'd / OS cursor shown.
+                                        //         Toggled by dispatch_message's WM_NCHITTEST (0x84),
+                                        //         WM_MOUSEMOVE (0x200) and WM_CAPTURECHANGED (0x215).
+    uint8_t    field_3D;               // +0x3D  one-shot "idle animation expired" flag, zeroed by ctor;
+                                        //         set permanently by dispatch_message's WM_TIMER (0x113)
+                                        //         fast path once field_40 counts down to 0; while set,
+                                        //         the WM_TIMER fast path is skipped entirely (0x426140).
     uint8_t    _pad_3E[2];             // +0x3E  padding
-    int32_t    field_40;               // +0x40  (unknown, zeroed by ctor)
+    int32_t    field_40;               // +0x40  idle-animation cycle countdown, zeroed by ctor;
+                                        //         decremented once per field_20 animation-tick wrap by
+                                        //         dispatch_message's WM_TIMER fast path (0x426140); at 0
+                                        //         it sets field_3D and stops decrementing further.
 
     uint8_t    activeFlag;             // +0x44  active/hidden flag (byte, cleared by Hide)
     uint8_t    _pad_45[3];             // +0x45  padding

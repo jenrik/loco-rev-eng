@@ -31,7 +31,10 @@ extern "C" {
                                      void* lpTimerFunc);
     extern BOOL  __stdcall KillTimer(HWND hWnd, UINT_PTR uIDEvent);
     extern HWND  __stdcall SetCapture(HWND hWnd);
+    extern BOOL  __stdcall ReleaseCapture(void);
     extern int   __stdcall ShowCursor(BOOL bShow);
+    extern BOOL  __stdcall GetCursorPos(POINT* lpPoint);
+    extern HWND  __stdcall WindowFromPoint(POINT pt);
     extern BOOL  __stdcall ShowWindow(HWND hWnd, int nCmdShow);
     extern BOOL  __stdcall EnableWindow(HWND hWnd, BOOL bEnable);
     extern ATOM  __stdcall RegisterClassA(const void* lpWndClass);
@@ -533,37 +536,93 @@ void UI_WindowBase::on_noop()
 {
 }
 
-/* vtable[10] - WM_* router 0x426140 */
+/* vtable[10] - WM_* router 0x426140
+ *
+ * Most messages are a pure "dispatch to typed virtual slot" router (see the
+ * table below). Four messages are NOT pure dispatch — they contain real
+ * inline logic (capture/cursor-visibility state machine and an idle-hover
+ * animation throttle) before falling through to (or instead of) a virtual
+ * slot call. This was previously mis-transcribed as pure dispatch for all
+ * four; re-validated instruction-by-instruction against the disassembly at
+ * 0x426140 (see git history for the prior, incorrect version):
+ *
+ *   WM_NCHITTEST (0x84): NOT a virtual dispatch at all. Calls DefWindowProcA
+ *     directly. If the result is HTCLIENT (1), captures the mouse and hides
+ *     the OS cursor (spin-looping ShowCursor(FALSE) until it reports hidden);
+ *     otherwise releases capture and restores the OS cursor (spin-looping
+ *     ShowCursor(TRUE) until it reports visible). Either way, re-renders the
+ *     panel bracketed by DDRAW_UnlockPrimary(), then returns the
+ *     DefWindowProcA hit-test result.
+ *
+ *   WM_MOUSEMOVE (0x200): only acts when `hWnd` is this window's own HWND
+ *     (else returns 0 without dispatching). Resolves the HWND under the
+ *     cursor via WindowFromPoint and compares it against captureFlag's
+ *     current state to decide whether the cursor just left or re-entered
+ *     this window, toggling capture/cursor-visibility and re-rendering on
+ *     the transition (see captureFlag's doc comment in the header for the
+ *     0/1 meaning). Always falls through to the real on_mouse_move()
+ *     virtual slot afterward EXCEPT when the cursor is leaving the window
+ *     (captureFlag was already 1 and the point is off-window: returns 0
+ *     immediately) or has just left it (captureFlag transitions 0 -> 1:
+ *     returns 0 immediately after the render, without dispatching).
+ *
+ *   WM_TIMER (0x113): a fast path runs BEFORE on_timer() when wParam == 0x43
+ *     (the periodic UI tick started by show()) AND field_14 != 0 (a render
+ *     surface is configured) AND captureFlag == 0 (not mid-drag) AND
+ *     field_3D == 0 (idle animation not yet expired). The fast path samples
+ *     GetCursorPos, advances the field_24 animation-tick counter (wrapping
+ *     at field_20, decrementing the field_40 idle-cycle countdown on each
+ *     wrap and latching field_3D once field_40 reaches 0), and re-renders
+ *     the panel (bracketed by DDRAW_UnlockPrimary()) if the cursor has not
+ *     moved since the last tick (lastCursorX/lastCursorY), then always
+ *     updates lastCursorX/lastCursorY and returns 0 WITHOUT dispatching to
+ *     on_timer(). If the fast-path condition is false, falls through to the
+ *     normal on_timer() virtual dispatch.
+ *
+ *   WM_CAPTURECHANGED (0x215): NOT in the virtual-dispatch table at all —
+ *     always returns 0 directly. No-ops when field_14 == 0 (no surface
+ *     configured), when lParam already equals this window's own HWND (we
+ *     are the window gaining capture), or when lParam == 0. Otherwise
+ *     another window is taking capture away from us: marks captureFlag = 1,
+ *     releases capture, restores the OS cursor (spin-loop), and re-renders
+ *     the panel bracketed by DDRAW_UnlockPrimary().
+ *
+ * All other messages remain pure dispatch:
+ *   WM_ERASEBKGND(0x14) -> on_erase_bkgnd  [30]
+ *   WM_CREATE(1)        -> on_create_msg   [13]
+ *   WM_DESTROY(2)       -> on_destroy      [31]
+ *   WM_SIZE(5)          -> on_size         [26]
+ *   WM_SETFOCUS(7)      -> on_set_focus    [24]
+ *   WM_KILLFOCUS(8)     -> on_kill_focus   [25]
+ *   WM_PAINT(0xF)       -> on_paint        [27]
+ *   WM_CLOSE(0x10)      -> on_close        [32]
+ *   WM_SHOWWINDOW(0x18) -> on_show_window  [29]
+ *   WM_ACTIVATEAPP(0x1C)-> on_activate_app [36]
+ *   WM_SETCURSOR(0x20)  -> on_set_cursor   [28]
+ *   WM_MOUSEACTIVATE(0x21)-> on_mouse_activate [23]
+ *   WM_NOTIFY(0x4E)     -> on_notify       [33]
+ *   WM_KEYDOWN(0x100)   -> on_key_down     [21]
+ *   WM_KEYUP(0x101)     -> on_key_up       [22]
+ *   WM_COMMAND(0x111)   -> on_command      [34]
+ *   WM_MOUSEMOVE(0x200) -> on_mouse_move   [20]  (see fast-path note above)
+ *   WM_LBUTTONDOWN(0x201)-> on_lbutton_down [14]
+ *   WM_LBUTTONUP(0x202) -> on_lbutton_up   [15]
+ *   WM_LBUTTONDBLCLK(0x203)-> on_lbutton_dblclk [18]
+ *   WM_RBUTTONDOWN(0x204)-> on_rbutton_down [16]
+ *   WM_RBUTTONUP(0x205) -> on_rbutton_up   [17]
+ *   WM_RBUTTONDBLCLK(0x206)-> on_rbutton_dblclk [19]
+ *   0x312               -> on_msg_312      [35]
+ *   default             -> window_proc     [11]
+ *
+ * NOTE: the real disassembly also shows WM_LBUTTONDOWN/UP/DBLCLK and
+ * WM_RBUTTONDOWN/DBLCLK (0x201/0x203/0x204/0x206) calling
+ * SetForegroundWindow(this->hWnd) before their virtual dispatch. That is a
+ * pre-existing simplification in this file, out of scope for this pass
+ * (which only re-validates WM_NCHITTEST/WM_MOUSEMOVE/WM_TIMER/
+ * WM_CAPTURECHANGED) — left untouched here; flagged for a future pass.
+ */
 LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    /* The recovered dispatcher routes specific messages to typed slots:
-     *   WM_ERASEBKGND(0x14) -> on_erase_bkgnd  [30]
-     *   WM_CREATE(1)        -> on_create_msg   [13]
-     *   WM_DESTROY(2)       -> on_destroy      [31]
-     *   WM_SIZE(5)          -> on_size         [26]
-     *   WM_SETFOCUS(7)      -> on_set_focus    [24]
-     *   WM_KILLFOCUS(8)     -> on_kill_focus   [25]
-     *   WM_PAINT(0xF)       -> on_paint        [27]
-     *   WM_CLOSE(0x10)      -> on_close        [32]
-     *   WM_SHOWWINDOW(0x18) -> on_show_window  [29]
-     *   WM_ACTIVATEAPP(0x1C)-> on_activate_app [36]
-     *   WM_SETCURSOR(0x20)  -> on_set_cursor   [28]
-     *   WM_MOUSEACTIVATE(0x21)-> on_mouse_activate [23]
-     *   WM_NOTIFY(0x4E)     -> on_notify       [33]
-     *   WM_KEYDOWN(0x100)   -> on_key_down     [21]
-     *   WM_KEYUP(0x101)     -> on_key_up       [22]
-     *   WM_COMMAND(0x111)   -> on_command      [34]
-     *   WM_TIMER(0x113)     -> on_timer        [12]
-     *   WM_MOUSEMOVE(0x200) -> on_mouse_move   [20]
-     *   WM_LBUTTONDOWN(0x201)-> on_lbutton_down [14]
-     *   WM_LBUTTONUP(0x202) -> on_lbutton_up   [15]
-     *   WM_LBUTTONDBLCLK(0x203)-> on_lbutton_dblclk [18]
-     *   WM_RBUTTONDOWN(0x204)-> on_rbutton_down [16]
-     *   WM_RBUTTONUP(0x205) -> on_rbutton_up   [17]
-     *   WM_RBUTTONDBLCLK(0x206)-> on_rbutton_dblclk [19]
-     *   0x312               -> on_msg_312      [35]
-     *   default             -> window_proc     [11]
-     */
     switch (msg) {
     case 0x14:  return on_erase_bkgnd(hWnd, msg, wParam, lParam);
     case 1:     return on_create_msg(hWnd, msg, wParam, lParam);
@@ -581,8 +640,87 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case 0x100: return on_key_down(hWnd, msg, wParam, lParam);
     case 0x101: return on_key_up(hWnd, msg, wParam, lParam);
     case 0x111: return on_command(hWnd, msg, wParam, lParam);
-    case 0x113: return on_timer(hWnd, msg, wParam, lParam);
-    case 0x200: return on_mouse_move(hWnd, msg, wParam, lParam);
+
+    case 0x113: {  // WM_TIMER — fast idle-hover-animation path, else on_timer() [12]
+        if (wParam == 0x43 && this->field_14 != 0 &&
+            this->captureFlag == 0 && this->field_3D == 0) {
+            POINT cursorPos;
+            GetCursorPos(&cursorPos);
+
+            if (this->field_20 < 2) {
+                return 0;
+            }
+
+            int32_t tickCounter = this->field_24;
+            this->field_24 = tickCounter + 1;
+            if (this->field_20 <= tickCounter + 1) {
+                this->field_24 = 0;
+                if (this->field_40 != 0) {
+                    this->field_40 -= 1;
+                    if (this->field_40 == 0) {
+                        this->field_3D = 1;
+                    }
+                }
+            }
+
+            if (cursorPos.x == this->lastCursorX && cursorPos.y == this->lastCursorY) {
+                DDRAW_UnlockPrimary();
+                UIPANEL_Render(this, 1);
+                DDRAW_UnlockPrimary();
+            }
+            this->lastCursorX = cursorPos.x;
+            this->lastCursorY = cursorPos.y;
+            return 0;
+        }
+        return on_timer(hWnd, msg, wParam, lParam);
+    }
+
+    case 0x200: {  // WM_MOUSEMOVE — capture/cursor state machine, then on_mouse_move() [20]
+        if (hWnd != this->hWnd) {
+            return 0;
+        }
+
+        POINT pt;
+        pt.x = static_cast<short>(lParam & 0xFFFF);
+        pt.y = static_cast<short>(static_cast<uint32_t>(lParam) >> 16);
+        HWND hitWnd = WindowFromPoint(pt);
+
+        if (this->captureFlag == 0) {
+            if (hitWnd != this->hWnd) {
+                // Cursor just left this window: release capture, restore
+                // the OS cursor, re-render, and skip the virtual dispatch.
+                this->captureFlag = 1;
+                ReleaseCapture();
+                int cursorVis = ShowCursor(TRUE);
+                while (cursorVis < 0) {
+                    cursorVis = ShowCursor(TRUE);
+                }
+                DDRAW_UnlockPrimary();
+                UIPANEL_Render(this, 1);
+                DDRAW_UnlockPrimary();
+                return 0;
+            }
+            // Still hovering: no state change, fall through to dispatch.
+        } else {
+            if (hitWnd != this->hWnd) {
+                // Already released and still off-window: nothing to do.
+                return 0;
+            }
+            // Cursor (re-)entered this window: capture it, hide the OS
+            // cursor, and re-render before dispatching.
+            this->captureFlag = 0;
+            SetCapture(this->hWnd);
+            int cursorVis = ShowCursor(FALSE);
+            while (cursorVis >= 0) {
+                cursorVis = ShowCursor(FALSE);
+            }
+            DDRAW_UnlockPrimary();
+            UIPANEL_Render(this, 1);
+            DDRAW_UnlockPrimary();
+        }
+        return on_mouse_move(hWnd, msg, wParam, lParam);
+    }
+
     case 0x201: return on_lbutton_down(hWnd, msg, wParam, lParam);
     case 0x202: return on_lbutton_up(hWnd, msg, wParam, lParam);
     case 0x203: return on_lbutton_dblclk(hWnd, msg, wParam, lParam);
@@ -590,6 +728,52 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case 0x205: return on_rbutton_up(hWnd, msg, wParam, lParam);
     case 0x206: return on_rbutton_dblclk(hWnd, msg, wParam, lParam);
     case 0x312: return on_msg_312(hWnd, msg, wParam, lParam);
+
+    case 0x84: {  // WM_NCHITTEST — direct DefWindowProcA, not a virtual slot
+        LRESULT hitResult = DefWindowProcA(hWnd, msg, wParam, lParam);
+        if (hitResult == 1) {  // HTCLIENT
+            this->captureFlag = 0;
+            SetCapture(this->hWnd);
+            int cursorVis = ShowCursor(FALSE);
+            while (cursorVis >= 0) {
+                cursorVis = ShowCursor(FALSE);
+            }
+        } else {
+            this->captureFlag = 1;
+            ReleaseCapture();
+            int cursorVis = ShowCursor(TRUE);
+            while (cursorVis < 0) {
+                cursorVis = ShowCursor(TRUE);
+            }
+        }
+        DDRAW_UnlockPrimary();
+        UIPANEL_Render(this, 1);
+        DDRAW_UnlockPrimary();
+        return hitResult;
+    }
+
+    case 0x215: {  // WM_CAPTURECHANGED — not a virtual slot, always returns 0
+        if (this->field_14 == 0) {
+            return 0;
+        }
+        if (reinterpret_cast<HWND>(static_cast<uintptr_t>(static_cast<uint32_t>(lParam))) == this->hWnd) {
+            return 0;
+        }
+        if (lParam == 0) {
+            return 0;
+        }
+        this->captureFlag = 1;
+        ReleaseCapture();
+        int cursorVis = ShowCursor(TRUE);
+        while (cursorVis < 0) {
+            cursorVis = ShowCursor(TRUE);
+        }
+        DDRAW_UnlockPrimary();
+        UIPANEL_Render(this, 1);
+        DDRAW_UnlockPrimary();
+        return 0;
+    }
+
     default:    return window_proc(hWnd, msg, wParam, lParam);
     }
 }
