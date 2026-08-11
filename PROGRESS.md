@@ -380,7 +380,7 @@ The mode machine works end-to-end (SP accept to CGWND_SetMode(1) to loading to C
 
 - [x] ~~**Add named fields to pixel data structure** — ButtonSprite pixel data is accessed via raw offsets: +0x1E (default animation index), +0x20 (frame table pointer). Used in show(), load_page(), update_anim()~~ — fixed (2026-08-11, FUN_-sweep session): the fields were already named (`RESDATA::default_anim` at +0x1E, `RESDATA::anim_table` at +0x20, `shared/types.h`) from an earlier sweep; `ui/HelpWnd.cpp`'s `show()`/`update_anim()`/`load_page()` just hadn't been updated to use them. Replaced all 4 raw-offset sites with `pd->default_anim`/`pd->anim_table[fi].start_frame`/`.end_frame` (the `+0x18`-stride indexing was `anim_table[fi]`/`anim_table[fi+1]`, `FrameData` being exactly 0x18 bytes).
 
-- [ ] **Add named fields to AudioChannel** — sound resource ID at +0x38 accessed in hide() and play_page_audio_common().
+- [x] ~~**Add named fields to AudioChannel** — sound resource ID at +0x38 accessed in hide() and play_page_audio_common()~~ — fixed (2026-08-11, FUN_-sweep session): the field was already named (`AudioChannel::resource_id`, `audio/AudioChannel.h`) from an earlier sweep; `ui/HelpWnd.cpp` just hadn't been updated (5 raw `+0x38` sites across `hide()` and the page-audio helpers). Replaced all 5 with `audioChannel->resource_id`; needed adding `#include "../audio/AudioChannel.h"` since `ui/HelpWnd.h` only forward-declares the type.
 
 ### Priority 3: Rendering completeness
 

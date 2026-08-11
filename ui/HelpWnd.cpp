@@ -30,6 +30,7 @@
 // Status: TRANSCRIBED
 
 #include "HelpWnd.h"
+#include "../audio/AudioChannel.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
@@ -590,9 +591,7 @@ void HelpWnd::hide()
 
     /* Also release via GameAudio if available */
     if (g_audio != NULL && this->audioChannel != NULL) {
-        /* NOTE: +0x38 = sound resource ID in AudioChannel.
-         * TODO: Add named field to AudioChannel. */
-        UINT sndId = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
+        UINT sndId = static_cast<UINT>(this->audioChannel->resource_id);
         if (sndId != 0) {
             int handle = ResourceManager_GetStringById(&g_resmgr, sndId);
             ReleaseSoundResource(handle);
@@ -1471,7 +1470,7 @@ void HelpWnd::go_next_page()
         if (g_audio != NULL) {
             UINT sndId = this->pages[this->currentPageIdx].soundResId;
             if (this->audioChannel != NULL) {
-                UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
+                UINT oid = static_cast<UINT>(this->audioChannel->resource_id);
                 if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                 AudioChannel_Release(this->audioChannel);
             }
@@ -1503,7 +1502,7 @@ void HelpWnd::go_next_page()
             if (g_audio != NULL) {
                 UINT sndId = this->pages[this->currentPageIdx].soundResId;
                 if (this->audioChannel != NULL) {
-                    UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
+                    UINT oid = static_cast<UINT>(this->audioChannel->resource_id);
                     if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                     AudioChannel_Release(this->audioChannel);
                 }
@@ -1536,7 +1535,7 @@ void HelpWnd::go_prev_page()
         if (g_audio != NULL) {
             UINT sndId = this->pages[this->currentPageIdx].soundResId;
             if (this->audioChannel != NULL) {
-                UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
+                UINT oid = static_cast<UINT>(this->audioChannel->resource_id);
                 if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                 AudioChannel_Release(this->audioChannel);
             }
@@ -1556,7 +1555,7 @@ void HelpWnd::go_prev_page()
         if (g_audio != NULL) {
             UINT sndId = this->pages[this->currentPageIdx].soundResId;
             if (this->audioChannel != NULL) {
-                UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
+                UINT oid = static_cast<UINT>(this->audioChannel->resource_id);
                 if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                 AudioChannel_Release(this->audioChannel);
             }
