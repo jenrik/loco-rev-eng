@@ -148,7 +148,6 @@ def test_singleplayer_mode3_mouse_input_reaches_game(game):
     dispatch happened, but that host_pack_game_lparam's projection is
     correct, the only genuinely new coordinate-math logic in the fix.
 
-    Also asserts the game survives a real click past this point.
     BUG-mode3-input-processing-crashes.md tracked a chain of crashes on
     this exact path (Game::UpdateInputState -> ... -> ChildWindow
     construction), stopping at UI_CreateChildWindow's host
@@ -156,7 +155,11 @@ def test_singleplayer_mode3_mouse_input_reaches_game(game):
     That assert is gone now that ChildWindow/CursorEditWindow/
     TrainStation/BuildingDescriptorEditor are real derived classes with
     working host-path constructors (see ui/UI_ChildWindow.h's class
-    hierarchy) — this is the regression test for that fix."""
+    hierarchy) — this is the regression test for that fix. It only
+    checks the immediate aftermath of the click, not sustained survival:
+    see test_singleplayer_mode3_click_reaches_wndproc_stream_stub below
+    for why a real click still aborts the process a little further down
+    the same call chain, past this test's own 1s window."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.click_logical(600, 550, "select single player")
     game.click_logical(600, 720, "player-name field")
@@ -181,6 +184,62 @@ def test_singleplayer_mode3_mouse_input_reaches_game(game):
     game.click_logical(400, 300, "town view click")
     time.sleep(1)
     game.assert_alive("mode-3 click past ChildWindow construction")
+
+
+def test_singleplayer_mode3_click_reaches_wndproc_stream_stub(game):
+    """Longer-soak extension of test_singleplayer_mode3_mouse_input_reaches_game,
+    written to reliably reproduce a currently-open crash one step further
+    down the same call chain that test only samples for 1s.
+
+    Live gdb backtrace (this session, coredumpctl on a manually driven
+    repro of this exact click, matching commit 69f7556 HEAD) confirms the
+    full chain from a real click:
+
+        Game::UpdateInputState -> Game::PlaySound(0x1400)
+        -> ResourceManager::GetById -> ResourceManager::AddString
+        -> BuildingDescriptorEditor_Ctor
+        -> BuildingDescriptorEditor::BuildingDescriptorEditor
+        -> BuildingDescriptorEditor::handle_edit_message
+        -> BuildingDescriptorEditor::Render
+        -> WNDPROC_CriticalSectionLock (resources/WndProcStream.cpp:291)
+        -> assert(false) -> abort()
+
+    WNDPROC_CriticalSectionLock is a deliberate loud stub (PROGRESS.md,
+    "win32_stream.c removed (partial)"): its `stream` argument is a raw
+    `int streamHandle[2]` from the still-unimplemented `WIN32_StreamOpen*`
+    cluster, never a real constructed WNDPROC_Stream, so it fails loudly
+    rather than dereference garbage. That stub call used to be a silent
+    call-0 no-op on this exact path due to an extern-"C"/C++ linkage
+    landmine (fixed in 69f7556, "Fix extern-C linkage landmine for
+    WNDPROC_Stream* functions"); fixing the linkage made the call reach
+    the real stub for the first time, turning a silent no-op into a real
+    abort ~1-1.5s after the click (measured directly this session via a
+    manual gui-sandbox repro, coredumpctl-confirmed SIGABRT on this exact
+    stack, twice). test_singleplayer_mode3_mouse_input_reaches_game's own
+    1s post-click sleep races that window and can pass even though the
+    game aborts moments later — GameSession.close() never inspects how
+    the process died, so a crash after the last assert_alive() call is
+    invisible to that test (see PROGRESS.md's harness-gap note).
+
+    This test is EXPECTED TO FAIL (game.assert_alive() raises) until the
+    real WIN32_StreamOpen*/OpenPath/Read/Destroy cluster is implemented
+    for real — tracked as its own dedicated RE pass in PROGRESS.md, not
+    fixed here. It intentionally leaves a coredump per run."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    game.click_logical(600, 550, "select single player")
+    game.click_logical(600, 720, "player-name field")
+    game.clear_text()
+    game.type_text("test")
+    game.click_logical(925, 700, "main-menu accept/ok")
+    game.wait_for_event("mode_changed", new_mode=3, timeout=10)
+    time.sleep(1)
+
+    game.click_logical(400, 300, "town view click")
+    time.sleep(3)
+    game.assert_alive(
+        "mode-3 click reaching BuildingDescriptorEditor::Render -> "
+        "WNDPROC_CriticalSectionLock (resources/WndProcStream.cpp)"
+    )
 
 
 @pytest.mark.parametrize(
