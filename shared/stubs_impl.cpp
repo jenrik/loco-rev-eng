@@ -318,6 +318,12 @@ NetworkPlayerList* g_dplay = nullptr;
 void* g_dplay_config = nullptr;
 void* g_active_panel = nullptr;
 void* g_font_small = nullptr;
+/* Single-use font global read only by HelpWnd::render_scroll_down
+ * (ui/HelpWnd_stubs.cpp, 0x4526B0 -> global at 0x4855EC). No write site
+ * found anywhere in the binary; storage defined here alongside
+ * g_font_small for the same reason (host-side backing for a recovered
+ * global with no recovered initializer). */
+void* g_font_scroll_down_hint = nullptr;
 void* g_last_cursor_pos = nullptr;
 void* g_thumbpal_surface = nullptr;
 extern "C" const char g_thumbpal_bmp_name[] = "";

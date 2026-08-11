@@ -169,7 +169,13 @@ extern Cursor*  g_cursor;              /* 0x4FD2D8 */
 extern int      g_game_mode;           /* 0x4FD2E0 */
 extern int      g_is_fullscreen;       /* 0x4FD2E4 */
 extern TileMap* g_tilemap;             /* 0x4AAD08 — tilemap singleton */
-extern ResourceManager* g_resmgr;      /* 0x4855E8 */
+extern ResourceManager g_resmgr;       /* 0x4855E8 — object, not a pointer; matches
+                                         * the canonical declaration in
+                                         * resources/ResourceManager.h. This file used
+                                         * to wrongly declare it as ResourceManager*
+                                         * (same landmine documented in
+                                         * game/Train_network.cpp's g_resmgr comment) —
+                                         * every call site below now takes &g_resmgr. */
 extern HFONT    g_font_small;          /* 0x4855F4 */
 extern void*    g_primary_surface;     /* 0x4FD3C4 */
 extern int      g_viewport_rect_left;   /* 0x4FD358 */
@@ -591,7 +597,7 @@ void HelpWnd::hide()
          * TODO: Add named field to AudioChannel. */
         UINT sndId = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
         if (sndId != 0) {
-            int handle = ResourceManager_GetStringById(g_resmgr, sndId);
+            int handle = ResourceManager_GetStringById(&g_resmgr, sndId);
             ReleaseSoundResource(handle);
         }
         AudioChannel_Release(this->audioChannel);
@@ -1469,11 +1475,11 @@ void HelpWnd::go_next_page()
             UINT sndId = this->pages[this->currentPageIdx].soundResId;
             if (this->audioChannel != NULL) {
                 UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
-                if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(g_resmgr, oid));
+                if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                 AudioChannel_Release(this->audioChannel);
             }
             if (sndId != 0) {
-                LoadSoundResource(ResourceManager_GetStringById(g_resmgr, sndId));
+                LoadSoundResource(ResourceManager_GetStringById(&g_resmgr, sndId));
                 GameAudio_PlayResourceEx(g_audio, sndId, (int*)&this->audioChannel);
             }
         }
@@ -1501,11 +1507,11 @@ void HelpWnd::go_next_page()
                 UINT sndId = this->pages[this->currentPageIdx].soundResId;
                 if (this->audioChannel != NULL) {
                     UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
-                    if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(g_resmgr, oid));
+                    if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                     AudioChannel_Release(this->audioChannel);
                 }
                 if (sndId != 0) {
-                    LoadSoundResource(ResourceManager_GetStringById(g_resmgr, sndId));
+                    LoadSoundResource(ResourceManager_GetStringById(&g_resmgr, sndId));
                     GameAudio_PlayResourceEx(g_audio, sndId, (int*)&this->audioChannel);
                 }
             }
@@ -1534,11 +1540,11 @@ void HelpWnd::go_prev_page()
             UINT sndId = this->pages[this->currentPageIdx].soundResId;
             if (this->audioChannel != NULL) {
                 UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
-                if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(g_resmgr, oid));
+                if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                 AudioChannel_Release(this->audioChannel);
             }
             if (sndId != 0) {
-                LoadSoundResource(ResourceManager_GetStringById(g_resmgr, sndId));
+                LoadSoundResource(ResourceManager_GetStringById(&g_resmgr, sndId));
                 GameAudio_PlayResourceEx(g_audio, sndId, (int*)&this->audioChannel);
             }
         }
@@ -1554,11 +1560,11 @@ void HelpWnd::go_prev_page()
             UINT sndId = this->pages[this->currentPageIdx].soundResId;
             if (this->audioChannel != NULL) {
                 UINT oid = *(UINT*)((uintptr_t)this->audioChannel + 0x38);
-                if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(g_resmgr, oid));
+                if (oid != 0) ReleaseSoundResource(ResourceManager_GetStringById(&g_resmgr, oid));
                 AudioChannel_Release(this->audioChannel);
             }
             if (sndId != 0) {
-                LoadSoundResource(ResourceManager_GetStringById(g_resmgr, sndId));
+                LoadSoundResource(ResourceManager_GetStringById(&g_resmgr, sndId));
                 GameAudio_PlayResourceEx(g_audio, sndId, (int*)&this->audioChannel);
             }
         }
@@ -1665,17 +1671,155 @@ void HelpWnd::update_button_states(int buttonId)
 }
 
 /* ==================================================================== */
-/* HelpWnd::draw_text — Draw one line of help text for scroll position  */
+/* HelpWnd::draw_text — Draw a word-wrapped/ellipsis-truncated chunk of  */
+/* the current page's help text, advancing through it lineIdx times.   */
 /* Address: 0x450850                                                    */
 /*                                                                      */
-/* TODO: decompile 0x450850 — full word-wrap/DrawTextA logic.           */
-/* Stub returns -1 (EOF). Tracked in PROGRESS.md.                       */
+/* Uses DrawTextA with DT_WORDBREAK | DT_NOPREFIX | DT_END_ELLIPSIS |   */
+/* DT_MODIFYSTRING (0x18810) as both the word-wrap measuring device and */
+/* the actual paint call: each iteration copies the *remaining* page    */
+/* text (from the running character cursor) into a working buffer,     */
+/* lets DrawTextA wrap/ellipsis-truncate it in place to fit the         */
+/* text-area rect, then diffs the truncated buffer against an untouched */
+/* copy to find how many characters were actually consumed, backs up to */
+/* the previous space (word boundary), and advances the cursor past it. */
+/* The destination rect never moves between iterations, so only the     */
+/* *last* of the lineIdx draws remains visible on the backbuffer —      */
+/* earlier ones exist purely to advance the cursor past already-scrolled */
+/* lines. This mirrors the original algorithm exactly (it really does   */
+/* redraw-and-discard lineIdx-1 times); it is wasteful but preserved     */
+/* faithfully rather than "optimized" into different behavior.          */
+/*                                                                      */
+/* Returns the character offset where the next chunk would begin, or    */
+/* -1 once the remaining page text fits without truncation (EOF).      */
+/*                                                                      */
+/* Host note: this logic is only observably different from a no-op on   */
+/* builds where graphics/sdl3_window.cpp's DrawTextA shim actually       */
+/* word-wraps/truncates lpchText per DT_MODIFYSTRING. That shim is       */
+/* currently a stub (returns 0, never touches lpchText), so lineBuf      */
+/* never diverges from origLineBuf and this returns -1 on the very       */
+/* first internal chunk today — see ui/HelpWnd.h's draw_text doc.        */
 /* ==================================================================== */
 int HelpWnd::draw_text(int lineIdx, int* hdc_p)
 {
-    (void)lineIdx;
-    (void)hdc_p;
-    return -1;
+    if (this->helpDataLoaded == 0)
+        return -1;
+
+    void* hdc = reinterpret_cast<void*>(static_cast<uintptr_t>(*hdc_p));
+    int   oldColor = SetTextColor(hdc, 0xa0c0d1);
+    int   oldMode  = SetBkMode(hdc, 1 /* TRANSPARENT */);
+    void* oldFont  = SelectObject(hdc, g_font_small);
+
+    /* Three 0x200-byte working buffers, matching the three zeroed stack
+     * buffers in the original (local_600/local_400/local_200). */
+    char lineBuf[0x200];      /* mutable copy passed to DrawTextA — gets
+                                 word-wrapped/ellipsis-truncated in place
+                                 via DT_MODIFYSTRING */
+    char origLineBuf[0x200];  /* untouched copy of the same text, used to
+                                 detect where DrawTextA truncated lineBuf */
+    char pageText[0x200];     /* full formatted page text (source) */
+    std::memset(lineBuf, 0, sizeof(lineBuf));
+    std::memset(origLineBuf, 0, sizeof(origLineBuf));
+    std::memset(pageText, 0, sizeof(pageText));
+
+    FormatResourceString(&g_resmgr, this->pages[this->currentPageIdx].textResId,
+                          pageText, sizeof(pageText));
+
+    int textOffset = 0;   /* running character cursor into pageText */
+    int chunkCount = 0;   /* number of chunks processed so far this call */
+
+    if (lineIdx > 0) {
+        do {
+            if (chunkCount > 199)
+                break;
+
+            /* Reset the destination rect to the text area's full box each
+             * iteration (DrawTextA may shrink lprc's height with
+             * DT_CALCRECT-style flags; it doesn't here, but the original
+             * refreshes it unconditionally every pass). ButtonSprite's
+             * x/y/sourceX/sourceY double as a {left,top,right,bottom} box
+             * here — see the dual-use note in ButtonSprite.h. */
+            RECT srcRect;
+            srcRect.left   = this->btnTextArea->x;
+            srcRect.top    = this->btnTextArea->y;
+            srcRect.right  = this->btnTextArea->sourceX;
+            srcRect.bottom = this->btnTextArea->sourceY;
+            RECT destRect;
+            CopyRect(&destRect, &srcRect);
+
+            /* Copy the remaining page text into both the mutable draw
+             * buffer and the untouched reference copy. */
+            std::strcpy(lineBuf, pageText + textOffset);
+            std::strcpy(origLineBuf, pageText + textOffset);
+
+            int lineLen = static_cast<int>(std::strlen(lineBuf));
+            DrawTextA(hdc, lineBuf, lineLen, &destRect,
+                      0x18810 /* DT_WORDBREAK|DT_NOPREFIX|DT_END_ELLIPSIS|DT_MODIFYSTRING */);
+
+            /* Find the point where DT_MODIFYSTRING truncated lineBuf by
+             * diffing it against origLineBuf. The original only enters the
+             * scan if byte[0] still matches; if DrawTextA already changed
+             * the very first character, it skips straight to breakIdx = 0. */
+            int breakIdx = 0;
+            if (lineBuf[0] == origLineBuf[0]) {
+                int idx = 0;
+                int curLen = static_cast<int>(std::strlen(lineBuf));
+                for (;;) {
+                    int candidate = idx + 1;
+                    if (curLen < candidate) {
+                        /* No divergence found within lineBuf's length: the
+                         * whole remaining page text fit untruncated — EOF. */
+                        SelectObject(hdc, oldFont);
+                        SetBkMode(hdc, oldMode);
+                        SetTextColor(hdc, oldColor);
+                        return -1;
+                    }
+                    if (lineBuf[candidate] != origLineBuf[candidate]) {
+                        breakIdx = candidate;
+                        break;
+                    }
+                    idx = candidate;
+                }
+            }
+
+            /* Back up from the truncation point to the previous space so
+             * the line break lands on a word boundary. The original checks
+             * the bound (uVar3 < 0x200, unsigned) before decrementing
+             * (0x450A30/0x450A38), so on 32-bit x86 a "no space found"
+             * result wraps uVar3 to 0xFFFFFFFF after exactly one
+             * lineBuf[-1] read, which is a harmless adjacent-stack byte
+             * there. A plain `unsigned int` index replicating that same
+             * wraparound on a 64-bit host would compute a ~4 GB array
+             * offset and segfault (the classic 32->64 landmine), so this
+             * uses a signed index and lets it go negative — the loop stops
+             * via the same bound check, and 1 + (-1) == 0 reproduces the
+             * "no advance" outcome the original's wrapped uVar3 produced
+             * (1 + 0xFFFFFFFF == 0 mod 2^32) without an out-of-range
+             * lineBuf access beyond the single lineBuf[-1] read the
+             * original also performs (BUG, preserved: that one read is
+             * of a technically out-of-bounds C++ array element, matching
+             * the original's own out-of-bounds stack read in this edge
+             * case; benign in practice since lineBuf has adjacent stack
+             * neighbors on both sides). */
+            int scanIdx = breakIdx;
+            if (lineBuf[scanIdx] != ' ') {
+                while (static_cast<unsigned int>(scanIdx) < 0x200u) {
+                    char ch = lineBuf[scanIdx - 1];
+                    --scanIdx;
+                    if (ch == ' ')
+                        break;
+                }
+            }
+
+            ++chunkCount;
+            textOffset = textOffset + 1 + scanIdx;
+        } while (chunkCount < lineIdx);
+    }
+
+    SelectObject(hdc, oldFont);
+    SetBkMode(hdc, oldMode);
+    SetTextColor(hdc, oldColor);
+    return textOffset;
 }
 
 /* ==================================================================== */

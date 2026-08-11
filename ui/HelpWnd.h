@@ -55,6 +55,7 @@
 
 #include "GameWindow.h"
 #include "../shared/types.h"
+#include <cstddef>   /* offsetof, used by HelpPageData layout static_asserts */
 
 /* Forward declarations */
 class ButtonSprite;
@@ -81,11 +82,25 @@ struct HelpPageData {
     int32_t   field_0C;            // +0x0C  (unknown)
     int32_t   field_10;            // +0x10  Transition/fade parameter
     uint8_t   hasOverlay;          // +0x14  Flag: 1 = page has overlay effect
+    uint8_t   _pad_15[3];          // +0x15  MSVC natural alignment before soundResId
     int32_t   soundResId;          // +0x18  Audio narration resource ID
     RECT      clickRect;           // +0x1C  Clickable hotspot region
     RECT      overlayRect;         // +0x2C  Overlay/indicator region
 };
 #pragma pack(pop)
+
+/* This struct's byte layout must match the original x86 60-byte (0x3C)
+ * stride used throughout HelpWnd (pages[200] * 0x3C == workBuffer's
+ * offset - pages' offset: 0x1F5C - 0x15C), and by draw_text's manual
+ * index arithmetic (0x450850: LEA EAX,[EAX+EAX*2]; LEA EDX,[EAX+EAX*4];
+ * i.e. idx*3*5*4 = idx*60). Before this fix, pack(1) without the pad
+ * byte made sizeof(HelpPageData) == 0x39 (57), silently misaligning
+ * every access at page index > 0 (soundResId included, at
+ * ui/HelpWnd.cpp's go_next_page/go_prev_page narration lookups). */
+static_assert(sizeof(HelpPageData) == 0x3C, "HelpPageData stride must match the original 60-byte x86 layout");
+static_assert(offsetof(HelpPageData, soundResId) == 0x18, "");
+static_assert(offsetof(HelpPageData, clickRect) == 0x1C, "");
+static_assert(offsetof(HelpPageData, overlayRect) == 0x2C, "");
 
 /* ================================================================== */
 /* HelpPageNode — Page-list node (0x128 bytes, vtable 0x4783D8)        */
@@ -354,19 +369,32 @@ public:
 
     /**
      * render_page — Render current page text content. 0x452230.
-     * TODO: decompile 0x452230
+     *
+     * Reveals the current page's word-wrapped text one line at a time
+     * (via two draw_text() lookups per call), repainting the text-area
+     * background from the shared UI panel bitmap before drawing the new
+     * line. See ui/HelpWnd_stubs.cpp for the full transcription, validated
+     * instruction-by-instruction against disassembly.
      */
     void render_page(int* hdc_p);
 
     /**
      * render_scroll_up — Render scroll-up indicator. 0x452570.
-     * TODO: decompile 0x452570
+     *
+     * Formats pages[currentPageIdx].nextPageId as a resource *string* ID
+     * (despite the field's name) and draws it into btnTextArea2's rect.
+     * See ui/HelpWnd_stubs.cpp.
      */
     void render_scroll_up(int* hdc_p);
 
     /**
      * render_scroll_down — Render scroll-down indicator. 0x4526B0.
-     * TODO: decompile 0x4526B0
+     *
+     * Draws the fixed "..." string (constant at 0x47F070) into
+     * btnTextArea3's rect. Unconditional; the scrollDownBtnEnabled gate
+     * lives in the callers (update_button_states case 9,
+     * highlight_button case 9), not in this function. See
+     * ui/HelpWnd_stubs.cpp.
      */
     void render_scroll_down(int* hdc_p);
 
@@ -381,19 +409,41 @@ public:
     void update_button_states(int buttonId);
 
     /**
-     * draw_scroll_indicator — Blit the scroll indicator to surface. 0x452B00.
-     * TODO: decompile 0x452B00
+     * draw_scroll_indicator — Refresh the backbuffer's scroll-indicator
+     * region (0xE8 x 0x130) from the primary surface at the window's
+     * screen position, with DirectDraw surface-loss recovery around it.
+     * 0x452B00. See ui/HelpWnd_stubs.cpp for the full transcription,
+     * validated instruction-by-instruction against disassembly.
      */
     void draw_scroll_indicator();
 
     /**
-     * update_anim_sprite — Render animation sprite at frame offset. 0x452C00.
-     * TODO: decompile 0x452C00
+     * update_anim_sprite — Render the animation sprite (btnAnim) at the
+     * given frame offset onto the backbuffer, after refreshing the
+     * scroll indicator via draw_scroll_indicator(). 0x452C00. See
+     * ui/HelpWnd_stubs.cpp for the full transcription, validated
+     * instruction-by-instruction against disassembly.
      */
     void update_anim_sprite(int frameOffset);
 
     /**
-     * draw_text — Draw one line of help text for scroll position. 0x450850.
+     * draw_text — Word-wrap/ellipsis-truncate and draw a chunk of the
+     * current page's help text via DrawTextA(DT_WORDBREAK|DT_NOPREFIX|
+     * DT_END_ELLIPSIS|DT_MODIFYSTRING), advancing the text cursor
+     * lineIdx times (the destination rect never moves between passes,
+     * so only the last pass's draw remains visible — earlier passes
+     * exist only to skip past already-scrolled text). 0x450850.
+     *
+     * Returns the character offset for the next chunk, or -1 once the
+     * remaining page text fits without truncation (EOF).
+     *
+     * NOTE: on host builds this depends on graphics/sdl3_window.cpp's
+     * DrawTextA shim actually word-wrapping/truncating lpchText in
+     * place per DT_MODIFYSTRING; as of this writing that shim is a
+     * no-op stub, so draw_text currently returns -1 on its first
+     * internal chunk regardless of lineIdx (same observable behavior
+     * as the placeholder it replaced) until the shim implements real
+     * text layout.
      */
     int draw_text(int lineIdx, int* hdc_p);
 
