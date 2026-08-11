@@ -52,10 +52,15 @@ extern "C" {
      * the decompiler's own inferred call shape exactly (chained pointer
      * return = an advancing stream/token cursor). TODO: decompile these
      * directly in a follow-up pass instead of trusting the inferred shape
-     * below. */
-    void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
-    void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
-    void* WNDPROC_StreamWrite(void* stream, void* outBuf);
+     * below.
+     *
+     * WNDPROC_StreamPrintf/StreamReadLine/StreamWrite moved OUT of this
+     * extern "C" block on 2026-08-11 (see below) — their real definitions
+     * (shared/stubs_impl.cpp) have C++ mangled linkage; leaving them here
+     * bound every call site in this file to an unmangled, undefined
+     * symbol (a null-pointer call via -Wl,--unresolved-symbols=ignore-all)
+     * — the same defect class as the ui/HelpWnd.cpp landmine fixed in the
+     * 2026-08-10 "WNDPROC_Stream facade recovery" session. */
     void  WNDPROC_StreamSeekForward(void* stream, void* buf, int32_t size, int ch);
     void  WNDPROC_EnterCriticalSection(void* cs);
     void  WNDPROC_LeaveCriticalSection(void* cs);
@@ -73,8 +78,15 @@ extern "C" {
  * _Z27WNDPROC_CriticalSectionLockPiPc, i.e. (int*, char*); real
  * definition now in resources/WndProcStream.cpp, forwarding to
  * WNDPROC_Stream::ExtractToken).
- * Declared outside extern "C" to match the real definition. */
+ * Declared outside extern "C" to match the real definition.
+ *
+ * WNDPROC_StreamPrintf/StreamReadLine/StreamWrite (fixed 2026-08-11) belong
+ * here for the same reason — see the removed-from-extern-"C" comment left
+ * in the block above. */
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
+void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
+void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
+void* WNDPROC_StreamWrite(void* stream, void* outBuf);
 
 /* Section-keyword string literals (from the original .rdata; addresses
  * documented for cross-reference, not reproduced here byte-for-byte —

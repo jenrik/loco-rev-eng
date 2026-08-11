@@ -48,19 +48,28 @@ void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
 /* Format string construction (sprintf wrapper) */
 void __cdecl sprintf_wrapper(char* buffer, const char* format, ...);  /* 0x466D60 */
 
-/* Used only by TrainStation::Render (0x436750) below — matches
- * input/BuildingDescriptorEditor.cpp's existing declarations for these
- * same real symbols (extern "C" linkage there too). */
+/* Used only by TrainStation::Render (0x436750) below. CRT_wcsstr has its
+ * own separate, pre-existing multi-declaration landmine tree-wide (at
+ * least 4 mutually incompatible signatures across shared/stubs_impl.cpp,
+ * shared/defsym_stubs.cpp, native/ddraw_filedata.c,
+ * native/assetmgr_loadfile.c) — left untouched here, out of scope. */
 void* CRT_wcsstr(const void* haystack, const void* needle);
-void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
-void* WNDPROC_StreamWrite(void* stream, void* outBuf);
 
 }  // extern "C"
 
-/* WNDPROC_CriticalSectionLock has C++ mangled linkage in this tree (matches
- * input/BuildingDescriptorEditor.cpp's declaration of the same real symbol,
- * _Z27WNDPROC_CriticalSectionLockPiPc) — declared outside extern "C". */
+/* WNDPROC_CriticalSectionLock/StreamPrintf/StreamWrite have C++ mangled
+ * linkage in this tree (matches input/BuildingDescriptorEditor.cpp's and
+ * ui/UI_ChildWindow.cpp's declarations of these same real symbols) —
+ * declared outside extern "C". WNDPROC_StreamPrintf/StreamWrite were
+ * previously (wrongly) inside the extern "C" block above, which bound
+ * them to an unmangled, undefined symbol at link time (turned into a
+ * null-pointer call at every one of this file's call sites, via
+ * -Wl,--unresolved-symbols=ignore-all) — the exact same defect class as
+ * the ui/HelpWnd.cpp landmine fixed in the 2026-08-10 "WNDPROC_Stream
+ * facade recovery" session (see PROGRESS.md). Fixed 2026-08-11. */
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
+void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
+void* WNDPROC_StreamWrite(void* stream, void* outBuf);
 
 /* ================================================================== */
 /* Global variables referenced                                        */

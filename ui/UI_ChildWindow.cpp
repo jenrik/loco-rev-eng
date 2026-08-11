@@ -25,40 +25,57 @@ void*  __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id); /* 0x44
 int    __thiscall RESMGR_LoadSoundResource(void* resHandle);  /* 0x448D60 */
 void   __thiscall RESMGR_ReleaseSoundResource(void* resHandle); /* 0x448EE0 */
 
-/* Used only by Render() below. Matches the same real symbols already
- * declared (and, for the stream-family ones, called unconditionally on
- * both platforms) in input/BuildingDescriptorEditor.cpp and
- * game/TrainStation.cpp. NOTE: WNDPROC_StreamReadLine is declared `void`-
- * returning in BuildingDescriptorEditor.cpp (whose call sites never use
- * the return value) — this function's "button" directive genuinely
- * chains the return through a second call
- * (`WNDPROC_StreamPrintf(WNDPROC_StreamReadLine(WNDPROC_StreamReadLine(...)))`),
- * so it's declared `void*`-returning here instead; the real x86 ABI
- * returns the value in EAX regardless of either declaration, so this is
- * safe — each caller just chooses whether to read it. */
-void*  WNDPROC_StreamReadLine(void* stream, void* outBuf);
-void*  WNDPROC_StreamPrintf(void* stream, void* outBuf);
-void*  WNDPROC_StreamWrite(void* stream, void* outBuf);
 void*  CRT_wcsstr(const void* haystack, const void* needle);
 void   WNDPROC_EnterCriticalSection(void* cs);
 void   WNDPROC_LeaveCriticalSection(void* cs);
 void   WNDPROC_StreamSeekForward(void* stream, void* buf, int32_t size, int ch);
 /* Ghidra mislabels this call CRT_fabs (which really takes a double) —
  * same unresolved-identity caveat already flagged for the identical call
- * shape in input/BuildingDescriptorEditor.cpp's edit_key_handler_parse. */
+ * shape in input/BuildingDescriptorEditor.cpp's edit_key_handler_parse.
+ * Left inside extern "C" (matches its actual C-linkage stub definition in
+ * shared/stubs_impl.cpp) — NOT part of the 2026-08-11 linkage fix below,
+ * since its own identity is still unresolved; do not assume it shares
+ * the WNDPROC_Stream-family fix without re-checking. */
 void*  CRT_fabs(void* stream, void* outBuf);
 }
 /* GetResourceType has plain C++ linkage (resources/ResourceManager.h) —
  * declared outside the extern "C" block above, not inside it. */
 extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
 
-/* WNDPROC_CriticalSectionLock has C++ mangled linkage (matches every other
- * file in this tree that calls it — see input/BuildingDescriptorEditor.cpp,
- * game/TrainStation.cpp; real def at 0x4649F0 -- NOT 0x4647A0, an earlier
- * session's transcription error, corrected 2026-08-10, see PROGRESS.md
- * "WNDPROC_Stream facade recovery" --
- * _Z27WNDPROC_CriticalSectionLockPiPc). Used only by Render() below. */
+/* WNDPROC_CriticalSectionLock/StreamReadLine/StreamPrintf/StreamWrite have
+ * C++ mangled linkage (matches every other file in this tree that calls
+ * them — see input/BuildingDescriptorEditor.cpp, game/TrainStation.cpp;
+ * WNDPROC_CriticalSectionLock's real def at 0x4649F0 -- NOT 0x4647A0, an
+ * earlier session's transcription error, corrected 2026-08-10, see
+ * PROGRESS.md "WNDPROC_Stream facade recovery" --
+ * _Z27WNDPROC_CriticalSectionLockPiPc). Used only by Render() below.
+ *
+ * WNDPROC_StreamReadLine/StreamPrintf/StreamWrite were previously (wrongly)
+ * inside the extern "C" block above, which bound them to unmangled,
+ * undefined symbols at link time (a null-pointer call at every call site
+ * in this file, via -Wl,--unresolved-symbols=ignore-all) — the exact same
+ * defect class as the ui/HelpWnd.cpp landmine fixed in the 2026-08-10
+ * "WNDPROC_Stream facade recovery" session. Fixed 2026-08-11.
+ *
+ * NOTE: WNDPROC_StreamReadLine is declared `void`-returning in
+ * BuildingDescriptorEditor.cpp (whose call sites never use the return
+ * value) — this function's "button" directive genuinely chains the
+ * return through a second call
+ * (`WNDPROC_StreamPrintf(WNDPROC_StreamReadLine(WNDPROC_StreamReadLine(...)))`),
+ * so it's declared `void*`-returning here instead. Return type doesn't
+ * affect C++ mangling for a free function, so both declarations bind to
+ * the same symbol — that only fixes the *linkage* mismatch this comment
+ * is about. It does NOT make reading the return value safe against the
+ * real definition: shared/stubs_impl.cpp's WNDPROC_StreamReadLine is
+ * `void`-returning and currently aborts before returning anything, so
+ * this file's chained read is inert today, not correct. Whoever gives
+ * that stub a real body MUST make it return `void*` (this, matching the
+ * original x86 ABI's EAX) — otherwise this file's chained "button"
+ * directive silently reads an unset register. */
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
+void*  WNDPROC_StreamReadLine(void* stream, void* outBuf);
+void*  WNDPROC_StreamPrintf(void* stream, void* outBuf);
+void*  WNDPROC_StreamWrite(void* stream, void* outBuf);
 
 #ifdef _WIN32
 extern void*  __thiscall UIPANEL_CreateSurface(void* panel);                    /* 0x42A110 */
