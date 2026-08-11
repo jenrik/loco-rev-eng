@@ -42,21 +42,36 @@
  *                                           `void* panel` parameter is really a
  *                                           `NameEntryPanel*` (see
  *                                           network/DPlayManager.cpp / DPlayManager.h).
- *   [7] +0x1C: on_create()                 OVERRIDDEN: sub_441360 (not yet decompiled;
- *                                           called from NETMAN_JoinSession via
- *                                           `panel->on_create()`). Previously (wrongly)
- *                                           documented as inherited UI_WindowBase_OnCreate.
+ *   [7] +0x1C: on_create()                 OVERRIDDEN: NameEntryPanel::on_create
+ *                                           (0x441360) — calls the inherited
+ *                                           UI_WindowBase::on_create() first, then (gated
+ *                                           on hasSprites) lays out panelWindowRect, the
+ *                                           blit scroll offsets, all 7 ButtonSprites'
+ *                                           destination rects, panelRect, panelClickRect,
+ *                                           and editControlRect, ending with
+ *                                           NETMAN_EnumerateSessions(this). Called from
+ *                                           NETMAN_JoinSession via `panel->on_create()`.
+ *                                           Previously (wrongly) documented as inherited
+ *                                           UI_WindowBase_OnCreate.
  *   [8] +0x20: on_update(int32_t)           OVERRIDDEN: NETMAN_UpdateSessionInfo (0x441A90,
  *                                           native/NETMAN_NetworkUI.c) — blits the child
  *                                           surface, resets sprite states, refreshes
  *                                           session info, ends paint. Previously (wrongly)
  *                                           documented as inherited default no-op.
- *   [11]+0x2C: window_proc()               OVERRIDDEN: sub_442150 (not yet decompiled).
- *                                           Previously (wrongly) documented as inherited
- *                                           UI_DefWndProc.
- *   [12]+0x30: on_timer()                  OVERRIDDEN: sub_4423D0 (not yet decompiled;
- *                                           plausibly drives the 50ms animation timer
- *                                           NETMAN_JoinSession starts).
+ *   [11]+0x2C: window_proc()               OVERRIDDEN: NameEntryPanel::window_proc
+ *                                           (0x442150) — WM_SYSCOMMAND (0xF140-masked)
+ *                                           calls WIN32_PostQuit(); WM_CTLCOLORSTATIC for
+ *                                           sessionNameEditHwnd (+0x1D8) recolors the edit
+ *                                           control and returns backgroundBrush (+0x1D4);
+ *                                           otherwise DefWindowProcA. Previously (wrongly)
+ *                                           documented as inherited UI_DefWndProc.
+ *   [12]+0x30: on_timer()                  OVERRIDDEN: NameEntryPanel::on_timer
+ *                                           (0x4423D0) — drives the 50ms animation timer
+ *                                           NETMAN_JoinSession starts (wParam == 0x50,
+ *                                           gated on field_E8); repaints the scrolling
+ *                                           textBuffer marquee within panelRect and calls
+ *                                           RenderConnectionPanel(this) on scroll-boundary
+ *                                           transitions.
  *   [14]+0x38: on_lbutton_down()           OVERRIDDEN: NETMAN_SetSessionInfo (0x441C80,
  *                                           native/NETMAN_NetworkUI.c) — hit-tests the
  *                                           WM_LBUTTONDOWN lParam (packed x/y) against the
@@ -122,7 +137,15 @@ public:
                                        //        already documented on GameSetupPanel's
                                        //        textAlignMode (+0x1B0 there).
 
-    int32_t    field_144;              // +0x144  (unknown, init 0)
+    /* +0x144: icon handle. Evidence: create_window (0x4412F0) writes
+     * `*(HICON*)(this+0x144) = LoadIconA(...)` directly — confirmed via
+     * fresh decompile, NOT a reuse of gameMode (+0x140). A prior revision
+     * of create_window() wrote this value into `this->gameMode` with a
+     * "BUG: icon handle overwrites gameMode field" comment, treating the
+     * mismatch as a preserved original bug; it is not — the two fields
+     * are 4 bytes apart and the disassembly targets +0x144 only. Fixed
+     * to use this field instead of gameMode. */
+    HICON      iconHandle;             // +0x144  icon handle (LoadIconA result)
 
     /* +0x148: "paint ready" gate byte. Evidence (native/NETMAN_NetworkUI.c,
      * native/NETMAN_SessionSettings.c): NETMAN_JoinSession (0x441870) clears
@@ -156,8 +179,22 @@ public:
      * its width/height when creating sessionNameEditHwnd (below). */
     RECT       editControlRect;        // +0x15C  session-name edit control placement
 
-    /* +0x16C..+0x18B: unknown — not initialized by Init */
-    uint8_t    _gap_16C[0x20];         // +0x16C  gap (unnamed, unevidenced)
+    /* +0x16C (16 bytes): panel's own on-screen window rect. Evidence:
+     * NameEntryPanel::on_create (0x441360) initializes it to a fixed
+     * {0,0,800,600} size, then calls UI_CenterWindow(&workRect,
+     * &panelWindowRect) to center it within the inherited work rect
+     * (UI_WindowBase::workRect, +0xD4) — i.e. the 800x600 panel centered
+     * on the actual window's client area. Previously an unnamed gap. */
+    RECT       panelWindowRect;        // +0x16C  panel's own centered 800x600 window rect
+
+    /* +0x17C (16 bytes): sprite6's (res 0x421) destination rect, also kept
+     * as a NameEntryPanel field and reused as a layout anchor for sprite2's
+     * position later in on_create. Evidence: on_create (0x441360) computes
+     * it as {panelWindowRect.left+0x18, panelWindowRect.top+0x24,
+     * +sprite6->pixelData->frame_width, +sprite6->pixelData->frame_height},
+     * stores it into sprite6->x/y/sourceX/sourceY, then re-reads it (not
+     * recomputes) when positioning sprite2. Previously an unnamed gap. */
+    RECT       sprite6AnchorRect;      // +0x17C  sprite6 dest rect / layout anchor
 
     /* +0x18C (16 bytes): panel bounding RECT. Evidence: RenderConnectionPanel
      * reads it as {left,top,right,bottom} and passes it to UI_CenterWindow()
@@ -308,4 +345,52 @@ public:
      * @return            true on success, false on failure
      */
     bool create_window(HWND hWndParent);
+
+    /**
+     * on_create — Layout pass for the panel's sprite/rect geometry
+     * (vtable[7], overrides UI_WindowBase::on_create).
+     * Address: 0x441360
+     *
+     * Calls the inherited UI_WindowBase::on_create() first. Then, only
+     * when sprites have been allocated (hasSprites != 0), computes a
+     * one-time layout of the panel's sub-rects: panelWindowRect (fixed
+     * 800x600, centered on the window), the blit scroll offsets/size
+     * (scrollOffsetX2/Y2, blitDestWidth/Height), the 7 ButtonSprites'
+     * destination rects (via their x/y/sourceX/sourceY dual-use-as-RECT
+     * fields), panelRect, panelClickRect, and editControlRect. Ends by
+     * calling NETMAN_EnumerateSessions(this).
+     *
+     * Called by: NETMAN_JoinSession (0x441870, native/NETMAN_NetworkUI.c),
+     *            after hasSprites is set and sprites are initialized.
+     */
+    void on_create() override;
+
+    /**
+     * window_proc — Window procedure override (vtable[11]).
+     * Address: 0x442150
+     *
+     * On WM_SYSCOMMAND (0x112) with (wParam & 0xFFF0) == 0xF140 (a custom
+     * system command), calls WIN32_PostQuit(). On WM_CTLCOLORSTATIC
+     * (0x133) when lParam matches sessionNameEditHwnd (+0x1D8), sets the
+     * text color to 0xFF5C00 and background mode to TRANSPARENT, then
+     * returns backgroundBrush (+0x1D4). Otherwise falls through to
+     * DefWindowProcA.
+     */
+    LRESULT window_proc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+
+    /**
+     * on_timer — WM_TIMER handler override (vtable[12]).
+     * Address: 0x4423D0
+     *
+     * Gated on field_E8 (text-dirty flag) and wParam == 0x50 (the 50ms
+     * animation timer id started by NETMAN_JoinSession); otherwise
+     * delegates to UI_DefWndProc. When the gate passes: optionally blits
+     * the child surface (when hasSprites), then paints a marquee-scrolled
+     * copy of textBuffer within panelRect (advancing textDrawRect by a
+     * direction/step derived from gameMode's 4-state cycle), calls
+     * sprite5->setState(), advances the 4-state cycle when a scroll
+     * boundary is hit, calls RenderConnectionPanel(this) only when a
+     * boundary was hit, and always finishes with UIPANEL_EndPaint.
+     */
+    LRESULT on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
 };
