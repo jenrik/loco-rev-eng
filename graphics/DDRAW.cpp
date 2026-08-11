@@ -149,7 +149,9 @@ extern void* __thiscall UI_CreateMessageBox(void* mgr, int res_id, short type,
                                             char anchor, int x, int y, char flags); /* @ 0x423AB0 */
 
 /* Global state references */
-extern void*  g_resmgr;                 /* 0x485580 — ResourceManager singleton */
+/* g_resmgr previously declared here (wrong type `void*`, wrong address
+ * comment "0x485580") but never actually used anywhere in this file —
+ * removed as dead code rather than fixed (2026-08-11, g_resmgr sweep). */
 extern int    g_cursor_world_x;         /* cursor world space X */
 extern int    g_cursor_world_y;         /* cursor world space Y */
 extern int    g_drag_start_x;           /* drag operation start X */

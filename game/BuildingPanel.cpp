@@ -132,7 +132,14 @@ bool   UIPANEL_Blit(void* src_surface, uint32_t src_x, uint32_t src_y,
 /* Global variables                                                    */
 /* ================================================================== */
 
-extern void* g_resmgr;                  /* 0x4FD228 — Resource manager */
+class ResourceManager;
+extern ResourceManager g_resmgr;        /* 0x4855E8 — object, not a pointer (was void*
+                                          * with a stale "0x4FD228" address comment —
+                                          * confirmed via the single real definition in
+                                          * resources/ResourceManager.cpp that this always
+                                          * linked to the same object regardless; a
+                                          * widespread cross-TU landmine, see PROGRESS.md's
+                                          * g_resmgr sweep) */
 extern void* g_primary_surface;         /* 0x4FD164 — Primary DirectDraw surface */
 extern void* g_netman;                  /* 0x4FD33C — Network manager (contains player entries) */
 extern void* g_font_normal;             /* 0x4851D8 — Normal GDI font handle */
@@ -167,7 +174,7 @@ void BuildingPanel::init_sprites()
     }
 
     /* Load panel background resource 0x3d87 */
-    void* res = ResourceManager_GetById(g_resmgr, 0x3d87);
+    void* res = ResourceManager_GetById(&g_resmgr, 0x3d87);
     this->main_resource = res;                                   /* +0x28C */
     if (res != nullptr) {
         /* Get surface via vtable[1] = GetSurface(res, 0, 0) */
@@ -178,7 +185,7 @@ void BuildingPanel::init_sprites()
     }
 
     /* Load selection frame resource 0x3d88 */
-    res = ResourceManager_GetById(g_resmgr, 0x3d88);
+    res = ResourceManager_GetById(&g_resmgr, 0x3d88);
     this->selection_resource = res;                              /* +0x294 */
     if (res != nullptr) {
         using GetSurface = void* (__thiscall*)(int, int);

@@ -94,7 +94,14 @@ extern "C" {
     void   CRT_FindClose(HANDLE h);
 
     /* Resource manager */
-    extern void*  g_resmgr;               /* 0x4FD228 */
+    class ResourceManager;
+    extern ResourceManager g_resmgr;      /* 0x4855E8 — object, not a pointer (was void*
+                                            * with a stale "0x4FD228" address comment —
+                                            * confirmed via the single real definition in
+                                            * resources/ResourceManager.cpp that this
+                                            * always linked to the same object regardless;
+                                            * a widespread cross-TU landmine, see
+                                            * PROGRESS.md's g_resmgr sweep) */
     extern char   g_install_path[];        /* 0x4852B8 */
     extern char   g_empty_string;          /* 0x476934 */
     extern void*  g_game;                 /* 0x4FD144 */
@@ -1074,7 +1081,7 @@ void __thiscall UIPANEL_Hide(void* self, const char* filename)
                     dtor(*g_cursor_surf, 1);
                 }
             }
-            *g_cursor_surf = (int*)ResourceManager_GetById(g_resmgr, 0x400);
+            *g_cursor_surf = (int*)ResourceManager_GetById(reinterpret_cast<void**>(&g_resmgr), 0x400);
             if (*g_cursor_surf != NULL) {
                 typedef void* (__thiscall* GetSurfFunc)(void* self, int a, int b);
                 GetSurfFunc gs = (GetSurfFunc)(*(uintptr_t**)*g_cursor_surf)[1];
