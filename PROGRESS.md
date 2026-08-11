@@ -543,12 +543,9 @@ weakened to make this converge.
 
 ---
 
-### Priority: GameSetupPanel extended vtable stubs
+### Priority: GameSetupPanel extended vtable stubs — STALE, already resolved
 
-- [ ] **GameSetupPanel::HandleMapClick** (0x40ABA0) — vtable[12]. Stub in stubs/gamesetuppanel_network_stubs.cpp.
-- [ ] **GameSetupPanel::SelectLayoutEntry** (0x40AAF0) — vtable[13]. Stub in stubs/gamesetuppanel_network_stubs.cpp.
-- [ ] **GameSetupPanel::SendScenarioSelect** (0x40AC50) — vtable[14]. Stub in stubs/gamesetuppanel_network_stubs.cpp.
-- [ ] **GameSetupPanel::ConnectToNetworkGame** (0x40AA20) — vtable[15]. Stub in stubs/gamesetuppanel_network_stubs.cpp.
+- [x] ~~GameSetupPanel::HandleMapClick/SelectLayoutEntry/SendScenarioSelect/ConnectToNetworkGame~~ — this whole entry was stale (2026-08-11, FUN_-sweep session checked it as a continuous-decompile candidate): `stubs/gamesetuppanel_network_stubs.cpp` no longer exists, and all 4 methods are already fully implemented in `ui/GameSetupPanel_network.cpp`, with real call sites. `ui/GameSetupPanel.h`'s own class comment already corrects the "vtable[12..15]" framing this TODO used: 0x4784CC has zero cross-references (a Ghidra auto-label artifact, not a real vtable) and all 4 are called via direct `UNCONDITIONAL_CALL` dispatch, not virtual dispatch. No code change needed, just removing this stale tracking entry.
 
 ### Priority: wire the real mingw-w64 DirectX headers into the `_WIN32` typecheck path
 
