@@ -67,8 +67,6 @@ class  Building;
 /* ================================================================== */
 /* SpriteData — lightweight sprite resource descriptor                */
 /* Size: 0x10 bytes                                                   */
-/* Constructed by DDRAW_SpriteDataCtor (0x45CDF0)                     */
-/* Destroyed by DDRAW_SpriteDataDtor   (0x45CE10)                     */
 /* ================================================================== */
 
 struct SpriteData {
@@ -77,6 +75,24 @@ struct SpriteData {
     uint32_t  file_size;         /* +0x08  total file size in bytes      */
     uint16_t  resource_id;       /* +0x0C  numeric resource identifier   */
     /* total: 0x0E bytes + alignment padding to 0x10 */
+
+    /**
+     * SpriteData::SpriteData — constructor.
+     * Address: 0x45CDF0, __thiscall
+     *
+     * Zeroes tree_node/pixel_buffer/file_size, stores resource_id.
+     */
+    explicit SpriteData(uint16_t res_id);
+
+    /**
+     * SpriteData::~SpriteData — destructor.
+     * Address: 0x45CE10, __fastcall
+     *
+     * Detaches this node from the AssetMgr tree (AssetMgr_ReadFile,
+     * despite the misleading Ghidra-inferred name — see resources/AssetMgr.h),
+     * then frees pixel_buffer if allocated.
+     */
+    ~SpriteData();
 };
 
 /* ================================================================== */
@@ -314,26 +330,6 @@ void __fastcall DDRAW_FileData_Dtor(FileData* data);
  * @return      1 on success, 0 on failure
  */
 uint32_t __thiscall DDRAW_LoadFile(FileData* self, const char* path);
-
-/**
- * DDRAW_SpriteDataCtor — constructor for SpriteData struct.
- * Address: 0x45CDF0, __thiscall
- *
- * Zeroes fields +0x00/+0x04/+0x08, stores resource_id at +0x0C.
- *
- * @param res_id  numeric resource identifier
- */
-void __thiscall DDRAW_SpriteDataCtor(SpriteData* self, uint16_t res_id);
-
-/**
- * DDRAW_SpriteDataDtor — destructor for SpriteData struct.
- * Address: 0x45CE10, __fastcall
- *
- * Frees tree node and pixel_buffer.
- *
- * @param data  SpriteData* to destroy
- */
-void __fastcall DDRAW_SpriteDataDtor(SpriteData* data);
 
 /* ================================================================== */
 /* Global state — DirectDraw globals                                   */

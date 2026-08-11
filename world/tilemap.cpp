@@ -121,8 +121,12 @@ extern void     CGWND_SetMode(int mode);
 extern void     Game_DeselectGameObject(int game);
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
-extern void*    DDRAW_SpriteDataCtor(void* obj, int type);
-extern void     DDRAW_SpriteDataDtor(void* obj);
+/* Thin void*-only bridges over the real SpriteData::SpriteData/~SpriteData
+ * (graphics/DDRAW.h/.cpp) — this file can't #include DDRAW.h directly, its
+ * many global declarations (g_ddraw_building/g_tilemap/g_primary_surface)
+ * conflict with this file's own locally-declared, differently-typed copies. */
+extern void*    SpriteData_Construct(void* mem, uint16_t res_id);
+extern void     SpriteData_Destruct(void* obj);
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);
 extern void*    Entity_GetSubObjectPosition(void* obj, int* out_xy, int direction);
 extern void     GameObject_GetSubObjectWorldPos(void* obj, int* out_packed);
@@ -298,28 +302,39 @@ TileMap::TileMap()
     viewport_x = 0;
     viewport_y = 0;
 
-    /* Allocate first DDRAW_SpriteData at +0x52488 (asset_load_ptr).
-     * 0x2C is this call site's own real x86 evidence, but it does not match
-     * graphics/DDRAW.h's currently-documented `SpriteData` struct (0x10
-     * bytes original / ~0x18 on this host) — that struct is likely an
-     * incomplete reconstruction (missing ~0x1C bytes of real fields), not
-     * proof this allocation is wrong. DDRAW_SpriteDataCtor (0x45CDF0) is
-     * still a no-op stub (shared/stubs_impl.cpp) that never writes through
-     * `obj`, so this is not a live overflow today; leaving the literal as
-     * evidence rather than guessing a sizeof() from an under-modeled type.
-     * Revisit once 0x45CDF0 is actually decompiled. */
+    /* Allocate first sprite-data object at +0x52488 (asset_load_ptr).
+     * 0x2C is this call site's own real x86 evidence. DDRAW_SpriteDataCtor
+     * (now graphics/DDRAW.h's SpriteData::SpriteData, 0x45CDF0) only
+     * constructs the first 0xE bytes (tree_node/pixel_buffer/file_size/
+     * resource_id) — confirmed via full decompile+disassembly, not a
+     * stub anymore. The remaining ~0x1E bytes of this 0x2C allocation are
+     * genuinely unaccounted for by SpriteData: World_enumerate.cpp's
+     * AssetMgr_LoadFileEx/EnumFiles call sites below (~line 2207) reinterpret
+     * this SAME pointer as a full `AssetMgr*` and call real AssetMgr methods
+     * on it, and DDRAW_SpriteDataDtor's own body (see ~SpriteData) passes
+     * `this` itself (not a sub-field) to AssetMgr_ReadFile, which also casts
+     * to `AssetMgr*`. So this object is constructed as a small SpriteData
+     * header but consumed elsewhere as (or aliased with) a real AssetMgr —
+     * keeping the 0x2C literal here is deliberate: switching to
+     * sizeof(SpriteData) would under-allocate for whatever AssetMgr-shaped
+     * data those other call sites expect. Not fully reconciled this pass —
+     * flagged in PROGRESS.md as a follow-up (needs sizeof(AssetMgr) checked
+     * against 0x2C, and a decision on whether asset_load_ptr/asset_enum_ptr
+     * are genuinely AssetMgr instances with a SpriteData-shaped header, or
+     * two unrelated types that happen to alias). */
     void* mem1 = operator_new(0x2C);
     if (mem1 != NULL) {
-        asset_load_ptr = DDRAW_SpriteDataCtor(mem1, 7);
+        asset_load_ptr = SpriteData_Construct(mem1, 7);
     } else {
         asset_load_ptr = NULL;
     }
 
-    /* Allocate second DDRAW_SpriteData at +0x5248C (asset_enum_ptr) — see
-     * the mem1 comment above for the SpriteData size-discrepancy caveat. */
+    /* Allocate second sprite-data object at +0x5248C (asset_enum_ptr) —
+     * see the mem1 comment above for the SpriteData/AssetMgr aliasing
+     * caveat. */
     void* mem2 = operator_new(0x2C);
     if (mem2 != NULL) {
-        asset_enum_ptr = DDRAW_SpriteDataCtor(mem2, 8);
+        asset_enum_ptr = SpriteData_Construct(mem2, 8);
     } else {
         asset_enum_ptr = NULL;
     }
@@ -351,14 +366,14 @@ TileMap::~TileMap()
 
     /* Free asset load pointer (+0x52488) */
     if (asset_load_ptr != NULL) {
-        DDRAW_SpriteDataDtor(asset_load_ptr);
+        SpriteData_Destruct(asset_load_ptr);
         GLOBAL_free(asset_load_ptr);
         asset_load_ptr = NULL;
     }
 
     /* Free asset enum pointer (+0x5248C) */
     if (asset_enum_ptr != NULL) {
-        DDRAW_SpriteDataDtor(asset_enum_ptr);
+        SpriteData_Destruct(asset_enum_ptr);
         GLOBAL_free(asset_enum_ptr);
         asset_enum_ptr = NULL;
     }

@@ -306,6 +306,13 @@ public:
 
     /* ---- Misc pointers at end ---- */
     void*       occupancy_bitmap;       /* +0x52484  bitmap: 1 bit per tile */
+    /* void*, NOT SpriteData* despite being constructed via SpriteData's
+     * ctor/dtor below: World_enumerate.cpp's AssetMgr_LoadFileEx/EnumFiles
+     * call sites (+0x2207/+0x2210 in tilemap.cpp) reinterpret the SAME
+     * pointer as a full `AssetMgr*` and call real AssetMgr methods on it
+     * (UpdateAdjacencyGraph/EnumeratePostLoadAdjacency) — evidence that
+     * whatever this object really is, it is not simply a 0x10-byte
+     * SpriteData. See the ctor call sites' comment below. */
     void*       asset_load_ptr;         /* +0x52488  asset loading context */
     void*       asset_enum_ptr;         /* +0x5248C  asset enumeration context */
     uint8_t     update_complete;        /* +0x52490  async asset loading flag */
@@ -520,8 +527,6 @@ extern void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag);
 extern void     Game_DeselectGameObject(int game);  /* 0x411580 */
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
-extern void*    DDRAW_SpriteDataCtor(void* obj, int type);
-extern void     DDRAW_SpriteDataDtor(void* obj);
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);
 extern void*    Entity_GetSubObjectPosition(void* obj, int* out_xy, int direction);
 extern void     GameObject_GetSubObjectWorldPos(void* obj, int* out_packed);

@@ -430,10 +430,11 @@ void Cursor_UnlockAllSurfaces(void*) {}
  * these no-op duplicates removed (LINK-001). */
 void DDRAW_SetSurfaceFormat(void*, int);
 void DDRAW_SetSurfaceFormat(void*, int) {}
-void DDRAW_SpriteDataCtor(void*, int);
-void DDRAW_SpriteDataCtor(void*, int) {}
-void DDRAW_SpriteDataDtor(void*);
-void DDRAW_SpriteDataDtor(void*) {}
+/* DDRAW_SpriteDataCtor/Dtor(void*, int) no-op stubs removed — real
+ * implementation now SpriteData::SpriteData/~SpriteData (graphics/DDRAW.h/
+ * .cpp); world/tilemap.cpp's mismatched free-function declarations (which
+ * bound here instead of the real constructor/destructor) were fixed to
+ * use placement-new/explicit-dtor-call against the real type. */
 /* DDRAW_SelectBuilding(void*, int) — real implementation now in
  * graphics/DDRAW.cpp (0x459180), as a bridge to
  * DDRAW_Building::SelectBuilding. The wrong-signature `void`-returning
