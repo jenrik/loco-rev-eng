@@ -343,20 +343,14 @@ Game::Game()
      * TimerSlotList reconstruction owns that lifecycle).  The item
      * array allocation and count below reproduce the recovered data
      * fields. */
-    this->timer_array_ptr = 0;          /* +0x110 */
+    this->timer_array_ptr = nullptr;    /* +0x110 */
     this->timer_count = 0;              /* +0x114 */
 
     /* 0x28 is a fixed-size raw int32_t[10] array (the loop below writes
      * exactly 10 elements) — no pointer members, so this allocation is
-     * safe as-is on a 64-bit host; not a C++ object needing sizeof().
-     * SEPARATE bug (out of scope here, same class as world/tilemap.cpp's
-     * documented RECT-list truncation): timer_array_ptr is a 32-bit
-     * int32_t field storing a truncated 64-bit heap pointer via
-     * reinterpret_cast<intptr_t> below — undefined behavior whenever
-     * operator_new returns an address outside the low 4GB on this host. */
+     * safe as-is on a 64-bit host; not a C++ object needing sizeof(). */
     int32_t* timers = static_cast<int32_t*>(operator_new(0x28));
-    this->timer_array_ptr =
-        static_cast<int32_t>(reinterpret_cast<intptr_t>(timers));
+    this->timer_array_ptr = timers;
 
     if (timers != nullptr) {
         for (int i = 10; i != 0; i--) {
@@ -415,11 +409,10 @@ Game::~Game()
      * after this body. */
     this->timer_edit = 0;               /* +0x118 */
     this->timer_count = 0;              /* +0x114 */
-    if (this->timer_array_ptr != 0) {
-        GLOBAL_free(reinterpret_cast<void*>(
-            static_cast<intptr_t>(this->timer_array_ptr)));
+    if (this->timer_array_ptr != nullptr) {
+        GLOBAL_free(this->timer_array_ptr);
     }
-    this->timer_array_ptr = 0;
+    this->timer_array_ptr = nullptr;
 }
 
 /* ================================================================== */

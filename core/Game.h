@@ -145,7 +145,15 @@ public:
      * vtable slots Game dispatches (Stop/GetItem/GetCount/Insert). */
     int32_t    timer_sub_ptr;           /* +0x10C inline timer sub-object vtable
                                            (0x477798 init/dead, 0x477758 running) */
-    int32_t    timer_array_ptr;         /* +0x110 allocated timer data (0x28 bytes) */
+    int32_t*   timer_array_ptr;         /* +0x110 allocated timer data (0x28 bytes).
+                                           Was int32_t (truncating a real 64-bit heap
+                                           pointer through reinterpret_cast<intptr_t>
+                                           at every use site — same landmine class as
+                                           world/tilemap.cpp's dirty-rect-list next/prev,
+                                           see [[landmine_bug_classes]]); retyped to a
+                                           real pointer (2026-08-11, FUN_-sweep session)
+                                           since every use is either alloc/free or a
+                                           null check, never a numeric read. */
     int32_t    timer_count;             /* +0x114 timer count (10 if alloc succeeded, else 0) */
     int32_t    timer_edit;              /* +0x118 edit/mode counter */
 
