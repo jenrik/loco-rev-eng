@@ -64,7 +64,10 @@ extern void  __thiscall FormatResourceString(void* resmgr, int string_id,
 /* Global state                                                        */
 /* ================================================================== */
 
-extern void* g_resmgr;          /* 0x4855E8 — ResourceManager singleton */
+class ResourceManager;
+extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
+                                      * a widespread cross-TU landmine — see
+                                      * PROGRESS.md's g_resmgr sweep) */
 extern void* g_main_window;     /* 0x4AA4A0 — main CGWND window ptr */
 
 /* Global cursor backbuffer surface + refcount (shared among all UI windows) */

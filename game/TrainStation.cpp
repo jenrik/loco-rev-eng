@@ -76,7 +76,10 @@ extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof
 /* Global variables referenced                                        */
 /* ================================================================== */
 
-extern void* g_resmgr;                              /* 0x4855E8 */
+class ResourceManager;
+extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
+                                      * a widespread cross-TU landmine — see
+                                      * PROGRESS.md's g_resmgr sweep) */
 extern void* g_asset_mgr;                           /* 0x485600 */
 extern char g_install_path[];                       /* 0x4A99C8 — install directory path */
 

@@ -132,7 +132,10 @@ extern void __fastcall Cursor_Render(void* cursor, uintptr_t hWnd,          /* 0
 /* Global variables referenced                                         */
 /* ================================================================== */
 
-extern void* g_resmgr;              /* 0x4855E8 — global resource manager */
+class ResourceManager;
+extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
+                                      * a widespread cross-TU landmine — see
+                                      * PROGRESS.md's g_resmgr sweep) */
 extern void* g_asset_mgr;           /* 0x485600 — global asset manager */
 extern char  g_install_path[];      /* 0x4A99C8 — installation path string */
 extern void* g_font_small;          /* 0x4855F4 — small font handle (used for credits text) */

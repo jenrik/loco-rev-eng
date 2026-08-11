@@ -38,7 +38,10 @@ extern int      g_viewport_rect_right; /* 0x4AAD1C */
 extern int      g_viewport_rect_bottom;/* 0x4AAD20 */
 extern void*    g_tilemap;             /* 0x4AAD08 */
 extern void*    g_tooltip_mgr;         /* 0x4FD220 */
-extern void*    g_resmgr;              /* ResourceManager */
+class ResourceManager;
+extern ResourceManager g_resmgr;       /* 0x4855E8 — object, not a pointer (was void*,
+                                         * a widespread cross-TU landmine — see
+                                         * PROGRESS.md's g_resmgr sweep) */
 extern void*    g_audio;               /* 0x4FD3BC — GameAudio */
 
 /* Resource manager */

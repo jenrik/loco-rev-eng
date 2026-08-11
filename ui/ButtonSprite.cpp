@@ -17,7 +17,10 @@ extern void* __cdecl operator_new(size_t size);     /* 0x465CE0 — operator new
     extern void  __cdecl GLOBAL_free(void* ptr);         /* 0x465CD0 */
 
     /* ResourceManager singleton */
-    extern void* g_resmgr;                               /* 0x4855E8 */
+    class ResourceManager;
+    extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
+                                          * a widespread cross-TU landmine — see
+                                          * PROGRESS.md's g_resmgr sweep) */
 
     /* Resource lookup / release */
     extern void* __thiscall ResourceManager_GetById(void* resmgr, UINT id); /* 0x4472B0 */

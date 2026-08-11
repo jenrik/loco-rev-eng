@@ -182,7 +182,10 @@ extern uint8_t  g_road_build_mode;
 extern int      g_placement_resource_id;
 extern int      g_game_mode;            /* 0x4851F4 — 1=main menu, 2=in-game */
 extern int      g_timer_id;
-extern void*    g_resmgr;
+class ResourceManager;
+extern ResourceManager g_resmgr;  /* 0x4855E8 — object, not a pointer (was void*,
+                                    * a widespread cross-TU landmine — see
+                                    * PROGRESS.md's g_resmgr sweep) */
 extern int      g_demo_mode;            /* 0x4A9918 */
 extern int      g_easter_egg;
 extern uint32_t g_screen_bpp;           /* 0x48521C */

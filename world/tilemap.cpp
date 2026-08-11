@@ -83,7 +83,10 @@ extern int32_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) —
 extern void*    g_cursor_surface;        /* 0x4FD3C8 */
 extern void*    g_primary_surface;       /* 0x4FD3C4 */
 /* NOTE: g_tile_occupied_bitmap removed — occupancy bitmap is now a TileMap member field */
-extern void*    g_resmgr;                /* 0x4855E8 */
+class ResourceManager;
+extern ResourceManager g_resmgr;         /* 0x4855E8 — object, not a pointer (was void*,
+                                           * a widespread cross-TU landmine — see
+                                           * PROGRESS.md's g_resmgr sweep) */
 extern void*    g_scripted_object;       /* 0x4AA5B8 */
 extern void*    g_building_mgr;          /* 0x485448 */
 /* g_tilemap declared canonically in tilemap.h (TileMap* singleton) */
@@ -2251,7 +2254,7 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
         return NULL;
     }
 
-    void* res_data = ResourceManager_GetById(&g_resmgr,
+    void* res_data = ResourceManager_GetById(reinterpret_cast<void**>(&g_resmgr),
                                              static_cast<UINT>(target_resource_id));
     if (res_data == NULL) {
         return NULL;

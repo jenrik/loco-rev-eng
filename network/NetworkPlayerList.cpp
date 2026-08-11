@@ -87,7 +87,10 @@ extern void* __cdecl operator_new(size_t size);
 extern void  __cdecl GLOBAL_free(void* ptr);
 
 /* Game globals */
-extern void* g_resmgr;                  /* 0x4855E8 */
+class ResourceManager;
+extern ResourceManager g_resmgr;        /* 0x4855E8 — object, not a pointer (was void*,
+                                          * a widespread cross-TU landmine — see
+                                          * PROGRESS.md's g_resmgr sweep) */
 extern char  g_install_path[];          /* 0x4A99C8 */
 extern PlayerConfig* g_player_config;   /* 0x4AA4A8 */
 

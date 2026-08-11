@@ -85,7 +85,10 @@ extern uint8_t __thiscall UIPANEL_StretchBlit(void* surface, LPCSTR filePath,
 extern size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 #endif
 
-extern void* g_resmgr;      /* 0x4855E8 — ResourceManager singleton */
+class ResourceManager;
+extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
+                                      * a widespread cross-TU landmine — see
+                                      * PROGRESS.md's g_resmgr sweep) */
 extern void* g_netman;      /* 0x4FD3AC — NetMan singleton (raw-offset view; see
                                 game/ScriptedObject.cpp for the same
                                 g_netman[0x17].scenarioId idiom) */

@@ -94,7 +94,10 @@ extern void GLOBAL_free(void* p);                                 /* 0x465CD0 */
 
 /* Global variables */
 extern void*  g_primary_surface;     /* primary DirectDraw surface */
-extern void*  g_resmgr;              /* global resource manager singleton */
+class ResourceManager;
+extern ResourceManager g_resmgr;     /* 0x4855E8 — object, not a pointer (was void*,
+                                       * a widespread cross-TU landmine — see
+                                       * PROGRESS.md's g_resmgr sweep) */
 extern void*  g_audio;               /* global GameAudio singleton */
 extern uint32_t g_game_time;         /* 0x4A99B4 — game tick counter */
 extern HWND    g_main_window;        /* 0x4AA4A0 */
