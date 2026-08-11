@@ -530,14 +530,11 @@ void HelpWnd::show(int pageTarget)
 
     /* Initialize animation frame count from sprite data */
     {
-        void* animPixelData = this->btnAnim->pixelData;
+        RESDATA* animPixelData = static_cast<RESDATA*>(this->btnAnim->pixelData);
         if (animPixelData != NULL) {
-            /* NOTE: Raw offset access into ButtonSprite pixel data structure.
-             * +0x20 = frame table pointer, +0x1E = default animation index.
-             * TODO: Add named fields to pixel data structure. */
-            void* frameTable = *(void**)((uintptr_t)animPixelData + 0x20);
-            short frameIdx = *(short*)((uintptr_t)animPixelData + 0x1E);
-            this->animFrameCount = (uint)*(unsigned short*)((uintptr_t)frameTable + frameIdx * 0x18);
+            FrameData* frameTable = animPixelData->anim_table;
+            int16_t frameIdx = animPixelData->default_anim;
+            this->animFrameCount = (uint)frameTable[frameIdx].start_frame;
         }
     }
 
@@ -1379,22 +1376,22 @@ void HelpWnd::update_anim(int param)
 
     if ((this->field_3064 & 1) == 0) {
         if (AudioChannel_IsActive((int)this->audioChannel) == 0) {
-            void* pd = this->btnAnim->pixelData;
+            RESDATA* pd = static_cast<RESDATA*>(this->btnAnim->pixelData);
             if (pd != NULL) {
-                short fi = *(short*)((uintptr_t)pd + 0x1E);
-                void* ft = *(void**)((uintptr_t)pd + 0x20);
-                unsigned short mf = *(unsigned short*)((uintptr_t)ft + fi * 0x18 + 2);
+                int16_t fi = pd->default_anim;
+                FrameData* ft = pd->anim_table;
+                unsigned short mf = ft[fi].end_frame;
                 if (this->animFrameCount < (int)mf)
                     this->animFrameCount++;
                 else
-                    this->animFrameCount = *(unsigned short*)((uintptr_t)ft + fi * 0x18);
+                    this->animFrameCount = ft[fi].start_frame;
             }
         } else {
-            void* pd = this->btnAnim->pixelData;
+            RESDATA* pd = static_cast<RESDATA*>(this->btnAnim->pixelData);
             if (pd != NULL) {
-                short fi = *(short*)((uintptr_t)pd + 0x1E);
-                void* ft = *(void**)((uintptr_t)pd + 0x20);
-                unsigned short hf = *(unsigned short*)((uintptr_t)ft + fi * 0x18 + 0x18);
+                int16_t fi = pd->default_anim;
+                FrameData* ft = pd->anim_table;
+                unsigned short hf = ft[fi + 1].start_frame;
                 if (this->animFrameCount == hf) goto skip_render;
                 this->animFrameCount = hf;
             }
@@ -1414,11 +1411,11 @@ skip_render:
 void HelpWnd::load_page(int pageIdx)
 {
     if (this->spritesInited != 0) {
-        void* pd = this->btnAnim->pixelData;
+        RESDATA* pd = static_cast<RESDATA*>(this->btnAnim->pixelData);
         if (pd != NULL) {
-            short fi = *(short*)((uintptr_t)pd + 0x1E);
-            void* ft = *(void**)((uintptr_t)pd + 0x20);
-            this->animFrameCount = *(unsigned short*)((uintptr_t)ft + fi * 0x18);
+            int16_t fi = pd->default_anim;
+            FrameData* ft = pd->anim_table;
+            this->animFrameCount = ft[fi].start_frame;
         }
     }
     this->currentPageIdx = pageIdx;
