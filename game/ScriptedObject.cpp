@@ -46,7 +46,11 @@ void* AssetMgr_LoadFile(void* mgr, const char* name,
 /* ================================================================== */
 char  ScriptedObject_ParseStream(void* stream);                /* 0x41E9F0 */
 void  ScriptedObject_InitBase(uint32_t resource_id, int zero);  /* 0x4203E0 */
-char  UI_ChildWindow_Render(void* obj, void* stream);           /* 0x424E00 */
+/* UI_ChildWindow_Render's real definition (ui/UI_ChildWindow.cpp:796) is
+ * inside an `extern "C" { }` block (matching ui/UI_ChildWindow.h:339-376) —
+ * this declaration must match that linkage, not default C++ linkage,
+ * or this call binds to nothing (LINK-001 landmine). */
+extern "C" char UI_ChildWindow_Render(void* obj, void* stream);           /* 0x424E00 */
 
 /* Panel helpers declared in Panel.h */
 extern void Panel_DtorBody(void* obj);                         /* 0x4545A0 */

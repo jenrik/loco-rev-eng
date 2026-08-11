@@ -198,12 +198,17 @@ else
   # missing-implementation defects (a much larger, separate pass: doing so
   # requires resolving every currently-dangling undefined symbol first).
 
+  main_link_args = ['-no-pie']
+  if get_option('unresolved_ignore')
+    main_link_args += ['-Wl,--unresolved-symbols=ignore-all']
+  endif
+
   lego_loco = executable('lego_loco',
     dcp_sources + native_sources + platform_c_sources,
     include_directories: inc_dirs,
     cpp_args: common_cpp_args,
     c_args: common_c_args,
-    link_args: ['-no-pie', '-Wl,--unresolved-symbols=ignore-all'],
+    link_args: main_link_args,
     dependencies: [sdl3_dep, sdl3_net_dep, gst_app_dep, gst_video_dep, freetype_dep, dbus_dep, threads_dep],
     install: false,
   )

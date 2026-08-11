@@ -1,2 +1,4 @@
 option('strict', type: 'integer', min: 0, max: 2, value: 0,
   description: 'Anti-pattern warning tier: 0=Tier1 (always-on ABI/layout checks), 1=+Tier2 (calling-convention/cv/null), 2=+Tier3 (old-style-cast/Effective C++)')
+option('unresolved_ignore', type: 'boolean', value: true,
+  description: 'Link main binary with -Wl,--unresolved-symbols=ignore-all (LINK-001 legacy masking). Set false in a diagnostic builddir to make the linker enumerate every remaining undefined symbol instead of silently binding it to address 0.')
