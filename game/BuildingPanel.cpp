@@ -84,6 +84,10 @@ static_assert(offsetof(OccupantEntryView, next) == 0x10);
 
 void*  operator_new(size_t size);                       /* 0x465CE0 */
 
+/* Plain C++ linkage (matches the real definition in graphics/LOCOBITMAP.cpp) —
+ * must NOT be inside the extern "C" block below. */
+size_t UIPANEL_Surface_Size();
+
 extern "C" {
     /* Resource management */
     void*  ResourceManager_GetById(void* resmgr, int id);    /* 0x44CB40 */
@@ -723,8 +727,10 @@ void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
     int icon_width = static_cast<int>(player_entry->icon_width); /* +0x40 */
     int icon_height = static_cast<int>(player_entry->icon_height); /* +0x42 */
 
-    /* Create temp surface for icon */
-    void* surface_obj = operator_new(0x20);
+    /* Create temp surface for icon. 0x20 was the original x86
+     * sizeof(UIPANEL_Surface); use the real host size (pointer fields
+     * widen it to 0x30 — see graphics/LOCOBITMAP.h). */
+    void* surface_obj = operator_new(UIPANEL_Surface_Size());
     void* tmp_surface;
     if (surface_obj == nullptr) {
         tmp_surface = nullptr;

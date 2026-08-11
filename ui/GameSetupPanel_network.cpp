@@ -155,6 +155,8 @@ void GameSetupPanel::SendScenarioSelect(int32_t scenarioIndex)
         return;
     }
 
+    /* Fixed-size raw network wire-format packet (explicit byte offsets
+     * below), not a C++ object — safe as-is on any host. */
     auto* packet = static_cast<std::uint8_t*>(operator_new(0x1c));
     if (!packet) return;
     std::memset(packet, 0, 0x1c);

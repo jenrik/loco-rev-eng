@@ -323,6 +323,7 @@ void Cursor::init()
     char filePath[0x504] = { 0 };
     wsprintfA(filePath, "%spost\\Edit\\colour.dat", &g_install_path);
 
+    /* Fixed-size raw file-read buffer, not a C++ object — safe as-is. */
     void* readBuffer = operator_new(0x2000);
     int* streamObj = nullptr;
     int* memBuffer = nullptr;
@@ -336,7 +337,9 @@ void Cursor::init()
                                       reinterpret_cast<uint8_t*>(filePath),
                                       &fileSize);
         if (memBuffer != nullptr) {
-            void* stream = operator_new(0x5C);
+            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
+             * host size (see resources/Win32Stream.h). */
+            void* stream = operator_new(WIN32_Stream_Size());
             if (stream != nullptr) {
                 streamObj = static_cast<int*>(
                     WNDPROC_StreamFromMemory(stream, reinterpret_cast<char*>(memBuffer), fileSize, 1));
@@ -346,7 +349,9 @@ void Cursor::init()
 
     /* Fallback to direct file open */
     if (streamObj == nullptr) {
-        void* stream = operator_new(0x5C);
+        /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
+         * host size (see resources/Win32Stream.h). */
+        void* stream = operator_new(WIN32_Stream_Size());
         if (stream != nullptr) {
             streamObj = static_cast<int*>(
                 WIN32_StreamOpenFile(stream, filePath, 0xA0, 0x479190, 1));
@@ -555,8 +560,10 @@ void Cursor::init_background()
     RECT bgRect;
     SetRect(&bgRect, 0, 0, 0x500, 0x400);
 
-    /* Create the background UIPANEL surface */
-    void* panel = operator_new(0x20);
+    /* Create the background UIPANEL surface. 0x20 was the original x86
+     * sizeof(UIPANEL_Surface); use the real host size (see
+     * graphics/LOCOBITMAP.h). */
+    void* panel = operator_new(UIPANEL_Surface_Size());
     void* surface;
     if (panel != nullptr) {
         surface = UIPANEL_CreateSurface(panel);

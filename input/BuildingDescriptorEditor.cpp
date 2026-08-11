@@ -88,6 +88,17 @@ void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
 void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
 void* WNDPROC_StreamWrite(void* stream, void* outBuf);
 
+/* Plain C++ linkage (matches the real definition in resources/Win32Stream.cpp),
+ * NOT inside the extern "C" block above. Added 2026-08-11 during the
+ * operator_new hardcoded-size sweep — this call site allocated a raw
+ * ::operator new(0x5C, ...) buffer for WNDPROC_StreamFromMemory below,
+ * the same undersized-WIN32_Stream-buffer bug already fixed at ~11 other
+ * sites in this sweep (x86 WIN32_Stream is 0x5C bytes; sizeof(WIN32_Stream)
+ * on this 64-bit host is 0x80 — pointer members widen). It escaped the
+ * sweep's `operator_new(0x...)` grep because it's spelled with the
+ * `::operator new` form instead. */
+extern size_t WIN32_Stream_Size();
+
 /* Section-keyword string literals (from the original .rdata; addresses
  * documented for cross-reference, not reproduced here byte-for-byte —
  * these are ASCII renderings of the original wide-char keyword strings). */
@@ -219,7 +230,7 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
         CRT_sprintf_buf(archivePath, "%s.dat");
         int* fileData = reinterpret_cast<int*>(AssetMgr_LoadFile(&g_asset_mgr, archivePath, &fileSize));
         if (fileData != nullptr) {
-            void* streamMem = ::operator new(0x5C, std::nothrow);
+            void* streamMem = ::operator new(WIN32_Stream_Size(), std::nothrow);
             if (streamMem != nullptr) {
                 int* stream = reinterpret_cast<int*>(
                     WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<const char*>(fileData), fileSize, 1));

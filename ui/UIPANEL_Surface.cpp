@@ -118,6 +118,7 @@ extern "C" {
     /* Memory stream / file helpers */
     int  WIN32_StreamOpen(void* stream, int mode);
     int  WIN32_StreamOpenPath(void* stream, LPCSTR path, int flags, int unk);
+    extern size_t WIN32_Stream_Size(); /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
     void WIN32_StreamDestroy(void* stream);
     void WIN32_StreamDestroyImmediate(void* stream);
     /* Real def (shared/link_stubs.cpp) is extern "C" (plain, unmangled) —
@@ -342,7 +343,12 @@ extern "C" {
 
         asset_data = AssetMgr_LoadFile(g_asset_mgr, rel_path, &asset_size);
         if (asset_data != NULL) {
-            mem_stream = operator_new(0x5C);
+            /* WNDPROC_StreamFromMemory placement-constructs a WIN32_Stream
+             * here (see resources/Win32Stream.cpp); 0x5C was the original
+             * x86 sizeof(WIN32_Stream) — use the real host size instead,
+             * since StreamObject's pointer fields (rdbuf, tied) widen the
+             * class to 0x80 bytes on this 64-bit host. */
+            mem_stream = operator_new(WIN32_Stream_Size());
             if (mem_stream != NULL) {
                 stream = WNDPROC_StreamFromMemory(mem_stream, (char*)asset_data, asset_size, 1);
             }
@@ -396,7 +402,11 @@ extern "C" {
 
         s->mode = 0;
 
-        /* Allocate header copy struct for palette + info */
+        /* Allocate header copy struct for palette + info. 0x428 is a fixed
+         * BMP-format buffer (BITMAPINFOHEADER, 0x28 bytes, + a 256-entry
+         * 4-byte-per-color palette, 0x400 bytes = 0x428 total) — a raw byte
+         * buffer, not a C++ object, so this is safe as-is regardless of
+         * host pointer width. */
         void* header_copy = operator_new(0x428);
         if (header_copy == NULL) goto cleanup;
         memcpy(header_copy, &bmp_info_header, sizeof(bmp_info_header));
@@ -481,7 +491,9 @@ cleanup:
     int has_own_palette = 0;
 
     if (s->has_palette == 0 || g_shared_palette_refcount != 0) {
-        /* Private palette */
+        /* Private palette. 0x200 = 256 * sizeof(uint16_t) — a fixed-size
+         * raw uint16_t[256] array, not a C++ object, so safe as-is on any
+         * host. */
         s->has_palette = 1;
         palette = (uint16_t*)operator_new(0x200);     /* 512 bytes */
         s->palette_ptr = palette;
@@ -491,7 +503,8 @@ cleanup:
             return 0;
         }
     } else {
-        /* Shared global palette */
+        /* Shared global palette — same fixed-size uint16_t[256] array as
+         * the private-palette branch above; safe as-is. */
         s->has_palette = 0;
         palette = (uint16_t*)operator_new(0x200);
         g_shared_palette_buffer = palette;

@@ -291,8 +291,12 @@ void DirectPlay_Init(void)
     FillRect(surface_hdc, &fillRect, hBrush);
     primarySurface->ReleaseDC(surface_hdc);
 
-    /* Step 3: Create shadow GameObject at 0x4FD398 (res 0x402) */
-    void* shadow_mem = operator_new(0x88);
+    /* Step 3: Create shadow GameObject at 0x4FD398 (res 0x402). Every use
+     * below (resource, MoveTo, StopSound, Draw, screen_rect) is a plain
+     * Entity member, with no evidence of any further-derived fields — use
+     * sizeof(Entity) rather than the stale 0x88 x86 literal (Entity's
+     * pointer-bearing base fields widen on this 64-bit host). */
+    void* shadow_mem = operator_new(sizeof(Entity));
     if (shadow_mem == NULL) {
         _g_dsound_object = NULL;
     } else {

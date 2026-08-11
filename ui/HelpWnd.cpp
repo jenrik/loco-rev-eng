@@ -107,6 +107,11 @@ extern "C" {
  * (2026-08-10). */
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 
+/* Plain C++ linkage (matches the real definition in
+ * resources/Win32Stream.cpp) — must NOT be inside the extern "C" block
+ * above. */
+extern size_t WIN32_Stream_Size();
+
     /* Game functions (C++ linkage or typed APIs) */
     extern void   Sprite_Init(void* sprite);                /* 0x454BF0 */
     extern void   Sprite_Destroy(void* sprite);             /* 0x454BC0 */
@@ -1080,8 +1085,10 @@ char HelpWnd::reset_pages()
         loadedData = (int*)AssetMgr_LoadFile(g_asset_mgr, fileBuf, &fileSize);
 
         if (loadedData != NULL) {
-            /* Create memory stream from loaded data */
-            void* memStream = operator_new(0x5C);
+            /* Create memory stream from loaded data. 0x5C was the original
+             * x86 sizeof(WIN32_Stream); use the real host size (see
+             * resources/Win32Stream.h). */
+            void* memStream = operator_new(WIN32_Stream_Size());
             if (memStream != NULL) {
                 int* streamObj = WNDPROC_StreamFromMemory(memStream, (char*)loadedData, fileSize, 1);
                 if (streamObj != NULL) {

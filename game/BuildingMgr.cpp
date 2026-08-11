@@ -149,10 +149,14 @@ Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
     Building* object = nullptr;
     uint8_t type = GetResourceType(resource_id);
     if (type == 7) {
-        void* memory = operator_new(0xf4);
+        /* 0xf4 was the original x86 sizeof(Building); use the real host
+         * size (see game/Building.h). */
+        void* memory = operator_new(sizeof(Building));
         if (memory != nullptr) object = ::new (memory) Building(resource_id);
     } else if (type == 8) {
-        void* memory = operator_new(0xf0);
+        /* 0xf0 was the original x86 sizeof(TrainEntity); use the real host
+         * size (see game/Train.h). */
+        void* memory = operator_new(sizeof(TrainEntity));
         if (memory != nullptr)
             object = static_cast<Building*>(::new (memory) TrainEntity(resource_id));
     }

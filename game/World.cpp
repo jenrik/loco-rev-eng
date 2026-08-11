@@ -464,8 +464,10 @@ Vehicle* World::LoadFromFile(int* route_data, int* vehicle_init)
     do_register = false;
 
     if (vehicle_init == NULL) {
-        /* ---- Random vehicle generation ---- */
-        void* vehicle_mem = operator_new(0x94);
+        /* ---- Random vehicle generation ----
+         * 0x94 was the original x86 sizeof(Vehicle); use the real host
+         * size (0xC0 — pointer fields widen — see game/Vehicle.h). */
+        void* vehicle_mem = operator_new(sizeof(Vehicle));
         if (vehicle_mem == NULL) {
             vehicle = NULL;
         } else {
@@ -511,8 +513,10 @@ Vehicle* World::LoadFromFile(int* route_data, int* vehicle_init)
             }
         }
     } else {
-        /* ---- Specific vehicle from save data ---- */
-        void* vehicle_mem = operator_new(0x94);
+        /* ---- Specific vehicle from save data ----
+         * 0x94 was the original x86 sizeof(Vehicle); use the real host
+         * size (see game/Vehicle.h). */
+        void* vehicle_mem = operator_new(sizeof(Vehicle));
         if (vehicle_mem == NULL) {
             vehicle = NULL;
         } else {

@@ -457,7 +457,8 @@ WIN32_StreamFile* WIN32_StreamFile::Open(const char* path, int32_t flags, int32_
     if (unbuffered_ == 0 && bufferEnd_ == nullptr) {
         /* Lazily allocate the default 0x200-byte buffer, matching the
          * original's inline allocate-and-SetBuffer sequence — reuses the
-         * existing SetBufferPtrs() helper rather than duplicating it. */
+         * existing SetBufferPtrs() helper rather than duplicating it.
+         * Fixed-size raw I/O buffer, not a C++ object — safe as-is. */
         void* buf = operator_new(0x200);
         if (buf == nullptr) {
             unbuffered_ = 1;

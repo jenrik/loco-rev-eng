@@ -112,6 +112,15 @@ extern int32_t DAT_004aad38;         /* 0x4AAD38 — world center Y            *
 /*      c. Compute world position based on direction code               */
 /*      d. If resource has children (+0x0C > 0), create tooltip         */
 /* ================================================================== */
+/* Returns sizeof(UIEntity) on this host (0xC8 bytes here vs. the original
+ * x86's 0xA4 — pointer-bearing base fields widen). Exists so callers that
+ * only need to size an allocation can get the real size without
+ * `#include`-ing this header. */
+size_t UIEntity_Size()
+{
+    return sizeof(UIEntity);
+}
+
 UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
                     int32_t x, int32_t y)
 {

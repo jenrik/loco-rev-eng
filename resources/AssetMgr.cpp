@@ -220,7 +220,11 @@ void AssetMgr::UpdateAdjacencyGraph()
         }
     }
 
-    /* Step 4: Allocate and initialize each entry */
+    /* Step 4: Allocate and initialize each entry. 0x2C is a fixed-size raw
+     * array of 11 uint32_t "word" slots (truncated-pointer handles via
+     * pointer_to_word/pointer_from_word below, not native pointer members)
+     * — every write stays within entry[0..10], so this is safe as-is on a
+     * 64-bit host; not a C++ object needing sizeof(). */
     for (uint32_t i = 0; i < entry_count; i++) {
         void* entry_mem = operator_new(0x2C);
         reinterpret_cast<uint32_t**>(resource_array)[i] = static_cast<uint32_t*>(entry_mem);
@@ -263,7 +267,10 @@ void AssetMgr::UpdateAdjacencyGraph()
                     ref_slots[dir] = pointer_to_word(
                         reinterpret_cast<uint32_t**>(resource_array)[neighborIdx]);
                     if (dir_slots[dir] == 0) {
-                        /* Create 0x10-byte edge node linking src->neighbor */
+                        /* Create 0x10-byte edge node linking src->neighbor.
+                         * Fixed-size raw array of 4 int32_t slots (edge[0..3]
+                         * below) — no pointer members, so this is safe as-is
+                         * on a 64-bit host; not a C++ object needing sizeof(). */
                         int32_t* edge = static_cast<int32_t*>(operator_new(0x10));
                         dir_slots[dir] = static_cast<int32_t>(reinterpret_cast<uintptr_t>(edge));
                         edge[1] = 0;
@@ -366,7 +373,10 @@ void AssetMgr::EnumeratePostLoadAdjacency()
         }
     }
 
-    /* Allocate and init entries */
+    /* Allocate and init entries. 0x2C is a fixed-size raw array of 11
+     * uint32_t "word" slots (truncated-pointer handles, not native pointer
+     * members) — every write stays within entry[0..10], so this is safe
+     * as-is on a 64-bit host; not a C++ object needing sizeof(). */
     for (uint32_t i = 0; i < entry_count; i++) {
         void* entry_mem = operator_new(0x2C);
         reinterpret_cast<uint32_t**>(resource_array)[i] = static_cast<uint32_t*>(entry_mem);
@@ -413,6 +423,9 @@ void AssetMgr::EnumeratePostLoadAdjacency()
                     ref_slots[dir] = pointer_to_word(
                         reinterpret_cast<uint32_t**>(resource_array)[neighborIdx]);
                     if (dir_slots[dir] == 0) {
+                        /* Fixed-size raw array of 4 int32_t slots (edge[0..3]
+                         * below), no pointer members, so this is safe as-is
+                         * on a 64-bit host; not a C++ object needing sizeof(). */
                         int32_t* edge = static_cast<int32_t*>(operator_new(0x10));
                         dir_slots[dir] = static_cast<int32_t>(reinterpret_cast<uintptr_t>(edge));
                         edge[1] = 0;
@@ -570,7 +583,10 @@ uint32_t* AssetMgr::SearchFile(uint32_t currentId, int32_t depth, uint32_t dista
     if (distance < *best_dist) {
         *best_dist = distance;
 
-        /* Allocate path node (0x2C bytes, 11 dwords) */
+        /* Allocate path node (0x2C bytes, 11 dwords) — fixed-size raw
+         * uint32_t[11] array (path_node[0..10] below), no pointer members,
+         * so this is safe as-is on a 64-bit host; not a C++ object needing
+         * sizeof(). */
         uint32_t* path_node = static_cast<uint32_t*>(operator_new(0x2C));
         uint32_t* src_entry = *reinterpret_cast<uint32_t**>(
             reinterpret_cast<uint8_t*>(resource_array) + currentId * 4);

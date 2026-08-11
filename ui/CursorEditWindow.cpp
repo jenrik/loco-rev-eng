@@ -35,6 +35,7 @@ extern void   __thiscall WIN32_StreamDestroyImmediate(void* stream);       /* 0x
 extern void   __thiscall WNDPROC_StreamCleanup(void* stream);              /* 0x464620 */
 extern int*   __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data,
                                                    int size, int mode);    /* 0x464490 */
+extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 
 /* Cursor data parsing helpers.
  *
@@ -284,8 +285,10 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
         pLoadedData = AssetMgr_LoadFile(&g_asset_mgr, shortPath, &dataSize);
         if (pLoadedData != nullptr) {
-            /* Create memory stream from loaded data */
-            void* streamAlloc = operator_new(0x5C);
+            /* Create memory stream from loaded data. 0x5C was the original
+             * x86 sizeof(WIN32_Stream); use the real host size (see
+             * resources/Win32Stream.h). */
+            void* streamAlloc = operator_new(WIN32_Stream_Size());
             if (streamAlloc != nullptr) {
                 int* streamResult = WNDPROC_StreamFromMemory(
                     streamAlloc, reinterpret_cast<const char*>(pLoadedData),

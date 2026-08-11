@@ -38,15 +38,14 @@ void* operator_new(size_t size);                        /* 0x465CE0 */
 void  GLOBAL_free(void* ptr);                           /* 0x465CD0 */
 
 extern "C" {
-    /* EditorState/VehicleEditor construction — call-0/silent-wrong-stub
-     * landmines (Vehicle::Vehicle's VehicleEditor_Ctor resolves to a 2-arg
-     * no-op stub in shared/link_stubs.cpp despite this 4-arg declaration;
-     * EditorState_Ctor has no definition anywhere and resolves via
-     * -Wl,--unresolved-symbols=ignore-all to `call 0`). Both are tracked in
+    /* VehicleEditor construction — call-0/silent-wrong-stub landmine
+     * (Vehicle::Vehicle's VehicleEditor_Ctor resolves to a 2-arg no-op stub
+     * in shared/link_stubs.cpp despite this 4-arg declaration). Tracked in
      * docs/landmine-sweep-worklist.md and deliberately left as-is here —
-     * fixing them is a separate, behavior-changing commit, not part of this
-     * cast cluster. */
-    void* __thiscall EditorState_Ctor(void* this_, uint8_t param_1);
+     * fixing it is a separate, behavior-changing commit, not part of this
+     * cast cluster. (EditorState_Ctor's equivalent landmine was closed by
+     * constructing EditorState directly above instead of through that
+     * free-function bridge.) */
     void* __thiscall VehicleEditor_Ctor(void* this_, int32_t param_1,
                                         int32_t param_2, uint8_t param_3);
 
@@ -149,10 +148,16 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     this->editors[3] = nullptr;
     this->direction = 0;            /* +0x60 */
 
-    /* Create EditorState sub-object (0x20 bytes) */
-    EditorState* state = static_cast<EditorState*>(operator_new(0x20));
+    /* Create EditorState sub-object. Original x86 EditorState is 0x20 bytes
+     * (4-byte vtable ptr + one 4-byte `building` pointer); sizeof(EditorState)
+     * on this 64-bit host is 0x28 (GameVehicle* widens to 8 bytes) — use
+     * sizeof directly rather than the stale x86 literal to avoid an 8-byte
+     * heap overflow. This also removes the EditorState_Ctor free-function
+     * bridge (shared/stubs_link001_batch4_network_world.cpp), which existed
+     * only to work around the undersized caller buffer. */
+    EditorState* state = static_cast<EditorState*>(operator_new(sizeof(EditorState)));
     if (state != nullptr) {
-        state = static_cast<EditorState*>(EditorState_Ctor(state, param_3));
+        state = new (state) EditorState(static_cast<char>(param_3));
     }
     this->editor_state = state;     /* +0x20 */
     this->stop_timer = 0;           /* +0x28 */
@@ -164,8 +169,10 @@ Vehicle::Vehicle(int32_t param_1, int32_t param_2, uint8_t param_3, uint8_t para
     this->editors[3] = nullptr;
     this->editor_count = 0;         /* +0x0C */
 
-    /* Create VehicleEditor sub-object (0x450 bytes) */
-    VehicleEditor* vehicle_editor = static_cast<VehicleEditor*>(operator_new(0x450));
+    /* Create VehicleEditor sub-object. 0x450 was the original x86
+     * sizeof(VehicleEditor); sizeof is 0x490 on this 64-bit host (pointer
+     * fields widen) — use the real size. */
+    VehicleEditor* vehicle_editor = static_cast<VehicleEditor*>(operator_new(sizeof(VehicleEditor)));
     if (vehicle_editor != nullptr) {
         vehicle_editor = static_cast<VehicleEditor*>(
             VehicleEditor_Ctor(vehicle_editor, param_1, 2, param_3));
@@ -458,7 +465,9 @@ uint32_t Vehicle::InitRoute(int32_t param_1, int32_t param_2, uint8_t param_3)
     if (count < 3 && this->editors[count + 1] == nullptr) {
         this->editor_count = static_cast<int16_t>(count + 1);
 
-        void* editor = operator_new(0x450);
+        /* 0x450 was the original x86 sizeof(VehicleEditor); use the real
+         * host size (0x490 — see core/VehicleEditor.h). */
+        void* editor = operator_new(sizeof(VehicleEditor));
         if (editor != nullptr) {
             /* VehicleEditor_Ctor is a documented call-0/silent-wrong-stub
              * landmine (docs/landmine-sweep-worklist.md) — left as-is here,

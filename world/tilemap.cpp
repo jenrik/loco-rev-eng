@@ -173,7 +173,25 @@ bool TileMapResource::IsEditorSprite() const
      static_cast<int>(layer) * 4)
 
 /* ================================================================== */
-/* Dirty-rect list node: a RECT (16 bytes) + "next" pointer at +0x10.  */
+/* Dirty-rect list node: a RECT (16 bytes, 4x int32_t — no pointer        */
+/* members, so RECT's own size doesn't widen on this 64-bit host) + a    */
+/* "next" pointer at +0x10. Allocations are 0x14 bytes (16 + 4) —        */
+/* correct for THIS implementation and not an operator_new sizing bug,   */
+/* because "next" is stored/read as a 32-bit LONG word (node[1].left),   */
+/* not a real pointer-sized field (see below), so it only ever needs 4   */
+/* bytes of storage regardless of host pointer width.                    */
+/*                                                                        */
+/* SEPARATE, more serious bug (out of scope for the operator_new sizing  */
+/* sweep this comment is part of): every write site truncates a genuine  */
+/* 64-bit `RECT*` heap pointer into that 32-bit LONG via                 */
+/* `static_cast<LONG>(reinterpret_cast<intptr_t>(node))` (see e.g. lines */
+/* ~1691, 1706, 1739, 1753, 2412, 2455 below), then reconstructs it via   */
+/* `reinterpret_cast<RECT*>(static_cast<uintptr_t>(...[1].left))`. On a   */
+/* 64-bit host this is undefined behavior / a real pointer-truncation     */
+/* landmine (same class as the previously-documented                     */
+/* CGWND_ValidatePaletteData(int) truncation) whenever operator_new       */
+/* returns an address outside the low 4GB — not fixed here; needs a       */
+/* dedicated pass widening the "next" slot to a real pointer-sized field. */
 /* Allocations are 0x14 bytes (TileMap_InvalidateDirtyRects 0x456475). */
 /* ================================================================== */
 static RECT* TileMap_AllocRectNode()
@@ -280,7 +298,16 @@ TileMap::TileMap()
     viewport_x = 0;
     viewport_y = 0;
 
-    /* Allocate first DDRAW_SpriteData at +0x52488 (asset_load_ptr) */
+    /* Allocate first DDRAW_SpriteData at +0x52488 (asset_load_ptr).
+     * 0x2C is this call site's own real x86 evidence, but it does not match
+     * graphics/DDRAW.h's currently-documented `SpriteData` struct (0x10
+     * bytes original / ~0x18 on this host) — that struct is likely an
+     * incomplete reconstruction (missing ~0x1C bytes of real fields), not
+     * proof this allocation is wrong. DDRAW_SpriteDataCtor (0x45CDF0) is
+     * still a no-op stub (shared/stubs_impl.cpp) that never writes through
+     * `obj`, so this is not a live overflow today; leaving the literal as
+     * evidence rather than guessing a sizeof() from an under-modeled type.
+     * Revisit once 0x45CDF0 is actually decompiled. */
     void* mem1 = operator_new(0x2C);
     if (mem1 != NULL) {
         asset_load_ptr = DDRAW_SpriteDataCtor(mem1, 7);
@@ -288,7 +315,8 @@ TileMap::TileMap()
         asset_load_ptr = NULL;
     }
 
-    /* Allocate second DDRAW_SpriteData at +0x5248C (asset_enum_ptr) */
+    /* Allocate second DDRAW_SpriteData at +0x5248C (asset_enum_ptr) — see
+     * the mem1 comment above for the SpriteData size-discrepancy caveat. */
     void* mem2 = operator_new(0x2C);
     if (mem2 != NULL) {
         asset_enum_ptr = DDRAW_SpriteDataCtor(mem2, 8);

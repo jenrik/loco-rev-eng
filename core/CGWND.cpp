@@ -1411,9 +1411,11 @@ int CGWND::InitAllSubsystems()
     if (!((TrainStationWindow*)g_trainstation_window)->Create(hWndParent))  /* 0x436D00 */
         { destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -9; }
 
-    /* 5. PostcardAlbum — 0x254 bytes, res 0x1FB */
+    /* 5. PostcardAlbum — 0x254 bytes on the original x86 layout, res 0x1FB.
+     * sizeof(PostcardAlbum) is 0x328 on this 64-bit host (pointer fields
+     * widen) — use the real size, not the stale x86 literal. */
     g_postcard = PostcardAlbum::CreateFromResource(
-        operator_new(0x254), hInst, 0x1FB);                  /* 0x401F50 */
+        operator_new(sizeof(PostcardAlbum)), hInst, 0x1FB);   /* 0x401F50 */
     if (g_postcard == nullptr)
         { destroy_subsystem(g_trainstation_window); destroy_subsystem(g_postcard_send); destroy_subsystem(g_town); destroy_subsystem(g_ui_main); return -10; }
     if (!((PostcardAlbum*)g_postcard)->InitWindow(hWndParent))  /* 0x402520 */

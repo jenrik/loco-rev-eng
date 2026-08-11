@@ -70,6 +70,7 @@ void* CRT_wcsstr(const void* haystack, const void* needle);
 extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
 void* WNDPROC_StreamWrite(void* stream, void* outBuf);
+extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 
 /* ================================================================== */
 /* Global variables referenced                                        */
@@ -389,8 +390,10 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     if (g_asset_mgr != nullptr) {
         file_data = AssetMgr_LoadFile(&g_asset_mgr, short_dat_name, &file_size);
         if (file_data != nullptr) {
-            /* Create sub-stream from the loaded data */
-            mem_stream = operator_new(0x5C);  /* 92-byte stream object */
+            /* Create sub-stream from the loaded data. 0x5C was the
+             * original x86 sizeof(WIN32_Stream); use the real host size
+             * (see resources/Win32Stream.h). */
+            mem_stream = operator_new(WIN32_Stream_Size());
             if (mem_stream != nullptr) {
                 void* render_stream = WNDPROC_StreamFromMemory(
                     mem_stream, static_cast<char*>(file_data), file_size, 1);

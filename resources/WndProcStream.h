@@ -22,16 +22,14 @@
  * documentation clarity — no debug symbols survive to confirm the
  * original class or method names.
  *
- * This is a MINIMAL, PARTIAL reconstruction of the still-open
- * "WNDPROC_Stream* facade" PROGRESS.md tracks (0x4640B0-0x464D70:
- * WNDPROC_StreamRead/Write/Printf/ReadLine/SeekForward, still no-op host
- * stubs — see PROGRESS.md "win32_stream.c removed (partial)"). It
- * captures only what the InputPrefix/SkipWhitespace/ExtractToken/Flush
- * cluster proves. A future pass reconstructing that larger facade must
- * reconcile with (not duplicate) this class — in particular, confirm
- * whether `this` at 0x4640B0-0x464D70's call sites is really the same
- * concrete type as this class, or a sibling that shares the same
- * StreamObject virtual base.
+ * This reconstruction now also covers the WIN32_StreamRead cluster's
+ * facade-level pieces (Read/AttachBuffer, see below) confirmed to operate
+ * on this exact class's fields — see resources/Win32Stream.h/.cpp for the
+ * WIN32_StreamFile-specific layer built on top. The remaining part of
+ * PROGRESS.md's "WNDPROC_Stream* facade" item (0x4640B0-0x464D70's
+ * WNDPROC_StreamOpen/FromMemory/Seek/Tell/GetSize/Cleanup/ReadLine/
+ * SeekForward) is still open — a future pass reconstructing that must
+ * reconcile with (not duplicate) this class.
  *
  * Address map:
  *   ios::ipfx-equivalent       0x4648F0  -> InputPrefix(int)
@@ -43,8 +41,12 @@
  *     it exhibits the identical vbtable/StreamObject-lookup pattern as the
  *     three functions above operating on its own `this`, so it belongs on
  *     this facade, not on WNDPROC_StreamBuf — renamed accordingly)
+ *   Read(void*,uint32_t)       0x463810  -> "WIN32_StreamRead" at the call
+ *     sites, but operates only on this facade's own state (see below)
+ *   AttachBuffer(WNDPROC_StreamBuf*) 0x464840 -> previously mislabeled
+ *     "WNDPROC_StreamVPrintf"
  *
- * All four validated instruction-by-instruction against disassembly.
+ * All validated instruction-by-instruction against disassembly.
  */
 
 // Status: VALIDATED
@@ -97,6 +99,35 @@ public:
      * unlocks both, returns `this`. */
     void* Flush();
 
+    /* 0x463810 (Ghidra/callers auto-named this "WIN32_StreamRead", but it
+     * operates purely on WNDPROC_Stream/StreamObject-level state — rdbuf,
+     * gcount_, state_bits, sync_flag/critical_section — with nothing
+     * WIN32_StreamFile-specific, so it belongs on this facade like
+     * InputPrefix/ExtractToken/Flush above, not on WIN32_Stream). Calls
+     * InputPrefix(1) (locks both this object's and rdbuf's CRITICAL_
+     * SECTIONs, leaving them held on success per InputPrefix's documented
+     * contract), then rdbuf->ReadBytes(buf, size) (WNDPROC_StreamBuf
+     * vtable+0x18), stores the count read into gcount_, sets failbit|eofbit
+     * on a short read, and performs the unlock InputPrefix left pending.
+     * If InputPrefix itself fails (stream already bad), does nothing
+     * further — matches the original, which never reaches the read at all
+     * in that case. Returns `this` either way. */
+    WNDPROC_Stream* Read(void* buf, uint32_t size);
+
+protected:
+    /* 0x464840 (Ghidra auto-analysis named this "WNDPROC_StreamVPrintf"; it
+     * is not printf-related — it attaches a buffer). Calls the inherited
+     * StreamObject::AttachBuffer(newBuf), then sets format_flags's skipws
+     * bit (classic istream default: skip leading whitespace before
+     * formatted extraction), and zeroes gcount_ and _reserved_04. Does NOT
+     * set owns_rdbuf — WIN32_Stream's constructors do that themselves,
+     * matching the original (the original's own initBase/vtable-poke
+     * branch is MSVC most-derived-vs-base-subobject construction
+     * bookkeeping; real C++ virtual-base construction ordering already
+     * provides the equivalent, so it is not reproduced here — see
+     * StreamObject::StreamObject()'s doc comment for the same reasoning). */
+    void AttachBuffer(WNDPROC_StreamBuf* newBuf);
+
 private:
     /* 0x464B10. Discards characters from rdbuf (via ReadChar()/GetChar())
      * while they're whitespace, stopping at the first non-space char or
@@ -109,14 +140,18 @@ private:
     /* +0x08 on this facade (NOT StreamObject::state_bits, which is also
      * nominally "+0x08" but relative to the virtual base at a different
      * runtime address — InputPrefix reads/writes both independently in
-     * the same basic blocks, proving they're distinct storage). TODO:
-     * likely the classic istream::gcount_ (only istream needs a per-read
-     * character count; keeping it on the derived facade rather than the
-     * StreamObject virtual base shared with an ostream-equivalent fits
-     * that pattern) — no direct read of this field has been found yet
-     * to confirm the "gcount" identity further, only the need != 0 write
-     * in InputPrefix. */
+     * the same basic blocks, proving they're distinct storage). Confirmed
+     * to be the classic istream::gcount_: InputPrefix resets it to 0 on
+     * every unformatted-read call, and Read() (0x463810) above stores the
+     * actual byte count read into it — the only two writers found. */
     int32_t gcount_;
+
+    /* +0x04 on this facade. Zeroed alongside gcount_ by AttachBuffer
+     * (0x464840); no read of this field has been found anywhere in the
+     * evidenced call graph. Kept as a named placeholder (not folded into
+     * padding) so AttachBuffer's write is reproduced faithfully; purpose
+     * unconfirmed. */
+    int32_t _reserved_04;
 };
 
 /* Free-function adapter for the pre-existing `WNDPROC_CriticalSectionLock`

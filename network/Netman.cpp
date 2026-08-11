@@ -254,6 +254,15 @@ int32_t NETMAN_GetGameMode(const void* netman)
         ? static_cast<const Netman*>(netman)->m_gameMode : -1;
 }
 
+/* Returns sizeof(Netman) on this host (0x898 bytes here vs. the original
+ * x86's 0x804 — pointer-bearing fields widen from 4 to 8 bytes). Exists
+ * so callers that only need to size an allocation can get the real size
+ * without including the full Netman/NetmanTypes.h. */
+size_t Netman_Size()
+{
+    return sizeof(Netman);
+}
+
 /* ================================================================== */
 /* 1. Constructor - 0x43D0A0                                          */
 /* ================================================================== */
@@ -490,7 +499,9 @@ void Netman::SendMapData(int32_t targetDpId)
     if (!slot) return;
     slot->has_data = 1;
 
-    void* surf = operator_new(0x20);
+    /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the real host
+     * size (see graphics/LOCOBITMAP.h). */
+    void* surf = operator_new(UIPANEL_Surface_Size());
     if (surf != nullptr) surf = UIPANEL_CreateSurface(surf);
     TileMap_CreateOverlay(g_tilemap, surf, 0);
     if (surf == nullptr) return;
@@ -914,6 +925,8 @@ int32_t Netman::SendPlayerName()
 
     if (slot_idx >= this->m_playerSlotCount) return slot_idx;
 
+    /* Fixed-size raw network wire-format packet buffer (explicit byte
+     * offsets below), not a C++ object — safe as-is on any host. */
     uint16_t* packet = static_cast<uint16_t*>(operator_new(0x8000));
     if (packet == nullptr) return slot_idx;
 
@@ -1985,7 +1998,10 @@ uint8_t Netman::SendSignalChange(InboundTrainNode* node)
     }
 
     if (hasValidData) {
-        InboundTrainNode* vehicle = (InboundTrainNode*)operator_new(0x94);
+        /* 0x94 was the original x86 sizeof(Vehicle) (InboundTrainNode is a
+         * type alias for Vehicle, see network/NetmanTypes.h); use the real
+         * host size. */
+        InboundTrainNode* vehicle = (InboundTrainNode*)operator_new(sizeof(InboundTrainNode));
         if (vehicle != NULL) {
             int32_t rnd = CRT_rand();
             int32_t resId = (rnd % 3) * 2 + 0x1804;

@@ -78,6 +78,7 @@ extern "C" {
     void   TileMap_InvalidateDirtyRects(void* tilemap, char flag);
     void   UI_CenterWindow(int* a, int* b);
     void*  UI_CreateChildWindow(void* obj, int parent, int title);
+    size_t ChildWindow_Size();  /* ui/UI_ChildWindow.cpp — real sizeof(ChildWindow) */
 
     /* String / CRT */
     char*  _strncpy(char* dst, const char* src, int max);
@@ -600,7 +601,29 @@ uint32_t __fastcall UIPANEL_DrawEditField(int param_1)
                 continue;
             }
 
-            /* Create a new SaveSprite (0x230 bytes) */
+            /* Create a new SaveSprite (0x230 bytes on the original x86
+             * layout). NOT SAFE ON THIS 64-BIT HOST, and NOT fixable by a
+             * simple sizeof() bump — left as the evidenced x86 literal
+             * rather than a guessed replacement, per CLAUDE.md's
+             * evidence-only rule, until a dedicated pass reconstructs this
+             * as a real class. Two confirmed, compounding problems:
+             *   1. sizeof(RESDATA) is 0x2A8 on this host (shared/types.h),
+             *      not the original x86's 0x1D8 — RESDATA's own pointer
+             *      fields widen. RESMGR_ResourceData_Init below writes a
+             *      real (widened) RESDATA through the `sprite_mem + 0x50`
+             *      cast, so it writes 0xD0 bytes past where this buffer's
+             *      +0x228 next/prev fields are assumed to start.
+             *   2. next/prev (below, +0x228/+0x22C) are written as real
+             *      8-byte pointers via `uintptr_t**` casts, but occupy only
+             *      4 bytes each in this x86-sized layout — writing prev at
+             *      +0x22C with an 8-byte store runs 4 bytes past the end
+             *      of this exact 0x230 allocation (confirmed live: see the
+             *      list-insertion writes further down this function).
+             * This is also a `VTBL_*` raw-vtable-write anti-pattern
+             * (CLAUDE.md), present here and in UIPANEL_FreeSprite/
+             * UIPANEL_DtorSprite below — same underlying pseudo-class.
+             * Tracked in PROGRESS.md; needs a full SaveSprite class with
+             * typed RESDATA/next/prev members, not a numeric size patch. */
             uint8_t* sprite_mem = (uint8_t*)operator_new(0x230);
             if (sprite_mem == NULL) continue;
 
@@ -1012,8 +1035,10 @@ void __thiscall UIPANEL_Hide(void* self, const char* filename)
     strcpy(full_path, s_backdrop_prefix);
     strcat(full_path, filename);
 
-    /* Create child window for backdrop */
-    void* child = operator_new(0x168);
+    /* Create child window for backdrop. 0x168 was the original x86
+     * sizeof(ChildWindow); use the real host size (see
+     * ui/UI_ChildWindow.h). */
+    void* child = operator_new(ChildWindow_Size());
     if (child == NULL) {
         *g_cursor_surf = NULL;
     } else {

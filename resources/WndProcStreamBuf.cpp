@@ -21,6 +21,8 @@
 
 #include "WndProcStreamBuf.h"
 
+#include <cstring>  /* memcpy */
+
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
@@ -138,6 +140,56 @@ void WNDPROC_StreamBuf::SetBufferPtrs(uint8_t* bufferStart, uint8_t* bufferEnd, 
     bufferStart_ = bufferStart;
     ownsBuffer_ = owns;
     bufferEnd_ = bufferEnd;
+}
+
+/* ================================================================== */
+/* WNDPROC_StreamBuf_ReadBytes — 0x4655C0 (vtable+0x18)                 */
+/* ================================================================== */
+int32_t WNDPROC_StreamBuf::ReadBytes(void* buf, int32_t size)
+{
+    uint8_t* out = static_cast<uint8_t*>(buf);
+    int32_t totalRead = 0;
+
+    if (unbuffered_ == 0) {
+        if (size != 0) {
+            do {
+                if (Underflow() == -1) {
+                    return totalRead;
+                }
+                int32_t avail = static_cast<int32_t>(readHigh_ - readPtr_);
+                int32_t chunk = (size <= avail) ? size : avail;
+                if (chunk > 0) {
+                    memcpy(out, readPtr_, static_cast<size_t>(chunk));
+                    totalRead += chunk;
+                    out += chunk;
+                    readPtr_ += chunk;
+                    size -= chunk;
+                }
+            } while (size != 0);
+        }
+        return totalRead;
+    }
+
+    /* Unbuffered mode: one byte at a time via peekCache_, matching
+     * ReadChar()/GetChar()'s own peekCache_ usage above. */
+    if (peekCache_ == -1) {
+        peekCache_ = Underflow();
+    }
+    if (size != 0) {
+        for (;;) {
+            --size;
+            if (peekCache_ == -1) {
+                break;
+            }
+            *out++ = static_cast<uint8_t>(peekCache_);
+            ++totalRead;
+            peekCache_ = Underflow();
+            if (size == 0) {
+                break;
+            }
+        }
+    }
+    return totalRead;
 }
 
 /* ================================================================== */

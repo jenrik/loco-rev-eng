@@ -1014,7 +1014,10 @@ void EditWindow::render()
         if (!blitted) return;
     }
 #else
-    void* surface_memory = operator_new(0x20);
+    /* 0x20 was the original x86 sizeof(UIPANEL_Surface); pointer fields
+     * widen on this 64-bit host, so use the real size (see
+     * graphics/LOCOBITMAP.h). */
+    void* surface_memory = operator_new(sizeof(UIPANEL_Surface));
     this->pMainSurface = surface_memory
         ? static_cast<UIPANEL_Surface*>(UIPANEL_CreateSurface(surface_memory)) : nullptr;
     if (this->pMainSurface) UIPANEL_InitSurface(this->pMainSurface, 0x500, 0x400, 1, 0, 0);

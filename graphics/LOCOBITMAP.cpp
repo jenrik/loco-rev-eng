@@ -1252,6 +1252,18 @@ error:
 /* UIPANEL_Surface management functions                                */
 /* ================================================================== */
 
+/* Returns sizeof(UIPANEL_Surface) on this host (0x30 bytes here vs. the
+ * original x86's 0x20 — palette_ptr/pixels/ddraw_surf widen from 4 to 8
+ * bytes, plus the host-only trailing `palette` field). Exists so callers
+ * across the tree that allocate raw memory for UIPANEL_CreateSurface can
+ * get the real size without each one including this header (many declare
+ * their own local, weakly-typed `void*`-based UIPANEL_CreateSurface
+ * prototype instead). */
+size_t UIPANEL_Surface_Size()
+{
+    return sizeof(UIPANEL_Surface);
+}
+
 /* ────────────────────────────────────────────────────────────────── */
 /* UIPANEL_CreateSurface — Constructor for UIPANEL_Surface            */
 /* Address: 0x42A110 — __fastcall (ECX=this)                         */

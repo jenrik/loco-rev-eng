@@ -98,6 +98,7 @@ extern void* WIN32_StreamWrite(void* stream, const void* buf, uint32_t size); /*
 extern void* WNDPROC_StreamFromMemory(void* stream, const void* data,
                                       int32_t size, int32_t mode);      /* 0x464490 */
 extern int32_t AssetMgr_LoadFile(void* mgr, const char* path, int32_t* size); /* 0x45CD00 */
+extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 /* The preview writer uses the tilemap overlay (0x457080) on g_tilemap
  * (tilemap.h, 0x4AAD08). */
 class TileMap;
@@ -538,7 +539,9 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
                               &asset_size));
         resdata->asset_data = asset_data;
         if (asset_data != nullptr) {
-            void* mem = operator_new(0x5C);
+            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
+             * host size (see resources/Win32Stream.h). */
+            void* mem = operator_new(WIN32_Stream_Size());
             if (mem != nullptr) {
                 resdata->primary_stream =
                     WNDPROC_StreamFromMemory(mem, asset_data, asset_size, 1);
@@ -546,7 +549,7 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
         }
     }
     if (resdata->primary_stream == nullptr) {
-        void* mem = operator_new(0x5C);
+        void* mem = operator_new(WIN32_Stream_Size());
         if (mem != nullptr) {
             resdata->primary_stream =
                 WIN32_StreamOpenFile(mem, filename, 0xA0, 0x479190, 1);
@@ -749,6 +752,17 @@ int32_t RESMGR_LoadResourceData(RESDATA* resdata, const char* filename)
     return 1;
 #else
     RESMGR_RemoveResource(resdata);
+    /* 0x58 is this call site's own x86 evidence for whatever
+     * WIN32_StreamOpenWriteFile (declared above, called below) constructs
+     * — but that function has no implementation anywhere in this tree
+     * (not even a stub), and its exact target type (a WIN32_Stream
+     * variant? something write-specific and not yet reconstructed?) isn't
+     * evidenced, so there's no sizeof(Type) to take yet. This whole `#else`
+     * branch is also Windows-only (see the #ifndef _WIN32 host path above,
+     * which uses HostSaveStream instead) — it never compiles or links on
+     * this host, so it is not a reachable bug here; revisit once
+     * WIN32_StreamOpenWriteFile is implemented and its real target type is
+     * identified. */
     void* mem = operator_new(0x58);
     if (mem == nullptr) {
         return 0;

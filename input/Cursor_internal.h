@@ -134,6 +134,7 @@ HDC UIPANEL_BeginPaint(void*);
 void UIPANEL_EndPaint(void*);
 void UIPANEL_EndPaintEx(void*, HWND, int, uint8_t, RECT*);
 void* UIPANEL_CreateSurface(void*);
+size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 void UIPANEL_UnlockSurface(void*);
 void FormatResourceString(void*, UINT, LPSTR, int);
 /* DPLAY_EnumeratePlayers and NET_GetOrCreateSurface are now typed
@@ -182,6 +183,7 @@ void DPLAY_RenderPlayer(void* dplay, void* hdcVal, int32_t player,
                          void* surface, int32_t x, int32_t y, uint32_t w,
                          RECT* rect);
 void* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
+size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 
 /* ================================================================ */
 /* C++ linkage — game helpers originally compiled as C++ symbols     */

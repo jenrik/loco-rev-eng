@@ -76,6 +76,7 @@ extern void*  WIN32_StreamOpen(void* stream, const char* path, int mode, void* e
 extern void   WIN32_StreamRead(void* stream, void* buf, int sz);        /* 0x463810 */
 extern int*   WNDPROC_StreamFromMemory(void* stream, const char* data,
                                         int size, int mode);             /* 0x464490 */
+extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 
 /* UI_CreateFullWindow — use UI_WindowBase::create_full_window (static method) */
 /* (declared in UI_WindowBase.h, included above) */
@@ -912,7 +913,9 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
     if (g_asset_mgr != NULL) {
         pData = AssetMgr_LoadFile(g_asset_mgr, (uint8_t*)filePath, &dataSize);
         if (pData != NULL) {
-            streamObj = (char*)operator_new(0x5C);
+            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
+             * host size (see resources/Win32Stream.h). */
+            streamObj = (char*)operator_new(WIN32_Stream_Size());
             if (streamObj != NULL) {
                 streamResult = (int*)WNDPROC_StreamFromMemory(streamObj, (const char*)pData, dataSize, 1); /* pData is uint8_t*, cast to const char* for StreamFromMemory */
             }
@@ -924,7 +927,7 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
        returned NULL, streamObj is overwritten here without freeing the first
        allocation. The binary has this leak — preserved for behavioral fidelity. */
     if (streamResult == NULL) {
-        streamObj = (char*)operator_new(0x5C);
+        streamObj = (char*)operator_new(WIN32_Stream_Size());
         if (streamObj != NULL) {
             streamResult = (int*)WIN32_StreamOpen(streamObj, filePath, 0xA0, &g_stream_open_mode, 1);
         }
@@ -945,7 +948,9 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
         }
     }
 
-    /* Step 6: Allocate text buffer (0x2000 bytes) and zero it */
+    /* Step 6: Allocate text buffer (0x2000 bytes) and zero it. Fixed-size
+     * raw byte buffer for WIN32_StreamRead below, not a C++ object — safe
+     * as-is on any host. */
     uint32_t* textBuffer = (uint32_t*)operator_new(0x2000);
     if (textBuffer == NULL) {
         const char* errMsg = "couldn't allocate buffer";
@@ -982,13 +987,18 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
             /* Null-terminate this line */
             ((char*)buf)[pos] = '\0';
 
-            /* Allocate a new list node (0xC bytes) */
-            LayoutListNode* newNode = (LayoutListNode*)operator_new(0x0C);
+            /* Allocate a new list node. 0xC was the original x86
+             * sizeof(LayoutListNode); use the real host size (0x18 —
+             * next/name pointers widen — see ui/LayoutListNode.h). */
+            LayoutListNode* newNode = (LayoutListNode*)operator_new(sizeof(LayoutListNode));
             newNode->next = this->titleList;                    /* node[0] = next pointer */
             newNode->_pad_04 = 0;                                /* +0x04 padding, zero-initialized */
             this->titleList = newNode;
 
-            /* Allocate name buffer (0x100 bytes) and copy line content */
+            /* Allocate name buffer (0x100 bytes) and copy line content.
+             * Fixed-size raw char buffer (the copy loop below is bounds-
+             * checked to < 0xFF chars + NUL), not a C++ object — safe as-is
+             * on any host. */
             char* nameBuf = (char*)operator_new(0x100);
             newNode->name = nameBuf;                             /* node[2] = name string */
 

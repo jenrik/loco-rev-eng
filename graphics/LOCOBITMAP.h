@@ -720,6 +720,9 @@ struct UIPANEL_Surface {
 void  UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* @0x42A110 */
 void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* @0x42A140 */
 
+/* sizeof(UIPANEL_Surface) on this host — see graphics/LOCOBITMAP.cpp. */
+size_t UIPANEL_Surface_Size();
+
 /* ================================================================ */
 /* Tile-occupancy / viewport collision checks (0x42C950-0x42CB10)   */
 /*                                                                    */
