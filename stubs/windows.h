@@ -20,6 +20,14 @@
 #ifndef STUBS_WINDOWS_H
 #define STUBS_WINDOWS_H
 
+#include <cstdarg>  /* va_list — used by wvsprintfA() below. Previously relied
+                      * on a transitive include from whichever translation
+                      * unit got here first; standalone compiles without one
+                      * failed (found via tests/win32_stream_file_test.cpp,
+                      * 2026-08-10 — it had never actually been compiled
+                      * before, since it was never registered as a meson
+                      * test() target until the same session). */
+
 #include "windows_types.h"
 
 #ifdef __cplusplus

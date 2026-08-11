@@ -249,6 +249,8 @@ else
   obj_sdl3_ddraw          = lego_loco.extract_objects('graphics/sdl3_ddraw.cpp')
   obj_sdl3_game_audio     = lego_loco.extract_objects('audio/sdl3_game_audio.cpp')
   obj_host_test_events    = lego_loco.extract_objects('stubs/host_test_events.cpp')
+  obj_win32_stream_file   = lego_loco.extract_objects('resources/Win32StreamFile.cpp')
+  obj_wndproc_stream_buf  = lego_loco.extract_objects('resources/WndProcStreamBuf.cpp')
 
   subdir('tests')
 endif

@@ -16,6 +16,15 @@
  *   WIN32_StreamFile_WriteChar   0x463CB0  -> WriteChar() override
  *   WIN32_StreamFile_Flush       0x463E50  -> Flush() override
  *   WIN32_StreamFile_SetBuffer   0x463F50  -> SetBuffer() override
+ *   WIN32_StreamFile_Underflow   0x463D40  -> Underflow() override (vtable
+ *     +0x20 — PROGRESS.md previously tracked this as "base/override
+ *     implementation address not yet located"; resolved 2026-08-10 by
+ *     reading WIN32_StreamFile's vtable at 0x4791AC directly, `create_
+ *     function` (Ghidra auto-analysis never defined this address), then
+ *     decompiling/disassembling it)
+ *   WIN32_StreamFile_Open        0x4652D0  -> Open() (previously
+ *     Ghidra-mislabeled "CRT_exp" — an auto-analysis artifact, not the
+ *     real name; resolved 2026-08-10)
  *
  * Derived fields start at +0x4C (the base subobject's exact size — see
  * WndProcStreamBuf.h for the WIN32_StreamMem sibling-class evidence):
@@ -24,14 +33,18 @@
  *                       => the fd is borrowed from elsewhere, so the
  *                       destructor only flushes and leaves it open
  *
- * This class is not yet wired to any caller: the higher-level entry points
- * that construct/open it (WIN32_StreamOpen 0x463890, WIN32_StreamOpenFile
- * 0x463970, WIN32_StreamOpenPath 0x463AA0) are still no-op host stubs (see
- * shared/link_stubs.cpp / shared/defsym_stubs.cpp) — that layer is a
- * separate, larger piece of tracked work (PROGRESS.md "win32_stream.c
- * removed"). This file only supplies real bodies for the five class-method
- * addresses listed above plus their required, previously-unimplemented
- * callees (CloseHandle and the WNDPROC_StreamBuf base).
+ * This class is now open-capable (Open()) and read-capable (Underflow()),
+ * but is still not wired to any caller: the higher-level entry points that
+ * construct it (WIN32_StreamOpen 0x463890, WIN32_StreamOpenPath 0x463AA0,
+ * WIN32_StreamRead 0x463810, WIN32_StreamDestroy*, WNDPROC_StreamFromMemory
+ * 0x464490 for the WIN32_StreamMem-backed sibling path) are real,
+ * fully-decompiled functions per 2026-08-10's investigation (see
+ * PROGRESS.md "win32_stream.c removed (partial)") but NOT YET IMPLEMENTED
+ * on the host or wired to callers — that wiring needs two still-open
+ * design questions answered first (how the `fd_ != -1` success gate reaches
+ * through a `WNDPROC_StreamBuf* rdbuf` base pointer without a forbidden
+ * cast, and disassembly-level disambiguation of two callers' ambiguous
+ * stack-offset patterns), tracked in the same PROGRESS.md entry.
  */
 
 // Status: VALIDATED
@@ -48,12 +61,42 @@ public:
     int32_t WriteChar(int32_t ch) override;                 /* 0x463CB0 */
     int32_t Flush() override;                                /* 0x463E50 */
     void* SetBuffer(void* buffer, int32_t size) override;    /* 0x463F50 */
+    int32_t Underflow() override;                             /* 0x463D40 */
 
     /* WIN32_StreamFile_CloseHandle, 0x463C30. Not found at any vtable slot
      * in this batch's evidence, so kept as an ordinary member; called
-     * directly by the destructor and available for the not-yet-wired
-     * WIN32_StreamOpen* layer to call once that is reverse engineered. */
+     * directly by the destructor and by Open()'s failure path. */
     WIN32_StreamFile* CloseHandle();
+
+    /* WIN32_StreamFile_Open, 0x4652D0 (previously Ghidra-mislabeled
+     * "CRT_exp"). Opens `path` for this (as-yet-unopened) stream:
+     * translates `flags`/`shareMask` into POSIX open() flags (see the .cpp
+     * for the fully-traced bit meanings — every bit was independently
+     * re-derived from disassembly, not guessed), calls the CRT-open
+     * equivalent, sets fd_/ownsHandle_ on success, and lazily allocates the
+     * default 0x200-byte buffer via the base class's existing
+     * SetBufferPtrs()/AllocateDefaultBuffer() machinery — no new
+     * allocation logic duplicated here.
+     *
+     * Real host deviation (documented, not a silent simplification): the
+     * original's `shareMask`-derived Windows CreateFileA share-mode
+     * computation (exclusive/read-shared/write-shared/read-write-shared)
+     * has no POSIX equivalent — POSIX open() has no share-mode parameter —
+     * so that computation is not reproduced; `shareMask` is accepted for
+     * signature fidelity but unused on the host.
+     *
+     * Real host deviation, tracked not silently dropped: the original also
+     * seeks to file end when the caller's `flags` has bit 0x04 set (via a
+     * virtual call through a vtable slot — 0x463E00 — this pass did not
+     * reverse engineer, since it is a still-unnamed method on this class
+     * hierarchy and no real caller in this codebase's evidenced call sites
+     * ever sets that bit). This override fails loudly (fprintf+assert) only
+     * if that unexercised branch is ever actually reached, rather than
+     * silently ignoring it.
+     *
+     * Returns this on success, nullptr on failure (already open, or the
+     * underlying open() call failed) — matches the original's contract. */
+    WIN32_StreamFile* Open(const char* path, int32_t flags, int32_t shareMask);
 
     int32_t fileHandle() const { return fd_; }
     void SetFileHandle(int32_t fd, int32_t ownsHandle) { fd_ = fd; ownsHandle_ = ownsHandle; }

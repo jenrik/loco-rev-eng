@@ -119,16 +119,22 @@ private:
     int32_t gcount_;
 };
 
-/* Real definition of the pre-existing `WNDPROC_CriticalSectionLock`
- * free-function symbol that `game/TrainStation.cpp`, `input/
- * BuildingDescriptorEditor.cpp`, and `ui/UI_ChildWindow.cpp` already
- * declare (C++-mangled linkage, `_Z27WNDPROC_CriticalSectionLockPiPc`)
- * and call against their own `int* stream` handles — those files predate
- * this class and never had a real definition to bind to; they were
- * calling a crashing `assert(0)` stub in shared/stubs_impl.cpp. This
- * thin adapter is the fix: `stream` is really a `WNDPROC_Stream*`, this
- * just forwards to ExtractToken(). Declared with the EXACT signature
- * those files use so the mangled name matches and the linker binds here
- * instead of (now-removed) stub. NOT declared `extern "C"` — must keep
- * C++ linkage to match. */
+/* Free-function adapter for the pre-existing `WNDPROC_CriticalSectionLock`
+ * symbol that `game/TrainStation.cpp`, `input/BuildingDescriptorEditor.cpp`,
+ * and `ui/UI_ChildWindow.cpp` declare (C++-mangled linkage,
+ * `_Z27WNDPROC_CriticalSectionLockPiPc`) and call against their own
+ * `int* stream` handles.
+ *
+ * INTENDED to forward to ExtractToken() on the assumption `stream` is
+ * really a `WNDPROC_Stream*` — but gdb-confirmed SIGSEGV (2026-08-10,
+ * see PROGRESS.md "WNDPROC_Stream facade recovery" postmortem) proved
+ * that assumption false at the real call sites: `stream` there is a raw,
+ * never-constructed `int[2]` handle from the still-unimplemented
+ * `WIN32_StreamOpenPath`, not an object with the vtable this class's
+ * virtual base (StreamObject) needs. The .cpp definition is currently a
+ * loud deferred stub for that reason — see its doc comment for the full
+ * postmortem and what a real fix requires. Declared with the EXACT
+ * signature those files use so the mangled name matches and the linker
+ * binds here. NOT declared `extern "C"` — must keep C++ linkage to
+ * match. */
 void WNDPROC_CriticalSectionLock(int* stream, char* buf);

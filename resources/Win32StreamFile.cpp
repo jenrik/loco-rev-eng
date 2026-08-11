@@ -11,12 +11,16 @@
  *   WIN32_StreamFile_WriteChar   0x463CB0
  *   WIN32_StreamFile_Flush       0x463E50
  *   WIN32_StreamFile_SetBuffer   0x463F50
+ *   WIN32_StreamFile_Underflow   0x463D40
+ *   WIN32_StreamFile_Open        0x4652D0
  */
 
 // Status: VALIDATED
 
 #include "Win32StreamFile.h"
 
+#include <cassert>
+#include <cstdio>
 #include <cstring>
 
 /* ================================================================== */
@@ -37,6 +41,17 @@ void __stdcall WNDPROC_LeaveCriticalSection(void* cs);  /* 0x464DA0 */
 /* host they are POSIX write/close/lseek with identical contracts — this */
 /* is not a behavior change, just the equivalent libc entry point.       */
 /* ================================================================== */
+#include <fcntl.h>  /* O_CREAT/O_EXCL/O_APPEND/O_TRUNC/O_WRONLY/O_RDWR — used
+                      * by Open() below on both platforms; POSIX values on
+                      * the host, MinGW's real-CRT-matching values under
+                      * _WIN32. */
+#ifndef O_BINARY
+#define O_BINARY 0  /* No POSIX equivalent (no text/binary distinction on
+                      * Linux) — file scope so it doesn't leak a local
+                      * macro definition into the rest of the translation
+                      * unit. */
+#endif
+
 #ifndef _WIN32
 #include <unistd.h>
 namespace {
@@ -44,16 +59,28 @@ inline int32_t HostWrite(int32_t fd, const void* buf, uint32_t count)
 {
     return static_cast<int32_t>(::write(fd, buf, count));
 }
+inline int32_t HostRead(int32_t fd, void* buf, uint32_t count)
+{
+    return static_cast<int32_t>(::read(fd, buf, count));
+}
 inline int32_t HostClose(int32_t fd) { return ::close(fd); }
 inline long HostLseek(int32_t fd, long offset, int32_t whence) { return ::lseek(fd, offset, whence); }
+inline int32_t HostOpen(const char* path, int32_t posixFlags)
+{
+    return ::open(path, static_cast<int>(posixFlags), 0644);
+}
 } // namespace
 #else
 extern "C" int _write(int fd, const void* buf, unsigned int count);   /* 0x468CF0 */
+extern "C" int _read(int fd, void* buf, unsigned int count);          /* 0x468D30-ish, CRT low-level read */
 extern "C" int _close(int fd);                                        /* 0x468BF0 */
 extern "C" long _lseek(int fd, long offset, int origin);              /* 0x469230 */
+extern "C" int _open(const char* path, int oflag, ...);               /* CRT low-level open */
 #define HostWrite _write
+#define HostRead _read
 #define HostClose _close
 #define HostLseek _lseek
+#define HostOpen(path, flags) _open(path, flags)
 
 /* MSVC CRT-internal per-fd _osfile[] mode table, referenced only by the
  * _WIN32 branch of Flush() below (text-mode CRLF seek-back adjustment).
@@ -165,6 +192,66 @@ int32_t WIN32_StreamFile::WriteChar(int32_t ch)
         }
     }
     return 1;
+}
+
+/* ================================================================== */
+/* WIN32_StreamFile_Underflow — 0x463D40 (vtable+0x20)                  */
+/*                                                                       */
+/* "underflow"-equivalent get-side refill hook, called by the base       */
+/* class's ReadChar()/GetChar() (WndProcStreamBuf.cpp) when the get      */
+/* region is exhausted. Refills from fd_ via the CRT low-level read      */
+/* equivalent, then returns the next byte WITHOUT consuming it — the     */
+/* base class's ReadChar()/GetChar() own the read-cursor advance, not    */
+/* this override (verified: the original never touches readPtr_ past    */
+/* resetting it to bufferStart_ on refill; it returns *readPtr_, it      */
+/* does not increment past it). Returns -1 on EOF/error (read count      */
+/* < 1), matching the original's contract.                               */
+/*                                                                        */
+/* Note for any future subclass: the original calls WIN32_StreamFile's    */
+/* own Flush() via a direct absolute CALL (0x463D6F -> 0x463E50), NOT     */
+/* through the vtable — i.e. non-virtually, even though Flush() is a      */
+/* virtual slot. This override below calls Flush() through normal C++     */
+/* member-call syntax, which resolves virtually. Identical behavior       */
+/* today since nothing derives from WIN32_StreamFile, but a future        */
+/* subclass overriding Flush() would observably diverge from the          */
+/* original here — flagged so that divergence isn't silently introduced.  */
+/* ================================================================== */
+int32_t WIN32_StreamFile::Underflow()
+{
+    int32_t avail = (readPtr_ < readHigh_) ? static_cast<int32_t>(readHigh_ - readPtr_) : 0;
+    if (avail != 0) {
+        return *readPtr_;
+    }
+
+    int32_t rc = CheckFlush();
+    if (rc == -1) {
+        return -1;
+    }
+    rc = Flush();
+    if (rc == -1) {
+        return -1;
+    }
+
+    if (unbuffered_ != 0) {
+        char c;
+        int32_t n = HostRead(fd_, &c, 1);
+        if (n < 1) {
+            return -1;
+        }
+        return static_cast<uint8_t>(c);
+    }
+
+    uint32_t space = (bufferStart_ < bufferEnd_)
+        ? static_cast<uint32_t>(bufferEnd_ - bufferStart_) : 0;
+    int32_t n = HostRead(fd_, bufferStart_, space);
+    if (n < 1) {
+        return -1;
+    }
+    peekCache_ = -1;
+    readBase_ = bufferStart_;
+    readPtr_ = bufferStart_;
+    readHigh_ = bufferStart_ + n;
+    return *readPtr_;
 }
 
 /* ================================================================== */
@@ -281,6 +368,125 @@ void* WIN32_StreamFile::SetBuffer(void* buffer, int32_t size)
         if (syncActive_ < 0) {
             WNDPROC_LeaveCriticalSection(&cs_);
         }
+    }
+    return this;
+}
+
+/* ================================================================== */
+/* WIN32_StreamFile_Open — 0x4652D0 (previously Ghidra-mislabeled       */
+/* "CRT_exp" — an auto-analysis artifact)                                */
+/*                                                                       */
+/* `flags` bit meanings, independently re-derived from the raw           */
+/* disassembly (not the caller's naming, which never named them):        */
+/*   0x01  read intent (required alongside 0x02 for write, or alone      */
+/*         for read-only — real CRT _O_RDONLY is numerically 0, so the   */
+/*         read-only path leaves the low oflag bits at 0)                */
+/*   0x02  write/read-write intent gate                                  */
+/*   0x04  seek to end after opening (NOT IMPLEMENTED here — see below)  */
+/*   0x08  append (-> real CRT _O_APPEND); also forces the write gate    */
+/*   0x10  truncate (-> real CRT _O_TRUNC); also forces the write gate   */
+/*   0x20  "open existing only" — its ABSENCE is what adds real CRT      */
+/*         _O_CREAT (every real caller in this codebase SETS this bit,   */
+/*         i.e. never creates — all real call sites only ever open       */
+/*         pre-existing resource files for reading)                      */
+/*   0x40  exclusive (-> real CRT _O_EXCL)                                */
+/*   0x80  binary mode (set) vs. text mode (clear); on the host this      */
+/*         only matters for POSIX's optional O_BINARY (no-op on Linux)   */
+/* `shareMask` selects a Windows CreateFileA share mode (exclusive/       */
+/* read-shared/write-shared/read-write-shared) in the original — no      */
+/* POSIX equivalent exists, so it is accepted for signature fidelity     */
+/* but unused on the host (documented host deviation, not a silent       */
+/* simplification).                                                      */
+/* ================================================================== */
+WIN32_StreamFile* WIN32_StreamFile::Open(const char* path, int32_t flags, int32_t shareMask)
+{
+    (void)shareMask;
+
+    if (fd_ != -1) {
+        /* Already open. */
+        return nullptr;
+    }
+
+    /* O_CREAT/O_EXCL/O_APPEND/O_TRUNC/O_WRONLY/O_RDWR/O_BINARY come from
+     * <fcntl.h> (see the file-scope O_BINARY fallback near the top of this
+     * file) — no hand-picked numeric literals needed on either platform. */
+    int32_t posixFlags = (flags & 0x80) ? O_BINARY : 0;
+    if ((flags & 0x20) == 0) {
+        posixFlags |= O_CREAT;
+    }
+    if ((flags & 0x40) != 0) {
+        posixFlags |= O_EXCL;
+    }
+    if ((flags & 0x08) != 0) {
+        flags |= 0x02;
+        posixFlags |= O_APPEND;
+    }
+    if ((flags & 0x10) != 0) {
+        flags |= 0x02;
+        posixFlags |= O_TRUNC;
+    }
+    if ((flags & 0x02) == 0) {
+        if ((flags & 0x01) == 0) {
+            /* Neither read nor write intent specified — original returns
+             * NULL here without ever calling the underlying open(). */
+            return nullptr;
+        }
+        /* Read-only: real CRT _O_RDONLY is numerically 0, nothing to OR in. */
+    } else {
+        posixFlags |= ((flags & 0x01) == 0) ? O_WRONLY : O_RDWR;
+        if ((flags & 0x4D) == 0) {
+            posixFlags |= O_TRUNC;
+        }
+    }
+
+    int32_t newFd = HostOpen(path, posixFlags);
+    fd_ = newFd;
+    if (newFd == -1) {
+        return nullptr;
+    }
+
+    if (syncActive_ < 0) {
+        WNDPROC_EnterCriticalSection(&cs_);
+    }
+    ownsHandle_ = 1;
+    /* Guard is unbuffered_/bufferEnd_ (+0x08/+0x14), NOT bufferStart_/
+     * writeBase_ — verified against the disassembly: 0x4653D7 reads
+     * [ESI+0x8] (unbuffered_), 0x4653E6 reads [ESI+0x14] (bufferEnd_). A
+     * stream already put into unbuffered mode via SetBuffer(nullptr, 0)
+     * before Open() must NOT get a buffer allocated out from under it. */
+    if (unbuffered_ == 0 && bufferEnd_ == nullptr) {
+        /* Lazily allocate the default 0x200-byte buffer, matching the
+         * original's inline allocate-and-SetBuffer sequence — reuses the
+         * existing SetBufferPtrs() helper rather than duplicating it. */
+        void* buf = operator_new(0x200);
+        if (buf == nullptr) {
+            unbuffered_ = 1;
+        } else {
+            SetBufferPtrs(static_cast<uint8_t*>(buf), static_cast<uint8_t*>(buf) + 0x200, /* owns = */ 1);
+        }
+    }
+
+    if ((flags & 0x04) != 0) {
+        /* Seek-to-end-after-open: real logic dispatches through a still-
+         * unnamed vtable slot (0x463E00 in the original — a distinct
+         * method this pass did not reverse engineer, out of scope for
+         * this class's WriteChar/Flush/SetBuffer/Underflow/Open batch).
+         * No real caller in this codebase's evidenced call sites ever
+         * sets this bit (verified: every real WIN32_StreamOpenPath/
+         * WIN32_StreamOpenFile call site uses 0x20/0x21/0xA0/0xA1, all
+         * with bit 0x04 clear) — fail loudly rather than silently
+         * ignoring the request if this branch is ever actually reached. */
+        fprintf(stderr,
+                "STUB: WIN32_StreamFile::Open seek-to-end branch (flags&0x04, "
+                "original vtable slot 0x463E00) reached — not yet reverse "
+                "engineered, see resources/Win32StreamFile.cpp\n");
+        assert(false &&
+               "WIN32_StreamFile::Open: seek-to-end branch deferred, see "
+               "TODO in resources/Win32StreamFile.cpp");
+    }
+
+    if (syncActive_ < 0) {
+        WNDPROC_LeaveCriticalSection(&cs_);
     }
     return this;
 }

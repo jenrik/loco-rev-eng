@@ -133,6 +133,19 @@ postbag_cleanup_test = executable('postbag_cleanup_test',
 )
 test('postbag-cleanup', postbag_cleanup_test)
 
+# WIN32_StreamFile/WNDPROC_StreamBuf regression — write side (WriteChar/Flush/
+# SetBuffer/dtor/CloseHandle) plus read side (Underflow/GetChar/ReadChar/Open)
+# against real temp files. Was written but never registered as a meson test()
+# target (found while extending it for Underflow()/Open() — see PROGRESS.md's
+# "win32_stream.c removed (partial)" entry, 2026-08-10 update).
+win32_stream_file_test = executable('win32_stream_file_test',
+  'win32_stream_file_test.cpp',
+  objects: [obj_win32_stream_file, obj_wndproc_stream_buf],
+  include_directories: inc_dirs,
+  cpp_args: test_warn_args,
+)
+test('win32-stream-file', win32_stream_file_test)
+
 # SDL primary-target regression: validates the CGWND frame source reaches the window.
 sdl3_primary_present_test = executable('sdl3_primary_present_test',
   'sdl3_primary_present_test.cpp',

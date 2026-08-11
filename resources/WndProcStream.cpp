@@ -15,6 +15,9 @@
 
 #include "WndProcStream.h"
 
+#include <cassert>
+#include <cstdio>
+
 extern "C" {
 /* Same family as WNDPROC_StreamBuf's Lock()/Unlock() (resources/
  * WndProcStreamBuf.cpp) — 0x464D90/0x464DA0, already declared/stubbed in
@@ -239,10 +242,62 @@ void* WNDPROC_Stream::Flush()
 /* WNDPROC_CriticalSectionLock(int*, char*) — free-function adapter    */
 /* for the pre-existing callers in game/TrainStation.cpp, input/       */
 /* BuildingDescriptorEditor.cpp, ui/UI_ChildWindow.cpp (see             */
-/* WndProcStream.h for the full rationale). `stream` is really a        */
-/* WNDPROC_Stream*.                                                    */
+/* WndProcStream.h for the full rationale). `stream` is really meant   */
+/* to be a WNDPROC_Stream*, forwarding to ExtractToken() below —        */
+/* BUT deferred back to a loud stub (2026-08-10, see PROGRESS.md        */
+/* "WNDPROC_Stream facade recovery" postmortem):                        */
+/*                                                                       */
+/* gdb-confirmed SIGSEGV (coredumpctl, reproduced twice): at its real   */
+/* call sites (BuildingDescriptorEditor::Render, TrainStation's         */
+/* equivalent), `stream` is an `int streamHandle[2]` — an 8-byte raw    */
+/* handle from the still-unimplemented WIN32_StreamOpenPath (no-op host */
+/* stub), never a real, constructed `WNDPROC_Stream` object. `WNDPROC_  */
+/* Stream` has a virtual base (StreamObject) reached through a vtable   */
+/* pointer that only a real C++ constructor establishes — a raw,        */
+/* uninitialized/undersized buffer reinterpret_cast to this type has no */
+/* such pointer, so ExtractToken()/InputPrefix() dereference garbage.   */
+/*                                                                       */
+/* A follow-up attempt to fix this by hand-writing the object's fields  */
+/* via raw offset arithmetic (mimicking the original x86 MSVC vbtable   */
+/* layout: forward slot `vtable_ptr[1]` = byte offset to the virtual    */
+/* base) was reverted: this host build's `WNDPROC_Stream` is a real     */
+/* GCC/Itanium-ABI C++ object, whose virtual-base offsets live at        */
+/* *negative* vtable indices (confirmed from this exact crash's fault   */
+/* disassembly: `mov (%rax),%rax; sub $0x18,%rax; mov (%rax),%rax`) —    */
+/* not the MSVC forward-slot convention. Manually poking bytes to        */
+/* imitate the wrong ABI is worse than the original bug: silent          */
+/* corruption instead of a clean crash. Per CLAUDE.md, raw `this +      */
+/* offset` construction of a typed C++ object is not allowed regardless.*/
+/*                                                                       */
+/* The real fix needs a real `WNDPROC_Stream` constructed via its own    */
+/* constructor (placement-new) wrapping a real `WIN32_StreamFile`        */
+/* rdbuf — which means reverse engineering the `WIN32_StreamOpen`/       */
+/* `OpenFile`/`OpenPath`/`Read`/`Destroy`/`DestroyImmediate` cluster      */
+/* (0x463810-0x463B6B) AND first unifying 8+ mutually incompatible,      */
+/* non-`extern "C"` declarations of `WIN32_StreamOpen`/`OpenPath` spread  */
+/* across game/ScriptedObject.cpp, TrainStation.cpp, input/               */
+/* BuildingDescriptorEditor.cpp, ui/CursorEditWindow.cpp,                 */
+/* ui/GameSetupPanel.cpp (5-arg!), ui/UIPANEL_Surface.cpp, ui/HelpWnd.cpp,*/
+/* ui/AboutDialog.cpp — most of which currently bind to unrelated stub    */
+/* symbols, not each other. That is its own dedicated RE pass (tracked    */
+/* in PROGRESS.md), not a quick fix.                                      */
+/*                                                                        */
+/* Until then: fail loudly rather than silently corrupting memory or      */
+/* returning wrong results, per CLAUDE.md's stub policy. The real         */
+/* ExtractToken()/InputPrefix()/SkipWhitespace()/Flush() implementations  */
+/* above remain intact and validated for whenever a real WNDPROC_Stream   */
+/* object reaches them.                                                   */
 /* ================================================================== */
 void WNDPROC_CriticalSectionLock(int* stream, char* buf)
 {
-    reinterpret_cast<WNDPROC_Stream*>(stream)->ExtractToken(buf);
+    (void)stream;
+    (void)buf;
+    fprintf(stderr,
+            "STUB: WNDPROC_CriticalSectionLock (0x4649F0 adapter) reached — "
+            "its `stream` argument is not a real constructed WNDPROC_Stream "
+            "on the host path (WIN32_StreamOpen* cluster not yet "
+            "implemented), see resources/WndProcStream.cpp\n");
+    assert(false &&
+           "WNDPROC_CriticalSectionLock: deferred, see TODO in "
+           "resources/WndProcStream.cpp");
 }
