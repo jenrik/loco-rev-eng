@@ -32,7 +32,20 @@
  *   +0x018: session_name[0x400] (char) - session name string
  *   +0x418: player_name[0x80] (char) - local player name
  *   +0x498: session_password[0x80] (char) - session password
- *   +0x518: connection_type (int) - 0=IPX, 1=TCP/IP, 2=Modem, 3=Serial, 4=DirectModem
+ *   +0x518: connection_type (int) - 0=unset/invalid (HandleMessages's
+ *           dispatch switch bails without creating a provider), 1=Modem,
+ *           2=TCP/IP, 3=Serial, 4=IPX. Confirmed 2026-08-11 by reading the
+ *           raw DPSPGUID_* bytes at 0x478fa8-0x478fe7 (IPX/TCPIP/SERIAL/MODEM
+ *           in that address order) and cross-referencing DirectPlay_
+ *           HandleMessages's (0x45F390) connection_type-1 switch, whose
+ *           four cases select GUID sub-fields from 0x478fd8 (case value 1),
+ *           0x478fb8 (2), 0x478fc8 (3), 0x478fa8 (4) respectively — see
+ *           network/DirectPlay.cpp's DirectPlay_ChooseConnectionDlgProc and
+ *           DirectPlay_HandleMessages comments. This replaces a prior,
+ *           unverified "0=IPX, 1=TCP/IP, 2=Modem, 3=Serial, 4=DirectModem"
+ *           comment that both misordered the values and invented a
+ *           "DirectModem" connection type that does not appear anywhere in
+ *           the binary.
  *   +0x51C: connection_name[0x400] (char) - provider name buffer
  *   +0x91C: modem_baud (int16_t, stored widened) - never touched by this class's methods
  *   +0x920: session_flags (int)

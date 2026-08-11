@@ -129,6 +129,9 @@ extern "C" {
     LRESULT __stdcall SendDlgItemMessageA(HWND hDlg, int32_t nIDDlgItem, UINT Msg,
                                            WPARAM wParam, LPARAM lParam);
     BOOL    __stdcall EndDialog(HWND hDlg, int32_t nResult);
+    /* Used by DirectPlay_SelectSessionDlgProc (below) to fetch the listbox
+     * HWND for SetFocus. */
+    HWND    __stdcall GetDlgItem(HWND hDlg, int32_t nIDDlgItem);
     /* CreateFileA, PlaySoundA, GetSystemMetrics, wsprintfA, LoadStringA,
      * MessageBoxA, CloseHandle, Sleep: declared in stubs/windows.h (pulled
      * in transitively via stubs/dplay.h for the GUID/DPID types below),
@@ -935,10 +938,12 @@ uint32_t DirectPlaySession::SetSessionDesc(const char* password)
 /*                                                                     */
 /* Confirmed via disassembly (RET 0x10 = 4 stdcall params popped by     */
 /* the callee, matching DLGPROC's real ABI exactly). Its one caller is  */
-/* DirectPlay_HandleMessages (0x45F390, at 0x45F42D) via                */
-/* `DialogBoxParamA(NULL, MAKEINTRESOURCE(0x7D0A), hwnd,                */
-/*  DirectPlay_ChooseConnectionDlgProc, 0)` — offered when the caller    */
-/* was not given an explicit connection_type override.                  */
+/* DirectPlay_HandleMessages (0x45F390); get_xrefs_to confirms the       */
+/* single reference is at 0x45F3CA, `DialogBoxParamA(NULL,               */
+/* MAKEINTRESOURCE(0x7D0A), hwnd, DirectPlay_ChooseConnectionDlgProc,    */
+/* 0)` — offered when the caller was not given an explicit                */
+/* connection_type override (that call site sets connection_type = 0     */
+/* right before showing this dialog — see DirectPlay.h's field comment). */
 /*                                                                      */
 /* Dialog has 4 mutually-exclusive radio buttons (item IDs 0x7D32-      */
 /* 0x7D35) selecting the connection type, plus standard OK (IDOK=1) and  */
@@ -954,36 +959,44 @@ uint32_t DirectPlaySession::SetSessionDesc(const char* password)
 /*                                                                       */
 /* WM_COMMAND (0x111), IDOK (1): queries each radio's checked state       */
 /* (BM_GETCHECK) in order 0x7D32/0x7D33/0x7D34/0x7D35 and writes           */
-/* g_dplay_peer->connection_type accordingly: 4/2/1/3. This mapping is    */
-/* consistent with the field's documented encoding in DirectPlay.h        */
-/* (0=IPX, 1=TCP/IP, 2=Modem, 3=Serial, 4=DirectModem) — i.e. the dialog's */
-/* radio order is DirectModem, Modem, TCP/IP, Serial. The 4th radio's     */
-/* write (connection_type = 3) is only performed if it reads back          */
-/* checked; if none of the 4 radios read as checked (should not happen     */
-/* given mutually-exclusive radios always leave exactly one checked),      */
-/* connection_type is left unchanged. Every path ends with                 */
-/* EndDialog(hDlg, 1).                                                      */
-/*                                                                          */
-/* WM_COMMAND (0x111), IDCANCEL (2): EndDialog(hDlg, 0), connection_type    */
-/* untouched.                                                               */
-/*                                                                          */
-/* Any other message: returns 0 (unhandled), matching a real DLGPROC's      */
-/* convention.                                                              */
+/* g_dplay_peer->connection_type accordingly: 4/2/1/3. Confirmed          */
+/* 2026-08-11 by reading the raw DPSPGUID_IPX/TCPIP/SERIAL/MODEM GUID      */
+/* bytes directly at 0x478fa8/0x478fb8/0x478fc8/0x478fd8 (16 bytes each,   */
+/* byte-identical to this file's own DPSPGUID_* constants) and cross-      */
+/* referencing DirectPlay_HandleMessages's (0x45F390) connection_type-1    */
+/* switch, whose GUID sub-field offsets land in exactly those four         */
+/* 16-byte ranges for case values 1/2/3/4 respectively — so                */
+/* connection_type 1=Modem, 2=TCP/IP, 3=Serial, 4=IPX (see DirectPlay.h's   */
+/* field comment; this corrects a prior, unverified "0=IPX, 1=TCP/IP,      */
+/* 2=Modem, 3=Serial, 4=DirectModem" comment — there is no "DirectModem"    */
+/* connection type anywhere in the binary). So the dialog's radio order    */
+/* is IPX (default-checked), TCP/IP, Modem, Serial. The 4th radio's        */
+/* write (connection_type = 3, Serial) is only performed if it reads       */
+/* back checked; if none of the 4 radios read as checked (should not       */
+/* happen given mutually-exclusive radios always leave exactly one         */
+/* checked), connection_type is left unchanged. Every path ends with       */
+/* EndDialog(hDlg, 1).                                                     */
+/*                                                                         */
+/* WM_COMMAND (0x111), IDCANCEL (2): EndDialog(hDlg, 0), connection_type   */
+/* untouched.                                                              */
+/*                                                                         */
+/* Any other message: returns 0 (unhandled), matching a real DLGPROC's     */
+/* convention.                                                             */
 /* ================================================================== */
 static LRESULT CALLBACK DirectPlay_ChooseConnectionDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     (void)lParam;
 
-    static const int32_t kRadioDirectModem = 0x7d32;
-    static const int32_t kRadioModem       = 0x7d33;
-    static const int32_t kRadioTcpIp       = 0x7d34;
-    static const int32_t kRadioSerial      = 0x7d35;
+    static const int32_t kRadioIPX    = 0x7d32;  /* connection_type = 4 */
+    static const int32_t kRadioTcpIp  = 0x7d33;  /* connection_type = 2 */
+    static const int32_t kRadioModem  = 0x7d34;  /* connection_type = 1 */
+    static const int32_t kRadioSerial = 0x7d35;  /* connection_type = 3 */
 
     if (msg == WM_INITDIALOG) {
-        SendDlgItemMessageA(hDlg, kRadioDirectModem, BM_SETCHECK, 1, 0);
-        SendDlgItemMessageA(hDlg, kRadioModem,       BM_SETCHECK, 0, 0);
-        SendDlgItemMessageA(hDlg, kRadioTcpIp,       BM_SETCHECK, 0, 0);
-        SendDlgItemMessageA(hDlg, kRadioSerial,      BM_SETCHECK, 0, 0);
+        SendDlgItemMessageA(hDlg, kRadioIPX,    BM_SETCHECK, 1, 0);
+        SendDlgItemMessageA(hDlg, kRadioTcpIp,  BM_SETCHECK, 0, 0);
+        SendDlgItemMessageA(hDlg, kRadioModem,  BM_SETCHECK, 0, 0);
+        SendDlgItemMessageA(hDlg, kRadioSerial, BM_SETCHECK, 0, 0);
         return 0;
     }
 
@@ -991,18 +1004,18 @@ static LRESULT CALLBACK DirectPlay_ChooseConnectionDlgProc(HWND hDlg, UINT msg, 
         const int32_t controlId = static_cast<int32_t>(wParam & 0xffff);
 
         if (controlId == IDOK) {
-            if (SendDlgItemMessageA(hDlg, kRadioDirectModem, BM_GETCHECK, 0, 0) == 1) {
-                g_dplay_peer->connection_type = 4;  /* DirectModem */
-                EndDialog(hDlg, 1);
-                return 1;
-            }
-            if (SendDlgItemMessageA(hDlg, kRadioModem, BM_GETCHECK, 0, 0) == 1) {
-                g_dplay_peer->connection_type = 2;  /* Modem */
+            if (SendDlgItemMessageA(hDlg, kRadioIPX, BM_GETCHECK, 0, 0) == 1) {
+                g_dplay_peer->connection_type = 4;  /* IPX */
                 EndDialog(hDlg, 1);
                 return 1;
             }
             if (SendDlgItemMessageA(hDlg, kRadioTcpIp, BM_GETCHECK, 0, 0) == 1) {
-                g_dplay_peer->connection_type = 1;  /* TCP/IP */
+                g_dplay_peer->connection_type = 2;  /* TCP/IP */
+                EndDialog(hDlg, 1);
+                return 1;
+            }
+            if (SendDlgItemMessageA(hDlg, kRadioModem, BM_GETCHECK, 0, 0) == 1) {
+                g_dplay_peer->connection_type = 1;  /* Modem */
                 EndDialog(hDlg, 1);
                 return 1;
             }
@@ -1020,6 +1033,187 @@ static LRESULT CALLBACK DirectPlay_ChooseConnectionDlgProc(HWND hDlg, UINT msg, 
     }
 
     return 0;
+}
+
+/* Frees every node of a DirectPlaySession's player_list (+0xD64) — the
+ * exact same free sequence as DirectPlaySession::SetSessionDesc's own
+ * !is_host clearing loop above, duplicated here because
+ * DirectPlay_SelectSessionDlgProc needs it twice (WM_INITDIALOG and the
+ * Refresh button) and it isn't a DirectPlaySession method in the
+ * original (both call sites resolve to the same inlined-at-source
+ * sequence in the disassembly, not a shared subroutine call). */
+static void FreePlayerList(DirectPlaySession* session)
+{
+    DirectPlayPlayerListNode* node = session->player_list;
+    while (node != nullptr) {
+        DirectPlayPlayerListNode* next = node->next;
+        if (node->payload != nullptr) {
+            GLOBAL_free(node->payload);
+        }
+        if (node->hglobal_data != nullptr) {
+            void* hglb = GlobalHandle(node->hglobal_data);
+            GlobalUnlock(hglb);
+            hglb = GlobalHandle(node->hglobal_data);
+            GlobalFree(hglb);
+            node->hglobal_data = nullptr;
+        }
+        GLOBAL_free(node);
+        session->player_list = next;
+        node = next;
+    }
+}
+
+/* Repopulates the session listbox (item 0x7D20) from session->player_list:
+ * each node's `payload` is added as a string (LB_ADDSTRING) and the
+ * returned index gets `hglobal_data` attached as its item data
+ * (LB_SETITEMDATA) — matches DirectPlay_SelectSessionDlgProc's two
+ * identical listbox-population loops (WM_INITDIALOG and Refresh). */
+static void PopulateSessionListbox(HWND hDlg, DirectPlaySession* session)
+{
+    DirectPlayPlayerListNode* node = session->player_list;
+    while (node != nullptr) {
+        LRESULT index = SendDlgItemMessageA(hDlg, 0x7D20, LB_ADDSTRING, 0,
+                                             reinterpret_cast<LPARAM>(node->payload));
+        SendDlgItemMessageA(hDlg, 0x7D20, LB_SETITEMDATA, index,
+                            reinterpret_cast<LPARAM>(node->hglobal_data));
+        node = node->next;
+    }
+}
+
+/* ================================================================== */
+/* DirectPlay_SelectSessionDlgProc — "Select Session" join-dialog proc  */
+/* (listbox item 0x7D20). Address: 0x4611B0                            */
+/* __stdcall DLGPROC (HWND, UINT, WPARAM, LPARAM)                       */
+/*                                                                      */
+/* WM_INITDIALOG (0x110): frees any pending session_desc_ptr (matches   */
+/* DirectPlaySession::Close's same pattern), frees the entire            */
+/* player_list (+0xD64 — confirmed via disassembly: the call at 0x461298 */
+/* is a direct call to 0x45F090, the same address already implemented    */
+/* as DirectPlaySession::SetSessionDesc, whose own documented return      */
+/* value is `player_list` truncated to uint32_t — this settles which     */
+/* list this dialog walks in favor of player_list, not session_list),    */
+/* calls SetSessionDesc(nullptr) with a retry-on-DPERR_PENDING loop       */
+/* (mirroring SetSessionDesc's own internal retry, needed here because    */
+/* SetSessionDesc can also return null for reasons unrelated to PENDING   */
+/* — e.g. a null dplay_interface — see its own doc comment), repopulates  */
+/* the listbox on success, selects the first entry (LB_SETCURSEL), and    */
+/* focuses the listbox.                                                  */
+/*                                                                       */
+/* WM_COMMAND (0x111): LBN_DBLCLK (HIWORD(wParam)==2) on the listbox      */
+/* immediately confirms the current selection (equivalent to the IDOK     */
+/* path below). Otherwise dispatches on LOWORD(wParam):                   */
+/*   IDOK (1): reads the selected listbox entry (LB_GETCURSEL, -1 if the  */
+/*     list is empty per LB_GETCOUNT) into session_name (+0x18) and        */
+/*     session_desc_ptr (+0x92C, via LB_GETITEMDATA); no selection clears  */
+/*     both and cancels (EndDialog(hDlg,0)); a selection sets              */
+/*     session_desc_valid=1 and confirms (EndDialog(hDlg,1)).              */
+/*   IDCANCEL (2): clears session_desc_ptr/session_desc_valid, cancels.    */
+/*   0x7D01 ("Refresh"): re-frees player_list, re-enumerates via            */
+/*     SetSessionDesc(nullptr) (same retry loop), repopulates the listbox,  */
+/*     stays open (no EndDialog).                                          */
+/* ================================================================== */
+static LRESULT CALLBACK DirectPlay_SelectSessionDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    (void)lParam;
+
+    if (msg == WM_INITDIALOG) {
+        if (g_dplay_peer->session_desc_ptr != nullptr && !g_dplay_peer->session_desc_valid) {
+            void* hglb = GlobalHandle(g_dplay_peer->session_desc_ptr);
+            GlobalUnlock(hglb);
+            hglb = GlobalHandle(g_dplay_peer->session_desc_ptr);
+            GlobalFree(hglb);
+        }
+        g_dplay_peer->session_desc_valid = 0;
+        g_dplay_peer->session_desc_ptr = nullptr;
+
+        FreePlayerList(g_dplay_peer);
+
+        uint32_t result = g_dplay_peer->SetSessionDesc(nullptr);
+        bool gaveUp = false;
+        if (result == 0) {
+            while (g_dplay_peer->last_hresult == -0x7788FEA2 /* DPERR_PENDING */) {
+                Sleep(1);
+                result = g_dplay_peer->SetSessionDesc(nullptr);
+                if (result != 0) {
+                    break;
+                }
+            }
+            gaveUp = (result == 0);
+        }
+        if (!gaveUp) {
+            PopulateSessionListbox(hDlg, g_dplay_peer);
+        }
+
+        SendDlgItemMessageA(hDlg, 0x7D20, LB_SETCURSEL, 0, 0);
+        HWND listboxHwnd = GetDlgItem(hDlg, 0x7D20);
+        SetFocus(listboxHwnd);
+        return 0;
+    }
+
+    if (msg != WM_COMMAND) {
+        return 0;
+    }
+
+    if ((wParam >> 16) == LBN_DBLCLK) {
+        LRESULT count = SendDlgItemMessageA(hDlg, 0x7D20, LB_GETCOUNT, 0, 0);
+        LRESULT selected = (count == 0) ? -1 : SendDlgItemMessageA(hDlg, 0x7D20, LB_GETCURSEL, 0, 0);
+        if (selected == -1) {
+            return 1;
+        }
+        SendDlgItemMessageA(hDlg, 0x7D20, LB_GETTEXT, selected,
+                             reinterpret_cast<LPARAM>(g_dplay_peer->session_name));
+        LRESULT itemData = SendDlgItemMessageA(hDlg, 0x7D20, LB_GETITEMDATA, selected, 0);
+        g_dplay_peer->session_desc_ptr = reinterpret_cast<void*>(itemData);
+    } else {
+        uint32_t controlId = static_cast<uint32_t>(wParam & 0xFFFF);
+        if (controlId == IDOK) {
+            LRESULT count = SendDlgItemMessageA(hDlg, 0x7D20, LB_GETCOUNT, 0, 0);
+            LRESULT selected = (count == 0) ? -1 : SendDlgItemMessageA(hDlg, 0x7D20, LB_GETCURSEL, 0, 0);
+            if (selected == -1) {
+                g_dplay_peer->session_name[0] = 0;
+                g_dplay_peer->session_desc_ptr = nullptr;
+                g_dplay_peer->session_desc_valid = 0;
+                EndDialog(hDlg, 0);
+                return 1;
+            }
+            SendDlgItemMessageA(hDlg, 0x7D20, LB_GETTEXT, selected,
+                                 reinterpret_cast<LPARAM>(g_dplay_peer->session_name));
+            LRESULT itemData = SendDlgItemMessageA(hDlg, 0x7D20, LB_GETITEMDATA, selected, 0);
+            g_dplay_peer->session_desc_ptr = reinterpret_cast<void*>(itemData);
+            SendDlgItemMessageA(hDlg, 0x7D20, LB_GETTEXT, selected,
+                                 reinterpret_cast<LPARAM>(g_dplay_peer->session_name));
+        } else if (controlId == IDCANCEL) {
+            g_dplay_peer->session_desc_ptr = nullptr;
+            g_dplay_peer->session_desc_valid = 0;
+            EndDialog(hDlg, 0);
+            return 1;
+        } else if (controlId == 0x7D01) {
+            FreePlayerList(g_dplay_peer);
+            SendDlgItemMessageA(hDlg, 0x7D20, LB_RESETCONTENT, 0, 0);
+
+            uint32_t result = g_dplay_peer->SetSessionDesc(nullptr);
+            if (result == 0) {
+                while (g_dplay_peer->last_hresult == -0x7788FEA2 /* DPERR_PENDING */) {
+                    Sleep(1);
+                    result = g_dplay_peer->SetSessionDesc(nullptr);
+                    if (result != 0) {
+                        break;
+                    }
+                }
+                if (result == 0) {
+                    return 1;
+                }
+            }
+            PopulateSessionListbox(hDlg, g_dplay_peer);
+            return 1;
+        } else {
+            return 0;
+        }
+    }
+
+    g_dplay_peer->session_desc_valid = 1;
+    EndDialog(hDlg, 1);
+    return 1;
 }
 
 /* ================================================================== */
@@ -1040,12 +1234,21 @@ uint32_t DirectPlay_HandleMessages(int32_t protocol, const char* address, int32_
      * 5. Creates/initializes DirectPlayAddress
      * 6. Calls IDirectPlay4::InitializeConnection
      *
-     * The connection_type values are:
-     *   1 = DirectPlay (default, shows provider selection dialog)
+     * The connection_type values (confirmed 2026-08-11 by reading the raw
+     * DPSPGUID_* GUID bytes at 0x478fa8-0x478fe7 and cross-referencing this
+     * function's own connection_type-1 switch — see DirectPlay.h's field
+     * comment and DirectPlay_ChooseConnectionDlgProc below; this replaces a
+     * prior unverified "1=DirectPlay/2=TCP/IP/3=IPX/4=Modem/5=Serial" list
+     * that did not match the switch's own GUID selections) are:
+     *   0 = unset/invalid — this switch bails without creating a provider
+     *   1 = Modem
      *   2 = TCP/IP
-     *   3 = IPX
-     *   4 = Modem
-     *   5 = Serial
+     *   3 = Serial
+     *   4 = IPX
+     *
+     * connection_type == 0 (the value HandleMessages resets it to before
+     * showing DirectPlay_ChooseConnectionDlgProc, see below) is what drives
+     * the interactive dialog path in the disassembly.
      *
      * See native/DPLAY_* files for the dispatch implementation.
      * This function calls the Ordinal_1 load and CoCreateInstance path.

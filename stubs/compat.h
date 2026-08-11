@@ -131,6 +131,22 @@ typedef DWORD*              LPDWORD;
 #define BM_GETCHECK         0x00F0
 #define BM_SETCHECK         0x00F1
 
+/* Listbox control messages (subset used by
+ * DirectPlay_SelectSessionDlgProc, network/DirectPlay.cpp) — real WinUser.h
+ * values, byte/value-verified against the message constants pushed by
+ * loco.exe's own SendDlgItemMessageA call sites at 0x4611B0. */
+#define LB_ADDSTRING        0x0180
+#define LB_RESETCONTENT     0x0184
+#define LB_SETCURSEL        0x0186
+#define LB_GETCURSEL        0x0188
+#define LB_GETTEXT          0x0189
+#define LB_GETCOUNT         0x018B
+#define LB_GETITEMDATA      0x0199
+#define LB_SETITEMDATA      0x019A
+
+/* Listbox notification code (HIWORD(wParam) in WM_COMMAND) */
+#define LBN_DBLCLK          2
+
 /* Standard dialog control IDs (OK/Cancel push buttons) */
 #define IDOK                1
 #define IDCANCEL            2

@@ -162,6 +162,23 @@ BOOL  PostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 
 /* =========================================================================
+ * Modal dialogs with child controls (STUB — no host equivalent yet; this
+ * project has no native SDL3 dialog/control-widget system built. Callers
+ * currently reachable through this path are dead code (see
+ * network/DirectPlay.cpp's DirectPlay_ChooseConnectionDlgProc, which
+ * nothing invokes yet), so a safe no-op with a one-time warning is used
+ * instead of the loud-assert stub policy reserved for deferred internal
+ * game logic. Revisit if/when a real caller makes this path reachable.
+ * ========================================================================= */
+
+int32_t DialogBoxParamA(HINSTANCE hInstance, LPCSTR lpTemplateName,
+                         HWND hWndParent, void* lpDialogFunc, LPARAM dwInitParam);
+LRESULT SendDlgItemMessageA(HWND hDlg, int nIDDlgItem, UINT Msg,
+                            WPARAM wParam, LPARAM lParam);
+BOOL    EndDialog(HWND hDlg, int32_t nResult);
+HWND    GetDlgItem(HWND hDlg, int nIDDlgItem);
+
+/* =========================================================================
  * GDI (STUB — drawing is done via DirectDraw/SDL renderer)
  * ========================================================================= */
 

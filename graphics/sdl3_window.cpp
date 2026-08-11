@@ -717,6 +717,50 @@ int MessageBoxA(HWND hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType)
 }
 
 /* =========================================================================
+ * Modal dialogs with child controls (no host equivalent yet — see the
+ * sdl3_window.h doc comment above these declarations)
+ * ========================================================================= */
+
+int32_t DialogBoxParamA(HINSTANCE hInstance, LPCSTR lpTemplateName,
+                         HWND hWndParent, void* lpDialogFunc, LPARAM dwInitParam)
+{
+    (void)hInstance; (void)hWndParent; (void)lpDialogFunc; (void)dwInitParam;
+    fprintf(stderr,
+            "WARNING: DialogBoxParamA(template=%p) has no SDL3 host implementation "
+            "(no native dialog/control-widget system) -- returning -1 (failure)\n",
+            lpTemplateName);
+    return -1;
+}
+
+LRESULT SendDlgItemMessageA(HWND hDlg, int nIDDlgItem, UINT Msg,
+                            WPARAM wParam, LPARAM lParam)
+{
+    (void)hDlg; (void)nIDDlgItem; (void)Msg; (void)wParam; (void)lParam;
+    fprintf(stderr,
+            "WARNING: SendDlgItemMessageA(item=%d, msg=0x%x) has no SDL3 host "
+            "implementation -- returning 0\n", nIDDlgItem, Msg);
+    return 0;
+}
+
+BOOL EndDialog(HWND hDlg, int32_t nResult)
+{
+    (void)hDlg;
+    fprintf(stderr,
+            "WARNING: EndDialog(result=%d) has no SDL3 host implementation "
+            "-- returning TRUE\n", nResult);
+    return TRUE;
+}
+
+HWND GetDlgItem(HWND hDlg, int nIDDlgItem)
+{
+    (void)hDlg;
+    fprintf(stderr,
+            "WARNING: GetDlgItem(item=%d) has no SDL3 host implementation "
+            "-- returning nullptr\n", nIDDlgItem);
+    return nullptr;
+}
+
+/* =========================================================================
  * String helpers
  * ========================================================================= */
 
