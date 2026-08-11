@@ -257,15 +257,38 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
     }
 
     if (!loadedFromArchive) {
-        int streamHandle[2];
-        WIN32_StreamOpenPath(streamHandle, datPath, 0x20, 0 /* DAT_00479190 */);
-        uint8_t ok = this->Render(streamHandle);  /* Virtual call — derived override */
-        this->loaded = ok;
-        if (ok) {
-            uint8_t rendered = this->ChildWindow::Render(streamHandle);
-            this->loaded = rendered;
+        /* Real disassembly of the enclosing original function (0x41E6E0)
+         * shows `WIN32_StreamOpen(&local_278, 1)` runs unconditionally at
+         * function entry, constructing the stream object BEFORE this
+         * branch's `WIN32_StreamOpenPath(&local_278, ...)` call, which is
+         * a plain method call on an already-constructed WIN32_Stream
+         * (OpenPath), not a constructor itself — confirmed against
+         * resources/Win32Stream.cpp, where WIN32_StreamOpenPath is
+         * `static_cast<WIN32_Stream*>(stream)->OpenPath(...)`, requiring a
+         * live vtable. This branch previously skipped that construction
+         * step entirely, passing a raw stack `int[2]` with no vtable —
+         * confirmed root cause of the WNDPROC_CriticalSectionLock abort
+         * this project's own gui_sandbox regression test reproduces
+         * (tests/integration/test_game_gui.py). Fixed to match the
+         * already-correct archive-branch pattern above: allocate a real
+         * WIN32_Stream-sized buffer and construct via WIN32_StreamOpen
+         * before opening the path. */
+        void* streamMem = ::operator new(WIN32_Stream_Size(), std::nothrow);
+        if (streamMem != nullptr) {
+            WIN32_StreamOpen(streamMem, 1);
+            WIN32_StreamOpenPath(streamMem, datPath, 0x20, 0 /* DAT_00479190 */);
+            uint8_t ok = this->Render(streamMem);  /* Virtual call — derived override */
+            this->loaded = ok;
+            if (ok) {
+                uint8_t rendered = this->ChildWindow::Render(streamMem);
+                this->loaded = rendered;
+            }
+            WIN32_StreamDestroyImmediate(streamMem);
+            /* Original tail dispatches the stream's own scalar deleting
+             * destructor (vtable[0](1)) here; not reproduced with a raw
+             * vtable call per project policy — same accepted gap as the
+             * archive branch above (out of scope for this pass). */
         }
-        WIN32_StreamDestroyImmediate(streamHandle);
     }
 
     /* If neither default edit-origin field was set by the .dat, derive a
