@@ -285,63 +285,55 @@ WNDPROC_Stream* WNDPROC_Stream::Read(void* buf, uint32_t size)
 /* ================================================================== */
 /* WNDPROC_CriticalSectionLock(int*, char*) — free-function adapter    */
 /* for the pre-existing callers in game/TrainStation.cpp, input/       */
-/* BuildingDescriptorEditor.cpp, ui/UI_ChildWindow.cpp (see             */
-/* WndProcStream.h for the full rationale). `stream` is really meant   */
-/* to be a WNDPROC_Stream*, forwarding to ExtractToken() below —        */
-/* BUT deferred back to a loud stub (2026-08-10, see PROGRESS.md        */
-/* "WNDPROC_Stream facade recovery" postmortem):                        */
+/* BuildingDescriptorEditor.cpp, ui/UI_ChildWindow.cpp, game/           */
+/* ScriptedObject.cpp, ui/CursorEditWindow.cpp, ui/UIPANEL_Surface.cpp, */
+/* ui/HelpWnd.cpp (see WndProcStream.h for the full rationale).         */
+/* `stream` is meant to be a `WNDPROC_Stream*`, forwarding to           */
+/* ExtractToken() below.                                                */
 /*                                                                       */
-/* gdb-confirmed SIGSEGV (coredumpctl, reproduced twice): at its real   */
-/* call sites (BuildingDescriptorEditor::Render, TrainStation's         */
-/* equivalent), `stream` is an `int streamHandle[2]` — an 8-byte raw    */
-/* handle from the still-unimplemented WIN32_StreamOpenPath (no-op host */
-/* stub), never a real, constructed `WNDPROC_Stream` object. `WNDPROC_  */
-/* Stream` has a virtual base (StreamObject) reached through a vtable   */
-/* pointer that only a real C++ constructor establishes — a raw,        */
-/* uninitialized/undersized buffer reinterpret_cast to this type has no */
-/* such pointer, so ExtractToken()/InputPrefix() dereference garbage.   */
-/*                                                                       */
-/* A follow-up attempt to fix this by hand-writing the object's fields  */
-/* via raw offset arithmetic (mimicking the original x86 MSVC vbtable   */
-/* layout: forward slot `vtable_ptr[1]` = byte offset to the virtual    */
-/* base) was reverted: this host build's `WNDPROC_Stream` is a real     */
-/* GCC/Itanium-ABI C++ object, whose virtual-base offsets live at        */
-/* *negative* vtable indices (confirmed from this exact crash's fault   */
-/* disassembly: `mov (%rax),%rax; sub $0x18,%rax; mov (%rax),%rax`) —    */
-/* not the MSVC forward-slot convention. Manually poking bytes to        */
-/* imitate the wrong ABI is worse than the original bug: silent          */
-/* corruption instead of a clean crash. Per CLAUDE.md, raw `this +      */
-/* offset` construction of a typed C++ object is not allowed regardless.*/
-/*                                                                       */
-/* The real fix needs a real `WNDPROC_Stream` constructed via its own    */
-/* constructor (placement-new) wrapping a real `WIN32_StreamFile`        */
-/* rdbuf — which means reverse engineering the `WIN32_StreamOpen`/       */
-/* `OpenFile`/`OpenPath`/`Read`/`Destroy`/`DestroyImmediate` cluster      */
-/* (0x463810-0x463B6B) AND first unifying 8+ mutually incompatible,      */
-/* non-`extern "C"` declarations of `WIN32_StreamOpen`/`OpenPath` spread  */
-/* across game/ScriptedObject.cpp, TrainStation.cpp, input/               */
-/* BuildingDescriptorEditor.cpp, ui/CursorEditWindow.cpp,                 */
-/* ui/GameSetupPanel.cpp (5-arg!), ui/UIPANEL_Surface.cpp, ui/HelpWnd.cpp,*/
-/* ui/AboutDialog.cpp — most of which currently bind to unrelated stub    */
-/* symbols, not each other. That is its own dedicated RE pass (tracked    */
-/* in PROGRESS.md), not a quick fix.                                      */
+/* Was deferred back to a loud stub (2026-08-10, see PROGRESS.md        */
+/* "WNDPROC_Stream facade recovery" postmortem) after a gdb-confirmed    */
+/* SIGSEGV: at BuildingDescriptorEditor::Render's real call site,        */
+/* `stream` was an `int streamHandle[2]` — an 8-byte raw stack handle    */
+/* passed straight to `WIN32_StreamOpenPath` (a plain method call on an  */
+/* already-constructed `WIN32_Stream`, per resources/Win32Stream.cpp —   */
+/* NOT itself a constructor) with no prior `WIN32_StreamOpen` call, so    */
+/* no vtable was ever established there. A follow-up attempt to work     */
+/* around this by hand-writing the object's fields via raw offset        */
+/* arithmetic (mimicking the original x86 MSVC vbtable layout) was       */
+/* reverted: this host's `WNDPROC_Stream` is a real GCC/Itanium-ABI      */
+/* object whose virtual-base offsets live at *negative* vtable indices,  */
+/* not the MSVC forward-slot convention — manually poking bytes to       */
+/* imitate the wrong ABI would have been worse than the original bug.    */
 /*                                                                        */
-/* Until then: fail loudly rather than silently corrupting memory or      */
-/* returning wrong results, per CLAUDE.md's stub policy. The real         */
-/* ExtractToken()/InputPrefix()/SkipWhitespace()/Flush() implementations  */
-/* above remain intact and validated for whenever a real WNDPROC_Stream   */
-/* object reaches them.                                                   */
+/* Root cause fixed (2026-08-11, FUN_-sweep session): input/              */
+/* BuildingDescriptorEditor.cpp's path-load branch now calls              */
+/* `WIN32_StreamOpen` (the real placement-new constructor) before        */
+/* `WIN32_StreamOpenPath`, matching its own sibling archive-load branch   */
+/* and every one of this function's other real, currently-implemented    */
+/* callers (game/ScriptedObject.cpp, game/TrainStation.cpp, ui/           */
+/* CursorEditWindow.cpp, ui/UIPANEL_Surface.cpp, ui/HelpWnd.cpp — audited  */
+/* individually and confirmed to already call `WIN32_StreamOpen` before   */
+/* `WIN32_StreamOpenPath`/`OpenFile`). Declaration-shape differences       */
+/* across those files (extern "C" vs C++-mangled, `int*` vs `void*`       */
+/* parameter spelling) do not affect this: shared/                        */
+/* stubs_link001_integration.cpp already bridges every extern "C" caller  */
+/* to the one real C++-mangled implementation via GCC's asm-label         */
+/* extension, and extern "C" linkage doesn't encode parameter types in    */
+/* the symbol name the way C++ mangling does, so those spelling           */
+/* differences were never a second landmine. (Two callers are NOT in      */
+/* this audited set and must not be assumed safe: ui/GameSetupPanel.cpp's */
+/* `loadLayouts` uses a distinct 5-arg `WIN32_StreamOpen` overload with    */
+/* its own honest "not implemented" stub, unrelated to this path; ui/      */
+/* AboutDialog.cpp's `LoadCredits` is not implemented at all yet — an      */
+/* empty function body, so it cannot reach this adapter regardless.)      */
+/*                                                                        */
+/* Every real, reachable caller now constructs a genuine WIN32_Stream     */
+/* (which IS-A WNDPROC_Stream via single, non-virtual inheritance) before */
+/* reaching this adapter, so forwarding to the real, already-validated     */
+/* ExtractToken() is safe. */
 /* ================================================================== */
 void WNDPROC_CriticalSectionLock(int* stream, char* buf)
 {
-    (void)stream;
-    (void)buf;
-    fprintf(stderr,
-            "STUB: WNDPROC_CriticalSectionLock (0x4649F0 adapter) reached — "
-            "its `stream` argument is not a real constructed WNDPROC_Stream "
-            "on the host path (WIN32_StreamOpen* cluster not yet "
-            "implemented), see resources/WndProcStream.cpp\n");
-    assert(false &&
-           "WNDPROC_CriticalSectionLock: deferred, see TODO in "
-           "resources/WndProcStream.cpp");
+    reinterpret_cast<WNDPROC_Stream*>(stream)->ExtractToken(buf);
 }

@@ -188,11 +188,11 @@ def test_singleplayer_mode3_mouse_input_reaches_game(game):
 
 def test_singleplayer_mode3_click_reaches_wndproc_stream_stub(game):
     """Longer-soak extension of test_singleplayer_mode3_mouse_input_reaches_game,
-    written to reliably reproduce a currently-open crash one step further
-    down the same call chain that test only samples for 1s.
+    added to reliably reproduce a then-open crash one step further down the
+    same call chain that test only samples for 1s.
 
-    Live gdb backtrace (this session, coredumpctl on a manually driven
-    repro of this exact click, matching commit 69f7556 HEAD) confirms the
+    Live gdb backtrace (2026-08-11 session, coredumpctl on a manually driven
+    repro of this exact click, matching commit 69f7556 HEAD) confirmed the
     full chain from a real click:
 
         Game::UpdateInputState -> Game::PlaySound(0x1400)
@@ -204,27 +204,28 @@ def test_singleplayer_mode3_click_reaches_wndproc_stream_stub(game):
         -> WNDPROC_CriticalSectionLock (resources/WndProcStream.cpp:291)
         -> assert(false) -> abort()
 
-    WNDPROC_CriticalSectionLock is a deliberate loud stub (PROGRESS.md,
-    "win32_stream.c removed (partial)"): its `stream` argument is a raw
-    `int streamHandle[2]` from the still-unimplemented `WIN32_StreamOpen*`
-    cluster, never a real constructed WNDPROC_Stream, so it fails loudly
-    rather than dereference garbage. That stub call used to be a silent
-    call-0 no-op on this exact path due to an extern-"C"/C++ linkage
-    landmine (fixed in 69f7556, "Fix extern-C linkage landmine for
-    WNDPROC_Stream* functions"); fixing the linkage made the call reach
-    the real stub for the first time, turning a silent no-op into a real
-    abort ~1-1.5s after the click (measured directly this session via a
-    manual gui-sandbox repro, coredumpctl-confirmed SIGABRT on this exact
-    stack, twice). test_singleplayer_mode3_mouse_input_reaches_game's own
-    1s post-click sleep races that window and can pass even though the
-    game aborts moments later — GameSession.close() never inspects how
-    the process died, so a crash after the last assert_alive() call is
-    invisible to that test (see PROGRESS.md's harness-gap note).
+    WNDPROC_CriticalSectionLock was a deliberate loud stub (PROGRESS.md,
+    "win32_stream.c removed (partial)"): its `stream` argument arrived as a
+    raw `int streamHandle[2]` -- not because the WIN32_StreamOpen*
+    functions themselves were unimplemented (5 of 6 already were, see
+    PROGRESS.md's "win32-stream-cluster-implemented" entry), but because
+    input/BuildingDescriptorEditor.cpp's path-load branch called
+    WIN32_StreamOpenPath (a plain method call on an already-constructed
+    WIN32_Stream, not a constructor) without first calling WIN32_StreamOpen
+    to construct one. Root-caused and fixed 2026-08-11 (FUN_-sweep
+    session) by disassembling the original 0x41E6E0 directly and
+    confirming WIN32_StreamOpen runs unconditionally before
+    WIN32_StreamOpenPath there; every other real, reachable caller
+    (game/ScriptedObject.cpp, game/TrainStation.cpp, ui/CursorEditWindow.cpp,
+    ui/UIPANEL_Surface.cpp, ui/HelpWnd.cpp) was individually audited and
+    already did this correctly. WNDPROC_CriticalSectionLock itself was then
+    un-stubbed to forward to the real, already-validated
+    WNDPROC_Stream::ExtractToken(). See resources/WndProcStream.cpp's
+    updated doc comment for the full writeup.
 
-    This test is EXPECTED TO FAIL (game.assert_alive() raises) until the
-    real WIN32_StreamOpen*/OpenPath/Read/Destroy cluster is implemented
-    for real — tracked as its own dedicated RE pass in PROGRESS.md, not
-    fixed here. It intentionally leaves a coredump per run."""
+    This test now asserts the game SURVIVES the click (previously asserted
+    the opposite while the bug was open) -- confirmed passing on a
+    from-scratch build with 0 `call 0` linkage sites."""
     game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
     game.click_logical(600, 550, "select single player")
     game.click_logical(600, 720, "player-name field")
