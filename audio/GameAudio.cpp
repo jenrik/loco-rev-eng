@@ -47,7 +47,10 @@ extern GameAudio* g_audio;                              /* 0x4FD3BC */
 
 /* Listener position globals (in screen/world coords) */
 /* Global resource manager */
-extern void* g_resmgr;                                  /* 0x4855E8 */
+class ResourceManager;
+extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
+                                      * a widespread cross-TU landmine — see
+                                      * PROGRESS.md's g_resmgr sweep) */
 
 extern int32_t g_listener_x;                            /* 0x4AAD2C */
 extern int32_t g_listener_y;                            /* 0x4AAD30 */
@@ -306,7 +309,7 @@ void GameAudio::StopAll()
 void GameAudio::PlayResource(uint32_t resource_id)
 {
     SoundResource* res = static_cast<SoundResource*>(
-        RESMGR_GetById(g_resmgr, resource_id));
+        RESMGR_GetById(&g_resmgr, resource_id));
     this->AllocChannel(res, nullptr,
                        g_listener_x, g_listener_y,
                        4, 0);
@@ -323,7 +326,7 @@ void GameAudio::PlayResourceEx(uint32_t resource_id, AudioChannel** output_ptr)
     }
 
     SoundResource* res = static_cast<SoundResource*>(
-        RESMGR_GetById(g_resmgr, resource_id));
+        RESMGR_GetById(&g_resmgr, resource_id));
     this->AllocChannel(res, output_ptr,
                        g_listener_x, g_listener_y,
                        4, 0);

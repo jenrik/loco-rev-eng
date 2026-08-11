@@ -8,7 +8,10 @@
 extern int CRT_rand(void);                                      // 0x466150
 extern uint32_t g_game_time;                                    // 0x4a99b4
 extern BuildingMgr* g_building_mgr;                             // 0x485448 — host-constructed singleton
-extern void* g_resmgr;                                          // 0x4855e8
+class ResourceManager;
+extern ResourceManager g_resmgr;    // 0x4855e8 — object, not a pointer (was void*,
+                                     // a widespread cross-TU landmine — see
+                                     // PROGRESS.md's g_resmgr sweep)
 extern void* ResourceManager_GetById(void*, int);                // 0x446ea0
 extern unsigned int GetResourceType(unsigned int);                // 0x446030
 extern tm* CRT_localtime(uint32_t*);                             // 0x4674e0
@@ -98,7 +101,7 @@ Building* ResourceGameObject::CreateMember(uint32_t resource_id)
             static_cast<uint8_t*>(resource) + 0x524);
         resource_id = choices[CRT_rand() % 5];
     }
-    void* member_resource = ResourceManager_GetById(g_resmgr, resource_id);
+    void* member_resource = ResourceManager_GetById(&g_resmgr, resource_id);
     if (member_resource == nullptr) return nullptr;
 
     uint8_t kind = *reinterpret_cast<uint8_t*>(

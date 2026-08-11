@@ -93,7 +93,10 @@ extern Netman*  _g_netman;           /* stale translated alias of 0x4FD3AC */
 #endif
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 */
 extern void*    g_dplay_config;      /* 0x4FD3B4 */
-extern void*    g_resmgr;            /* 0x4855E8 */
+class ResourceManager;
+extern ResourceManager g_resmgr;     /* 0x4855E8 — object, not a pointer (was void*,
+                                       * a widespread cross-TU landmine — see
+                                       * PROGRESS.md's g_resmgr sweep) */
 extern void*    g_scripted_object;   /* 0x4AA9B0 */
 extern void*    g_town_view;         /* 0x4AA818 */
 extern void*    g_ddraw_building;    /* 0x4851D0 */
@@ -295,7 +298,7 @@ extern "C" int GameLoop_Setup(void* cgwnd)
 
     trace_setup_stage("step 8: resources");
     /* Step 8: Initialize resource manager */
-    if (!ResourceManager_Init(g_resmgr)) {
+    if (!ResourceManager_Init(&g_resmgr)) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 8\n"); std::fflush(stderr);
         return -1;
     }

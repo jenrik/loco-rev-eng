@@ -238,7 +238,10 @@ static int DPLAY_GetMessageCount(void* dplay)
 /* Global variables referenced by Town functions                       */
 /* ================================================================== */
 
-extern void* g_resmgr;                  /* 0x4855E8 — resource manager */
+class ResourceManager;
+extern ResourceManager g_resmgr;        /* 0x4855E8 — object, not a pointer (was void*,
+                                          * a widespread cross-TU landmine — see
+                                          * PROGRESS.md's g_resmgr sweep) */
 extern void* g_tilemap;                 /* 0x4FD244 — tile map */
 extern void* g_ddraw_building;          /* 0x4A9EF0 — DDraw building selection */
 extern void* g_primary_surface;         /* 0x4FD3C4 — primary DirectDraw surface */
@@ -2557,7 +2560,7 @@ byte Town::save_postcard_as()
 
     /* Step 2: format the dialog title (resource 0x6a). */
     char title_buf[0x100] = {0};
-    FormatResourceString(g_resmgr, 0x6a, title_buf, sizeof(title_buf));
+    FormatResourceString(&g_resmgr, 0x6a, title_buf, sizeof(title_buf));
 
     /* Step 3: set up OPENFILENAMEA (all fields verified against the
      * disassembly writes at 0x42F092..0x42F0D6). */
@@ -2626,7 +2629,7 @@ byte Town::save_postcard_as()
         if (hFile != reinterpret_cast<HANDLE>(-1)) {
             /* File exists — prompt for overwrite (MB_YESNO = 4). */
             char msg_buf[0x100] = {0};
-            FormatResourceString(g_resmgr, 0x6b, msg_buf, sizeof(msg_buf));
+            FormatResourceString(&g_resmgr, 0x6b, msg_buf, sizeof(msg_buf));
             int choice = MessageBoxA(this->hWnd, msg_buf,
                                      s_LEGO_LOCO_0047e1c0,
                                      4);            /* MB_YESNO */
@@ -2647,7 +2650,7 @@ byte Town::save_postcard_as()
 
         if (err == 3) {              /* ERROR_PATH_NOT_FOUND */
             char msg_buf[0x100] = {0};
-            FormatResourceString(g_resmgr, 0x6d, msg_buf, sizeof(msg_buf));
+            FormatResourceString(&g_resmgr, 0x6d, msg_buf, sizeof(msg_buf));
             int choice = MessageBoxA(this->hWnd, msg_buf,
                                      s_LEGO_LOCO_0047e1c0,
                                      0x24);          /* MB_YESNO|MB_ICONQUESTION */
@@ -2657,7 +2660,7 @@ byte Town::save_postcard_as()
         /* Other errors — error dialog (MB_OK|MB_ICONSTOP = 0x30). */
         {
             char msg_buf[0x100] = {0};
-            FormatResourceString(g_resmgr, 0x6d, msg_buf, sizeof(msg_buf));
+            FormatResourceString(&g_resmgr, 0x6d, msg_buf, sizeof(msg_buf));
             MessageBoxA(this->hWnd, msg_buf,
                         s_LEGO_LOCO_0047e1c0,
                         0x30);

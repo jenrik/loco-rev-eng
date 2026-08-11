@@ -23,7 +23,10 @@ extern BOOL (__stdcall* g_IntersectRect)(RECT*, const RECT*, const RECT*);
 extern BOOL (__stdcall* g_OffsetRect)(RECT*, int, int);
 extern BOOL (__stdcall* g_PtInRect)(const RECT*, int, int);
 
-extern void* g_resmgr;          // 0x4855e8
+class ResourceManager;
+extern ResourceManager g_resmgr;    // 0x4855e8 — object, not a pointer (was void*,
+                                     // a widespread cross-TU landmine — see
+                                     // PROGRESS.md's g_resmgr sweep)
 extern int g_game_mode;         // 0x4851f4
 extern void* g_tooltip_mgr;     // 0x4fd220
 extern void* g_game;            // 0x4854c8
@@ -129,20 +132,20 @@ void BuildingMgr::CompactCollections()
 Building* BuildingMgr::CreateFromResource(int resource_id, int owner_slot,
                                           int world_x, int world_y)
 {
-    void* resource = ResourceManager_GetById(g_resmgr, resource_id);
+    void* resource = ResourceManager_GetById(&g_resmgr, resource_id);
     /* Host-safety: the binary dereferences the resource unconditionally
      * (iVar1 + 0x40); a null primary lookup would crash the original. */
     if (resource == nullptr) return nullptr;
 
     const ResourceFactoryFields* resource_fields = resource_factory_fields(resource);
     int dependency_id = resource_fields->dependency_id;
-    void* dependency = ResourceManager_GetById(g_resmgr, dependency_id);
+    void* dependency = ResourceManager_GetById(&g_resmgr, dependency_id);
     if (dependency_id != -1 &&
         (dependency == nullptr || resource_factory_fields(dependency)->enabled == 0))
         return nullptr;
 
     int exclusion_id = resource_fields->exclusion_id;
-    void* exclusion = ResourceManager_GetById(g_resmgr, exclusion_id);
+    void* exclusion = ResourceManager_GetById(&g_resmgr, exclusion_id);
     if (exclusion != nullptr && resource_factory_fields(exclusion)->enabled != 0)
         return nullptr;
 
