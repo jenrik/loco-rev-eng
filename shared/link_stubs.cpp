@@ -365,14 +365,6 @@ int WIN32_SendNetworkData(void*, int, void*, int, int) {
     }
     return 0;
 }
-void WIN32_StreamOpenPath(void*,const char*,int32_t,int32_t);
-void WIN32_StreamOpenPath(void*,const char*,int32_t,int32_t){}
-void WIN32_StreamDestroy(void*);
-void WIN32_StreamDestroy(void*){}
-void WIN32_StreamDestroyImmediate(void*);
-void WIN32_StreamDestroyImmediate(void*){}
-void WIN32_StreamRead(void*,void*,int32_t);
-void WIN32_StreamRead(void*,void*,int32_t){}
 void WNDPROC_StreamCleanup(void*);
 void WNDPROC_StreamCleanup(void*){}
 void WIN32_CloseHandle(void*);
@@ -675,11 +667,13 @@ void VehicleEditor_CheckEditBounds1(void*,void*){}            /* _Z31VehicleEdit
 void VehicleEditor_CheckEditBounds1(VehicleEditor*,void*);
 void VehicleEditor_CheckEditBounds1(VehicleEditor*,void*){}   /* _ZN13VehicleEditor16CheckEditBounds1EPv */
 
-/* WIN32_StreamOpen — C++ overloads */
-void*WIN32_StreamOpen(void*,int32_t);
-void*WIN32_StreamOpen(void*,int32_t){return nullptr;}                        /* _Z16WIN32_StreamOpenPvi */
-void*WIN32_StreamOpen(void*,const char*,int32_t,void*,int32_t);
-void*WIN32_StreamOpen(void*,const char*,int32_t,void*,int32_t){return nullptr;} /* _Z16WIN32_StreamOpenPvPKciS_i */
+/* WIN32_StreamOpen/OpenFile/OpenPath/Read/DestroyImmediate/Destroy — real
+ * implementations now in resources/Win32Stream.h/.cpp (0x463810-0x463B6B
+ * cluster); the two mismatched extern "C" overloads that used to live here
+ * were a decompiler-era mistake (this file's own declarations conflated
+ * WIN32_StreamOpen 0x463890 and the distinct WIN32_StreamOpenFile 0x463970
+ * into bogus overloads of one name — they are separate functions, see
+ * Win32Stream.h). */
 
 /* WNDPROC_StreamFromMemory — C++ overloads */
 void WNDPROC_StreamFromMemory(void*,const char*,int32_t,int32_t);

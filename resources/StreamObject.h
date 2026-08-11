@@ -84,11 +84,23 @@ struct StreamObject {
     uint8_t             _unknown_00[0x04];  /* +0x00..+0x03 */
     WNDPROC_StreamBuf*  rdbuf;              /* +0x04 */
     uint32_t            state_bits;         /* +0x08 */
-    uint8_t             _unknown_0C[0x14];  /* +0x0C..+0x1F */
-    WNDPROC_Stream*     tied;               /* +0x20 */
+    uint8_t             _unknown_0C[0x10];  /* +0x0C..+0x1B */
+    int32_t             owns_rdbuf;         /* +0x1C — nonzero iff rdbuf was
+                                             * heap-allocated by this object
+                                             * and must be freed on replacement */
+    WNDPROC_Stream*     tied;               /* +0x20 — stream flushed before
+                                             * blocking read (classic ios::tie) */
     uint8_t             format_flags;       /* +0x24 */
-    uint8_t             _unknown_25[0x0B];  /* +0x25..+0x2F */
-    int32_t             width;              /* +0x30 */
+    uint8_t             _unknown_25[0x03];  /* +0x25..+0x27 */
+    uint32_t            precision;          /* +0x28 — formatted output
+                                             * precision (initialized to 6 by
+                                             * StreamObject_Ctor) */
+    uint8_t             fill;               /* +0x2C — formatted output fill
+                                             * character (initialized to ' ' by
+                                             * StreamObject_Ctor) */
+    uint8_t             _unknown_2D[0x03];  /* +0x2D..+0x2F */
+    int32_t             width;              /* +0x30 — formatted extraction
+                                             * character limit */
     int32_t             sync_flag;          /* +0x34 */
     CRITICAL_SECTION    critical_section;   /* +0x38 */
 
@@ -99,6 +111,31 @@ struct StreamObject {
 
     /* format_flags bits */
     static constexpr uint8_t kSkipws = 0x1;
+
+    /* 0x464590 (Ghidra auto-analysis named this "WNDPROC_StreamGetSize";
+     * it does not get any size — it default-initializes this virtual base:
+     * rdbuf/tied null, badbit set (no buffer attached yet), owns_rdbuf
+     * clear, precision/fill at their classic-iostream defaults, width/
+     * sync_flag/critical_section as documented above. Also lazily
+     * initializes a process-global CRITICAL_SECTION shared across every
+     * StreamObject, guarded by a global refcount — see the .cpp file. The
+     * original additionally pokes this object's own vtable pointer to a
+     * standalone "StreamObject alone" vtable here (classic MSVC
+     * base-before-derived vptr sequencing); real C++ virtual-base
+     * construction ordering already provides that, so it is not
+     * reproduced. */
+    StreamObject();
+
+protected:
+    /* 0x464680 (Ghidra auto-analysis named this "WNDPROC_StreamFlush"; it
+     * does not flush anything — it replaces the attached buffer). If this
+     * object owns its current rdbuf, deletes it (the original does this by
+     * calling the old buffer's scalar-deleting-destructor vtable slot; real
+     * C++ `delete` through WNDPROC_StreamBuf's virtual destructor is the
+     * same operation). Installs `newBuf` as the new rdbuf and clears/sets
+     * badbit depending on whether it is null. Does NOT touch owns_rdbuf —
+     * every caller sets that separately (see Win32Stream.cpp). */
+    void AttachBuffer(WNDPROC_StreamBuf* newBuf);
 };
 
 /* ================================================================== */

@@ -9,6 +9,8 @@
  *   SkipWhitespace 0x464B10
  *   ExtractToken   0x4649F0
  *   Flush          0x465960
+ *   Read           0x463810
+ *   AttachBuffer   0x464840
  */
 
 // Status: VALIDATED
@@ -27,6 +29,20 @@ void __stdcall WNDPROC_LeaveCriticalSection(void* cs);
 
 /* CRT character classification. */
 int __cdecl _isspace(int c);
+
+/* Stream buffer attachment via WNDPROC_StreamFlush (0x464680). */
+void WNDPROC_StreamFlush(void* stream, int rdbuf_child);
+}
+
+/* ================================================================== */
+/* AttachBuffer — 0x464840 (previously mislabeled WNDPROC_StreamVPrintf) */
+/* ================================================================== */
+void WNDPROC_Stream::AttachBuffer(WNDPROC_StreamBuf* newBuf)
+{
+    StreamObject::AttachBuffer(newBuf);
+    format_flags |= kSkipws;
+    gcount_ = 0;
+    _reserved_04 = 0;
 }
 
 /* ================================================================== */
@@ -234,6 +250,34 @@ void* WNDPROC_Stream::Flush()
 
     if (sync_flag < 0) {
         WNDPROC_LeaveCriticalSection(&critical_section);
+    }
+    return this;
+}
+
+/* ================================================================== */
+/* Read — 0x463810 ("WIN32_StreamRead" at its call sites)               */
+/* ================================================================== */
+WNDPROC_Stream* WNDPROC_Stream::Read(void* buf, uint32_t size)
+{
+    if (InputPrefix(1)) {
+        /* InputPrefix(1) left both this object's and rdbuf's CRITICAL_
+         * SECTIONs held on success, per its own documented contract — the
+         * two Unlock/Leave calls below are exactly the release it deferred
+         * to us. */
+        int32_t count = (rdbuf != nullptr)
+                            ? rdbuf->ReadBytes(buf, static_cast<int32_t>(size))
+                            : 0;
+        gcount_ = count;
+        if (static_cast<uint32_t>(count) < size) {
+            state_bits |= (kFailBit | kEofBit);
+        }
+
+        if (rdbuf != nullptr) {
+            rdbuf->Unlock();
+        }
+        if (sync_flag < 0) {
+            WNDPROC_LeaveCriticalSection(&critical_section);
+        }
     }
     return this;
 }

@@ -36,6 +36,11 @@
  *     WndProcStream.h)
  *   StreamBuf_GetChar                     0x4651A0  -> GetChar()  (get +
  *     advance; same discovery as ReadChar())
+ *   WNDPROC_StreamBuf_ReadBytes           0x4655C0  -> ReadBytes(void*,int32_t)
+ *     (vtable+0x18; had no Ghidra function defined at all before this pass —
+ *     found by reading WIN32_StreamFile's real vtable bytes at 0x4791AC and
+ *     decompiling the dword at +0x18. Discovered while reverse engineering
+ *     WIN32_StreamRead, see Win32Stream.cpp.)
  *
  * Field layout (verified against WNDPROC_StreamBuf_Ctor's disassembly,
  * which zero-initializes +0x04..+0x2C and sets +0x0C/+0x30 = -1, plus
@@ -116,6 +121,19 @@ public:
      * which is not virtual and is called BY the overrides, not overridden
      * itself. */
     virtual void* SetBuffer(void* buffer, int32_t size) = 0;
+
+    /* vtable +0x18. Bulk read: fills `buf` with up to `size` bytes, draining
+     * the buffered get-region and calling the Underflow() hook to refill (or
+     * to fetch one byte at a time in unbuffered_ mode) until `size` bytes are
+     * read or Underflow() reports EOF/error. Returns the number of bytes
+     * actually read (may be less than `size` on EOF). No override for this
+     * slot was found in WIN32_StreamFile's own vtable (0x4791AC dword at
+     * +0x18 points at this exact base-class address) — the base
+     * implementation, driven entirely through the virtual Underflow() hook,
+     * is what every concrete stream type uses. Discovered while reverse
+     * engineering the WIN32_StreamRead cluster (see Win32Stream.cpp), which
+     * dispatches through this slot. */
+    virtual int32_t ReadBytes(void* buf, int32_t size);
 
     /* vtable +0x1C ("overflow" hook proper). WIN32_StreamFile overrides this
      * with its real WriteChar (0x463CB0). */

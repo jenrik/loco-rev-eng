@@ -111,10 +111,14 @@ void UI_WindowBase_Ctor();
 void UI_WindowBase_Ctor() { /* host no-op */ }
 void VehicleEditor_CheckEditBounds1();
 void VehicleEditor_CheckEditBounds1() { /* host no-op */ }
-void WIN32_StreamOpen();
-void WIN32_StreamOpen() { /* host no-op */ }
-void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t);
-void* WIN32_StreamOpenFile(void*, const char*, uint32_t, uint32_t, uint32_t) { return nullptr; }
+/* WIN32_StreamOpen()/WIN32_StreamOpenFile() extern "C" no-ops removed:
+ * both are now real implementations in resources/Win32Stream.h/.cpp, with
+ * plain C++ (mangled) linkage matching the majority of existing .cpp
+ * callers — these extern "C" bare-name stubs only ever matched the two
+ * .c-file callers (native/wave_io.c, native/cgwnd_palette.c), which keep
+ * resolving via -Wl,--unresolved-symbols=ignore-all (LINK-001) same as
+ * before, pending the separate caller-unification pass tracked in
+ * PROGRESS.md. */
 void WNDPROC_EnterCriticalSection();
 void WNDPROC_EnterCriticalSection() { /* host no-op — single-threaded */ }
 void WNDPROC_LeaveCriticalSection();
@@ -405,12 +409,14 @@ void TrackPiece_Dtor(void*);
 void TrackPiece_Dtor(void*) { /* host no-op */ }
 void __ftol(double);
 void __ftol(double) { /* host no-op */ }
-void WIN32_StreamDestroy(void*);
-void WIN32_StreamDestroy(void*) { /* host no-op */ }
+/* WIN32_StreamDestroy(void*)/WIN32_StreamDestroyImmediate(void*) silent
+ * no-ops removed: DestroyImmediate is now a real implementation in
+ * resources/Win32Stream.h/.cpp; Destroy is now a LOUD deferred stub there
+ * instead (CLAUDE.md forbids silent no-op stubs for internal logic —
+ * see that file's doc comment for why it can't be safely implemented
+ * yet). */
 void WNDPROC_StreamCleanup(void*);
 void WNDPROC_StreamCleanup(void*) { /* host no-op */ }
-void WIN32_StreamDestroyImmediate(void*);
-void WIN32_StreamDestroyImmediate(void*) { /* host no-op */ }
 void TileMap_SetViewport(void*, void*);
 void TileMap_SetViewport(void*, void*) { /* host no-op */ }
 void TileMap_GetTileAt(void*, void*);
