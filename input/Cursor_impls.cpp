@@ -698,7 +698,17 @@ void Cursor::init_network_player()
         this->obj_184 = nullptr;
     }
 
-    /* Allocate the 0x39C-byte player record and create it via DPLAY */
+    /* Allocate the 0x39C-byte player record and create it via DPLAY.
+     * 0x39C is real x86 evidence for the record's full original size
+     * (town/Town.h documents the same value from DPLAY_CreatePlayer's own
+     * disassembly), but only its first 0x94 bytes are reconstructed as
+     * input/Cursor.h's CursorEditorRecord (an intentional partial view, see
+     * Cursor::base_destructor's doc comment) — there is no complete C++
+     * type to take a sizeof() of yet, so the literal stays. DPLAY_
+     * CreatePlayer is currently a no-op stub (never writes past `record`),
+     * so this is not a live overflow today; if the full record is ever
+     * reconstructed with pointer fields beyond +0x94, this will need to
+     * become sizeof(the full type) instead. */
     void* record = operator_new(0x39C);
     this->obj_184 = static_cast<CursorEditorRecord*>(
         record != nullptr

@@ -487,48 +487,13 @@ void VehicleEditor_Update(Vehicle* vehicle)
     }
 }
 
-/* ====================================================================
- * SYMBOL: EditorState_Ctor(void*, unsigned char)  [extern "C"]
- * CALLER: Vehicle::Vehicle(int, int, unsigned char, unsigned char)  (game/Vehicle.cpp:155)
- * ADDRESS: 0x40B500 (EditorState::EditorState(char))
- * ACTION: real-implementation (bridge, with a host-only sizing fix)
- * RATIONALE: game/Vehicle.cpp:49 declares
- *   `void* __thiscall EditorState_Ctor(void* this_, uint8_t param_1);`
- *   *inside* its file-scope `extern "C" { }` block — genuinely missing
- *   under that linkage. The real logic is the already-integrated
- *   EditorState(char) constructor (world/EditorState.h/.cpp). HOST
- *   DEVIATION: game/Vehicle.cpp allocates only `operator_new(0x20)` (32
- *   bytes) for this object — correct for the original x86 EditorState
- *   (4-byte vtable ptr + one 4-byte `building` pointer = 0x20), but
- *   sizeof(EditorState) on this 64-bit host is 0x28 (40 bytes: 8-byte
- *   vtable ptr + 8-byte `building` pointer), because GameVehicle* widens
- *   from 4 to 8 bytes. Placement-constructing into the caller's 32-byte
- *   buffer would overflow it by 8 bytes. Since the caller reassigns the
- *   return value (`state = static_cast<EditorState*>(EditorState_Ctor(state, param_3))`),
- *   this frees the caller's undersized buffer and allocates a
- *   correctly-sized one instead of using it, avoiding both the overflow
- *   and a leak.
- * SHOULD_BE_FIXED_AT: game/Vehicle.cpp:154 — this is a host-only sizing
- *   deviation from the original x86 layout (CLAUDE.md: exact original
- *   layouts are documentation for Windows builds, not a host-build
- *   requirement), so the *real* fix is for that call site to stop
- *   allocating a fixed 0x20 and instead do
- *   `state = new (operator_new(sizeof(EditorState))) EditorState(param_3);`
- *   directly, removing the free-function bridge entirely.
- * ==================================================================== */
-extern "C" void* EditorState_Ctor(void* this_, uint8_t param_1)
-{
-#ifndef _WIN32
-    /* Host-only deviation: undersized caller buffer, see rationale above. */
-    if (this_ != nullptr) GLOBAL_free(this_);
-    void* mem = operator_new(sizeof(EditorState));
-    if (mem == nullptr) return nullptr;
-    return new (mem) EditorState(static_cast<char>(param_1));
-#else
-    if (this_ == nullptr) return nullptr;
-    return new (this_) EditorState(static_cast<char>(param_1));
-#endif
-}
+/* EditorState_Ctor(void*, unsigned char) [extern "C"] — this bridge (formerly
+ * here) was removed: its only caller, Vehicle::Vehicle (game/Vehicle.cpp),
+ * now constructs EditorState directly via
+ * `new (operator_new(sizeof(EditorState))) EditorState(...)`, per this
+ * function's own SHOULD_BE_FIXED_AT note, closing the operator_new(0x20)
+ * vs. sizeof(EditorState)==0x28 undersized-allocation deviation at the
+ * source instead of working around it here. */
 
 /* ====================================================================
  * SYMBOLS: EditorState_SelectLayout / EditorState_HandleNetworkGame /

@@ -108,6 +108,11 @@ void* AllocateSoundObjectStorage()
     return operator_new(sizeof(SoundObject));
 }
 #else
+/* Real Windows 32-bit target: 0x58/0x68 are the original x86
+ * sizeof(TrackPiece)/sizeof(SoundObject) exactly — safe as literals here
+ * since this branch only ever builds for that original 32-bit layout (the
+ * #ifndef _WIN32 branch above uses sizeof() directly for the 64-bit host,
+ * where those values would be wrong due to pointer widening). */
 void* AllocateTrackPieceStorage()
 {
     return operator_new(0x58);

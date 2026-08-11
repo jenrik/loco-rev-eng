@@ -35,7 +35,9 @@
  * offsets are unconditional for every caller. Four sources confirm ChildWindow
  * is a genuine base class, not an overlay across unrelated objects:
  * 1. All field writes are absolute (not subobject-relative).
- * 2. Total size is fixed at operator_new(0x168) across all current callers.
+ * 2. Total size was fixed at the original x86 sizeof(ChildWindow), 0x168,
+ *    across all callers (now operator_new(sizeof(ChildWindow)) == 0x180 on
+ *    this 64-bit host, since pointer-bearing fields widen).
  * 3. Derived constructors call the base ctor, then immediately overwrite the
  *    vptr with their own vtable — the classic C++ base-subobject construction
  *    pattern, confirming the base is a real type, not a field-layout alias.
@@ -106,7 +108,9 @@ public:
                                      //        OnMouseMove/OnMouseLeave via entry+0x0E "stringId")
     void*      bitmapSurface;      // +0x24  static bitmap surface for this window's own frame
                                      //        image (was misnamed `subObject`; created in Render()
-                                     //        via operator_new(0x20)+UIPANEL_CreateSurface, the
+                                     //        via operator_new(UIPANEL_Surface_Size())+
+                                     //        UIPANEL_CreateSurface (was the original x86's
+                                     //        operator_new(0x20)), the
                                      //        same construction idiom as OnMouseMove's overlay
                                      //        `renderSurface` at +0x10 but for a *different*,
                                      //        statically-loaded surface — released in dtor via its
@@ -331,6 +335,10 @@ public:
      */
     void InitFields(uint32_t resourceId, int32_t nameParam);
 };
+
+/* sizeof(ChildWindow) on this host — see ui/UI_ChildWindow.cpp. Plain C++
+ * linkage; must NOT be declared inside the extern "C" block below. */
+size_t ChildWindow_Size();
 
 /* ================================================================== */
 /* Extern "C" Compatibility Shims                                     */

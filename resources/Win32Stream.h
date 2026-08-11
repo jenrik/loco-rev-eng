@@ -98,6 +98,18 @@ void* WIN32_StreamRead(void* stream, void* buf, uint32_t size);
 /* 0x463B10 */
 void WIN32_StreamDestroyImmediate(void* stream);
 
+/* Returns sizeof(WIN32_Stream) on this host (0x80 bytes here vs. the
+ * original x86's 0x5C — StreamObject's pointer-bearing base-class fields
+ * widen from 4 to 8 bytes; see StreamObject.h/WndProcStream.h). Exists so
+ * callers that only need to size a WIN32_StreamOpen(File)/
+ * WNDPROC_StreamFromMemory allocation can get the real size without
+ * including this header, whose class declaration would conflict with
+ * those callers' own pre-existing, already-flagged-inconsistent local
+ * extern "C" declarations of WIN32_StreamOpen et al (see the
+ * "Free-function facades" comment above) — unifying those is the
+ * separately tracked follow-up this header already defers. */
+size_t WIN32_Stream_Size();
+
 /* 0x463A80 — deliberately NOT implemented (loud deferred stub in the
  * .cpp). Disassembly shows this function's real argument is
  * `&stream->StreamObject_subobject` (`this+0xc` in the original x86

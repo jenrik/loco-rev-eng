@@ -111,6 +111,7 @@ void   GameObject_Draw(void* self);  /* stub @ shared/stubs_impl.cpp:436 */
  * `operator_new` returned in EAX, never actually constructed. Moved out of
  * extern "C" with the correct signature so it binds to the real ctor. */
 void   UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* 0x42A110 */
+size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 
 extern "C" {
     /* Resource management */
@@ -851,8 +852,10 @@ char Town::handle_tile_click()
              * "return value" actually reflects) — surface_obj itself,
              * not any call result, is what gets stored into
              * overlay_panel. */
+            /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the
+             * real host size (see graphics/LOCOBITMAP.h). */
             UIPANEL_Surface* surface_obj =
-                static_cast<UIPANEL_Surface*>(operator_new(0x20));
+                static_cast<UIPANEL_Surface*>(operator_new(UIPANEL_Surface_Size()));
             if (surface_obj) {
                 UIPANEL_CreateSurface(surface_obj);
             }
@@ -2822,8 +2825,9 @@ void Train_HandleTrackBuild(void* subsystem, int msg)
 
     if (*reinterpret_cast<int*>(data + 0xC) != 0) {
         /* Create a local vehicle with a random type from 3 variants
-         * starting at resource 0x1804. */
-        void* mem = operator_new(0x94);
+         * starting at resource 0x1804. 0x94 was the original x86
+         * sizeof(Vehicle); use the real host size (see game/Vehicle.h). */
+        void* mem = operator_new(sizeof(Vehicle));
         Vehicle* vehicle = nullptr;
         if (mem != nullptr) {
             vehicle = static_cast<Vehicle*>(Vehicle_Ctor(

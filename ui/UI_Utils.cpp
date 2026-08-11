@@ -194,12 +194,15 @@ void* UI_Manager::createMessageBox(int resourceId, short param2,
         return NULL;
     }
 
-    /* Allocate UIEntity (0xA4 bytes) */
+    /* Allocate UIEntity. 0xA4 was the original x86 sizeof(UIEntity); use
+     * the real host size (0xC8 — see ui/UIEntity.h/.cpp) instead of the
+     * stale x86 literal. */
     typedef void* (__thiscall* UIEntityCtor)(void* self, int a, short b,
                                               char c, int d, int e);
     extern UIEntityCtor UIEntity_Ctor;    /* 0x422EC0 */
+    extern size_t UIEntity_Size();        /* ui/UIEntity.cpp — real sizeof(UIEntity) */
 
-    void* entity = operator_new(0xA4);
+    void* entity = operator_new(UIEntity_Size());
     if (entity == NULL) {
         return NULL;
     }
@@ -250,7 +253,16 @@ void* UI_Manager::createMessageBox(int resourceId, short param2,
 int* UI_Manager::createTooltip(int resourceId, short param2,
                                 int posX, int posY)
 {
-    /* Allocate 0x88 bytes for tooltip GameObject */
+    /* Allocate 0x88 bytes for tooltip GameObject. 0x88 is this call site's
+     * real x86 evidence, but the concrete type constructed here is bigger
+     * than the base GameObject (sizeof(GameObject) == 0x38) — it's some
+     * still-unidentified GameObject-derived tooltip class whose full field
+     * layout hasn't been reconstructed, so there's no sizeof(Type) to take
+     * yet (guessing one would violate CLAUDE.md's evidence-only rule).
+     * GameObject_BaseCtor (0x405790) is still an undecompiled stub
+     * (shared/stubs_impl.cpp) that never writes through `obj`, so this is
+     * not a live overflow today; revisit once the real derived type is
+     * identified and GameObject_BaseCtor is decompiled. */
     void* obj = operator_new(0x88);
     if (obj == NULL) {
         return NULL;

@@ -47,8 +47,13 @@
  *   ChildWindow (ui/UI_ChildWindow.h, vtable 0x477C18)
  *     └─ BuildingDescriptorEditor (this class, vtable 0x4779E0)
  *
- * Size: 0x630 bytes (confirmed: resources/ResourceManager.cpp allocates
- *       exactly operator_new(0x630) before calling the constructor bridge).
+ * Size: 0x630 bytes on the original x86 layout (confirmed: resources/
+ *       ResourceManager.cpp allocated exactly operator_new(0x630) before
+ *       calling the constructor bridge). sizeof(BuildingDescriptorEditor)
+ *       is 0x658 on a 64-bit host (pointer-bearing fields widen) —
+ *       ResourceManager.cpp now allocates
+ *       operator_new(sizeof(BuildingDescriptorEditor)) instead of that
+ *       stale x86 literal.
  *
  * Status: INTEGRATED
  */
@@ -156,8 +161,11 @@ public:
     uint8_t  leisure_destination;                       // +0x62C  [LeisureDestination]
     uint8_t  _pad_62D[3];                                 // +0x62D
 
-    /* Total: 0x630 bytes (verified: ResourceManager::AddString allocates
-     * exactly operator_new(0x630) before calling the constructor bridge). */
+    /* Total: 0x630 bytes on the original x86 layout (verified:
+     * ResourceManager::AddString allocated exactly operator_new(0x630)
+     * before calling the constructor bridge); sizeof(BuildingDescriptorEditor)
+     * is 0x658 on this 64-bit host — AddString now uses
+     * operator_new(sizeof(BuildingDescriptorEditor)) instead. */
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */

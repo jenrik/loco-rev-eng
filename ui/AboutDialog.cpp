@@ -105,6 +105,7 @@ extern void* __thiscall wcsstr(const void* str, const void* substr);        /* 0
  * doc comment and PROGRESS.md for that pre-existing conflict. Matches
  * ui/UIPANEL.cpp's own `void*`-typed local extern for the same address. */
 extern void     __fastcall UIPANEL_CreateSurface(void* surface);            /* 0x42A110 */
+extern size_t   UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 extern uint32_t __thiscall UIPANEL_InitSurface(void* surface, int width,    /* 0x42A850 */
                                                 int height, int mode,
                                                 uint32_t paletteParam,
@@ -496,14 +497,14 @@ void AboutDialog::InitSprites()
     res_surface = reinterpret_cast<ResourceGetSurfaceFn>(resourceVtbl[1])(resource, 0, 0);
 
     /* Allocate the screensaver's own UIPANEL surface. The original
-     * allocates exactly 0x20 bytes (matching ui/UIPANEL_Surface.cpp's
-     * documented real 32-bit layout for this struct — NOT
-     * graphics/LOCOBITMAP.h's differently-sized same-named struct, a
-     * pre-existing conflict tracked in PROGRESS.md) and, faithfully,
-     * proceeds to call UIPANEL_InitSurface below even if this allocation
-     * fails (screensaver_surface stays nullptr) — an original bug,
-     * preserved as-is rather than fixed. */
-    void* surfaceBuf = operator_new(0x20);
+     * allocates exactly 0x20 bytes (the real 32-bit sizeof(UIPANEL_Surface),
+     * graphics/LOCOBITMAP.h) — use UIPANEL_Surface_Size() instead of that
+     * literal since pointer fields widen the struct on this 64-bit host
+     * (see graphics/LOCOBITMAP.cpp). Faithfully proceeds to call
+     * UIPANEL_InitSurface below even if this allocation fails
+     * (screensaver_surface stays nullptr) — an original bug, preserved
+     * as-is rather than fixed. */
+    void* surfaceBuf = operator_new(UIPANEL_Surface_Size());
     if (surfaceBuf != nullptr) {
         UIPANEL_CreateSurface(surfaceBuf);
     }

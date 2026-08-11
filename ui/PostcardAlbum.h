@@ -175,9 +175,12 @@ public:
      *
      * The binary version calls UI_WindowBase_Ctor + InitFromResource on
      * memory supplied by the caller (CGWND_InitAllSubsystems allocates
-     * 0x254 bytes via operator_new). This is placement-new construction.
+     * the original x86's 0x254 bytes via operator_new; the host build
+     * allocates operator_new(sizeof(PostcardAlbum)) == 0x328 instead, since
+     * PostcardAlbum's pointer-bearing base fields widen on a 64-bit host).
+     * This is placement-new construction.
      *
-     * @param mem         Pre-allocated memory (operator_new(0x254))
+     * @param mem         Pre-allocated memory (operator_new(sizeof(PostcardAlbum)))
      * @param hInstance   Application instance handle
      * @param resId       Window resource ID
      * @return            Pointer to constructed PostcardAlbum (same as mem)

@@ -243,6 +243,7 @@ void  CRT_time(void);                         /* 0x466490 */
 /* -- Game engine functions -- */
 void  Train_QueueMessage(void* train, TrainMessage* msg);
 void* UIPANEL_CreateSurface(void* surface);
+size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 void  TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags);
 
 /* -- Resource manager functions -- */

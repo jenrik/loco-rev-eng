@@ -72,7 +72,13 @@ void TrainEntity_DeserializeFactory(GameObject* prototype,
 
     const uint8_t* saved = static_cast<const uint8_t*>(save_data);
     const int resource_id = *reinterpret_cast<const int32_t*>(saved + 0x64);
-    void* storage = operator_new(0xF0);  /* Binary allocates exactly 0xF0, not sizeof(TrainEntity) */
+    /* The original x86 binary allocates exactly 0xF0 bytes here (matching
+     * the original, smaller x86 TrainEntity layout). sizeof(TrainEntity) on
+     * this 64-bit host is 0x120 — pointer-bearing base fields widen from
+     * 4 to 8 bytes — so operator_new(0xF0) undersizes the real placement-new
+     * below by 0x30 bytes. Use the real size instead of the stale x86
+     * literal. */
+    void* storage = operator_new(sizeof(TrainEntity));
     TrainEntity* train = nullptr;
 
     if (storage != nullptr) {

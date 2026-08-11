@@ -87,6 +87,11 @@ void WIN32_Stream::CloseNow()
 /* Free-function facades — see Win32Stream.h for scope/linkage notes   */
 /* ================================================================== */
 
+size_t WIN32_Stream_Size()
+{
+    return sizeof(WIN32_Stream);
+}
+
 void* WIN32_StreamOpen(void* stream, int /*initBase*/)
 {
     return ::new (stream) WIN32_Stream();

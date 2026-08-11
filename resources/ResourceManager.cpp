@@ -675,7 +675,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
     if (resourceType > 0xE) {
         /* Fallthrough for type > 14 */
-        newObj = operator_new(0x168);
+        newObj = operator_new(sizeof(ChildWindow));
         if (newObj != nullptr) {
             result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
         }
@@ -683,12 +683,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         switch (resourceType) {
         case 0:
             if ((resId & 1) == 0) {
-                newObj = operator_new(0x168);
+                newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
                     result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
-                newObj = operator_new(0x630);
+                newObj = operator_new(sizeof(BuildingDescriptorEditor));
                 if (newObj != nullptr) {
                     result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
                 }
@@ -696,7 +696,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             break;
 
         case 1:
-            newObj = operator_new(0x168);
+            newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
                 result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
@@ -705,12 +705,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 2:
         case 4:
             if ((resId & 1) == 0) {
-                newObj = operator_new(0x168);
+                newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
                     result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
-                newObj = operator_new(0x630);
+                newObj = operator_new(sizeof(BuildingDescriptorEditor));
                 if (newObj != nullptr) {
                     result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
                 }
@@ -719,11 +719,20 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
         case 3:
             if ((resId & 1) == 0) {
-                newObj = operator_new(0x168);
+                newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
                     result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
+                /* 0x63C is the original x86 sizeof of RESDATA_ScriptedObject_
+                 * AddChild's target object (0x44B190, still undecompiled —
+                 * see shared/stubs_link001_batch3_resource_audio.cpp's TODO;
+                 * no reconstructed C++ class exists yet to take a sizeof()
+                 * from). Currently safe: that stub returns nullptr without
+                 * writing through `newObj`, so this buffer is never touched
+                 * at its real size. Revisit this literal (widen to the real
+                 * class's sizeof) the moment 0x44B190 is decompiled — until
+                 * then this is provably not a live overflow, only a leak. */
                 newObj = operator_new(0x63C);
                 if (newObj != nullptr) {
                     result = RESDATA_ScriptedObject_AddChild(newObj, resId, strPtr);
@@ -733,7 +742,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
         case 5:
             /* Type 5: ChildWindow with persistence enabled */
-            newObj = operator_new(0x168);
+            newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
                 result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
@@ -745,12 +754,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
         case 6:
             if (resId == 0x1802 || (resId >= 0x1866 && (resId & 1) == 1)) {
-                newObj = operator_new(0x7AC);
+                newObj = operator_new(sizeof(CursorEditWindow));
                 if (newObj != nullptr) {
                     result = CursorEditWindow_Ctor(newObj, resId, strPtr);
                 }
             } else {
-                newObj = operator_new(0x168);
+                newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
                     result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
@@ -760,12 +769,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 7:
         case 8:
             if ((resId & 1) == 0) {
-                newObj = operator_new(0x178);
+                newObj = operator_new(sizeof(TrainStation));
                 if (newObj != nullptr) {
                     result = TrainStation_Ctor(newObj, resId, strPtr);
                 }
             } else {
-                newObj = operator_new(0x168);
+                newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
                     result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
@@ -775,7 +784,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 9:
         case 10:
         case 11:
-            newObj = operator_new(0x168);
+            newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
                 result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
@@ -783,14 +792,14 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
         case 12:
         case 13:
-            newObj = operator_new(0x630);
+            newObj = operator_new(sizeof(BuildingDescriptorEditor));
             if (newObj != nullptr) {
                 result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
             }
             break;
 
         case 14:
-            newObj = operator_new(0x168);
+            newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
                 result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }
@@ -802,7 +811,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
 
         default:
             /* Fallthrough for types not explicitly handled */
-            newObj = operator_new(0x168);
+            newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
                 result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
             }

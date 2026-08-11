@@ -48,6 +48,7 @@ size_t ScriptEngine_HostSize();
 void*  ScriptEngine_HostConstruct(void* mem);
 void* GameConfig_constructor(void* mem);         /* 0x440C60 */
 void* NETMAN_constructor(void* mem);             /* 0x43D0A0 */
+size_t Netman_Size();  /* network/Netman.cpp — real sizeof(Netman) */
 PlayerConfig* PlayerRecord_constructor(PlayerConfig* config); /* 0x452E10 */
 
 /* Subsystem init/update (C++ linkage) */
@@ -188,15 +189,23 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     mem = operator_new(ScriptEngine_HostSize());
     g_train_resources = mem ? ScriptEngine_HostConstruct(mem) : nullptr;
 
-    /* Allocate GameConfig (0xB0 bytes) */
+    /* Allocate GameConfig (0xB0 bytes). GameConfig_constructor placement-
+     * constructs a DPlayConfig (network/DPlayConfig.h) here, which stores
+     * its whole original x86 byte layout in a raw `uint8_t storage_[0xB0]`
+     * array rather than typed pointer members — sizeof(DPlayConfig) == 0xB0
+     * on every host, so this literal is safe as-is, not an
+     * undersized-allocation landmine like ScriptEngine/PixelDataCache
+     * above. */
     trace_setup_stage("step 3b: GameConfig");
     mem = operator_new(0xB0);
     g_game_config = mem ? GameConfig_constructor(mem) : nullptr;
 
-    /* Allocate NETMAN (0x804 bytes) */
+    /* Allocate NETMAN. 0x804 was the original x86 sizeof(Netman); use the
+     * real host size (0x898 — see network/NetmanTypes.h) instead of the
+     * stale x86 literal. */
     trace_setup_stage("step 3c: Netman");
 #ifdef _WIN32
-    mem = operator_new(0x804);
+    mem = operator_new(Netman_Size());
     g_netman = mem ? NETMAN_constructor(mem) : nullptr;
 #else
     g_netman = lego_loco::network::CreateHostNetman();
@@ -210,9 +219,11 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     mem = operator_new(sizeof(NetworkPlayerList));
     g_dplay = mem ? ::new (mem) NetworkPlayerList() : nullptr;
 
-    /* Allocate PlayerRecord (0x124 bytes) */
+    /* Allocate PlayerRecord. 0x124 was the original x86 sizeof(PlayerConfig);
+     * use the real host size (0x128 — see game/PlayerConfig.h) instead of
+     * the stale x86 literal. */
     trace_setup_stage("step 3e: PlayerRecord");
-    mem = operator_new(0x124);
+    mem = operator_new(sizeof(PlayerConfig));
     g_player_config = mem ? PlayerRecord_constructor(static_cast<PlayerConfig*>(mem))
                           : nullptr;
 

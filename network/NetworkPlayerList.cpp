@@ -453,6 +453,11 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
     filepath[0x501] = 0;
     filepath[0x502] = 0;
 
+    /* Every operator_new(sizeof(UIPANEL_Surface)) below was originally a
+     * hardcoded 0x20 (the x86 struct's real size) — use sizeof directly
+     * since the pointer fields (palette_ptr/pixels/ddraw_surf) widen it to
+     * 0x30 on this 64-bit host; see graphics/LOCOBITMAP.h. */
+
     /* Search cache for matching entry */
     for (i = 0; i < 256; i++) {
         if (this->surface_cache[i] != NULL &&
@@ -463,7 +468,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
             /* Cache hit — update LRU timestamp and return copy */
             this->lru_timestamps[i] = this->frame_counter;
 
-            void* new_surf = operator_new(0x20);
+            void* new_surf = operator_new(sizeof(UIPANEL_Surface));
             if (new_surf != NULL) {
                 return UIPANEL_CopySurface(new_surf, this->surface_cache[i]);
             }
@@ -501,7 +506,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
     /* Create surface from file. UIPANEL_CreateSurface (the real 0x42A110
      * method, graphics/LOCOBITMAP.h/.cpp) initializes *surface in place and
      * returns void — it does not hand back a new pointer to reassign. */
-    surface = static_cast<UIPANEL_Surface*>(operator_new(0x20));
+    surface = static_cast<UIPANEL_Surface*>(operator_new(sizeof(UIPANEL_Surface)));
     if (surface != NULL) {
         UIPANEL_CreateSurface(surface);
     }
@@ -530,7 +535,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
             this->tags[i].tag_low = tag_low;
             this->lru_timestamps[i] = this->frame_counter;
 
-            void* copy = operator_new(0x20);
+            void* copy = operator_new(sizeof(UIPANEL_Surface));
             if (copy != NULL) {
                 this->surface_cache[i] = static_cast<UIPANEL_Surface*>(UIPANEL_CopySurface(copy, surface));
             } else {
@@ -553,7 +558,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
         this->tags[lru].tag_low = tag_low;
         this->lru_timestamps[lru] = this->frame_counter;
 
-        void* copy = operator_new(0x20);
+        void* copy = operator_new(sizeof(UIPANEL_Surface));
         if (copy != NULL) {
             this->surface_cache[lru] = static_cast<UIPANEL_Surface*>(UIPANEL_CopySurface(copy, surface));
         } else {

@@ -873,7 +873,9 @@ void TrainSubsystem::ProcessMessages()
                     }
                 }
 
-                /* Send player info response (0x3E9, 24 bytes) */
+                /* Send player info response (0x3E9, 24 bytes). Fixed-size
+                 * raw network wire-format packet (explicit field offsets
+                 * below), not a C++ object — safe as-is on any host. */
                 {
                     uint16_t* resp = reinterpret_cast<uint16_t*>(operator_new(0x18));
                     if (resp) {
@@ -952,7 +954,9 @@ void TrainSubsystem::ProcessMessages()
                     qmsg->data = NULL; qmsg->next = NULL;
                     qmsg->type = 4;
                     /* 0x439948 allocates the protocol's fixed 13-byte name
-                     * buffer and copies the C string at payload +0x08. */
+                     * buffer and copies the C string at payload +0x08.
+                     * Raw char buffer, not a C++ object — safe as-is on any
+                     * host. */
                     char* str = reinterpret_cast<char*>(operator_new(0x0D));
                     if (str) strcpy(str, reinterpret_cast<char*>(payload) + 8);
                     qmsg->data = str;
@@ -980,6 +984,11 @@ void TrainSubsystem::ProcessMessages()
                 qmsg->data = DPLAY_DecodePlayerSlots(
                     static_cast<uint8_t*>(payload) + 0x0C);
 #else
+                /* Fixed-size raw player-slot buffer (0x2AC / 0x4C = 9
+                 * fixed-size slots, copied byte-offset below), not a C++
+                 * object — safe as-is. This branch is also Windows-only
+                 * (the host path above uses DPLAY_DecodePlayerSlots
+                 * instead). */
                 void* data = operator_new(0x2AC);
                 qmsg->data = data;
                 if (data != nullptr) {
@@ -1165,7 +1174,9 @@ void TrainSubsystem::UploadPendingAttachments()
         node->throttle = 0x14; /* 20-tick throttle */
 
         if (node->transfer_state == 0) {
-            /* FIRST block */
+            /* FIRST block. Fixed-size raw network transfer buffer (0x10-byte
+             * header + 0x7FDC payload bytes read via ReadFile below), not a
+             * C++ object — safe as-is on any host. */
             uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x7FEC));
             uint32_t bytes_read = 0;
 
@@ -1191,7 +1202,8 @@ void TrainSubsystem::UploadPendingAttachments()
         }
 
         if (node->transfer_state == 1) {
-            /* INTERIM block */
+            /* INTERIM block. Same fixed-size raw network transfer buffer as
+             * the FIRST block above — safe as-is. */
             uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x7FEC));
             uint32_t bytes_read = 0;
 
@@ -1227,7 +1239,9 @@ void TrainSubsystem::UploadPendingAttachments()
             continue;
         }
 
-        /* FINAL block */
+        /* FINAL block. Fixed-size raw network transfer buffer (header +
+         * 0x400 bytes read via ReadFile below), not a C++ object — safe
+         * as-is on any host. */
         {
             uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x410));
             char att_path[0x144] = {0};
@@ -1823,8 +1837,9 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 {
     uint16_t* p = reinterpret_cast<uint16_t*>(data);
 
-    /* Create a new Vehicle controller */
-    void* vehicle_obj = operator_new(0x94);
+    /* Create a new Vehicle controller. 0x94 was the original x86
+     * sizeof(Vehicle); use the real host size (see game/Vehicle.h). */
+    void* vehicle_obj = operator_new(sizeof(Vehicle));
     void* controller = NULL;
     if (vehicle_obj) {
         controller = Vehicle_Ctor(vehicle_obj, *reinterpret_cast<int*>((p + 8)), 2, 1, 1);
@@ -2410,7 +2425,9 @@ void TrainSubsystem::UpdateTrainMovement()
 
             /* === Build and send type-0x3F6 position update message === */
             {
-                /* Allocate message buffer */
+                /* Allocate message buffer. Fixed-size raw network message
+                 * buffer (explicit byte offsets below), not a C++ object —
+                 * safe as-is on any host. */
                 uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x2000));
                 if (buf) {
                     buf[0] = 0x3F6;
@@ -2617,7 +2634,9 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direct
         return 1;
     }
 
-    /* === Remote player: serialize into 0xB1C-byte MSG_CONN_SETUP === */
+    /* === Remote player: serialize into 0xB1C-byte MSG_CONN_SETUP ===
+     * Fixed-size raw network message buffer (memset + explicit byte
+     * offsets below), not a C++ object — safe as-is on any host. */
     uint8_t* buf = reinterpret_cast<uint8_t*>(operator_new(0xB1C));
     if (buf == NULL) return 0;
 
@@ -2907,7 +2926,13 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
         NETMAN_QueueMessage(err_msg);
     }
 
-    /* Create and register a DPLAY player for this session */
+    /* Create and register a DPLAY player for this session. 0x39C is real
+     * x86 evidence for the player record's full original size (see
+     * input/Cursor_impls.cpp's init_network_player for the same value and
+     * the fuller rationale: only a partial view of this record — 0x94 of
+     * 0x39C bytes — is reconstructed as a C++ type so far, and
+     * DPLAY_CreatePlayer is currently a no-op stub, so this is not a live
+     * overflow today). */
     {
         void* player = DPLAY_CreatePlayer(operator_new(0x39C));
         if (player) {

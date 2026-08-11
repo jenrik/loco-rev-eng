@@ -38,6 +38,7 @@ int   WIN32_StreamOpenPath(void* stream, const char* path,
 void* WNDPROC_StreamFromMemory(void* obj, char* data,
                                int size, int mode);            /* 0x464490 */
 void  WNDPROC_StreamCleanup(void* stream);                    /* 0x464620 */
+size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 void* AssetMgr_LoadFile(void* mgr, const char* name,
                         int* out_size);                        /* 0x45CD00 */
 
@@ -350,7 +351,9 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
             g_asset_mgr, asset_path, &loaded_size));        /* 0x45CD00 */
 
         if (file_data != NULL) {
-            stream_obj = operator_new(0x5C);                 /* 0x465CE0 */
+            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
+             * host size (see resources/Win32Stream.h). */
+            stream_obj = operator_new(WIN32_Stream_Size());
             if (stream_obj != NULL) {
                 parsed_stream = WNDPROC_StreamFromMemory(
                     stream_obj, file_data, loaded_size, 1);   /* 0x464490 */

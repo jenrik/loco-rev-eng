@@ -82,6 +82,7 @@ extern void*  __thiscall UIPANEL_CreateSurface(void* panel);                    
 extern uint8_t __thiscall UIPANEL_StretchBlit(void* surface, LPCSTR filePath,
                                                uint32_t param2, int32_t param3,
                                                int32_t param4);                  /* 0x42AB10 */
+extern size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 #endif
 
 extern void* g_resmgr;      /* 0x4855E8 — ResourceManager singleton */
@@ -168,6 +169,16 @@ uint8_t childwindow_stream_flags(void* stream)
 }
 
 } // namespace
+
+/* Returns sizeof(ChildWindow) on this host (0x180 bytes here vs. the
+ * original x86's 0x168 — pointer-bearing fields widen from 4 to 8 bytes).
+ * Exists so callers that only need to size an allocation for
+ * UI_CreateChildWindow/InitFields can get the real size without
+ * `#include`-ing this header. */
+size_t ChildWindow_Size()
+{
+    return sizeof(ChildWindow);
+}
 
 /* ================================================================== */
 /* ChildWindow::ChildWindow (Constructor)                             */
@@ -287,7 +298,9 @@ void* ChildWindow::OnMouseMove(int32_t x, int32_t y)
     }
 
     if (renderSurface == nullptr) {
-        void* const raw = operator_new(0x20);
+        /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the real
+         * host size (see graphics/LOCOBITMAP.h). */
+        void* const raw = operator_new(UIPANEL_Surface_Size());
         void* const surface = (raw != nullptr) ? UIPANEL_CreateSurface(raw) : nullptr;
         renderSurface = surface;
         if (surface == nullptr) {
@@ -617,7 +630,9 @@ uint8_t ChildWindow::Render(void* stream)
         }
 
 #ifdef _WIN32
-        void* const raw = operator_new(0x20);
+        /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the real
+         * host size (see graphics/LOCOBITMAP.h). */
+        void* const raw = operator_new(UIPANEL_Surface_Size());
         bitmapSurface = (raw != nullptr) ? UIPANEL_CreateSurface(raw) : nullptr;
         if (bitmapSurface != nullptr) {
             UIPANEL_StretchBlit(bitmapSurface, composedPath, 0, 0, 0);
