@@ -82,18 +82,47 @@ int main() {
     // scenery\bigfount.dat (0x1020) has real physical_occupancy/animation
     // metadata, verified against real resource.RFD bytes elsewhere in this
     // suite -- a real host SpriteResource, not a synthetic fixture.
-    Entity entity(0x1020, -1, 0, 0);
+    //
+    // Constructed and destroyed in a nested scope, deterministically before
+    // host_resource_manager().reset() below, so ~Entity's host branch (the
+    // release_surface skip) runs on a still-live resource -- not just
+    // incidentally at process exit -- and a crash there fails this test
+    // rather than silently passing.
+    {
+        Entity entity(0x1020, -1, 0, 0);
 
-    if (!loco::assets::is_host_sprite_resource(entity.resource)) {
-        return fail("Entity(0x1020, ...) did not load a host SpriteResource -- "
-                     "test no longer proves what it claims to") ? 0 : 1;
+        if (!loco::assets::is_host_sprite_resource(entity.resource)) {
+            return fail("Entity(0x1020, ...) did not load a host SpriteResource -- "
+                         "test no longer proves what it claims to") ? 0 : 1;
+        }
+        if (entity.initialized != 1) {
+            return fail("Entity::InitBase's host branch left the entity uninitialized") ? 0 : 1;
+        }
+        if (entity.anim_index < 0) {
+            return fail("Entity::InitBase's host branch left anim_index unresolved (-1)") ? 0 : 1;
+        }
+
+        // Entity::Update (vtable[10]) runs every game tick for any
+        // initialized entity -- InputMgr's per-tick loop calls it on the
+        // whole live-entity collection (input/InputMgr.cpp). Its host guard
+        // (core/GameObject.cpp) is a separate fix from InitBase's: reading
+        // resource+0x20's FrameData array on a host SpriteResource has no
+        // verified field mapping yet, so it rejects loudly and holds the
+        // current frame instead of reading past the allocation. Call it
+        // twice: the first call must not crash, and frame_index must stay
+        // exactly what SetAnimState set it to -- proving the early-return
+        // guard fired rather than a raw offset read that happened to look
+        // harmless once.
+        const int frame_before = entity.frame_index;
+        entity.Update();
+        entity.Update();
+        if (entity.frame_index != frame_before) {
+            return fail("Entity::Update advanced frame_index on a host "
+                         "SpriteResource -- its host guard did not fire") ? 0 : 1;
+        }
     }
-    if (entity.initialized != 1) {
-        return fail("Entity::InitBase's host branch left the entity uninitialized") ? 0 : 1;
-    }
-    if (entity.anim_index < 0) {
-        return fail("Entity::InitBase's host branch left anim_index unresolved (-1)") ? 0 : 1;
-    }
+    std::puts("PASS: ~Entity's host branch released a live host SpriteResource "
+              "without calling the original's null release_surface slot");
 
     loco::assets::host_resource_manager().reset();
     SDL_Quit();

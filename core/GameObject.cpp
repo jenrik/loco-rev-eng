@@ -20,6 +20,8 @@
 
 #ifndef _WIN32
 #include "../resources/resource_manager_sdl3.h"
+#include <cstdio>
+#include <unordered_set>
 #endif
 
 namespace {
@@ -772,6 +774,39 @@ void Entity::Update()
     }
 
     void* resource = this->resource;
+
+#ifndef _WIN32
+    /* Host deviation: FrameData's step_delay/wait_time/sound_fx_index/
+     * audio_delay/volume fields (+0x04/+0x08/+0x0C/+0x10/+0x14, shared/
+     * types.h) have no verified mapping onto the .dat animation row's
+     * remaining numeric tokens yet -- AnimationFrameSet (resources/
+     * resource_manager_sdl3.h) only nails down start_frame/end_frame/
+     * sound_resource_id, which is all Entity::SetAnimState needs. Reading
+     * resource+0x20 here on a host SpriteResource would be the exact same
+     * undersized-object OOB read fixed in InitBase/SetAnimState/SetFrame
+     * (see PROGRESS.md's "raw fixed-offset reads against undersized host
+     * resource objects" item and the "FrameData field-name mismatch"
+     * follow-up), except this call site runs at game-tick rate instead of
+     * once at construction -- every placed, animated host entity would
+     * hit it continuously. Reject loudly, once per resource rather than
+     * every tick given the call frequency, and hold the current frame
+     * (already valid from SetAnimState's host branch) instead of guessing
+     * at the missing field mapping or crashing. */
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static std::unordered_set<const void*> warned;
+        if (warned.insert(resource).second) {
+            std::fprintf(stderr,
+                "[HOST] Entity::Update: skipping animation advance -- "
+                "resource %p is a host SpriteResource and FrameData's "
+                "timing fields have no verified .dat mapping yet (see "
+                "PROGRESS.md)\n",
+                resource);
+            std::fflush(stderr);
+        }
+        return;
+    }
+#endif
+
     FrameData* fd = *field_at<FrameData*>(resource, 0x20)
                     + this->anim_index;
 
