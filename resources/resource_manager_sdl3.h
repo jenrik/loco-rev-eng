@@ -51,6 +51,23 @@ struct AnimationFrameSet {
     int flip_x = 0;
 };
 
+// Tile-placement footprint, parsed from the .dat "physical_occupancy" /
+// "bitmap_occupancy" sections (BuildingDescriptorEditor's border_width/
+// border_height/border_depth and bitmap_occupancy_width/height at the
+// original x86 +0x168../+0x16C offsets — see input/BuildingDescriptorEditor.h
+// and world/tilemap.h's TileMapResource::grid_width/grid_height/grid_depth/
+// grid_span_y/original_span, the same layout convention). has_footprint is
+// false for the majority of resources (sprites, buttons, cursors) that carry
+// no occupancy sections at all.
+struct SpriteFootprint {
+    bool has_footprint = false;
+    int grid_width = 0;         // physical_occupancy width
+    int grid_height = 0;        // physical_occupancy height
+    int grid_depth = 0;         // physical_occupancy depth
+    int bitmap_grid_width = 0;  // bitmap_occupancy width
+    int bitmap_grid_height = 0; // bitmap_occupancy height
+};
+
 struct SpriteMetadata {
     bool is_button = false;
     int offset_x = 0;
@@ -61,6 +78,7 @@ struct SpriteMetadata {
     int cursor_frame_set = 0;
     int cursor_frame = 0;
     std::vector<AnimationFrameSet> frame_sets;
+    SpriteFootprint footprint;
 };
 
 class SpriteResource;

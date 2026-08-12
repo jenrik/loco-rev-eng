@@ -81,6 +81,18 @@ int main() {
         return fail("resource 0x414 did not load its archived animated cursor") ? 0 : 1;
     }
 
+    // roads\half-vwint.dat carries a real "physical_occupancy"/"bitmap_occupancy"
+    // tile-placement footprint (verified by extracting resource.RFD directly):
+    //   physical_occupancy\n\n2 1 1 \n\n1 1 ...\nbitmap_occupancy\n\n2 1 \n\n1 1 ...
+    void* road = ResourceManager_GetById(static_cast<void*>(nullptr), 0x341d);
+    const loco::assets::SpriteMetadata* road_metadata = ResourceManager_GetSpriteMetadata(road);
+    if (!road_metadata || !road_metadata->footprint.has_footprint ||
+        road_metadata->footprint.grid_width != 2 || road_metadata->footprint.grid_height != 1 ||
+        road_metadata->footprint.grid_depth != 1 || road_metadata->footprint.bitmap_grid_width != 2 ||
+        road_metadata->footprint.bitmap_grid_height != 1) {
+        return fail("resource 0x341d's physical_occupancy/bitmap_occupancy footprint was not parsed") ? 0 : 1;
+    }
+
     manager.reset();
     SDL_Quit();
     std::puts("PASS: ResourceManager loads real BMP, DAT/color key, WAVE, BUT, and ANI archive assets");

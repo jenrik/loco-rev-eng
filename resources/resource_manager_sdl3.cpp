@@ -105,11 +105,44 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
     *metadata = SpriteMetadata{};
     const std::string text(bytes.begin(), bytes.end());
     bool in_animation = false;
+    // The "physical_occupancy"/"bitmap_occupancy" section headers are each
+    // immediately followed (skipping blank lines) by one dims line ("W H D"
+    // / "W H"); the occupancy grid rows that follow are plain integer lines
+    // that match no other keyword, so they fall through the loop untouched.
+    bool expect_physical_dims = false;
+    bool expect_bitmap_dims = false;
     std::istringstream lines(text);
     std::string line;
     while (std::getline(lines, line)) {
         const std::vector<std::string> tokens = split_tokens(line);
         if (tokens.empty() || tokens[0].rfind("//", 0) == 0) continue;
+        if (expect_physical_dims) {
+            expect_physical_dims = false;
+            if (tokens.size() == 3 &&
+                parse_int(tokens[0], &metadata->footprint.grid_width) &&
+                parse_int(tokens[1], &metadata->footprint.grid_height) &&
+                parse_int(tokens[2], &metadata->footprint.grid_depth)) {
+                metadata->footprint.has_footprint = true;
+            }
+            continue;
+        }
+        if (expect_bitmap_dims) {
+            expect_bitmap_dims = false;
+            if (tokens.size() == 2 &&
+                parse_int(tokens[0], &metadata->footprint.bitmap_grid_width) &&
+                parse_int(tokens[1], &metadata->footprint.bitmap_grid_height)) {
+                metadata->footprint.has_footprint = true;
+            }
+            continue;
+        }
+        if (tokens[0] == "physical_occupancy") {
+            expect_physical_dims = true;
+            continue;
+        }
+        if (tokens[0] == "bitmap_occupancy") {
+            expect_bitmap_dims = true;
+            continue;
+        }
         if (tokens[0] == "button") {
             metadata->is_button = true;
             if (tokens.size() >= 5 && tokens[1] == "offset") {
@@ -289,7 +322,15 @@ SpriteResource* ResourceManagerSdl3::get_sprite_by_id(uint32_t resource_id) {
     resource->has_metadata = false;
     std::vector<uint8_t> dat;
     if (impl_->archive.read(*stem + ".dat", &dat, nullptr)) {
-        resource->has_metadata = parse_sprite_metadata(dat, &resource->metadata);
+        // parse_sprite_metadata's return value only reports whether the
+        // animation frame-set *count* matched the rows actually parsed (a
+        // narrower, separately-tracked gap in the animation-row grammar —
+        // see PROGRESS.md's ResourceManager-consumers item); every field it
+        // populates along the way (footprint, offsets, is_button, ...) is
+        // real regardless, so metadata is exposed either way rather than
+        // hidden behind an unrelated animation-parsing shortfall.
+        parse_sprite_metadata(dat, &resource->metadata);
+        resource->has_metadata = true;
     }
     SpriteResource* result = resource.get();
     impl_->resources.emplace(resource_id, std::move(resource));
