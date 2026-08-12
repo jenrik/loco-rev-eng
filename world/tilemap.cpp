@@ -26,6 +26,10 @@
 #include <cmath>
 #include <cstdio>
 #include <new>
+#ifndef _WIN32
+#include <unordered_map>
+#include <vector>
+#endif
 
 /* ================================================================== */
 /* External references — declared in tilemap.h; re-declared here for   */
@@ -392,13 +396,67 @@ TileMap::~TileMap()
     }
 }
 
+#ifndef _WIN32
+namespace {
+/* Host-only tile-slot pointer registry. tile_data reproduces the
+ * original x86 32-bit slot width (this file's own top-of-file doc:
+ * "Values: 0 = empty, non-zero = pointer to object occupying the
+ * tile"). A real 64-bit placed-object pointer does not fit in that
+ * width -- measured directly (not assumed): operator_new addresses on
+ * this host do not survive a uint32_t truncate/widen round-trip, so
+ * this fires on every placement, not as a rare ASLR edge case. Per
+ * CLAUDE.md's host-deviation policy, widening every tile slot to 8
+ * bytes is explicitly out of scope (it would ripple through every
+ * TILE_OFFSET-style address computation in this file, and tile_data's
+ * neighbors tile_count_x/tile_count_y at +0x3E/+0x40 alias other
+ * globals) -- so this keeps the 4-byte slot width and stores a small
+ * monotonic handle instead, translated through this side table. */
+std::vector<void*>& TileSlotPointerRegistry() {
+    static std::vector<void*> registry;
+    return registry;
+}
+std::unordered_map<void*, int32_t>& TileSlotHandleByPointer() {
+    static std::unordered_map<void*, int32_t> handles;
+    return handles;
+}
+}  // namespace
+#endif
+
+/* ================================================================== */
+/* TileMap::StoreTilePointer                                           */
+/* ================================================================== */
+int32_t TileMap::StoreTilePointer(void* ptr)
+{
+#ifndef _WIN32
+    if (ptr == nullptr) return 0;
+    auto& by_pointer = TileSlotHandleByPointer();
+    auto it = by_pointer.find(ptr);
+    if (it != by_pointer.end()) return it->second;
+    auto& registry = TileSlotPointerRegistry();
+    registry.push_back(ptr);
+    int32_t handle = static_cast<int32_t>(registry.size());
+    by_pointer.emplace(ptr, handle);
+    return handle;
+#else
+    return static_cast<int32_t>(reinterpret_cast<intptr_t>(ptr));
+#endif
+}
+
 /* ================================================================== */
 /* TileMap::ReadTilePointer                                            */
 /* ================================================================== */
 void* TileMap::ReadTilePointer(size_t data_index) const
 {
+    int32_t slot_value = ReadTileValue(data_index);
+#ifndef _WIN32
+    if (slot_value == 0) return nullptr;
+    auto& registry = TileSlotPointerRegistry();
+    size_t index = static_cast<size_t>(static_cast<uint32_t>(slot_value)) - 1;
+    return (index < registry.size()) ? registry[index] : nullptr;
+#else
     return reinterpret_cast<void*>(static_cast<uintptr_t>(
-        static_cast<uint32_t>(ReadTileValue(data_index))));
+        static_cast<uint32_t>(slot_value)));
+#endif
 }
 
 /* ================================================================== */
@@ -650,12 +708,11 @@ void* TileMap::GetObjectAtEx(short tile_x, short tile_y, short* layer_out)
         tile_data[(tile_index + 2) * 0x40 - 0x48]);
     if (active >= 0) {
         for (int8_t layer = active; layer >= 0; layer--) {
-            int32_t val = ReadTileValue(
+            void* ptr = ReadTilePointer(
                 (static_cast<int>(layer) + tile_index * 0x10) * 4 + 100 - 0x48);
-            if (val != 0) {
+            if (ptr != nullptr) {
                 *layer_out = layer;
-                result = reinterpret_cast<void*>(static_cast<uintptr_t>(
-                    static_cast<uint32_t>(val)));
+                result = ptr;
                 break;
             }
         }
@@ -704,11 +761,14 @@ int* TileMap::GetTileOrigin(int* out_id, short tile_x, short tile_y, short layer
 
     size_t data_index = (static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y)) * 0x40 +
                         static_cast<int>(layer) * 4 + 0x1C;
-    int obj_val = ReadTileValue(data_index);
+    TileMapObject* obj = static_cast<TileMapObject*>(ReadTilePointer(data_index));
 
-    if (obj_val != 0) {
-        *out_id = *reinterpret_cast<int*>(reinterpret_cast<uint8_t*>(
-            static_cast<uintptr_t>(obj_val)) + 0x88);
+    if (obj != nullptr) {
+        /* Binary reads one 32-bit dword at +0x88, packing tile_x (+0x88,
+         * low word) and tile_y (+0x8A, high word) together -- hence
+         * "*out_id" here is a packed pair, not just tile_x alone. */
+        *out_id = (static_cast<int32_t>(static_cast<uint16_t>(obj->tile_y)) << 16) |
+                  static_cast<int32_t>(static_cast<uint16_t>(obj->tile_x));
         return out_id;
     }
     *out_id = -1;
@@ -732,11 +792,12 @@ void TileMap::GetTileOriginEx(int* out_packed, short tile_x, short tile_y, short
 
     size_t data_index = (static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y)) * 0x40 +
                         static_cast<int>(layer) * 4;
-    int obj_val = ReadTileValue(data_index);
+    TileMapObject* obj = static_cast<TileMapObject*>(ReadTilePointer(data_index));
 
-    if (obj_val != 0) {
-        *out_packed = *reinterpret_cast<int*>(
-            reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(obj_val)) + 0x88);
+    if (obj != nullptr) {
+        /* Same packed tile_x/tile_y dword as GetTileOrigin above. */
+        *out_packed = (static_cast<int32_t>(static_cast<uint16_t>(obj->tile_y)) << 16) |
+                      static_cast<int32_t>(static_cast<uint16_t>(obj->tile_x));
         return;
     }
     *out_packed = -1;
@@ -1267,10 +1328,10 @@ void TileMap::ClearInputProcessedFlag()
 /* of the target building to verify that no blocking objects are in    */
 /* the way.                                                            */
 /* ================================================================== */
-char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
+char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
     short delta_x, unsigned short delta_y, int placement_mode)
 {
-    TileMapObject* building = target_building;
+    TileMapResource* building = target_building;
 
 #ifndef _WIN32
     /* Host deviation: both call sites (TileMap::FindObject) pass the raw
@@ -1337,14 +1398,24 @@ char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
                             static_cast<int>(iy) * 7 +
                             static_cast<int>(iz)];
                         if (occ != 0) {
-                            int tile_x = static_cast<int>(iy) + static_cast<int>(delta_x);
-                            int tile_y = static_cast<int>(ix) + static_cast<int>(delta_y);
-                            int obj = ReadTileValue(
-                                TILE_OFFSET(tile_x, tile_y, iz) - 0x48);
-                            if (obj != 0) {
+                            /* Disassembly of 0x4553E0: the tile address is
+                             * `(int)sVar8 + (sVar10 + iVar9) * 0x41 + iVar5`
+                             * where sVar10 is the x/width-bounded loop var
+                             * (bound bVar4/grid_width -> ix here), sVar8 is
+                             * the y/height-bounded one (bound bVar7/
+                             * grid_height -> iy here), iVar9 = delta_x,
+                             * iVar5 = delta_y. Matching TILE_OFFSET's
+                             * (x*65+y) shape means x = sVar10+delta_x =
+                             * ix+delta_x and y = sVar8+delta_y = iy+delta_y.
+                             * An earlier transcription had tile_x sourced
+                             * from iy and tile_y from ix -- swapped. */
+                            int tile_x = static_cast<int>(ix) + static_cast<int>(delta_x);
+                            int tile_y = static_cast<int>(iy) + static_cast<int>(delta_y);
+                            TileMapObject* obj = static_cast<TileMapObject*>(
+                                ReadTilePointer(TILE_OFFSET(tile_x, tile_y, iz) - 0x48));
+                            if (obj != nullptr) {
                                 if (g_allow_building_placement == 1 &&
-                                    static_cast<TileMapObject*>(
-                                        reinterpret_cast<void*>(obj))->is_moving == 1 &&
+                                    obj->is_moving == 1 &&
                                     (g_disable_input == 0 ||
                                      g_game_mode == 3 ||
                                      g_game_mode == 1)) {
@@ -1433,16 +1504,21 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
                 int8_t active = *active_layer_byte;
 
                 for (int8_t layer = 6; layer >= 0; layer--) {
-                    /* Slot at this + tile_idx*0x40 + 0x64 + layer*4 */
-                    int* slot = reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(this) + tile_idx * 0x40 +
-                        0x64 + static_cast<int>(layer) * 4);
-                    if (reinterpret_cast<void*>(static_cast<uintptr_t>(*slot)) == target) {
+                    /* Origin-region slot at tile_idx*0x40 + 0x64 + layer*4
+                     * (this file's own top-of-file doc: 0 = empty,
+                     * non-zero = pointer to the occupying object). Read/
+                     * write through the typed accessors, not a raw int*
+                     * cast -- ReadTilePointer/WriteTileValue are the only
+                     * host-safe way to touch a tile slot (see
+                     * TileMap::StoreTilePointer's doc comment). */
+                    size_t slot_index = tile_idx * 0x40 + 0x64 +
+                                         static_cast<int>(layer) * 4 - 0x48;
+                    if (ReadTilePointer(slot_index) == target) {
                         /* Decrement active layer count if this was the top */
                         if (active == layer) {
                             *active_layer_byte = active - 1;
                         }
-                        *slot = 0;
+                        WriteTileValue(slot_index, 0);
 
                         /* Set occupancy bit (mark as dirty) */
                         uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
@@ -1456,10 +1532,8 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
                 /* Compress active layer byte: while topmost slot is empty, decrement */
                 active = *active_layer_byte;
                 while (active >= 0) {
-                    int* slot = reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(this) +
-                        (static_cast<int>(active) + tile_idx * 0x10 + 0x19) * 4);
-                    if (*slot == 0) {
+                    size_t slot_index = (static_cast<int>(active) + tile_idx * 0x10 + 0x19) * 4 - 0x48;
+                    if (ReadTileValue(slot_index) == 0) {
                         *active_layer_byte = *active_layer_byte - 1;
                         active = *active_layer_byte;
                     } else {
@@ -1497,28 +1571,26 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
 
                 if (active >= 0) {
                     /* Scan from active layer down to 0 in the standard
-                     * layer region (this + tile_idx*0x40 + 0x48 + layer*4) */
-                    int* slot = reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(this) +
-                        (tile_idx * 0x10 + static_cast<int>(active)) * 4 + 0x48);
+                     * layer region (tile_idx*0x40 + 0x48 + layer*4),
+                     * through the typed accessors -- see the Phase 1
+                     * comment above on why a raw int* cast isn't safe
+                     * here. */
                     for (int8_t layer = active; layer >= 0; layer--) {
-                        if (reinterpret_cast<void*>(static_cast<uintptr_t>(*slot)) == target) {
+                        size_t slot_index = (tile_idx * 0x10 + static_cast<int>(layer)) * 4;
+                        if (ReadTilePointer(slot_index) == target) {
                             if (*active_layer_byte == layer) {
                                 *active_layer_byte = *active_layer_byte - 1;
                             }
-                            *slot = 0;
+                            WriteTileValue(slot_index, 0);
                         }
-                        slot--;
                     }
                 }
 
                 /* Compress active layer byte */
                 active = *active_layer_byte;
                 while (active >= 0) {
-                    int* slot = reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(this) +
-                        (static_cast<int>(active) + tile_idx * 0x10 + 0x12) * 4);
-                    if (*slot == 0) {
+                    size_t slot_index = (static_cast<int>(active) + tile_idx * 0x10 + 0x12) * 4 - 0x48;
+                    if (ReadTileValue(slot_index) == 0) {
                         *active_layer_byte = *active_layer_byte - 1;
                         active = *active_layer_byte;
                     } else {
@@ -2143,16 +2215,12 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
                 row_y < 0 || g_player_color <= row_y) {
                 valid = 0;
             } else {
-                int tile_val = ReadTileValue((cur_x * 0x41 + row_y) * 0x40);
-                if (tile_val == 0) {
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
+                    ReadTilePointer((cur_x * 0x41 + row_y) * 0x40));
+                if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else {
-                    int tile_res = *reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(
-                            static_cast<uintptr_t>(tile_val)) + 0x40);
-                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
-                        valid = 0;
-                    }
+                } else if (expected != tile_obj->resource->resource_id) {
+                    valid = 0;
                 }
             }
         }
@@ -2175,16 +2243,12 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
                 col_y < 0 || g_player_color <= col_y) {
                 valid = 0;
             } else {
-                int tile_val = ReadTileValue((col_y + right_x * 0x41) * 0x40);
-                if (tile_val == 0) {
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
+                    ReadTilePointer((col_y + right_x * 0x41) * 0x40));
+                if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else {
-                    int tile_res = *reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(
-                            static_cast<uintptr_t>(tile_val)) + 0x40);
-                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
-                        valid = 0;
-                    }
+                } else if (expected != tile_obj->resource->resource_id) {
+                    valid = 0;
                 }
             }
         }
@@ -2203,16 +2267,12 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
                 col_y < 0 || g_player_color <= col_y) {
                 valid = 0;
             } else {
-                int tile_val = ReadTileValue((x3 * 0x41 + col_y) * 0x40);
-                if (tile_val == 0) {
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
+                    ReadTilePointer((x3 * 0x41 + col_y) * 0x40));
+                if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else {
-                    int tile_res = *reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(
-                            static_cast<uintptr_t>(tile_val)) + 0x40);
-                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
-                        valid = 0;
-                    }
+                } else if (expected != tile_obj->resource->resource_id) {
+                    valid = 0;
                 }
             }
         }
@@ -2233,16 +2293,12 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
                 col_y < 0 || g_player_color <= col_y) {
                 valid = 0;
             } else {
-                int tile_val = ReadTileValue((col_y + x3 * 0x41) * 0x40);
-                if (tile_val == 0) {
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
+                    ReadTilePointer((col_y + x3 * 0x41) * 0x40));
+                if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else {
-                    int tile_res = *reinterpret_cast<int*>(
-                        reinterpret_cast<uint8_t*>(
-                            static_cast<uintptr_t>(tile_val)) + 0x40);
-                    if (expected != *reinterpret_cast<int*>(tile_res + 4)) {
-                        valid = 0;
-                    }
+                } else if (expected != tile_obj->resource->resource_id) {
+                    valid = 0;
                 }
             }
         }
@@ -2331,10 +2387,10 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
     }
 
     if (g_allow_building_placement == 0 ||
-        ScrollRect(0, reinterpret_cast<TileMapObject*>(res_data), tile_x,
+        ScrollRect(0, resource, tile_x,
                    static_cast<unsigned short>(adjusted_y + static_cast<short>(offset)),
                    static_cast<int>(mode)) != 0) {
-        if (ScrollRect(1, reinterpret_cast<TileMapObject*>(res_data), tile_x,
+        if (ScrollRect(1, resource, tile_x,
                        static_cast<unsigned short>(offset + static_cast<int>(adjusted_y)),
                        static_cast<int>(mode)) != 0) {
             result = reinterpret_cast<int*>(
@@ -2351,8 +2407,16 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                             do {
                                 /* Occupancy grid indexed [x][y][z] */
                                 for (int8_t iz = 0; iz < resource->grid_depth; iz++) {
-                                    if (reinterpret_cast<TileMapObject*>(result)
-                                            ->occupancy_grid[
+                                    /* Disassembly of 0x4550C0 (pvVar6):
+                                     * every +0x16e occupancy-grid read here
+                                     * is against the raw resource, never
+                                     * against the newly-placed `result` --
+                                     * an earlier transcription read this
+                                     * off `result`, which (a) is the wrong
+                                     * object and (b) doesn't even declare
+                                     * this field (see TileMapObject's own
+                                     * comment on why it was removed). */
+                                    if (resource->occupancy_grid[
                                                 static_cast<int>(gx) * 9 * 7 +
                                                 static_cast<int>(gy) * 7 +
                                                 static_cast<int>(iz)] == 1) {
@@ -2363,8 +2427,7 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                         /* standard layer slot at +0x48 */
                                         WriteTileValue(
                                             tile_index * 0x40 + static_cast<int>(iz) * 4,
-                                            static_cast<int32_t>(
-                                                reinterpret_cast<intptr_t>(result)));
+                                            StoreTilePointer(result));
                                         /* active byte = max(active, iz) */
                                         uint8_t& active = tile_data[
                                             (tile_index + 2) * 0x40 - 0x48];
@@ -2388,19 +2451,19 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                     int y = static_cast<int>(adjusted_y);
                     int x = static_cast<int>(tile_x);
                     for (int sy = 0; sy < static_cast<int>(orig_span); sy++, y++) {
-                        uint8_t* span_row = reinterpret_cast<uint8_t*>(res_data) +
-                                            0x4A1 + sy;
                         if (span_y != 0) {
                             int sx = 0;
                             for (; sx < static_cast<int>(span_y); sx++) {
-                                uint8_t span = span_row[sx * 9];
+                                /* span_map row stride 1, column stride 9
+                                 * (BuildingDescriptorEditor__parse_dat_
+                                 * directive_line, 0x41E9F0). */
+                                uint8_t span = resource->span_map[sy + sx * 9];
                                 if (span != 0) {
                                     int tile_index = y + (x + sx) * 0x41;
                                     int span_slot = static_cast<int>(span) - 1;
                                     WriteTileValue(
                                         tile_index * 0x40 + span_slot * 4 + 0x1C,
-                                        static_cast<int32_t>(
-                                            reinterpret_cast<intptr_t>(result)));
+                                        StoreTilePointer(result));
                                     /* active byte = max(active, span-1) */
                                     uint8_t& active = tile_data[
                                         (tile_index + 2) * 0x40 - 0x48];
@@ -2684,7 +2747,7 @@ void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags)
 void* TileMap::FindNearestObject(unsigned short type_filter,
                                  int target_x, int target_y, int search_radius)
 {
-    int best_obj = 0;
+    void* best_obj = nullptr;
     int best_dist_sq = 999999999;
 
     short radius_tiles = (search_radius < 0) ? -1 : static_cast<short>(search_radius >> 4);
@@ -2692,8 +2755,8 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
     short center_y = (target_y < 0) ? -1 : static_cast<short>(target_y >> 4);
 
     for (short ring = 0; ring <= radius_tiles; ring++) {
-        if (best_obj != 0) {
-            return reinterpret_cast<void*>(static_cast<uintptr_t>(best_obj));
+        if (best_obj != nullptr) {
+            return best_obj;
         }
 
         int r = static_cast<int>(ring);
@@ -2707,20 +2770,14 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
 
         /* Sweep 1: top edge (y = top), x from left..right */
         for (int x = x0; x <= right && x < tile_count_x; x++) {
-            int tile_val = 0;
-            if (x < 0 || x > 0x51 || y0 < 0 || y0 > 0x41) {
-                tile_val = 0;
-            } else {
-                tile_val = ReadTileValue((x * 0x41 + y0) * 0x40);
+            TileMapObject* tile_object = nullptr;
+            if (!(x < 0 || x > 0x51 || y0 < 0 || y0 > 0x41)) {
+                tile_object = static_cast<TileMapObject*>(
+                    ReadTilePointer((x * 0x41 + y0) * 0x40));
             }
-            if (tile_val != 0) {
-                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
-                    static_cast<uintptr_t>(tile_val));
-                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
-                uint8_t obj_type = 0;
-                if (resource_ptr != 0) {
-                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
-                }
+            if (tile_object != nullptr) {
+                TileMapResource* resource = tile_object->resource;
+                uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
                     Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
@@ -2728,7 +2785,7 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
                                                    entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
-                        best_obj = tile_val;
+                        best_obj = tile_object;
                     }
                 }
             }
@@ -2739,20 +2796,14 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
         if (rx >= tile_count_x) rx = tile_count_x;
         int y1 = (top + 1 < 1) ? 0 : top + 1;
         for (int y = y1; y <= bottom && y < tile_count_y; y++) {
-            int tile_val = 0;
-            if (rx < 0 || rx > 0x51 || y < 0 || y > 0x41) {
-                tile_val = 0;
-            } else {
-                tile_val = ReadTileValue((y + rx * 0x41) * 0x40);
+            TileMapObject* tile_object = nullptr;
+            if (!(rx < 0 || rx > 0x51 || y < 0 || y > 0x41)) {
+                tile_object = static_cast<TileMapObject*>(
+                    ReadTilePointer((y + rx * 0x41) * 0x40));
             }
-            if (tile_val != 0) {
-                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
-                    static_cast<uintptr_t>(tile_val));
-                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
-                uint8_t obj_type = 0;
-                if (resource_ptr != 0) {
-                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
-                }
+            if (tile_object != nullptr) {
+                TileMapResource* resource = tile_object->resource;
+                uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
                     Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
@@ -2760,7 +2811,7 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
                                                    entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
-                        best_obj = tile_val;
+                        best_obj = tile_object;
                     }
                 }
             }
@@ -2772,18 +2823,14 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
         int by = bottom;
         if (by >= tile_count_y) by = tile_count_y;
         for (; left <= bx && bx >= 0; bx--) {
-            int tile_val = 0;
+            TileMapObject* tile_object = nullptr;
             if (bx < 0x52 && by >= 0 && by < 0x42) {
-                tile_val = ReadTileValue((bx * 0x41 + by) * 0x40);
+                tile_object = static_cast<TileMapObject*>(
+                    ReadTilePointer((bx * 0x41 + by) * 0x40));
             }
-            if (tile_val != 0) {
-                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
-                    static_cast<uintptr_t>(tile_val));
-                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
-                uint8_t obj_type = 0;
-                if (resource_ptr != 0) {
-                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
-                }
+            if (tile_object != nullptr) {
+                TileMapResource* resource = tile_object->resource;
+                uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
                     Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
@@ -2791,7 +2838,7 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
                                                    entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
-                        best_obj = tile_val;
+                        best_obj = tile_object;
                     }
                 }
             }
@@ -2802,18 +2849,14 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
         int ly = bottom - 1;
         if (ly >= tile_count_y) ly = tile_count_y;
         for (; top < ly && ly >= 0; ly--) {
-            int tile_val = 0;
+            TileMapObject* tile_object = nullptr;
             if (lx >= 0 && lx <= 0x51 && ly >= 0 && ly <= 0x41) {
-                tile_val = ReadTileValue((ly + lx * 0x41) * 0x40);
+                tile_object = static_cast<TileMapObject*>(
+                    ReadTilePointer((ly + lx * 0x41) * 0x40));
             }
-            if (tile_val != 0) {
-                uint8_t* tile_object = reinterpret_cast<uint8_t*>(
-                    static_cast<uintptr_t>(tile_val));
-                int resource_ptr = *reinterpret_cast<int*>(tile_object + 0x40);
-                uint8_t obj_type = 0;
-                if (resource_ptr != 0) {
-                    obj_type = *reinterpret_cast<uint8_t*>(resource_ptr + 8);
-                }
+            if (tile_object != nullptr) {
+                TileMapResource* resource = tile_object->resource;
+                uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
                     Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
@@ -2821,12 +2864,12 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
                                                    entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
-                        best_obj = tile_val;
+                        best_obj = tile_object;
                     }
                 }
             }
         }
     }
 
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(best_obj));
+    return best_obj;
 }

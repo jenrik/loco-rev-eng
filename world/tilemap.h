@@ -60,9 +60,39 @@ struct TileMapResource {
     uint8_t grid_width;                  /* +0x168 */
     uint8_t grid_height;                 /* +0x169 */
     int8_t  grid_depth;                  /* +0x16A */
-    uint8_t grid_span_y;                 /* +0x16B */
-    uint8_t original_span;               /* +0x16C */
-    uint8_t _pad_16D[0x3F3];
+    uint8_t grid_span_y;                 /* +0x16B  bitmap_occupancy grid
+                                          *   width (BuildingDescriptorEditor::
+                                          *   bitmap_occupancy_width, same
+                                          *   offset -- confirmed same real
+                                          *   object: RESDATA_ScriptedObject_
+                                          *   AddChild constructs via
+                                          *   BuildingDescriptorEditor__Ctor,
+                                          *   see PROGRESS.md) */
+    uint8_t original_span;               /* +0x16C  bitmap_occupancy grid
+                                          *   height (bitmap_occupancy_height) */
+    uint8_t _pad_16D;                    /* +0x16D  border_scale_byte,
+                                          *   unused by TileMap */
+
+    /* Physical-occupancy 3D grid, dims grid_width x grid_height x
+     * grid_depth, indexed [x][y][z] = x*63+y*7+z (ScrollRect 0x4553E0 /
+     * FindObject 0x4550C0). Real size confirmed via
+     * input/BuildingDescriptorEditor.h's physical_occupancy_grid[0x333]
+     * at the same +0x16E offset -- the two headers model the same real
+     * x86 object (see the AddChild comment above); this file's earlier
+     * occupancy_grid[9*7] was undersized (63 bytes only covers x==0). */
+    int8_t occupancy_grid[0x333];        /* +0x16E */
+
+    /* bitmap_occupancy grid cell values (span map), dims grid_span_y x
+     * original_span, stored row-major with a 9-byte column stride in the
+     * original layout (BuildingDescriptorEditor__parse_dat_directive_line,
+     * 0x41E9F0) -- FindObject (0x4550C0) reads this with the matching
+     * stride to write the origin-region layer for each nonzero cell
+     * (value - 1 = layer index). Same object/offset identity as
+     * occupancy_grid above; real size from BuildingDescriptorEditor.h's
+     * bitmap_occupancy_grid[0x75]. */
+    uint8_t span_map[0x75];              /* +0x4A1 */
+
+    uint8_t _pad_516[0x4A];
     uint32_t expected_count;             /* +0x560  footprint id list length
                                           *   (ProcessObjectTimer) */
     int32_t* expected_ids;               /* +0x564  expected resource-id array
@@ -119,14 +149,17 @@ struct TileMapObject {
                                           *   build chain (read from the
                                           *   neighbour object) */
     uint8_t _pad_10C[0x10];              /* +0x10C..+0x11B */
-    uint8_t _pad_11C[0x4C];              /* +0x11C..+0x167 */
-    uint8_t grid_width;                  /* +0x168 */
-    uint8_t grid_height;                 /* +0x169 */
-    int8_t  grid_depth;                  /* +0x16A */
-    uint8_t _pad_16B[3];
-    int8_t  occupancy_grid[9 * 7];       /* +0x16E 3D placement mask, indexed
-                                          *   [x][y][z] = x*63 + y*7 + z
-                                          *   (FindObject / ScrollRect) */
+
+    /* No fields evidenced past +0x11B: grid_width/height/depth/
+     * occupancy_grid used to be declared here at +0x168, mirroring
+     * TileMapResource's layout, on the theory that a placed object
+     * carries its own runtime copy of its footprint. Disassembly of
+     * ScrollRect (0x4553E0) and FindObject (0x4550C0) disproves this --
+     * every +0x168/+0x169/+0x16a/+0x16e read in both functions is against
+     * the raw TileMapResource the ResourceManager returns (FindObject's
+     * pvVar6/"resource" local), never against a placed TileMapObject.
+     * Removed rather than left as a misleading, unevidenced duplicate --
+     * see world/tilemap.cpp's ScrollRect/FindObject for the real fields. */
 };
 
 /* ================================================================== */
@@ -164,6 +197,22 @@ public:
     void*   ReadTilePointer(size_t data_index) const;
     int32_t ReadTileValue(size_t data_index) const;
     void    WriteTileValue(size_t data_index, int32_t value);
+
+    /**
+     * Converts a placed-object pointer into the value a tile slot should
+     * store. On _WIN32 this is the original x86 pointer-to-int32_t cast
+     * (lossless there). On host it is a small monotonic handle from a
+     * side-table registry, NOT the pointer's low 32 bits -- confirmed by
+     * a round-trip measurement that this host's heap addresses do not
+     * survive a uint32_t truncate/widen cycle (unlike a 32-bit ABI, this
+     * is not a rare ASLR edge case; it fires on ordinary operator_new
+     * addresses every time). Every write site that used to compute
+     * `static_cast<int32_t>(reinterpret_cast<intptr_t>(ptr))` before
+     * calling WriteTileValue must call this first instead; ReadTilePointer
+     * is the matching read-side translation. Returns 0 for a null ptr,
+     * matching the tile grid's own "0 = empty" convention.
+     */
+    int32_t StoreTilePointer(void* ptr);
 
     /* ---- Lifecycle ---- */
 
@@ -224,8 +273,15 @@ public:
     /** Scroll to target object position — Address: 0x455AB0 */
     void* ScrollTo(TileMapObject* target, int scroll_flag);
 
-    /** Validate placement rect scroll — Address: 0x4553E0 */
-    char ScrollRect(char use_sound, TileMapObject* target_building,
+    /**
+     * Validate placement rect scroll — Address: 0x4553E0.
+     * target_building is the raw resource (what ResourceManager_GetById
+     * returns), not a placed TileMapObject -- confirmed via disassembly:
+     * every +0x168/+0x169/+0x16a/+0x16e read in this function and in
+     * FindObject's fill loop is against that raw resource. The parameter
+     * was previously mistyped TileMapObject*.
+     */
+    char ScrollRect(char use_sound, TileMapResource* target_building,
                     short delta_x, unsigned short delta_y, int placement_mode);
 
     /* ---- Tile occupancy / buildability queries ---- */
@@ -556,7 +612,7 @@ inline void*    TileMap_GetViewport(TileMap* tm, TileMapObject* s, int d) { retu
 inline char     TileMap_SetViewport(TileMap* tm, TileMapObject* bs) { return tm->SetViewport(bs); }
 inline char     TileMap_UpdateViewport(TileMap* tm, TileMapObject* s, short t) { return tm->UpdateViewport(s, t); }
 inline void*    TileMap_ScrollTo(TileMap* tm, TileMapObject* t, int f) { return tm->ScrollTo(t, f); }
-inline char     TileMap_ScrollRect(TileMap* tm, char snd, TileMapObject* b, short dx, unsigned short dy, int pm) { return tm->ScrollRect(snd, b, dx, dy, pm); }
+inline char     TileMap_ScrollRect(TileMap* tm, char snd, TileMapResource* b, short dx, unsigned short dy, int pm) { return tm->ScrollRect(snd, b, dx, dy, pm); }
 inline char     TileMap_HandleClick(TileMap* tm, int sx, int sy)    { return tm->HandleClick(sx, sy); }
 inline void     TileMap_ClearInputProcessedFlag(TileMap* tm)        { tm->ClearInputProcessedFlag(); }
 inline void     TileMap_InvalidateRect(TileMap* tm, int l, int t, int r, int b) { tm->InvalidateRect(l, t, r, b); }
