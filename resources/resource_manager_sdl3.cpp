@@ -39,6 +39,11 @@ struct SpriteBitmap {
     }
 };
 
+// Identifies a genuine loco::assets::SpriteResource to is_host_sprite_resource()
+// below. Placed after every offset EditWindow's ABI depends on (width/height at
+// +0x14/+0x16) so adding it can never shift those asserted offsets.
+constexpr uint32_t kSpriteResourceMagic = 0x53505231u; // 'SPR1'
+
 struct SpriteResource {
     void** vtable;                                     // +0x00
     uint8_t padding_08_to_13[0x14 - sizeof(void*)];    // +0x08..+0x13 on x86_64
@@ -48,6 +53,7 @@ struct SpriteResource {
     uint32_t resource_id;
     SpriteMetadata metadata;
     bool has_metadata;
+    uint32_t magic = kSpriteResourceMagic;
 };
 
 namespace {
@@ -366,6 +372,13 @@ ResourceManagerSdl3& host_resource_manager() {
 
 SpriteResource* host_get_sprite_by_id(uint32_t resource_id) {
     return host_resource_manager().get_sprite_by_id(resource_id);
+}
+
+bool is_host_sprite_resource(const void* resource) {
+    if (resource == nullptr) {
+        return false;
+    }
+    return static_cast<const SpriteResource*>(resource)->magic == kSpriteResourceMagic;
 }
 
 }  // namespace loco::assets

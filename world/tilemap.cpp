@@ -19,8 +19,12 @@
 
 #include "../core/Entity.h"
 #include "../input/InputMgr.h"
+#ifndef _WIN32
+#include "../resources/resource_manager_sdl3.h"
+#endif
 
 #include <cmath>
+#include <cstdio>
 #include <new>
 
 /* ================================================================== */
@@ -1242,6 +1246,32 @@ char TileMap::ScrollRect(char use_sound, TileMapObject* target_building,
     short delta_x, unsigned short delta_y, int placement_mode)
 {
     TileMapObject* building = target_building;
+
+#ifndef _WIN32
+    /* Host deviation: both call sites (TileMap::FindObject) pass the raw
+     * ResourceManager_GetById() return value reinterpret_cast to
+     * TileMapObject*, before any real placed object exists. On host that
+     * pointer is a loco::assets::SpriteResource -- a small, unrelated C++
+     * struct -- so grid_width/occupancy_grid below (offsets +0x168/+0x16E)
+     * would read hundreds of bytes past the real allocation. That read
+     * doesn't crash; it silently returns garbage that almost always fails
+     * validation, which is indistinguishable from a real "can't place
+     * here" rejection without this check. Reject explicitly and loudly
+     * instead (same 0 return the original gives for a real validation
+     * failure) until a proper host resource adapter carries occupancy-grid
+     * data. See PROGRESS.md's "raw fixed-offset reads against undersized
+     * host resource objects" landmine item. */
+    if (loco::assets::is_host_sprite_resource(building)) {
+        std::fprintf(stderr,
+            "[HOST] TileMap::ScrollRect: rejecting placement -- resource "
+            "%p is a host SpriteResource, not a real TileMapObject/"
+            "TileMapResource (no occupancy-grid adapter yet)\n",
+            static_cast<const void*>(building));
+        std::fflush(stderr);
+        return 0;
+    }
+#endif
+
     byte grid_w = building->grid_width;
     byte grid_h = building->grid_height;
 

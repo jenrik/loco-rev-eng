@@ -119,6 +119,17 @@ ResourceManagerSdl3& host_resource_manager();
 // use archive-backed sprites without importing the binary-facing C wrappers.
 SpriteResource* host_get_sprite_by_id(uint32_t resource_id);
 
+// True when `resource` is a genuine loco::assets::SpriteResource returned by
+// this bridge (tag-checked; false for null or any other pointer). Host
+// resources never carry the original x86 TileMapObject/TileMapResource
+// layout (grid_width/occupancy_grid/... at fixed offsets like +0x168) that
+// decompiled code built around real placed objects expects -- callers that
+// would otherwise reinterpret_cast a resource pointer to read those offsets
+// must check this first and reject instead of reading out-of-bounds garbage.
+// See PROGRESS.md's "raw fixed-offset reads against undersized host
+// resource objects" landmine item.
+bool is_host_sprite_resource(const void* resource);
+
 }  // namespace loco::assets
 
 // C++ linkage is intentional: existing translated callers use overloads.

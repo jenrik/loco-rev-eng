@@ -273,18 +273,26 @@ void HostLoadingSequence(void* /*param*/)
      * and the failure is logged loudly, so a fresh seed NEVER reports
      * success without a durable curr. */
     if (seeded) {
+        /* Host: the INPUT_LoadWorld → INPUT_LoadSaveFile path below places
+         * records only when host_placement_available() returns true.  This
+         * MUST run before that call, not after: `INPUT_LoadWorld("curr")`
+         * is the load-back that walks all 497 records, so setting the gate
+         * afterward means every record already took the "gate closed,
+         * carry the record" branch for this load-back, silently, with the
+         * flag then (uselessly) true only for a load that never happens
+         * again in this flow.  Verified by extracting the real "curr" file
+         * from a GUI test run: its header correctly says entity_count=497
+         * (the write path was never the bug), yet zero records reached
+         * TileMap::ScrollRect's placement guard — moving this call fixed
+         * that (see PROGRESS.md, "gate ordering bug" entry). */
+        loco::host::set_host_placement_available(true);
+
         char loaded = INPUT_LoadWorld(&g_input_mgr, "curr");
         std::fprintf(stderr,
             "[HOST] LoadingSequence: fresh world seeded + persisted to "
             "curr (load-back result %d); entering mode 3\n",
             static_cast<int>(loaded));
         std::fflush(stderr);
-
-        /* Host: the existing INPUT_LoadWorld → INPUT_LoadSaveFile path
-         * already places records when host_placement_available() returns
-         * true.  Enable that gate now that TileMap, ResourceManager, and
-         * tile predicates are available. */
-        loco::host::set_host_placement_available(true);
     } else {
         std::fprintf(stderr,
             "[HOST] LoadingSequence: fresh-world seed FAILED (no durable "
