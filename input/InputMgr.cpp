@@ -19,9 +19,12 @@
  * INPUT_LoadSaveFile 0x41D5C0, INPUT_SaveCurrentWorld 0x41D9B0) are
  * implemented over the canonical InputMgr (see the persistence-milestone
  * notes in PROGRESS.md); the editor placement helpers (INPUT_PlaceObject
- * 0x41DD80, INPUT_RemoveObject 0x41DEF0) are NOT on the load/save path
- * and live here as deferred stubs that log loudly and abort, replacing
- * the previous silent no-op stubs.  Tracked in PROGRESS.md.
+ * 0x41DD80, INPUT_RemoveObject 0x41DEF0) live here as deferred stubs that
+ * log loudly and abort, replacing the previous silent no-op stubs.
+ * **Correction (2026-08-12): `INPUT_PlaceObject` IS on the load path** --
+ * `TileMap::FindObject` (0x4550C0, world/tilemap.cpp:2247-2330) calls it
+ * directly, and `INPUT_LoadSaveFile` reaches `FindObject` while replaying
+ * a save's entity records. Tracked in PROGRESS.md's tile-placement chain.
  *
  * Also implemented here: the verified neighbour-tile offset helpers
  * INPUT_DirToOffset_Up/Left/Down/Right (0x41D8F0/0x41D920/0x41D950/

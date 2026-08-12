@@ -109,16 +109,23 @@ int main() {
         // resource+0x20's FrameData array on a host SpriteResource has no
         // verified field mapping yet, so it rejects loudly and holds the
         // current frame instead of reading past the allocation. Call it
-        // twice: the first call must not crash, and frame_index must stay
-        // exactly what SetAnimState set it to -- proving the early-return
-        // guard fired rather than a raw offset read that happened to look
-        // harmless once.
+        // twice and check the guard's own hit counter, not just
+        // frame_index -- the original also has early-return paths
+        // (single-frame no-loop animation, already-at-end-frame,
+        // mid-wait) that would leave frame_index unchanged with no guard
+        // at all, so an unchanged frame_index alone doesn't prove the
+        // guard fired rather than one of those.
+        const uint32_t hits_before = loco::host_test::entity_update_host_guard_hit_count();
         const int frame_before = entity.frame_index;
         entity.Update();
         entity.Update();
         if (entity.frame_index != frame_before) {
             return fail("Entity::Update advanced frame_index on a host "
                          "SpriteResource -- its host guard did not fire") ? 0 : 1;
+        }
+        if (loco::host_test::entity_update_host_guard_hit_count() != hits_before + 2) {
+            return fail("Entity::Update's host guard did not run on both calls -- "
+                         "frame_index staying put was coincidental, not proof") ? 0 : 1;
         }
     }
     std::puts("PASS: ~Entity's host branch released a live host SpriteResource "

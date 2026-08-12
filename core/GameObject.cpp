@@ -22,6 +22,14 @@
 #include "../resources/resource_manager_sdl3.h"
 #include <cstdio>
 #include <unordered_set>
+
+namespace {
+uint32_t g_entity_update_host_guard_hits = 0;
+}  // namespace
+
+namespace loco::host_test {
+uint32_t entity_update_host_guard_hit_count() { return g_entity_update_host_guard_hits; }
+}  // namespace loco::host_test
 #endif
 
 namespace {
@@ -793,6 +801,7 @@ void Entity::Update()
      * (already valid from SetAnimState's host branch) instead of guessing
      * at the missing field mapping or crashing. */
     if (loco::assets::is_host_sprite_resource(resource)) {
+        ++g_entity_update_host_guard_hits;
         static std::unordered_set<const void*> warned;
         if (warned.insert(resource).second) {
             std::fprintf(stderr,

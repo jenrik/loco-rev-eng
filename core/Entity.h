@@ -22,6 +22,17 @@
 
 #include "GameObject.h"
 
+#ifndef _WIN32
+namespace loco::host_test {
+// Test-only observability for Entity::Update's host guard (core/GameObject.cpp):
+// incremented each time the guard's early-return path actually runs, so a test
+// can distinguish "the guard fired" from "the original's own early-return
+// paths (single-frame animation, already-at-end-frame, mid-wait) happened to
+// leave frame_index unchanged anyway."
+uint32_t entity_update_host_guard_hit_count();
+}  // namespace loco::host_test
+#endif
+
 
 // Status: TRANSCRIBED
 class Entity : public GameObject {
