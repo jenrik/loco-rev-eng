@@ -148,6 +148,34 @@ int main() {
         return fail("resource 0xc54's \"depot top\" tile_type was not parsed") ? 0 : 1;
     }
 
+    // building\factory1.dat carries "Name Factory" (verified by extracting
+    // resource.RFD directly) -> ChildWindow::name's host equivalent.
+    void* factory = ResourceManager_GetById(static_cast<void*>(nullptr), 0x816);
+    const loco::assets::SpriteMetadata* factory_metadata = ResourceManager_GetSpriteMetadata(factory);
+    if (!factory_metadata || factory_metadata->name != "Factory") {
+        return fail("resource 0x816's \"Name Factory\" directive was not parsed") ? 0 : 1;
+    }
+
+    // building\launcher.dat is the only shipped resource carrying an
+    // "EEReplayDelay" directive, with value -1 (verified by extracting
+    // resource.RFD directly) -- the parser's uint8_t wrap-then-clamp must
+    // turn that into 5, not -1 or 255.
+    void* launcher = ResourceManager_GetById(static_cast<void*>(nullptr), 0x852);
+    const loco::assets::SpriteMetadata* launcher_metadata = ResourceManager_GetSpriteMetadata(launcher);
+    if (!launcher_metadata || launcher_metadata->ee_replay_delay != 5) {
+        return fail("resource 0x852's \"EEReplayDelay -1\" did not clamp to 5") ? 0 : 1;
+    }
+
+    // scenery\bigfount.dat's "LeisureDestination 1" line (the same directive
+    // that motivated physical_occupancy's row-counted parsing above, since it
+    // interleaves before that resource's "bitmap_occupancy" header) should
+    // now itself parse correctly as leisure_destination == 1.
+    void* bigfount = ResourceManager_GetById(static_cast<void*>(nullptr), 0x1020);
+    const loco::assets::SpriteMetadata* bigfount_metadata = ResourceManager_GetSpriteMetadata(bigfount);
+    if (!bigfount_metadata || bigfount_metadata->leisure_destination != 1) {
+        return fail("resource 0x1020's \"LeisureDestination 1\" directive was not parsed") ? 0 : 1;
+    }
+
     manager.reset();
     SDL_Quit();
     std::puts("PASS: ResourceManager loads real BMP, DAT/color key, WAVE, BUT, and ANI archive assets");

@@ -144,6 +144,34 @@ struct SpriteMetadata {
     // resources (buildings, scenery, UI) that carry no such directive.
     bool has_tile_type = false;
     TileTrackType tile_type = TileTrackType::TunnelLeft;
+
+    // Display name, parsed from the "Name" directive (ui/UI_ChildWindow.h's
+    // ChildWindow::name, +0x14D). The original truncates to a 10-byte buffer
+    // without guaranteeing null-termination if the source fills all 10 bytes;
+    // this host copy keeps the same effective content (up to 9 characters)
+    // without reproducing that non-termination quirk. Empty when no "Name"
+    // directive is present.
+    std::string name;
+
+    // Easter-egg replay-delay terminator value, parsed from the
+    // "EEReplayDelay" directive (input/BuildingDescriptorEditor.h's
+    // BuildingDescriptorEditor::ee_replay_delay, +0x522), clamped to <= 5 by
+    // the original parser (a negative value like the shipped archive's only
+    // instance, "EEReplayDelay -1", wraps through uint8_t and clamps to 5 --
+    // reproduced exactly, not "fixed"). Defaults to 0, matching the
+    // original's unconditional zero-init when no directive is present.
+    // core/BuildingMgrObjectGroup.cpp's ResourceGameObject reads this value
+    // as its group member-count ceiling -- not from "MaxMinifigForResource"
+    // as a naive reading of the .dat text might suggest.
+    uint8_t ee_replay_delay = 0;
+
+    // "LeisureDestination" directive value (input/BuildingDescriptorEditor.h's
+    // BuildingDescriptorEditor::leisure_destination, +0x62C). INPUT_PlaceObject
+    // (0x41DD80) reads this off the newly-placed entity's resource pointer
+    // (nonzero test) to decide whether to increment InputMgr's special_count
+    // counter alongside the general entity count. Defaults to 0, matching the
+    // original's unconditional zero-init when no directive is present.
+    uint8_t leisure_destination = 0;
 };
 
 class SpriteResource;

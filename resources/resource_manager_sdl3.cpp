@@ -237,6 +237,40 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
                 continue;
             }
         }
+        if (tokens[0] == "Name") {
+            // Real archive lines are "Name<one space><text>" (e.g. "Name
+            // Factory", "Name School " with a trailing space preserved) --
+            // skip exactly the keyword plus one separator character, matching
+            // the original's `strncpy(this+0x14D, line+1, 10)` (see
+            // ui/UI_ChildWindow.cpp's "Name" branch), then trim up to 2
+            // trailing \r/\n the same way, and truncate to the buffer's
+            // effective 9-character content.
+            std::string rest = line.substr(4);  // tokens[0] == "Name" guarantees line.size() >= 4
+            if (!rest.empty() && (rest[0] == ' ' || rest[0] == '\t')) rest.erase(0, 1);
+            for (int trim = 0; trim < 2 && !rest.empty() &&
+                                (rest.back() == '\r' || rest.back() == '\n');
+                 ++trim) {
+                rest.pop_back();
+            }
+            if (rest.size() > 9) rest.resize(9);
+            metadata->name = rest;
+            continue;
+        }
+        if (tokens[0] == "EEReplayDelay" && tokens.size() == 2) {
+            int value = 0;
+            if (parse_int(tokens[1], &value)) {
+                metadata->ee_replay_delay = static_cast<uint8_t>(value);
+                if (metadata->ee_replay_delay > 5) metadata->ee_replay_delay = 5;
+            }
+            continue;
+        }
+        if (tokens[0] == "LeisureDestination" && tokens.size() == 2) {
+            int value = 0;
+            if (parse_int(tokens[1], &value)) {
+                metadata->leisure_destination = static_cast<uint8_t>(value);
+            }
+            continue;
+        }
         if (tokens[0] == "button") {
             metadata->is_button = true;
             if (tokens.size() >= 5 && tokens[1] == "offset") {
