@@ -176,6 +176,17 @@ int main() {
         return fail("resource 0x1020's \"LeisureDestination 1\" directive was not parsed") ? 0 : 1;
     }
 
+    // The same resource's "cursor/default_frame_set 12 0" line (verified by
+    // extracting resource.RFD directly) uses the slash-spelling variant of
+    // this directive, not the far more common plain "cursor_frame_set" --
+    // the parser must recognize both (198 vs 379 real files respectively;
+    // a real, previously-unnoticed gap, since the slash variant was not
+    // recognized at all before this fix). Non-zero cursor_frame_set makes
+    // this a meaningful check, unlike a resource that happens to default to 0.
+    if (bigfount_metadata->cursor_frame_set != 12 || bigfount_metadata->cursor_frame != 0) {
+        return fail("resource 0x1020's \"cursor/default_frame_set 12 0\" directive was not parsed") ? 0 : 1;
+    }
+
     manager.reset();
     SDL_Quit();
     std::puts("PASS: ResourceManager loads real BMP, DAT/color key, WAVE, BUT, and ANI archive assets");

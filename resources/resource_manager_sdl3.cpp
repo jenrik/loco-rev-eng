@@ -298,7 +298,16 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
             if (!parse_int(tokens[1], &metadata->frame_set_count)) return false;
             continue;
         }
-        if (tokens[0] == "cursor_frame_set" && tokens.size() == 3) {
+        // Real archive data uses two distinct spellings for this directive
+        // (379 files "cursor_frame_set", 198 files "cursor/default_frame_set"
+        // -- matching UI_ChildWindow.cpp's two CRT_wcsstr checks against
+        // s_cursor_frame_set/s_cursor_default_frame_set exactly). A third,
+        // rarer typo'd spelling ("cursor_Frame_set", capital F, 8 files) is
+        // deliberately NOT recognized here: CRT_wcsstr is case-sensitive, so
+        // the original parser doesn't recognize it either and falls through
+        // to `break` for those files -- reproduced, not "fixed".
+        if ((tokens[0] == "cursor_frame_set" || tokens[0] == "cursor/default_frame_set") &&
+            tokens.size() == 3) {
             if (!parse_int(tokens[1], &metadata->cursor_frame_set) ||
                 !parse_int(tokens[2], &metadata->cursor_frame)) return false;
             continue;
