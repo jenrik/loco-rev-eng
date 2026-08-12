@@ -407,6 +407,29 @@ void* ResourceManager_GetById(void*, int);
 void* ResourceManager_GetById(void*, int) { return nullptr; }
 void* ResourceManager_GetById(void*, unsigned int) { return nullptr; }
 
+/* Host resource-adapter accessors (resources/resource_manager_sdl3.h),
+ * referenced by GameObject.o's Entity::InitBase/SetAnimState/SetFrame/
+ * ~Entity host branches (see PROGRESS.md's InitBase host-safety entry).
+ * Not exercised: ResourceManager_GetById above always returns nullptr in
+ * this cone, so `resource` is always null before any of these would be
+ * called -- these exist only to satisfy the link. Declared here rather
+ * than via #include "resources/resource_manager_sdl3.h" because that
+ * header's ResourceManager_Init(void*) -> int declaration collides with
+ * network/Netman.h's pre-existing ResourceManager_Init(void*) -> void
+ * (a real, separate mismatch between those two headers, out of scope
+ * here -- this cone never calls either). */
+namespace loco::assets {
+class SpriteResource;
+class SpriteBitmap;
+struct SpriteMetadata;
+bool is_host_sprite_resource(const void*) { return false; }
+uint32_t sprite_resource_id(const SpriteResource*) { return 0; }
+SpriteBitmap* sprite_bitmap(SpriteResource*) { return nullptr; }
+uint32_t sprite_width(const SpriteResource*) { return 0; }
+uint32_t sprite_height(const SpriteResource*) { return 0; }
+}  // namespace loco::assets
+const loco::assets::SpriteMetadata* ResourceManager_GetSpriteMetadata(void*) { return nullptr; }
+
 /* CRT_rand (0x466150) — deterministic linear congruential generator for
  * the FindObjectAt random-pick tests.  Netman.h declares it with C++
  * linkage (_Z8CRT_randv); some cone TUs (GameObject.o, Building.o)

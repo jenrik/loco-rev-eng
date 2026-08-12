@@ -180,6 +180,7 @@ class SpriteBitmap;
 SpriteBitmap* sprite_bitmap(SpriteResource* resource);
 uint32_t sprite_width(const SpriteResource* resource);
 uint32_t sprite_height(const SpriteResource* resource);
+uint32_t sprite_resource_id(const SpriteResource* resource);
 uint32_t bitmap_width(const SpriteBitmap* bitmap);
 uint32_t bitmap_height(const SpriteBitmap* bitmap);
 SDL_Surface* bitmap_surface(const SpriteBitmap* bitmap);

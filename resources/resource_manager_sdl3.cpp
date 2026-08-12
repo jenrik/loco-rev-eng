@@ -491,6 +491,7 @@ SpriteBitmap* sprite_bitmap(SpriteResource* resource) {
 }
 uint32_t sprite_width(const SpriteResource* resource) { return resource ? resource->width : 0; }
 uint32_t sprite_height(const SpriteResource* resource) { return resource ? resource->height : 0; }
+uint32_t sprite_resource_id(const SpriteResource* resource) { return resource ? resource->resource_id : 0; }
 uint32_t bitmap_width(const SpriteBitmap* bitmap) { return bitmap ? bitmap->width : 0; }
 uint32_t bitmap_height(const SpriteBitmap* bitmap) { return bitmap ? bitmap->height : 0; }
 SDL_Surface* bitmap_surface(const SpriteBitmap* bitmap) { return bitmap ? bitmap->surface : nullptr; }

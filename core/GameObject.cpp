@@ -18,6 +18,10 @@
 #include "Entity.h"
 #include <cstring>
 
+#ifndef _WIN32
+#include "../resources/resource_manager_sdl3.h"
+#endif
+
 namespace {
 
 template <typename T>
@@ -177,12 +181,25 @@ Entity::~Entity()
     /* Release resource reference (+0x40) */
     void* resource = this->resource;
     if (resource != nullptr) {
+#ifndef _WIN32
+        /* Host sprites are owned by ResourceManagerSdl3's cache, not
+         * per-entity refcounted (see Entity::InitBase) -- +0x162's "locked"
+         * flag and release_surface (a null vtable slot on host sprites,
+         * resource_manager_sdl3.cpp's k_resource_vtable) do not apply. */
+        if (!loco::assets::is_host_sprite_resource(resource)) {
+            if (*field_at<uint8_t>(resource, 0x162) == 1) {
+                this->InvalidateRect();
+                reinterpret_cast<ResourceDataView*>(resource)->release_surface();
+            }
+        }
+#else
         /* If resource has a locked flag at +0x162, invalidate rect
          * and release via resource->vtable[2] */
         if (*field_at<uint8_t>(resource, 0x162) == 1) {
             this->InvalidateRect();
             reinterpret_cast<ResourceDataView*>(resource)->release_surface();
         }
+#endif
         this->resource = nullptr;
     }
 
@@ -372,10 +389,33 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
     /* Reset timer */
     this->timer = 0;
 
+#ifndef _WIN32
+    /* Host deviation: a positive resource_id can resolve to a host
+     * loco::assets::SpriteResource*, which carries none of RESDATA's x86
+     * layout -- not even a compatible vtable (resource_manager_sdl3.cpp's
+     * k_resource_vtable leaves acquire_surface/release_surface, slots 1/2,
+     * null). Calling those the way the original does below would crash on
+     * a null-pointer virtual call, not silently misread. Every host branch
+     * below routes through resource_manager_sdl3.h's typed accessors
+     * instead of the raw field_at<>/virtual-dispatch original body. */
+    const bool resource_is_host_sprite =
+        resource != nullptr && loco::assets::is_host_sprite_resource(resource);
+#endif
+
     /* Check if we already have the right resource loaded */
-    if (resource == nullptr || force_reload ||
-        *field_at<int32_t>(resource, 4) != resource_id)
-    {
+    bool need_reload = resource == nullptr || force_reload;
+    if (!need_reload) {
+#ifndef _WIN32
+        need_reload = resource_is_host_sprite
+            ? loco::assets::sprite_resource_id(static_cast<loco::assets::SpriteResource*>(
+                  resource)) != static_cast<uint32_t>(resource_id)
+            : *field_at<int32_t>(resource, 4) != resource_id;
+#else
+        need_reload = *field_at<int32_t>(resource, 4) != resource_id;
+#endif
+    }
+
+    if (need_reload) {
         /* Mark not initialized until resource loads */
         this->initialized = 1;  /* still 1 during load attempt */
 
@@ -384,7 +424,15 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
             /* vtable[1] — invalidate */
             this->InvalidateRect();
 
+#ifndef _WIN32
+            /* Host sprites are owned by ResourceManagerSdl3's cache, not
+             * per-entity refcounted -- nothing to release here. */
+            if (!resource_is_host_sprite) {
+                reinterpret_cast<ResourceDataView*>(this->resource)->release_surface();
+            }
+#else
             reinterpret_cast<ResourceDataView*>(this->resource)->release_surface();
+#endif
             this->resource = nullptr;
         }
 
@@ -401,20 +449,49 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
             return 0;
         }
 
+#ifndef _WIN32
+        const bool loaded_is_host_sprite =
+            loco::assets::is_host_sprite_resource(this->resource);
+        if (!loaded_is_host_sprite) {
+            /* Acquire the resource surface through its typed slot 1 method. */
+            reinterpret_cast<ResourceDataView*>(this->resource)->acquire_surface(
+                this->world_x_raw, this->world_y_raw);
+        }
+        /* Host sprites need no acquire step -- the bitmap is already
+         * decoded and cached by ResourceManagerSdl3. */
+#else
         /* Acquire the resource surface through its typed slot 1 method. */
         reinterpret_cast<ResourceDataView*>(this->resource)->acquire_surface(
             this->world_x_raw, this->world_y_raw);
+#endif
 
-        /* If no surface data (flags at +0x10 == 0), bail */
         resource = this->resource;
-        if (*field_at<uint32_t>(resource, 0x10) == 0) {
-            this->initialized = 0;
-            return 0;
+        uint16_t frame_w;
+        uint16_t frame_h;
+#ifndef _WIN32
+        if (loaded_is_host_sprite) {
+            auto* sprite = static_cast<loco::assets::SpriteResource*>(resource);
+            /* "No surface data" equivalent: a resource whose .dat had no
+             * matching .bmp never got a decoded bitmap. */
+            if (loco::assets::sprite_bitmap(sprite) == nullptr) {
+                this->initialized = 0;
+                return 0;
+            }
+            frame_w = static_cast<uint16_t>(loco::assets::sprite_width(sprite));
+            frame_h = static_cast<uint16_t>(loco::assets::sprite_height(sprite));
+        } else
+#endif
+        {
+            /* If no surface data (flags at +0x10 == 0), bail */
+            if (*field_at<uint32_t>(resource, 0x10) == 0) {
+                this->initialized = 0;
+                return 0;
+            }
+            frame_w = *field_at<uint16_t>(resource, 0x14);
+            frame_h = *field_at<uint16_t>(resource, 0x16);
         }
 
         /* Set screen_rect from resource frame dimensions */
-        uint16_t frame_w = *field_at<uint16_t>(resource, 0x14);
-        uint16_t frame_h = *field_at<uint16_t>(resource, 0x16);
         SetRect(&this->screen_rect,
                 this->screen_rect.left,
                 this->screen_rect.top,
@@ -428,18 +505,38 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
         this->anim_index = -1;
     }
 
-    /* Copy default blit flags from resource (+0x164) */
     resource = this->resource;
+#ifndef _WIN32
+    const bool current_is_host_sprite = loco::assets::is_host_sprite_resource(resource);
+    /* blit_flags (RESDATA+0x164) has no host source; original-behavior
+     * default (0) until a host adapter carries per-resource render flags. */
+    this->blit_flags = current_is_host_sprite ? 0 : *field_at<uint32_t>(resource, 0x164);
+#else
+    /* Copy default blit flags from resource (+0x164) */
     this->blit_flags = *field_at<uint32_t>(resource, 0x164);
+#endif
 
     /* If no anim_index specified, use resource's default */
     if (anim_index < 0) {
         resource = this->resource;
-        anim_index = *field_at<int16_t>(resource, 0x1E);
+#ifndef _WIN32
+        if (current_is_host_sprite) {
+            /* RESDATA+0x1E ("default_anim") is the .dat's
+             * "cursor/default_frame_set" directive's *second* value --
+             * SpriteMetadata::cursor_frame, not cursor_frame_set (verified
+             * against UI_ChildWindow_Render's write order, not guessed). */
+            const loco::assets::SpriteMetadata* metadata =
+                ResourceManager_GetSpriteMetadata(resource);
+            anim_index = metadata ? metadata->cursor_frame : -1;
+        } else
+#endif
+        {
+            anim_index = *field_at<int16_t>(resource, 0x1E);
+        }
     }
 
     /* Select animation via vtable[14] = SetAnimState */
-    int result = this->SetAnimState(anim_index);
+    this->SetAnimState(anim_index);
 
     /* Check if animation was set successfully */
     if (this->anim_index != -1) {
@@ -480,6 +577,37 @@ int Entity::SetAnimState(int anim_index)
     }
 
     void* resource = this->resource;
+
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        const loco::assets::SpriteMetadata* metadata =
+            ResourceManager_GetSpriteMetadata(resource);
+        const size_t anim_count = metadata ? metadata->frame_sets.size() : 0;
+
+        if (anim_index >= 0 && static_cast<size_t>(anim_index) < anim_count) {
+            this->anim_index = anim_index;
+
+            /* Host equivalent of resource->anim_table[anim_index]: parsed
+             * directly from the same .dat animation rows (start_frame/
+             * sound_resource_id map onto FrameData::start_frame/
+             * audio_res_id exactly -- confirmed against
+             * UI_ChildWindow_Render's FrameData-array write order). */
+            const loco::assets::AnimationFrameSet& frame_set =
+                metadata->frame_sets[static_cast<size_t>(anim_index)];
+
+            this->phase_timer = 0;
+            this->timer = 0;
+
+            const uint16_t start_frame = static_cast<uint16_t>(frame_set.start_frame);
+            this->frame_index = start_frame;
+            this->SetFrame(start_frame, true);
+            this->PlayAnimation(frame_set.sound_resource_id);
+        }
+
+        return this->frame_index;
+    }
+#endif
+
     uint16_t anim_count = *field_at<uint16_t>(resource, 0x1A);
 
     if (anim_index >= 0 && anim_index < anim_count) {
@@ -767,7 +895,16 @@ void Entity::SetFrame(int frame_id, bool trigger_invalidate)
     this->frame_index = frame_id;
 
     void* resource = this->resource;
-    uint16_t frame_w = *field_at<uint16_t>(resource, 0x14);
+    uint16_t frame_w;
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        frame_w = static_cast<uint16_t>(
+            loco::assets::sprite_width(static_cast<loco::assets::SpriteResource*>(resource)));
+    } else
+#endif
+    {
+        frame_w = *field_at<uint16_t>(resource, 0x14);
+    }
 
     /* Compute source rect X offsets from frame index and width */
     this->source_rect.left  = frame_id * frame_w;

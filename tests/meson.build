@@ -118,6 +118,23 @@ test('resource-manager-sdl3', resource_manager_sdl3_test,
   env: ['SDL_VIDEODRIVER=dummy'],
   workdir: meson.project_source_root())
 
+# Reachability proof for Entity::InitBase's host branch (core/GameObject.cpp):
+# constructs a real Entity against the REAL resource_manager_sdl3.cpp bridge
+# (not the persistence tests' fake GetById) to prove the host branch fires on
+# a real archive resource without crashing on the original's null
+# acquire_surface/release_surface vtable slots. See PROGRESS.md.
+entity_host_resource_test = executable('entity_host_resource_test',
+  'entity_host_resource_test.cpp',
+  objects: [obj_resource_archive, obj_pe_string_table, obj_resource_mgr_sdl3,
+            obj_game_object, obj_entity],
+  include_directories: inc_dirs,
+  cpp_args: test_warn_args,
+  dependencies: [sdl3_dep],
+)
+test('entity-host-resource', entity_host_resource_test,
+  env: ['SDL_VIDEODRIVER=dummy'],
+  workdir: meson.project_source_root())
+
 dplay_config_test = executable('dplay_config_test',
   'dplay_config_test.cpp',
   include_directories: inc_dirs,
