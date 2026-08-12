@@ -130,9 +130,20 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
         this->vehicle_kind = 2;
         this->init_state   = 5;
     } else {
-        /* Check for road tile */
-        char is_road = RESDATA_IsRoadTile(static_cast<int32_t>(
-            reinterpret_cast<intptr_t>(this->resource)));
+        /* Check for road tile. RESDATA_IsRoadTile takes int32_t (the
+         * original x86 ABI's pointer width) -- same pointer-truncation
+         * defect as InputMgr.cpp's dispatch (see its comment on
+         * INPUT_PlaceObject). tile_type here is already the resolved
+         * +0x63A byte, so check its value set directly instead of
+         * re-deriving it through a truncated pointer. */
+        bool is_road;
+#ifndef _WIN32
+        is_road = (tile_type == 0x01 || tile_type == 0x02 ||
+                    tile_type == 0x03 || tile_type == 0x04);
+#else
+        is_road = RESDATA_IsRoadTile(static_cast<int32_t>(
+            reinterpret_cast<intptr_t>(this->resource))) != 0;
+#endif
         if (is_road) {
             this->vehicle_kind = 3;
         } else if (tile_type == 0x0D) {

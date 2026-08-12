@@ -596,7 +596,6 @@ LOUD_FIXTURE(Math_DistSquared)
 LOUD_FIXTURE(Math_PointOnLineSegment)
 LOUD_FIXTURE(CRT_localtime)
 LOUD_FIXTURE(TileMap_FindTileByType)
-LOUD_FIXTURE(World_DeserializeMap)
 LOUD_FIXTURE(Building_CheckPlacement)
 LOUD_FIXTURE(Vehicle_SetState_free)
 LOUD_FIXTURE(Vehicle_LoadSounds)
@@ -637,8 +636,19 @@ void* TileMap_GetObjectAt(TileMap*, int, int, int)
 int TileMap_FindTileByType(void*, int, int, int, int);
 int TileMap_FindTileByType(void*, int, int, int, int)
 { fixture_reached_TileMap_FindTileByType(); return 0; }
+#ifndef PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER
+LOUD_FIXTURE(World_DeserializeMap)
 void World_DeserializeMap(void*, int);
 void World_DeserializeMap(void*, int) { fixture_reached_World_DeserializeMap(); }
+#else
+/* Real bridge behavior (shared/stubs_link001_batch4_network_world.cpp):
+ * `if (world == nullptr) return;`. g_world is nullptr in every persistence
+ * test, so this is the exact real no-op, not a fabricated shortcut --
+ * ~RESDATA_GameVehicle() calls this unconditionally, and the type==3
+ * placement dispatch branch (input_place_object_test.cpp) legitimately
+ * reaches it on entity teardown. */
+void World_DeserializeMap(void*, int) {}
+#endif
 unsigned int AssetMgr_ReadPairValue(void*, unsigned int, unsigned int);
 unsigned int AssetMgr_ReadPairValue(void*, unsigned int, unsigned int)
 { fixture_reached_AssetMgr_ReadPairValue(); return 0; }

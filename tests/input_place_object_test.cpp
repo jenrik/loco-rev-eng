@@ -27,7 +27,19 @@
  *
  * Asserts -- not just "didn't abort" -- that the returned object is
  * initialized, is registered in InputMgr's collection, and that
- * entity_count advanced. See PROGRESS.md's INPUT_PlaceObject entry.
+ * entity_count/special_count advanced. See PROGRESS.md's INPUT_PlaceObject
+ * entry.
+ *
+ * Also places resource 0xc54 ("depot top", GetResourceType==3, tile_type 9 --
+ * a building value per InputMgr.cpp's is_building_tile set) to exercise the
+ * type==3 dispatch branch and its GameVehicle constructor -- the first three
+ * commits of this chain only ever exercised the type!=3 -> ResourceGameObject
+ * branch (0x1020). Confirmed via resource_manager_sdl3_test.cpp that 0xc54's
+ * own tile_type parses to 9 (DepotTop). 0xc54 specifically, not 0xc0a
+ * ("points", tile_type 0xb): 0xc0a turned out to have no decoded bitmap
+ * (Entity::InitBase bails with initialized=0, same failure mode as 0x816) --
+ * itself a real finding about which track-type resources are pure metadata
+ * descriptors, tracked in PROGRESS.md rather than silently swapped away.
  */
 #define PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER
 #include "input/InputMgr.h"
@@ -68,6 +80,7 @@ int main() {
 
     const int32_t count_before = g_input_mgr.ListGetCount();
     const int32_t entity_count_before = g_input_mgr.entity_count;
+    const int32_t special_count_before = g_input_mgr.special_count;
 
     void* placed = INPUT_PlaceObject(&g_input_mgr, 0x1020);
     Entity* entity = static_cast<Entity*>(placed);
@@ -92,11 +105,52 @@ int main() {
     if (g_input_mgr.entity_count != entity_count_before + 1) {
         return fail("INPUT_PlaceObject did not increment entity_count") ? 0 : 1;
     }
+    /* 0x1020 (scenery\bigfount.dat) carries "LeisureDestination 1" --
+     * resource_manager_sdl3_test.cpp confirms sprite_leisure_destination_byte()
+     * returns true/1 for it. If this assertion is dropped, the entire
+     * sprite_leisure_destination_byte() tail of INPUT_PlaceObject passes
+     * identically whether or not it actually resolves -- caught by advisor
+     * review before this was added. */
+    if (g_input_mgr.special_count != special_count_before + 1) {
+        return fail("INPUT_PlaceObject did not increment special_count for a "
+                     "leisure-destination resource") ? 0 : 1;
+    }
+
+    /* Second placement: resource 0xc54 ("depot top"), GetResourceType==3, to
+     * exercise the type==3 dispatch branch (0x1020 above is type!=3 ->
+     * ResourceGameObject only). tile_type 9 is a building value, so this
+     * lands in the GameVehicle constructor -- previously guarded but never
+     * reachability-tested end to end. */
+    const int32_t count_before_2 = g_input_mgr.ListGetCount();
+    const int32_t entity_count_before_2 = g_input_mgr.entity_count;
+
+    void* placed_tile = INPUT_PlaceObject(&g_input_mgr, 0xc54);
+    Entity* tile_entity = static_cast<Entity*>(placed_tile);
+
+    if (tile_entity == nullptr) {
+        return fail("INPUT_PlaceObject(0xc54) returned null -- construction "
+                     "failed or initialized != 1 (resource may lack a decoded "
+                     "bitmap, as 0x816 did)") ? 0 : 1;
+    }
+    if (tile_entity->initialized != 1) {
+        return fail("INPUT_PlaceObject's type==3 constructed entity is not "
+                     "initialized") ? 0 : 1;
+    }
+    if (g_input_mgr.ListGetCount() != count_before_2 + 1) {
+        return fail("INPUT_PlaceObject did not register the type==3 entity "
+                     "via ListInsert") ? 0 : 1;
+    }
+    if (g_input_mgr.entity_count != entity_count_before_2 + 1) {
+        return fail("INPUT_PlaceObject did not increment entity_count for "
+                     "the type==3 entity") ? 0 : 1;
+    }
 
     g_input_mgr.ListClearAll();
     loco::assets::reset_host_resource_manager();
     SDL_Quit();
-    std::puts("PASS: INPUT_PlaceObject constructs a real ResourceGameObject "
-              "from a real archive resource and registers it via ListInsert");
+    std::puts("PASS: INPUT_PlaceObject constructs real entities from real "
+              "archive resources across both dispatch branches (type!=3 -> "
+              "ResourceGameObject, type==3 -> RESDATA_GameVehicle) and "
+              "registers them via ListInsert");
     return 0;
 }
