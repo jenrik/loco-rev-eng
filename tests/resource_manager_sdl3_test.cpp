@@ -93,6 +93,39 @@ int main() {
         return fail("resource 0x341d's physical_occupancy/bitmap_occupancy footprint was not parsed") ? 0 : 1;
     }
 
+    // scenery\statue1.dat's physical_occupancy is a non-uniform 3x3x3 grid
+    // (verified by extracting resource.RFD directly), chosen specifically
+    // because its asymmetric pattern can catch an x/y transposition that a
+    // uniform or 1x1x1 fixture (like 0x341d above) cannot:
+    //   z=0: fully occupied (all nine cells 1)
+    //   z=1: only (x=1,y=1) occupied
+    //   z=2: (x=1,y=1) and (x=2,y=1) occupied -- asymmetric across x
+    void* statue = ResourceManager_GetById(static_cast<void*>(nullptr), 0x1012);
+    const loco::assets::SpriteMetadata* statue_metadata = ResourceManager_GetSpriteMetadata(statue);
+    if (!statue_metadata || !statue_metadata->footprint.has_footprint ||
+        statue_metadata->footprint.grid_width != 3 || statue_metadata->footprint.grid_height != 3 ||
+        statue_metadata->footprint.grid_depth != 3 ||
+        statue_metadata->footprint.physical_occupancy_grid.size() != 27) {
+        return fail("resource 0x1012's physical_occupancy dims/row count were not parsed") ? 0 : 1;
+    }
+    const loco::assets::SpriteFootprint& statue_grid = statue_metadata->footprint;
+    for (int x = 0; x < 3; ++x) {
+        for (int y = 0; y < 3; ++y) {
+            if (!statue_grid.physical_occupied(x, y, 0)) {
+                return fail("resource 0x1012's z=0 physical_occupancy layer was not fully occupied") ? 0 : 1;
+            }
+        }
+    }
+    if (!statue_grid.physical_occupied(1, 1, 1) || statue_grid.physical_occupied(0, 1, 1) ||
+        statue_grid.physical_occupied(1, 0, 1) || statue_grid.physical_occupied(2, 1, 1)) {
+        return fail("resource 0x1012's z=1 physical_occupancy layer did not match the single occupied cell") ? 0 : 1;
+    }
+    if (!statue_grid.physical_occupied(1, 1, 2) || !statue_grid.physical_occupied(2, 1, 2) ||
+        statue_grid.physical_occupied(0, 1, 2) || statue_grid.physical_occupied(1, 2, 2)) {
+        return fail("resource 0x1012's z=2 physical_occupancy layer did not match its asymmetric pattern "
+                    "(possible x/y transposition)") ? 0 : 1;
+    }
+
     manager.reset();
     SDL_Quit();
     std::puts("PASS: ResourceManager loads real BMP, DAT/color key, WAVE, BUT, and ANI archive assets");

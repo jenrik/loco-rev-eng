@@ -117,6 +117,13 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
     // that match no other keyword, so they fall through the loop untouched.
     bool expect_physical_dims = false;
     bool expect_bitmap_dims = false;
+    // Set to grid_height*grid_depth right after the physical dims line parses;
+    // counted down one data row at a time rather than scanned-for-next-keyword,
+    // because some .dat files (e.g. scenery/bigfount.dat) interleave an
+    // unrelated directive ("LeisureDestination 1") between the last occupancy
+    // row and the "bitmap_occupancy" header -- a keyword-boundary scan would
+    // swallow it as if it were grid data.
+    int physical_rows_remaining = 0;
     std::istringstream lines(text);
     std::string line;
     while (std::getline(lines, line)) {
@@ -129,8 +136,33 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
                 parse_int(tokens[1], &metadata->footprint.grid_height) &&
                 parse_int(tokens[2], &metadata->footprint.grid_depth)) {
                 metadata->footprint.has_footprint = true;
+                metadata->footprint.physical_occupancy_grid.clear();
+                physical_rows_remaining =
+                    metadata->footprint.grid_height * metadata->footprint.grid_depth;
             }
             continue;
+        }
+        if (physical_rows_remaining > 0) {
+            if (tokens.size() == static_cast<size_t>(metadata->footprint.grid_width)) {
+                std::vector<uint8_t> row;
+                row.reserve(tokens.size());
+                bool row_ok = true;
+                for (const std::string& cell : tokens) {
+                    int value = 0;
+                    if (!parse_int(cell, &value)) { row_ok = false; break; }
+                    row.push_back(static_cast<uint8_t>(value));
+                }
+                if (row_ok) {
+                    metadata->footprint.physical_occupancy_grid.insert(
+                        metadata->footprint.physical_occupancy_grid.end(),
+                        row.begin(), row.end());
+                    --physical_rows_remaining;
+                    continue;
+                }
+            }
+            // Not a grid data row after all (e.g. an interleaved directive
+            // line) -- stop collecting instead of misparsing it as a cell row.
+            physical_rows_remaining = 0;
         }
         if (expect_bitmap_dims) {
             expect_bitmap_dims = false;

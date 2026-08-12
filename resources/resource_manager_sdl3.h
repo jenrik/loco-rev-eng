@@ -66,6 +66,33 @@ struct SpriteFootprint {
     int grid_depth = 0;         // physical_occupancy depth
     int bitmap_grid_width = 0;  // bitmap_occupancy width
     int bitmap_grid_height = 0; // bitmap_occupancy height
+
+    // physical_occupancy cell values, exactly grid_width*grid_height*grid_depth
+    // entries, stored in file order (depth-major, then height, then width --
+    // see parse_sprite_metadata). Empty when has_footprint is false or the
+    // .dat's row count didn't match its own declared dims. Values observed in
+    // the shipped archive are strictly 0/1 (verified against scenery/statue1.dat
+    // and scenery/bigfount.dat). Access via physical_occupied(), not the raw
+    // index formula below, so the storage order stays an implementation detail.
+    std::vector<uint8_t> physical_occupancy_grid;
+
+    // bitmap_occupancy's cell values are NOT parsed here: unlike
+    // physical_occupancy, its rows carry non-binary values (0 through at least
+    // 6, observed in scenery/bigfount.dat) whose semantics were not resolved
+    // against the original consumer at the time this was written -- only the
+    // bounding dims above are trustworthy.
+
+    bool physical_occupied(int x, int y, int z) const {
+        if (!has_footprint || x < 0 || x >= grid_width || y < 0 ||
+            y >= grid_height || z < 0 || z >= grid_depth) {
+            return false;
+        }
+        const size_t index = (static_cast<size_t>(z) * grid_height + y) *
+                                  grid_width +
+                              x;
+        return index < physical_occupancy_grid.size() &&
+               physical_occupancy_grid[index] != 0;
+    }
 };
 
 struct SpriteMetadata {
