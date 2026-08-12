@@ -214,6 +214,20 @@ public:
      */
     int32_t StoreTilePointer(void* ptr);
 
+#ifndef _WIN32
+    /** Host-only diagnostic, no original counterpart: number of tile-grid
+     * cells the most recent FindObject() call actually wrote via
+     * WriteTileValue. A non-null FindObject() return is not proof of
+     * occupancy by itself -- a resource with no real physical/bitmap
+     * footprint (grid_width/height == 0 and orig_span == 0) still
+     * constructs and returns an entity but writes zero cells. Callers
+     * that need to know whether a placement really landed in the grid
+     * (see INPUT_LoadSaveFile's placed-vs-occupied measurement) must
+     * check this after each FindObject() call, not just the return
+     * value. */
+    int32_t last_find_object_cells_written = 0;
+#endif
+
     /* ---- Lifecycle ---- */
 
     /** Initialize dimensions and occupancy bitmap — Address: 0x454E60 */

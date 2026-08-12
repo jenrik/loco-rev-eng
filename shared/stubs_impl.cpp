@@ -354,6 +354,15 @@ uint8_t g_allow_building_placement = 0;   /* 0x4FD3DC — loader/building placem
                                              and restores it around its work. */
 void* g_town_view = nullptr;
 void* g_tile_occupied_bitmap = nullptr;
+/* TODO(tilemap-drawing-pipeline): declared here as a scalar but
+ * world/tilemap.h declares `extern uint8_t ATTR_0047f108[8]` (real 8-byte
+ * bitmask-table type, confirmed via disassembly at 0x455342: `MOV AL, byte
+ * ptr [EAX + 0x47f108]` with EAX pre-masked to 0-7). Fixing the type wakes
+ * up TileMap::InvalidateDirtyRects/ProcessRect's DirectDraw presentation
+ * path (dirty-tile bits go from always-0 to real), which has its own
+ * separate landmines (null g_cursor_surface, raw offset reads on
+ * tobj->resource) -- out of scope for the ScrollRect/FindObject placement
+ * work this fixes alongside. See PROGRESS.md. */
 int ATTR_0047f108 = 0;
 int DAT_00481170 = 0;
 int DAT_0048118c = 0;

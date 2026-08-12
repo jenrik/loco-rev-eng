@@ -46,7 +46,6 @@ uint8_t ResolveVehicleTileType(const void* resource)
 /* ================================================================== */
 
 extern void  World_DeserializeMap(void* world, int obj);  /* 0x44DAD0 */
-extern void  GameObject_StopSound(void*, int);             /* 0x405A20 — Entity::StopSound */
 /* RESDATA_IsRoadTile takes int32_t, not void* — the real implementation
  * (world/tilemap.h) treats it as a __fastcall(int32_t); a void* param
  * declaration here mangled to a symbol nothing defines (genuine call-0,
@@ -114,16 +113,16 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
             /* DEAD CODE — tile_type != 0x0B here */
             if (anim_val == 0) {
                 this->init_state = 5;
-                GameObject_StopSound(this, 0);
+                Entity::StopSound(0);
             } else {
                 if (anim_val == 1) {
                     this->init_state = 4;
                 }
-                GameObject_StopSound(this, anim_val);
+                Entity::StopSound(anim_val);
             }
         } else {
             this->init_state = anim_val;
-            GameObject_StopSound(this, anim_val);
+            Entity::StopSound(anim_val);
         }
     } else if (tile_type == 0x0B) {
         /* Pedestrian tile */
@@ -157,7 +156,7 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
             this->init_state   = 4;
             this->vehicle_kind = 7;
             this->init_state   = 4;  /* binary writes twice */
-            GameObject_StopSound(this, 1);
+            Entity::StopSound(1);
         } else {
             /* Check resource ID for special vehicles */
             int32_t res_id = -1;

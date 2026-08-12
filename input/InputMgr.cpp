@@ -1180,6 +1180,19 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
     const int32_t entity_count = static_cast<int32_t>(resdata.save.entity_count);
     const uint16_t vehicle_count = resdata.save.vehicle_count;
     bool truncation = false;
+#ifndef _WIN32
+    /* Host measurement, not a claim: how many of this file's records
+     * actually landed in the real tilemap grid via TileMap::FindObject,
+     * vs. rejected/skipped. Same "count, don't assume" discipline as the
+     * gate-ordering bug's 0-vs-497 guard-hit measurement (PROGRESS.md).
+     * placed_count is "FindObject returned a non-null entity" -- NOT
+     * proof of grid occupancy (a resource with no real footprint still
+     * constructs an entity while writing zero cells). occupied_count is
+     * the stronger claim: TileMap::last_find_object_cells_written was
+     * nonzero for that same call, i.e. a tile slot genuinely changed. */
+    int32_t placed_count = 0;
+    int32_t occupied_count = 0;
+#endif
 
 #ifndef _WIN32
     /* Host: validate the declared record layout against the stream so a
@@ -1247,6 +1260,12 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
             index++;
             continue;
         }
+#ifndef _WIN32
+        placed_count++;
+        if (static_cast<TileMap*>(g_tilemap)->last_find_object_cells_written > 0) {
+            occupied_count++;
+        }
+#endif
 
         if (flags2 == 0) {
             as_tilemap_object(entity)->is_moving = 0;   /* +0xC0 */
@@ -1419,6 +1438,16 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
     g_in_build_mode = 1;                            /* 0x4FD199 */
     g_allow_building_placement = static_cast<uint8_t>(saved_placement);
     RESMGR_ReleaseResource(&resdata);               /* 0x447B90 */
+#ifndef _WIN32
+    if (loco::host::host_placement_available()) {
+        std::fprintf(stderr,
+            "[HOST] INPUT_LoadSaveFile: '%s' placed %d / %d entity records "
+            "(%d actually occupied a tile slot) into the real tilemap grid "
+            "via TileMap::FindObject\n",
+            path, placed_count, entity_count, occupied_count);
+        std::fflush(stderr);
+    }
+#endif
     return 1;
 }
 

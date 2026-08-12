@@ -1333,33 +1333,45 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
 {
     TileMapResource* building = target_building;
 
+    /* Both call sites (TileMap::FindObject) pass the raw
+     * ResourceManager_GetById() return value, before any real placed
+     * object exists. On host that pointer is a loco::assets::SpriteResource
+     * -- a small, unrelated C++ struct -- so grid_width/object_type/
+     * occupancy_grid (offsets +0x168/+0x08/+0x16E) cannot be read as raw
+     * struct offsets; source them from the already-verified SpriteFootprint/
+     * SpriteMetadata parse instead (resources/resource_manager_sdl3.h,
+     * SpriteFootprint::physical_occupied()). See PROGRESS.md's "raw fixed-
+     * offset reads against undersized host resource objects" landmine
+     * item for why the raw-offset read is unsafe here. */
+    byte grid_w, grid_h;
+    int8_t grid_depth;
+    uint8_t object_type;
+    bool host_has_tile_type = false;
+    uint8_t host_tile_type_byte = 0;
 #ifndef _WIN32
-    /* Host deviation: both call sites (TileMap::FindObject) pass the raw
-     * ResourceManager_GetById() return value reinterpret_cast to
-     * TileMapObject*, before any real placed object exists. On host that
-     * pointer is a loco::assets::SpriteResource -- a small, unrelated C++
-     * struct -- so grid_width/occupancy_grid below (offsets +0x168/+0x16E)
-     * would read hundreds of bytes past the real allocation. That read
-     * doesn't crash; it silently returns garbage that almost always fails
-     * validation, which is indistinguishable from a real "can't place
-     * here" rejection without this check. Reject explicitly and loudly
-     * instead (same 0 return the original gives for a real validation
-     * failure) until a proper host resource adapter carries occupancy-grid
-     * data. See PROGRESS.md's "raw fixed-offset reads against undersized
-     * host resource objects" landmine item. */
+    const loco::assets::SpriteFootprint* host_footprint = nullptr;
     if (loco::assets::is_host_sprite_resource(building)) {
-        std::fprintf(stderr,
-            "[HOST] TileMap::ScrollRect: rejecting placement -- resource "
-            "%p is a host SpriteResource, not a real TileMapObject/"
-            "TileMapResource (no occupancy-grid adapter yet)\n",
-            static_cast<const void*>(building));
-        std::fflush(stderr);
-        return 0;
-    }
+        auto* host_resource = reinterpret_cast<loco::assets::SpriteResource*>(building);
+        const loco::assets::SpriteMetadata* metadata =
+            loco::assets::host_resource_manager().sprite_metadata(host_resource);
+        if (metadata == nullptr) return 0;
+        host_footprint = &metadata->footprint;
+        grid_w = static_cast<byte>(host_footprint->grid_width);
+        grid_h = static_cast<byte>(host_footprint->grid_height);
+        grid_depth = static_cast<int8_t>(host_footprint->grid_depth);
+        object_type = static_cast<uint8_t>(
+            GetResourceType(loco::assets::sprite_resource_id(host_resource)));
+        host_has_tile_type = metadata->has_tile_type;
+        host_tile_type_byte = host_has_tile_type ?
+            static_cast<uint8_t>(metadata->tile_type) : 0;
+    } else
 #endif
-
-    byte grid_w = building->grid_width;
-    byte grid_h = building->grid_height;
+    {
+        grid_w = building->grid_width;
+        grid_h = building->grid_height;
+        grid_depth = building->grid_depth;
+        object_type = building->object_type;
+    }
 
     /* Bounds check (unsigned add of the byte dims, matching the binary) */
     if (static_cast<int>(static_cast<unsigned int>(grid_w) +
@@ -1371,9 +1383,24 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
 
     char valid = 1;
 
-    /* Check road tile compatibility */
-    if (building->object_type == 0x03) {
-        if (RESDATA_IsRoadTile(reinterpret_cast<intptr_t>(target_building))) {
+    /* Check road tile compatibility. RESDATA_IsRoadTile takes int32_t (the
+     * original x86 ABI's pointer width) -- same pointer-truncation defect
+     * already fixed in InputMgr.cpp's dispatch and RESDATA_GameVehicle's
+     * constructor. Check the already-resolved tile_type byte directly on
+     * host instead of re-deriving it through a truncated pointer. */
+    if (object_type == 0x03) {
+        bool is_road;
+#ifndef _WIN32
+        if (host_footprint != nullptr) {
+            is_road = host_has_tile_type &&
+                (host_tile_type_byte == 0x01 || host_tile_type_byte == 0x02 ||
+                 host_tile_type_byte == 0x03 || host_tile_type_byte == 0x04);
+        } else
+#endif
+        {
+            is_road = RESDATA_IsRoadTile(reinterpret_cast<intptr_t>(target_building)) != 0;
+        }
+        if (is_road) {
             unsigned int category = RESDATA_GetTileCategory(
                 target_building, delta_x, delta_y);
             valid = static_cast<char>(category);
@@ -1382,22 +1409,30 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
 
     /* If still valid, scan the occupancy grid */
     if (valid == 1) {
-        byte bVar4 = building->grid_width;
-        byte bVar7 = building->grid_height;
+        byte bVar4 = grid_w;
+        byte bVar7 = grid_h;
 
         if (bVar4 != 0 && bVar7 != 0) {
             valid = 1;
-            short depth = building->grid_depth;
+            short depth = grid_depth;
 
             for (short iz = 0; iz < depth; iz++) {
                 for (short iy = 0; iy < static_cast<short>(bVar7); iy++) {
                     for (short ix = 0; ix < static_cast<short>(bVar4); ix++) {
                         /* occupancy grid is indexed [x][y][z] = x*63+y*7+z */
-                        int8_t occ = building->occupancy_grid[
-                            static_cast<int>(ix) * 9 * 7 +
-                            static_cast<int>(iy) * 7 +
-                            static_cast<int>(iz)];
-                        if (occ != 0) {
+                        bool occ;
+#ifndef _WIN32
+                        if (host_footprint != nullptr) {
+                            occ = host_footprint->physical_occupied(ix, iy, iz);
+                        } else
+#endif
+                        {
+                            occ = building->occupancy_grid[
+                                static_cast<int>(ix) * 9 * 7 +
+                                static_cast<int>(iy) * 7 +
+                                static_cast<int>(iz)] != 0;
+                        }
+                        if (occ) {
                             /* Disassembly of 0x4553E0: the tile address is
                              * `(int)sVar8 + (sVar10 + iVar9) * 0x41 + iVar5`
                              * where sVar10 is the x/width-bounded loop var
@@ -2360,6 +2395,10 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
 {
     int* result = NULL;
 
+#ifndef _WIN32
+    last_find_object_cells_written = 0;
+#endif
+
     if (tile_x < 0 || tile_x > tile_count_x ||
         tile_y < 0 || tile_y > tile_count_y) {
         return NULL;
@@ -2372,10 +2411,45 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
     }
 
     TileMapResource* resource = reinterpret_cast<TileMapResource*>(res_data);
-    unsigned short orig_span = static_cast<unsigned short>(resource->original_span);
-    byte span_y = resource->grid_span_y;
+
+    /* Host deviation: on host, res_data is a loco::assets::SpriteResource,
+     * not a real TileMapResource -- source original_span/grid_span_y/
+     * grid_width/height/depth from the verified SpriteFootprint parse
+     * instead of raw struct offsets. Same landmine and same fix shape as
+     * ScrollRect's matching comment. bitmap_grid_height/width ARE
+     * original_span/grid_span_y: BuildingDescriptorEditor__parse_dat_
+     * directive_line (0x41E9F0) extracts the same two shorts, in the same
+     * order, into both this file's +0x16B/+0x16C and that class's
+     * bitmap_occupancy_width/height. */
+    unsigned short orig_span;
+    byte span_y;
+    byte grid_height, grid_width;
+    int8_t grid_depth;
+#ifndef _WIN32
+    const loco::assets::SpriteFootprint* host_footprint = nullptr;
+    if (loco::assets::is_host_sprite_resource(res_data)) {
+        const loco::assets::SpriteMetadata* metadata =
+            loco::assets::host_resource_manager().sprite_metadata(
+                static_cast<loco::assets::SpriteResource*>(res_data));
+        if (metadata == nullptr) return NULL;
+        host_footprint = &metadata->footprint;
+        orig_span = static_cast<unsigned short>(host_footprint->bitmap_grid_height);
+        span_y = static_cast<byte>(host_footprint->bitmap_grid_width);
+        grid_height = static_cast<byte>(host_footprint->grid_height);
+        grid_width = static_cast<byte>(host_footprint->grid_width);
+        grid_depth = static_cast<int8_t>(host_footprint->grid_depth);
+    } else
+#endif
+    {
+        orig_span = static_cast<unsigned short>(resource->original_span);
+        span_y = resource->grid_span_y;
+        grid_height = resource->grid_height;
+        grid_width = resource->grid_width;
+        grid_depth = resource->grid_depth;
+    }
+
     int offset = static_cast<unsigned int>(orig_span) -
-                 static_cast<unsigned int>(resource->grid_height);
+                 static_cast<unsigned int>(grid_height);
 
     short adjusted_y = tile_y;
     if (unknown != 1) {
@@ -2399,27 +2473,35 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                 /* Fill the standard layer region of each occupied tile */
                 short gy = 0;
                 int y_start = offset + static_cast<int>(adjusted_y);
-                if (resource->grid_height != 0) {
+                if (grid_height != 0) {
                     do {
                         short gx = 0;
                         unsigned int x_start = static_cast<unsigned int>(tile_x);
-                        if (resource->grid_width != 0) {
+                        if (grid_width != 0) {
                             do {
-                                /* Occupancy grid indexed [x][y][z] */
-                                for (int8_t iz = 0; iz < resource->grid_depth; iz++) {
-                                    /* Disassembly of 0x4550C0 (pvVar6):
-                                     * every +0x16e occupancy-grid read here
-                                     * is against the raw resource, never
-                                     * against the newly-placed `result` --
-                                     * an earlier transcription read this
-                                     * off `result`, which (a) is the wrong
-                                     * object and (b) doesn't even declare
-                                     * this field (see TileMapObject's own
-                                     * comment on why it was removed). */
-                                    if (resource->occupancy_grid[
+                                /* Occupancy grid indexed [x][y][z]. Disassembly
+                                 * of 0x4550C0 (pvVar6): every +0x16e occupancy-
+                                 * grid read here is against the raw resource,
+                                 * never against the newly-placed `result` --
+                                 * an earlier transcription read this off
+                                 * `result`, which (a) is the wrong object and
+                                 * (b) doesn't even declare this field (see
+                                 * TileMapObject's own comment on why it was
+                                 * removed). */
+                                for (int8_t iz = 0; iz < grid_depth; iz++) {
+                                    bool occ;
+#ifndef _WIN32
+                                    if (host_footprint != nullptr) {
+                                        occ = host_footprint->physical_occupied(gx, gy, iz);
+                                    } else
+#endif
+                                    {
+                                        occ = resource->occupancy_grid[
                                                 static_cast<int>(gx) * 9 * 7 +
                                                 static_cast<int>(gy) * 7 +
-                                                static_cast<int>(iz)] == 1) {
+                                                static_cast<int>(iz)] == 1;
+                                    }
+                                    if (occ) {
                                         int tile_index =
                                             (y_start + static_cast<int>(gy)) +
                                             (static_cast<int>(x_start) +
@@ -2434,14 +2516,17 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                         if (active <= static_cast<uint8_t>(iz)) {
                                             active = static_cast<uint8_t>(iz);
                                         }
+#ifndef _WIN32
+                                        last_find_object_cells_written++;
+#endif
                                     }
                                 }
                                 gx++;
-                            } while (gx < resource->grid_width);
+                            } while (gx < grid_width);
                         }
                         gy++;
                         y_start++;
-                    } while (gy < resource->grid_height);
+                    } while (gy < grid_height);
                 }
 
                 /* Write the span map (resource +0x4A1, stride 9) into the
@@ -2456,8 +2541,18 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                             for (; sx < static_cast<int>(span_y); sx++) {
                                 /* span_map row stride 1, column stride 9
                                  * (BuildingDescriptorEditor__parse_dat_
-                                 * directive_line, 0x41E9F0). */
-                                uint8_t span = resource->span_map[sy + sx * 9];
+                                 * directive_line, 0x41E9F0); host equivalent
+                                 * is row-major (see SpriteFootprint::
+                                 * bitmap_occupancy_value's own doc comment). */
+                                uint8_t span;
+#ifndef _WIN32
+                                if (host_footprint != nullptr) {
+                                    span = host_footprint->bitmap_occupancy_value(sx, sy);
+                                } else
+#endif
+                                {
+                                    span = resource->span_map[sy + sx * 9];
+                                }
                                 if (span != 0) {
                                     int tile_index = y + (x + sx) * 0x41;
                                     int span_slot = static_cast<int>(span) - 1;
@@ -2479,6 +2574,9 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                         reinterpret_cast<uint8_t*>(
                                             this->occupancy_bitmap) + (bit_idx >> 3);
                                     *bitmap_byte |= ATTR_0047f108[bit_idx & 7];
+#ifndef _WIN32
+                                    last_find_object_cells_written++;
+#endif
                                 }
                             }
                         }
