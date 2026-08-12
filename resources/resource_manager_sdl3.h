@@ -76,11 +76,22 @@ struct SpriteFootprint {
     // index formula below, so the storage order stays an implementation detail.
     std::vector<uint8_t> physical_occupancy_grid;
 
-    // bitmap_occupancy's cell values are NOT parsed here: unlike
-    // physical_occupancy, its rows carry non-binary values (0 through at least
-    // 6, observed in scenery/bigfount.dat) whose semantics were not resolved
-    // against the original consumer at the time this was written -- only the
-    // bounding dims above are trustworthy.
+    // bitmap_occupancy cell values, exactly bitmap_grid_width*bitmap_grid_height
+    // entries, row-major (row 0 first, bitmap_grid_width entries per row).
+    // Unlike physical_occupancy, values are not booleans -- they are 1-based
+    // layer indices into the tile's ORIGIN region (TileMap::FindObject,
+    // 0x4550C0: value-1 = layer, 0 = cell not part of this span). Verified
+    // against the shipped resource.RFD directly (each bitmap_occupancy
+    // section is one "W H" dims line followed by exactly H rows of W
+    // space-separated tokens, values 0 through at least 6 observed) before
+    // writing this parser, matching the same row/line-per-row shape
+    // physical_occupancy already used. Access via bitmap_occupancy_value(),
+    // not the raw index formula, so the storage order stays an
+    // implementation detail (this array is row-major; the original x86
+    // BuildingDescriptorEditor::bitmap_occupancy_grid stores it column-major
+    // with a 9-byte column stride -- see world/tilemap.h's
+    // TileMapResource::span_map).
+    std::vector<uint8_t> bitmap_occupancy_grid;
 
     bool physical_occupied(int x, int y, int z) const {
         if (!has_footprint || x < 0 || x >= grid_width || y < 0 ||
@@ -92,6 +103,17 @@ struct SpriteFootprint {
                               x;
         return index < physical_occupancy_grid.size() &&
                physical_occupancy_grid[index] != 0;
+    }
+
+    // Raw bitmap_occupancy cell value at (x, y); 0 if out of bounds, no
+    // footprint, or the .dat's row count didn't match its declared dims.
+    uint8_t bitmap_occupancy_value(int x, int y) const {
+        if (!has_footprint || x < 0 || x >= bitmap_grid_width || y < 0 ||
+            y >= bitmap_grid_height) {
+            return 0;
+        }
+        const size_t index = static_cast<size_t>(y) * bitmap_grid_width + x;
+        return index < bitmap_occupancy_grid.size() ? bitmap_occupancy_grid[index] : 0;
     }
 };
 

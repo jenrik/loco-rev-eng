@@ -126,6 +126,34 @@ int main() {
                     "(possible x/y transposition)") ? 0 : 1;
     }
 
+    // resource 0x1012's bitmap_occupancy is 3x4 with a real 0/non-binary
+    // cell (verified by extracting resource.RFD directly, and cross-checked
+    // against a standalone dump program before writing this assertion):
+    //   row 0: 0 3 3     row 1: 1 2 1     row 2: 1 1 1     row 3: 1 1 1
+    // Chosen because (a) the leading 0 tests that "not part of this span"
+    // is reported as 0, not misread as a valid layer, and (b) the 2/3
+    // values prove this isn't just re-reading physical_occupancy's boolean
+    // grid under a different name.
+    if (statue_metadata->footprint.bitmap_grid_width != 3 ||
+        statue_metadata->footprint.bitmap_grid_height != 4 ||
+        statue_metadata->footprint.bitmap_occupancy_grid.size() != 12) {
+        return fail("resource 0x1012's bitmap_occupancy dims/row count were not parsed") ? 0 : 1;
+    }
+    if (statue_grid.bitmap_occupancy_value(0, 0) != 0 ||
+        statue_grid.bitmap_occupancy_value(1, 0) != 3 ||
+        statue_grid.bitmap_occupancy_value(2, 0) != 3 ||
+        statue_grid.bitmap_occupancy_value(0, 1) != 1 ||
+        statue_grid.bitmap_occupancy_value(1, 1) != 2 ||
+        statue_grid.bitmap_occupancy_value(2, 1) != 1 ||
+        statue_grid.bitmap_occupancy_value(0, 3) != 1 ||
+        statue_grid.bitmap_occupancy_value(2, 3) != 1) {
+        return fail("resource 0x1012's bitmap_occupancy cell values did not match") ? 0 : 1;
+    }
+    if (statue_grid.bitmap_occupancy_value(3, 0) != 0 ||
+        statue_grid.bitmap_occupancy_value(0, 4) != 0) {
+        return fail("resource 0x1012's bitmap_occupancy_value did not report 0 out of bounds") ? 0 : 1;
+    }
+
     // track\pnt-ws.dat's last directive line is the standalone keyword
     // "points" (no direction qualifier, verified by extracting resource.RFD
     // directly) -> TileTrackType::Points, matching TileMapResource::state_63A's

@@ -172,6 +172,10 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
     // row and the "bitmap_occupancy" header -- a keyword-boundary scan would
     // swallow it as if it were grid data.
     int physical_rows_remaining = 0;
+    // Same row-countdown rationale as physical_rows_remaining -- some .dat
+    // files interleave directives (e.g. "LeisureDestination") right after
+    // the last bitmap_occupancy row.
+    int bitmap_rows_remaining = 0;
     std::istringstream lines(text);
     std::string line;
     while (std::getline(lines, line)) {
@@ -218,8 +222,30 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
                 parse_int(tokens[0], &metadata->footprint.bitmap_grid_width) &&
                 parse_int(tokens[1], &metadata->footprint.bitmap_grid_height)) {
                 metadata->footprint.has_footprint = true;
+                metadata->footprint.bitmap_occupancy_grid.clear();
+                bitmap_rows_remaining = metadata->footprint.bitmap_grid_height;
             }
             continue;
+        }
+        if (bitmap_rows_remaining > 0) {
+            if (tokens.size() == static_cast<size_t>(metadata->footprint.bitmap_grid_width)) {
+                std::vector<uint8_t> row;
+                row.reserve(tokens.size());
+                bool row_ok = true;
+                for (const std::string& cell : tokens) {
+                    int value = 0;
+                    if (!parse_int(cell, &value)) { row_ok = false; break; }
+                    row.push_back(static_cast<uint8_t>(value));
+                }
+                if (row_ok) {
+                    metadata->footprint.bitmap_occupancy_grid.insert(
+                        metadata->footprint.bitmap_occupancy_grid.end(),
+                        row.begin(), row.end());
+                    --bitmap_rows_remaining;
+                    continue;
+                }
+            }
+            bitmap_rows_remaining = 0;
         }
         if (tokens[0] == "physical_occupancy") {
             expect_physical_dims = true;
