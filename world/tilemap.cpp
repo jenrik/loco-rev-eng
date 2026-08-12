@@ -880,11 +880,17 @@ uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj)
     }
 
 #ifndef _WIN32
-    /* Host deviation: tile_obj may be a loco::assets::SpriteResource*
-     * (undersized-object landmine, see PROGRESS.md) rather than a real
-     * RESDATA/TileMapResource. Source the tile-state byte from the
-     * already-verified SpriteMetadata::tile_type instead of reading past
-     * the real allocation. */
+    /* Host deviation: `tile_obj`'s real type depends on the caller.
+     * INPUT_LoadSaveFile/INPUT_FindObjectAt (the two callers on record)
+     * pass ResourceManager_GetById's return value, which on host today is
+     * always a loco::assets::SpriteResource* (undersized-object landmine,
+     * see PROGRESS.md) -- source the byte from the already-verified
+     * SpriteMetadata::tile_type instead of reading past the real
+     * allocation. `is_host_sprite_resource()` correctly returns false (and
+     * this falls through to the raw read below) for a pointer that is
+     * NOT a SpriteResource -- notably a real placed TileMapObject* once
+     * INPUT_PlaceObject/FindObject exist (PROGRESS.md:368's occupancy_grid
+     * note); that case isn't reachable yet and isn't guarded here. */
     const void* host_resource =
         reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj));
     uint8_t host_state = 0;
