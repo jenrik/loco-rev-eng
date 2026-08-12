@@ -126,6 +126,28 @@ int main() {
                     "(possible x/y transposition)") ? 0 : 1;
     }
 
+    // track\pnt-ws.dat's last directive line is the standalone keyword
+    // "points" (no direction qualifier, verified by extracting resource.RFD
+    // directly) -> TileTrackType::Points, matching TileMapResource::state_63A's
+    // value table (FUN_0044b4f0).
+    void* points = ResourceManager_GetById(static_cast<void*>(nullptr), 0xc0a);
+    const loco::assets::SpriteMetadata* points_metadata = ResourceManager_GetSpriteMetadata(points);
+    if (!points_metadata || !points_metadata->has_tile_type ||
+        points_metadata->tile_type != loco::assets::TileTrackType::Points) {
+        return fail("resource 0xc0a's standalone \"points\" tile_type was not parsed") ? 0 : 1;
+    }
+
+    // track\Depot-n.dat carries "depot top" (type keyword + direction
+    // qualifier on the same line, verified by extracting resource.RFD
+    // directly) -> TileTrackType::DepotTop == 9, not the sequential-looking
+    // 7 a naive left/right/top/bottom ordering guess would produce.
+    void* depot = ResourceManager_GetById(static_cast<void*>(nullptr), 0xc54);
+    const loco::assets::SpriteMetadata* depot_metadata = ResourceManager_GetSpriteMetadata(depot);
+    if (!depot_metadata || !depot_metadata->has_tile_type ||
+        depot_metadata->tile_type != loco::assets::TileTrackType::DepotTop) {
+        return fail("resource 0xc54's \"depot top\" tile_type was not parsed") ? 0 : 1;
+    }
+
     manager.reset();
     SDL_Quit();
     std::puts("PASS: ResourceManager loads real BMP, DAT/color key, WAVE, BUT, and ANI archive assets");

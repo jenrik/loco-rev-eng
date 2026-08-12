@@ -95,6 +95,37 @@ struct SpriteFootprint {
     }
 };
 
+// Track-connectivity classification, matching TileMapResource::state_63A
+// (world/tilemap.h). Values and their originating keyword/direction pair are
+// fully evidenced from decompiling FUN_0044b4f0 (vtable 0x478358 slot [3] --
+// still no confirmed caller, but the keyword table itself doesn't depend on
+// finding one). Confirmed against real archive data (track/*.dat) that the
+// type keyword and its direction/orientation qualifier are space-separated
+// tokens on one line, e.g. "tunnel right", "depot top", "levelcrossing
+// road-x-v", or a lone keyword with no qualifier ("points", "switch",
+// "crosstrack").
+enum class TileTrackType : uint8_t {
+    TunnelLeft = 1,
+    TunnelRight = 2,
+    TunnelTop = 3,
+    TunnelBottom = 4,
+    BridgeHorizontal = 5,
+    BridgeVertical = 6,
+    DepotLeft = 7,
+    DepotRight = 8,
+    DepotTop = 9,
+    DepotBottom = 10,
+    Points = 0xb,
+    Switch = 0xc,
+    CrossTrack = 0xd,
+    LevelCrossingPathHorizontal = 0xe,
+    LevelCrossingPathVertical = 0xf,
+    LevelCrossingRoadHorizontal = 0x10,
+    LevelCrossingRoadVertical = 0x11,
+    StationHorizontal = 0x12,
+    StationVertical = 0x13,
+};
+
 struct SpriteMetadata {
     bool is_button = false;
     int offset_x = 0;
@@ -106,6 +137,13 @@ struct SpriteMetadata {
     int cursor_frame = 0;
     std::vector<AnimationFrameSet> frame_sets;
     SpriteFootprint footprint;
+
+    // Track-connectivity type, parsed from one of the "tunnel"/"depot"/
+    // "bridge"/"points"/"switch"/"crosstrack"/"levelcrossing"/"station"
+    // directive lines (see TileTrackType). false for the majority of
+    // resources (buildings, scenery, UI) that carry no such directive.
+    bool has_tile_type = false;
+    TileTrackType tile_type = TileTrackType::TunnelLeft;
 };
 
 class SpriteResource;

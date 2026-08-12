@@ -107,6 +107,54 @@ std::vector<std::string> split_tokens(const std::string& line) {
     return tokens;
 }
 
+// Classifies a "tunnel"/"depot"/"bridge"/"points"/"switch"/"crosstrack"/
+// "levelcrossing"/"station" directive line into TileTrackType. `tokens[0]`
+// is the type keyword; `tokens[1]`, when the keyword needs one, is the
+// direction/orientation qualifier on the same line (confirmed against real
+// track/*.dat archive data -- see TileTrackType's doc comment). Returns
+// false (leaving *type unset) for anything that isn't one of these exact
+// keyword/qualifier pairs.
+bool classify_tile_track_type(const std::vector<std::string>& tokens, TileTrackType* type) {
+    static const std::unordered_map<std::string, TileTrackType> kDirectional = {
+        {"tunnel left", TileTrackType::TunnelLeft},
+        {"tunnel right", TileTrackType::TunnelRight},
+        {"tunnel top", TileTrackType::TunnelTop},
+        {"tunnel bottom", TileTrackType::TunnelBottom},
+        {"bridge horizontal", TileTrackType::BridgeHorizontal},
+        {"bridge vertical", TileTrackType::BridgeVertical},
+        {"depot left", TileTrackType::DepotLeft},
+        {"depot right", TileTrackType::DepotRight},
+        {"depot top", TileTrackType::DepotTop},
+        {"depot bottom", TileTrackType::DepotBottom},
+        {"levelcrossing path-x-h", TileTrackType::LevelCrossingPathHorizontal},
+        {"levelcrossing path-x-v", TileTrackType::LevelCrossingPathVertical},
+        {"levelcrossing road-x-h", TileTrackType::LevelCrossingRoadHorizontal},
+        {"levelcrossing road-x-v", TileTrackType::LevelCrossingRoadVertical},
+        {"station station-h", TileTrackType::StationHorizontal},
+        {"station station-v", TileTrackType::StationVertical},
+    };
+    static const std::unordered_map<std::string, TileTrackType> kStandalone = {
+        {"points", TileTrackType::Points},
+        {"switch", TileTrackType::Switch},
+        {"crosstrack", TileTrackType::CrossTrack},
+    };
+    if (tokens.size() == 2) {
+        const auto it = kDirectional.find(tokens[0] + " " + tokens[1]);
+        if (it != kDirectional.end()) {
+            *type = it->second;
+            return true;
+        }
+    }
+    if (tokens.size() == 1) {
+        const auto it = kStandalone.find(tokens[0]);
+        if (it != kStandalone.end()) {
+            *type = it->second;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* metadata) {
     *metadata = SpriteMetadata{};
     const std::string text(bytes.begin(), bytes.end());
@@ -180,6 +228,14 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
         if (tokens[0] == "bitmap_occupancy") {
             expect_bitmap_dims = true;
             continue;
+        }
+        {
+            TileTrackType track_type{};
+            if (classify_tile_track_type(tokens, &track_type)) {
+                metadata->tile_type = track_type;
+                metadata->has_tile_type = true;
+                continue;
+            }
         }
         if (tokens[0] == "button") {
             metadata->is_button = true;
