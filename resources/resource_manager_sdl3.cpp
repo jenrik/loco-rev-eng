@@ -506,6 +506,14 @@ SpriteResource* host_get_sprite_by_id(uint32_t resource_id) {
     return host_resource_manager().get_sprite_by_id(resource_id);
 }
 
+bool initialize_host_resource_manager(const std::string& game_root, std::string* error) {
+    return host_resource_manager().initialize(game_root, error);
+}
+
+void reset_host_resource_manager() {
+    host_resource_manager().reset();
+}
+
 bool is_host_sprite_resource(const void* resource) {
     if (resource == nullptr) {
         return false;
@@ -523,6 +531,19 @@ bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte) {
         return false;
     }
     *out_byte = static_cast<uint8_t>(metadata->tile_type);
+    return true;
+}
+
+bool sprite_leisure_destination_byte(const void* resource, uint8_t* out_byte) {
+    if (!is_host_sprite_resource(resource)) {
+        return false;
+    }
+    const SpriteMetadata* metadata =
+        ResourceManager_GetSpriteMetadata(const_cast<void*>(resource));
+    if (metadata == nullptr) {
+        return false;
+    }
+    *out_byte = metadata->leisure_destination;
     return true;
 }
 

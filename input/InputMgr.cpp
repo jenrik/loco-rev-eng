@@ -67,6 +67,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
 #include <ctime>
 #include <new>
@@ -125,6 +126,22 @@ bool build_host_resource_path(char* destination, size_t destination_size,
 }
 
 }  // namespace
+#endif
+
+#ifndef _WIN32
+/* Forward declarations, not #include "../resources/resource_manager_sdl3.h":
+ * that header's ResourceManager_Init(void*) -> int declaration collides
+ * with network/Netman.h's pre-existing ResourceManager_Init(void*) -> void
+ * (already included above, a real, separate mismatch between those two
+ * headers -- see tests/persistence_fixtures.h for the same workaround).
+ * These match resource_manager_sdl3.h's real declarations exactly, so
+ * they resolve to the same already-compiled symbols at link time. */
+namespace loco::assets {
+bool is_host_sprite_resource(const void* resource);
+bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
+bool sprite_leisure_destination_byte(const void* resource, uint8_t* out_byte);
+}  // namespace loco::assets
+void* ResourceManager_GetById(void* ignored_original_manager, uint32_t resource_id);
 #endif
 
 /* ================================================================== */
@@ -330,6 +347,93 @@ void InputMgr::ListClearAll()
     }
 }
 
+/* ---- Resize — collection vtable[0], 0x435D10 (shared "Timer_Resize"
+ *      body with Game's inline timer list, core/Game.cpp:242).
+ *      Shrinking trims only trailing NULL slots (an occupied slot
+ *      stops the trim, so `new_capacity` acts as a floor, not a hard
+ *      cap, whenever elements are still live above it). Reallocates
+ *      zero-filled, copies min(old, new) capacity elements, frees the
+ *      old buffer.  capacity/buffer both become 0/null if the
+ *      allocation fails (matching the original's `uVar4 = -(new_buf!=0)
+ *      & uVar4` sentinel dance).                                    ---- */
+void InputMgr::ListResize(int32_t new_capacity)
+{
+    int32_t trimmed_capacity = new_capacity;
+    if (new_capacity < this->capacity) {
+        int32_t i = this->capacity;
+        while (new_capacity < i) {
+            if (this->buffer[i - 1] != nullptr) {
+                break;
+            }
+            i--;
+        }
+        trimmed_capacity = i;
+    }
+
+    Entity** old_buffer = this->buffer;
+    Entity** new_buffer = nullptr;
+    if (trimmed_capacity != 0) {
+        new_buffer = static_cast<Entity**>(
+            operator_new(static_cast<size_t>(trimmed_capacity) * sizeof(Entity*)));
+        std::memset(new_buffer, 0, static_cast<size_t>(trimmed_capacity) * sizeof(Entity*));
+    }
+    if (old_buffer != nullptr) {
+        if (new_buffer != nullptr) {
+            int32_t copy_count = std::min(trimmed_capacity, this->capacity);
+            std::memcpy(new_buffer, old_buffer, static_cast<size_t>(copy_count) * sizeof(Entity*));
+        }
+        GLOBAL_free(old_buffer);
+    }
+    this->buffer = new_buffer;
+    this->capacity = (new_buffer != nullptr) ? trimmed_capacity : 0;
+}
+
+/* ---- SetItem — collection vtable[10], 0x4124B0.  ListInsert's only
+ *      real caller (confirmed via get_xrefs_to: no other xref besides
+ *      the vtable's own data entry).  Destroys any existing occupant at
+ *      `index` (RemoveElement-style virtual-destructor delete) before
+ *      storing `item`; re-grows first if `index` is still >= capacity
+ *      -- redundant once ListInsert's own growth check has run, kept
+ *      because 0x4124B0 itself has the same redundant check.        ---- */
+Entity* InputMgr::ListSetItem(int32_t index, Entity* item)
+{
+    if (this->count < index) {
+        return nullptr;
+    }
+    if (this->capacity <= index) {
+        this->ListResize(1 - static_cast<int32_t>(static_cast<double>(this->count) * -1.1));
+    }
+    Entity*& slot = this->buffer[index];
+    if (slot != nullptr) {
+        delete slot;
+        slot = nullptr;
+    }
+    slot = item;
+    return slot;
+}
+
+/* ---- Insert — collection vtable[13], 0x412440.  Appends `item` at the
+ *      current count, growing first via ListResize if the buffer is
+ *      full.  New capacity is `1 - trunc(count * -1.1)` (the FMUL
+ *      constant at 0x477838, confirmed by disassembly+read_bytes) --
+ *      an amortized ~10%-plus-one growth, not a doubling.  Returns the
+ *      inserted index, or -1 if the append itself failed (can't happen
+ *      once ListResize has succeeded, preserved for fidelity).      ---- */
+int32_t InputMgr::ListInsert(Entity* item)
+{
+    if (this->capacity <= this->count) {
+        this->ListResize(1 - static_cast<int32_t>(static_cast<double>(this->count) * -1.1));
+    }
+    int32_t index = this->count;
+    this->count = index + 1;
+    Entity* stored = this->ListSetItem(index, item);
+    if (stored != nullptr) {
+        return this->count - 1;
+    }
+    this->count--;
+    return -1;
+}
+
 /* ================================================================== */
 /* ResetWorldState — vtable[3] (cleanup thunk 0x41D310 target)         */
 /* Address: 0x41E100                                                   */
@@ -526,13 +630,6 @@ static TileMapObject* as_tilemap_object(Entity* entity)
 }
 
 /* ================================================================== */
-/* ListResize/ListInsert (collection vtable[0] 0x435D10 / vtable[13]   */
-/* 0x412440) are NOT reconstructed in this milestone — the only        */
-/* binary caller is INPUT_PlaceObject (0x41DD80), which is editor-only */
-/* and stays a loud deferred stub below.                              */
-/* ================================================================== */
-
-/* ================================================================== */
 /* INPUT_NewWorld                                                     */
 /* Address: 0x41E120                                                   */
 /*                                                                      */
@@ -641,25 +738,110 @@ void INPUT_NewWorld(InputMgr* self)
 }
 
 /* ================================================================== */
-/* INPUT_PlaceObject (editor-only, deferred; loud)                    */
+/* INPUT_PlaceObject                                                    */
 /* Address: 0x41DD80                                                   */
 /*                                                                      */
-/* Creates a typed placed object for a resource id and registers it in */
-/* the collection.  Not on the load/save path (INPUT_NewWorld/Load/    */
-/* Save never call it — the persistence path finds existing objects    */
-/* through TileMap_FindObject and INPUT_FindObjectAt); it is editor-   */
-/* only and stays a loud deferred stub until the editor milestone.    */
+/* IS on the load path: TileMap::FindObject (0x4550C0, world/           */
+/* tilemap.cpp:2341) calls this directly, and INPUT_LoadSaveFile         */
+/* reaches FindObject while replaying a save's entity records --        */
+/* this is the real placement dispatcher for every kind of resource,    */
+/* not an editor-only tool (an earlier comment here claiming             */
+/* otherwise was stale; corrected 2026-08-12).                          */
+/*                                                                      */
+/* Dispatches on GetResourceType(resource_id):                          */
+/*   type 3, IsBuildingTile        -> GameVehicle                       */
+/*   type 3, !building, IsRoadTile -> HelpPageNode (mislabeled          */
+/*                                     HelpWnd_FindPage in the binary)   */
+/*   type 3, !building, !road      -> RESDATA_GameVehicle               */
+/*   type != 3                     -> ResourceGameObject                */
+/* (all four already real, address-verified C++ constructors --         */
+/* core/BuildingMgrObjectGroup.h, game/ResdataGameVehicle.h,             */
+/* game/GameVehicle.h, ui/HelpPageNode.h).                               */
+/*                                                                      */
+/* On construction failure (initialized != 1, i.e. the resource load     */
+/* failed) destroys the object and returns null -- the binary's          */
+/* `puVar4+6 != 1` check dispatches through the object's own vtable[0]   */
+/* (scalar deleting destructor, flag=1), exactly `delete`.  On success,  */
+/* registers it via ListInsert, increments special_count if the          */
+/* resource's leisure_destination byte (+0x62C) is nonzero, always       */
+/* increments entity_count, and returns the object.                      */
 /* ================================================================== */
-
 void* INPUT_PlaceObject(InputMgr* self, unsigned int resource_id)  /* 0x41DD80 */
 {
-    (void)self;
-    (void)resource_id;
-    std::fprintf(stderr,
-        "[InputMgr] INPUT_PlaceObject (0x41DD80) is a deferred stub: "
-        "editor-only, not on the load/save path\n");
-    std::fflush(stderr);
-    std::abort();
+    const unsigned type = GetResourceType(resource_id);
+    Entity* entity = nullptr;
+
+    if (type == 3) {
+        bool is_building_tile = false;
+        bool is_road_tile = false;
+#ifndef _WIN32
+        /* Host deviation: RESDATA_IsBuildingTile/IsRoadTile take int32_t
+         * (the original x86 ABI's pointer width). A real host resource
+         * pointer does not fit losslessly in int32_t -- this host's heap
+         * addresses run well past 0xFFFFFFFF -- so calling them here the
+         * way existing code does elsewhere in this file (on an already-
+         * constructed entity's resource, not a fresh pre-construction
+         * lookup) would silently classify against a truncated pointer.
+         * Call the pointer-safe host accessor directly instead, checking
+         * the exact value ranges those functions use internally. Not
+         * fixed at the source -- their int32_t signatures are real,
+         * address-verified x86 ABI contracts with other existing callers
+         * too; tracked as its own item in PROGRESS.md. */
+        void* resource = ResourceManager_GetById(static_cast<void*>(nullptr), resource_id);
+        uint8_t tile_byte = 0;
+        if (loco::assets::sprite_tile_type_byte(resource, &tile_byte)) {
+            is_building_tile = (tile_byte == 0x07 || tile_byte == 0x08 ||
+                                 tile_byte == 0x09 || tile_byte == 0x0A);
+            is_road_tile = !is_building_tile &&
+                (tile_byte == 0x01 || tile_byte == 0x02 ||
+                 tile_byte == 0x03 || tile_byte == 0x04);
+        }
+#else
+        const int32_t resource = g_resmgr.GetById(static_cast<int32_t>(resource_id));
+        is_building_tile = RESDATA_IsBuildingTile(resource) != 0;
+        is_road_tile = !is_building_tile && RESDATA_IsRoadTile(resource) != 0;
+#endif
+        if (is_building_tile) {
+            entity = new GameVehicle(static_cast<int>(resource_id));
+        } else if (is_road_tile) {
+            entity = new HelpPageNode(static_cast<int>(resource_id));
+        } else {
+            entity = new RESDATA_GameVehicle(static_cast<int>(resource_id));
+        }
+    } else {
+        entity = new ResourceGameObject(static_cast<int>(resource_id));
+    }
+
+    if (entity->initialized != 1) {
+        delete entity;
+        return nullptr;
+    }
+
+    self->ListInsert(entity);
+
+    bool has_leisure_destination;
+#ifndef _WIN32
+    uint8_t leisure_byte = 0;
+    if (loco::assets::sprite_leisure_destination_byte(entity->resource, &leisure_byte)) {
+        has_leisure_destination = leisure_byte != 0;
+    } else
+#endif
+    {
+        /* Host hardening: the binary reads +0x62C without a null check
+         * on the resource pointer (0x41DEC3 MOV EAX,[ESI+0x40]; 0x41DEC6
+         * MOV CL,[EAX+0x62c] -- no intervening test) -- safe in practice
+         * since initialized==1 already implies a loaded resource, but
+         * guarded here to match this file's established convention for
+         * unconditional binary reads. */
+        has_leisure_destination = entity->resource != nullptr &&
+            *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(entity->resource) + 0x62C) != 0;
+    }
+    if (has_leisure_destination) {
+        self->special_count++;
+    }
+    self->entity_count++;
+
+    return entity;
 }
 
 /* ================================================================== */

@@ -292,6 +292,22 @@ input_world_test = executable('input_world_test',
 )
 test('input-world', input_world_test, workdir: meson.project_source_root())
 
+# INPUT_PlaceObject reachability: links the real InputMgr.o AND the real
+# resource_manager_sdl3.cpp bridge (unlike the two tests above) to construct
+# a real placed entity from a real archive resource, not just prove the
+# dispatcher survives a null lookup.
+input_place_object_test = executable('input_place_object_test',
+  'input_place_object_test.cpp',
+  objects: persistence_objs + persistence_cone +
+           [obj_resource_archive, obj_pe_string_table, obj_resource_mgr_sdl3],
+  include_directories: inc_dirs + [include_directories('.')],
+  cpp_args: test_warn_args + ['-include', compat_h],
+  dependencies: [sdl3_dep],
+)
+test('input-place-object', input_place_object_test,
+  env: ['SDL_VIDEODRIVER=dummy'],
+  workdir: meson.project_source_root())
+
 # ---------------------------------------------------------------------------
 # Symbol/linkage checks against the real lego_loco binary (nm/objdump).
 # ---------------------------------------------------------------------------

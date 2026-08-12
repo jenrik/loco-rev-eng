@@ -402,7 +402,15 @@ uint8_t AssetMgr_ReadPairValue(AssetMgr*, uint32_t, uint32_t)
 { fixture_reached_AssetMgr_ReadPairValue(); return 0xFF; }
 
 /* Host resource bridge: no resources are loaded in the persistence
- * tests, so GetById returns nullptr (a fresh host manager). */
+ * tests, so GetById returns nullptr (a fresh host manager).
+ *
+ * A test that links the REAL resources/resource_manager_sdl3.cpp (to
+ * construct real placed entities, e.g. tests/input_place_object_test.cpp)
+ * must define PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER before including
+ * this header, to skip these fakes and the loco::assets::* ones below --
+ * otherwise the fakes' definitions collide with the real ones at link
+ * time (multiple definition). */
+#ifndef PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER
 void* ResourceManager_GetById(void*, int);
 void* ResourceManager_GetById(void*, int) { return nullptr; }
 void* ResourceManager_GetById(void*, unsigned int) { return nullptr; }
@@ -426,12 +434,14 @@ class SpriteBitmap;
 struct SpriteMetadata;
 bool is_host_sprite_resource(const void*) { return false; }
 bool sprite_tile_type_byte(const void*, uint8_t*) { return false; }
+bool sprite_leisure_destination_byte(const void*, uint8_t*) { return false; }
 uint32_t sprite_resource_id(const SpriteResource*) { return 0; }
 SpriteBitmap* sprite_bitmap(SpriteResource*) { return nullptr; }
 uint32_t sprite_width(const SpriteResource*) { return 0; }
 uint32_t sprite_height(const SpriteResource*) { return 0; }
 }  // namespace loco::assets
 const loco::assets::SpriteMetadata* ResourceManager_GetSpriteMetadata(void*) { return nullptr; }
+#endif  /* !PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER */
 
 /* CRT_rand (0x466150) — deterministic linear congruential generator for
  * the FindObjectAt random-pick tests.  Netman.h declares it with C++
@@ -471,15 +481,32 @@ extern "C" const wchar_t* CRT_wcsstr(const wchar_t* a, const wchar_t* b)
 
 /* Rect helpers the class cone references (documented Win32 semantics). */
 /* Win32 rect/string helpers the class cone references (never exercised
- * by the persistence tests).  The decompiled TUs declare these in
- * extern "C" blocks, so the fixtures need C linkage. */
+ * by the persistence tests -- ResourceManager_GetById above always
+ * returns null, so no real GameObject/Entity ever gets far enough to
+ * call these).  The decompiled TUs declare these in extern "C" blocks,
+ * so the fixtures need C linkage.
+ *
+ * A test defining PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER (see above)
+ * DOES construct real GameObject/Entity instances, so SetRect/SetRectEmpty/
+ * OffsetRect/IsRectEmpty/IntersectRect/IsCharAlphaNumericA/
+ * TileMap_InvalidateRect/_strncpy get real minimal bodies instead of loud
+ * fixtures (matching tests/entity_host_resource_test.cpp's already-
+ * validated versions) -- LoadStringA stays loud unconditionally, since
+ * nothing on the construction path touches PE string-table lookups. */
+LOUD_FIXTURE(LoadStringA)
+extern "C" {
+int LoadStringA(void*, unsigned int, char*, int);
+int LoadStringA(void*, unsigned int, char*, int)
+{ fixture_reached_LoadStringA(); return 0; }
+}
+
+#ifndef PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER
 LOUD_FIXTURE(SetRect)
 LOUD_FIXTURE(SetRectEmpty)
 LOUD_FIXTURE(OffsetRect)
 LOUD_FIXTURE(IsRectEmpty)
 LOUD_FIXTURE(IntersectRect)
 LOUD_FIXTURE(IsCharAlphaNumericA)
-LOUD_FIXTURE(LoadStringA)
 LOUD_FIXTURE(TileMap_InvalidateRect)
 LOUD_FIXTURE(strncpy_crt)
 extern "C" {
@@ -506,9 +533,6 @@ int IntersectRect(RECT*, const RECT*, const RECT*)
 int IsCharAlphaNumericA(char);
 int IsCharAlphaNumericA(char)
 { fixture_reached_IsCharAlphaNumericA(); return 0; }
-int LoadStringA(void*, unsigned int, char*, int);
-int LoadStringA(void*, unsigned int, char*, int)
-{ fixture_reached_LoadStringA(); return 0; }
 void TileMap_InvalidateRect(void*, int, int, int, int);
 void TileMap_InvalidateRect(void*, int, int, int, int)
 { fixture_reached_TileMap_InvalidateRect(); }
@@ -517,6 +541,30 @@ char* _strncpy(char* dst, const char* src, size_t n);
 char* _strncpy(char* dst, const char* src, size_t n)
 { (void)src; (void)n; fixture_reached_strncpy_crt(); return dst; }
 }
+#else
+/* void*-typed parameters here (not RECT*) so these remain distinct
+ * C-linkage overloads from world/tilemap.h's own (mixed C/C++ linkage,
+ * RECT*-typed) declarations of the same names -- matching the approach
+ * the loud-fixture versions above already relied on. */
+extern "C" {
+void SetRect(void* r, int left, int top, int right, int bottom)
+{ RECT* rect = static_cast<RECT*>(r);
+  if (rect) { rect->left = left; rect->top = top; rect->right = right; rect->bottom = bottom; } }
+void SetRectEmpty(void* r)
+{ RECT* rect = static_cast<RECT*>(r);
+  if (rect) { rect->left = rect->top = rect->right = rect->bottom = 0; } }
+int32_t __stdcall OffsetRect(RECT* r, int32_t dx, int32_t dy)
+{ if (r) { r->left += dx; r->right += dx; r->top += dy; r->bottom += dy; } return 1; }
+int IsRectEmpty(const void* r)
+{ const RECT* rect = static_cast<const RECT*>(r);
+  return (rect == nullptr || rect->left >= rect->right || rect->top >= rect->bottom) ? 1 : 0; }
+int IntersectRect(RECT*, const RECT*, const RECT*) { return 0; }
+int IsCharAlphaNumericA(char) { return 0; }
+void TileMap_InvalidateRect(void*, int, int, int, int) {}
+char* _strncpy(char* dst, const char* src, size_t n)
+{ (void)src; (void)n; return dst; }
+}
+#endif  /* PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER */
 
 /* Function-pointer globals the Building cone uses (real trivial impls). */
 int g_OffsetRect_impl(void* r, int dx, int dy);

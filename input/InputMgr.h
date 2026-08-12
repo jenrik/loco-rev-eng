@@ -163,6 +163,38 @@ public:
      *  dispatches each item's vtable[10] = Entity::Update (0x405C40),
      *  and ClearAll deletes each item as Entity (its virtual dtor). */
     void ListClearAll();
+
+    /** Resize — collection vtable[0], 0x435D10 (shared "Timer_Resize"
+     *  body with Game's inline timer list, core/Game.cpp).  Grows or
+     *  shrinks the buffer to `new_capacity`: when shrinking, trims only
+     *  trailing NULL slots (never discards an occupied one, so
+     *  `new_capacity` is a floor, not a hard cap, when elements are
+     *  still live above it).  Allocates the new buffer zero-filled,
+     *  copies min(old, new) capacity elements, frees the old buffer.
+     *  `capacity`/`buffer` both become 0/null if the allocation
+     *  fails. */
+    void ListResize(int32_t new_capacity);
+
+    /** Insert — collection vtable[13], 0x412440.  Appends `item` at the
+     *  current `count`, growing first via ListResize if the buffer is
+     *  full.  New capacity is `1 - trunc(count * -1.1)` (the FMUL
+     *  constant at 0x477838, confirmed by disassembly+read_bytes) — an
+     *  amortized ~10%-plus-one growth, not a doubling.  Returns the
+     *  inserted index (== the pre-insert count), or -1 if the append
+     *  itself failed (can't happen once ListResize has succeeded, but
+     *  the check is preserved for fidelity with 0x412440's own). */
+    int32_t ListInsert(Entity* item);
+
+private:
+    /** SetItem — collection vtable[10], 0x4124B0.  ListInsert's only
+     *  real caller (confirmed: no other xref to this address besides
+     *  the vtable's own data entry).  Destroys any existing occupant at
+     *  `index` via its virtual destructor (matching ClearAll's
+     *  RemoveElement semantics) before storing `item`; re-grows first
+     *  if `index` is still >= capacity — redundant once ListInsert's
+     *  own growth check has run, preserved because the real function
+     *  has the same redundant check. */
+    Entity* ListSetItem(int32_t index, Entity* item);
 };
 
 /* ================================================================== */

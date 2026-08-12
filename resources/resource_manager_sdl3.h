@@ -209,6 +209,17 @@ private:
 
 ResourceManagerSdl3& host_resource_manager();
 
+// Free-function wrappers around host_resource_manager().initialize()/reset(),
+// for translation units that need the real bridge but can't include this
+// whole header -- e.g. a test that also includes network/Netman.h, whose
+// ResourceManager_Init(void*) -> void declaration ambiguates against this
+// header's ResourceManager_Init(void*) -> int (see PROGRESS.md's "raw fixed-
+// offset reads" landmine item; tests/persistence_fixtures.h documents the
+// same collision). Forward-declaring just these two avoids pulling in the
+// conflicting declaration.
+bool initialize_host_resource_manager(const std::string& game_root, std::string* error = nullptr);
+void reset_host_resource_manager();
+
 // Narrow host-compositor bridge. These free functions let translated UI files
 // use archive-backed sprites without importing the binary-facing C wrappers.
 SpriteResource* host_get_sprite_by_id(uint32_t resource_id);
@@ -232,6 +243,14 @@ bool is_host_sprite_resource(const void* resource);
 // must treat that the same as "no category matches", not fall back to
 // SpriteMetadata::tile_type's arbitrary default enumerator value.
 bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
+
+// Host source for the RESDATA+0x62C leisure_destination byte
+// INPUT_PlaceObject (0x41DE9B..0x41DEC6) reads off a newly-placed entity's
+// resource pointer. Returns false (leaving *out_byte untouched) when
+// `resource` isn't a host SpriteResource -- callers should treat that as
+// "no leisure destination" (matching the original's zero-init default),
+// not fall back to an arbitrary value.
+bool sprite_leisure_destination_byte(const void* resource, uint8_t* out_byte);
 
 }  // namespace loco::assets
 
