@@ -8,12 +8,36 @@
 
 #include "ResdataGameVehicle.h"
 
+#ifndef _WIN32
+#include "../resources/resource_manager_sdl3.h"
+#endif
+
 namespace {
 
 struct ResourceVehicleTileMetadata {
     uint8_t prefix_00_639[0x63A];
     uint8_t tile_type;
 };
+
+/* Host deviation: `resource` may be a loco::assets::SpriteResource*
+ * (undersized-object landmine, see PROGRESS.md) rather than a real
+ * RESDATA/TileMapResource. 0 matches none of the tile_type branches
+ * below, so it falls through to the RESDATA_IsRoadTile/etc. checks --
+ * already guarded the same way -- exactly like a real resource whose
+ * +0x63A byte happens to be 0. */
+uint8_t ResolveVehicleTileType(const void* resource)
+{
+#ifndef _WIN32
+    uint8_t byte = 0;
+    if (loco::assets::sprite_tile_type_byte(resource, &byte)) {
+        return byte;
+    }
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        return 0;
+    }
+#endif
+    return reinterpret_cast<const ResourceVehicleTileMetadata*>(resource)->tile_type;
+}
 
 } // namespace
 
@@ -62,17 +86,25 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
     }
 
     /* Read tile type byte at resource + 0x63A */
-    const ResourceVehicleTileMetadata* resource_tile =
-        reinterpret_cast<const ResourceVehicleTileMetadata*>(this->resource);
-    uint8_t tile_type = resource_tile->tile_type;
+    uint8_t tile_type = ResolveVehicleTileType(this->resource);
 
     if (tile_type == 0x0C) {
         /* Train tile */
         this->vehicle_kind = 1;
 
         /* Read animation/state value from resource header at +0x1E */
-        const RESDATA* resource_data = static_cast<const RESDATA*>(this->resource);
-        int16_t anim_val = resource_data->default_anim;
+        int16_t anim_val = 0;
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(this->resource)) {
+            const loco::assets::SpriteMetadata* metadata =
+                ResourceManager_GetSpriteMetadata(this->resource);
+            anim_val = metadata ? static_cast<int16_t>(metadata->cursor_frame) : 0;
+        } else
+#endif
+        {
+            const RESDATA* resource_data = static_cast<const RESDATA*>(this->resource);
+            anim_val = resource_data->default_anim;
+        }
 
         /* NOTE: The binary re-checks tile_type for 0x0B (pedestrian)
          * inside the train branch at 0x44AEEE — dead code since we
@@ -117,8 +149,18 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
             GameObject_StopSound(this, 1);
         } else {
             /* Check resource ID for special vehicles */
-            const RESDATA* resource_data = static_cast<const RESDATA*>(this->resource);
-            int32_t res_id = (resource_data != nullptr) ? resource_data->resource_id : -1;
+            int32_t res_id = -1;
+#ifndef _WIN32
+            if (loco::assets::is_host_sprite_resource(this->resource)) {
+                res_id = static_cast<int32_t>(
+                    loco::assets::sprite_resource_id(
+                        static_cast<loco::assets::SpriteResource*>(this->resource)));
+            } else
+#endif
+            {
+                const RESDATA* resource_data = static_cast<const RESDATA*>(this->resource);
+                res_id = (resource_data != nullptr) ? resource_data->resource_id : -1;
+            }
             if (res_id == 0xC64 || res_id == 0xC66 ||
                 res_id == 0xC68 || res_id == 0xC6A) {
                 this->vehicle_kind = 8;
@@ -165,9 +207,7 @@ RESDATA_GameVehicle::~RESDATA_GameVehicle()
 /* ================================================================== */
 void RESDATA_GameVehicle::StopSound(int state)
 {
-    const ResourceVehicleTileMetadata* resource_tile =
-        reinterpret_cast<const ResourceVehicleTileMetadata*>(this->resource);
-    uint8_t tile_type = resource_tile->tile_type;
+    uint8_t tile_type = ResolveVehicleTileType(this->resource);
 
     if (tile_type == 0x0B || this->vehicle_kind == 7) {
         /* Pedestrian tile or signal vehicle */

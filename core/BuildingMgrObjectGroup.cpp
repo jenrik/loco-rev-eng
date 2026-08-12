@@ -5,6 +5,10 @@
 #include "../game/Building.h"
 #include <ctime>
 
+#ifndef _WIN32
+#include "../resources/resource_manager_sdl3.h"
+#endif
+
 extern int CRT_rand(void);                                      // 0x466150
 extern uint32_t g_game_time;                                    // 0x4a99b4
 extern BuildingMgr* g_building_mgr;                             // 0x485448 — host-constructed singleton
@@ -27,6 +31,54 @@ ResourceGameObject::ResourceGameObject(int resource_id)
     type = 3;
     sub_pos_x = sub_pos_y = 0;
     if (resource == nullptr) return;
+
+#ifndef _WIN32
+    /* Host deviation: `resource` may be a loco::assets::SpriteResource*
+     * (undersized-object landmine, see PROGRESS.md), not a real RESDATA.
+     * ee_replay_delay/name/frame_sets are the already-verified host
+     * sources for +0x522/+0x14D/+0x20 (see the childwindow-descriptor-
+     * fields and cursor-default-frame-set-fix session-log entries). */
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        const loco::assets::SpriteMetadata* metadata =
+            ResourceManager_GetSpriteMetadata(resource);
+        const uint8_t maximum = metadata ? metadata->ee_replay_delay : 0;
+        member_limit = maximum == 0
+            ? 0
+            : static_cast<uint8_t>(CRT_rand() % maximum + 1);
+        created_count = 0;
+        group_flag = 0;
+        for (int i = 0; i < 5; ++i) {
+            member_objects[i] = nullptr;
+            linked_objects[i] = nullptr;
+        }
+        field_b8 = field_bc = 0;
+        group_active = 1;
+
+        if (metadata != nullptr && !metadata->name.empty()) {
+            SetName(metadata->name.c_str());
+        }
+
+        /* anim_index can be -1 here (SetAnimState's host branch leaves it
+         * unresolved when default_anim is out of range) -- unlike the
+         * original's frames[-1] OOB heap read (preserved elsewhere for
+         * fidelity), std::vector::operator[](-1) is real memory
+         * corruption on host, so this documented deviation just skips
+         * the timer set instead of reading out of bounds. */
+        if (metadata != nullptr && anim_index >= 0 &&
+            static_cast<size_t>(anim_index) < metadata->frame_sets.size() &&
+            metadata->frame_sets[static_cast<size_t>(anim_index)].restart_delay >= 0) {
+            timer = static_cast<uint32_t>(CRT_rand() % 0x3d) + g_game_time;
+        }
+
+        for (int i = 0; i < 8; ++i) {
+            fields_c4_e0[i] = 0;
+            fields_e8_104[i] = 0;
+        }
+        sentinel_e4 = -1;
+        sentinel_108 = -1;
+        return;
+    }
+#endif
 
     uint8_t maximum = *reinterpret_cast<uint8_t*>(
         static_cast<uint8_t*>(resource) + 0x522);

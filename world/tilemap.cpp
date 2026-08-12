@@ -878,6 +878,25 @@ uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj)
     if (tile_obj == 0) {
         return 0;
     }
+
+#ifndef _WIN32
+    /* Host deviation: tile_obj may be a loco::assets::SpriteResource*
+     * (undersized-object landmine, see PROGRESS.md) rather than a real
+     * RESDATA/TileMapResource. Source the tile-state byte from the
+     * already-verified SpriteMetadata::tile_type instead of reading past
+     * the real allocation. */
+    const void* host_resource =
+        reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj));
+    uint8_t host_state = 0;
+    if (loco::assets::sprite_tile_type_byte(host_resource, &host_state)) {
+        return (host_state == 0x07 || host_state == 0x08 ||
+                host_state == 0x09 || host_state == 0x0A) ? 1 : 0;
+    }
+    if (loco::assets::is_host_sprite_resource(host_resource)) {
+        return 0;
+    }
+#endif
+
     const uint8_t state = *reinterpret_cast<const uint8_t*>(
         static_cast<uintptr_t>(static_cast<intptr_t>(tile_obj)) + 0x63A);
     return (state == 0x07 || state == 0x08 || state == 0x09 || state == 0x0A)

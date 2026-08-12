@@ -224,6 +224,15 @@ SpriteResource* host_get_sprite_by_id(uint32_t resource_id);
 // resource objects" landmine item.
 bool is_host_sprite_resource(const void* resource);
 
+// Host source for the RESDATA+0x63A tile-state byte the RESDATA_Is*Tile
+// family (world/tilemap.cpp, shared/stubs_impl.cpp) and RESDATA_GameVehicle
+// (game/ResdataGameVehicle.cpp) read unconditionally off a resource pointer.
+// Returns false (leaving *out_byte untouched) when `resource` isn't a host
+// SpriteResource, or is one but carries no tile_type directive -- callers
+// must treat that the same as "no category matches", not fall back to
+// SpriteMetadata::tile_type's arbitrary default enumerator value.
+bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
+
 }  // namespace loco::assets
 
 // C++ linkage is intentional: existing translated callers use overloads.

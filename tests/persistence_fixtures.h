@@ -409,7 +409,9 @@ void* ResourceManager_GetById(void*, unsigned int) { return nullptr; }
 
 /* Host resource-adapter accessors (resources/resource_manager_sdl3.h),
  * referenced by GameObject.o's Entity::InitBase/SetAnimState/SetFrame/
- * ~Entity host branches (see PROGRESS.md's InitBase host-safety entry).
+ * ~Entity host branches (see PROGRESS.md's InitBase host-safety entry) and
+ * by ResdataGameVehicle.o's tile-type/resource-id host branches (see the
+ * entity-update-host-guard/RESDATA_Is*Tile follow-up entries).
  * Not exercised: ResourceManager_GetById above always returns nullptr in
  * this cone, so `resource` is always null before any of these would be
  * called -- these exist only to satisfy the link. Declared here rather
@@ -423,6 +425,7 @@ class SpriteResource;
 class SpriteBitmap;
 struct SpriteMetadata;
 bool is_host_sprite_resource(const void*) { return false; }
+bool sprite_tile_type_byte(const void*, uint8_t*) { return false; }
 uint32_t sprite_resource_id(const SpriteResource*) { return 0; }
 SpriteBitmap* sprite_bitmap(SpriteResource*) { return nullptr; }
 uint32_t sprite_width(const SpriteResource*) { return 0; }

@@ -148,6 +148,31 @@ int main() {
         return fail("resource 0xc54's \"depot top\" tile_type was not parsed") ? 0 : 1;
     }
 
+    // sprite_tile_type_byte() is the host source RESDATA_IsBuildingTile/
+    // RESDATA_IsRoadTile/RESDATA_GameVehicle's constructor now read instead
+    // of the undersized-SpriteResource +0x63A landmine (see PROGRESS.md's
+    // entity-update-host-guard follow-up). Prove it end-to-end against
+    // these same two real resources rather than just trusting has_tile_type/
+    // tile_type were plumbed through correctly: DepotTop == 9, in
+    // RESDATA_IsBuildingTile's {7,8,9,0xA} match set; Points == 0xb, in
+    // none of the Is*Tile predicates' match sets.
+    uint8_t depot_byte = 0;
+    if (!loco::assets::sprite_tile_type_byte(depot, &depot_byte) || depot_byte != 9) {
+        return fail("sprite_tile_type_byte(0xc54) did not return DepotTop's raw value (9)") ? 0 : 1;
+    }
+    uint8_t points_byte = 0;
+    if (!loco::assets::sprite_tile_type_byte(points, &points_byte) || points_byte != 0x0b) {
+        return fail("sprite_tile_type_byte(0xc0a) did not return Points' raw value (0xb)") ? 0 : 1;
+    }
+    // A resource with no tile_type directive at all (0x1012, the statue
+    // fixture from earlier in this test) must report false, not a stale/
+    // default enumerator value -- callers rely on this to fall through to
+    // "no category matches" instead of misreading TunnelLeft's default 1.
+    uint8_t untyped_byte = 0xFF;
+    if (loco::assets::sprite_tile_type_byte(statue, &untyped_byte)) {
+        return fail("sprite_tile_type_byte(0x1012) reported a tile_type for a resource with none") ? 0 : 1;
+    }
+
     // building\factory1.dat carries "Name Factory" (verified by extracting
     // resource.RFD directly) -> ChildWindow::name's host equivalent.
     void* factory = ResourceManager_GetById(static_cast<void*>(nullptr), 0x816);

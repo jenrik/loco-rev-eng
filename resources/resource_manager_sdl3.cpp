@@ -513,6 +513,19 @@ bool is_host_sprite_resource(const void* resource) {
     return static_cast<const SpriteResource*>(resource)->magic == kSpriteResourceMagic;
 }
 
+bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte) {
+    if (!is_host_sprite_resource(resource)) {
+        return false;
+    }
+    const SpriteMetadata* metadata =
+        ResourceManager_GetSpriteMetadata(const_cast<void*>(resource));
+    if (metadata == nullptr || !metadata->has_tile_type) {
+        return false;
+    }
+    *out_byte = static_cast<uint8_t>(metadata->tile_type);
+    return true;
+}
+
 }  // namespace loco::assets
 
 int ResourceManager_Init(void*) {

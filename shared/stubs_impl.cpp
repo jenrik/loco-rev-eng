@@ -467,7 +467,31 @@ void RESDATA_DtorBase(void*) {}
 
 #ifndef _WIN32
 #include <cstdint>
+#include "../resources/resource_manager_sdl3.h"
 #endif
+
+namespace {
+
+/* Shared tile-state byte fetch for the RESDATA_Is*Tile family below.
+ * Host deviation: `tile_obj`/`ptr` may be a loco::assets::SpriteResource*
+ * (undersized-object landmine, see PROGRESS.md) rather than a real
+ * RESDATA/TileMapResource -- source the byte from the already-verified
+ * SpriteMetadata::tile_type instead of reading past the real allocation.
+ * Returns false (no category can match) for a host resource with no
+ * tile_type directive, matching a real non-track resource's behavior. */
+inline bool ResolveTileStateByte(const void* resource, uint8_t* out_byte)
+{
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        return loco::assets::sprite_tile_type_byte(resource, out_byte);
+    }
+#endif
+    *out_byte = *reinterpret_cast<const uint8_t*>(
+        static_cast<const char*>(resource) + 0x63A);
+    return true;
+}
+
+}  // namespace
 
 /* RESDATA_IsBuildingTile — identical Ghidra-verified implementation
  * (0x44BD30) now canonical in world/tilemap.cpp; this was a duplicate
@@ -478,8 +502,11 @@ uint8_t RESDATA_IsRoadTile(int32_t tile_obj)
 {
     /* 0x44BD10: check byte at +0x63A for {0x01,0x02,0x03,0x04} */
     if (tile_obj == 0) return 0;
-    uint8_t b = *reinterpret_cast<const uint8_t*>(
-        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    uint8_t b = 0;
+    if (!ResolveTileStateByte(
+            reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj)), &b)) {
+        return 0;
+    }
     return (b == 0x01 || b == 0x02 || b == 0x03 || b == 0x04) ? 1 : 0;
 }
 
@@ -488,8 +515,11 @@ uint8_t RESDATA_IsWaterTile(int32_t tile_obj)
 {
     /* 0x44BD50: check byte at +0x63A for {0x0E,0x0F} */
     if (tile_obj == 0) return 0;
-    uint8_t b = *reinterpret_cast<const uint8_t*>(
-        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    uint8_t b = 0;
+    if (!ResolveTileStateByte(
+            reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj)), &b)) {
+        return 0;
+    }
     return (b == 0x0E || b == 0x0F) ? 1 : 0;
 }
 
@@ -498,8 +528,11 @@ uint8_t RESDATA_IsTrackTile(int32_t tile_obj)
 {
     /* 0x44BD70: check byte at +0x63A for {0x10,0x11} */
     if (tile_obj == 0) return 0;
-    uint8_t b = *reinterpret_cast<const uint8_t*>(
-        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    uint8_t b = 0;
+    if (!ResolveTileStateByte(
+            reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj)), &b)) {
+        return 0;
+    }
     return (b == 0x10 || b == 0x11) ? 1 : 0;
 }
 
@@ -508,8 +541,11 @@ uint8_t RESDATA_IsSceneryTile(int32_t tile_obj)
 {
     /* 0x44BD90: check byte at +0x63A for {0x12,0x13} */
     if (tile_obj == 0) return 0;
-    uint8_t b = *reinterpret_cast<const uint8_t*>(
-        static_cast<const char*>(reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj))) + 0x63A);
+    uint8_t b = 0;
+    if (!ResolveTileStateByte(
+            reinterpret_cast<const void*>(static_cast<intptr_t>(tile_obj)), &b)) {
+        return 0;
+    }
     return (b == 0x12 || b == 0x13) ? 1 : 0;
 }
 
@@ -521,8 +557,15 @@ uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
      * Host stub: return 0 (no category match) — the original logic
      * requires full RESDATA resource objects with player/color fields. */
     if (ptr == nullptr) return 0;
-    uint8_t typeByte = *reinterpret_cast<const uint8_t*>(
-        static_cast<const char*>(ptr) + 0x63A);
+    /* This stub asserts unconditionally below regardless of typeByte's
+     * value (the player/color-dependent path this function needs was
+     * never implemented) -- ResolveTileStateByte here exists only to
+     * avoid the undersized-host-object OOB read on the way to that
+     * assert, not to change whether it fires. A host resource with no
+     * tile_type falls through to the same unconditional assert as any
+     * other value, matching the original's "always crashes" contract. */
+    uint8_t typeByte = 0;
+    ResolveTileStateByte(ptr, &typeByte);
     (void)a; (void)b;
     /* For now, return 0 for everything.  The full implementation needs
      * the +0x169, +0x16B, +0x16C fields which are only available on
