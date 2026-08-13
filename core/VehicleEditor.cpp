@@ -63,10 +63,13 @@ extern void GameObject_InvalidateRect(void* obj);                               
 extern void   DPLAY_CreatePlayer(void* slot);                                           /* 0x442850 */
 extern void   DPLAY_CleanupPlayer(void* slot);                                          /* 0x442A00 */
 
-/* Resource classification (same externs used by EditorState.cpp) */
+/* Resource classification (same extern used by EditorState.cpp).
+ * Resource_IsRoadTile (0x44BD10) / Resource_IsBuildingTile (0x44BD30) are
+ * NOT declared here: their extern declarations collide at link time with a
+ * void-returning stub in shared/link_stubs.cpp (C++ return type isn't part
+ * of Itanium mangling, so both mangle identically and the stub silently
+ * wins). Call sites use ClassifyResourceTile() (game/Vehicle.h) instead. */
 extern uint8_t  Resource_IsValidTrackIndex(void* resource, int16_t idx);               /* 0x44BCD0 */
-extern uint8_t  Resource_IsRoadTile(void* resource);                                    /* 0x44BD10 */
-extern uint8_t  Resource_IsBuildingTile(void* resource);                                /* 0x44BD30 */
 extern unsigned int __cdecl CGWND_MapResourceToDirection(int resource_id);              /* 0x40EB60 —
                                                      same real function as game/World.cpp's
                                                      `uint`-returning declaration (equivalent

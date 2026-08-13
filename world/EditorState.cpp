@@ -83,13 +83,13 @@ extern uint8_t  GetResourceType(uint32_t res_id);                     /* 0x44603
  * Address: 0x44BCD0 */
 extern uint8_t  Resource_IsValidTrackIndex(void* resource, int16_t idx);
 
-/* Resource_IsRoadTile — __fastcall, reads tile type byte at resource+0x63A.
- * Returns 1 if type ∈ {1,2,3,4}. Address: 0x44BD10 */
-extern uint8_t  Resource_IsRoadTile(void* resource);
-
-/* Resource_IsBuildingTile — __fastcall, reads tile type byte at resource+0x63A.
- * Returns 1 if type ∈ {7,8,9,10}. Address: 0x44BD30 */
-extern uint8_t  Resource_IsBuildingTile(void* resource);
+/* Resource_IsRoadTile (0x44BD10, __fastcall) and Resource_IsBuildingTile
+ * (0x44BD30, __fastcall) both read the tile type byte at resource+0x63A,
+ * but their extern declarations collide at link time with a void-returning
+ * stub in shared/link_stubs.cpp — C++ return type is not part of Itanium
+ * mangling, so both mangle to the same symbol and the stub silently wins.
+ * No declaration is kept here; call sites use ClassifyResourceTile() below,
+ * which reads the byte directly instead of calling the broken externs. */
 
 /* BuildingMgr singleton at 0x485448 */
 extern BuildingMgr* g_building_mgr;          /* 0x485448 — BuildingMgr singleton */
