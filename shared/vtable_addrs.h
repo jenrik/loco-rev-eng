@@ -668,6 +668,63 @@
 #define VTBL_WIN32_THREAD               0x00479168
 
 /* ================================================================== */
+/* WNDPROC_Stream / WIN32_Stream family — see resources/StreamObject.h, */
+/* WndProcStream.h, Win32Stream.h, WndProcOStream.h, Win32OStream.h.    */
+/*                                                                       */
+/* Each entry below is a 2-slot MSVC vbtable ([0]=self-offset (always   */
+/* 0), [1]=byte offset from `this` to the StreamObject virtual base),   */
+/* NOT a method-pointer vtable — confirmed via read_bytes. The separate */
+/* "_VIEW" entries ARE real (1-entry, scalar-deleting-destructor)       */
+/* method vtables, used when the object is accessed through its        */
+/* StreamObject-view adjustor (this+vbase offset above).                */
+/* ================================================================== */
+#define VTBL_WNDPROC_STREAM             0x00479238  /* WNDPROC_Stream's own vbtable
+    [0]=0, [1]=0xC (own data: _reserved_04@+4, gcount_@+8, before StreamObject).
+    Poked into `*this` only when WNDPROC_Stream::AttachBuffer (0x464840) runs
+    with initBase set (i.e. constructed as the most-derived object) — never
+    observed in this codebase's evidence, since every real caller constructs
+    the derived WIN32_Stream instead. */
+#define VTBL_WNDPROC_STREAM_VIEW        0x00479234  /* WNDPROC_Stream-as-StreamObject-view
+    vtable (1 slot: scalar deleting destructor, target 0x464810 ==
+    WNDPROC_Stream_ScalarDtor — confirmed via read_bytes, NOT
+    WNDPROC_Stream_DtorVftableReset itself, which that scalar dtor calls
+    internally). Poked into the StreamObject subobject by
+    WNDPROC_Stream::AttachBuffer's initBase branch. */
+#define VTBL_WIN32_STREAM               0x00479188  /* WIN32_Stream's own vbtable
+    [0]=0, [1]=0xC (WIN32_Stream adds no own fields beyond WNDPROC_Stream,
+    same vbase offset). Poked into `*this` by WIN32_StreamOpen/OpenFile
+    (0x463890/0x463970) on construction. */
+#define VTBL_WIN32_STREAM_VIEW          0x00479184  /* WIN32_Stream-as-StreamObject-view
+    vtable (1 slot: scalar deleting destructor, target 0x463940 ==
+    WIN32_Stream_ScalarDtor, chains to WIN32_StreamDestroy 0x463A80 then
+    WNDPROC_Stream_DtorVftableReset 0x4648E0). Poked in by WIN32_StreamOpen/
+    OpenFile after WNDPROC_Stream::AttachBuffer runs. */
+
+#define VTBL_WNDPROC_OSTREAM            0x00479288  /* WNDPROC_OStream's own vbtable
+    [0]=0, [1]=8 (own data: _reserved_04@+4 ONLY — no gcount_-equivalent,
+    write-only facade, one dword smaller than VTBL_WNDPROC_STREAM above).
+    Poked into `*this` by WNDPROC_OStream::AttachBuffer (0x465A30) when
+    initBase is set; never observed constructed bare in this codebase. */
+#define VTBL_WNDPROC_OSTREAM_VIEW       0x00479284  /* WNDPROC_OStream-as-StreamObject-
+    view vtable (1 slot: scalar deleting destructor, target 0x465A00 ==
+    WNDPROC_OStream_ScalarDtor — confirmed via read_bytes, NOT
+    WNDPROC_OStream_DtorVftableReset itself, which that scalar dtor calls
+    internally). Poked into the StreamObject subobject by
+    WNDPROC_OStream::AttachBuffer's initBase branch. */
+#define VTBL_WIN32_OSTREAM              0x00479248  /* WIN32_OStream's own vbtable
+    [0]=0, [1]=8 (WIN32_OStream adds no own fields beyond WNDPROC_OStream,
+    same vbase offset; 4 bytes smaller than VTBL_WIN32_STREAM above —
+    confirmed via this class's own allocation: operator_new(0x58) at its
+    sole call site, RESMGR_LoadResourceData 0x447E63, vs. WIN32_Stream's
+    documented 0x5C). Poked into `*this` by WIN32_StreamOpenWriteFile
+    (0x465090, formerly Ghidra-mislabeled "CRT_floor") on construction. */
+#define VTBL_WIN32_OSTREAM_VIEW         0x00479244  /* WIN32_OStream-as-StreamObject-view
+    vtable (1 slot: scalar deleting destructor, target 0x465060 ==
+    WIN32_OStream_ScalarDtor, chains to WIN32_OStream_DtorVftableReset
+    0x465180 then WNDPROC_OStream_DtorVftableReset 0x465AC0). Poked in by
+    WIN32_StreamOpenWriteFile after WNDPROC_OStream::AttachBuffer runs. */
+
+/* ================================================================== */
 /* Unidentified vtables — addresses only, class TBD                     */
 /* ================================================================== */
 #define VTBL_0047703C                  0x0047703C

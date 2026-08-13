@@ -86,19 +86,26 @@ static constexpr size_t kHostMaxPreviewBytes = 16u * 1024u * 1024u;
  * fallback below is the path the original takes in that state too. */
 #else
 /* Win32 stream layer (native/win32_stream.c — original ABI). */
-/* Read-stream ctor 0x463970 (mode|1, child vtable 0x479184); write-stream
- * ctor 0x465090 (mode|2, child vtable 0x479244 — the OR'd mode bit is the
- * value-vs-address discriminator the write path needs). */
+/* Read-stream ctor 0x463970 constructs a WIN32_Stream (Win32Stream.h,
+ * flags|1, child vtable 0x479184); write-stream ctor 0x465090 constructs
+ * the genuinely distinct sibling class WIN32_OStream (Win32OStream.h,
+ * flags|2, child vtable 0x479244 — confirmed via vbtable/allocation-size
+ * evidence to be a smaller, separate class, not the same class re-tagged;
+ * see Win32OStream.h/WndProcOStream.h). Declared here (not `#include`d)
+ * to match this file's existing local-extern convention for this stream
+ * family — signatures kept in sync with the canonical headers by hand. */
 extern void* WIN32_StreamOpenFile(void* stream, const char* path,
                                   uint32_t mode, uint32_t flags, int32_t param4); /* 0x463970 */
 extern void* WIN32_StreamOpenWriteFile(void* stream, const char* path,
-                                       uint32_t mode, uint32_t flags, int32_t param4); /* 0x465090 */
+                                       uint32_t flags, uint32_t shareMask,
+                                       int32_t initBase); /* 0x465090, see Win32OStream.h */
 extern void* WIN32_StreamRead(void* stream, void* buf, uint32_t size);   /* 0x463810 */
 extern void* WIN32_StreamWrite(void* stream, const void* buf, uint32_t size); /* 0x465010 */
 extern void* WNDPROC_StreamFromMemory(void* stream, const void* data,
                                       int32_t size, int32_t mode);      /* 0x464490 */
 extern int32_t AssetMgr_LoadFile(void* mgr, const char* path, int32_t* size); /* 0x45CD00 */
 extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
+extern size_t WIN32_OStream_Size(); /* resources/Win32OStream.cpp — real sizeof(WIN32_OStream) */
 /* The preview writer uses the tilemap overlay (0x457080) on g_tilemap
  * (tilemap.h, 0x4AAD08). */
 class TileMap;
@@ -752,34 +759,57 @@ int32_t RESMGR_LoadResourceData(RESDATA* resdata, const char* filename)
     return 1;
 #else
     RESMGR_RemoveResource(resdata);
-    /* 0x58 is this call site's own x86 evidence for whatever
-     * WIN32_StreamOpenWriteFile (declared above, called below) constructs
-     * — but that function has no implementation anywhere in this tree
-     * (not even a stub), and its exact target type (a WIN32_Stream
-     * variant? something write-specific and not yet reconstructed?) isn't
-     * evidenced, so there's no sizeof(Type) to take yet. This whole `#else`
-     * branch is also Windows-only (see the #ifndef _WIN32 host path above,
-     * which uses HostSaveStream instead) — it never compiles or links on
-     * this host, so it is not a reachable bug here; revisit once
-     * WIN32_StreamOpenWriteFile is implemented and its real target type is
-     * identified. */
-    void* mem = operator_new(0x58);
+    /* 0x58 was the original x86 sizeof(WIN32_OStream) (confirmed via this
+     * exact call site's own allocation — see Win32OStream.h/WndProcOStream.h
+     * for the vbtable/size evidence that WIN32_OStream is a genuinely
+     * distinct, 4-bytes-smaller sibling of WIN32_Stream, not the same class
+     * re-tagged); use the real host size instead, same convention as
+     * WIN32_Stream_Size() a few hundred lines up. This whole `#else` branch
+     * is also Windows-only (see the #ifndef _WIN32 host path above, which
+     * uses HostSaveStream instead) — it never compiles or links on this
+     * host, but the MinGW typecheck build does compile it. */
+    void* mem = operator_new(WIN32_OStream_Size());
     if (mem == nullptr) {
         return 0;
     }
+    /* DAT_00479190's real VALUE (confirmed via read_bytes: 0x000001A4), not
+     * its address — the original loads [0x479190] into a register before
+     * pushing it (`MOV ECX,[0x479190]`), it does not push the address
+     * 0x479190 itself. The previous version of this call site passed the
+     * literal address, a bug (harmless only because this whole branch is
+     * dead on the host — see above). This is the same global at least 16
+     * read sites across the tree pass as the shareMask/flags argument to
+     * WIN32_StreamOpen*, with at least 4 mutually-inconsistent existing
+     * declarations for it elsewhere (game/TrainStation.cpp's `void*
+     * g_resource_dir_path`, game/ScriptedObject.cpp's `int
+     * g_stream_open_flags`, ui/GameSetupPanel.cpp's `int
+     * g_stream_open_mode`, and two more call sites — ui/UIPANEL_Surface.cpp,
+     * ui/HelpWnd.cpp — that pass the literal address, the identical bug
+     * fixed here). Its exact semantic meaning is unconfirmed — it precedes,
+     * but is NOT one of, the three mask constants (0x479194/98/9C)
+     * WIN32_StreamFile_Open ORs together to decode share-mode bits, and
+     * masking 0x1A4 against that combined mask (0xE00) yields 0, so every
+     * caller that passes this constant always takes Open()'s share-mode
+     * DEFAULT branch — named for that role, not for any confirmed bit
+     * meaning. RESMGR_LoadResource's analogous WIN32_StreamOpenFile call a
+     * few hundred lines up has the identical address-vs-value bug; not
+     * fixed here (out of this pass's scope, and it's one of many
+     * inconsistent per-file declarations of this same global — see above),
+     * but flagged for the same follow-up. */
+    constexpr uint32_t kStreamOpenDefaultShareMask = 0x1A4;
     resdata->secondary_stream =
-        WIN32_StreamOpenWriteFile(mem, filename, 0x92, 0x479190, 1);
+        WIN32_StreamOpenWriteFile(mem, filename, 0x92, kStreamOpenDefaultShareMask, 1);
     if (resdata->secondary_stream == nullptr) {
         return 0;
     }
     /* Original (0x447EA7..0x447EB1): when the stream's vtable-relative
      * STATE word has bit 0x4 set (non-writable) the save is refused
-     * with 0.  The ctor above is the WRITE-stream ctor (0x465090): it
+     * with 0.  The ctor above is the WIN32_OStream ctor (0x465090): it
      * ORs the open mode with 2 (0x447e8f passes mode 0x92) and attaches
-     * the write child vtable 0x479244 — the OR'd flag is the
-     * value-vs-address discriminator that makes the child stream
-     * writable.  (The read ctor 0x463970 used by LoadResource ORs mode
-     * with 1 instead.) */
+     * the write-side child vtable 0x479244 (see Win32OStream.h) — the
+     * OR'd bit is what makes the underlying WIN32_StreamFile writable.
+     * (The read ctor 0x463970 used by LoadResource, constructing a plain
+     * WIN32_Stream, ORs mode with 1 instead.) */
     if ((stream_state_word(resdata->secondary_stream) & 0x4) != 0) {
         return 0;
     }

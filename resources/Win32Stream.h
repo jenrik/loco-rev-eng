@@ -29,6 +29,14 @@
  * parameter on the class constructors below (same reasoning as
  * StreamObject::StreamObject()'s doc comment) — it is kept only on the
  * free-function facades, unused, for call-site arity compatibility.
+ *
+ * WIN32_Stream is NOT the write-side counterpart of the WIN32_StreamFile
+ * rdbuf story: the write-stream constructor at 0x465090 (previously
+ * mislabeled "CRT_floor") builds a genuinely distinct, 4-bytes-smaller
+ * sibling class — WIN32_OStream, deriving from WNDPROC_OStream rather than
+ * WNDPROC_Stream (see Win32OStream.h/WndProcOStream.h for the vbtable/
+ * allocation-size evidence this is a separate class, not this one
+ * constructed at a different most-derived level).
  */
 
 // Status: VALIDATED
