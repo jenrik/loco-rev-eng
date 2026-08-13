@@ -57,6 +57,7 @@
 #include "../game/Building.h"
 #include "../game/GameVehicle.h"
 #include "../game/ResdataGameVehicle.h"
+#include "../game/PlayerConfig.h"
 #include "../game/TrackPos.h"
 #include "../network/Netman.h"
 #include "../ui/HelpPageNode.h"
@@ -86,6 +87,11 @@ using loco::host::VehicleRecord;
 
 /* 0x4A99C8 — install/res-dir path buffer ("<data>/art-res/" on the host). */
 extern char g_install_path[];
+
+/* 0x485484 — global config INI handle (PlayerConfig-shaped), matching
+ * game/PlayerConfig.cpp's declaration of the same real global. Used by
+ * INPUT_DiscoverEasterEgg's Config_WriteInt call. */
+extern void* g_config_ini;
 
 /* Host-only persistence isolation: integration runs share the immutable
  * asset tree but may redirect the host-only current-save pair (curr and
@@ -1946,14 +1952,41 @@ void INPUT_SwitchToLocomotiveTab(void* self, int tab) /* 0x41A210 — Cursor tab
 /* intentionally generic per this project's naming policy.             */
 /* ================================================================== */
 
-extern "C" {
-    struct tm* CRT_localtime(const int32_t* time);   /* CRT wrapper; standard struct tm layout */
-}
+/* C++ linkage (NOT extern "C" — matches core/BuildingMgrObjectGroup.cpp's
+ * own declaration of the same real address, 0x4674e0, which InputMgr.cpp's
+ * previous extern "C" + int32_t* declaration here did not match: two
+ * distinct, non-interchangeable link-time symbols for the same function).
+ * Real thin CRT wrapper over localtime(); see shared/
+ * stubs_link001_batch1_crt_win32.cpp for the working host body. */
+extern tm* CRT_localtime(uint32_t* time);   /* 0x4674e0 */
 
 /* Plain C++ linkage, matching core/Game.cpp's declaration of the same
  * real symbol (0x423AB0). */
 void UI_CreateMessageBox(void* mgr, int32_t res_id, int32_t p2, char p3,
                          int32_t x, int32_t y, int32_t p7);
+
+/* Config_GetIniString — extern "C" linkage, matching game/ConfigIni.cpp's
+ * real declaration of the same real address (0x452D80). */
+extern "C" {
+int Config_GetIniString(void* ini, const char* section, const char* key,
+                        const char* def, char* buf, int bufSize);   /* 0x452D80 */
+}
+
+/* Config_WriteInt (0x452DB0) — game/ConfigIni.cpp's real definition is
+ * extern "C" (unmangled symbol "Config_WriteInt"), but network/Netman.h
+ * (already included by this file) separately declares a void-returning
+ * C++-linkage overload of the same name, and a single translation unit
+ * cannot see both a C-linkage and a C++-linkage declaration of the same
+ * identifier. INPUT_DiscoverEasterEgg needs the real return value
+ * (verified via disassembly: AL is compared against 1 and propagated as
+ * the function's own return) that the void overload discards, so this
+ * declares a local C++-linkage name whose actual link-time symbol is
+ * aliased to the real unmangled "Config_WriteInt" via an asm label —
+ * the same technique tests/persistence_fixtures.h already uses for
+ * CRT_rand's C-vs-C++-linkage split. */
+extern int Config_WriteInt_ExternC(void* ini, const char* section,
+                                   const char* key, int value)
+    __asm__("Config_WriteInt");
 
 namespace {
 
@@ -2049,34 +2082,101 @@ void INPUT_ResetTimeEventNode(void* node)
 /* INPUT_LoadTimeEvents — load [TimeEvents] from LOCO.INI               */
 /* Address: 0x41F6E0 (Ghidra label "INPUT_EditMouseHandler" — misnomer, */
 /* verified by direct decompile; unrelated to mouse input).             */
-/* Structurally identical to INPUT_LoadEvents (0x41F5E0, not part of    */
-/* this pass's assigned function list): builds "LOCO.INI" via           */
-/* PlayerConfig_Ctor/CRT_sprintf_buf, then reads "%03ld"-keyed           */
-/* [TimeEvents] entries until empty, calling INPUT_AddTimeEvent for      */
-/* each. Full INI-loading plumbing (PlayerConfig_Ctor path) is out of   */
-/* scope for this pass — this loud-deferred rather than silently wired, */
-/* consistent with the sibling INPUT_LoadEvents/INPUT_SetKeyboard/      */
-/* INPUT_SetMouse loaders in this same object, all still deferred.      */
+/*                                                                      */
+/* Takes a SECOND parameter (const char* suffix) that the header used   */
+/* to omit — verified via disassembly of the one call site (FUN_0045de3a */
+/* / GameLoop's post-setup flow, 0x45DEA2/0x45DEA7/0x45DEAC): PUSH       */
+/* 0x47E29C ("ee") then MOV ECX,0x4A99B0 then CALL 0x41F6E0, and the     */
+/* callee's own RET 4 (thiscall + 1 stack arg) matches. Structurally     */
+/* identical to INPUT_LoadEvents (0x41F5E0): builds "{install_path}     */
+/* {suffix}.ini" (format "%s%s.ini", string 0x47E61C) and reads it via   */
+/* a PlayerConfig-shaped handle, then "%03ld"-keyed (string 0x47E614)    */
+/* [TimeEvents] entries until Config_GetIniString returns empty,        */
+/* calling INPUT_AddTimeEvent for each.                                  */
+/*                                                                      */
+/* Original also constructs the handle with PlayerConfig::PlayerConfig  */
+/* (0x452CE0, "this"=B+0x10C) and the placeholder name "LOCO.INI"        */
+/* (string 0x47E628), then immediately overwrites the handle's name     */
+/* field (this+4 = B+0x110, a second CRT_sprintf_buf call with no        */
+/* format specifiers — a plain copy) with the computed path. Since       */
+/* PlayerConfig::PlayerConfig has no side effect beyond writing           */
+/* descriptor/name/field_108 (game/PlayerConfig.cpp), constructing        */
+/* directly with the final computed path is behaviorally identical to    */
+/* construct-with-placeholder-then-overwrite, and is what this           */
+/* implementation does.                                                  */
+/*                                                                      */
+/* The caller (TEST AL,AL at 0x45DEB1) checks the return value, so the   */
+/* header's previous `void` return was also wrong; the only return path  */
+/* in the disassembly is `MOV AL,1` — always true here.                  */
 /* ================================================================== */
-void INPUT_LoadTimeEvents(void* self)
+bool INPUT_LoadTimeEvents(void* self, const char* suffix)
 {
-    (void)self;
-    input_events_deferred("INPUT_LoadTimeEvents", 0x41F6E0);
+    char path[0x104];
+    std::snprintf(path, sizeof(path), "%s%s.ini", g_install_path, suffix);
+    PlayerConfig config(path);
+
+    for (int32_t index = 1; ; ++index) {
+        char key[16];
+        std::snprintf(key, sizeof(key), "%03d", index);
+
+        char value[0x104];
+        value[0] = '\0';   /* Config_GetIniString's real (Win32) behavior
+                              always writes the default on a miss, but
+                              pre-zero defensively so a provider that
+                              returns without writing can't spin this
+                              loop forever on uninitialized stack. */
+        Config_GetIniString(&config, "TimeEvents", key, "", value, sizeof(value));
+        if (value[0] == '\0') {
+            break;
+        }
+        INPUT_AddTimeEvent(self, value);
+    }
+    return true;
 }
 
 /* ================================================================== */
 /* INPUT_DiscoverEasterEgg — Address: 0x41F8E0                          */
 /* Ghidra label "INPUT_EditScrollHandler" — misnomer verified by direct */
-/* decompile. If the resource is not yet marked discovered (+0x163),    */
-/* writes a "%ld" entry to [EasterEggs] in LOCO.INI (Config_WriteInt)   */
-/* and marks it discovered. INI plumbing is out of scope for this pass  */
-/* (same as INPUT_LoadTimeEvents above) — loud deferred stub.           */
+/* decompile. If the resource is found and not yet marked discovered    */
+/* (+0x163), increments self+0x10 (discovered-egg counter), writes a    */
+/* "%ld"-valued (string 0x47E64C) entry keyed by that counter to the     */
+/* [EasterEggs] section (string 0x47E640) of the global config INI      */
+/* (g_config_ini) via Config_WriteInt, and on success (return==1) marks  */
+/* the resource discovered. Returns Config_WriteInt's own result, or 0   */
+/* if the resource wasn't found or was already discovered.              */
+/*                                                                      */
+/* CORRECTION vs. Ghidra's raw decompilation: Ghidra rendered the two    */
+/* early-exit paths as `return uVar1 & 0xffffff00` (a masked resource    */
+/* pointer) — verified by disassembly to be wrong; both paths actually   */
+/* execute `XOR AL,AL` and return a plain 0, not a masked pointer.       */
 /* ================================================================== */
 uint32_t INPUT_DiscoverEasterEgg(void* self, uint32_t resId)
 {
-    (void)self;
-    (void)resId;
-    input_events_deferred("INPUT_DiscoverEasterEgg", 0x41F8E0);
+    const int32_t res = g_resmgr.GetById(static_cast<int32_t>(resId));  /* 0x446EA0 */
+    if (res == 0) {
+        return 0;
+    }
+    /* ABI_BOUNDARY: ResourceManager::GetById preserves the original x86
+     * ABI's 32-bit pointer-as-int contract (same pattern already used by
+     * INPUT_FindObjectAt's default-mode lookup above); reconstruct the
+     * real host pointer from it. */
+    void* resource = reinterpret_cast<void*>(static_cast<uintptr_t>(res));
+    if (field_at<uint8_t>(resource, 0x163) == 1) {
+        return 0;
+    }
+
+    int32_t& discoveredCount = field_at<int32_t>(self, 0x10);
+    discoveredCount += 1;
+
+    char key[16];
+    std::snprintf(key, sizeof(key), "%ld", static_cast<long>(discoveredCount));
+
+    const int32_t writeResult = Config_WriteInt_ExternC(g_config_ini, "EasterEggs", key,
+                                                         static_cast<int32_t>(resId));
+    if (writeResult == 1) {
+        field_at<uint8_t>(resource, 0x163) = 1;
+    }
+    return static_cast<uint32_t>(writeResult);
 }
 
 /* ================================================================== */
@@ -2166,36 +2266,58 @@ void* INPUT_AddTimeEvent(void* self, const char* fields)
 /* decompile. Scans the TimeEvents list at self+0x0C for the first      */
 /* entry whose [start,end) window (Game_IsPositionBetween) contains the */
 /* current local time and whose trigger_time has elapsed; shows it via  */
-/* UI_CreateMessageBox and reschedules per repeat_mode. The real body   */
-/* is transcribed below (commented out) exactly as decompiled/verified  */
-/* against disassembly, together with the TimeEventNode field mapping   */
-/* above — but Game_IsPositionBetween/UI_CreateMessageBox both live in  */
-/* core/Game.cpp, whose own dependency graph is far larger than this    */
-/* file's existing footprint (this file's build/test targets link a    */
-/* deliberately curated, --unresolved-symbols=ignore-all-free object    */
-/* set; see tests/meson.build's comment on inputmgr_canonical_test).    */
-/* Pulling in core/Game.cpp here is a real architectural decision for   */
-/* a future pass, not something to do as a side effect of this one, so  */
-/* this stays a loud deferred stub like its siblings (INPUT_SetKeyboard,*/
-/* INPUT_SetMouse, INPUT_LoadTimeEvents, INPUT_DiscoverEasterEgg) rather */
-/* than silently wired half-open.                                      */
-/*
-uint8_t INPUT_CheckScheduledEvents_reference(void* self)
+/* UI_CreateMessageBox and reschedules per repeat_mode.                 */
+/*                                                                      */
+/* Re-derived fresh from disassembly (not trusted from any prior draft): */
+/* Game_IsPositionBetween/UI_CreateMessageBox are genuine free-function  */
+/* calls (no vtable dispatch in this function at all) whose addresses    */
+/* (0x412790 / 0x423AB0) and argument shapes match core/Game.h's real    */
+/* declaration and this file's own existing UI_CreateMessageBox          */
+/* declaration exactly — spot-checked against the disassembly's PUSH     */
+/* sequence and MOV ECX,0x4FD220 (== g_tooltip_mgr's value, matching how  */
+/* core/Game.cpp's own UI_CreateMessageBox call sites pass it).           */
+/*                                                                      */
+/* Two dead branches are collapsed below (each proven unreachable by its */
+/* own guarding comparison, not merely simplified for style):            */
+/*   - repeatMode>=1 always takes the CRT_rand()-based path; the          */
+/*     disassembly's `repeatMode==0` fast path can never fire because     */
+/*     the preceding `CMP repeatMode,1; JL` already sent repeatMode<1     */
+/*     (which includes 0) to the *other* branch.                          */
+/*   - within the repeatMode<1 branch, `2-repeatMode` is always >=2, so   */
+/*     the disassembly's `repeatMode==2` fast path can never fire either. */
+/* Both branches still call CRT_rand() exactly once, preserving the       */
+/* original's random-number-consumption sequence.                        */
+/*                                                                      */
+/* core/Game.cpp/UI_CreateMessageBox's own dependency graphs are far      */
+/* larger than this file's narrow test targets' link sets (see           */
+/* INPUT_LoadTimeEvents/INPUT_DiscoverEasterEgg above and this batch's    */
+/* report for the investigation); the strict tests get truthful loud      */
+/* fixtures in tests/persistence_fixtures.h instead of pulling in         */
+/* core/Game.cpp or graphics/DDRAW.cpp.                                   */
+/* ================================================================== */
+uint8_t INPUT_CheckScheduledEvents(void* self)
 {
-    auto* selfBytes = static_cast<uint8_t*>(self);
-    int32_t currentTick = *reinterpret_cast<int32_t*>(selfBytes + 0x04);
+    const int32_t currentTick = field_at<int32_t>(self, 0x04);
+    tm* now = CRT_localtime(&field_at<uint32_t>(self, 0x04));
 
-    struct tm* now = CRT_localtime(reinterpret_cast<int32_t*>(selfBytes + 0x04));
-    TimeEventNode* node = *reinterpret_cast<TimeEventNode**>(selfBytes + 0x0C);
+    TimeEventNode* node = field_at<TimeEventNode*>(self, 0x0C);
     if (node == nullptr) {
         return 0;
     }
 
     while (true) {
-        bool inWindow = Game_IsPositionBetween(
+        /* ABI_BOUNDARY: struct tm's first 5 fields (sec,min,hour,mday,mon)
+         * are int on this platform and match Game_IsPositionBetween's
+         * documented int[5]-shaped {sec,min,hour,day,month} parameter
+         * exactly (core/Game.h) — a genuine standard-library-struct
+         * reinterpretation, not a modeled game-object cast. node's own
+         * int32_t members need no cast at all: int32_t is int on this
+         * platform, so &node->start_sec/&node->end_sec already have
+         * type int*. */
+        const bool inWindow = Game_IsPositionBetween(
             reinterpret_cast<int*>(now),
-            reinterpret_cast<int*>(&node->start_sec),
-            reinterpret_cast<int*>(&node->end_sec)) != 0;
+            &node->start_sec,
+            &node->end_sec) != 0;
         if (inWindow && node->trigger_time < currentTick) {
             break;
         }
@@ -2208,28 +2330,15 @@ uint8_t INPUT_CheckScheduledEvents_reference(void* self)
     UI_CreateMessageBox(g_tooltip_mgr, node->msg_res_id, node->msg_type,
                         node->msg_anchor, node->msg_x, node->msg_y, 1);
 
-    int32_t repeatMode = node->repeat_mode;
-    if (repeatMode > 0) {
-        if (repeatMode == 0) {
-            node->trigger_time = currentTick + 1;
-            return 1;
-        }
+    const int32_t repeatMode = node->repeat_mode;
+    if (repeatMode >= 1) {
         node->trigger_time = currentTick + static_cast<int32_t>(CRT_rand()) % repeatMode + 1;
         return 1;
     }
 
-    int32_t offset = repeatMode;
-    if (repeatMode != 2) {
-        offset = static_cast<int32_t>(CRT_rand()) % (2 - repeatMode) + repeatMode;
-    }
+    const int32_t offset = static_cast<int32_t>(CRT_rand()) % (2 - repeatMode) + repeatMode;
     node->trigger_time = currentTick + offset;
     return 1;
-}
-*/
-uint8_t INPUT_CheckScheduledEvents(void* self)
-{
-    (void)self;
-    input_events_deferred("INPUT_CheckScheduledEvents", 0x41FF20);
 }
 
 /* ================================================================== */

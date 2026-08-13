@@ -278,20 +278,27 @@ void INPUT_ResetLoadEventNode(void* node);             /* 0x41F540 */
  *  INPUT_FreeEvents's second loop (TimeEvents list). Address: 0x41F590. */
 void INPUT_ResetTimeEventNode(void* node);             /* 0x41F590 */
 
-/** Load the [TimeEvents] section from LOCO.INI, calling
- *  INPUT_AddTimeEvent for each entry. Structurally identical to
- *  INPUT_LoadEvents above (same PlayerConfig_Ctor/Config_GetIniString
- *  pattern, "%03ld" keys). Ghidra's auto-generated name
- *  ("INPUT_EditMouseHandler") is a misnomer verified by direct
- *  decompile — this has nothing to do with mouse input. Address:
- *  0x41F6E0. */
-void INPUT_LoadTimeEvents(void* self);                 /* 0x41F6E0 */
+/** Load the [TimeEvents] section from "{install_path}{suffix}.ini",
+ *  calling INPUT_AddTimeEvent for each entry. Structurally identical to
+ *  INPUT_LoadEvents above (same PlayerConfig-handle/Config_GetIniString
+ *  pattern, "%03ld" keys). The `suffix` parameter and `bool` return were
+ *  both missing from this declaration until verified fresh from the one
+ *  call site's disassembly (FUN_0045de3a, pushes "ee" then self, RET 4
+ *  callee-pops-1-stack-arg, and the caller checks AL). Ghidra's
+ *  auto-generated name ("INPUT_EditMouseHandler") is a misnomer verified
+ *  by direct decompile — this has nothing to do with mouse input.
+ *  Address: 0x41F6E0. */
+bool INPUT_LoadTimeEvents(void* self, const char* suffix);   /* 0x41F6E0 */
 
-/** Easter-egg discovery-on-hover: if the resource at `resId` has not
- *  yet been marked discovered (+0x163), writes a "%ld" entry to the
- *  [EasterEggs] section of LOCO.INI and marks it discovered. Ghidra's
- *  auto-generated name ("INPUT_EditScrollHandler") is a misnomer
- *  verified by direct decompile. Address: 0x41F8E0. */
+/** Easter-egg discovery-on-hover: if the resource at `resId` is found
+ *  and not yet marked discovered (+0x163), increments self+0x10 (a
+ *  discovered-egg counter), writes a "%ld"-keyed entry (key = that
+ *  counter, value = resId) to the [EasterEggs] section of the global
+ *  config INI (g_config_ini) via Config_WriteInt, and on success marks
+ *  the resource discovered. Returns Config_WriteInt's own result (0 if
+ *  not found/already discovered). Ghidra's auto-generated name
+ *  ("INPUT_EditScrollHandler") is a misnomer verified by direct
+ *  decompile. Address: 0x41F8E0. */
 uint32_t INPUT_DiscoverEasterEgg(void* self, uint32_t resId); /* 0x41F8E0 */
 
 /** Allocate and prepend a new LoadEvents node parsed from a
@@ -314,8 +321,10 @@ void* INPUT_AddTimeEvent(void* self, const char* fields);     /* 0x41FBE0 */
  *  (see Game_IsPositionBetween) contains the current local time and
  *  whose trigger_time has elapsed; show it via UI_CreateMessageBox and
  *  reschedule (random/fixed/immediate per its repeat-mode field).
- *  Ghidra's auto-generated name ("INPUT_EditSetFocus") is a misnomer
- *  verified by direct decompile. Address: 0x41FF20. */
+ *  Real free-function calls to Game_IsPositionBetween (0x412790) and
+ *  UI_CreateMessageBox (0x423AB0) — no vtable dispatch. Ghidra's
+ *  auto-generated name ("INPUT_EditSetFocus") is a misnomer verified
+ *  by direct decompile. Address: 0x41FF20. */
 uint8_t INPUT_CheckScheduledEvents(void* self);        /* 0x41FF20 */
 
 /** Periodic per-tick dispatcher: at wParam%10==0 (mode 3 only) calls

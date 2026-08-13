@@ -47,6 +47,7 @@
 #include "network/Netman.h"
 #include "world/tilemap.h"
 #include "resources/ResourceManager.h"
+#include "game/PlayerConfig.h"
 
 /* ---- Fail-loud macro ---- */
 
@@ -70,6 +71,12 @@ UI_Manager* g_tooltip_mgr = nullptr;      /* 0x4FD220 */
 void*    g_asset_mgr = nullptr;           /* 0x485600 */
 void*    g_audio = nullptr;               /* 0x4FD3BC */
 void*    g_building_mgr = nullptr;        /* 0x485448 */
+void*    g_config_ini = nullptr;          /* 0x485484 — global config INI handle;
+                                             INPUT_DiscoverEasterEgg's
+                                             Config_WriteInt call passes this
+                                             through untouched (real
+                                             Config_WriteInt ignores the
+                                             handle on this host). */
 void*    g_main_window = nullptr;         /* 0x4AA4A0 */
 void*    g_primary_surface = nullptr;     /* 0x4FD3C4 */
 Entity*  g_selected_building = nullptr;  /* 0x4855B0 (Entity* — see world/tilemap.h) */
@@ -592,6 +599,31 @@ LOUD_FIXTURE(GameObject_Update)
 LOUD_FIXTURE(GameObject_StopSound)
 LOUD_FIXTURE(Game_CheckTimeInRange)
 LOUD_FIXTURE(Game_SelectGameObject)
+/* Newly referenced by input/InputMgr.cpp's INPUT_CheckScheduledEvents
+ * (real logic implemented this session): Game_IsPositionBetween/
+ * UI_CreateMessageBox both live in core/Game.cpp, whose own dependency
+ * graph (World/BuildingMgr/ResourceManager/GameAudio/Town/scriptengine/
+ * DDRAW_Building/CGWND, and g_tooltip_mgr's real definition in
+ * graphics/DDRAW.cpp) is far larger than this narrow test cone and this
+ * project has no -ffunction-sections/--gc-sections to prune the unused
+ * rest of that object, so pulling in the real core/Game.o here would
+ * pull in most of the game's world subsystem. Not exercised by any
+ * current persistence test (none call INPUT_CheckScheduledEvents), so a
+ * loud fixture is fully truthful. */
+LOUD_FIXTURE(Game_IsPositionBetween)
+LOUD_FIXTURE(UI_CreateMessageBox)
+/* PlayerConfig::PlayerConfig/~PlayerConfig — newly referenced by
+ * input/InputMgr.cpp's INPUT_LoadTimeEvents (real logic implemented
+ * this session). The real bodies (game/PlayerConfig.cpp) are trivial
+ * (descriptor/name/field_108 writes only) but the .cpp's OTHER methods
+ * (LoadOrCreate/SetName) reference GetUserNameA/CreateFileA/ReadFile/
+ * WriteFile/NET_UpdatePlayerList — the last of which has a real body in
+ * network/NetworkPlayerList.cpp, cascading into the network subsystem —
+ * so linking the real game/PlayerConfig.o here (whole-.o resolution,
+ * same reasoning as above) is not a lightweight fix either. Not
+ * exercised by any current persistence test. */
+LOUD_FIXTURE(PlayerConfig_Ctor)
+LOUD_FIXTURE(PlayerConfig_Dtor)
 LOUD_FIXTURE(UIPANEL_Blit)
 LOUD_FIXTURE(Math_DistSquared)
 LOUD_FIXTURE(Math_PointOnLineSegment)
@@ -615,6 +647,15 @@ void GameObject_StopSound(void*, int) { fixture_reached_GameObject_StopSound(); 
 int Game_CheckTimeInRange(int*, int*, int*) { fixture_reached_Game_CheckTimeInRange(); return 0; }
 void Game_SelectGameObject(void*, void*);
 void Game_SelectGameObject(void*, void*) { fixture_reached_Game_SelectGameObject(); }
+/* Signature matches core/Game.h's real declaration exactly. */
+int Game_IsPositionBetween(int*, int*, int*)
+{ fixture_reached_Game_IsPositionBetween(); return 0; }
+/* Signature matches input/InputMgr.cpp's own declaration of the real
+ * 0x423AB0 symbol exactly. */
+void UI_CreateMessageBox(void*, int32_t, int32_t, char, int32_t, int32_t, int32_t)
+{ fixture_reached_UI_CreateMessageBox(); }
+PlayerConfig::PlayerConfig(const char*) { fixture_reached_PlayerConfig_Ctor(); }
+PlayerConfig::~PlayerConfig() { fixture_reached_PlayerConfig_Dtor(); }
 /* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
  * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t). Was a
  * uniform-int shape that happened to match the call-0-landmine-era

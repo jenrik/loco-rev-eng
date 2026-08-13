@@ -258,7 +258,7 @@ host_mode3_bootstrap_test = executable('host_mode3_bootstrap_test',
 )
 test('host-mode3-bootstrap', host_mode3_bootstrap_test)
 
-persistence_objs = [obj_input_mgr, obj_resdata_save, obj_persistence_adapt]
+persistence_objs = [obj_input_mgr, obj_resdata_save, obj_persistence_adapt, obj_config_ini]
 persistence_cone = [obj_track_pos, obj_game_object, obj_entity, obj_building_mgr_grp,
                      obj_resdata_vehicle, obj_game_vehicle, obj_help_page_node, obj_building]
 
@@ -266,6 +266,16 @@ persistence_cone = [obj_track_pos, obj_game_object, obj_entity, obj_building_mgr
 # entity-collection ops / ResetWorldState 0x41E100. Links the real InputMgr.o;
 # no --unresolved-symbols=ignore-all: the link fails loudly if InputMgr.o
 # references any symbol the test does not truthfully provide.
+#
+# obj_config_ini (game/ConfigIni.cpp) is included above because
+# INPUT_LoadTimeEvents/INPUT_DiscoverEasterEgg call the real
+# Config_GetIniString/Config_WriteInt (0x452D80/0x452DB0) — a genuinely
+# self-contained leaf translation unit (no external deps beyond <cstring>),
+# unlike game/PlayerConfig.cpp or core/Game.cpp, both of which would pull in
+# much larger dependency graphs if extracted whole (see
+# tests/persistence_fixtures.h's comments next to the Game_IsPositionBetween/
+# UI_CreateMessageBox/PlayerConfig_Ctor/PlayerConfig_Dtor loud fixtures for
+# why those stay fixtures instead).
 inputmgr_canonical_test = executable('inputmgr_canonical_test',
   'inputmgr_canonical_test.cpp',
   objects: persistence_objs + persistence_cone,

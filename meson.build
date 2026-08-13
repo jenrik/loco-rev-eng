@@ -242,6 +242,7 @@ else
   obj_track_pos         = lego_loco.extract_objects('game/TrackPos.cpp')
   obj_resdata_save      = lego_loco.extract_objects('resources/ResDataSave.cpp')
   obj_persistence_adapt = lego_loco.extract_objects('input/PersistenceAdapter.cpp')
+  obj_config_ini        = lego_loco.extract_objects('game/ConfigIni.cpp')
   obj_postbag_cleanup   = lego_loco.extract_objects('network/PostBagCleanup.cpp')
 
   # Shim/subsystem objects reused by tests instead of recompiling them again.
