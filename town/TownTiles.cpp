@@ -1004,42 +1004,158 @@ bool UIPANEL_Surface::BlitTileSurface(
 }
 
 /* ================================================================== */
-/* CalcScrollRect / CalcScrollRect_Reversed — TODO: decompile 0x42C590 / 0x42C700 */
+/* CalcScrollRect / CalcScrollRect_Reversed                            */
+/* Addresses: 0x42C590 (forward) / 0x42C700 (reversed)                 */
 /*                                                                     */
-/* Deferred per CLAUDE.md stub policy. Ghidra's own decompilation of   */
-/* both functions is internally inconsistent about the real parameter */
-/* count: the caller (UIPANEL_Blit, flags & 0x40) pushes 4 stack dwords */
-/* and the callee's `RET 0x10` pops exactly 4, but the decompiled body */
-/* only demonstrably reads 2 of them (a RECT* rewritten in place, and  */
-/* a surface-descriptor object dereferenced for a vtable+0x58 call);   */
-/* the other two surface only as Ghidra's unresolved "unaff_EBX"/      */
-/* "unaff_EBP" artifacts, which may just be the decompiler losing      */
-/* track of the SAME RECT*'s left/top across intervening SetRect/      */
-/* IntersectRect calls rather than genuinely distinct parameters. The  */
-/* vtable+0x58 call target's real interface (and therefore the exact  */
-/* shape of the width/height query it performs) is also unconfirmed.  */
-/* Rather than guess at pixel-level rect math with this much open      */
-/* uncertainty, this is a loud stub — never a silent no-op. Called     */
-/* from UIPANEL_Blit only when flags & 0x40 is set; not yet exercised  */
-/* by any test (the mode==0 software tile path this feeds has no test  */
-/* coverage — see PROGRESS.md).                                        */
+/* RESOLVED (was a deferred stub — see PROGRESS.md history). Ghidra's   */
+/* own signature guess for these functions (2 stack args) was wrong;   */
+/* both take 4 stack args, matching their `RET 0x10`. Re-derived from   */
+/* raw disassembly of both functions AND their sole caller (UIPANEL_   */
+/* Blit @0x42B050, dispatch around 0x42B0EF-0x42B111 for the forward   */
+/* call, mirrored for the reversed call): the caller pushes, in        */
+/* argument order, `&param_1` (a RECT-shaped view over its own         */
+/* src_x/src_y/dest_x/dest_y stack slots), `param_5` (dest_surface),   */
+/* `&param_6` (a second RECT-shaped view over clip_left/clip_top/      */
+/* clip_right/clip_bottom), and `param_10` (its own flags value).      */
+/*                                                                     */
+/* `flags` is genuinely unread by either function body — confirmed by  */
+/* enumerating every ESP-relative read in both disassemblies and       */
+/* finding none at the stack offset corresponding to the 4th argument. */
+/* Kept in the signature for original-ABI fidelity (the sole caller    */
+/* pushes it and the callee's RET 0x10 pops it); unused internally.    */
+/*                                                                     */
+/* Both functions clip a "scroll view" rectangle — `clip_rect`'s own   */
+/* width/height repositioned to `rect`'s origin, compensating for a    */
+/* negative `clip_rect` origin — against the surface's bounds (queried */
+/* from `surface_obj->GetSurfaceDesc()`, vtable+0x58 in the original),  */
+/* then write the result back into BOTH `rect` (surface-local          */
+/* coordinates) and `clip_rect` (shifted destination coordinates).     */
+/*                                                                     */
+/* They are NOT simple mirror images:                                  */
+/*   - CalcScrollRect (forward, this->mode==1 / DDraw surface) checks   */
+/*     `clip_rect` only for emptiness against itself, clips solely      */
+/*     against the surface's *reported* bounds, and its shared          */
+/*     epilogue does an unconditional `XOR AL,AL` — it ALWAYS returns   */
+/*     false, on both the success and early-bail paths. The sole caller */
+/*     never inspects the return value, so this apparent original bug   */
+/*     has no observable effect (documented, not "fixed"). It also      */
+/*     computes a `{0,0,this->width,this->height}` panel-bounds rect    */
+/*     via SetRect that is written but never read again anywhere in the */
+/*     function — dead code in the original, omitted here for the same  */
+/*     reason CLAUDE.md permits simplifying proven-equivalent assembly   */
+/*     artifacts.                                                       */
+/*   - CalcScrollRect_Reversed (this->mode==0 / software pixel buffer)  */
+/*     additionally clips `clip_rect` against the panel's *logical*     */
+/*     bounds (`{0,0,this->width,this->height}`) BEFORE clipping        */
+/*     against the surface's reported bounds, and returns true on       */
+/*     success / false only on its two early-empty-rect bail paths.     */
 /* ================================================================== */
-bool UIPANEL_Surface::CalcScrollRect(RECT* rect, void* surface_obj)
+extern void __stdcall SetRect(RECT* lprc, int left, int top, int right, int bottom);  /* IAT 0x477384 */
+extern int  __stdcall IntersectRect(RECT* dst, const RECT* src1, const RECT* src2);   /* IAT 0x47726C */
+extern int  __stdcall IsRectEmpty(const RECT* rect);                                  /* IAT 0x477268 */
+
+bool UIPANEL_Surface::CalcScrollRect(RECT* rect, IDirectDrawSurface4* surface_obj,
+                                     RECT* clip_rect, uint32_t /*flags*/)
 {
-    (void)rect;
-    (void)surface_obj;
-    fprintf(stderr, "STUB: UIPANEL_Surface::CalcScrollRect reached at %s:%d\n", __FILE__, __LINE__);
-    assert(0 && "UIPANEL_Surface::CalcScrollRect stub reached (TODO: decompile 0x42C590)");
-    return false;  /* unreachable */
+    DDSURFACEDESC desc = {};
+    desc.dwSize = sizeof(desc);
+    surface_obj->GetSurfaceDesc(&desc);   /* vtable+0x58 in the original */
+
+    RECT surface_bounds;
+    SetRect(&surface_bounds, 0, 0, static_cast<int>(desc.dwWidth), static_cast<int>(desc.dwHeight));
+
+    /* Shift amount compensating for a negative clip_rect origin. */
+    int adj_x = rect->left - ((clip_rect->left < 0) ? clip_rect->left : 0);
+    int adj_y = rect->top  - ((clip_rect->top  < 0) ? clip_rect->top  : 0);
+
+    /* Validate clip_rect (empty-rect check via self-intersect, matching
+     * the original's IntersectRect(tmp, clip_rect, clip_rect) idiom). */
+    RECT clip_norm;
+    IntersectRect(&clip_norm, clip_rect, clip_rect);
+    if (IsRectEmpty(&clip_norm)) {
+        return false;
+    }
+
+    /* View rect: same size as clip_norm, repositioned to (adj_x, adj_y). */
+    RECT view_rect;
+    view_rect.left   = adj_x;
+    view_rect.top    = adj_y;
+    view_rect.right  = adj_x + (clip_norm.right  - clip_norm.left);
+    view_rect.bottom = adj_y + (clip_norm.bottom - clip_norm.top);
+
+    RECT final_rect;
+    IntersectRect(&final_rect, &view_rect, &surface_bounds);
+    if (IsRectEmpty(&final_rect)) {
+        return false;
+    }
+
+    int clamp_x = (adj_x > 0) ? 0 : adj_x;
+    int clamp_y = (adj_y > 0) ? 0 : adj_y;
+
+    SetRect(rect, final_rect.left, final_rect.top, final_rect.right, final_rect.bottom);
+
+    int dst_x = clip_norm.left - clamp_x;
+    int dst_y = clip_norm.top  - clamp_y;
+    SetRect(clip_rect, dst_x, dst_y,
+            dst_x + (final_rect.right  - final_rect.left),
+            dst_y + (final_rect.bottom - final_rect.top));
+
+    /* BUG (original): the shared epilogue always returns false, on every
+     * path including this success path. The sole caller (UIPANEL_Blit)
+     * never checks the return value, so this has no observable effect. */
+    return false;
 }
 
-bool UIPANEL_Surface::CalcScrollRect_Reversed(RECT* rect, void* surface_obj)
+bool UIPANEL_Surface::CalcScrollRect_Reversed(RECT* rect, IDirectDrawSurface4* surface_obj,
+                                              RECT* clip_rect, uint32_t /*flags*/)
 {
-    (void)rect;
-    (void)surface_obj;
-    fprintf(stderr, "STUB: UIPANEL_Surface::CalcScrollRect_Reversed reached at %s:%d\n", __FILE__, __LINE__);
-    assert(0 && "UIPANEL_Surface::CalcScrollRect_Reversed stub reached (TODO: decompile 0x42C700)");
-    return false;  /* unreachable */
+    DDSURFACEDESC desc = {};
+    desc.dwSize = sizeof(desc);
+    surface_obj->GetSurfaceDesc(&desc);   /* vtable+0x58 in the original */
+
+    RECT surface_bounds;
+    SetRect(&surface_bounds, 0, 0, static_cast<int>(desc.dwWidth), static_cast<int>(desc.dwHeight));
+
+    RECT panel_bounds;
+    SetRect(&panel_bounds, 0, 0, this->width, this->height);   /* +0x08 / +0x0C */
+
+    /* Shift amount compensating for a negative clip_rect origin. */
+    int adj_x = rect->left - ((clip_rect->left < 0) ? clip_rect->left : 0);
+    int adj_y = rect->top  - ((clip_rect->top  < 0) ? clip_rect->top  : 0);
+
+    /* Unlike the forward version, clip_rect is first clipped against the
+     * panel's logical bounds (not just self-validated). */
+    RECT clip_vs_panel;
+    IntersectRect(&clip_vs_panel, &panel_bounds, clip_rect);
+    if (IsRectEmpty(&clip_vs_panel)) {
+        return false;
+    }
+
+    /* View rect: same size as clip_vs_panel, repositioned to (adj_x, adj_y). */
+    RECT view_rect;
+    view_rect.left   = adj_x;
+    view_rect.top    = adj_y;
+    view_rect.right  = adj_x + (clip_vs_panel.right  - clip_vs_panel.left);
+    view_rect.bottom = adj_y + (clip_vs_panel.bottom - clip_vs_panel.top);
+
+    RECT final_rect;
+    IntersectRect(&final_rect, &view_rect, &surface_bounds);
+    if (IsRectEmpty(&final_rect)) {
+        return false;
+    }
+
+    int clamp_x = (adj_x > 0) ? 0 : adj_x;
+    int clamp_y = (adj_y > 0) ? 0 : adj_y;
+
+    SetRect(rect, final_rect.left, final_rect.top, final_rect.right, final_rect.bottom);
+
+    int dst_x = clip_vs_panel.left - clamp_x;
+    int dst_y = clip_vs_panel.top  - clamp_y;
+    SetRect(clip_rect, dst_x, dst_y,
+            dst_x + (final_rect.right  - final_rect.left),
+            dst_y + (final_rect.bottom - final_rect.top));
+
+    return true;
 }
 
 /* ================================================================== */

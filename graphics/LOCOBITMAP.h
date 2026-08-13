@@ -73,6 +73,9 @@
 /* ================================================================ */
 
 struct RESDATA;  /* Resource data descriptor */
+struct IDirectDrawSurface4;  /* DirectDraw surface interface (see graphics/DDRAW.h,
+                               * graphics/sdl3_ddraw.h / stubs/ddraw.h for the real
+                               * declaration) — used by UIPANEL_Surface::CalcScrollRect. */
 
 /* ================================================================ */
 /* PostcardAlbum — Postbag album/browser UI window                   */
@@ -700,25 +703,54 @@ struct UIPANEL_Surface {
     /**
      * CalcScrollRect / CalcScrollRect_Reversed — Compute the visible tile
      * rect from a scroll position, clamped against the surface bounds
-     * (queried via a GetSurfaceDesc-style vtable call on `surface_obj` at
-     * vtable+0x58) and an input clip rect. Rewrites `rect` in place.
-     * Address: 0x42C590 (forward) / 0x42C700 (reversed).
-     * Called by: UIPANEL_Blit (flags=0x40), selecting forward vs. reversed
-     * based on this->mode (1=forward, 0=reversed).
+     * (queried via `surface_obj->GetSurfaceDesc()`, vtable+0x58 in the
+     * original) and an input clip rect. Rewrites BOTH `rect` and
+     * `clip_rect` in place. Address: 0x42C590 (forward) / 0x42C700
+     * (reversed). Called by: UIPANEL_Blit (flags=0x40), selecting forward
+     * vs. reversed based on this->mode (1=forward/DDraw surface,
+     * 0=reversed/software buffer).
      *
-     * CAVEAT: the original x86 callee pops 0x10 (4 stack dwords) via its
-     * RET instruction, and the caller (UIPANEL_Blit) pushes 4 values before
-     * the call, but only 2 of those four are demonstrably read by the
-     * decompiled body (the `rect` pointer and `surface_obj`) — Ghidra's own
-     * decompiler shows unresolved "unaff_EBX"/"unaff_EBP"/"ptStack_4"
-     * artifacts for the other two, which trace back to the SAME `rect`
-     * pointer being dereferenced early (this may just be a decompiler
-     * tracking limitation, not two genuinely distinct extra parameters).
-     * Implemented here with the two parameters the body unambiguously uses;
-     * revisit if the 4-vs-2 stack-argument discrepancy turns out to matter.
+     * RESOLVED (previously deferred — see PROGRESS.md history): the
+     * original x86 callee pops 0x10 (4 stack dwords) via its RET
+     * instruction because it genuinely takes 4 stack arguments, not 2.
+     * Ghidra's own signature guess (2 args) was wrong and caused the
+     * decompiler to lose track of two real parameters, surfacing them as
+     * unresolved "unaff_EBX"/"unaff_EBP"/"ptStack_4" artifacts. Re-derived
+     * from raw disassembly of both this function and its sole caller
+     * (UIPANEL_Blit @0x42B050, the `this->+4 == 1` / `== 0` dispatch
+     * around 0x42B0EF-0x42B111): the caller pushes, in argument order,
+     * `&param_1` (a RECT-shaped view over its own src_x/src_y/dest_x/
+     * dest_y stack slots), `param_5` (dest_surface), `&param_6` (a second
+     * RECT-shaped view over clip_left/clip_top/clip_right/clip_bottom),
+     * and `param_10` (its own flags value) — i.e. exactly 4 stack args,
+     * matching RET 0x10.
+     *
+     * `flags` is pushed by the caller to match the real stack frame but is
+     * never read by either function body (checked exhaustively against
+     * every stack-relative read in the disassembly) — kept in the
+     * signature for original-ABI fidelity, unused internally.
+     *
+     * The two functions are NOT simple mirror images:
+     *   - CalcScrollRect (forward) validates `clip_rect` only against
+     *     itself (IntersectRect(tmp, clip_rect, clip_rect), a normalize/
+     *     empty-check idiom), clips the shifted view rect against the
+     *     surface's *reported* bounds (GetSurfaceDesc), and ALWAYS
+     *     returns false — the original's shared epilogue does an
+     *     unconditional `XOR AL,AL` on every path, a likely original bug
+     *     with no observable effect because the sole caller never checks
+     *     the return value. It also computes a `{0,0,this->width,
+     *     this->height}` panel-bounds rect via SetRect that is written
+     *     but never read again — dead code in the original, omitted here.
+     *   - CalcScrollRect_Reversed additionally clips `clip_rect` against
+     *     the panel's *logical* bounds (`{0,0,this->width,this->height}`)
+     *     BEFORE clipping against the surface's reported bounds, and
+     *     returns true on success / false only on the two early-empty-
+     *     rect bail paths.
      */
-    bool CalcScrollRect(RECT* rect, void* surface_obj);
-    bool CalcScrollRect_Reversed(RECT* rect, void* surface_obj);
+    bool CalcScrollRect(RECT* rect, IDirectDrawSurface4* surface_obj,
+                        RECT* clip_rect, uint32_t flags);
+    bool CalcScrollRect_Reversed(RECT* rect, IDirectDrawSurface4* surface_obj,
+                                 RECT* clip_rect, uint32_t flags);
 };
 
 /* ================================================================ */

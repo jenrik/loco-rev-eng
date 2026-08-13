@@ -634,22 +634,32 @@ bool __thiscall UIPANEL_Blit(void* renderer,
         }
     }
 
-    /* Handle scroll rect calculation */
+    /* Handle scroll rect calculation. `rect` mirrors the original's
+     * &param_1 view over (src_x, src_y, dest_x, dest_y) and `clip_rect`
+     * mirrors its &param_6 view over (clip_left, clip_top, clip_right,
+     * clip_bottom) — both are genuine in/out parameters of CalcScrollRect/
+     * CalcScrollRect_Reversed (see town/TownTiles.cpp), so every field of
+     * both rects must be written back unconditionally afterward, exactly
+     * as the original's aliased stack layout would. */
     if ((flags & 0x40) != 0) {
-        RECT rect;
-        rect.left   = src_x;
-        rect.top    = src_y;
-        rect.right  = clip_right;
-        rect.bottom = clip_bottom;
+        RECT rect      = { static_cast<int>(src_x),     static_cast<int>(src_y),
+                           dest_x,                       static_cast<int>(dest_y) };
+        RECT clip_rect = { static_cast<int>(clip_left),  static_cast<int>(clip_top),
+                           clip_right,                    static_cast<int>(clip_bottom) };
+        IDirectDrawSurface4* scroll_surface = static_cast<IDirectDrawSurface4*>(dest_surface);
         if (surf->mode == 1) {
-            surf->CalcScrollRect(&rect, dest_surface);
+            surf->CalcScrollRect(&rect, scroll_surface, &clip_rect, flags);
         } else if (surf->mode == 0) {
-            surf->CalcScrollRect_Reversed(&rect, dest_surface);
+            surf->CalcScrollRect_Reversed(&rect, scroll_surface, &clip_rect, flags);
         }
         src_x       = rect.left;
         src_y       = rect.top;
-        clip_right  = rect.right;
-        clip_bottom = rect.bottom;
+        dest_x      = rect.right;
+        dest_y      = rect.bottom;
+        clip_left   = clip_rect.left;
+        clip_top    = clip_rect.top;
+        clip_right  = clip_rect.right;
+        clip_bottom = clip_rect.bottom;
         flags &= 0xFFFFFFBF;
     }
 
