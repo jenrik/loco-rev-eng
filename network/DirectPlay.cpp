@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <cstring>
 #include <initializer_list>
+#include <new>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
 /* DirectPlay COM interface GUIDs (from .rdata section of loco.exe) */
@@ -151,7 +152,6 @@ extern "C" {
 }
 
 /* Game engine functions (C++ linkage) */
-void* GameObject_BaseCtor(void* mem, int32_t a, int32_t b, int32_t c, int32_t d);
 void  DDRAW_PresentRect(void* rect, void* hWnd, int32_t* param, uint8_t flag);
 
 /* DirectPlay game functions (C++ linkage) */
@@ -303,12 +303,18 @@ void DirectPlay_Init(void)
      * below (resource, MoveTo, StopSound, Draw, screen_rect) is a plain
      * Entity member, with no evidence of any further-derived fields — use
      * sizeof(Entity) rather than the stale 0x88 x86 literal (Entity's
-     * pointer-bearing base fields widen on this 64-bit host). */
+     * pointer-bearing base fields widen on this 64-bit host).
+     *
+     * Construction goes through Entity's real constructor (0x405790) via
+     * placement new, not the free function "GameObject_BaseCtor" — that
+     * label is Ghidra's stale name for the same address; it is
+     * Entity::Entity(int,int16_t,int,int), and a free-function declaration
+     * of it can never bind to the real constructor's mangled symbol. */
     void* shadow_mem = operator_new(sizeof(Entity));
     if (shadow_mem == NULL) {
         _g_dsound_object = NULL;
     } else {
-        _g_dsound_object = GameObject_BaseCtor(shadow_mem, 0x402, -1, 0, 0);
+        _g_dsound_object = new (shadow_mem) Entity(0x402, -1, 0, 0);
     }
 
     /* Step 4: Position shadow at screen center */

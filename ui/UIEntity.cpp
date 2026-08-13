@@ -34,9 +34,6 @@ int   __cdecl CRT_rand(void);                            /* @ 0x466150 */
 int   __cdecl CRT_toupper(int c);                        /* @ 0x467710 — toupper wrapper */
 
 /* GameObject base methods */
-int   __thiscall GameObject_BaseCtor(void* self,
-                                      int a, int b,
-                                      int c, int d);     /* @ 0x405790 */
 void  __thiscall GameObject_SetWorldPos(void* self,
                                          int x, int y);   /* @ 0x405C00 */
 
@@ -102,7 +99,10 @@ extern int32_t DAT_004aad38;         /* 0x4AAD38 — world center Y            *
 /* Called by: UI_CreateMessageBox (0x423BA5) to position dialog elements */
 /*                                                                      */
 /* Steps:                                                               */
-/*   1. Call GameObject_BaseCtor(this, resourceId, param2, 0, 0)        */
+/*   1. Construct Entity base(resourceId, param2, 0, 0) — 0x405790,     */
+/*      Entity::Entity(int,int16_t,int,int). Ghidra's stale label for   */
+/*      this address ("GameObject_BaseCtor") is a free-function         */
+/*      mislabel; it is Entity's real constructor.                     */
 /*   2. Set vtable to VTBL_UIENTITY                                     */
 /*   3. Zero tooltip pointer, set animVariant=1                         */
 /*   4. Store direction (toupper'd), worldX, worldY, field_8A           */
@@ -124,10 +124,8 @@ size_t UIEntity_Size()
 
 UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
                     int32_t x, int32_t y)
+    : Entity(resourceId, param2, 0, 0)
 {
-    /* Step 1: Call base GameObject constructor */
-    GameObject_BaseCtor(this, resourceId, param2, 0, 0);
-
     /* Step 2: Set vtable to UIEntity */
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
