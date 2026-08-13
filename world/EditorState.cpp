@@ -546,17 +546,20 @@ uint32_t EditorState::UpdateVehiclePlacement(Vehicle* vehicle)
             }
         }
     } else {
-        /* Resource_IsValidTrackIndex (0x44BCD0) mangles identically to
-         * its void-returning no-op stub in shared/link_stubs.cpp (return
-         * type isn't part of Itanium mangling), so this call already
-         * reads an uninitialized register on every build, independent of
-         * any host/RESDATA-layout concern. It also reads RESDATA+0x636/
-         * +0x638, which have no host source (see this file's header
-         * comment) even if the linkage were fixed. Rather than act on
-         * garbage, treat the index as always invalid on host -- this
-         * function's own contract already treats valid_idx != 1 as "skip
-         * the adjacent-track placement logic", a safe, deterministic
-         * degradation instead of an unpredictable one. */
+        /* Resource_IsValidTrackIndex (0x44BCD0) is now a real implementation
+         * (shared/link_stubs.cpp) -- the prior void-returning no-op stub
+         * mangled identically to every real caller's declaration (return
+         * type isn't part of Itanium mangling) and read an uninitialized
+         * register; fixed. It still reads RESDATA+0x636/+0x638, which have
+         * no host source (see this file's header comment) -- a separate,
+         * still-open, already-tracked data-modeling gap, not a linkage
+         * bug. Deterministic memory now, not register garbage, but the
+         * is_host_sprite_resource guard below still treats the index as
+         * always invalid for that specific resource shape, since it's the
+         * one host case confirmed to have no meaningful bytes there at
+         * all -- this function's own contract already treats valid_idx != 1
+         * as "skip the adjacent-track placement logic", a safe,
+         * deterministic degradation either way. */
         uint8_t valid_idx;
 #ifndef _WIN32
         if (loco::assets::is_host_sprite_resource(resource)) {

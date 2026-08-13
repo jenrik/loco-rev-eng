@@ -688,13 +688,49 @@ void VehicleEditor_CheckEditBounds1(VehicleEditor*,void*){}   /* _ZN13VehicleEdi
  * (`_Z24WNDPROC_StreamFromMemoryPvPKcii`) has zero remaining references
  * anywhere in the tree (confirmed via `nm` across every object file). */
 
-/* Resource_IsBuildingTile / Resource_IsRoadTile / Resource_IsValidTrackIndex */
-void Resource_IsBuildingTile(void*);
-void Resource_IsBuildingTile(void*){}    /* _Z22Resource_IsBuildingTilePv */
-void Resource_IsRoadTile(void*);
-void Resource_IsRoadTile(void*){}        /* _Z18Resource_IsRoadTilePv */
-void Resource_IsValidTrackIndex(void*, short);
-void Resource_IsValidTrackIndex(void*, short){} /* _Z28Resource_IsValidTrackIndexPvs */
+/* Resource_IsBuildingTile(void*) / Resource_IsRoadTile(void*) — both had
+ * zero remaining call sites tree-wide (confirmed via grep; superseded by
+ * ClassifyResourceTile(), game/Vehicle.h) and were only ever a call-0-
+ * adjacent trap: they mangle identically to a real, differently-signed
+ * RESDATA_IsRoadTile/IsBuildingTile pair used elsewhere. Removed rather
+ * than left as no-op stubs a future caller could silently bind to. */
+
+/* Resource_IsValidTrackIndex(void*, int16_t) — real address 0x44BCD0
+ * (Ghidra label RESDATA_IsValidTrackIndex). The prior stub here,
+ * `void Resource_IsValidTrackIndex(void*, short){}`, mangled identically
+ * to every real caller's `extern uint8_t Resource_IsValidTrackIndex(void*,
+ * int16_t)` declaration (return type isn't part of Itanium mangling), so
+ * every call already read an uninitialized register on every build. Real
+ * logic (disassembly-verified): valid when idx==0 (off), idx equals the
+ * current track index (+0x636), or (the alternate track index at +0x638
+ * is nonzero and idx equals either current+1 or the alternate index).
+ * +0x636/+0x638 are the same RESDATA+0x630-family control-point fields
+ * documented (and still raw-offset-read, not yet named struct fields) at
+ * every one of this function's call sites in world/EditorState.cpp/
+ * core/VehicleEditor.cpp — no host resource has real data there yet (see
+ * PROGRESS.md's "RESDATA+0x630/+0x636/+0x638 has no host source" item);
+ * matches the same raw-offset pattern rather than inventing a new named
+ * field ahead of that separate, already-tracked modeling item. */
+uint8_t Resource_IsValidTrackIndex(void* resource, int16_t idx);
+uint8_t Resource_IsValidTrackIndex(void* resource, int16_t idx)
+{
+    if (idx == 0) {
+        return 1;
+    }
+    uint16_t current = *reinterpret_cast<const uint16_t*>(
+        reinterpret_cast<const uint8_t*>(resource) + 0x636);
+    if (static_cast<uint16_t>(idx) == current) {
+        return 1;
+    }
+    uint16_t alternate = *reinterpret_cast<const uint16_t*>(
+        reinterpret_cast<const uint8_t*>(resource) + 0x638);
+    if (alternate != 0 &&
+        (static_cast<uint16_t>(idx) == static_cast<uint16_t>(current + 1) ||
+         static_cast<uint16_t>(idx) == alternate)) {
+        return 1;
+    }
+    return 0;
+}
 
 /* DPLAY_CreatePlayer — C++ overloads */
 void*DPLAY_CreatePlayer(void*,const char*,const char*);
