@@ -119,7 +119,19 @@ extern void*    g_netman;                /* 0x4FD3AC */
 class UI_Manager;
 extern UI_Manager* g_tooltip_mgr;        /* 0x4FD220 */
 extern void*    g_tilemap;               /* 0x4AAE90 */
-extern void*    g_town_view;             /* 0x4AAD2C */
+extern void*    g_town_view;             /* 0x4852A0 — real address (see
+                                           * core/GameView.h). The prior
+                                           * comment here, 0x4AAD2C, has real
+                                           * xrefs but they're all from
+                                           * unrelated audio functions
+                                           * (PlaySound, GameAudio_PlayResource(Ex),
+                                           * ResourceManager_AnimateClock,
+                                           * NETMAN_ReceivePlayerName) — none
+                                           * from ScriptedObject-family code —
+                                           * so it was simply a stale/wrong
+                                           * comment for this global, not a
+                                           * fabricated address in general.
+                                           * See PROGRESS.md's g_town_view item. */
 extern void*    g_ddraw_building;        /* 0x4A9EF0 */
 extern void*    g_trainstation_window;   /* 0x485258 */
 extern void*    g_game;                  /* 0x4854C8 — Game singleton */

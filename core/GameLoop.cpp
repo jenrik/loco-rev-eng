@@ -98,7 +98,21 @@ extern ResourceManager g_resmgr;     /* 0x4855E8 — object, not a pointer (was 
                                        * a widespread cross-TU landmine — see
                                        * PROGRESS.md's g_resmgr sweep) */
 extern void*    g_scripted_object;   /* 0x4AA9B0 */
-extern void*    g_town_view;         /* 0x4AA818 */
+extern void*    g_town_view;         /* 0x4852A0 — real address (see
+                                       * core/GameView.h). The prior comment
+                                       * here, 0x4AA818, is a real, heavily-
+                                       * referenced address (7 xrefs incl.
+                                       * GameLoop_Setup, Game_HandleCursorHover,
+                                       * INPUT_LoadSaveFile — confirmed via
+                                       * get_xrefs_to) but for an unrelated
+                                       * global, not this one; this file's
+                                       * own use (Town_TrackBuilding(g_town_view)
+                                       * below) needs the real GameView
+                                       * object at 0x4852A0. Harmless at
+                                       * link time either way — extern
+                                       * declarations aren't checked against
+                                       * comments — but misleading during RE.
+                                       * See PROGRESS.md's g_town_view item. */
 extern void*    g_ddraw_building;    /* 0x4851D0 */
 extern void*    g_building_mgr;      /* 0x485448 */
 class UI_Manager;

@@ -164,7 +164,11 @@ extern "C" {
     extern UI_Manager* g_tooltip_mgr;         /* @ 0x4FD220 */
     extern void* g_audio;                      /* @ 0x4FD3BC */
     extern void* g_audio_mgr;                  /* @ 0x4A9E0C */
-    extern void* g_town_view;                  /* @ 0x4A9E1C */
+    /* Real address 0x4852A0 (see core/GameView.h). The prior comment here,
+     * 0x4A9E1C, has ZERO xrefs anywhere in the binary (confirmed via
+     * get_xrefs_to) — fabricated, not just stale. See PROGRESS.md's
+     * g_town_view item. */
+    extern void* g_town_view;                  /* @ 0x4852A0 */
     extern void* g_ddraw_active;               /* @ 0x4AA4A4 */
     extern void* g_ddraw_building;             /* @ 0x4FD758 */
     extern void* g_town_mode;                  /* @ 0x485490 */
