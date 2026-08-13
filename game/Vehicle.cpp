@@ -28,7 +28,21 @@
 #include "../network/DPlayManager.h"
 #include "../network/Netman.h"
 #include "GameVehicle.h"
+#include <cstdio>
 #include <new>
+
+/* Forward-declared rather than including resources/resource_manager_sdl3.h
+ * wholesale: that header's own ResourceManager_Init(void*) -> int
+ * ambiguates against network/Netman.h's ResourceManager_Init(void*) -> void
+ * the moment both are visible in one TU (this file already includes
+ * Netman.h) -- same collision input/InputMgr.cpp's identical forward
+ * declarations sidestep. These match resource_manager_sdl3.h's real
+ * declarations exactly, so they resolve to the same already-compiled
+ * symbols at link time. */
+namespace loco::assets {
+bool is_host_sprite_resource(const void* resource);
+bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
+}  // namespace loco::assets
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -74,6 +88,31 @@ extern "C" {
  * shared/stubs_impl.cpp respectively). */
 uint8_t __fastcall RESDATA_IsRoadTile(int32_t tile_obj);      /* 0x44BD10 */
 uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj);  /* 0x44BD30 */
+
+/* RESDATA_IsRoadTile/IsBuildingTile take int32_t (the original x86 ABI's
+ * pointer width) -- same pointer-truncation defect already fixed at
+ * every other call site (ScrollRect, InputMgr.cpp, ResdataGameVehicle.cpp).
+ * `resource` is a loco::assets::SpriteResource* on host, not the real
+ * TileMapResource* those functions' raw +0x63A read assumes, so check the
+ * resolved tile_type byte against their own documented match sets
+ * ({1,2,3,4} road, {7,8,9,10} building) directly instead of re-deriving
+ * it through a truncated pointer. */
+static void ClassifyResourceTile(void* resource, bool* is_road, bool* is_building)
+{
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        uint8_t tile_type = 0;
+        loco::assets::sprite_tile_type_byte(resource, &tile_type);
+        *is_road = (tile_type == 1 || tile_type == 2 || tile_type == 3 || tile_type == 4);
+        *is_building = !*is_road &&
+            (tile_type == 7 || tile_type == 8 || tile_type == 9 || tile_type == 10);
+        return;
+    }
+#endif
+    int32_t resource_id = static_cast<int32_t>(reinterpret_cast<intptr_t>(resource));
+    *is_road = RESDATA_IsRoadTile(resource_id) != 0;
+    *is_building = RESDATA_IsBuildingTile(resource_id) != 0;
+}
 
 /* StopSound on GameObject */
 void __fastcall GameObject_StopSound(void* obj, int32_t sound_idx);
@@ -904,14 +943,38 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
      * the same untyped int32_t* through). */
     GameVehicle* gv = reinterpret_cast<GameVehicle*>(target);
 
-    /* Determine tile category from target's resource. This truncates the
-     * resource pointer to 32 bits on a 64-bit host — pre-existing (the
-     * original read a plain dword at +0x40), preserved via the same
-     * uintptr_t round-trip idiom already used elsewhere in this file. */
-    int32_t resource_id = static_cast<int32_t>(reinterpret_cast<uintptr_t>(gv->resource));   /* +0x40 */
+    /* Host deviation: gv->resource is a loco::assets::SpriteResource* on
+     * this build, not the real x86 TileMapResource* the rest of this
+     * function's raw +0x63A/+0x636/+0x630 offset reads assume (same
+     * "raw fixed-offset reads against undersized host resource objects"
+     * landmine already fixed in ScrollRect/InputMgr.cpp/
+     * ResdataGameVehicle.cpp). The previous version of this line also
+     * truncated the pointer through int32_t before ever reaching those
+     * reads -- a second, independent bug (same class as the
+     * tile-pointer-registry fix): on this 64-bit host a real heap
+     * address does not survive that round-trip, so every downstream read
+     * was already dereferencing a garbage address regardless of the
+     * layout mismatch. Kept as a real, untruncated pointer; the resolved
+     * tile_type byte (where a host source exists) is read once via the
+     * existing sprite_tile_type_byte() accessor instead of re-deriving it
+     * through the raw offset at each of this function's three read sites. */
+    void* resource = gv->resource;   /* +0x40 */
+    uint8_t tile_type = 0;
+#ifndef _WIN32
+    bool resource_is_host_sprite = loco::assets::is_host_sprite_resource(resource);
+    if (resource_is_host_sprite) {
+        loco::assets::sprite_tile_type_byte(resource, &tile_type);
+    } else
+#endif
+    {
+        tile_type = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(resource) + 0x63A);
+    }
     int32_t tile_category = 0;
 
-    if (RESDATA_IsRoadTile(resource_id)) {
+    bool is_road_tile, is_building_tile;
+    ClassifyResourceTile(resource, &is_road_tile, &is_building_tile);
+
+    if (is_road_tile) {
         tile_category = 2;                       /* ROAD */
         /* Original does a single 32-bit store spanning tile_x (+0x2E) and
          * tile_y (+0x30) from gv's packed sub_pos_x/sub_pos_y (+0x88); the
@@ -922,7 +985,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
          * one already fixed in FindPath above). */
         this->tile_x = gv->sub_pos_x;
         this->tile_y = gv->sub_pos_y;
-    } else if (RESDATA_IsBuildingTile(resource_id)) {
+    } else if (is_building_tile) {
         tile_category = 1;                       /* BUILDING */
         /* vtable[7] = StopSound(int). The previous version of this call
          * dropped the +0x1C vtable-slot offset and instead called
@@ -933,6 +996,34 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
          * +0x1C = 0x405A20 = Entity::StopSound). */
         gv->StopSound(1);
     }
+
+    /* Host deviation: no source exists for RESDATA+0x636 (the track
+     * control-point index seeding a wheel's initial track_pos) --
+     * world/EditorState.cpp's own header comment already records this
+     * offset as "never routed through a named struct member," and
+     * nothing in SpriteMetadata maps to it. Guard rather than guess,
+     * matching Entity::Update's precedent: on host, warn once and leave
+     * track_pos at whatever it already holds (EditorState's constructor
+     * default is 0) instead of reading raw bytes at an address that
+     * isn't the real TileMapResource on this build. */
+    auto host_track_pos = [&](int32_t current_value) -> int32_t {
+#ifndef _WIN32
+        if (resource_is_host_sprite) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr,
+                    "[HOST] Vehicle::LoadSounds: no host source for "
+                    "RESDATA+0x636 (track control-point index) -- "
+                    "leaving track_pos at its current value\n");
+                std::fflush(stderr);
+            }
+            return current_value;
+        }
+#endif
+        return *reinterpret_cast<uint16_t*>(
+            reinterpret_cast<uint8_t*>(resource) + 0x636) - 1;
+    };
 
     /* --- Configure sound positions for each editor --- */
     for (int32_t i = 0; i <= static_cast<int32_t>(static_cast<uint32_t>(this->editor_count)); i++) {
@@ -953,9 +1044,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
             rear_wheel->edit_state  = 5;
         }
 
-        /* Set sound pitch offsets based on tile type at RESDATA+0x63A */
-        uint8_t tile_type = *reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(resource_id) + 0x63A);
-
+        /* tile_type resolved once, above (host-safe). */
         if (tile_type == 1 || tile_type == 7) {
             /* North-facing */
             if (param_2 == 0) {
@@ -963,9 +1052,9 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                     (this->active_editor == 0) ? 0x40 : 0;
             }
             front_wheel->direction  = 0;
-            front_wheel->track_pos  = *reinterpret_cast<uint16_t*>(static_cast<uintptr_t>(resource_id) + 0x636) - 1;
+            front_wheel->track_pos  = host_track_pos(front_wheel->track_pos);
             rear_wheel->direction   = 0;
-            rear_wheel->track_pos   = *reinterpret_cast<uint16_t*>(static_cast<uintptr_t>(resource_id) + 0x636) - 1;
+            rear_wheel->track_pos   = host_track_pos(rear_wheel->track_pos);
         } else if (tile_type == 2 || tile_type == 8) {
             /* South-facing */
             if (param_2 == 0) {
@@ -993,9 +1082,9 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
                     (this->active_editor == 0) ? 0x60 : 0x20;
             }
             front_wheel->direction = 0;
-            front_wheel->track_pos = *reinterpret_cast<uint16_t*>(static_cast<uintptr_t>(resource_id) + 0x636) - 1;
+            front_wheel->track_pos = host_track_pos(front_wheel->track_pos);
             rear_wheel->direction  = 0;
-            rear_wheel->track_pos  = *reinterpret_cast<uint16_t*>(static_cast<uintptr_t>(resource_id) + 0x636) - 1;
+            rear_wheel->track_pos  = host_track_pos(rear_wheel->track_pos);
         }
         /* else: no special handling for other tile types */
 
@@ -1020,18 +1109,40 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
     /* Calculate world position from target. editor_state->building is
      * GameVehicle* (== gv == target); target_res/track_table stay raw
      * int32_t* since they point into an opaque RESDATA blob, not a class
-     * we've reconstructed. */
-    int32_t* target_res = reinterpret_cast<int32_t*>(gv->resource);
-    int32_t* track_table = *reinterpret_cast<int32_t**>(reinterpret_cast<uint8_t*>(target_res) + 0x630);
+     * we've reconstructed.
+     *
+     * Host deviation: same "no host source" gap as host_track_pos()
+     * above, one level further -- RESDATA+0x630 (the track
+     * control-point table track_pos indexes into) has no host mapping
+     * either. Guard, don't guess: on host, leave pos_x/pos_y at their
+     * current values (editor_state was just constructed, so 0) instead
+     * of dereferencing a table that doesn't exist at this address. */
+#ifndef _WIN32
+    if (resource_is_host_sprite) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] Vehicle::LoadSounds: no host source for "
+                "RESDATA+0x630 (track control-point table) -- leaving "
+                "editor_state pos_x/pos_y at their current values\n");
+            std::fflush(stderr);
+        }
+    } else
+#endif
+    {
+        int32_t* target_res = reinterpret_cast<int32_t*>(resource);
+        int32_t* track_table = *reinterpret_cast<int32_t**>(reinterpret_cast<uint8_t*>(target_res) + 0x630);
 
-    editor_state->pos_x =
-        static_cast<int32_t>(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(track_table) +
-            first_front_wheel->track_pos * 4)) +
-        gv->sub_pos_x * 0x10;
-    editor_state->pos_y =
-        static_cast<int32_t>(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(track_table) + 2 +
-            first_front_wheel->track_pos * 4)) +
-        gv->sub_pos_y * 0x10;
+        editor_state->pos_x =
+            static_cast<int32_t>(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(track_table) +
+                first_front_wheel->track_pos * 4)) +
+            gv->sub_pos_x * 0x10;
+        editor_state->pos_y =
+            static_cast<int32_t>(*reinterpret_cast<int16_t*>(reinterpret_cast<uint8_t*>(track_table) + 2 +
+                first_front_wheel->track_pos * 4)) +
+            gv->sub_pos_y * 0x10;
+    }
 
     /* Set editor state code based on tile category */
     if (tile_category == 2) {
@@ -1062,8 +1173,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
 
         do {
             VehicleEditor* ed = this->editors[ed_idx];
-            int tile_type = *reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(resource_id) + 0x63A);
-
+            /* tile_type resolved once, host-safe, near the top of this function. */
             switch (tile_type) {
             case 1:
             case 7:
@@ -1141,8 +1251,7 @@ uint8_t Vehicle::LoadSounds(int32_t* target, uint8_t param_2)
             EditorState* rear_wheel_ed  = editor->end_b;
             int32_t offset = i * 0x26;
 
-            int tile_type = *reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(resource_id) + 0x63A);
-
+            /* tile_type resolved once, host-safe, near the top of this function. */
             if (tile_type == 1 || tile_type == 7) {
                 /* North: front wheel above, rear wheel below */
                 int32_t front_pos = (i == 0)
@@ -1359,18 +1468,24 @@ uint8_t Vehicle::IsMoving()
         return 1;   /* no target = assume moving */
     }
 
-    int32_t target_res = static_cast<int32_t>(reinterpret_cast<uintptr_t>(target->resource));
-    if (!RESDATA_IsRoadTile(target_res) && !RESDATA_IsBuildingTile(target_res)) {
+    bool target_is_road, target_is_building;
+    ClassifyResourceTile(target->resource, &target_is_road, &target_is_building);
+    if (!target_is_road && !target_is_building) {
         return 1;   /* not road/building = assume moving */
     }
 
     /* Check wheel's current target for continuity */
     GameVehicle* wheel_target = wheel->building;
     if (wheel_target != nullptr) {
-        int32_t wheel_res = static_cast<int32_t>(reinterpret_cast<uintptr_t>(wheel_target->resource));
-        if (RESDATA_IsRoadTile(wheel_res) || RESDATA_IsBuildingTile(wheel_res)) {
-            /* If wheel target differs from vehicle target, vehicle is still moving */
-            if (wheel_res != target_res) {
+        bool wheel_is_road, wheel_is_building;
+        ClassifyResourceTile(wheel_target->resource, &wheel_is_road, &wheel_is_building);
+        if (wheel_is_road || wheel_is_building) {
+            /* If wheel target differs from vehicle target, vehicle is still
+             * moving. Compares the real resource pointers directly rather
+             * than truncated int32_t copies of them -- on this 64-bit host,
+             * two distinct real pointers can truncate to the same 32-bit
+             * value, which would have made this a false "same target". */
+            if (wheel_target->resource != target->resource) {
                 return 0;
             }
         }
