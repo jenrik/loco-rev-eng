@@ -309,7 +309,11 @@ void DirectPlay_Init(void)
      * placement new, not the free function "GameObject_BaseCtor" — that
      * label is Ghidra's stale name for the same address; it is
      * Entity::Entity(int,int16_t,int,int), and a free-function declaration
-     * of it can never bind to the real constructor's mangled symbol. */
+     * of it can never bind to the real constructor's mangled symbol.
+     *
+     * Placement-new pairing: torn down (if ever) via ->~Entity() +
+     * GLOBAL_free, never plain `delete` — this object was allocated with
+     * operator_new (0x465CE0), a different allocator than ::operator new. */
     void* shadow_mem = operator_new(sizeof(Entity));
     if (shadow_mem == NULL) {
         _g_dsound_object = NULL;

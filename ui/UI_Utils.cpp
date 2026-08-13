@@ -406,7 +406,14 @@ Entity* UI_Manager::createTooltip(int resourceId, short param2,
      * sizeof(Entity) (the real host size, pointer fields widen it past
      * 0x88) rather than the stale x86 literal, and construct through
      * Entity's real constructor (0x405790) — not the free-function
-     * "GameObject_BaseCtor" misdeclaration fixed elsewhere this session. */
+     * "GameObject_BaseCtor" misdeclaration fixed elsewhere this session.
+     *
+     * Placement-new pairing: this object is allocated with operator_new
+     * (0x465CE0) and must be torn down with obj->~Entity() + GLOBAL_free
+     * (0x465CD0), never plain `delete` (mismatched allocator). No current
+     * caller frees a tooltip at all — destroyTooltip only removes it from
+     * text_list — so this is latent, not live; flagged for whoever
+     * implements real teardown. */
     void* mem = operator_new(sizeof(Entity));
     if (mem == NULL) {
         return NULL;
