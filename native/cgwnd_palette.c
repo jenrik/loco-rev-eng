@@ -151,7 +151,14 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
              * is equally undersized by the literal `0x5C` below; no
              * `*_Size()` helper exists for that class yet to fix this
              * correctly (out of this pass's scope — same gap as
-             * ui/UIPANEL_Surface.cpp's `mem_stream`). */
+             * ui/UIPANEL_Surface.cpp's `mem_stream`). Verified dead on
+             * host, not a live undersized allocation: `g_asset_mgr` has
+             * exactly one definition in the tree (`shared/stubs_impl.cpp`,
+             * `nullptr`) and is never assigned anywhere else, so this
+             * whole `if (g_asset_mgr != NULL)` branch never executes —
+             * confirmed by grepping every `.cpp`/`.c` file for an
+             * assignment to it. Revisit sizing once `g_asset_mgr` is
+             * actually wired to a real asset manager. */
             streamMem = operator_new(0x5C);  /* stream object: original x86 size, not host size */
             if (streamMem != NULL) {
                 streamObj = WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<char*>(loadedData),
