@@ -12,6 +12,7 @@
 #include "graphics/DDRAW.h"
 
 #include <cstdio>
+#include <cstdlib>
 
 void* g_town_view = nullptr;
 /* g_ddraw_building is now defined in graphics/DDRAW.cpp (linked in via
@@ -23,6 +24,18 @@ void* g_town_view = nullptr;
  * shared/stubs_impl.cpp, not linked into this isolated-object test) —
  * defined locally rather than pulling that whole stub file in. */
 char g_empty_string = 0;
+
+/* DDRAW.cpp's static UI_Manager singleton (g_tooltip_mgr, 0x4FD220 — see
+ * that file's doc comment) is now constructed unconditionally at process
+ * startup, matching the original CRT static-initializer behavior. That
+ * construction calls UITimerList::Resize (ui/UI_Utils.cpp, obj_ui_utils
+ * in tests/meson.build), which allocates via operator_new/GLOBAL_free.
+ * Neither is provided by the narrow object set this test links, so —
+ * following this file's existing g_empty_string precedent — they are
+ * defined locally rather than pulling in shared/link_stubs.cpp's whole
+ * Win32-stub translation unit. */
+void* operator_new(size_t size) { return std::malloc(size); }
+void  GLOBAL_free(void* ptr) { std::free(ptr); }
 
 void Town_TrackBuilding(void* self);
 void DDRAW_UpdateBuilding(void* self);

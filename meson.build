@@ -227,6 +227,12 @@ else
   obj_game_view         = lego_loco.extract_objects('core/GameView.cpp')
   obj_panel             = lego_loco.extract_objects('game/Panel.cpp')
   obj_ddraw             = lego_loco.extract_objects('graphics/DDRAW.cpp')
+  # DDRAW.cpp now defines the real UI_Manager singleton backing
+  # `g_tooltip_mgr` (0x4FD220 — see that file's doc comment), so any test
+  # that links obj_ddraw needs UI_Utils.o too: its static initializer
+  # unconditionally constructs a UI_Manager, matching the original CRT
+  # $XCU static-init entry at 0x45C680.
+  obj_ui_utils          = lego_loco.extract_objects('ui/UI_Utils.cpp')
   obj_building_mgr_grp  = lego_loco.extract_objects('core/BuildingMgrObjectGroup.cpp')
   obj_resdata_vehicle   = lego_loco.extract_objects('game/ResdataGameVehicle.cpp')
   obj_game_vehicle      = lego_loco.extract_objects('game/GameVehicle.cpp')

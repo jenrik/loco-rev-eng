@@ -251,7 +251,7 @@ test('cgwnd-entermode3', cgwnd_entermode3_test)
 host_mode3_bootstrap_test = executable('host_mode3_bootstrap_test',
   'host_mode3_bootstrap_test.cpp',
   objects: [obj_sdl3_town_mode3, obj_game_view, obj_panel, obj_ddraw,
-            obj_game_object, obj_entity, obj_sdl3_window],
+            obj_ui_utils, obj_game_object, obj_entity, obj_sdl3_window],
   include_directories: inc_dirs,
   cpp_args: test_warn_args + ['-include', compat_h],
   link_args: ['-no-pie', '-Wl,--unresolved-symbols=ignore-all'],

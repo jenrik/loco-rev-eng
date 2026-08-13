@@ -16,6 +16,7 @@
 
 #include "DDRAW.h"
 #include "../game/Building.h"
+#include "../ui/UI_Utils.h"
 #include <new>
 #include <cassert>
 #include <cstdio>
@@ -194,7 +195,39 @@ DDRAW_Building* g_ddraw_building;  /* 0x4A9EF0 */
 int   g_viewport_x;         /* 0x4AAD24 */
 int   g_viewport_y;         /* 0x4AAD28 */
 /* g_game_time declared as uint32_t in shared/types.h */
-void* g_tooltip_mgr;        /* 0x4FD220 */
+
+/**
+ * g_tooltip_mgr — UI_Manager singleton (0x4FD220).
+ *
+ * In the original binary this is not a pointer variable at all: 0x4FD220
+ * is the UI_Manager object's own static storage. It is constructed by a
+ * genuine MSVC CRT global-static-initializer entry (an anonymous thunk
+ * at 0x45C680, listed in the `.CRT$XCU` pointer table at 0x47E020, part
+ * of the array based at 0x47E000) that the CRT startup code runs before
+ * WinMain — there is no explicit call from any game function. That thunk
+ * calls UI_Manager::UI_Manager() (0x4238C0) directly on the global, then
+ * registers a teardown thunk (0x45C6A0, which tail-jumps to
+ * UI_Manager::reset()/UI_ResetWindow at 0x4239E0) with the CRT's
+ * atexit-equivalent table (0x468170/0x4680E0 — misnamed `_ungetwc_*` by
+ * Ghidra's signature matcher; decompilation shows the real behavior is
+ * growing an exit-function-pointer table). Every real caller across the
+ * codebase (Game_HandleLeftClick, INPUT_CheckScheduledEvents, TileMap_-
+ * ProcessRect, etc.) takes "&g_tooltip_mgr" or reads it expecting a live
+ * UI_Manager, confirming this reading — see ui/UI_Utils.h's UI_Manager()
+ * doc comment for the full xref/disassembly evidence chain.
+ *
+ * The faithful C++ reconstruction is therefore a real global object with
+ * automatic (static) storage duration: the compiler already performs
+ * the same "construct before main, destroy at process exit" sequence
+ * the original CRT static-initializer table did, so no manual host-side
+ * construction/teardown call is needed (and none should be added to
+ * CGWND::InitAllSubsystems or GameLoop_Setup — neither is the real
+ * caller). This is not a host-only deviation: the mechanism is identical
+ * on Windows and non-Windows builds, so no #ifndef _WIN32 guard applies.
+ */
+static UI_Manager g_tooltip_mgr_instance;
+void* g_tooltip_mgr = &g_tooltip_mgr_instance;   /* 0x4FD220 */
+
 void* g_world_state;        /* 0x4A98B0 */
 void* g_tilemap;            /* 0x4AAD08 */
 

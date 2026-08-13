@@ -11,6 +11,7 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include <stdint.h>
+#include <cstring>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -39,13 +40,56 @@ extern void* g_tooltip_mgr;              /* 0x4FD220 */
 /* FPS gate threshold for CreateMessageBox */
 extern double DAT_00481170;              /* 0x481170 — FPS threshold */
 
-/* The common resize implementation used by the binary's UI collection
- * template instantiations. */
-extern void Timer_Resize(void* collection, unsigned capacity); /* 0x435D10 */
-
+/* ================================================================== */
+/* UITimerList::Resize (vtable[0] on all 3 of UI_Manager's sub-lists)   */
+/* Address: 0x435D10 (originally a shared "Timer_Resize"/"Collection::  */
+/* Resize" routine reused across several of the binary's UI collection */
+/* template instantiations via a raw `this+4`=items / `this+8`=        */
+/* capacity layout — that layout is exactly UITimerList::items/         */
+/* capacity, so the real logic is implemented directly as this typed   */
+/* method rather than kept behind a shared void*-taking free function; */
+/* see resources/AssetMgr.cpp for a distinct, unrelated caller of the   */
+/* same original address on its own collection type, left untouched.)  */
+/* ================================================================== */
 void UITimerList::Resize(uint32_t new_capacity)
 {
-    Timer_Resize(this, new_capacity);
+    uint32_t old_capacity = capacity;
+    uint32_t target = new_capacity;
+
+    /* Shrinking: trim only the trailing NULL slots, stopping as soon as
+     * a live (non-NULL) entry is found — matches the disassembly's
+     * backward scan from old_capacity down to new_capacity. */
+    if (new_capacity < old_capacity) {
+        uint32_t idx = old_capacity;
+        while (idx > new_capacity) {
+            if (items[idx - 1] != NULL) {
+                break;
+            }
+            --idx;
+        }
+        target = idx;
+    }
+
+    void** old_items = items;
+
+    if (target != 0) {
+        void** new_items = static_cast<void**>(operator_new(target * sizeof(void*)));
+        items = new_items;
+        std::memset(new_items, 0, target * sizeof(void*));
+    }
+
+    if (old_items != NULL) {
+        if (target != 0) {
+            uint32_t copy_count = (target < old_capacity) ? target : old_capacity;
+            std::memcpy(items, old_items, copy_count * sizeof(void*));
+        }
+        GLOBAL_free(old_items);
+    }
+
+    capacity = (items != NULL) ? target : 0;
+    if (capacity == 0) {
+        items = NULL;
+    }
 }
 
 void* UITimerList::GetItem(uint32_t index) const

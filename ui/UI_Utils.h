@@ -42,7 +42,14 @@ public:
     int32_t key_size;         /* +0x14 */
 
     virtual ~UITimerList() {}
-    virtual void Resize(uint32_t new_capacity);  /* 0x435D10 */
+    /* Resize — vtable[0]. Address: 0x435D10. Grows/shrinks `items` to
+     * `new_capacity` slots (trimming trailing NULLs when shrinking,
+     * zero-filling new slots, preserving up to min(old,new) entries).
+     * Implemented directly in UI_Utils.cpp — see that definition's doc
+     * comment for why the original's shared void*-based routine is
+     * expressed as a typed method here instead of a shared free
+     * function. */
+    virtual void Resize(uint32_t new_capacity);
     virtual void* GetItem(uint32_t index) const; /* original vtable[8] */
     virtual uint32_t GetCount() const;           /* original vtable[11] */
 };
@@ -94,7 +101,28 @@ public:
      * Sets vtable to VTBL_UI_MANAGER. Calls vtable[0x13] on update_list
      * as final initialization step.
      *
-     * Called by: CGWND_InitAllSubsystems (0x406FD2)
+     * NOT called by CGWND_InitAllSubsystems (0x406F90-0x407794) — that
+     * range's callers were checked directly and none reach 0x4238C0.
+     * The one and only real caller is 0x45C685, inside an anonymous
+     * compiler-generated static-initializer thunk at 0x45C680-0x45C697
+     * that is itself listed as data (not called) in the MSVC CRT's
+     * `.CRT$XCU` static-initializer pointer table at 0x47E020 (part of
+     * the array based at 0x47E000). That thunk runs this constructor
+     * directly on the global object embedded at 0x4FD220 — i.e. the
+     * global `g_tooltip_mgr` storage IS a UI_Manager object in the
+     * original binary (not a pointer to one) — then registers a
+     * teardown thunk (0x45C6A0, tail-jumps to UI_ResetWindow/reset()
+     * at 0x4239E0) with the CRT's atexit-equivalent registrar
+     * (0x468170, auto-named `_ungetwc_push_ret` by Ghidra's signature
+     * matcher — that name is a FLIRT false-positive; the real behavior,
+     * confirmed by decompiling both it and its callee 0x4680E0, is
+     * growing an exit-function-pointer table, i.e. this is CRT
+     * atexit()/`_onexit()`-style registration). This entire mechanism
+     * runs before WinMain, with no explicit call site anywhere in game
+     * code. See graphics/DDRAW.cpp's g_tooltip_mgr definition for the
+     * host reconstruction (a real global object with automatic static
+     * storage duration — the faithful C++ equivalent of this CRT
+     * mechanism, requiring no manual host wiring).
      */
     UI_Manager();
 
@@ -103,6 +131,12 @@ public:
      * Address: 0x4239C0
      *
      * Calls UI_ResetWindow to clean up all timer lists and frees memory.
+     * Not itself the CRT-registered teardown callback for the global
+     * instance — the CRT exit table calls reset() (0x4239E0) directly
+     * via a tail-jump thunk (0x45C6A0), skipping this scalar-deleting
+     * wrapper, since the global object is static storage (never heap-
+     * deleted). See UI_Manager() ctor doc comment above for the full
+     * static-initializer evidence chain.
      */
     virtual ~UI_Manager();
 
