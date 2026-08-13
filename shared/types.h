@@ -186,7 +186,9 @@ struct FrameData {
                                  *   (0x405CCE: nonzero -> +2/tick, even
                                  *   frames only) -- same byte, single field,
                                  *   confirmed by one .dat-parser write site
-                                 *   (UI_ChildWindow_Render, 0x42522D) and both
+                                 *   (UI_ChildWindow_Render, 0x42528B -- the
+                                 *   4th numeric token, truncated to a byte,
+                                 *   direct disassembly-verified) and both
                                  *   read sites using identical address
                                  *   arithmetic (anim_table + anim_index*0x18
                                  *   + 0x17).                                */

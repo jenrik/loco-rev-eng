@@ -46,7 +46,12 @@ struct AnimationFrameSet {
     // The 4th numeric .dat token. Original writes this same token
     // (truncated to a byte) to FrameData::is_connected (+0x17,
     // shared/types.h) -- confirmed via disassembly of both the writer
-    // (UI_ChildWindow_Render, 0x42522D) and the two readers
+    // (UI_ChildWindow_Render, 0x42528B -- confirmed by direct disassembly:
+    // the 4th numeric token is extracted into a stack temp at 0x42527F
+    // then stored truncated via `MOV byte [rec+0x17], CL` at 0x42528B,
+    // the 5th distinct numeric-field write in the record, following
+    // start_frame/end_frame/frame_delay at +0x00/+0x02/+0x04) and the
+    // two readers
     // (TileMap::ProcessRect 0x4569AF, Entity::Update 0x405CCE).
     bool is_connected = false;
     int restart_delay = 0;
