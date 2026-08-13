@@ -434,13 +434,26 @@ int TileMap_IsTileOccupied(int tile_resource_a, int tile_resource_b);
  *  -1 when blocked. */
 int TileMap_IsTileBuildable(int tile_resource_a, int tile_resource_b);
 
+/** Dirty-rect list node used by TileMap::InvalidateDirtyRects/ProcessRect's
+ *  presentation pipeline. The original x86 layout stores `next` as a 4-byte
+ *  LONG immediately after the RECT (allocated 0x14 = 16 + 4 bytes) and
+ *  every site round-trips it through `static_cast<LONG>(reinterpret_cast<
+ *  intptr_t>(ptr))` -- lossless on the original 32-bit ABI, but a real
+ *  pointer-truncation bug on this 64-bit host (same landmine class as the
+ *  TileMap tile-pointer registry fix). A typed `next` member removes the
+ *  round-trip entirely rather than widening the truncating cast. */
+struct DirtyRectNode {
+    RECT rect;
+    DirtyRectNode* next;
+};
+
 /** Merge overlapping dirty rects in the linked list — Address: 0x456C60.
  *  Returns 1 if any merge occurred (caller loops until 0). */
-char TileMap_ProcessDirtyRects(RECT* rect_list);
+char TileMap_ProcessDirtyRects(DirtyRectNode* rect_list);
 
 /** Clip dirty rects to the viewport rect; free out-of-view rects.
  *  Address: 0x456D10 */
-void TileMap_FreeDirtyRects(RECT* rect_list);
+void TileMap_FreeDirtyRects(DirtyRectNode* rect_list);
 
 /**
  * CreateOverlay — build placement-preview overlay. Address: 0x457080.

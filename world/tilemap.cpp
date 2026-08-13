@@ -189,32 +189,18 @@ bool TileMapResource::IsEditorSprite() const
      static_cast<int>(layer) * 4)
 
 /* ================================================================== */
-/* Dirty-rect list node: a RECT (16 bytes, 4x int32_t — no pointer        */
-/* members, so RECT's own size doesn't widen on this 64-bit host) + a    */
-/* "next" pointer at +0x10. Allocations are 0x14 bytes (16 + 4) —        */
-/* correct for THIS implementation and not an operator_new sizing bug,   */
-/* because "next" is stored/read as a 32-bit LONG word (node[1].left),   */
-/* not a real pointer-sized field (see below), so it only ever needs 4   */
-/* bytes of storage regardless of host pointer width.                    */
-/*                                                                        */
-/* SEPARATE, more serious bug (out of scope for the operator_new sizing  */
-/* sweep this comment is part of): every write site truncates a genuine  */
-/* 64-bit `RECT*` heap pointer into that 32-bit LONG via                 */
-/* `static_cast<LONG>(reinterpret_cast<intptr_t>(node))` (see e.g. lines */
-/* ~1691, 1706, 1739, 1753, 2412, 2455 below), then reconstructs it via   */
-/* `reinterpret_cast<RECT*>(static_cast<uintptr_t>(...[1].left))`. On a   */
-/* 64-bit host this is undefined behavior / a real pointer-truncation     */
-/* landmine (same class as the previously-documented                     */
-/* CGWND_ValidatePaletteData(int) truncation) whenever operator_new       */
-/* returns an address outside the low 4GB — not fixed here; needs a       */
-/* dedicated pass widening the "next" slot to a real pointer-sized field. */
-/* Allocations are 0x14 bytes (TileMap_InvalidateDirtyRects 0x456475). */
+/* Dirty-rect list node allocator (DirtyRectNode, world/tilemap.h).    */
+/* Original allocation size was the x86-ABI-specific 0x14 bytes         */
+/* (RECT + a 4-byte LONG "next"); now sizeof(DirtyRectNode) so the       */
+/* real pointer-sized `next` member gets the storage it needs on any    */
+/* host, rather than a hardcoded literal matching only the 32-bit ABI.  */
 /* ================================================================== */
-static RECT* TileMap_AllocRectNode()
+static DirtyRectNode* TileMap_AllocRectNode()
 {
-    RECT* node = reinterpret_cast<RECT*>(operator_new(0x14));
+    DirtyRectNode* node = reinterpret_cast<DirtyRectNode*>(
+        operator_new(sizeof(DirtyRectNode)));
     if (node != NULL) {
-        node[1].left = 0;
+        node->next = nullptr;
     }
     return node;
 }
@@ -1821,8 +1807,8 @@ mode3_town_select:
 /* ================================================================== */
 void TileMap::InvalidateDirtyRects(char force_all)
 {
-    RECT* head = NULL;
-    RECT* last = NULL;
+    DirtyRectNode* head = NULL;
+    DirtyRectNode* last = NULL;
 
 #ifndef _WIN32
     last_dirty_tile_count = 0;
@@ -1915,11 +1901,11 @@ void TileMap::InvalidateDirtyRects(char force_all)
                 }
             } else if (!no_pending) {
                 /* Flush pending rect */
-                RECT* node = TileMap_AllocRectNode();
+                DirtyRectNode* node = TileMap_AllocRectNode();
                 if (node != NULL) {
-                    *node = pending;
+                    node->rect = pending;
                     if (last != NULL) {
-                        last[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                        last->next = node;
                     } else {
                         head = node;
                     }
@@ -1930,11 +1916,11 @@ void TileMap::InvalidateDirtyRects(char force_all)
         }
         /* Flush pending rect at end of row */
         if (!no_pending) {
-            RECT* node = TileMap_AllocRectNode();
+            DirtyRectNode* node = TileMap_AllocRectNode();
             if (node != NULL) {
-                *node = pending;
+                node->rect = pending;
                 if (last != NULL) {
-                    last[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                    last->next = node;
                 } else {
                     head = node;
                 }
@@ -1962,8 +1948,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
     /* Blit cursor surface to primary surface for each dirty region.
      * Note the binary passes the rect's right/bottom directly as the
      * width/height arguments. */
-    for (RECT* r = head; r != NULL; r = reinterpret_cast<RECT*>(
-             static_cast<uintptr_t>(r[1].left))) {
+    for (DirtyRectNode* r = head; r != NULL; r = r->next) {
 #ifndef _WIN32
         /* Host deviation: g_cursor_surface is never assigned a real
          * DirectDraw surface on this build (DirectDraw is never
@@ -1985,37 +1970,37 @@ void TileMap::InvalidateDirtyRects(char force_all)
 #endif
         void* cursor_pixels = *reinterpret_cast<void**>(
             reinterpret_cast<uint8_t*>(g_cursor_surface) + 0x10);
-        UIPANEL_Blit(cursor_pixels, r->left, r->top, r->right, r->bottom,
-                     g_primary_surface, r->left, r->top, r->right, r->bottom, 1);
+        UIPANEL_Blit(cursor_pixels, r->rect.left, r->rect.top, r->rect.right, r->rect.bottom,
+                     g_primary_surface, r->rect.left, r->rect.top, r->rect.right, r->rect.bottom, 1);
     }
 
     /* Append selection rects (selected building + town selection rect) */
     if (g_has_selection != 0) {
-        RECT* prev = last;
+        DirtyRectNode* prev = last;
         if (g_selected_building != nullptr) {
-            RECT* node = TileMap_AllocRectNode();
+            DirtyRectNode* node = TileMap_AllocRectNode();
             if (node != NULL) {
                 uint8_t* sel = reinterpret_cast<uint8_t*>(g_selected_building);
-                node->left   = *reinterpret_cast<int*>(sel + 8);
-                node->top    = *reinterpret_cast<int*>(sel + 0xC);
-                node->right  = *reinterpret_cast<int*>(sel + 0x10);
-                node->bottom = *reinterpret_cast<int*>(sel + 0x14);
+                node->rect.left   = *reinterpret_cast<int*>(sel + 8);
+                node->rect.top    = *reinterpret_cast<int*>(sel + 0xC);
+                node->rect.right  = *reinterpret_cast<int*>(sel + 0x10);
+                node->rect.bottom = *reinterpret_cast<int*>(sel + 0x14);
                 if (prev != NULL) {
-                    prev[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                    prev->next = node;
                 } else {
                     head = node;
                 }
                 prev = node;
             }
         }
-        RECT* node = TileMap_AllocRectNode();
+        DirtyRectNode* node = TileMap_AllocRectNode();
         if (node != NULL) {
-            node->left   = g_town_selection_rect_left;
-            node->top    = g_town_selection_rect_top;
-            node->right  = g_town_selection_rect_right;
-            node->bottom = g_town_selection_rect_bottom;
+            node->rect.left   = g_town_selection_rect_left;
+            node->rect.top    = g_town_selection_rect_top;
+            node->rect.right  = g_town_selection_rect_right;
+            node->rect.bottom = g_town_selection_rect_bottom;
             if (prev != NULL) {
-                prev[1].left = static_cast<LONG>(reinterpret_cast<intptr_t>(node));
+                prev->next = node;
             } else {
                 head = node;
             }
@@ -2044,7 +2029,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
             }
         }
 
-        ProcessRect(head->left, head->top, head->right, head->bottom);
+        ProcessRect(head->rect.left, head->rect.top, head->rect.right, head->rect.bottom);
 
         /* Unlock primary surface */
         if (surface_locked != 0 && TileMap_UnlockPrimarySurface() == 0) {
@@ -2052,9 +2037,9 @@ void TileMap::InvalidateDirtyRects(char force_all)
         }
 
         HWND child_wnd = static_cast<CGWND*>(g_main_window)->hWnd;
-        DDRAW_PresentRect(head, child_wnd, &viewport_x, 1);
+        DDRAW_PresentRect(&head->rect, child_wnd, &viewport_x, 1);
 
-        RECT* next = reinterpret_cast<RECT*>(static_cast<uintptr_t>(head[1].left));
+        DirtyRectNode* next = head->next;
         GLOBAL_free(head);
         head = next;
     }
@@ -2752,32 +2737,31 @@ uint TileMap::Scroll(int delta_x, int delta_y, int drag_start_x, int drag_start_
 /* merges via UnionRect, frees the merged-away rect. Returns 1 if any  */
 /* merge occurred (caller loops until 0).                              */
 /* ================================================================== */
-char TileMap_ProcessDirtyRects(RECT* rect_list)
+char TileMap_ProcessDirtyRects(DirtyRectNode* rect_list)
 {
     char merged = 0;
-    for (RECT* r = rect_list; r != NULL;
-         r = reinterpret_cast<RECT*>(static_cast<uintptr_t>(r[1].left))) {
-        RECT* next = reinterpret_cast<RECT*>(static_cast<uintptr_t>(r[1].left));
-        RECT* prev = r;
+    for (DirtyRectNode* r = rect_list; r != NULL; r = r->next) {
+        DirtyRectNode* next = r->next;
+        DirtyRectNode* prev = r;
         while (next != NULL) {
             RECT tmp;
-            InflateRect(next, 1, 1);
-            if (IntersectRect(&tmp, r, next)) {
-                InflateRect(next, -1, -1);
-                UnionRect(&tmp, next, r);
+            InflateRect(&next->rect, 1, 1);
+            if (IntersectRect(&tmp, &r->rect, &next->rect)) {
+                InflateRect(&next->rect, -1, -1);
+                UnionRect(&tmp, &next->rect, &r->rect);
                 merged = 1;
-                r->left = tmp.left;
-                r->top = tmp.top;
-                r->right = tmp.right;
-                r->bottom = tmp.bottom;
-                prev[1].left = next[1].left;
+                r->rect.left = tmp.left;
+                r->rect.top = tmp.top;
+                r->rect.right = tmp.right;
+                r->rect.bottom = tmp.bottom;
+                prev->next = next->next;
                 GLOBAL_free(next);
                 next = prev;
             } else {
-                InflateRect(next, -1, -1);
+                InflateRect(&next->rect, -1, -1);
             }
             prev = next;
-            next = reinterpret_cast<RECT*>(static_cast<uintptr_t>(next[1].left));
+            next = next->next;
         }
     }
     return merged;
@@ -2791,9 +2775,9 @@ char TileMap_ProcessDirtyRects(RECT* rect_list)
 /* Rects that do not intersect the viewport are unlinked and freed     */
 /* with GLOBAL_free; intersecting rects are clipped in place.          */
 /* ================================================================== */
-void TileMap_FreeDirtyRects(RECT* rect_list)
+void TileMap_FreeDirtyRects(DirtyRectNode* rect_list)
 {
-    RECT* prev = NULL;
+    DirtyRectNode* prev = NULL;
 
     while (rect_list != NULL) {
         RECT local_10;
@@ -2802,21 +2786,19 @@ void TileMap_FreeDirtyRects(RECT* rect_list)
          * RECT so the host globals do not need to be contiguous. */
         RECT viewport = { g_viewport_rect_left, g_viewport_rect_top,
                           g_viewport_rect_right, g_viewport_rect_bottom };
-        if (IntersectRect(&local_10, rect_list, &viewport)) {
-            rect_list->left = local_10.left;
-            rect_list->top = local_10.top;
-            rect_list->right = local_10.right;
-            rect_list->bottom = local_10.bottom;
+        if (IntersectRect(&local_10, &rect_list->rect, &viewport)) {
+            rect_list->rect.left = local_10.left;
+            rect_list->rect.top = local_10.top;
+            rect_list->rect.right = local_10.right;
+            rect_list->rect.bottom = local_10.bottom;
             prev = rect_list;
-            rect_list = reinterpret_cast<RECT*>(
-                static_cast<uintptr_t>(rect_list[1].left));
+            rect_list = rect_list->next;
         } else {
             OutputDebugStringA("Invalid Rect found in world draw chain");
             if (prev != NULL) {
-                prev[1].left = rect_list[1].left;
+                prev->next = rect_list->next;
             }
-            RECT* next = reinterpret_cast<RECT*>(
-                static_cast<uintptr_t>(rect_list[1].left));
+            DirtyRectNode* next = rect_list->next;
             GLOBAL_free(rect_list);
             rect_list = next;
         }
