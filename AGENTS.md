@@ -54,7 +54,10 @@ Evidence rules:
 
 ## Correctness and completion
 
-Behavior must match the assembly for all inputs:
+Behavior must match the assembly for all inputs, but the checked-in source must
+express that behavior as proper C++. Assembly and decompiler output are
+**evidence**, not a source-code template. Instruction-for-instruction visual
+similarity is not a goal.
 
 - Preserve control flow, data flow, widths, signedness, calling conventions,
   return values, side effects, ownership, and error paths.
@@ -62,16 +65,52 @@ Behavior must match the assembly for all inputs:
 - Document original x86 field offsets in canonical headers; put every global in
   its canonical declaration.
 - Verify original callers/callees, virtual slots, layouts, and allocations agree.
-- Do not simplify assembly unless equivalence is proven and documented.
+- Replace compiler-lowered mechanics with their source-level C++ equivalent:
+  classes, inheritance, constructors/destructors, virtual calls, members,
+  arrays, typed ownership, and ordinary structured control flow.
+- Simplify assembly-shaped expressions whenever behavioral equivalence is
+  proven. Do not preserve registers, stack temporaries, vtable plumbing,
+  byte-offset field access, or decompiler casts merely because Ghidra emitted
+  them.
+
+### Model before implementation
+
+Do not paste a cleaned decompilation into a source file and plan to type it
+later. Recover the object model first, then write the implementation:
+
+1. Establish the receiver's class, inheritance, vtable slots, constructor/
+   destructor chain, and strongest evidenced parameter/return types from all
+   relevant callers and callees.
+2. Update the one canonical header with the recovered base classes, fields,
+   arrays, ownership, and virtual declarations. An unknown semantic purpose may
+   use a neutral member name such as `unknown_0x74`; an unknown layout is not
+   permission to use pointer arithmetic.
+3. Implement through those declarations using ordinary C++. Let the compiler
+   perform `this` adjustment, base construction, virtual dispatch, and object
+   destruction.
+4. Compare the resulting behavior back to every assembly basic block and call
+   site. Verify allocations against the modeled concrete type.
+5. Audit the changed lines for decompiler residue before completion.
+
+If the evidence is insufficient to model an object or relationship safely,
+stop and report the precise missing evidence. Do **not** bridge the gap with
+`void*`, `reinterpret_cast`, a local partial-layout view, a literal offset,
+or manual vtable dispatch. Resolving the model is part of the task, not a later
+cleanup pass.
 
 File status:
 
-- `// Status: TRANSCRIBED` — cleaned decompiler output; compiles; not validated.
-- `// Status: VALIDATED` — checked instruction-by-instruction against assembly.
-- `// Status: INTEGRATED` — validated, typed, and wired into C++ hierarchy.
+- `// Status: TRANSCRIBED` — legacy inventory only: assembly-shaped output that
+  still requires replacement; never a completion target for new work.
+- `// Status: VALIDATED` — behavior checked against assembly, but not necessarily
+  integrated into the canonical object model.
+- `// Status: INTEGRATED` — validated, typed, and expressed through the canonical
+  C++ hierarchy.
 
-Only **INTEGRATED** is done. Progress in order: transcribe and clean; validate
-against disassembly; integrate named fields/types and virtual dispatch.
+Only **INTEGRATED** is done. New or substantially modified original-game code
+must be written toward **INTEGRATED** directly. A literal transcription may be
+kept in private scratch notes while analyzing assembly, but it must not be the
+checked-in implementation or an agent's stopping point.
 
 ## Fix anti-patterns on sight
 
@@ -89,6 +128,13 @@ the assembly before choosing the replacement.
 - Literal vtable assignment/access/dispatch → typed virtual methods/calls.
 - Raw `this + offset`, cast-based field access, or expanded scalar arrays →
   named fields/arrays in the one canonical class header.
+- `reinterpret_cast` used to simulate an object layout, recover a member by
+  offset, convert between reconstructed classes, erase a known type, round-trip
+  an object pointer through an integer, or call a vtable/function slot → fix the
+  model and use members, inheritance, typed pointers, and virtual methods.
+- Local `*View`/`*Fields`/partial-layout structs over known game objects → add
+  the fields to the canonical class instead. Do not create a second type merely
+  to make offset casts look typed.
 - Flat inherited structs or duplicate/partial layouts → actual inheritance and
   one canonical definition.
 - Known objects stored or passed as `void*`/`void**` → strongest evidenced type.
@@ -100,9 +146,20 @@ the assembly before choosing the replacement.
 - MSVC-only cast-to-lvalue syntax or direct base-constructor calls → valid C++.
 - Internal no-op/null-return stubs → decompile the function.
 
-Do not manually read or write `VTBL_*` in executable code. Avoid raw pointer
-arithmetic; a temporary cross-cast offset is allowed only when evidence is
-recorded with a precise TODO and it is removed during integration.
+Do not manually read or write `VTBL_*` in executable code. Raw pointer
+arithmetic and `reinterpret_cast` are not temporary substitutes for
+reconstruction. Their narrow legitimate uses are true external ABI boundaries
+such as opaque OS handles/callbacks and byte-oriented file or wire formats; mark
+such a changed-line use with `// ABI_BOUNDARY: <why>` and keep it outside the
+modeled game-object domain. Prefer `std::memcpy`/explicit endian readers for
+unaligned bytes. Serialization does not justify casting a byte buffer into a
+live C++ object.
+
+Before returning, inspect added lines in original-game `.cpp`/`.h` files for
+`reinterpret_cast`, C-style casts, `void*`, literal object offsets, local
+layout views, and manual vtable access. Any remaining occurrence must be either
+removed or justified as the marked external ABI boundary above. Build success
+does not waive this review.
 
 ## Host deviations and SDL3
 

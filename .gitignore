@@ -7,7 +7,17 @@ wine-prefix/
 DDrawCompat-*.zip
 tools/ghidra-mcp/*.zip
 tools/ghidra-mcp/GhidraMCP-release-*/
-.claude/
+# Keep machine-local Claude state ignored, but version the project-specific
+# reverse-engineering agent and coordination standard.
+.claude/*
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/reverse-engineer.md
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/re-with-subagents/
+.claude/skills/re-with-subagents/*
+!.claude/skills/re-with-subagents/SKILL.md
 *.pyc
 __pycache__/
 .pytest_cache/

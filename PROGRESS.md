@@ -244,6 +244,12 @@ main()
 - [x] **Acceptance signal: `BUG-mode3-input-processing-crashes.md`'s stopping point is resolved.** Extended `test_singleplayer_mode3_mouse_input_reaches_game` with a real click (previously the test deliberately only moved the mouse, documenting that a click would hit this exact crash) and `game.assert_alive()` — passes. The game no longer crashes on `UI_CreateChildWindow`'s host `assert(false)` reached via `BuildingDescriptorEditor`'s construction.
 - **Verification**: `meson compile -C build` clean; `meson test -C build` 28/30 (documented 2 pre-existing environmental network-sandbox failures, unrelated); `meson test -C build --suite integration` 13/13 including the extended mode-3 click test; `ninja -C build-mingw -k 0` — the four touched headers/`.cpp` files introduce zero new failure categories, only the same pre-existing `invalid-offsetof`-on-polymorphic-type class already present in `game/Building.h` (not fixable without abandoning the layout-verification `static_assert`s entirely — out of scope this pass). Ghidra database saved with the new/updated function decompilations and an expanded `shared/vtable_addrs.h` slot-table documentation for all four vtables.
 
+### Semantic C++ reconstruction standard (2026-08-13)
+
+- [x] **Model-first reconstruction made mandatory** — assembly/Ghidra output is evidence rather than a source template; new work must recover the canonical class, hierarchy, fields, signatures, ownership, and virtual dispatch before implementation, and must target `INTEGRATED` directly rather than stopping at `TRANSCRIBED`.
+- [x] **Cast-backed pseudo-models explicitly rejected** — `reinterpret_cast`, local partial-layout views, literal object offsets, known-object `void*`, pointer/integer round trips, and manual vtable calls may not substitute for class reconstruction; genuine external ABI uses require an `ABI_BOUNDARY` justification.
+- [x] **Subagent prompts versioned and aligned** — the reverse-engineer agent and parallel coordination skill now require canonical-header-first implementation, return precise model-evidence blockers instead of cast workarounds, and make coordinators reject decompiler-shaped diffs.
+
 ## Remaining work
 
 ### Follow-ups from the operator_new hardcoded-size sweep (2026-08-11)
@@ -1072,3 +1078,5 @@ Added a real occupancy measurement rather than trusting a non-null `FindObject()
 `meson compile -C build` clean. `meson test -C build`: 33/33 including `--suite integration`, unchanged pass count from session start (isolated the `ATTR_0047f108`/`ScrollRect` change sets from each other before committing, per the paragraph above). `ninja -C build-mingw -k 0`: zero new failures — the pre-existing `uint`-typedef/`EditWindow.cpp`/`CRT_malloc_zero`-redefinition failures are all on lines untouched by this session's diff (`git diff --stat` confirms a single additive hunk in `tilemap.h`, nowhere near any of the failing lines).
 
 **Still open, tracked as its own follow-up, not a `ScrollRect` dependency**: the `ATTR_0047f108` type fix plus `TileMap::InvalidateDirtyRects`/`ProcessRect`'s DirectDraw presentation path (null `g_cursor_surface` guard, `tobj->resource+4`/`+0x20` raw-offset reads, `g_main_window`-derived `child_wnd` dereference, `DDRAW_PresentRect` host-safety) — the whole unported mode-3 rendering pipeline, exposed but not caused by this session's placement work.
+
+**2026-08-13 (semantic-cpp-reconstruction-guardrail)**: Replaced the literal-transcription workflow with a model-first C++ standard in `AGENTS.md`; versioned and aligned the active reverse-engineering agent/coordination prompts; made cast-backed object layouts and `TRANSCRIBED` stopping points explicit rejection criteria.
