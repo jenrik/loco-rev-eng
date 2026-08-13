@@ -42,7 +42,7 @@
  *   [10] +0x28: track_building                (0x42D1A0 — per-frame
  *               selection tracking; formerly misattributed to
  *               Town::track_building)
- *   [11] +0x2C: Panel::DispatchEvent        (0x454900, inherited)
+ *   [11] +0x2C: Panel::Draw                 (0x454900, override of Entity::Draw)
  *   [12] +0x30: Entity::DrawConnected       (0x405FD0, inherited)
  *   [13] +0x34: Entity::SetName             (0x405E20, inherited)
  *   [14] +0x38: Entity::SetAnimState        (0x405A50, inherited)

@@ -180,12 +180,15 @@ public:
     void UpdateChild();
 
     /**
-     * Dispatch event — draws the Panel and dims overlapping child rects
-     * on the screen surface.
-     * Address: 0x454900
-     * __thiscall
+     * Draw override — vtable[11] (Entity::Draw's own slot). Draws the
+     * Panel, then dims overlapping child rects on the screen surface.
+     * Address: 0x454900. Ghidra's own label for this address,
+     * "RESDATA_DispatchEvent"/"DispatchEvent", is a naming artifact, not
+     * a distinct method — confirmed a genuine same-signature override of
+     * Entity::Draw via direct vtable[11] byte comparison (see
+     * core/GameView.cpp's render_selection, PROGRESS.md 2026-08-13).
      */
-    void DispatchEvent(RECT* param_rect);
+    void Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags) override;
 
     /**
      * Hit-test children — finds if a click point hits any child sprite
@@ -234,5 +237,4 @@ extern void* __cdecl operator_new(size_t size);                     /* 0x465CE0 
 extern void  __cdecl GLOBAL_free(void* ptr);                         /* 0x465CD0 */
 extern int   __thiscall UI_IsBitmapReady(int handle);                /* 0x424C30 */
 extern void* __cdecl ResourceManager_GetById(void** resmgr, UINT id); /* 0x4472B0 */
-extern void  __thiscall GameObject_Draw(void* self);                 /* 0x405E60 */
 extern void  __fastcall CGWND_TrackPiece_SetZoom(void* obj, int zoom); /* 0x47xxxx */

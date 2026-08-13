@@ -440,7 +440,7 @@
     [7]  +0x1C: StopSound                    (GameObject_StopSound,            0x405A20)
     [8]  +0x20: SetPause/callback            (CGWND_SetPause,                  0x4061B0)
     [9]  +0x24: Update callback              (RESDATA_ScriptedObject_Update,   0x4497A0)
-    [10] +0x28: Dispatch/Draw                (RESDATA_DispatchEvent,           0x454900)
+    [10] +0x28: Draw (override)              (Panel::Draw,                     0x454900)
     [11] +0x2C: DrawConnected                (GameObject_DrawConnected,        0x405FD0)
     [12] +0x30: SetName                      (GameObject_SetName,              0x405E20)
     [13] +0x34: SetAnimState                 (GameObject_SetAnimState,         0x405A50)

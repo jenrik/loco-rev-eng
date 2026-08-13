@@ -277,7 +277,8 @@ void Cursor_RenderWithViewport(GameWindow* gameWindow, uint8_t param)
  * detailed doc comment already citing the address) but no .cpp anywhere
  * defines a body -- confirmed via grep across the whole tree. Ghidra
  * decompile obtained and matches the header's doc comment: dispatches
- * DrawConnected (vtable slot 11) to self (via RESDATA_DispatchEvent),
+ * DrawConnected (vtable slot 11) to self (via Panel::Draw, the real
+ * name for what this comment's own "RESDATA_DispatchEvent" meant),
  * sub_object_1 (+0xE0, a real typed GameObject member), popup_panel
  * (+0x3A0, `void*` -- calls BOTH vtable slot 11 AND slot 12 on it),
  * pattern_container (+0x428, `void*`) + 4 pattern sprites (+0x168,

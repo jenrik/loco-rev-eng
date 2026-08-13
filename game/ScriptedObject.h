@@ -38,7 +38,7 @@
  *   [7]  +0x1C: StopSound                     (0x405A20)  Entity::StopSound
  *   [8]  +0x20: SetVisible                    (0x4061B0)  Entity::SetVisible
  *   [9]  +0x24: Update                        (0x4497A0)  override
- *   [10] +0x28: DispatchEvent                 (0x454900)  Panel::DispatchEvent
+ *   [10] +0x28: Draw                          (0x454900)  Panel::Draw (override of Entity::Draw)
  *   [11] +0x2C: DrawConnected                 (0x405FD0)  Entity::DrawConnected
  *   [12] +0x30: SetName                       (0x405E20)  Entity::SetName
  *   [13] +0x34: SetAnimState                  (0x405A50)  Entity::SetAnimState

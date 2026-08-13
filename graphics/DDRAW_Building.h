@@ -467,7 +467,8 @@ public:
      *
      * Only dispatches when active flag (+0x88) is set. Routes vtable[11]
      * (DrawConnected) to:
-     *   1. self via RESDATA_DispatchEvent (draw + dim child rects)
+     *   1. self via Panel::Draw (draw + dim child rects; the DDRAW_Building
+     *      hierarchy's own vtable[11], an override of Entity::Draw)
      *   2. sub_object_1 at +0xE0
      *   3. popup_panel at +0x3A0 (if popup_visible and popup_active byte set)
      *      — called twice: once with vtable[11], once with vtable[12]

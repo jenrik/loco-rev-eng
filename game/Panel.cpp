@@ -63,7 +63,6 @@ extern int __thiscall GameObject_InitBase(void* self, int resource_id,
                                           int anim_index, byte force_reload); /* 0x405900 */
 extern void __thiscall GameObject_SetWorldPos(void* self, int x, int y);    /* 0x405C00 */
 extern void __thiscall GameObject_InvalidateRect(void* self);               /* 0x436AB0 */
-extern void __thiscall GameObject_Draw(void* self);                         /* 0x405E60 */
 extern int  __thiscall GameObject_GetRelPos(void* self, int* out,
                                             int param_1, int param_2);      /* 0x436A40 */
 
@@ -467,23 +466,23 @@ void Panel::UpdateChild()
 }
 
 /* ================================================================== */
-/* Panel::DispatchEvent                                                 */
+/* Panel::Draw — override of Entity::Draw (vtable[11])                 */
 /* Address: 0x454900                                                   */
 /*                                                                     */
-/* Draws the GameObject, then dims overlapping child rects if the      */
+/* Draws the Entity base, then dims overlapping child rects if the     */
 /* update_child_flags (+0x88) is non-zero. For each child rect that    */
-/* intersects the given param_rect, calls DDRAW_DimSurfaceRect.        */
+/* intersects clip_bounds, calls DDRAW_DimSurfaceRect.                 */
 /* Skips dimming the +0xB0 rect if byte at +0xAD is non-zero.          */
 /* ================================================================== */
-void Panel::DispatchEvent(RECT* param_rect)
+void Panel::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 {
-    GameObject_Draw(this);
+    this->Entity::Draw(clip_bounds, enable_scroll, extra_flags);
 
     if (this->update_child_flags != 0) {  /* +0x88 */
         RECT intersect_rect;
 
-        /* Dim child_rect_b (+0xC0) if it intersects param_rect */
-        if (IntersectRect(&intersect_rect, &this->child_rect_b, param_rect)) {
+        /* Dim child_rect_b (+0xC0) if it intersects clip_bounds */
+        if (IntersectRect(&intersect_rect, &this->child_rect_b, &clip_bounds)) {
             DDRAW_DimSurfaceRect(
                 intersect_rect.left, intersect_rect.top,
                 intersect_rect.right, intersect_rect.bottom
@@ -495,7 +494,7 @@ void Panel::DispatchEvent(RECT* param_rect)
            controlling whether rect_a is dimmed */
         uint8_t* dim_flag = &this->dim_flag;
         if (*dim_flag == 0) {
-            if (IntersectRect(&intersect_rect, &this->child_rect_a, param_rect)) {
+            if (IntersectRect(&intersect_rect, &this->child_rect_a, &clip_bounds)) {
                 DDRAW_DimSurfaceRect(
                     intersect_rect.left, intersect_rect.top,
                     intersect_rect.right, intersect_rect.bottom

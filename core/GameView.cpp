@@ -625,13 +625,14 @@ void GameView::update_selection(int32_t /*unused1*/, int32_t /*unused2*/,
  * it; no signature mismatch.
  *
  * This must call Entity::Draw() explicitly, NOT through virtual
- * dispatch: Panel::DispatchEvent (0x454900) is a real override of this
- * exact vtable slot (confirmed via decompile — same (RECT, int,
- * uint32_t) signature) whose body calls Entity::Draw() and THEN dims
- * overlapping child rects. The original's raw, non-virtual
- * `CALL 0x00405E60` deliberately bypasses that extra dimming for this
- * specific redraw; a plain `this->Draw(...)` virtual call would
- * incorrectly reintroduce it.
+ * dispatch: Panel::Draw (0x454900, game/Panel.h/.cpp — Ghidra's own
+ * label for this address, "DispatchEvent", was a naming artifact, fixed
+ * 2026-08-14) is a real override of this exact vtable slot (confirmed
+ * via decompile — same (RECT, int, uint32_t) signature) whose body
+ * calls Entity::Draw() and THEN dims overlapping child rects. The
+ * original's raw, non-virtual `CALL 0x00405E60` deliberately bypasses
+ * that extra dimming for this specific redraw; a plain `this->Draw(...)`
+ * virtual call would incorrectly reintroduce it.
  */
 void GameView::render_selection(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
                                  int32_t extra)

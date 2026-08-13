@@ -108,8 +108,9 @@ extern void __cdecl   RESDATA_Unlock(void* ptr);            /* @ 0x449420 */
  * (void*, void*, int, int) overload and its verified-dead-code stub). */
 extern void* __fastcall RESDATA_CreateChildSprite(void* parent, int res_id,
                                                    int a, int b); /* @ 0x4546D0 */
-extern void __fastcall RESDATA_DispatchEvent(void* self, int a, int b,
-                                              int c, int d, void* e, int f); /* @ 0x454900 */
+/* RESDATA_DispatchEvent (0x454900) removed: it is Panel::Draw, a genuine
+ * C++ override of Entity::Draw's own vtable slot (game/Panel.h/.cpp),
+ * not a free function — this declaration had zero call sites. */
 extern void __fastcall RESDATA_SoundObject_Init(void* sprite, const char* text); /* @ 0x449070 */
 extern int  __fastcall RESDATA_SoundObject_GetState(void* sprite); /* @ 0x4490D0 */
 extern uint32_t __thiscall RESDATA_ScriptedObject_HandleKey(void* self, uint32_t key); /* @ 0x44A0C0 */
