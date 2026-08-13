@@ -239,9 +239,19 @@ int main()
 
         /* oversized preview dimensions: 0xFFFF x 0xFFFF overflows the
          * 16 MiB preview cap (write refuses; the reader classifies the
-         * header as Oversized once a file exists with those dims) */
+         * header as Oversized once a file exists with those dims).
+         *
+         * Built by hand rather than via make_doc(): write_save's cap
+         * check multiplies header.player_id * player_color directly and
+         * never reads doc.preview, so make_doc()'s unconditional
+         * preview.assign(w * h, ...) would allocate/fill a real ~4 GiB
+         * buffer just to exercise a rejection path that doesn't need it
+         * (this previously OOM-killed the host running the suite). */
         {
-            SaveDocument over = make_doc(0xFFFF, 0xFFFF, 0, 0);
+            SaveDocument over;
+            over.header.type = 8;
+            over.header.player_id = 0xFFFF;
+            over.header.player_color = 0xFFFF;
             std::string p = dir + "/bigdims.loco";
             std::string err;
             /* write_save refuses before writing (dims overflow) */
