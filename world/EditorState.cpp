@@ -49,6 +49,19 @@
 #include "tilemap.h"
 
 #include <cstdint>
+#include <cstdio>
+
+/* Forward-declared rather than including resources/resource_manager_sdl3.h
+ * wholesale, matching game/Vehicle.cpp's identical forward declarations
+ * (that header's ResourceManager_Init(void*) -> int ambiguates against
+ * network/Netman.h's ResourceManager_Init(void*) -> void once both are
+ * visible in one TU). */
+namespace loco::assets {
+class SpriteResource;
+bool is_host_sprite_resource(const void* resource);
+bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
+uint32_t sprite_resource_id(const SpriteResource* resource);
+}  // namespace loco::assets
 
 /* ================================================================== */
 /* External globals                                                    */
@@ -85,9 +98,24 @@ extern "C" void EditorState_DetachCompat(void* editor_state);
 
 /* Reads the tile-type/direction byte at TileMapResource+0x63A directly,
  * bypassing TileMapResource::state_63A's compiler-computed offset — see
- * this file's header comment for why that offset drifts on 64-bit hosts. */
+ * this file's header comment for why that offset drifts on 64-bit hosts.
+ *
+ * Host deviation: `resource` is a loco::assets::SpriteResource* on this
+ * build, not the real x86 TileMapResource* the raw offset above assumes
+ * (the "raw fixed-offset reads against undersized host resource objects"
+ * landmine already fixed in ScrollRect/InputMgr.cpp/ResdataGameVehicle.cpp/
+ * Vehicle::LoadSounds). Source the byte via the existing accessor instead;
+ * this one fix covers every one of this file's ~15 ReadTileTypeByte()
+ * call sites. */
 static inline uint8_t ReadTileTypeByte(void* resource)
 {
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        uint8_t tile_type = 0;
+        loco::assets::sprite_tile_type_byte(resource, &tile_type);
+        return tile_type;
+    }
+#endif
     return *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(resource) + 0x63A);
 }
 
@@ -170,6 +198,27 @@ int EditorState::FindTrackPosition(int pixel_x, int pixel_y)
     }
 
     TileMapResource* resource = static_cast<TileMapResource*>(gv->resource);
+
+    /* Host deviation: this entire function's logic depends on
+     * RESDATA+0x630/+0x636 (the track control-point table/count), which
+     * have no host source (see this file's header comment) -- same
+     * whole-function guard as FindAdjacentTrack/MoveAlongTrack above.
+     * Returns 0, the same "not found" value every other failure path in
+     * this function already returns. */
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] EditorState::FindTrackPosition: no host source "
+                "for RESDATA+0x630/+0x636 (track control-point table)\n");
+            std::fflush(stderr);
+        }
+        return 0;
+    }
+#endif
+
     int16_t* control_points = *reinterpret_cast<int16_t**>(
         reinterpret_cast<uint8_t*>(resource) + 0x630);
 
@@ -226,7 +275,23 @@ uint32_t EditorState::InitTrackAtPosition(int pixel_x, int pixel_y)
     }
 
     TileMapResource* resource = static_cast<TileMapResource*>(gv->resource);
-    uint32_t resource_type = GetResourceType(static_cast<uint32_t>(resource->resource_id));
+
+    /* Host deviation: `resource` is a loco::assets::SpriteResource* on
+     * this build, not the real x86 TileMapResource* a raw struct-field
+     * read through it assumes -- the same landmine as this file's
+     * ReadTileTypeByte(), just via a named field instead of a raw
+     * offset. */
+    uint32_t resource_id;
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        resource_id = loco::assets::sprite_resource_id(
+            reinterpret_cast<loco::assets::SpriteResource*>(resource));
+    } else
+#endif
+    {
+        resource_id = static_cast<uint32_t>(resource->resource_id);
+    }
+    uint32_t resource_type = GetResourceType(resource_id);
     if (resource_type != 3) {
         return resource_type & 0xFFFFFF00;
     }
@@ -239,6 +304,25 @@ uint32_t EditorState::InitTrackAtPosition(int pixel_x, int pixel_y)
     int32_t* origin_out = TileMap_GetTileOrigin(g_tilemap, tile_origin,
                                                  tile_x, tile_y, 0);
     gv->set_tile_target(*origin_out);
+
+    /* Host deviation: RESDATA+0x630/+0x636 (the track control-point
+     * table/count) have no host source -- see world/EditorState.cpp's
+     * header comment. Without them there is no track position to
+     * initialize; bail the same way the resource_type mismatch above
+     * already does, rather than guessing at a partial translation. */
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] EditorState::InitTrackAtPosition: no host source "
+                "for RESDATA+0x630/+0x636 (track control-point table)\n");
+            std::fflush(stderr);
+        }
+        return 0;
+    }
+#endif
 
     int building_x_pixels = gv->sub_pos_x * 16;
     int16_t* cp_array = *reinterpret_cast<int16_t**>(
@@ -274,6 +358,29 @@ GameVehicle* EditorState::FindAdjacentTrack()
 
     GameVehicle* gv = this->building;
     TileMapResource* resource = static_cast<TileMapResource*>(gv->resource);
+
+    /* Host deviation: this entire function's logic (both this building's
+     * own control points and every adjacent-building branch below) is
+     * built on RESDATA+0x630/+0x636/+0x638, which have no host source
+     * (see this file's header comment). Guard the whole function, same
+     * as VehicleEditor::MoveAlongTrack: warn once and return the
+     * "no adjacent track" sentinel every other failure path in this
+     * function already returns, rather than guessing at a partial
+     * translation. */
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] EditorState::FindAdjacentTrack: no host source for "
+                "RESDATA+0x630/+0x636/+0x638 (track control-point table)\n");
+            std::fflush(stderr);
+        }
+        return gv;
+    }
+#endif
+
     int16_t* control_points = *reinterpret_cast<int16_t**>(
         reinterpret_cast<uint8_t*>(resource) + 0x630);
 
@@ -439,7 +546,35 @@ uint32_t EditorState::UpdateVehiclePlacement(Vehicle* vehicle)
             }
         }
     } else {
-        uint8_t valid_idx = Resource_IsValidTrackIndex(resource, static_cast<int16_t>(this->track_pos));
+        /* Resource_IsValidTrackIndex (0x44BCD0) mangles identically to
+         * its void-returning no-op stub in shared/link_stubs.cpp (return
+         * type isn't part of Itanium mangling), so this call already
+         * reads an uninitialized register on every build, independent of
+         * any host/RESDATA-layout concern. It also reads RESDATA+0x636/
+         * +0x638, which have no host source (see this file's header
+         * comment) even if the linkage were fixed. Rather than act on
+         * garbage, treat the index as always invalid on host -- this
+         * function's own contract already treats valid_idx != 1 as "skip
+         * the adjacent-track placement logic", a safe, deterministic
+         * degradation instead of an unpredictable one. */
+        uint8_t valid_idx;
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(resource)) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr,
+                    "[HOST] EditorState::UpdateVehiclePlacement: no host "
+                    "source for RESDATA+0x636/+0x638 (track index "
+                    "validity) -- treating as invalid\n");
+                std::fflush(stderr);
+            }
+            valid_idx = 0;
+        } else
+#endif
+        {
+            valid_idx = Resource_IsValidTrackIndex(resource, static_cast<int16_t>(this->track_pos));
+        }
         if (valid_idx == 1) {
             adj_result = this->FindAdjacentTrack();
         }
@@ -449,7 +584,17 @@ uint32_t EditorState::UpdateVehiclePlacement(Vehicle* vehicle)
                 found_adjacent = 1;
                 resource = static_cast<TileMapResource*>(this->building->resource);
 
-                if (Resource_IsRoadTile(resource)) {
+                /* Resource_IsRoadTile/IsBuildingTile (0x44BD10/0x44BD30)
+                 * mangle identically to their void-returning no-op stubs
+                 * in shared/link_stubs.cpp (return type isn't part of
+                 * Itanium mangling), so every call through these
+                 * declarations already binds to the stub and reads
+                 * garbage, independent of the host-SpriteResource
+                 * landmine below. ClassifyResourceTile (game/Vehicle.h)
+                 * fixes both at once. */
+                bool res_is_road, res_is_building;
+                ClassifyResourceTile(resource, &res_is_road, &res_is_building);
+                if (res_is_road) {
                     /* vehicle->editor_state is the paired EditorState for the
                      * opposite end of this track segment. */
                     GameVehicle* ve_building = vehicle->editor_state->building;
@@ -467,7 +612,7 @@ uint32_t EditorState::UpdateVehiclePlacement(Vehicle* vehicle)
                     this->move_state = 1;
                     vehicle->direction = 1;
                     vehicle->tile_x = ve_building->sub_pos_x;
-                } else if (Resource_IsBuildingTile(resource)) {
+                } else if (res_is_building) {
                     if (vehicle->occupancy != 0) {
                         if (vehicle->IsMoving()) {
                             vehicle->Stop((vehicle->active_editor == 0) ? 0 : 1, 1);
@@ -550,8 +695,36 @@ uint32_t EditorState::UpdateVehiclePlacement(Vehicle* vehicle)
 
                 int dir = this->direction;
                 TileMapResource* par_res = static_cast<TileMapResource*>(par->resource);
-                int cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(par_res) + 0x636);
-                int max_idx  = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(par_res) + 0x638);
+
+                /* Host deviation: RESDATA+0x636/+0x638 (track
+                 * control-point count/branch index) have no host source
+                 * (see this file's header comment). cp_count/max_idx only
+                 * gate the four boundary checks immediately below; with
+                 * no real table to compare against, treat the position
+                 * as never at a boundary (values that can't match any of
+                 * the four conditions) rather than guess, falling
+                 * through to the init_state toggle checks below exactly
+                 * as if none of the boundaries were hit. */
+                int cp_count, max_idx;
+#ifndef _WIN32
+                if (loco::assets::is_host_sprite_resource(par_res)) {
+                    static bool warned = false;
+                    if (!warned) {
+                        warned = true;
+                        std::fprintf(stderr,
+                            "[HOST] EditorState::UpdateVehiclePlacement: no "
+                            "host source for RESDATA+0x636/+0x638 (track "
+                            "control-point count/branch index)\n");
+                        std::fflush(stderr);
+                    }
+                    cp_count = this->track_pos + 2;
+                    max_idx = this->track_pos + 2;
+                } else
+#endif
+                {
+                    cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(par_res) + 0x636);
+                    max_idx  = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(par_res) + 0x638);
+                }
 
                 if ((dir == 1 && this->track_pos == 1) ||
                     (dir == 0 && this->track_pos == cp_count - 1) ||
@@ -602,9 +775,30 @@ uint32_t EditorState::UpdateVehiclePlacement(Vehicle* vehicle)
             }
             state_changed = 1;
             TileMapResource* res = static_cast<TileMapResource*>(cur_building->resource);
-            int16_t* cp_array = *reinterpret_cast<int16_t**>(reinterpret_cast<uint8_t*>(res) + 0x630);
-            this->pos_x = cp_array[this->track_pos * 2]     + cur_building->sub_pos_x * 16;
-            this->pos_y = cp_array[this->track_pos * 2 + 1] + cur_building->sub_pos_y * 16;
+            /* Host deviation: no source for RESDATA+0x630 (track
+             * control-point table) -- leave pos_x/pos_y at their current
+             * values, matching Vehicle::LoadSounds' host_track_pos()
+             * precedent, instead of dereferencing a table that doesn't
+             * exist at this address. */
+#ifndef _WIN32
+            if (loco::assets::is_host_sprite_resource(res)) {
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    std::fprintf(stderr,
+                        "[HOST] EditorState::UpdateVehiclePlacement: no "
+                        "host source for RESDATA+0x630 (track "
+                        "control-point table) -- leaving pos_x/pos_y at "
+                        "their current values\n");
+                    std::fflush(stderr);
+                }
+            } else
+#endif
+            {
+                int16_t* cp_array = *reinterpret_cast<int16_t**>(reinterpret_cast<uint8_t*>(res) + 0x630);
+                this->pos_x = cp_array[this->track_pos * 2]     + cur_building->sub_pos_x * 16;
+                this->pos_y = cp_array[this->track_pos * 2 + 1] + cur_building->sub_pos_y * 16;
+            }
         } else if (cur_state == 1 || cur_sub == 1) {
             int dir_type = ReadTileTypeByte(resource) - 1;
             switch (dir_type) {
@@ -697,7 +891,26 @@ uint32_t EditorState::UpdatePosition(Vehicle* vehicle, VehicleEditor* vehicleEdi
             goto handle_scroll_edge;
         }
 
-        uint8_t valid_idx = Resource_IsValidTrackIndex(resource, static_cast<int16_t>(this->track_pos));
+        /* Resource_IsValidTrackIndex broken-stub/no-host-source note:
+         * see the identical fix in UpdateVehiclePlacement above. */
+        uint8_t valid_idx;
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(resource)) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr,
+                    "[HOST] EditorState::UpdatePosition: no host source "
+                    "for RESDATA+0x636/+0x638 (track index validity) -- "
+                    "treating as invalid\n");
+                std::fflush(stderr);
+            }
+            valid_idx = 0;
+        } else
+#endif
+        {
+            valid_idx = Resource_IsValidTrackIndex(resource, static_cast<int16_t>(this->track_pos));
+        }
         if (valid_idx != 1) goto after_track_advance;
 
         int32_t nearest_track = vehicle->GetNearestTrack();
@@ -709,11 +922,15 @@ uint32_t EditorState::UpdatePosition(Vehicle* vehicle, VehicleEditor* vehicleEdi
         if (adj_result == nullptr) {
             resource = static_cast<TileMapResource*>(this->building->resource);
 
-            if (vehicle->direction == 4 ||
-                Resource_IsRoadTile(resource) == 0) {
+            /* ClassifyResourceTile (game/Vehicle.h) -- see the identical
+             * Resource_IsRoadTile/IsBuildingTile note earlier in this
+             * file for why the raw extern calls are unsafe here. */
+            bool res_is_road, res_is_building;
+            ClassifyResourceTile(resource, &res_is_road, &res_is_building);
+            if (vehicle->direction == 4 || !res_is_road) {
                 if (vehicle->occupancy != 4 &&
                     vehicle->occupancy != 5 &&
-                    Resource_IsBuildingTile(resource) != 0) {
+                    res_is_building) {
                     this->edit_state = 1;
                     vehicleEditor->edge_dir_b = 1;
                 }
@@ -762,9 +979,27 @@ after_track_advance:
         }
         gv = this->building;
         resource = static_cast<TileMapResource*>(gv->resource);
-        int16_t* cp_array = *reinterpret_cast<int16_t**>(reinterpret_cast<uint8_t*>(resource) + 0x630);
-        this->pos_x = cp_array[this->track_pos * 2]     + gv->sub_pos_x * 16;
-        this->pos_y = cp_array[this->track_pos * 2 + 1] + gv->sub_pos_y * 16;
+        /* Host deviation: no source for RESDATA+0x630 -- leave
+         * pos_x/pos_y at their current values (host_track_pos()
+         * precedent, Vehicle.cpp), still reporting "handled". */
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(resource)) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr,
+                    "[HOST] EditorState::UpdatePosition: no host source "
+                    "for RESDATA+0x630 (track control-point table) -- "
+                    "leaving pos_x/pos_y at their current values\n");
+                std::fflush(stderr);
+            }
+        } else
+#endif
+        {
+            int16_t* cp_array = *reinterpret_cast<int16_t**>(reinterpret_cast<uint8_t*>(resource) + 0x630);
+            this->pos_x = cp_array[this->track_pos * 2]     + gv->sub_pos_x * 16;
+            this->pos_y = cp_array[this->track_pos * 2 + 1] + gv->sub_pos_y * 16;
+        }
         return 1;
     }
 
@@ -845,7 +1080,28 @@ uint8_t EditorState::TryAttach(Vehicle* vehicle)
         }
 
         uint8_t occ_count = vehicle->GetOccupantCount();
-        uint16_t cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(resource) + 0x636);
+        /* Host deviation: no source for RESDATA+0x636 (track
+         * control-point count) -- cp_count only gates the
+         * direction==1 boundary check below; use a value that can't
+         * match track_pos rather than guess, same as the analogous
+         * guard in UpdateVehiclePlacement. */
+        uint16_t cp_count;
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(resource)) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr,
+                    "[HOST] EditorState::TryAttach: no host source for "
+                    "RESDATA+0x636 (track control-point count)\n");
+                std::fflush(stderr);
+            }
+            cp_count = static_cast<uint16_t>(this->track_pos + 2);
+        } else
+#endif
+        {
+            cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(resource) + 0x636);
+        }
         if (occ_count != 0 &&
             ((this->direction == 0 && this->track_pos == 1) ||
              (this->direction == 1 && this->track_pos == cp_count - 1))) {
@@ -874,8 +1130,30 @@ uint8_t EditorState::HandleDirection(Vehicle* vehicle, GameVehicle* train)
 
     int32_t  dir      = this->direction;
     TileMapResource* res = static_cast<TileMapResource*>(train->resource);
-    uint16_t cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(res) + 0x636);
-    uint16_t branch   = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(res) + 0x638);
+    /* Host deviation: no source for RESDATA+0x636/+0x638 -- both only
+     * gate three of the four boundary checks below; use values that
+     * can't match track_pos rather than guess, same pattern as the
+     * analogous guards above. */
+    uint16_t cp_count, branch;
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(res)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] EditorState::HandleDirection: no host source for "
+                "RESDATA+0x636/+0x638 (track control-point count/branch "
+                "index)\n");
+            std::fflush(stderr);
+        }
+        cp_count = static_cast<uint16_t>(this->track_pos + 2);
+        branch = static_cast<uint16_t>(this->track_pos + 2);
+    } else
+#endif
+    {
+        cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(res) + 0x636);
+        branch   = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(res) + 0x638);
+    }
 
     /* Check if at track boundary positions — if so, return 0 */
     if ((dir == 1 && this->track_pos == 0) ||
@@ -1075,7 +1353,26 @@ void EditorState::UpdateEditMode(Vehicle* vehicle)
      * actually advances to a new node. */
     TileMapResource* resource = static_cast<TileMapResource*>(this->building->resource);
 
-    uint8_t valid = Resource_IsValidTrackIndex(resource, static_cast<int16_t>(this->track_pos));
+    /* Resource_IsValidTrackIndex broken-stub/no-host-source note: see the
+     * identical fix in UpdateVehiclePlacement above. */
+    uint8_t valid;
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] EditorState::UpdateEditMode: no host source for "
+                "RESDATA+0x636/+0x638 (track index validity) -- treating "
+                "as invalid\n");
+            std::fflush(stderr);
+        }
+        valid = 0;
+    } else
+#endif
+    {
+        valid = Resource_IsValidTrackIndex(resource, static_cast<int16_t>(this->track_pos));
+    }
     if (valid == 0) {
         this->direction = (this->direction == 0) ? 1 : 0;
     } else {
@@ -1115,12 +1412,33 @@ set_move_to_1:
             if (this->building->vehicle_kind == 3) {
                 this->FindTrackPosition(this->pos_x, this->pos_y);
             }
-        } else {
-            uint16_t cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(resource) + 0x636);
-            switch (dir_type) {
-            case 1: this->track_pos = cp_count - 1; break;
-            case 2: case 3: this->track_pos = 1; break;
-            case 4: this->track_pos = cp_count - 1; break;
+        } else if (dir_type == 2 || dir_type == 3) {
+            /* Independent of RESDATA+0x636 -- always safe. */
+            this->track_pos = 1;
+        } else if (dir_type == 1 || dir_type == 4) {
+            /* Host deviation: no source for RESDATA+0x636 (track
+             * control-point count). track_pos = cp_count - 1 has no safe
+             * neutral value to substitute (it's an assignment, not a
+             * comparison) -- leave track_pos at its current value
+             * instead of guessing, matching Vehicle.cpp's
+             * host_track_pos() precedent. */
+#ifndef _WIN32
+            if (loco::assets::is_host_sprite_resource(resource)) {
+                static bool warned = false;
+                if (!warned) {
+                    warned = true;
+                    std::fprintf(stderr,
+                        "[HOST] EditorState::UpdateEditMode: no host "
+                        "source for RESDATA+0x636 (track control-point "
+                        "count) -- leaving track_pos at its current "
+                        "value\n");
+                    std::fflush(stderr);
+                }
+            } else
+#endif
+            {
+                uint16_t cp_count = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(resource) + 0x636);
+                this->track_pos = cp_count - 1;
             }
         }
     }

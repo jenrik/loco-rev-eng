@@ -61,6 +61,21 @@ class DPlayManager;
 struct HostNetworkVehicleTag {};
 #endif
 
+/* RESDATA_IsRoadTile/IsBuildingTile (0x44BD10/0x44BD30) take int32_t, the
+ * original x86 ABI's pointer width -- a real 64-bit host pointer does not
+ * survive that round-trip (game/Vehicle.cpp's Vehicle::LoadSounds/IsMoving
+ * both hit this). `resource` is also a loco::assets::SpriteResource* on
+ * this build, not the real x86 TileMapResource* those functions' raw
+ * +0x63A read assumes (the "raw fixed-offset reads against undersized
+ * host resource objects" landmine already fixed in ScrollRect/
+ * InputMgr.cpp/ResdataGameVehicle.cpp). On host, checks the resolved
+ * tile_type byte against their own documented match sets ({1,2,3,4}
+ * road, {7,8,9,10} building) directly; under _WIN32, calls the real
+ * int32_t-signature functions unchanged. Shared by game/Vehicle.cpp,
+ * core/VehicleEditor.cpp, and world/EditorState.cpp -- all three read
+ * this same resource classification off a real placed vehicle/editor. */
+void ClassifyResourceTile(void* resource, bool* is_road, bool* is_building);
+
 /* ================================================================ */
 /* Vehicle — 0x94-byte standalone class with VTBL_VEHICLE           */
 /* ================================================================ */

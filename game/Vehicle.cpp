@@ -89,15 +89,9 @@ extern "C" {
 uint8_t __fastcall RESDATA_IsRoadTile(int32_t tile_obj);      /* 0x44BD10 */
 uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj);  /* 0x44BD30 */
 
-/* RESDATA_IsRoadTile/IsBuildingTile take int32_t (the original x86 ABI's
- * pointer width) -- same pointer-truncation defect already fixed at
- * every other call site (ScrollRect, InputMgr.cpp, ResdataGameVehicle.cpp).
- * `resource` is a loco::assets::SpriteResource* on host, not the real
- * TileMapResource* those functions' raw +0x63A read assumes, so check the
- * resolved tile_type byte against their own documented match sets
- * ({1,2,3,4} road, {7,8,9,10} building) directly instead of re-deriving
- * it through a truncated pointer. */
-static void ClassifyResourceTile(void* resource, bool* is_road, bool* is_building)
+/* Declared in Vehicle.h (shared with core/VehicleEditor.cpp and
+ * world/EditorState.cpp); see that header for the full evidence trail. */
+void ClassifyResourceTile(void* resource, bool* is_road, bool* is_building)
 {
 #ifndef _WIN32
     if (loco::assets::is_host_sprite_resource(resource)) {

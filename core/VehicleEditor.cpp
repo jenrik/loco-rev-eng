@@ -13,8 +13,19 @@
 #include "../game/Vehicle.h"
 #include "../network/DPlayManager.h"
 #include <cmath>
+#include <cstdio>
 #include <new>
 #include <cassert>
+
+/* Forward-declared rather than including resources/resource_manager_sdl3.h
+ * wholesale, matching game/Vehicle.cpp's identical forward declarations
+ * (that header's ResourceManager_Init(void*) -> int ambiguates against
+ * network/Netman.h's ResourceManager_Init(void*) -> void once both are
+ * visible in one TU). */
+namespace loco::assets {
+bool is_host_sprite_resource(const void* resource);
+bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
+}  // namespace loco::assets
 
 namespace {
 
@@ -322,8 +333,22 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
             /* Both ends on the same road building */
             vehicle->detach_flag = 1;
 
+            /* Host deviation: `resource` is a loco::assets::SpriteResource*
+             * on this build, not the real x86 TileMapResource* a raw
+             * +0x63A read assumes (the "raw fixed-offset reads against
+             * undersized host resource objects" landmine already fixed
+             * in ScrollRect/InputMgr.cpp/ResdataGameVehicle.cpp/
+             * Vehicle::LoadSounds). */
             void* resource = bldg_a->resource;
-            char res_type = *field_at<char>(resource, 0x63a);
+            uint8_t res_type = 0;
+#ifndef _WIN32
+            if (!loco::assets::is_host_sprite_resource(resource) ||
+                !loco::assets::sprite_tile_type_byte(resource, &res_type)) {
+                res_type = 0;
+            }
+#else
+            res_type = *field_at<char>(resource, 0x63a);
+#endif
 
             if (res_type == 5) {
                 /* Road type — move along track */
@@ -400,8 +425,18 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
     if (road_building != nullptr) {
         void* road_res = road_building->resource;
         if (road_res != nullptr) {
-            uint8_t is_road = Resource_IsRoadTile(road_res);
-            if (is_road == 1) {
+            /* Resource_IsRoadTile (0x44BD10) mangles identically to its
+             * void-returning no-op stub in shared/link_stubs.cpp
+             * (_Z18Resource_IsRoadTilePv -- return type isn't part of
+             * Itanium mangling), so every call through this declaration
+             * already binds to the stub and reads garbage -- independent
+             * of the host-SpriteResource landmine below. See
+             * game/Vehicle.h's ClassifyResourceTile() for the fix, shared
+             * across this file, game/Vehicle.cpp, and
+             * world/EditorState.cpp. */
+            bool is_road, unused_is_building;
+            ClassifyResourceTile(road_res, &is_road, &unused_is_building);
+            if (is_road) {
                 GameVehicle* target_bldg = nullptr;
                 if (vehicle->active_editor == 0) {
                     uint32_t child_idx = vehicle->editor_count;
@@ -417,8 +452,9 @@ void VehicleEditor::ProcessMove(Vehicle* vehicle)
                 if (target_bldg != nullptr) {
                     void* target_res = target_bldg->resource;
                     if (target_res != nullptr) {
-                        uint8_t target_is_road = Resource_IsRoadTile(target_res);
-                        if (target_is_road == 0 && road_building->occupant_state == 1) {
+                        bool target_is_road, target_unused_is_building;
+                        ClassifyResourceTile(target_res, &target_is_road, &target_unused_is_building);
+                        if (!target_is_road && road_building->occupant_state == 1) {
                             road_building->occupant_state = 0;   /* +0x11C */
                         }
                     }
@@ -445,6 +481,33 @@ uint32_t VehicleEditor::MoveAlongTrack(Vehicle* vehicle)
     int dir = active_end->direction;
     void* track_bldg = active_end->building->resource;
     int track_idx = active_end->track_pos;
+
+    /* Host deviation: this entire function's bound-check and position
+     * logic is built on RESDATA+0x636/+0x630 (the track control-point
+     * count/table), which have no host source -- world/EditorState.cpp's
+     * own header comment already records these offsets as "never routed
+     * through a named struct member." Unlike Vehicle::LoadSounds' isolated
+     * reads, every line below this point depends on real track_count/
+     * track_coords data, so there is no single raw read to swap for a
+     * host accessor -- guard the whole function instead of guessing at a
+     * partial translation. Returning 0 (the "not handled" value the
+     * ProcessMove caller already checks via `if (moved == 0)`) makes the
+     * vehicle fall through to the ordinary per-frame UpdatePosition path
+     * rather than reading a table that doesn't exist at this address. */
+#ifndef _WIN32
+    if (loco::assets::is_host_sprite_resource(track_bldg)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] VehicleEditor::MoveAlongTrack: no host source for "
+                "RESDATA+0x636/+0x630 (track control-point table) -- "
+                "falling back to ordinary position update\n");
+            std::fflush(stderr);
+        }
+        return 0;
+    }
+#endif
     int track_count = *field_at<uint16_t>(track_bldg, 0x636);
 
     /* If at edge, recalibrate both ends */
