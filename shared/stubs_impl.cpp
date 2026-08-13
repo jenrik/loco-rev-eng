@@ -359,10 +359,21 @@ void* g_tile_occupied_bitmap = nullptr;
  * bitmask-table type, confirmed via disassembly at 0x455342: `MOV AL, byte
  * ptr [EAX + 0x47f108]` with EAX pre-masked to 0-7). Fixing the type wakes
  * up TileMap::InvalidateDirtyRects/ProcessRect's DirectDraw presentation
- * path (dirty-tile bits go from always-0 to real), which has its own
- * separate landmines (null g_cursor_surface, raw offset reads on
- * tobj->resource) -- out of scope for the ScrollRect/FindObject placement
- * work this fixes alongside. See PROGRESS.md. */
+ * path (dirty-tile bits go from always-0 to real).
+ *
+ * Re-attempted 2026-08-13 with TileMap::ProcessRect's tobj->resource
+ * landmine reads, InvalidateDirtyRects' null-g_cursor_surface deref, and
+ * TileMap_Lock/UnlockPrimarySurface's null-g_primary_surface deref all
+ * guarded first (see PROGRESS.md) -- got further than before (dirty-tile
+ * detection went live, 4000 tiles on the first force_all pass, no crash
+ * in ProcessRect itself), but still crashes: TileMap::ProcessRect's
+ * layer==1 branch calls UI_SetTooltipPos -> UI_Manager::setTooltipPos on
+ * a null `this` (world/tilemap.cpp:2186 -> ui/UI_Utils.cpp:457,
+ * gdb-confirmed backtrace). This is the already-documented "g_tooltip_mgr
+ * is never wired to a real UI_Manager" gap (PROGRESS.md's
+ * "ui_manager.c removed" item) -- a genuinely separate, larger, already-
+ * scoped-as-not-attempted subsystem, not a new landmine. Reverted again;
+ * next attempt should wire g_tooltip_mgr first. */
 int ATTR_0047f108 = 0;
 int DAT_00481170 = 0;
 int DAT_0048118c = 0;

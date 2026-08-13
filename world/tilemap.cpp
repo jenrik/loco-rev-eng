@@ -235,6 +235,17 @@ typedef int (__thiscall* DDrawSurfaceUnlockFn)(void* self, void* rect);
 
 static int TileMap_LockPrimarySurface(void* desc)
 {
+#ifndef _WIN32
+    /* Host deviation: g_primary_surface is never assigned a real
+     * DirectDraw surface on this build (DirectDraw is never
+     * initialized) -- dereferencing its vtable here would be a
+     * guaranteed null-pointer read. Report failure exactly like a real
+     * DDraw Lock() failure would (surface_locked stays 0), rather than
+     * crash; the caller already tolerates a failed lock. */
+    if (g_primary_surface == nullptr) {
+        return -1;
+    }
+#endif
     void** vtable = *reinterpret_cast<void***>(g_primary_surface);
     return (*(reinterpret_cast<DDrawSurfaceLockFn>(vtable[25])))(
         g_primary_surface, NULL, desc, 0, nullptr);
@@ -242,6 +253,11 @@ static int TileMap_LockPrimarySurface(void* desc)
 
 static int TileMap_UnlockPrimarySurface()
 {
+#ifndef _WIN32
+    if (g_primary_surface == nullptr) {
+        return -1;
+    }
+#endif
     void** vtable = *reinterpret_cast<void***>(g_primary_surface);
     return (*(reinterpret_cast<DDrawSurfaceUnlockFn>(vtable[32])))(
         g_primary_surface, NULL);
@@ -1808,6 +1824,10 @@ void TileMap::InvalidateDirtyRects(char force_all)
     RECT* head = NULL;
     RECT* last = NULL;
 
+#ifndef _WIN32
+    last_dirty_tile_count = 0;
+#endif
+
     /* Only process in game modes 3 or 4, and not while locked */
     if ((g_game_mode != 3 && g_game_mode != 4) || g_lock_update_flag == 1) {
         return;
@@ -1878,6 +1898,9 @@ void TileMap::InvalidateDirtyRects(char force_all)
             uint8_t* bitmap = reinterpret_cast<uint8_t*>(this->occupancy_bitmap);
             if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
                 /* Dirty tile found — extend pending rect or start one */
+#ifndef _WIN32
+                ++last_dirty_tile_count;
+#endif
                 RECT tile_rect;
                 tile_rect.left = x * 16;
                 tile_rect.top = y * 16;
@@ -1920,6 +1943,21 @@ void TileMap::InvalidateDirtyRects(char force_all)
             no_pending = true;
         }
     }
+
+#ifndef _WIN32
+    if (last_dirty_tile_count > 0) {
+        static bool logged_first_real_dirty_tile = false;
+        if (!logged_first_real_dirty_tile) {
+            logged_first_real_dirty_tile = true;
+            std::fprintf(stderr,
+                "[HOST] TileMap::InvalidateDirtyRects: %d dirty tile(s) "
+                "detected (first time this has been non-zero on this "
+                "build -- see PROGRESS.md's ATTR_0047f108 item)\n",
+                last_dirty_tile_count);
+            std::fflush(stderr);
+        }
+    }
+#endif
 
     /* Blit cursor surface to primary surface for each dirty region.
      * Note the binary passes the rect's right/bottom directly as the

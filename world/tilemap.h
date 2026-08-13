@@ -226,6 +226,14 @@ public:
      * check this after each FindObject() call, not just the return
      * value. */
     int32_t last_find_object_cells_written = 0;
+
+    /* Host-only diagnostic: number of occupancy-bitmap tiles found dirty
+     * (ATTR_0047f108-gated) during the most recent InvalidateDirtyRects()
+     * call. Reset at function entry, incremented once per dirty tile
+     * found by the scan loop. Lets callers measure "dirty-tile detection
+     * went from always-0 to real" rather than inferring it from whether
+     * ProcessRect/DDRAW_PresentRect happened to run without crashing. */
+    int32_t last_dirty_tile_count = 0;
 #endif
 
     /* ---- Lifecycle ---- */
