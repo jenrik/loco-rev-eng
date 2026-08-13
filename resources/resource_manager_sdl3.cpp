@@ -342,8 +342,9 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
         if (in_animation && tokens.size() == 11) {
             AnimationFrameSet frame_set;
             frame_set.name = tokens[0];
+            int is_connected_int = 0;
             int* fields[] = {&frame_set.start_frame, &frame_set.end_frame,
-                             &frame_set.frame_delay, &frame_set.split_frames,
+                             &frame_set.frame_delay, &is_connected_int,
                              &frame_set.restart_delay, &frame_set.next_frame_set,
                              &frame_set.sound_resource_id, &frame_set.replay_delay,
                              &frame_set.flip_x};
@@ -351,6 +352,7 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
             for (size_t index = 0; index < 9; ++index) {
                 valid = valid && parse_int(tokens[index + 1], fields[index]);
             }
+            frame_set.is_connected = (is_connected_int != 0);
             // The tenth numeric field is retained only by the original opaque
             // animation implementation; parsing it validates row shape.
             int opaque_field = 0;

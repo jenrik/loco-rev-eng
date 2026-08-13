@@ -179,10 +179,17 @@ struct FrameData {
     uint32_t audio_delay;       /* +0x10  delay mode (0=immediate, 1=random)*/
     uint16_t volume;            /* +0x14  audio playback volume             */
     uint8_t  flip_horizontal;   /* +0x16  1 = mirrored sprite               */
-    /* Note: offset +0x17 is overloaded:
-     *   is_connected: 1 = connected/multi-tile sprite
-     *   step_mode:    1 = +2 per tick with even frames only
-     */
+    uint8_t  is_connected;      /* +0x17  1 = connected/multi-tile sprite;
+                                 *   gates TileMap::ProcessRect's DrawConnected
+                                 *   dispatch (0x4569AF) and, read identically,
+                                 *   Entity::Update's frame-stepping mode
+                                 *   (0x405CCE: nonzero -> +2/tick, even
+                                 *   frames only) -- same byte, single field,
+                                 *   confirmed by one .dat-parser write site
+                                 *   (UI_ChildWindow_Render, 0x42522D) and both
+                                 *   read sites using identical address
+                                 *   arithmetic (anim_table + anim_index*0x18
+                                 *   + 0x17).                                */
 };
 
 /* ================================================================== */

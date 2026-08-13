@@ -43,7 +43,12 @@ struct AnimationFrameSet {
     int start_frame = 0;
     int end_frame = 0;
     int frame_delay = 0;
-    int split_frames = 0;
+    // The 4th numeric .dat token. Original writes this same token
+    // (truncated to a byte) to FrameData::is_connected (+0x17,
+    // shared/types.h) -- confirmed via disassembly of both the writer
+    // (UI_ChildWindow_Render, 0x42522D) and the two readers
+    // (TileMap::ProcessRect 0x4569AF, Entity::Update 0x405CCE).
+    bool is_connected = false;
     int restart_delay = 0;
     int next_frame_set = 0;
     int sound_resource_id = 0;

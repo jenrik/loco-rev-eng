@@ -15,6 +15,7 @@
  */
 
 #include "tilemap.h"
+#include "../core/CGWND.h"
 #include "../ui/UIPANEL_Surface.h"
 
 #include "../core/Entity.h"
@@ -558,11 +559,10 @@ void TileMap::FullReset()
         }
     }
 
-    /* Invalidate and update the main window's child handle (CGWND + 0x8)
-     * if not in game mode 1. */
+    /* Invalidate and update the main window's child handle
+     * (CGWND::hWnd) if not in game mode 1. */
     if (g_main_window != NULL) {
-        HWND child_wnd = *reinterpret_cast<HWND*>(
-            reinterpret_cast<uint8_t*>(g_main_window) + 8);
+        HWND child_wnd = static_cast<CGWND*>(g_main_window)->hWnd;
         if (child_wnd != NULL && g_game_mode != 1) {
             ::InvalidateRect(child_wnd, NULL, FALSE);
             UpdateWindow(child_wnd);
@@ -1926,6 +1926,25 @@ void TileMap::InvalidateDirtyRects(char force_all)
      * width/height arguments. */
     for (RECT* r = head; r != NULL; r = reinterpret_cast<RECT*>(
              static_cast<uintptr_t>(r[1].left))) {
+#ifndef _WIN32
+        /* Host deviation: g_cursor_surface is never assigned a real
+         * DirectDraw surface on this build (DirectDraw is never
+         * initialized), so dereferencing it here would be a guaranteed
+         * null-pointer read the first time a dirty rect exists. Reject
+         * loudly, once, and skip the cursor blit rather than crash. */
+        if (g_cursor_surface == nullptr) {
+            static bool warned = false;
+            if (!warned) {
+                warned = true;
+                std::fprintf(stderr,
+                    "[HOST] TileMap::InvalidateDirtyRects: skipping cursor "
+                    "blit -- g_cursor_surface is never assigned on this "
+                    "build (DirectDraw not implemented)\n");
+                std::fflush(stderr);
+            }
+            continue;
+        }
+#endif
         void* cursor_pixels = *reinterpret_cast<void**>(
             reinterpret_cast<uint8_t*>(g_cursor_surface) + 0x10);
         UIPANEL_Blit(cursor_pixels, r->left, r->top, r->right, r->bottom,
@@ -1994,8 +2013,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
             surface_locked = 0;
         }
 
-        HWND child_wnd = *reinterpret_cast<HWND*>(
-            reinterpret_cast<uint8_t*>(g_main_window) + 8);
+        HWND child_wnd = static_cast<CGWND*>(g_main_window)->hWnd;
         DDRAW_PresentRect(head, child_wnd, &viewport_x, 1);
 
         RECT* next = reinterpret_cast<RECT*>(static_cast<uintptr_t>(head[1].left));
@@ -2082,9 +2100,30 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                     unsigned int res_type = 0;
                                     TileMapObject* tobj = static_cast<TileMapObject*>(obj);
                                     if (obj != NULL) {
-                                        res_type = GetResourceType(static_cast<unsigned int>(
-                                            *reinterpret_cast<int*>(
-                                                reinterpret_cast<uint8_t*>(tobj->resource) + 4)));
+                                        /* tobj->resource is a raw x86
+                                         * TileMapResource* only on _WIN32;
+                                         * on host it's a loco::assets::
+                                         * SpriteResource* (see PROGRESS.md's
+                                         * "raw fixed-offset reads against
+                                         * undersized host resource objects"
+                                         * landmine item) -- source the
+                                         * resource_id via the resolved
+                                         * accessor instead of the raw +4
+                                         * offset, matching ScrollRect's
+                                         * established pattern. */
+#ifndef _WIN32
+                                        if (loco::assets::is_host_sprite_resource(tobj->resource)) {
+                                            res_type = GetResourceType(
+                                                loco::assets::sprite_resource_id(
+                                                    reinterpret_cast<loco::assets::SpriteResource*>(
+                                                        tobj->resource)));
+                                        } else
+#endif
+                                        {
+                                            res_type = GetResourceType(static_cast<unsigned int>(
+                                                *reinterpret_cast<int*>(
+                                                    reinterpret_cast<uint8_t*>(tobj->resource) + 4)));
+                                        }
                                     }
                                     if (static_cast<char>(res_type) != 3) {
                                         /* obj == NULL or non-type-3: BuildingMgr
@@ -2112,14 +2151,36 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                             }
 
                             /* vtable[12] = DrawConnected when the object's
-                             * frame data marks it as connected. */
+                             * frame data marks it as connected
+                             * (FrameData::is_connected, +0x17 of the
+                             * anim_table entry -- shared/types.h). Same
+                             * host-SpriteResource landmine as the
+                             * res_type read above: source the flag via
+                             * SpriteMetadata::frame_sets[i].is_connected
+                             * on host instead of the raw resource+0x20
+                             * pointer chase. */
                             if (obj != NULL) {
                                 TileMapObject* tobj = static_cast<TileMapObject*>(obj);
-                                uint8_t* frame_table = *reinterpret_cast<uint8_t**>(
-                                    reinterpret_cast<uint8_t*>(tobj->resource) + 0x20);
                                 int anim_index =
                                     static_cast<Entity*>(obj)->anim_index;
-                                if (frame_table[anim_index * 3 * 8 + 0x17] == 1) {
+                                bool is_connected = false;
+#ifndef _WIN32
+                                if (loco::assets::is_host_sprite_resource(tobj->resource)) {
+                                    const loco::assets::SpriteMetadata* metadata =
+                                        ResourceManager_GetSpriteMetadata(tobj->resource);
+                                    if (metadata != nullptr && anim_index >= 0 &&
+                                        static_cast<size_t>(anim_index) < metadata->frame_sets.size()) {
+                                        is_connected = metadata->frame_sets[
+                                            static_cast<size_t>(anim_index)].is_connected;
+                                    }
+                                } else
+#endif
+                                {
+                                    uint8_t* frame_table = *reinterpret_cast<uint8_t**>(
+                                        reinterpret_cast<uint8_t*>(tobj->resource) + 0x20);
+                                    is_connected = (frame_table[anim_index * 3 * 8 + 0x17] == 1);
+                                }
+                                if (is_connected) {
                                     static_cast<Entity*>(obj)->DrawConnected(
                                         RECT{pixel_x, pixel_y,
                                              pixel_x + 16, pixel_y + 16}, 0, 0);
