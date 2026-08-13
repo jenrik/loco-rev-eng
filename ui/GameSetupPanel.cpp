@@ -71,12 +71,20 @@ extern void   __cdecl CRT_free(void* ptr);                              /* 0x466
 /* Resource manager — use g_resmgr.GetById() / g_resmgr.FormatResourceString() */
 /* ReleaseSoundResource declared in ResourceManager.h (included above) */
 
-/* Stream / WNDPROC helpers — TODO: decompile WndProcStream class (0x464490, 0x463810, etc.) */
+/* Stream / WNDPROC helpers — TODO: decompile WndProcStream class (0x463810 etc). */
 extern void*  WIN32_StreamOpen(void* stream, const char* path, int mode, void* extra, int flag);
 extern void   WIN32_StreamRead(void* stream, void* buf, int sz);        /* 0x463810 */
-extern int*   WNDPROC_StreamFromMemory(void* stream, const char* data,
-                                        int size, int mode);             /* 0x464490 */
 extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
+/* Canonical signature/size helper: resources/Win32StreamMem.h. Declared
+ * locally here (forward-declared class, not #include) rather than
+ * including that header directly: this file's own local extern "C" Win32
+ * API block above (SetTextColor/DeleteObject/etc., a legacy manual decl
+ * set) conflicts with Win32StreamMem.h's transitively-included
+ * <windows.h> (stubs/windows.h) — same pre-existing header-organization
+ * conflict class as input/Cursor.cpp's, out of this pass's scope. */
+class WNDPROC_Stream;
+extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, char* data, int32_t size, int32_t mode);
+extern size_t WIN32_MemoryStream_Size();
 
 /* UI_CreateFullWindow — use UI_WindowBase::create_full_window (static method) */
 /* (declared in UI_WindowBase.h, included above) */
@@ -913,11 +921,15 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
     if (g_asset_mgr != NULL) {
         pData = AssetMgr_LoadFile(g_asset_mgr, (uint8_t*)filePath, &dataSize);
         if (pData != NULL) {
-            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
-             * host size (see resources/Win32Stream.h). */
-            streamObj = (char*)operator_new(WIN32_Stream_Size());
+            /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use the
+             * real host size (see resources/Win32StreamMem.h). */
+            streamObj = (char*)operator_new(WIN32_MemoryStream_Size());
             if (streamObj != NULL) {
-                streamResult = (int*)WNDPROC_StreamFromMemory(streamObj, (const char*)pData, dataSize, 1); /* pData is uint8_t*, cast to const char* for StreamFromMemory */
+                // ABI_BOUNDARY: WNDPROC_Stream* -> this file's own legacy
+                // opaque int* view — same header-organization conflict as
+                // input/Cursor.cpp (see this file's extern declaration
+                // block above), out of this pass's scope to resolve.
+                streamResult = (int*)WNDPROC_StreamFromMemory(streamObj, (char*)pData, dataSize, 1);
             }
         }
     }

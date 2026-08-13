@@ -13,6 +13,7 @@
  */
 
 #include "../shared/types.h"
+#include "../resources/Win32StreamMem.h"
 
 /* ================================================================== */
 /* External references                                                */
@@ -24,8 +25,8 @@ extern void   __cdecl CRT_sprintf_buf(char* buf, const char* fmt);  /* 0x466D60 
 extern void*  g_asset_mgr;                                          /* 0x485600 — global asset manager */
 extern char   g_install_path[];                                     /* 0x4A99C8 — install directory path */
 extern int*   __stdcall AssetMgr_LoadFile(int* mgr, byte* path, int* outSize);   /* 0x45CD00 */
-extern void*  __thiscall WNDPROC_StreamFromMemory(void* stream, char* data,
-                                                   int size, int mode);           /* 0x464490 */
+/* WNDPROC_StreamFromMemory / WIN32_MemoryStream_Size() come from
+ * resources/Win32StreamMem.h (included above), not redeclared here. */
 extern void*  __thiscall WIN32_StreamOpenFile(void* stream, char* path,
                                                int mode, const char* flags,
                                                int flag2);                        /* 0x463970 */
@@ -44,21 +45,16 @@ extern size_t WIN32_Stream_Size();
 extern void*  DAT_00479190;
 
 /* ================================================================== */
-/* Internal: destroy a stream object via its vtable[4] scalar dtor     */
+/* Internal: destroy a stream object. Real C++ `delete` through          */
+/* WNDPROC_Stream* dispatches to the real concrete class's scalar        */
+/* deleting destructor via StreamObject's virtual ~StreamObject() —       */
+/* replaces the former raw vtable-indirection dispatch (`stream` here is  */
+/* always either a WIN32_MemoryStream or a WIN32_Stream, both             */
+/* WNDPROC_Stream-derived — see resources/Win32StreamMem.h/Win32Stream.h).*/
 /* ================================================================== */
-static void destroy_stream(void* stream)
+static void destroy_stream(WNDPROC_Stream* stream)
 {
-    if (stream == NULL) return;
-    /* The stream object has a complex indirection. Its vtable is at
-       *(*((int*)stream + 1) + (int)stream). vtable[4] is the scalar dtor. */
-    int* inner = *reinterpret_cast<int**>(static_cast<uintptr_t>(
-        *reinterpret_cast<int*>(static_cast<uintptr_t>(*reinterpret_cast<int*>(stream) + 4)) +
-        static_cast<int>(reinterpret_cast<uintptr_t>(stream))));
-    if (inner != NULL) {
-        typedef void (__thiscall* DtorFn)(void*, byte);
-        DtorFn dtor = reinterpret_cast<DtorFn>((*reinterpret_cast<void***>(inner))[4]);  /* vtable[4] */
-        dtor(static_cast<void*>(inner), 1);
-    }
+    delete stream;
 }
 
 /* ================================================================== */
@@ -91,7 +87,7 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
 {
     char   filePath[256];    /* assembled file path */
     int*   loadedData;       /* buffer from AssetMgr (must free) */
-    void*  streamObj;        /* stream object for reading */
+    WNDPROC_Stream* streamObj; /* stream object for reading */
     void*  streamMem;        /* heap-allocated stream memory */
     byte   successFlag;      /* 1 = OK, 0 = error */
     short* dataPtr;
@@ -144,22 +140,16 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
                                         reinterpret_cast<byte*>(filePath + relOffset - 1),
                                         &initialSize);  /* initial size = 2048 */
         if (loadedData != NULL) {
-            /* WNDPROC_StreamFromMemory constructs a distinct,
-             * not-yet-fully-modeled concrete class (its own vtable,
-             * 0x479210 — see resources/Win32Stream.h's WIN32_StreamRead
-             * doc comment) that also embeds a StreamObject at +0xC, so it
-             * is equally undersized by the literal `0x5C` below; no
-             * `*_Size()` helper exists for that class yet to fix this
-             * correctly (out of this pass's scope — same gap as
-             * ui/UIPANEL_Surface.cpp's `mem_stream`). Verified dead on
+            /* WNDPROC_StreamFromMemory constructs a WIN32_MemoryStream
+             * (resources/Win32StreamMem.h) — use its real *_Size() helper
+             * instead of the original x86's literal 0x5C. Verified dead on
              * host, not a live undersized allocation: `g_asset_mgr` has
              * exactly one definition in the tree (`shared/stubs_impl.cpp`,
              * `nullptr`) and is never assigned anywhere else, so this
              * whole `if (g_asset_mgr != NULL)` branch never executes —
              * confirmed by grepping every `.cpp`/`.c` file for an
-             * assignment to it. Revisit sizing once `g_asset_mgr` is
-             * actually wired to a real asset manager. */
-            streamMem = operator_new(0x5C);  /* stream object: original x86 size, not host size */
+             * assignment to it. */
+            streamMem = operator_new(WIN32_MemoryStream_Size());
             if (streamMem != NULL) {
                 streamObj = WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<char*>(loadedData),
                                                       *(loadedData - 1), 1);
@@ -174,8 +164,8 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
          * the original x86's 0x5C. */
         streamMem = operator_new(WIN32_Stream_Size());
         if (streamMem != NULL) {
-            streamObj = WIN32_StreamOpenFile(streamMem, filePath, 0xA0,
-                                              static_cast<const char*>(DAT_00479190), 1);
+            streamObj = static_cast<WNDPROC_Stream*>(WIN32_StreamOpenFile(
+                streamMem, filePath, 0xA0, static_cast<const char*>(DAT_00479190), 1));
         }
         if (streamObj == NULL) {
             successFlag = 0;
@@ -184,15 +174,11 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
 
     /* Step 5: Read 160 (0xA0) palette entries from file */
     if (streamObj != NULL) {
-        /* Check end-of-stream flag via vtable indirection:
-           status_byte = *(base + vtable[4] + obj_offset + 8) & 6
-           Non-zero = EOF or error */
-        int* sv = *reinterpret_cast<int**>(streamObj);
-        byte* status_ptr = reinterpret_cast<byte*>(static_cast<uintptr_t>(
-            *reinterpret_cast<int*>(static_cast<uintptr_t>(
-                sv[1] + static_cast<int>(reinterpret_cast<uintptr_t>(streamObj)))) + 8));
-
-        if (*status_ptr == 0) {
+        /* Check end-of-stream flag: real state_bits field (StreamObject's
+         * own public member, reached via the virtual base) — replaces the
+         * former raw vtable-relative pointer chase. Mask 6 = kFailBit(2)|
+         * kBadBit(4): non-zero = EOF or error. */
+        if ((streamObj->state_bits & 6) == 0) {
             dataPtr = reinterpret_cast<short*>(static_cast<uint8_t*>(obj) + 0x16A);
             for (lineIdx = 0; lineIdx < 0xA0; lineIdx++) {
                 /* Read 4 short values per palette entry.
@@ -201,16 +187,16 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
                    These correspond to palette buffer offsets +0x168,
                    +0x16A, +0x488, +0x48A. */
                 WNDPROC_StreamReadLine(streamObj, dataPtr - 1);
-                if ((*status_ptr & 6) != 0) goto load_error;
+                if ((streamObj->state_bits & 6) != 0) goto load_error;
 
                 WNDPROC_StreamReadLine(streamObj, dataPtr);
-                if ((*status_ptr & 6) != 0) goto load_error;
+                if ((streamObj->state_bits & 6) != 0) goto load_error;
 
                 WNDPROC_StreamReadLine(streamObj, dataPtr + 399);
-                if ((*status_ptr & 6) != 0) goto load_error;
+                if ((streamObj->state_bits & 6) != 0) goto load_error;
 
                 WNDPROC_StreamReadLine(streamObj, dataPtr + 400);
-                if ((*status_ptr & 6) != 0) goto load_error;
+                if ((streamObj->state_bits & 6) != 0) goto load_error;
 
                 dataPtr += 2;
             }

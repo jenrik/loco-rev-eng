@@ -32,6 +32,7 @@
 #include "HelpWnd.h"
 #include "../audio/AudioChannel.h"
 #include "../resources/Win32Stream.h"
+#include "../resources/Win32StreamMem.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
@@ -74,7 +75,6 @@ extern "C" {
      * windows.h made the mismatch a hard conflicting-declaration error. */
 
     /* Game functions (C-linkage) */
-    extern void*  WNDPROC_StreamFromMemory(void* self, char* data, int size, int mode);
     extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
 
     /* Config_GetIniString/Config_ReadInt are the recovered C-ABI INI
@@ -189,25 +189,6 @@ extern void*    g_player_config;       /* player config pointer */
 /* g_config_ini — declared in shared/types.h, not redeclared here */
 extern AssetMgr* g_asset_mgr;          /* asset manager */
 extern char     g_install_path[];      /* game install path string */
-
-/* ================================================================== */
-/* Stream vtable helper — TODO: decompile stream class, replace with   */
-/* proper C++ destructor dispatch.                                      */
-/* ================================================================== */
-
-/**
- * stream_vtable_scalar_dtor — Call the scalar deleting destructor
- * (vtable[1]) on a WNDPROC stream object.
- *
- * The stream class has a vtable at *streamObj; vtable[1] is the scalar
- * deleting destructor. Called with flag=1 to free memory.
- *
- * TODO: decompile stream class (WNDPROC stream) at 0x479190.
- * Once the class has a proper C++ destructor, replace this with
- * 'delete streamObj'.
- */
-/* stream_vtable_scalar_dtor — moved to HelpWnd_stubs.cpp */
-extern void stream_vtable_scalar_dtor(int* streamObj);
 
 /**
  * Single-character test string for measure_text_height. 0x47f06c.
@@ -1092,17 +1073,18 @@ char HelpWnd::reset_pages()
 
         if (loadedData != NULL) {
             /* Create memory stream from loaded data. 0x5C was the original
-             * x86 sizeof(WIN32_Stream); use the real host size (see
-             * resources/Win32Stream.h). */
-            void* memStream = operator_new(WIN32_Stream_Size());
+             * x86 sizeof(WIN32_MemoryStream); use the real host size (see
+             * resources/Win32StreamMem.h). */
+            void* memStream = operator_new(WIN32_MemoryStream_Size());
             if (memStream != NULL) {
-                int* streamObj = WNDPROC_StreamFromMemory(memStream, (char*)loadedData, fileSize, 1);
+                WNDPROC_Stream* streamObj = WNDPROC_StreamFromMemory(memStream, (char*)loadedData, fileSize, 1);
                 if (streamObj != NULL) {
                     result = (char)this->load_help_data(streamObj);
-                    /* Release stream via vtable[1] scalar deleting destructor.
-                     * TODO: decompile stream class — replace with 'delete streamObj'
-                     * once the stream class has a proper C++ destructor. */
-                    stream_vtable_scalar_dtor(streamObj);
+                    /* Release stream: real C++ `delete` through
+                     * WNDPROC_Stream* dispatches to WIN32_MemoryStream's
+                     * scalar deleting destructor via StreamObject's virtual
+                     * ~StreamObject() (see resources/Win32StreamMem.h). */
+                    delete streamObj;
                 }
             }
             CRT_free(loadedData);

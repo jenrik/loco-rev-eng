@@ -392,45 +392,10 @@ void Stream_BeginRead(void* stream, unsigned int offset, int mode)
     }
 }
 
-/* ================================================================== */
-/* 14. stream_vtable_scalar_dtor(int*)                                   */
-/*     Caller (verified, C++-mangled — declared at file scope outside     */
-/*     any extern "C" block): ui/HelpWnd.cpp's HelpWnd::reset_pages()      */
-/*     (call site at ui/HelpWnd.cpp:1092).                                 */
-/*                                                                          */
-/*     This symbol was in fact NEVER resolvable at this commit:            */
-/*     ui/HelpWnd_stubs.cpp defines a same-named, same-signature            */
-/*     function, but marks it `static` (internal linkage) — so it can      */
-/*     never satisfy ui/HelpWnd.cpp's `extern` reference from a different   */
-/*     translation unit. That is the real, pre-existing LINK-001 gap        */
-/*     this stub closes.                                                    */
-/*                                                                          */
-/*     PROVABLY UNREACHABLE at this commit, independent of any other        */
-/*     choice in this file: HelpWnd::reset_pages() only reaches this call   */
-/*     when `streamObj` (from WNDPROC_StreamFromMemory, called just above   */
-/*     it at ui/HelpWnd.cpp:1086) is non-null — but                         */
-/*     shared/defsym_stubs.cpp's WNDPROC_StreamFromMemory unconditionally   */
-/*     `assert(0)`s before it can ever return a value, so the program        */
-/*     aborts there first on any path that would reach this function.       */
-/*     Matches this project's existing exemption precedent for               */
-/*     RESDATA_CreateChildSprite in shared/defsym_stubs.cpp (grep-confirmed  */
-/*     unreachable call graph -> loud assert, not silent success), which     */
-/*     CLAUDE.md's stub policy explicitly allows. Left as a loud stub        */
-/*     rather than reimplementing HelpWnd_stubs.cpp's raw vtable-slot        */
-/*     dispatch (itself an anti-pattern CLAUDE.md forbids — "Do not          */
-/*     manually read or write VTBL_* in executable code") for a path that    */
-/*     cannot currently execute.                                             */
-/* ================================================================== */
-void stream_vtable_scalar_dtor(int* streamObj);
-void stream_vtable_scalar_dtor(int* streamObj)
-{
-    fprintf(stderr,
-            "STUB: stream_vtable_scalar_dtor(int*) reached with streamObj=%p "
-            "— provably unreachable at this commit (see comment above); "
-            "if this fires, WNDPROC_StreamFromMemory's assert(0) stopped "
-            "firing and this must become a real destructor call instead\n",
-            static_cast<void*>(streamObj));
-    assert(false &&
-           "stream_vtable_scalar_dtor: was provably unreachable — see "
-           "shared/stubs_link001_batch2_streams.cpp");
-}
+/* 14. stream_vtable_scalar_dtor(int*) — REMOVED. WNDPROC_StreamFromMemory
+ *     is now real (resources/Win32StreamMem.h/.cpp) and ui/HelpWnd.cpp's
+ *     reset_pages() now calls real `delete streamObj;` (a WNDPROC_Stream*)
+ *     instead of this raw vtable-slot stub — zero remaining references
+ *     (confirmed via grep). ui/HelpWnd_stubs.cpp's own `static` same-named
+ *     function was always dead code (internal linkage, never satisfied
+ *     HelpWnd.cpp's extern reference) and remains unreferenced. */

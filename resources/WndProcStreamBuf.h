@@ -140,11 +140,11 @@ public:
     virtual int32_t WriteChar(int32_t ch) = 0;
 
     /* vtable +0x20 ("underflow"-equivalent get-side refill/peek hook,
-     * called by ReadChar()/GetChar() below). No base implementation
-     * address has been located — WIN32_StreamFile.h documents its
-     * WriteChar/Flush/SetBuffer overrides but not this slot, so its real
-     * override address is still unconfirmed. TODO: locate and decompile
-     * WIN32_StreamFile's vtable+0x20 override. */
+     * called by ReadChar()/GetChar() below). Both concrete overrides are
+     * now located and reconstructed: WIN32_StreamFile::Underflow()
+     * (0x463D40, see Win32StreamFile.h) and WIN32_StreamMem::Underflow()
+     * (0x4642F0, see Win32StreamMem.h). No base implementation exists in
+     * the binary, so this stays pure. */
     virtual int32_t Underflow() = 0;
 
     /* vtable +0x28 ("doallocate"). Base class supplies a real, concrete

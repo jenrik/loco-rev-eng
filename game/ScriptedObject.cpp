@@ -13,6 +13,7 @@
 #include "../core/Entity.h"
 #include "../town/Town.h"
 #include "../resources/Win32Stream.h"
+#include "../resources/Win32StreamMem.h"
 
 /* ================================================================== */
 /* Win32 API imports — C linkage only                                  */
@@ -33,13 +34,10 @@ int   __cdecl CRT_sprintf_buf(void* buf, const char* fmt, ...); /* 0x466D60 */
 /* ================================================================== */
 /* Win32 stream I/O — C++ linkage                                       */
 /*                                                                       */
-/* stream_obj/parsed_stream below use the WNDPROC_StreamFromMemory heap- */
-/* stream variant — a separate, not-yet-reconstructed class; unrelated   */
-/* to WIN32_Stream and out of this pass's scope.                         */
+/* stream_obj/parsed_stream below use WIN32_MemoryStream (resources/     */
+/* Win32StreamMem.h, included above) — WNDPROC_StreamFromMemory's real   */
+/* declaration/size helper come from that header, not redeclared here.   */
 /* ================================================================== */
-void* WNDPROC_StreamFromMemory(void* obj, char* data,
-                               int size, int mode);            /* 0x464490 */
-size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 void* AssetMgr_LoadFile(void* mgr, const char* name,
                         int* out_size);                        /* 0x45CD00 */
 
@@ -351,28 +349,26 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
     if (g_asset_mgr != nullptr) {
         char* file_data;
         void* stream_obj;
-        void* parsed_stream;
+        WNDPROC_Stream* parsed_stream;
 
         CRT_sprintf_buf(asset_path, "%s.dat", name_suffix);
         file_data = static_cast<char*>(AssetMgr_LoadFile(
             g_asset_mgr, asset_path, &loaded_size));        /* 0x45CD00 */
 
         if (file_data != NULL) {
-            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
-             * host size (see resources/Win32Stream.h). */
-            stream_obj = operator_new(WIN32_Stream_Size());
+            /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use the
+             * real host size (see resources/Win32StreamMem.h). */
+            stream_obj = operator_new(WIN32_MemoryStream_Size());
             if (stream_obj != NULL) {
                 parsed_stream = WNDPROC_StreamFromMemory(
                     stream_obj, file_data, loaded_size, 1);   /* 0x464490 */
 
                 if (parsed_stream != NULL) {
-                    /* Check stream error flag at vtable[1] + offset 8 */
-                    const uint8_t* parsed_bytes =
-                        reinterpret_cast<const uint8_t*>(parsed_stream);
-                    const uintptr_t parsed_vtable = static_cast<uintptr_t>(
-                        *reinterpret_cast<const uint32_t*>(parsed_bytes));
-                    const int v4 = *reinterpret_cast<const int*>(parsed_vtable + 4);
-                    if ((*reinterpret_cast<const uint8_t*>(parsed_bytes + v4 + 8) & 4) == 0) {
+                    /* Check stream error flag: real state_bits/kBadBit
+                     * check (matches the fallback branch below, replacing
+                     * the former raw vtable[1]+offset-8 read of the same
+                     * field). */
+                    if ((parsed_stream->state_bits & StreamObject::kBadBit) == 0) {
                         char loaded;
 
                         /* Step 1: Parse script via ScriptedObject_ParseStream */
@@ -391,16 +387,12 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
                         }
                         this->sub_entity[0x82] = loaded;
 
-                        /* Destroy the temporary stream (vtable[0]) */
-                        {
-                            void* par_vtable = *reinterpret_cast<void**>(parsed_stream);
-                            const int par_v4 = *reinterpret_cast<const int*>(
-                                reinterpret_cast<const uint8_t*>(par_vtable) + 4);
-                            using V0 = void (*)(int flags);
-                            void** stream_slots = *reinterpret_cast<void***>(
-                                reinterpret_cast<uint8_t*>(parsed_stream) + par_v4);
-                            reinterpret_cast<V0>(stream_slots[0])(1);
-                        }
+                        /* Destroy the temporary stream: real C++ `delete`
+                         * through WNDPROC_Stream* dispatches to
+                         * WIN32_MemoryStream's scalar deleting destructor
+                         * via StreamObject's virtual ~StreamObject() —
+                         * replaces the former raw vtable[0] dispatch. */
+                        delete parsed_stream;
                     }
                 }
             }

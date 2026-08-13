@@ -197,7 +197,7 @@ extern "C" {
 
     /* External helpers used by HandleEvent */
     int32_t __fastcall CRT_sprintf_buf(void* buf, const char* format, ...); /* @ 0x00467F60 */
-    void* __thiscall WNDPROC_StreamFromMemory(void* stream, char* data, int32_t size, int32_t flag);  /* @ 0x00460C10 */
+    void* __thiscall WNDPROC_StreamFromMemory(void* stream, char* data, int32_t size, int32_t flag);  /* @ 0x00464490 -- not yet called anywhere in this file */
     void* __thiscall AssetMgr_LoadFile(void* mgr, void* name, int32_t* outSize);  /* @ 0x00457C00 */
     void CRT_free(void* ptr);                       /* @ 0x00465280 */
     void* operator_new(uint32_t size);              /* @ 0x00465CE0 */

@@ -12,6 +12,7 @@
 #include "TrainStation.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamFile.h"
+#include "../resources/Win32StreamMem.h"
 #include <cassert>
 #include <cctype>
 #include <cstddef>
@@ -35,12 +36,6 @@ void  __cdecl CRT_free(void* ptr);                     /* 0x466C70 */
 void* __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id);
 int   __thiscall RESMGR_LoadSoundResource(void* res_handle);
 void  __thiscall RESMGR_ReleaseSoundResource(void* res_handle);
-
-/* Win32 stream helpers (mem_stream/render_stream below use the
- * WNDPROC_StreamFromMemory heap-stream variant — a separate, not-yet-
- * reconstructed class; unrelated to WIN32_Stream and out of this pass's
- * scope). */
-void* __thiscall WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
 
 /* Asset manager */
 void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
@@ -399,11 +394,11 @@ void TrainStation::Init(int32_t param1, int32_t param2)
         file_data = AssetMgr_LoadFile(&g_asset_mgr, short_dat_name, &file_size);
         if (file_data != nullptr) {
             /* Create sub-stream from the loaded data. 0x5C was the
-             * original x86 sizeof(WIN32_Stream); use the real host size
-             * (see resources/Win32Stream.h). */
-            mem_stream = operator_new(WIN32_Stream_Size());
+             * original x86 sizeof(WIN32_MemoryStream) (see
+             * resources/Win32StreamMem.h); use the real host size. */
+            mem_stream = operator_new(WIN32_MemoryStream_Size());
             if (mem_stream != nullptr) {
-                void* render_stream = WNDPROC_StreamFromMemory(
+                WNDPROC_Stream* render_stream = WNDPROC_StreamFromMemory(
                     mem_stream, static_cast<char*>(file_data), file_size, 1);
 
                 if (render_stream != nullptr) {
@@ -411,11 +406,12 @@ void TrainStation::Init(int32_t param1, int32_t param2)
                     uint8_t render_ok = this->Render(render_stream);
                     this->loaded = render_ok;                    /* 0x4365E0 */
 
-                    /* Release the memory stream */
-                    void** stream_vt = *reinterpret_cast<void***>(render_stream);
-                    using StreamDestructor = void (__thiscall*)(int);
-                    StreamDestructor destroy = reinterpret_cast<StreamDestructor>(stream_vt[0]);
-                    destroy(1);  /* dtor with free */
+                    /* Release the memory stream. Real C++ `delete` through
+                     * WNDPROC_Stream* dispatches to WIN32_MemoryStream's
+                     * scalar deleting destructor via StreamObject's virtual
+                     * ~StreamObject() — replaces the former raw vtable[0]
+                     * dispatch (0x464460, see resources/Win32StreamMem.h). */
+                    delete render_stream;
                 }
             }
 

@@ -164,12 +164,23 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     extern void  __cdecl CRT_free(void* ptr);
     extern void  __cdecl CRT_exit(void* stack, const char* msg);
     extern int* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
-    extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
+    /* Canonical signature: resources/Win32StreamMem.h. `char*` (not
+     * `const char*`) matches the real definition's mangled name — this
+     * file's own local `struct WNDPROC_Stream` (an opaque handle type,
+     * NOT the same type as the canonical resources/WndProcStream.h class;
+     * kept local rather than #include-ing that header to avoid a same-
+     * named-tag collision) is only used as a pointer here, so the return
+     * type is compatible at the ABI level either way (pointer-to-struct,
+     * no layout access through it in this declaration). */
+    extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
     extern WNDPROC_Stream* WIN32_StreamOpen(void* stream, int mode);
     /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) on this host
      * (wider than the original x86's 0x5C: StreamObject grew a real vptr
      * once ~StreamObject() became virtual, see StreamObject.h). */
     extern size_t WIN32_Stream_Size();
+    /* resources/Win32StreamMem.cpp — real sizeof(WIN32_MemoryStream) on
+     * this host (the concrete WNDPROC_StreamFromMemory constructs). */
+    extern size_t WIN32_MemoryStream_Size();
     extern int   WIN32_StreamOpenPath(void* stream, const char* path, int flags, const char* mode);
     extern int   WIN32_StreamRead(void* stream, void* buf, int size);
     extern void* __cdecl CRT_malloc(size_t size);
@@ -193,24 +204,18 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
         asset_data = AssetMgr_LoadFile(&g_asset_mgr, rel_path, &data_size);
 
         if (asset_data != NULL) {
-            /* WNDPROC_StreamFromMemory constructs a distinct,
-             * not-yet-fully-modeled concrete class (its own vtable,
-             * 0x479210 — see resources/Win32Stream.h's WIN32_StreamRead
-             * doc comment) that also embeds a StreamObject at +0xC, so it
-             * is equally undersized by the literal `0x5C` below; no
-             * `*_Size()` helper exists for that class yet to fix this
-             * correctly (out of this pass's scope — same gap as
-             * ui/UIPANEL_Surface.cpp's `mem_stream`). Verified dead on
+            /* WNDPROC_StreamFromMemory constructs a WIN32_MemoryStream
+             * (resources/Win32StreamMem.h) — use its real *_Size() helper
+             * instead of the original x86's literal 0x5C. Verified dead on
              * host, not a live undersized allocation: `g_asset_mgr` has
              * exactly one definition in the tree (`shared/stubs_impl.cpp`,
              * `nullptr`) and is never assigned anywhere else, so this
              * whole `if (g_asset_mgr != NULL)` branch never executes —
              * confirmed by grepping every `.cpp`/`.c` file for an
-             * assignment to it. Revisit sizing once `g_asset_mgr` is
-             * actually wired to a real asset manager. */
-            WNDPROC_Stream* stream_mem = static_cast<WNDPROC_Stream*>(operator_new(0x5C));
+             * assignment to it. */
+            WNDPROC_Stream* stream_mem = static_cast<WNDPROC_Stream*>(operator_new(WIN32_MemoryStream_Size()));
             if (stream_mem != NULL) {
-                stream = WNDPROC_StreamFromMemory(stream_mem, reinterpret_cast<const char*>(asset_data), data_size, 1);
+                stream = WNDPROC_StreamFromMemory(stream_mem, reinterpret_cast<char*>(asset_data), data_size, 1);
             }
         }
     }
@@ -328,7 +333,20 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
      * TODO (ISS-raw-115-07): File-stream path (steps 3-4) not yet
      * tracked separately from memory-stream path. */
     if (stream != NULL) {
-        /* Destroy stream via its vtable[0] scalar deleting destructor */
+        /* Destroy stream via its vtable[0] scalar deleting destructor.
+         *
+         * NOT converted to real C++ `delete` in this pass: this file
+         * defines its OWN local, opaque `struct WNDPROC_Stream` (see the
+         * file-scope typedef above) distinct from the canonical
+         * resources/WndProcStream.h class of the same name, and
+         * Game_ReadChunk/this function read raw `->position`/`->size`
+         * fields through it (lines above) that do not correspond to the
+         * canonical class's real layout at all (offset +0x08 is
+         * StreamObject::state_bits on the real class, not a "size").
+         * Fully migrating this file onto the canonical WNDPROC_Stream
+         * class requires re-deriving Game_ReadChunk's real field
+         * semantics first — out of this pass's scope (WNDPROC_StreamFromMemory
+         * facade fix only). Tracked in PROGRESS.md. */
         void* vtable = *reinterpret_cast<void**>(stream);
         void (**dtor)(void*, int) = reinterpret_cast<void(**)(void*, int)>(vtable);
         dtor[0](stream, 1);

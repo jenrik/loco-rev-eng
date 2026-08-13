@@ -182,8 +182,24 @@ int DPLAY_CreatePlayer(void* record);
 void DPLAY_RenderPlayer(void* dplay, void* hdcVal, int32_t player,
                          void* surface, int32_t x, int32_t y, uint32_t w,
                          RECT* rect);
-void* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
 size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
+/* Canonical signature/size helper: resources/Win32StreamMem.h. Declared
+ * locally here (forward-declared class, not a full #include) rather than
+ * including that header directly: this file is included by every
+ * Cursor*.cpp translation unit, some of which transitively pull in
+ * graphics/sdl3_window.h (SDL3 Win32-windowing shim); Win32StreamMem.h
+ * transitively includes resources/StreamObject.h's real <windows.h>
+ * (stubs/windows.h), and the two headers declare several Win32 functions
+ * (SetRect/GetCursorPos/SetTimer/KillTimer/MSG) with incompatible
+ * signatures — a real, pre-existing header-organization conflict between
+ * those two subsystems, out of this pass's scope to resolve tree-wide.
+ * input/Cursor.cpp itself includes the full header directly (see its own
+ * top-of-file comment) since it needs WNDPROC_Stream's complete type for
+ * real construction/state-bits access, and does not transitively include
+ * graphics/sdl3_window.h. */
+class WNDPROC_Stream;
+WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
+size_t WIN32_MemoryStream_Size();
 
 /* ================================================================ */
 /* C++ linkage — game helpers originally compiled as C++ symbols     */

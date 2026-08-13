@@ -56,6 +56,17 @@
 
 #include "../shared/types.h"
 #include "ResourceManager.h"
+/* Win32_MemoryStream's complete type is only needed by this file's own
+ * _WIN32-only branch below (dead code on this host; exercised by the
+ * MinGW typecheck build) for real `delete` through WNDPROC_Stream*.
+ * Guarded to _WIN32 only: under the native build, graphics/sdl3_window.h
+ * (transitively reachable from other TUs, though not this one) would
+ * conflict with this header's <windows.h> chain if both were active in
+ * the same TU — moot here since sdl3_window.h's own body is guarded
+ * `#ifndef _WIN32` and contributes nothing when _WIN32 is defined. */
+#ifdef _WIN32
+#include "Win32StreamMem.h"
+#endif
 
 #include <cstdint>
 #include <cstdio>
@@ -101,8 +112,18 @@ extern void* WIN32_StreamOpenWriteFile(void* stream, const char* path,
                                        int32_t initBase); /* 0x465090, see Win32OStream.h */
 extern void* WIN32_StreamRead(void* stream, void* buf, uint32_t size);   /* 0x463810 */
 extern void* WIN32_StreamWrite(void* stream, const void* buf, uint32_t size); /* 0x465010 */
-extern void* WNDPROC_StreamFromMemory(void* stream, const void* data,
-                                      int32_t size, int32_t mode);      /* 0x464490 */
+/* Canonical signature/size helper: resources/Win32StreamMem.h. Kept as a
+ * local extern here (not an #include) to match this file's existing
+ * local-extern convention for this stream family, since this file's own
+ * WNDPROC_StreamFromMemory caller lives inside the _WIN32-only branch
+ * below (dead code on this host, but must stay signature-correct for the
+ * MinGW typecheck build). Only the pointer type is needed here, so a
+ * forward declaration suffices — no member of WNDPROC_Stream is touched
+ * in this file. */
+class WNDPROC_Stream;
+extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, char* data,
+                                                 int32_t size, int32_t mode); /* 0x464490 */
+extern size_t WIN32_MemoryStream_Size(); /* resources/Win32StreamMem.cpp */
 extern int32_t AssetMgr_LoadFile(void* mgr, const char* path, int32_t* size); /* 0x45CD00 */
 extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 extern size_t WIN32_OStream_Size(); /* resources/Win32OStream.cpp — real sizeof(WIN32_OStream) */
@@ -293,10 +314,17 @@ static void destroy_stream(void* stream)
 delete static_cast<HostSaveStream*>(stream);
 #else
 /* The original destroys the stream through its scalar-deleting
- * destructor slot (vtable[0], flags=1).  The native layer exposes
- * this as WIN32_StreamDestroyImmediate. */
-extern void WIN32_StreamDestroyImmediate(void* stream);
-WIN32_StreamDestroyImmediate(stream);
+ * destructor slot (vtable[0], flags=1) — real C++ `delete` through
+ * WNDPROC_Stream* reproduces this via StreamObject's virtual
+ * ~StreamObject() (see resources/Win32Stream.h/Win32StreamMem.h;
+ * `stream` here is always one of those two concrete classes,
+ * constructed a few lines above in RESMGR_LoadResource/
+ * RESMGR_LoadResourceData). WIN32_StreamDestroyImmediate (previously
+ * called here) is WIN32_Stream::CloseNow() — a different, non-freeing
+ * operation, not the scalar deleting destructor this comment always
+ * claimed it was; using it here leaked every heap stream object on
+ * this branch. */
+delete static_cast<WNDPROC_Stream*>(stream);
 #endif
 }
 
@@ -546,12 +574,12 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
                               &asset_size));
         resdata->asset_data = asset_data;
         if (asset_data != nullptr) {
-            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
-             * host size (see resources/Win32Stream.h). */
-            void* mem = operator_new(WIN32_Stream_Size());
+            /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use
+             * the real host size (see resources/Win32StreamMem.h). */
+            void* mem = operator_new(WIN32_MemoryStream_Size());
             if (mem != nullptr) {
                 resdata->primary_stream =
-                    WNDPROC_StreamFromMemory(mem, asset_data, asset_size, 1);
+                    WNDPROC_StreamFromMemory(mem, static_cast<char*>(asset_data), asset_size, 1);
             }
         }
     }

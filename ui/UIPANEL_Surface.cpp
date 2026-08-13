@@ -29,6 +29,7 @@
 #include "UIPANEL_Surface.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamFile.h"
+#include "../resources/Win32StreamMem.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -147,7 +148,6 @@ extern "C" {
     extern "C" void WIN32_StreamRead(void* stream, void* buf, int32_t size);
     constexpr void (*ReadStreamBytesC)(void*, void*, int32_t) = WIN32_StreamRead;
     void Stream_BeginRead(void* stream, uint32_t offset, int mode);
-    void* WNDPROC_StreamFromMemory(void* obj, char* data, int size, int mode);
     void* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
     /* Real def: graphics/sdl3_ddraw.cpp (host path, guarded #ifndef _WIN32);
      * first param is the same IDirectDrawSurface4* typed elsewhere in this
@@ -353,7 +353,7 @@ extern "C" {
     void* asset_data = NULL;
     int asset_size = 0;
     void* mem_stream = NULL;
-    void* stream = NULL;
+    WNDPROC_Stream* stream = nullptr;
     uint8_t result = 1;
 
     /* Free existing pixel buffer */
@@ -371,12 +371,12 @@ extern "C" {
 
         asset_data = AssetMgr_LoadFile(g_asset_mgr, rel_path, &asset_size);
         if (asset_data != NULL) {
-            /* WNDPROC_StreamFromMemory placement-constructs a WIN32_Stream
-             * here (see resources/Win32Stream.cpp); 0x5C was the original
-             * x86 sizeof(WIN32_Stream) — use the real host size instead,
-             * since StreamObject's pointer fields (rdbuf, tied) widen the
-             * class to 0x80 bytes on this 64-bit host. */
-            mem_stream = operator_new(WIN32_Stream_Size());
+            /* WNDPROC_StreamFromMemory placement-constructs a
+             * WIN32_MemoryStream here (see resources/Win32StreamMem.cpp);
+             * 0x5C was the original x86 sizeof(WIN32_MemoryStream) — use
+             * the real host size instead, since StreamObject's pointer
+             * fields (rdbuf, tied) widen the class on this 64-bit host. */
+            mem_stream = operator_new(WIN32_MemoryStream_Size());
             if (mem_stream != NULL) {
                 stream = WNDPROC_StreamFromMemory(mem_stream, (char*)asset_data, asset_size, 1);
             }
@@ -496,24 +496,23 @@ extern "C" {
 
 cleanup:
     if (mem_stream != NULL) {
-        /* `stream` (if non-null and taken from the AssetMgr path) IS
-         * `mem_stream` — this call destroys/frees it via its own scalar
-         * deleting destructor. The original's real tail (0x42AB10) has no
-         * further destroy call on `stream`/`mem_stream` beyond this one —
-         * a stray `if (stream != NULL && stream != &stream_buf)
-         * WIN32_StreamDestroyImmediate(stream);` branch used to sit here
-         * with no counterpart in the disassembly: it called
-         * WIN32_Stream::CloseNow() on this already-destroyed heap object,
-         * which is not even a WIN32_Stream in the first place (0x464490's
-         * disassembly shows a distinct vtable, 0x479210, with a
-         * WIN32_StreamMem rdbuf, not WIN32_StreamFile) — a use-after-free
-         * on top of the exact over-narrow-downcast bug already fixed in
-         * WIN32_StreamRead's facade (resources/Win32Stream.cpp). Removed
+        /* `stream` (taken from the AssetMgr path, guarded by mem_stream !=
+         * NULL) IS the WIN32_MemoryStream constructed into `mem_stream` by
+         * WNDPROC_StreamFromMemory above — real C++ `delete` through
+         * WNDPROC_Stream* dispatches to its scalar deleting destructor via
+         * StreamObject's virtual ~StreamObject(), replacing the former raw
+         * vtable[0] dispatch (see resources/Win32StreamMem.h). The
+         * original's real tail (0x42AB10) has no further destroy call on
+         * `stream`/`mem_stream` beyond this one — a stray `if (stream !=
+         * NULL && stream != &stream_buf) WIN32_StreamDestroyImmediate(stream);`
+         * branch used to sit here with no counterpart in the disassembly:
+         * it called WIN32_Stream::CloseNow() on this already-destroyed
+         * heap object, which is not even a WIN32_Stream in the first place
+         * — a use-after-free on top of an over-narrow downcast. Removed
          * rather than widened, since CloseNow() genuinely is a
          * WIN32_Stream-only method and this caller was simply wrong to
          * call it here at all. */
-        void (**dtor)(void*) = *(void***)mem_stream;
-        (*dtor)(mem_stream);
+        delete stream;
     }
 
     if (asset_data != NULL) {

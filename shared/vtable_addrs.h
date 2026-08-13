@@ -722,6 +722,24 @@
     full evidence trail (real C++ virtual-base destruction provides the
     same guarantee for free). */
 
+#define VTBL_WIN32_MEMORYSTREAM         0x00479210  /* WIN32_MemoryStream's own vbtable
+    [0]=0, [1]=0xC (WIN32_MemoryStream adds no own fields beyond WNDPROC_Stream,
+    same vbase offset as WIN32_Stream/plain WNDPROC_Stream). Poked into `*this`
+    by WNDPROC_StreamFromMemory (0x464490) on construction. Confirmed a
+    genuinely distinct concrete class from WIN32_Stream (not the same class
+    constructed at a different most-derived level): its own scalar-deleting-
+    destructor address (0x464460) differs from both WIN32_Stream's (0x463940)
+    and plain WNDPROC_Stream's (0x464810). rdbuf is a heap WIN32_StreamMem
+    (see resources/Win32StreamMem.h) instead of WIN32_Stream's WIN32_StreamFile. */
+#define VTBL_WIN32_MEMORYSTREAM_VIEW    0x0047920C  /* WIN32_MemoryStream-as-StreamObject-
+    view vtable (1 slot: scalar deleting destructor, target 0x464460 ==
+    WIN32_MemoryStream_ScalarDtor, chains to WIN32_MemoryStream_DtorVftableReset
+    0x464550 [Ghidra auto-name "WNDPROC_StreamSeek" was misleading -- it does
+    not seek] then WNDPROC_Stream_DtorVftableReset 0x4648E0). Poked in by
+    WNDPROC_StreamFromMemory after WNDPROC_Stream::AttachBuffer runs. Both
+    retagging functions are pure MSVC vptr-retagging bookkeeping, documented
+    not reimplemented, exactly like VTBL_WIN32_STREAM_VIEW's pair above. */
+
 #define VTBL_WNDPROC_OSTREAM            0x00479288  /* WNDPROC_OStream's own vbtable
     [0]=0, [1]=8 (own data: _reserved_04@+4 ONLY — no gcount_-equivalent,
     write-only facade, one dword smaller than VTBL_WNDPROC_STREAM above).

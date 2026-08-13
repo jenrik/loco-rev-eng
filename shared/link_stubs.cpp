@@ -680,11 +680,13 @@ void VehicleEditor_CheckEditBounds1(VehicleEditor*,void*){}   /* _ZN13VehicleEdi
  * into bogus overloads of one name — they are separate functions, see
  * Win32Stream.h). */
 
-/* WNDPROC_StreamFromMemory — C++ overloads */
-void WNDPROC_StreamFromMemory(void*,const char*,int32_t,int32_t);
-void WNDPROC_StreamFromMemory(void*,const char*,int32_t,int32_t){}  /* _Z24WNDPROC_StreamFromMemoryPvPKcii */
-void WNDPROC_StreamFromMemory(void*,char*,int32_t,int32_t);
-void WNDPROC_StreamFromMemory(void*,char*,int32_t,int32_t){}        /* _Z24WNDPROC_StreamFromMemoryPvPcii */
+/* WNDPROC_StreamFromMemory — REMOVED. Real definition now in
+ * resources/Win32StreamMem.cpp (constructs a real WIN32_MemoryStream);
+ * every real caller in the tree has been unified onto the (void*, char*,
+ * int32_t, int32_t) signature (`_Z24WNDPROC_StreamFromMemoryPvPcii`), and
+ * the (void*, const char*, int32_t, int32_t) overload
+ * (`_Z24WNDPROC_StreamFromMemoryPvPKcii`) has zero remaining references
+ * anywhere in the tree (confirmed via `nm` across every object file). */
 
 /* Resource_IsBuildingTile / Resource_IsRoadTile / Resource_IsValidTrackIndex */
 void Resource_IsBuildingTile(void*);

@@ -130,8 +130,14 @@ void WNDPROC_InitializeCriticalSection();
 void WNDPROC_InitializeCriticalSection() { /* host no-op — single-threaded */ }
 void WNDPROC_DeleteCriticalSection();
 void WNDPROC_DeleteCriticalSection() { /* host no-op — single-threaded */ }
-void* WNDPROC_StreamFromMemory(void*, const char*, int, int);
-void* WNDPROC_StreamFromMemory(void*, const char*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
+/* WNDPROC_StreamFromMemory (extern "C", bare-name) — REMOVED. This
+ * unmangled C-linkage stub was the landmine every extern-"C"-declared
+ * caller (input/BuildingDescriptorEditor.cpp, ui/UIPANEL_Surface.cpp,
+ * ui/HelpWnd.cpp, game/TrainStation.cpp) silently bound to instead of the
+ * real, now-implemented C++-mangled definition (resources/Win32StreamMem.cpp)
+ * — every one of those callers has been moved out of its extern "C" block
+ * to restore the intended C++ linkage; zero remaining references to the
+ * bare unmangled symbol anywhere in the tree (confirmed via `nm`). */
 void RESDATA_DtorBase();
 void RESDATA_DtorBase() { /* host no-op */ }
 void ScriptEngine_Init();

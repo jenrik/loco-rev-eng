@@ -9,6 +9,7 @@
  */
 
 #include "BuildingDescriptorEditor.h"
+#include "../resources/Win32StreamMem.h"
 
 #include <cstdio>
 #include <cstring>
@@ -51,7 +52,6 @@ extern "C" {
     void  WIN32_StreamOpen(void* streamOut, int mode);
     void  WIN32_StreamOpenPath(void* streamOut, const char* path, int mode, int unk);
     void  WIN32_StreamDestroyImmediate(void* stream);
-    void* WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
 
     /* .dat directive-line scanning primitives. These are callees of
      * Render/draw_border_grid/paint_edit_regions/edit_key_handler_parse —
@@ -96,15 +96,11 @@ void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
 void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
 void* WNDPROC_StreamWrite(void* stream, void* outBuf);
 
-/* Plain C++ linkage (matches the real definition in resources/Win32Stream.cpp),
- * NOT inside the extern "C" block above. Added 2026-08-11 during the
- * operator_new hardcoded-size sweep — this call site allocated a raw
- * ::operator new(0x5C, ...) buffer for WNDPROC_StreamFromMemory below,
- * the same undersized-WIN32_Stream-buffer bug already fixed at ~11 other
- * sites in this sweep (x86 WIN32_Stream is 0x5C bytes; sizeof(WIN32_Stream)
- * on this 64-bit host is 0x80 — pointer members widen). It escaped the
- * sweep's `operator_new(0x...)` grep because it's spelled with the
- * `::operator new` form instead. */
+/* WIN32_MemoryStream_Size() (resources/Win32StreamMem.h, included above)
+ * is used below to size the WNDPROC_StreamFromMemory allocation — x86
+ * WIN32_MemoryStream is 0x5C bytes; this host's real sizeof() may differ
+ * (pointer members widen). WIN32_Stream_Size() is the same convention for
+ * the plain-file-backed WIN32_Stream used by the fallback branch below. */
 extern size_t WIN32_Stream_Size();
 
 /* Section-keyword string literals (from the original .rdata; addresses
@@ -238,10 +234,10 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
         CRT_sprintf_buf(archivePath, "%s.dat");
         int* fileData = reinterpret_cast<int*>(AssetMgr_LoadFile(&g_asset_mgr, archivePath, &fileSize));
         if (fileData != nullptr) {
-            void* streamMem = ::operator new(WIN32_Stream_Size(), std::nothrow);
+            void* streamMem = ::operator new(WIN32_MemoryStream_Size(), std::nothrow);
             if (streamMem != nullptr) {
-                int* stream = reinterpret_cast<int*>(
-                    WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<const char*>(fileData), fileSize, 1));
+                WNDPROC_Stream* stream = WNDPROC_StreamFromMemory(
+                    streamMem, reinterpret_cast<char*>(fileData), fileSize, 1);
                 if (stream != nullptr) {
                     uint8_t ok = this->Render(stream);  /* Virtual call — derived override */
                     this->loaded = ok;
@@ -254,10 +250,11 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
                     }
                     loadedFromArchive = (this->loaded != 0);
                     /* Original tail dispatches the stream's own scalar deleting
-                     * destructor (vtable[0](1)) here; not reproduced with a raw
-                     * vtable call per project policy — the stream is a
-                     * WNDPROC_Stream-family object whose typed destructor is
-                     * out of scope for this pass. */
+                     * destructor (vtable[0](1)) here; real C++ `delete` through
+                     * WNDPROC_Stream* reproduces this via StreamObject's virtual
+                     * ~StreamObject() (was previously leaked — see
+                     * resources/Win32StreamMem.h). */
+                    delete stream;
                 }
             }
             CRT_free(fileData);

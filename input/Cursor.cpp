@@ -337,11 +337,25 @@ void Cursor::init()
                                       reinterpret_cast<uint8_t*>(filePath),
                                       &fileSize);
         if (memBuffer != nullptr) {
-            /* 0x5C was the original x86 sizeof(WIN32_Stream); use the real
-             * host size (see resources/Win32Stream.h). */
-            void* stream = operator_new(WIN32_Stream_Size());
+            /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use the
+             * real host size (see resources/Win32StreamMem.h). NOTE: the
+             * returned WNDPROC_Stream* is narrowed to int* below rather
+             * than kept typed, and the state_bits/gcount_ reads a few
+             * lines down stay raw offset math — this file's own local
+             * `struct WNDPROC_Stream` forward declaration (Cursor_internal.h)
+             * cannot see WNDPROC_Stream's complete type without pulling in
+             * resources/Win32StreamMem.h's <windows.h> chain, which conflicts
+             * with this TU's transitively-included graphics/sdl3_window.h
+             * (SetRect/GetCursorPos/SetTimer/KillTimer/MSG all redeclared
+             * incompatibly) — a real, pre-existing header-organization
+             * conflict between those two subsystems, out of this pass's
+             * scope to resolve tree-wide. Tracked in PROGRESS.md. */
+            void* stream = operator_new(WIN32_MemoryStream_Size());
             if (stream != nullptr) {
-                streamObj = static_cast<int*>(
+                // ABI_BOUNDARY: WNDPROC_Stream* -> this file's own legacy
+                // opaque int* view — see the comment above on why the
+                // complete type can't be used in this TU.
+                streamObj = reinterpret_cast<int*>(
                     WNDPROC_StreamFromMemory(stream, reinterpret_cast<char*>(memBuffer), fileSize, 1));
             }
         }
@@ -402,8 +416,11 @@ skip_palette_load:
     /* Close the stream object. The stream is an opaque internal ABI object
      * (created by WNDPROC_StreamFromMemory / WIN32_StreamOpenFile); the
      * binary calls its vtable slot [0] with flag 1 — equivalent to a
-     * scalar-deleting-dtor. The exact layout is undocumented; the dispatch
-     * below mirrors the binary's pointer chain (*stream + 4 → vtable). */
+     * scalar-deleting-dtor. NOT converted to real C++ `delete` in this
+     * pass: see the allocation-site comment above for why (sdl3_window.h/
+     * <windows.h> header conflict blocks pulling in the complete
+     * WNDPROC_Stream type in this translation unit). The dispatch below
+     * mirrors the binary's pointer chain (*stream + 4 -> vtable). */
     if (streamObj != nullptr) {
         auto* streamAddress = reinterpret_cast<uint8_t*>(streamObj);
         auto* streamVtableAddress = reinterpret_cast<uint8_t*>(

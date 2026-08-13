@@ -114,6 +114,13 @@ public:
      * in that case. Returns `this` either way. */
     WNDPROC_Stream* Read(void* buf, uint32_t size);
 
+    /* Classic istream::gcount() accessor for the private gcount_ field
+     * below — added so real callers (e.g. input/Cursor.cpp's palette
+     * loader) can read the byte count from the last Read() without a raw
+     * offset read (`streamObj[2]` on the original x86 layout, a landmine
+     * on this host since preceding pointer-bearing members widen). */
+    int32_t Gcount() const { return gcount_; }
+
 protected:
     /* 0x464840 (Ghidra auto-analysis named this "WNDPROC_StreamVPrintf"; it
      * is not printf-related — it attaches a buffer). Calls the inherited

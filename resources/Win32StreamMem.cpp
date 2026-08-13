@@ -1,21 +1,29 @@
 /**
- * Win32StreamMem.cpp — WIN32_StreamMem implementation
+ * Win32StreamMem.cpp — WIN32_StreamMem / WIN32_MemoryStream implementation
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
- * Reverse engineered via Ghidra decompilation + disassembly (locoaudit DB).
+ * Reverse engineered via Ghidra decompilation + disassembly (loco DB).
  *
- * See Win32StreamMem.h for the field/address map. This file implements:
- *   WIN32_StreamMem_Ctor  0x463FF0  (this task)
- * plus four deferred-stub vtable overrides required only so the class is
- * concrete (see header — none of the four are in this task's scope).
+ * See Win32StreamMem.h for the class/field/address maps. This file
+ * implements:
+ *   WIN32_StreamMem::WIN32_StreamMem   0x463FF0
+ *   WIN32_StreamMem::Underflow         0x4642F0
+ *   WIN32_MemoryStream::WIN32_MemoryStream / WNDPROC_StreamFromMemory 0x464490
+ * plus three deferred-stub vtable overrides required only so
+ * WIN32_StreamMem is concrete (see header — none of the three are in this
+ * task's scope, and none are reachable from any real caller of
+ * WIN32_MemoryStream, which only ever constructs WIN32_StreamMem in
+ * read-only-view mode).
  */
 
-// Status: VALIDATED (ctor only)
+// Status: VALIDATED (WIN32_StreamMem ctor + Underflow, WIN32_MemoryStream,
+// WNDPROC_StreamFromMemory)
 
 #include "Win32StreamMem.h"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <new>
 
 /* ================================================================== */
 /* WIN32_StreamMem_Ctor — 0x463FF0                                     */
@@ -40,16 +48,20 @@
 /*   - Then branches on bufferCapacity:                                  */
 /*       == 0: readHigh_ = end; peekCache_ = -1; writeBase_ = writePtr_ */
 /*             = nullptr; writeHigh_ = nullptr.  (read-only view: no     */
-/*             write region.)                                            */
+/*             write region — the only mode WNDPROC_StreamFromMemory     */
+/*             ever uses; get_xrefs_to(0x463FF0) confirms it is this     */
+/*             constructor's sole caller in the whole binary.)           */
 /*       != 0: readHigh_ = (uint8_t*)(intptr_t)bufferCapacity (the raw   */
 /*             int reused as a pointer-sized value — matches the         */
 /*             original's "undefined4" field exactly; not a real         */
-/*             pointer until something else interprets it, mirroring    */
+/*             pointer until something else interprets it, mirroring     */
 /*             the lazy-buffer-allocation design documented in           */
 /*             WndProcStreamBuf.h); peekCache_ = -1 (redundant with the */
 /*             base ctor — the original re-sets it too, preserved for    */
 /*             fidelity); writeBase_ = writePtr_ = the same raw-int-as-  */
-/*             pointer value; writeHigh_ = end.                          */
+/*             pointer value; writeHigh_ = end. Dead code for every real */
+/*             caller in this codebase (see above), reproduced anyway    */
+/*             since it is a real branch of the original function.       */
 /* ================================================================== */
 WIN32_StreamMem::WIN32_StreamMem(char* data, int32_t dataLen, int32_t bufferCapacity)
     : ownsMemory_(0),
@@ -87,8 +99,54 @@ WIN32_StreamMem::WIN32_StreamMem(char* data, int32_t dataLen, int32_t bufferCapa
 }
 
 /* ================================================================== */
+/* WIN32_StreamMem::Underflow — 0x4642F0                               */
+/*                                                                      */
+/* Disassembly summary:                                                 */
+/*   - Fast path: if the get-region still has unread bytes              */
+/*     (readPtr_ < readHigh_, unsigned compare), return *readPtr_        */
+/*     zero-extended WITHOUT advancing readPtr_ (that is GetChar()'s     */
+/*     job, StreamBuf_GetChar 0x4651A0 — this is purely the peek hook).  */
+/*   - Otherwise, if readHigh_ < writePtr_ (unsigned) — i.e. there is     */
+/*     pending written-but-not-yet-readable data beyond the current      */
+/*     read window — re-home the read cursor onto bufferStart_ (in case  */
+/*     the buffer was reallocated) and advance readHigh_ up to           */
+/*     writePtr_, then retry the fast path. This "growable buffer"        */
+/*     refill is DEAD CODE for every real caller of WIN32_MemoryStream:   */
+/*     WNDPROC_StreamFromMemory (Win32StreamMem.h) always constructs      */
+/*     this class with bufferCapacity == 0, which the ctor above turns    */
+/*     into writePtr_ == nullptr — and readHigh_ (a real, non-null        */
+/*     pointer in every real construction) is never less than nullptr    */
+/*     unsigned, so this branch never executes for any object this        */
+/*     codebase actually creates. Reproduced anyway: it is a real basic   */
+/*     block of the original function, and WIN32_StreamMem's ctor takes   */
+/*     a bufferCapacity parameter specifically to support it.             */
+/*   - If still exhausted after that, return -1 (EOF).                    */
+/* ================================================================== */
+int32_t WIN32_StreamMem::Underflow()
+{
+    if (readPtr_ < readHigh_) {
+        return *readPtr_;
+    }
+
+    if (readHigh_ < writePtr_) {
+        uint8_t* const oldReadBase = readBase_;
+        uint8_t* const oldReadPtr  = readPtr_;
+        readBase_ = bufferStart_;
+        readHigh_ = writePtr_;
+        peekCache_ = -1;
+        readPtr_  = bufferStart_ + (oldReadPtr - oldReadBase);
+    }
+
+    if (readPtr_ >= readHigh_) {
+        return -1;
+    }
+    return *readPtr_;
+}
+
+/* ================================================================== */
 /* Deferred vtable overrides — see Win32StreamMem.h for why these exist */
-/* and why each is out of this task's scope.                            */
+/* and why each is out of this task's scope. None are reachable from     */
+/* WIN32_MemoryStream's real construction path (read-only view only).    */
 /* ================================================================== */
 
 int32_t WIN32_StreamMem::Flush()
@@ -120,15 +178,48 @@ int32_t WIN32_StreamMem::WriteChar(int32_t /*ch*/)
     return -1;
 }
 
+int32_t WIN32_StreamMem::AllocateDefaultBuffer()
+{
+    fprintf(stderr, "STUB: WIN32_StreamMem::AllocateDefaultBuffer (0x464120) "
+                     "reached — 130-instruction growable-buffer reallocator, "
+                     "not yet decompiled, see resources/Win32StreamMem.h\n");
+    assert(false &&
+           "WIN32_StreamMem::AllocateDefaultBuffer: deferred, see TODO in Win32StreamMem.h");
+    return -1;
+}
+
 /* WIN32_StreamClose (0x463A60) and its two callees are intentionally not
  * defined here — see Win32StreamMem.h's doc comment on 0x463A60 for the
- * full evidence trail. The address this file previously called
- * "WNDPROC_StreamPutChar" (0x4648E0) under a deferred-stub TODO is not a
- * distinct, undecompiled function at all: it is the exact same address
- * already fully resolved this session as WNDPROC_Stream_DtorVftableReset
- * (resources/Win32Stream.h's WIN32_StreamDestroy doc comment) — pure MSVC
- * vptr-retagging bookkeeping that real C++ virtual-base destruction
- * already reproduces. WIN32_StreamClose itself has zero real callers
- * anywhere in this codebase (confirmed via grep) and, in the original
- * binary, is called only by a compiler-generated SEH unwind funclet
- * (Unwind@004766a5, confirmed via get_xrefs_to) — not game logic. */
+ * full evidence trail. It is pure MSVC vptr-retagging bookkeeping that
+ * real C++ virtual-base destruction already reproduces, and this class
+ * has zero real callers anywhere in this codebase (confirmed via grep). */
+
+/* ================================================================== */
+/* WIN32_MemoryStream::WIN32_MemoryStream — WNDPROC_StreamFromMemory's   */
+/* real body, 0x464490                                                   */
+/* ================================================================== */
+WIN32_MemoryStream::WIN32_MemoryStream(char* data, int32_t dataLen)
+{
+    AttachBuffer(new WIN32_StreamMem(data, dataLen, /*bufferCapacity=*/0));
+    owns_rdbuf = 1;
+}
+
+/* ================================================================== */
+/* Free-function facade — see Win32StreamMem.h for scope/linkage notes  */
+/* ================================================================== */
+
+size_t WIN32_StreamMem_Size()
+{
+    return sizeof(WIN32_StreamMem);
+}
+
+size_t WIN32_MemoryStream_Size()
+{
+    return sizeof(WIN32_MemoryStream);
+}
+
+WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, char* data,
+                                          int32_t size, int32_t /*initBase*/)
+{
+    return ::new (stream) WIN32_MemoryStream(data, size);
+}

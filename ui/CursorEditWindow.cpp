@@ -15,6 +15,7 @@
 #include "CursorEditWindow.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamFile.h"
+#include "../resources/Win32StreamMem.h"
 #include <cstring>
 #include <cassert>
 #include <cstdio>
@@ -36,11 +37,10 @@ extern int   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D
  * — see CursorEditWindow::init()'s doc comment for why this replaces the
  * former raw `int localStream[22]` buffer plus its manual
  * WIN32_StreamOpen/WIN32_StreamDestroy+WNDPROC_StreamCleanup construction/
- * destruction pair. streamAlloc/streamResult below still use the separate,
- * not-yet-reconstructed WNDPROC_StreamFromMemory heap-stream variant. */
-extern int*   __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data,
-                                                   int size, int mode);    /* 0x464490 */
-extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
+ * destruction pair. streamAlloc/streamResult below use WIN32_MemoryStream
+ * (resources/Win32StreamMem.h), the memory-backed sibling of WIN32_Stream —
+ * WNDPROC_StreamFromMemory's real declaration/size helper come from that
+ * header (included above), not redeclared here. */
 
 /* Cursor data parsing helpers.
  *
@@ -70,21 +70,6 @@ extern uint8_t __fastcall CGWND_ValidatePaletteData(int classPtr);        /* 0x4
 /* Asset manager */
 extern int*   __thiscall AssetMgr_LoadFile(void* mgr, const char* path,
                                             int* outSize);                 /* 0x45CD00 */
-
-namespace {
-using StreamDestructor = void (__fastcall *)(void*);
-
-void destroy_memory_stream(int* stream_result)
-{
-    void** stream_vtable = *reinterpret_cast<void***>(stream_result);
-    const auto* offset_bytes = reinterpret_cast<const uint8_t*>(stream_vtable) + 4;
-    const uintptr_t stream_offset = *reinterpret_cast<const uintptr_t*>(offset_bytes);
-    auto* stream_base = reinterpret_cast<uint8_t*>(stream_result) + stream_offset;
-    auto destroy = reinterpret_cast<StreamDestructor>(
-        *reinterpret_cast<void**>(stream_base));
-    destroy(stream_result);
-}
-}
 
 /* ================================================================== */
 /* Global variables                                                    */
@@ -294,12 +279,12 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
         pLoadedData = AssetMgr_LoadFile(&g_asset_mgr, shortPath, &dataSize);
         if (pLoadedData != nullptr) {
             /* Create memory stream from loaded data. 0x5C was the original
-             * x86 sizeof(WIN32_Stream); use the real host size (see
-             * resources/Win32Stream.h). */
-            void* streamAlloc = operator_new(WIN32_Stream_Size());
+             * x86 sizeof(WIN32_MemoryStream); use the real host size (see
+             * resources/Win32StreamMem.h). */
+            void* streamAlloc = operator_new(WIN32_MemoryStream_Size());
             if (streamAlloc != nullptr) {
-                int* streamResult = WNDPROC_StreamFromMemory(
-                    streamAlloc, reinterpret_cast<const char*>(pLoadedData),
+                WNDPROC_Stream* streamResult = WNDPROC_StreamFromMemory(
+                    streamAlloc, reinterpret_cast<char*>(pLoadedData),
                     dataSize, 1);
 
                 if (streamResult != nullptr) {
@@ -312,8 +297,12 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
                         this->loaded = (baseRenderResult != 0) ? 1 : 0;
                     }
 
-                    /* Destroy the memory stream via its vtable[0] */
-                    destroy_memory_stream(streamResult);
+                    /* Destroy the memory stream: real C++ `delete` through
+                     * WNDPROC_Stream* dispatches to WIN32_MemoryStream's
+                     * scalar deleting destructor via StreamObject's virtual
+                     * ~StreamObject() — replaces the former manual raw
+                     * vtable[0] dispatch (destroy_memory_stream()). */
+                    delete streamResult;
                 }
             }
 

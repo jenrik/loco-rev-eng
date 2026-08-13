@@ -153,7 +153,7 @@ uint32_t UIPANEL_LockSurface(void* surf);            /* @ 0x00428A70 */
 void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flag); /* @ 0x00455CB0 */
 
 void* AssetMgr_LoadFile(void** assetMgr, const uint8_t* name, int32_t* outSize); /* @ 0x00457C00 */
-void* WNDPROC_StreamFromMemory(void* stream, char* data, int32_t size, int32_t flag); /* @ 0x00460C10 */
+void* WNDPROC_StreamFromMemory(void* stream, char* data, int32_t size, int32_t flag); /* @ 0x00464490 -- not yet called anywhere in this file */
 /* The WIN32_StreamOpen(File/Path)/Destroy(Immediate)/WNDPROC_StreamCleanup/
  * WIN32_StreamRead declarations formerly here (addresses 0x461600-
  * 0x461880) were dead — RESMGR_OpenResourceFile (declared in
