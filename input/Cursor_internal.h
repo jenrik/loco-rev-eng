@@ -132,7 +132,15 @@ bool UIPANEL_Blit(void* srcSurf, uint32_t sx, uint32_t sy, int32_t sw, uint32_t 
                    void* dstSurf, uint32_t dx, uint32_t dy, int32_t dw, uint32_t dh, uint32_t flags);
 HDC UIPANEL_BeginPaint(void*);
 void UIPANEL_EndPaint(void*);
-void UIPANEL_EndPaintEx(void*, HWND, int, uint8_t, RECT*);
+/* Real def: ui/UIPANEL.cpp:0x426B90 — the 2nd param is `int hdc`, not
+ * `HWND` (HWND == void*). Was declared with an HWND 2nd param, mangling
+ * to a distinct symbol from the real function, so every one of
+ * input/Cursor_new_impls.cpp's 25 call sites through this header was a
+ * silent-wrong-stub landmine binding to shared/stubs_impl.cpp's host
+ * no-op instead of the real present pipeline (the identical landmine
+ * already fixed in native/NETMAN_NetworkUI.c;
+ * docs/landmine-sweep-worklist.md). */
+void UIPANEL_EndPaintEx(void*, int, int, uint8_t, RECT*);
 void* UIPANEL_CreateSurface(void*);
 size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 void UIPANEL_UnlockSurface(void*);

@@ -79,11 +79,23 @@ extern int32_t __stdcall GetWindowTextA(void* hWnd, char* lpString, int32_t nMax
 
 extern void  __cdecl    UI_MainMenu_SetState(void* ui_main, int32_t state);
 extern void  __cdecl    Sprite_SetState(void* sprite, int32_t state, int32_t* unk);
-extern void  __thiscall UIPANEL_EndPaintEx(void* panel, void* hwnd, int32_t hdc,
-                                            uint8_t repaint, void* updateRect);
 
 extern void* g_ui_main;                /* 0x4A8860 */
 }
+
+/* Real def: ui/UIPANEL.cpp (0x426B90), C++ linkage (not extern "C"),
+ * void(void* self, int hdc, int unlock_param, uint8_t unlock_flag,
+ * RECT* restrict_rect) — the 2nd param is `int hdc`, not `void* hwnd`.
+ * Was declared inside the extern "C" block above with a void* 2nd
+ * param — both the linkage and the 2nd param type mismatched the real
+ * mangled symbol, so both of this file's call sites were a
+ * silent-wrong-stub landmine binding to shared/stubs_impl.cpp's host
+ * no-op instead of the real present pipeline (the identical landmine
+ * already fixed in native/NETMAN_NetworkUI.c;
+ * docs/landmine-sweep-worklist.md). Moved out of extern "C" with the
+ * correct 2nd-param type. */
+extern void  __thiscall UIPANEL_EndPaintEx(void* self, int32_t hdc, int32_t unlockParam,
+                                            uint8_t unlockFlag, RECT* restrictRect);
 
 /* GameConfig singleton (0x4FD3A8). network/Netman.cpp already declares
  * this exact symbol as `GameConfig*` and uses named fields through it;
@@ -302,7 +314,7 @@ LRESULT __thiscall NETMAN_DestroySession(void* panelPtr, void* hWnd, uint32_t ms
     if (wParam == 0x1B) {
         /* ESC pressed — cancel/back */
         Sprite_SetState(panel->sprite1, 1, nullptr);
-        UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
         panel->set_render_surface(nullptr, 0, nullptr, 0, 1);
         UI_MainMenu_SetState(g_ui_main, 7);
@@ -311,7 +323,7 @@ LRESULT __thiscall NETMAN_DestroySession(void* panelPtr, void* hWnd, uint32_t ms
 
     /* wParam == 0x0D: ENTER pressed — confirm/join */
     Sprite_SetState(panel->sprite0, 1, nullptr);
-    UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     Sleep(0x96);
     panel->set_render_surface(nullptr, 0, nullptr, 0, 1);
 

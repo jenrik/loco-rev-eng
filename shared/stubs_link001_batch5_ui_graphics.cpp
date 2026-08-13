@@ -125,43 +125,47 @@ void UI_DestroyTooltip(void* mgr, void* tooltip)
 
 /* ===================================================================
  * SYMBOL: UIPANEL_EndPaintEx(void*, void*, int, unsigned char, void*)
- * CALLERS: Netman::ProcessMessage/HandlePlayerJoin/RemoveInboundTrain/
- *          HandlePlayerLeave [network/Netman.cpp, via network/Netman.h:264];
- *          GameSetupPanel::on_update/drawLayoutList/drawTitle/drawGrid
- *          [ui/GameSetupPanel.cpp -- confirmed all its actual call sites
- *          pass an `int` 3rd arg, so they bind to network/Netman.h's
- *          included (void*,void*,int32_t,uint8_t,void*) overload, not
- *          this file's own unused local (void*,void*,void*,uint8_t,void*)
- *          declaration at GameSetupPanel.cpp:93-95].
- * ACTION: loud-deferred-stub.
+ * -- RESOLVED AND REMOVED (2026-08-13).
  *
- * This exact shape is a long-documented, deliberately-deferred cluster
- * (docs/landmine-sweep-worklist.md's UIPANEL_EndPaintEx entry, "6 files
- * not fixed -- cluster still too wide for a single session"). The real
- * implementation (ui/UIPANEL.cpp:98, 0x426B90) is `(void* self, int hdc,
- * int unlock_param, uint8_t unlock_flag, RECT* rect)` -- no hwnd parameter
- * at all. A prior fix (native/NETMAN_NetworkUI.c) established that some
- * call sites intentionally pass their hWnd value where the real function
- * wants an hdc/int, but that was for the simpler UIPANEL_EndPaint, and the
- * unlock_param mapping for THIS function's extra argument is not
- * evidenced. Fabricating that mapping here would violate "do not simplify
- * assembly unless equivalence is proven" -- staying a loud stub instead.
- * Netman::ProcessMessage and GameSetupPanel are both plausibly reachable
- * (multiplayer / game-setup UI), so warn-once rather than a bare assert.
+ * This comment previously deferred the fix pending disassembly evidence
+ * for two open questions; both are now answered from 0x426B90's actual
+ * instructions:
+ *
+ * 1. Arity: `RET 0x10` confirms 4 stack args + ECX(this) = 5 params
+ *    total, matching every caller's arg count exactly -- the fix is a
+ *    pure signature/linkage correction, not an argument-count mismatch.
+ * 2. Param-2 ("hdc") IS read, in the unlock_flag==0 branch: it is passed
+ *    to a helper at 0x45B940 (the same "unlock primary surface" call
+ *    UIPANEL_EndPaint's own reconstruction attributes to
+ *    DDRAW_UnlockPrimary, just with an argument ui/UIPANEL.cpp's current
+ *    transcription omits -- a separate, pre-existing gap in that file,
+ *    not touched here). Concretely: when callers pass `self->hWnd` for
+ *    this position with unlock_flag=0 (the common "just end paint, no
+ *    HDC" shape), that hWnd value *is* forwarded to the real unlock
+ *    helper -- exactly the same "hwnd fed into a hdc-shaped slot" pattern
+ *    native/NETMAN_NetworkUI.c already established for the simpler
+ *    UIPANEL_EndPaint. When callers instead pass unlock_flag=1 with a
+ *    real HDC obtained from BeginPaint (`(int)hdc, 1, NULL` shape), that
+ *    branch never reads param-2 at all -- it reads param-3 (unlockParam)
+ *    and calls the primary surface's vtable slot 0x68 with it (a
+ *    ReleaseDC-shaped call), and returns immediately. Both caller shapes
+ *    were already passing correct values in the correct positions; only
+ *    the C++ declared types (mangled to a different, wrong-stub-bound
+ *    symbol) were wrong.
+ *
+ * All then-open callers (network/Netman.h/.cpp,
+ * ui/GameSetupPanel.cpp/GameSetupPanel_network.cpp, ui/NameEntryPanel.cpp,
+ * town/Town.cpp, game/BuildingPanel.cpp, native/NETMAN_SessionSettings.c,
+ * network/DPlayManager.cpp/NetworkPlayerList.cpp,
+ * input/Cursor_internal.h/Cursor_new_impls.cpp,
+ * graphics/LOCOBITMAP.cpp, shared/stubs_link001_batch4_network_world.cpp)
+ * are fixed to the real `(void* self, int hdc, int unlockParam,
+ * uint8_t unlockFlag, RECT* restrictRect)` signature
+ * (docs/landmine-sweep-worklist.md). This stub is confirmed dead via `nm`
+ * (zero undefined references to its mangled name,
+ * _Z18UIPANEL_EndPaintExPvS_ihS_, across every native and mingw-typecheck
+ * .o) and removed.
  * =================================================================== */
-void UIPANEL_EndPaintEx(void* panel, void* hwnd, int32_t hdc, uint8_t repaint, void* updateRect)
-{
-    (void)panel; (void)hwnd; (void)hdc; (void)repaint; (void)updateRect;
-    static bool warned = false;
-    if (!warned) {
-        std::fprintf(stderr,
-            "STUB: UIPANEL_EndPaintEx(void*,void*,int,uint8_t,void*) not implemented "
-            "(see docs/landmine-sweep-worklist.md; real impl ui/UIPANEL.cpp 0x426B90 "
-            "takes (self,hdc,unlock_param,flag,rect) with no separate hwnd) -- "
-            "paint-end dropped\n");
-        warned = true;
-    }
-}
 
 /* ===================================================================
  * SYMBOL: UIPANEL::StopSound(int)

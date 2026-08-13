@@ -125,6 +125,21 @@ bool   UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
 void   UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* 0x42A110 */
 size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 
+/* UIPANEL_EndPaintEx — real def: ui/UIPANEL.cpp:0x426B90, C++ linkage (not
+ * extern "C"), void(void* self, int hdc, int unlock_param, uint8_t
+ * unlock_flag, RECT* restrict_rect) — the 2nd param is `int hdc`, not
+ * `void* hwnd`/HWND. Was declared inside the extern "C" block below with a
+ * `HWND` 2nd param (and a bogus 0x42B2D0 address annotation -- that address
+ * disassembles to a block inside UIPANEL_Blit at 0x42B050, not this
+ * function) — both the linkage and the 2nd param type mismatched the real
+ * mangled symbol, so every one of this file's 17 call sites was a
+ * silent-wrong-stub landmine binding to shared/stubs_impl.cpp's host no-op
+ * instead of the real present pipeline (the identical landmine already
+ * fixed in native/NETMAN_NetworkUI.c; docs/landmine-sweep-worklist.md).
+ * Moved out of extern "C" with the correct 2nd-param type and address. */
+void   UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
+                          uint8_t unlock_flag, RECT* restrict_rect);  /* 0x426B90 */
+
 extern "C" {
     /* Resource management */
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
@@ -143,11 +158,9 @@ extern "C" {
     int    UI_CreateFullWindow(void* self, int nCmdShow, HWND hParent,
                                int x, int y, int nWidth, int nHeight,
                                void* hMenu, void* hIcon, UINT classStyle); /* 0x425B70 */
-    void   UIPANEL_EndPaintEx(void* self, HWND hWnd, int unk1,
-                              byte unk2, RECT* rect);                /* 0x42B2D0 */
 
-    /* UIPANEL_Blit and UIPANEL_CreateSurface declared above, outside this
-     * extern "C" block (C++ linkage). */
+    /* UIPANEL_Blit, UIPANEL_CreateSurface, and UIPANEL_EndPaintEx declared
+     * above, outside this extern "C" block (C++ linkage). */
 
     /* Tile map */
     void   TileMap_InvalidateRect(void* tilemap, int left, int top,
@@ -927,7 +940,7 @@ void Town::on_update(int32_t /* param */)
     this->postcard_update_ui(8);
 
     this->clear_postcard_ui();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
     SetFocus(this->hWnd);
 
@@ -1267,11 +1280,11 @@ LRESULT Town::on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             this->repaint_requested = 0;
             this->frame_counter = 0;
             this->postcard_update_buttons();
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         } else if (this->frame_counter > 19) {
             this->repaint_requested = 1;
             this->postcard_update_buttons();
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
 
         if (this->timer_counter != 0) {                          /* +0x5F0 */
@@ -1498,7 +1511,7 @@ LRESULT Town::on_key_down(HWND hWnd, UINT msg, WPARAM wParam,
     if (this->postcard_active && !this->flag_E8 && !this->audio_playing) {
         if (wParam == 0x1B || wParam == 0x51) {   /* ESC or Q */
             this->postcard_dlg_proc(2);
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
             Sleep(0x96);
             PlaySound(0x5015);
 
@@ -1677,11 +1690,11 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             this->repaint_requested = 0;
             this->frame_counter = 0;
             this->postcard_update_buttons();
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         } else {
             this->repaint_requested = 1;
             this->postcard_update_buttons();
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 
@@ -1695,7 +1708,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case 2:
         if (this->postcard_data == nullptr) {
             this->postcard_dlg_proc(2);
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
             Sleep(0x96);
             PlaySound(0x5015);
             this->hide();                        /* vtable[1] */
@@ -1706,7 +1719,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case 3:
         if (this->postcard_data == nullptr) {
             this->postcard_dlg_proc(3);
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
             Sleep(0x96);
             /* g_postcard vtable[2] (PostcardAlbum show). */
             static_cast<PostcardAlbum*>(g_postcard)->show();
@@ -1721,7 +1734,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             this->postcard_update_ui(8);
         }
         this->postcard_update_ui(7);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         return 0;
 
     case 4:
@@ -1729,7 +1742,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             this->set_mode(this->childCount1, this->childObj1, 0, 1);
         }
         this->postcard_dlg_proc(4);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
         Cursor_Show(g_cursor);
         if (this->postcard_data) {
@@ -1749,7 +1762,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         this->postcard_dlg_proc(5);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
         this->postcard_update_ui(5);
         this->delete_postcard();
@@ -1777,7 +1790,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         this->postcard_dlg_proc(6);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
         this->postcard_update_ui(6);
         /* Toggle the player-count flag (+0x610). */
@@ -1793,7 +1806,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             this->clear_postcard_ui();
             if (!this->is_host && this->selected_player == nullptr) {
                 this->postcard_update_ui(8);
-                UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+                UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                 return 0;
             }
             goto end_paint_ex;
@@ -1802,7 +1815,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
             goto case_8_path;
         }
         this->postcard_dlg_proc(7);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
         this->list_postcards();
         this->postcard_update_ui(7);
@@ -1823,7 +1836,7 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         this->postcard_update_ui(7);
         this->clear_postcard_ui();
     end_paint_ex:
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         return 0;
 
     case 9:
@@ -1835,14 +1848,14 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
         this->timer_counter = 8;
         this->postcard_dlg_proc(9);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
         this->postcard_update_ui(9);
         PlaySound(0x5276);
         break;
     }
 
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     return 0;
 
 set_mode_base_pair:
@@ -2348,7 +2361,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
 
         record_set_need_connect(this->selected_player, 0);
         this->clear_postcard_ui();
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         return;
     }
 
@@ -2369,7 +2382,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
 
         record_set_need_connect(this->selected_player, 0);
         this->clear_postcard_ui();
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         return;
     }
 
@@ -2446,7 +2459,7 @@ void Town::save_received_postcard(uint32_t unused_arg)
 
     /* Step 7: clean up the postcard UI. */
     this->clear_postcard_ui();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* ================================================================== */

@@ -736,8 +736,12 @@ void UIEntity_Ctor(void);
 void UIEntity_Ctor(void) { /* host no-op */ }
 /* UIPANEL_Blit(void*,int...int) and UIPANEL_BeginPaint(void*): duplicates
  * of shared/link_stubs.cpp / ui/UIPANEL.cpp (LINK-001); removed here. */
-void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*);
-void UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) { /* host no-op */ }
+/* UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) — this wrong
+ * (2nd-param void*) overload's host no-op was the silent-wrong-stub every
+ * mis-declared caller in the tree bound to (docs/landmine-sweep-worklist.md).
+ * Removed 2026-08-13 after fixing all known callers; confirmed via `nm`
+ * that no remaining .o (native or mingw-typecheck) has an undefined
+ * reference to its mangled name (_Z18UIPANEL_EndPaintExPvS_ihP4RECT). */
 /* Returns `self` (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
  * cluster): the real definition (0x42A110, graphics/LOCOBITMAP.cpp
  * UIPANEL_CreateSurface(UIPANEL_Surface*)) is a placement-style constructor

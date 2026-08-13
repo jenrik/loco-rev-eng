@@ -1472,7 +1472,7 @@ redraw_if_visible:
         GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
         if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 }
@@ -1558,7 +1558,7 @@ void Netman::HandlePlayerJoin()
         GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
         if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     } else {
         this->ResetNetworkState();
@@ -1671,7 +1671,7 @@ void Netman::RemoveInboundTrain(int32_t dpId)
         GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
         if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 }
@@ -1731,7 +1731,7 @@ void Netman::HandlePlayerLeave(TrainMessage* msg)
         GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
         if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 }
@@ -1817,7 +1817,7 @@ void Netman::SyncGameState(TrainMessage* msg)
         GameSetupPanel* panel = static_cast<EditWindow*>(g_ui_main)->pPanelB;
         if (IsWindowVisible(panel->hWnd)) {
             CGWND_GameSetup_DrawGrid_Thunk(panel);
-            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, NULL);
+            UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 #endif
@@ -2647,14 +2647,23 @@ void NETMAN_ReceiveLayoutSelect(Netman* netman)
     Train_QueueMessage(_g_train, message);
 
 #ifdef _WIN32
-    void* panel = g_ui_main != nullptr
-        ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(g_ui_main) + 0x220)
+    /* `g_ui_main + 0x220` is EditWindow::pPanelB (ui/EditWindow.h) -- the
+     * same typed accessor this file's other 8 call sites already use
+     * (e.g. line ~1472's `static_cast<EditWindow*>(g_ui_main)->pPanelB`).
+     * This site previously read the identical slot via a raw `+0x220`
+     * offset (and pPanelB->hWnd via a raw `+8` offset below it) instead of
+     * that established typed pattern -- both replaced here rather than
+     * left as a second, inconsistent way to reach the same field. */
+    GameSetupPanel* panel = g_ui_main != nullptr
+        ? static_cast<EditWindow*>(g_ui_main)->pPanelB
         : nullptr;
-    if (panel != nullptr && IsWindowVisible(*reinterpret_cast<void**>(
-            reinterpret_cast<uint8_t*>(panel) + 8))) {
+    if (panel != nullptr && IsWindowVisible(panel->hWnd)) {
         CGWND_GameSetup_DrawGrid_Thunk(panel);
         UIPANEL_EndPaintEx(panel,
-            *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(panel) + 8),
+            // ABI_BOUNDARY: opaque OS HWND round-tripped through the
+            // original function's int hdc param, matching
+            // ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper.
+            static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)),
             0, 0, nullptr);
     }
 #endif

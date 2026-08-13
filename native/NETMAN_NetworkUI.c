@@ -57,6 +57,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -259,16 +260,27 @@ static void NETMAN_ApplyProviderModes(NameEntryPanel* panel, GameConfig* config)
  * loud, asserting stub (matching ui/UI_ChildWindow.cpp's precedent) rather
  * than a silent no-op or a raw, unresolvable function-pointer literal
  * (which is what this file previously embedded — a bare address with no
- * matching implementation anywhere in the tree). */
+ * matching implementation anywhere in the tree).
+ *
+ * Uses std::abort(), not assert(), for the fallthrough guard: this
+ * project's meson.build does not force `b_ndebug=false` (it only defaults
+ * there via the "debug" buildtype -- `meson introspect --buildoptions`
+ * shows `b_ndebug` is a normal, overridable option, and
+ * b_ndebug=true/if-release compiles assert() to nothing). An assert-only
+ * guard would silently fall through to `return DefWindowProcA(...)` in an
+ * NDEBUG build -- exactly the "internal no-op/null-return stub" this
+ * repo's stub policy forbids. std::abort() fails the same way in every
+ * build configuration; the fprintf above already carries the diagnostic
+ * message an assert(false, "...") string would have duplicated. */
 static LRESULT __stdcall NETMAN_EditControlSubclassProc(void* hWnd, uint32_t msg,
                                                           uint32_t wParam, uint32_t lParam)
 {
+    (void)hWnd; (void)msg; (void)wParam; (void)lParam;
     std::fprintf(stderr,
         "STUB: NETMAN_EditControlSubclassProc (0x4417E0) reached on host build — "
         "the session-name edit control's subclass WndProc is not yet decompiled "
         "(see PROGRESS.md).\n");
-    assert(false && "NETMAN_EditControlSubclassProc (0x4417E0): not yet decompiled");
-    return DefWindowProcA(hWnd, msg, wParam, lParam);
+    std::abort();
 }
 
 /* ================================================================== */

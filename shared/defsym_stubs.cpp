@@ -103,8 +103,15 @@ void UIPANEL_BeginPaint() { /* host no-op */ }
  * docs/landmine-sweep-worklist.md. */
 void UIPANEL_CreateSurface();
 void UIPANEL_CreateSurface() { /* host no-op */ }
-void UIPANEL_EndPaintEx();
-void UIPANEL_EndPaintEx() { /* host no-op */ }
+/* UIPANEL_EndPaintEx() (zero-arg, extern "C") removed 2026-08-13: this was
+ * the plain-C-linkage wrong stub that town/Town.cpp and
+ * native/NETMAN_SessionSettings.c used to silently bind to (their own
+ * correctly-shaped declarations were wrongly inside an extern "C" block,
+ * giving them C linkage instead of the real C++-mangled one — extern "C"
+ * doesn't mangle by param count/type, so any extern-"C" declaration of
+ * this name collided here regardless of its params). Fixed by moving
+ * both declarations out of extern "C" (docs/landmine-sweep-worklist.md);
+ * confirmed zero referrers left via nm before removing this stub. */
 void UI_WindowBase_BaseDtor();
 void UI_WindowBase_BaseDtor() { /* host no-op */ }
 void UI_WindowBase_Ctor();

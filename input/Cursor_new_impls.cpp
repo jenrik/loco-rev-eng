@@ -203,7 +203,7 @@ void Cursor::on_update(int32_t /* param */)
     /* Branch based on palette_start_idx */
     if (this->palette_start_idx < 0) {
         /* Tab-switch mode: end paint, reset surface flags, dispatch */
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         this->surf_a_dirty = 0;                          /* +0x594 */
         this->surf_b_dirty = 0;                          /* +0x59C */
         this->surface_toggle = 0;                        /* +0x58C */
@@ -212,7 +212,7 @@ void Cursor::on_update(int32_t /* param */)
         /* Normal editor mode: draw color palette, reset sprite, end paint */
         this->draw_color_palette(nullptr, 0);
         Sprite_SetState(this->sprite_1C0, 0, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     }
 
     /* Handle delayed focus + audio narration */
@@ -248,7 +248,7 @@ void Cursor::handle_color_swatch_click(LONG x, LONG y)
             if (PtInRect(spriteRect, pt)) {
                 /* Highlight the swatch */
                 Sprite_SetState(this->editor_sprites[i], 1, nullptr);
-                UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+                UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                 Sleep(0x96);  /* 150ms pause */
 
                 /* Copy RGB from palette table to active color */
@@ -274,7 +274,7 @@ void Cursor::handle_color_swatch_click(LONG x, LONG y)
                     }
                 }
 
-                UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+                UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                 return;
             }
         }
@@ -314,7 +314,7 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
     if (component == 0) {
         /* Red channel */
         Sprite_SetState(this->sprite_2A4, 1, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
         if (this->color_r < 0xFF && direction != 0) {
             if (this->timer_id_198 < 1) {
@@ -332,7 +332,7 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
     } else if (component == 1) {
         /* Green channel */
         Sprite_SetState(this->sprite_2A8, 1, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
         if (this->color_g < 0xFF && direction != 0) {
             if (this->timer_id_198 < 1) {
@@ -350,7 +350,7 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
     } else if (component == 2) {
         /* Blue channel */
         Sprite_SetState(this->sprite_2AC, 1, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
         if (this->color_b < 0xFF && direction != 0) {
             if (this->timer_id_198 < 1) {
@@ -387,7 +387,7 @@ void Cursor::adjust_color_component(int32_t component, uint8_t direction, int32_
 
     /* Blit edit preview */
     this->blit_edit_preview();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* ================================================================== */
@@ -468,7 +468,8 @@ void Cursor::draw_color_bars(uint8_t reset_buttons)
     DeleteObject(brushBlue);
 
     /* End paint with HDC */
-    UIPANEL_EndPaintEx(this, this->hWnd,
+    UIPANEL_EndPaintEx(this,
+                       static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)),  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                        static_cast<int>(reinterpret_cast<intptr_t>(hdc)),
                        1, nullptr);
 
@@ -882,7 +883,7 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     this->draw_color_palette(nullptr, 0);
     UIPANEL_EndPaint(this);
     Sprite_SetState(this->sprite_1C0, 0, nullptr);
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
     /* Pump messages */
     CGWND_PumpMessages(0);
@@ -1214,7 +1215,8 @@ void Cursor::update_scroll_buttons()
         SetTextColor(hdc, oldColor);
         SetBkMode(hdc, oldBkMode);
 
-        UIPANEL_EndPaintEx(this, this->hWnd,
+        UIPANEL_EndPaintEx(this,
+                           static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)),  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                            static_cast<int>(reinterpret_cast<intptr_t>(hdc)),
                            1, nullptr);
 
@@ -1297,7 +1299,7 @@ void Cursor::show_file_dialog()
     this->sprite_width_hi() = 1;                              /* +0x3D */
     this->sprite_height() = 0;                                /* +0x40 */
 
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* ================================================================== */
@@ -1320,7 +1322,7 @@ void Cursor::handle_locomotive_select(uint32_t index)
                 static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
                 reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
                 0, 1);
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
 
         this->editor_state = 2;
@@ -1344,7 +1346,7 @@ void Cursor::handle_locomotive_select(uint32_t index)
             static_cast<uint8_t>(this->bonus_ids[index & 0xFF]) + 1;   /* +0x370, no bounds check */
     }
     this->blit_edit_preview();
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* ================================================================== */
@@ -1402,11 +1404,11 @@ void Cursor::handle_toolbar_hover(LONG x, LONG y)
         static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
         reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
         0, 1);
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
     this->handle_tab_change();
     this->draw_postcard_preview(1);
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     this->draw_locomotive_preview(1);
 }
 
@@ -1420,7 +1422,7 @@ void Cursor::handle_locomotive_list_click(LONG x, LONG y)
 
     if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_148) + 4), pt)) {
         Sprite_SetState(this->sprite_148, 1, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         if (this->scroll_top_idx > 0) {                    /* +0x170 */
             int32_t next = this->scroll_top_idx - this->scroll_visible_count; /* +0x17C */
             this->scroll_top_idx = (next < 0) ? 0 : next;
@@ -1428,20 +1430,20 @@ void Cursor::handle_locomotive_list_click(LONG x, LONG y)
         }
         Sleep(0x32);
         Sprite_SetState(this->sprite_148, 0, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         return;
     }
 
     if (PtInRect(reinterpret_cast<RECT*>(reinterpret_cast<uint8_t*>(this->sprite_14C) + 4), pt)) {
         Sprite_SetState(this->sprite_14C, 1, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         if (this->scroll_end_flag == 0) {                   /* +0x180 */
             this->scroll_top_idx = this->scroll_bottom_idx + 1; /* +0x170 = +0x174 + 1 */
             this->update_scroll_buttons();
         }
         Sleep(0x32);
         Sprite_SetState(this->sprite_14C, 0, nullptr);
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         return;
     }
 
@@ -1556,7 +1558,7 @@ void Cursor::upload_custom_content()
             NET_FindPlayer(4, key);
             this->obj_184->upload_id = 0;
             this->blit_edit_preview();
-            UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 
@@ -1699,7 +1701,7 @@ void Cursor::upload_custom_content()
         int uploadState = (this->obj_184 != nullptr && this->obj_184->upload_id != 0) ? 1 : 0;
         Sprite_SetState(this->sprite_2EC, uploadState, nullptr);
     }
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
     /* Kill timer if active */
     if (this->timer_id_18C != 0) {
@@ -1728,5 +1730,5 @@ void Cursor::upload_custom_content()
         reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
         0, 1);
 
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }

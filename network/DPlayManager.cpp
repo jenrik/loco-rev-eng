@@ -53,8 +53,13 @@ void* __cdecl operator_new(size_t size);                   /* 0x465CE0 */
  * to the no-op stub `UIPANEL_BeginPaint(int32_t)` in shared/link_stubs.cpp
  * instead of the real implementation). */
 HDC  __fastcall UIPANEL_BeginPaint(void* self);           /* 0x426B00 */
-void __thiscall UIPANEL_EndPaintEx(void* panel, void* param2, int32_t hdc,
-                                     uint8_t param4, RECT* param5); /* 0x426B90 */
+/* Real def: ui/UIPANEL.cpp:0x426B90 — the 2nd param is `int hdc`, not
+ * `void*`. Was declared here with a void* 2nd param — a distinct mangled
+ * symbol (call-0-class landmine, same shape as UIPANEL_BeginPaint above)
+ * that bound to shared/stubs_impl.cpp's host no-op instead of the real
+ * present pipeline (docs/landmine-sweep-worklist.md). */
+void __thiscall UIPANEL_EndPaintEx(void* panel, int32_t hdc, int32_t unlockParam,
+                                     uint8_t unlockFlag, RECT* restrictRect); /* 0x426B90 */
 /* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
  * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
  * uniformly int32_t, which doesn't match the real mixed uint32_t/int32_t
@@ -208,7 +213,7 @@ void RenderConnectionPanel(NameEntryPanel* panel)
 
     UIPANEL_EndPaintEx(
         panel,
-        panel->hWnd,                        /* +0x08: panel handle/HWND */
+        static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)),  /* +0x08: panel handle/HWND — ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param */
         static_cast<int32_t>(reinterpret_cast<intptr_t>(hdc)),
         1,                              /* repaint flag */
         nullptr

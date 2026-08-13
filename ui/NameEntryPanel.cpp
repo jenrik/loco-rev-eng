@@ -525,7 +525,8 @@ LRESULT NameEntryPanel::on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     SelectObject(hdc, oldFont);
     SetTextColor(hdc, oldTextColor);
 
-    UIPANEL_EndPaintEx(this, this->hWnd,
+    UIPANEL_EndPaintEx(this,
+                       static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)),  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                        static_cast<int32_t>(reinterpret_cast<intptr_t>(hdc)), 1, nullptr);
     this->sprite5->setState(0, nullptr);
 

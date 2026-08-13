@@ -88,6 +88,19 @@ void*  operator_new(size_t size);                       /* 0x465CE0 */
  * must NOT be inside the extern "C" block below. */
 size_t UIPANEL_Surface_Size();
 
+/* UIPANEL_EndPaintEx — real def: ui/UIPANEL.cpp:0x426B90, C++ linkage (not
+ * extern "C"), void(void* self, int hdc, int unlock_param, uint8_t
+ * unlock_flag, RECT* restrict_rect) — the 2nd param is `int hdc`, not
+ * `HWND hWnd`. Was declared inside the extern "C" block below with an HWND
+ * 2nd param — both the linkage and the 2nd param type mismatched the real
+ * mangled symbol, so both of this file's call sites were a silent-
+ * wrong-stub landmine binding to shared/stubs_impl.cpp's host no-op
+ * instead of the real present pipeline (the identical landmine already
+ * fixed in native/NETMAN_NetworkUI.c; docs/landmine-sweep-worklist.md).
+ * Moved out of extern "C" with the correct 2nd-param type. */
+void   UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
+                          uint8_t unlock_flag, RECT* restrict_rect);  /* 0x426B90 */
+
 extern "C" {
     /* Resource management */
     void*  ResourceManager_GetById(void* resmgr, int id);    /* 0x44CB40 */
@@ -96,7 +109,6 @@ extern "C" {
 
     /* UIPANEL */
     int    UIPANEL_BeginPaint(void* panel);                  /* 0x42B0C0 — returns HDC */
-    void   UIPANEL_EndPaintEx(void* panel, HWND hWnd, int hdc, byte flag, RECT* rect);
     void*  UIPANEL_CreateSurface(void* obj);                  /* 0x42A110 */
 
     /* GDI */
@@ -315,7 +327,8 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
     this->draw_color_dot(hdc, cell_right - 16, dot_y, player_idx);
 
     /* Step 7: End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd,
+    UIPANEL_EndPaintEx(this,
+                       static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)),  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                        static_cast<int>(reinterpret_cast<uintptr_t>(hdc)),
                        1, nullptr);  /* +0x08 = hWnd */
 }
@@ -608,7 +621,8 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
     DeleteObject(SelectObject(hdc, old_pen));
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd,
+    UIPANEL_EndPaintEx(this,
+                       static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)),  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                        static_cast<int>(reinterpret_cast<uintptr_t>(hdc)),
                        1, nullptr);
 }

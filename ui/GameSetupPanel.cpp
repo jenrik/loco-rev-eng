@@ -99,9 +99,18 @@ extern bool   UIPANEL_Blit(void* sprite, uint32_t dstX, uint32_t dstY,
                            uint32_t srcX, uint32_t srcY, int32_t srcW,
                            uint32_t srcH, uint32_t mode);            /* 0x42B050 */
 extern void*  UIPANEL_BeginPaint(void* self);              /* 0x426B00 */
-extern void   UIPANEL_EndPaintEx(void* self, HWND hWnd,
-                                  void* hdc, byte flags,
-                                  void* rect);              /* 0x426B90 */
+/* UIPANEL_EndPaintEx: real def is network/Netman.h's declaration (included
+ * above), void(void* self, int hdc, int unlockParam, uint8_t unlockFlag,
+ * RECT* restrictRect) — a distinct, wrong local overload
+ * (void*, HWND, void*, byte, void*) used to be declared here too. It was
+ * dead code: every one of this file's call sites passes an explicit `int`
+ * 3rd argument, which can only bind to Netman.h's int32_t-typed overload
+ * (nullptr/void* can't implicitly convert to int), so this redeclaration
+ * never actually resolved any call — but it was a live landmine risk (a
+ * future nullptr-typed call site would have silently rebound to it
+ * instead of the real function). Removed rather than fixed in place, to
+ * avoid a second declaration of the same real function
+ * (docs/landmine-sweep-worklist.md). */
 
 /* UI_CenterWindow — TODO: decompile 0x425A50 */
 extern void   UI_CenterWindow(void* param1, void* param2); /* 0x425A50 */
@@ -424,7 +433,7 @@ void GameSetupPanel::on_update(int32_t unused)
     this->renderFlag = 1;                 /* +0x1B8 */
 
     /* Step 8: End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, static_cast<int>(0), 0, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), static_cast<int>(0), 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* ================================================================== */
@@ -616,7 +625,7 @@ void GameSetupPanel::drawLayoutList(LayoutListNode* list)
     this->lineHeight = lineHeight + 4;             /* +0x100 */
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)hdc, 1, NULL);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), (int)hdc, 1, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* ================================================================== */
@@ -679,7 +688,7 @@ void GameSetupPanel::drawTitle()
     SelectObject(hdc, oldFont);
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd, (int)hdc, 1, NULL);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), (int)hdc, 1, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
     /* Adjust bottom of draw rect for alignment calculation */
     drawRect->bottom = textHeight - 4 + drawRect->top;
@@ -816,7 +825,7 @@ void GameSetupPanel::drawGrid()
                     SelectObject(hdc, oldFont);
                     SetBkMode(hdc, oldBkMode);
                     SetTextColor(hdc, oldTextColor);
-                    UIPANEL_EndPaintEx(this, this->hWnd, (int)hdc, 1, NULL);
+                    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), (int)hdc, 1, NULL);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                 }
                 insertedCount++;
             } else {

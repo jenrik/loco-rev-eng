@@ -629,11 +629,16 @@ void UIPANEL_BeginPaint(int32_t){}       /* _Z18UIPANEL_BeginPainti */
  * docs/landmine-sweep-worklist.md, UIPANEL_Blit caller cluster. Removed as
  * dead code (zero referrers, confirmed via nm across every lego_loco.p/*.o). */
 
-/* UIPANEL_EndPaintEx — C++ overloads */
-void UIPANEL_EndPaintEx(void*,int32_t,int32_t,uint8_t,void*);
-void UIPANEL_EndPaintEx(void*,int32_t,int32_t,uint8_t,void*){}        /* _Z18UIPANEL_EndPaintExPviihS_ */
-void UIPANEL_EndPaintEx(void*,void*,void*,uint8_t,void*);
-void UIPANEL_EndPaintEx(void*,void*,void*,uint8_t,void*){}            /* _Z18UIPANEL_EndPaintExPvS_S_hS_ */
+/* UIPANEL_EndPaintEx — two wrong C++ overloads
+ * (void*,int32_t,int32_t,uint8_t,void*) [_Z18UIPANEL_EndPaintExPviihS_,
+ * 5th param void* instead of RECT*] and
+ * (void*,void*,void*,uint8_t,void*) [_Z18UIPANEL_EndPaintExPvS_S_hS_,
+ * 2nd/3rd params void* instead of int] — both were silent-wrong-stub
+ * no-ops that mis-declared callers across the tree bound to instead of
+ * the real ui/UIPANEL.cpp implementation
+ * (docs/landmine-sweep-worklist.md). Removed 2026-08-13 after fixing
+ * all known callers; confirmed via `nm` that no remaining .o (native or
+ * mingw-typecheck) has an undefined reference to either mangled name. */
 
 /* UI_CreateChildWindow — real implementation now in ui/UI_ChildWindow.cpp
  * (0x424AF0, extern "C"). The C++-mangled overloads that used to shadow

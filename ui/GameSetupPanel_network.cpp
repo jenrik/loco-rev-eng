@@ -21,7 +21,18 @@ extern void* _g_train;
 extern void* operator_new(std::size_t size);
 extern void GLOBAL_free(void* pointer);
 extern void EditorState_StartNewGame(void* panel);  // 0x40A150
-extern void UIPANEL_EndPaintEx(void* panel, HWND window, void* dc, byte flags, void* rect);
+/* Real def: ui/UIPANEL.cpp:0x426B90, void(void* self, int hdc,
+ * int unlockParam, uint8_t unlockFlag, RECT* restrictRect). Was declared
+ * (void*, HWND, void*, byte, void*) here -- three mismatched param types
+ * (2nd, 3rd, 5th), mangling to a distinct symbol from the real function
+ * (and from network/Netman.h's own differently-wrong overload of the
+ * same name, included above) -- this file's `nullptr`-typed 3rd-arg call
+ * sites bind to *this* local overload, not Netman.h's, since nullptr_t
+ * converts implicitly to void* but not to Netman.h's int32_t (same
+ * silent-wrong-stub landmine class fixed for the other UIPANEL_EndPaintEx
+ * callers in docs/landmine-sweep-worklist.md). */
+extern void UIPANEL_EndPaintEx(void* panel, int32_t hdc, int32_t unlockParam,
+                                uint8_t unlockFlag, RECT* restrictRect);
 #ifndef _WIN32
 extern char* _g_netman_state;
 #endif
@@ -78,7 +89,7 @@ void GameSetupPanel::ConnectToNetworkGame(int32_t index)
     if (this->renderFlag != 0) {
         this->drawGrid();
         this->updateTitle();
-        UIPANEL_EndPaintEx(this, this->hWnd, nullptr, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     }
 #endif
 }
@@ -106,7 +117,7 @@ void GameSetupPanel::SelectLayoutEntry(int32_t index)
         this->field_F8 = static_cast<int32_t>(reinterpret_cast<intptr_t>(selected->name));
         _g_netman->ResetNetworkState();
         this->updateTitle();
-        UIPANEL_EndPaintEx(this, this->hWnd, nullptr, 0, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         _g_netman->StopSession();
         NETMAN_StartClientSession();
         NETMAN_StartHostSession();
@@ -132,7 +143,7 @@ void GameSetupPanel::HandleMapClick(int32_t clickX, int32_t clickY)
             this->SendScenarioSelect(scenario);
             this->updateTitle();
             this->drawGrid();
-            UIPANEL_EndPaintEx(this, this->hWnd, nullptr, 0, nullptr);
+            UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 }

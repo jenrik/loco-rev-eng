@@ -120,7 +120,26 @@ void  __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
  * docs/landmine-sweep-worklist.md). */
 void  __fastcall NETMAN_CreateSession(NameEntryPanel* panelA);  /* 0x4419C0 */
 void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
-void  __thiscall NETMAN_SendPacket(void* netman);               /* 0x43CDF0 */
+/* Real def: native/NETMAN_SessionSettings.c, 0x440EA0 (misnamed in Ghidra;
+ * saves NetSettings.dat via CreateFileA/WriteFile) -- `void(GameConfig*)`,
+ * not `void(void*)`. The prior `void*`-typed declaration here (with a
+ * bogus 0x43CDF0 annotation -- that address is mid-body of
+ * Train_SendPlayerInfo, 0x43CCC0, not this function) was a genuine call-0:
+ * no definition anywhere matches its mangled name. network/Netman.h's own
+ * declaration of this same function (fixed in the native-session-glue-
+ * cluster session) already uses `GameConfig*`. `_g_netman_state` below is
+ * this file's own `char*`-typed view of the same 0x4FD3A8 singleton that
+ * class is defined over (see native/NETMAN_NetworkUI.c's `_g_netman_data`
+ * comment for the cross-file corroboration) -- only this one call site is
+ * retyped here, not the rest of this file's ~15 other raw `char*`-offset
+ * reads of `_g_netman_state`, which is a separate, larger refactor left
+ * for its own session. This call site is currently unreachable: it lives
+ * in EditWindow::onPlayerNameChanged(), which has zero callers anywhere
+ * in the tree (the real Win32 direct-dispatch call at 0x422AB2 is not
+ * wired up here), so this fix carries none of the live-unguarded-
+ * file-I/O risk a reachable call site would. */
+class GameConfig;
+void  __fastcall NETMAN_SendPacket(GameConfig* packetPtr);      /* 0x440EA0 */
 void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x4616C0 */
 /* (was previously mis-annotated 0x466EA0, which is CRT_strncpy — unrelated) */
 #ifdef _WIN32
@@ -807,7 +826,12 @@ void EditWindow::onPlayerNameChanged()
 #endif
 
     /* Send network packet */
-    NETMAN_SendPacket(_g_netman_state);
+    /* _g_netman_state (char*) is this file's own mistyped view of the same
+     * 0x4FD3A8 GameConfig singleton NETMAN_SendPacket's real parameter
+     * models -- see the declaration comment above. Not a cross-class
+     * reinterpret; a corrected view of a global this file never had typed
+     * as GameConfig in the first place. */
+    NETMAN_SendPacket(reinterpret_cast<GameConfig*>(_g_netman_state));
 
     /* Transition based on network state */
     if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {

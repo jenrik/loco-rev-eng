@@ -94,11 +94,15 @@ bool  UIPANEL_Blit(void* panel, uint32_t src_left, uint32_t src_top,
                    int32_t dst_right, uint32_t dst_bottom,
                    uint32_t flags);                                      /* @0x42B050 */
 
-/* The following were also inside the extern "C" block above with correct
- * param types but wrong linkage — real defs are C++-mangled, not extern
- * "C" (same call-0 landmine shape as UIPANEL_Blit above). */
-void  UIPANEL_EndPaintEx(void* self, HWND hWnd, int32_t param1,
-                          uint8_t flag, RECT* rect);                     /* @0x426B90 */
+/* The following were also inside the extern "C" block above with wrong
+ * linkage — real defs are C++-mangled, not extern "C" (same call-0
+ * landmine shape as UIPANEL_Blit above). UIPANEL_EndPaintEx additionally
+ * had a wrong 2nd param type: the real def (ui/UIPANEL.cpp:0x426B90) takes
+ * `int hdc`, not `HWND hWnd` — HWND (== void*) mangles to a distinct
+ * symbol from the real function, so both fixes were needed, not just the
+ * linkage (docs/landmine-sweep-worklist.md). */
+void  UIPANEL_EndPaintEx(void* self, int32_t hdc, int32_t unlockParam,
+                          uint8_t unlockFlag, RECT* restrictRect);       /* @0x426B90 */
 void  UIPANEL_BeginPaint(void* self);                                   /* @0x426B00 */
 void  CGWND_SetMode(int mode);                                         /* @0x408130 */
 
@@ -763,7 +767,8 @@ void PostcardAlbum::RenderAllTiles()
     }
 
     /* End paint */
-    UIPANEL_EndPaintEx(this, this->hWnd,
+    UIPANEL_EndPaintEx(this,
+                       static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)),  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
                        static_cast<int32_t>(reinterpret_cast<intptr_t>(hdc)),
                        0x01, nullptr);
 
@@ -1082,7 +1087,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
         }
         this->BlitElement(5);                      /* @0x403E80 */
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);  /* @0x426B90 */
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  /* @0x426B90 — ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper) */
         Sleep(0x96);                               /* 150ms delay */
         this->UpdateSprite(5);                     /* @0x403BA0 */
 
@@ -1115,7 +1120,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
             return 0;
         }
         this->BlitElement(6);                      /* @0x403E80 */
-        UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);  /* @0x426B90 */
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  /* @0x426B90 — ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper) */
         Sleep(0x96);                               /* 150ms delay */
         this->UpdateSprite(6);                     /* @0x403BA0 */
 
@@ -1141,7 +1146,7 @@ LRESULT PostcardAlbum::PaintWindow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 
 render:
     this->RenderAllTiles();                        /* @0x404AC0 */
-    UIPANEL_EndPaintEx(this, this->hWnd, 0, 0, nullptr);  /* @0x426B90 */
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  /* @0x426B90 — ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper) */
     return 0;
 }
 

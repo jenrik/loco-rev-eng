@@ -56,10 +56,17 @@ extern char*   _g_netman_state;                     /* 0x4FD3A8 — host/join me
 void NETMAN_StartClientSession();                   /* real def: network/Netman.cpp, 0x43F030 */
 void DPLAY_CopyPlayerData(void* dstSlot, const void* packet); /* real def: network/Netman.cpp, 0x4426D0 */
 void Train_QueueMessage(void* train, TrainMessage* msg);      /* real def: game/Train_network.cpp, 0x4393D0 */
-void UIPANEL_EndPaintEx(void* panel, HWND window, void* dc, uint8_t flags, void* rect); /* real def:
-                                                        ui/UIPANEL_Surface.cpp (see
-                                                        ui/GameSetupPanel_network.cpp's identical
-                                                        local declaration) */
+/* Real def: ui/UIPANEL.cpp:0x426B90, void(void* self, int hdc,
+ * int unlockParam, uint8_t unlockFlag, RECT* restrictRect) — the 2nd
+ * param is `int hdc`, not `HWND window`, and the 3rd/5th are `int`/`RECT*`,
+ * not `void*`. Was declared (void*, HWND, void*, uint8_t, void*) here,
+ * a distinct mangled symbol from the real function (ui/GameSetupPanel_
+ * network.cpp had the identical wrong declaration, fixed separately —
+ * see docs/landmine-sweep-worklist.md). All 4 call sites below already
+ * pass an `hWnd`-as-`hdc` value and integer literal `0` for unlockParam,
+ * matching the established pattern once the declaration is corrected. */
+void UIPANEL_EndPaintEx(void* panel, int32_t hdc, int32_t unlockParam,
+                         uint8_t unlockFlag, RECT* restrictRect); /* 0x426B90 */
 uintptr_t SetTimer(HWND hWnd, uintptr_t nIDEvent, UINT uElapse,
                     void (*lpTimerFunc)(HWND, UINT, uintptr_t, DWORD)); /* real def:
                                                         graphics/sdl3_window.cpp */
@@ -597,7 +604,7 @@ void EditorState_LoadExistingGame(void* uiPanel)
         panel->loadLayouts(true);
     }
     panel->drawGrid();
-    UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
 
 /* EditorState_HandleNetworkGame — 0x40A300. network/Netman.h:258. */
@@ -611,7 +618,7 @@ void EditorState_HandleNetworkGame(void* uiPanel)
         panel->updateTitle();
     }
     panel->drawGrid();
-    UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+    UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     panel->SendScenarioSelect(0);
 }
 
@@ -676,7 +683,7 @@ void EditorState_SelectLayout(void* uiPanel, int32_t layoutData)
         panel->SelectLayoutEntry(0);
         if (panel->renderFlag != 0) {
             panel->drawLayoutList(panel->layoutList);
-            UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+            UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
     }
 }
@@ -690,7 +697,7 @@ void EditorState_SetDifficulty(void* uiPanel, int32_t difficulty)
     panel->field_110 = difficulty;
     if ((_g_netman_state == nullptr || _g_netman_state[8] == 0) && panel->renderFlag != 0) {
         panel->updateTitle();
-        UIPANEL_EndPaintEx(panel, panel->hWnd, 0, 0, nullptr);
+        UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     }
 }
 

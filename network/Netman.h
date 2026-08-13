@@ -262,8 +262,20 @@ void  EditorState_StartGameTimer(int32_t* uiPanel);    /* was GAMESTATE_StartGam
 void  EditorState_SetDifficulty(void* uiPanel, int32_t difficulty); /* was GAMESTATE_SetDifficulty */
 void  CGWND_GameSetup_DrawGrid_Thunk(void* uiPanel);
 void  CGWND_QuitToMenu(void);
-void  UIPANEL_EndPaintEx(void* panel, void* hwnd, int32_t hdc,
-                          uint8_t repaint, void* updateRect);
+/* Real def: ui/UIPANEL.cpp:0x426B90, void(void* self, int hdc,
+ * int unlockParam, uint8_t unlockFlag, RECT* restrictRect) — the 2nd
+ * param is `int hdc`, not `void* hwnd`, and the 5th is `RECT*`, not
+ * `void*`. This is the hub declaration for network/Netman.cpp,
+ * ui/GameSetupPanel.cpp, and ui/NameEntryPanel.cpp — all three include
+ * this header, and their call sites' explicit-`int`-typed 3rd argument
+ * (unlockParam) selects this overload over any other locally-declared
+ * wrong overload in those same files (see docs/landmine-sweep-worklist.md
+ * and the per-caller comments at each call site). Was mangling to a
+ * distinct symbol from the real function, silently binding to
+ * shared/stubs_link001_batch5_ui_graphics.cpp's warn-once host stub
+ * instead of the real present pipeline. */
+void  UIPANEL_EndPaintEx(void* panel, int32_t hdc, int32_t unlockParam,
+                          uint8_t unlockFlag, RECT* restrictRect);
 void  UIPANEL_EndPaint(void* panel);
 void  UI_MainMenu_SetState(void* ui_main, int32_t state);
 

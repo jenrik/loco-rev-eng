@@ -96,9 +96,16 @@ extern PlayerConfig* g_player_config;   /* 0x4AA4A8 */
 
 /* UI helpers */
 extern void* __thiscall UIPANEL_BeginPaint(int32_t panel);
-extern void  __thiscall UIPANEL_EndPaintEx(void* panel, void* param2,
-                                            int32_t hdc, uint8_t repaint,
-                                            void* updateRect);
+/* Real def: ui/UIPANEL.cpp:0x426B90 — the 2nd param is `int hdc`, not
+ * `void*`. Was declared here with a void* 2nd param, mangling to a
+ * distinct symbol from the real function (same landmine class as
+ * UIPANEL_BeginPaint above; docs/landmine-sweep-worklist.md). Currently
+ * unused within this file (no call sites), so this was a dormant
+ * landmine, not a live bug — fixed anyway for consistency with the
+ * canonical signature. */
+extern void  __thiscall UIPANEL_EndPaintEx(void* panel, int32_t hdc,
+                                            int32_t unlockParam, uint8_t unlockFlag,
+                                            RECT* restrictRect);
 /* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
  * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
  * uniformly int32_t, which doesn't match the real mixed uint32_t/int32_t
