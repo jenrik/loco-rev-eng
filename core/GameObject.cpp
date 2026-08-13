@@ -1011,6 +1011,47 @@ void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 {
     void* resource = this->resource;
 
+#ifndef _WIN32
+    /* resource+0x10 is not a bitmap surface pointer: UIPANEL_Blit's real
+     * implementation (ui/UIPANEL_Surface.cpp, 0x42B050) casts its first
+     * argument straight to `UIPANEL_Surface*` -- confirmed by reading that
+     * function's own body, not inferred -- matching shared/types.h's
+     * RESDATA::flags doc comment ("+0x10 also aliased as ui_panel
+     * (UIPANEL*) in some contexts"). No host resource carries a
+     * UIPANEL_Surface sub-object at any offset (a host `SpriteResource*`
+     * is a small, unrelated struct -- see loco::assets::
+     * is_host_sprite_resource()), and FrameData::flip_horizontal (used
+     * below) has no verified .dat-derived host source either (only
+     * ::is_connected has been mapped so far -- see
+     * resources/resource_manager_sdl3.h's AnimationFrameSet). Skip the
+     * blit on host rather than dereference either as if they existed;
+     * this is the separately-tracked "DDRAW sprite-data management
+     * integration" item (PROGRESS.md), not a new landmine. */
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] Entity::Draw: skipping blit -- host SpriteResource "
+                "has no UIPANEL_Surface/flip_horizontal mapping yet (see "
+                "PROGRESS.md's DDRAW sprite-data management item)\n");
+            std::fflush(stderr);
+        }
+        return;
+    }
+
+    /* Not a host SpriteResource either: on host, most seeded entities
+     * carry a null `resource` at all (PersistenceAdapter.h's documented
+     * "0 placed / 497 carried" gap -- host resources lack the original
+     * RESDATA metadata needed to resolve one). The raw x86 offset read
+     * just below assumes a real, non-null resource, which every original
+     * caller always had; guard the host-only null case rather than
+     * dereference `nullptr + 0x10`. */
+    if (resource == nullptr) {
+        return;
+    }
+#endif
+
     /* Bail if no surface or not visible */
     if (*field_at<int>(resource, 0x10) == 0 || this->visible != 1) {
         return;
@@ -1079,6 +1120,33 @@ void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_f
     }
 
     void* resource = this->resource;
+
+#ifndef _WIN32
+    /* Same host-SpriteResource landmine and same missing-mapping gap as
+     * Entity::Draw above (resource+0x10 is a UIPANEL_Surface* sub-object,
+     * not a bitmap; FrameData::flip_horizontal has no host source yet) --
+     * see that function's doc comment for the full evidence. */
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                "[HOST] Entity::DrawConnected: skipping blit -- host "
+                "SpriteResource has no UIPANEL_Surface/flip_horizontal "
+                "mapping yet (see PROGRESS.md's DDRAW sprite-data "
+                "management item)\n");
+            std::fflush(stderr);
+        }
+        return;
+    }
+
+    /* Same host-only null-resource gap as Entity::Draw above -- see that
+     * function's doc comment. */
+    if (resource == nullptr) {
+        return;
+    }
+#endif
+
     FrameData* fd = *field_at<FrameData*>(resource, 0x20)
                     + this->anim_index;
 

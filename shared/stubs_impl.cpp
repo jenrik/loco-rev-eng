@@ -357,23 +357,46 @@ void* g_tile_occupied_bitmap = nullptr;
 /* TODO(tilemap-drawing-pipeline): declared here as a scalar but
  * world/tilemap.h declares `extern uint8_t ATTR_0047f108[8]` (real 8-byte
  * bitmask-table type, confirmed via disassembly at 0x455342: `MOV AL, byte
- * ptr [EAX + 0x47f108]` with EAX pre-masked to 0-7). Fixing the type wakes
- * up TileMap::InvalidateDirtyRects/ProcessRect's DirectDraw presentation
- * path (dirty-tile bits go from always-0 to real).
+ * ptr [EAX + 0x47f108]` with EAX pre-masked to 0-7). Real byte values
+ * confirmed via direct read of the original binary at 0x47f108: `80 40 20
+ * 10 08 04 02 01` -- MSB-first bit ordering (`1 << (7-n)`, not the naive
+ * `1 << n`), consistent with bit 0 of a row addressing the most-
+ * significant bit of its byte (same convention as bitmap_occupancy/
+ * span_map cell parsing elsewhere in this codebase). Fixing the type
+ * wakes TileMap::InvalidateDirtyRects/ProcessRect's DirectDraw
+ * presentation path (dirty-tile bits go from always-0 to real).
  *
- * Re-attempted 2026-08-13 with TileMap::ProcessRect's tobj->resource
- * landmine reads, InvalidateDirtyRects' null-g_cursor_surface deref, and
- * TileMap_Lock/UnlockPrimarySurface's null-g_primary_surface deref all
- * guarded first (see PROGRESS.md) -- got further than before (dirty-tile
- * detection went live, 4000 tiles on the first force_all pass, no crash
- * in ProcessRect itself), but still crashes: TileMap::ProcessRect's
- * layer==1 branch calls UI_SetTooltipPos -> UI_Manager::setTooltipPos on
- * a null `this` (world/tilemap.cpp:2186 -> ui/UI_Utils.cpp:457,
- * gdb-confirmed backtrace). This is the already-documented "g_tooltip_mgr
- * is never wired to a real UI_Manager" gap (PROGRESS.md's
- * "ui_manager.c removed" item) -- a genuinely separate, larger, already-
- * scoped-as-not-attempted subsystem, not a new landmine. Reverted again;
- * next attempt should wire g_tooltip_mgr first. */
+ * Third revert (2026-08-13): the previous blocker (null `g_tooltip_mgr`
+ * inside ProcessRect's UI_SetTooltipPos call) is fixed for real --
+ * `g_tooltip_mgr` is now a real `UI_Manager` singleton (PROGRESS.md's
+ * "Wire the real UI_Manager singleton" milestone) -- but flipping this
+ * type past that point reaches TWO more, larger, genuinely separate
+ * gaps in the same previously-100%-dead rendering path:
+ *   1. Entity::Draw/DrawConnected (core/GameObject.cpp) call
+ *      UIPANEL_Blit(resource+0x10, ...) -- confirmed via UIPANEL_Blit's
+ *      own body (ui/UIPANEL_Surface.cpp, 0x42B050) that this is a real
+ *      `UIPANEL_Surface*` sub-object pointer, not a bitmap. No host
+ *      resource carries one (a host SpriteResource* is a small,
+ *      unrelated struct), and FrameData::flip_horizontal has no
+ *      .dat-derived host mapping either (only ::is_connected is mapped
+ *      so far). Guarded both methods against this (warn-once, skip the
+ *      blit) plus a null-`resource` case (most host entities never get a
+ *      real resource -- see PersistenceAdapter.h's documented 0/497
+ *      placement-coverage gap) -- both guards kept, they're correct and
+ *      needed regardless of when this is next attempted.
+ *   2. Town::render_selection (town/Town.cpp:1185) calls a stale
+ *      GameObject_Draw(void*) free-function stub whose real target,
+ *      per the disassembly's own address (0x405E60), is Entity::Draw
+ *      itself (get_xrefs_to confirms 0x42D431 really is among
+ *      0x405E60's callers -- not a stale comment). But `Town : public
+ *      UI_WindowBase` (ui/UI_WindowBase.h) has NO Entity/GameObject base
+ *      at all, so the original's raw `CALL 0x405E60` with a `Town*` in
+ *      ECX relies on some layout relationship between Town and Entity
+ *      that isn't evidenced yet -- fixing this without that evidence
+ *      would mean reinterpret_cast-ing Town to Entity on a guess, which
+ *      CLAUDE.md forbids. Needs its own investigation (own
+ *      Remaining-work bullet below) before this flip can be reattempted.
+ * `ATTR_0047f108` stays reverted until both are resolved. */
 int ATTR_0047f108 = 0;
 int DAT_00481170 = 0;
 int DAT_0048118c = 0;
