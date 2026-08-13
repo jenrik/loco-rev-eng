@@ -70,9 +70,22 @@ extern bool UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
                           int32_t clip_right, uint32_t clip_bottom, uint32_t flags); /* 0x42B050 */
 
 /* Win32 — matches town/Town.cpp's own extern "C" declaration exactly
- * (same real symbol, avoid an ODR-mismatched second declaration). */
+ * (same real symbol, avoid an ODR-mismatched second declaration).
+ *
+ * OffsetRect: the real definition (graphics/sdl3_window.cpp, declared
+ * extern "C" in graphics/sdl3_window.h) returns BOOL and takes RECT*.
+ * game/Panel.h's own `extern void __stdcall OffsetRect(void*, int, int)`
+ * (visible transitively via this file's Panel.h include) has NO
+ * extern "C" linkage and a different parameter type, so it is a distinct,
+ * never-actually-linkable overload — the same latent mismatch
+ * game/TrackPiece.cpp already routes around with its own local
+ * `extern "C" void OffsetRect(void*, int, int)` declaration. Declared
+ * correctly here (matching the real symbol) so the call below binds to
+ * it; the return value is discarded, matching every other caller in this
+ * tree. */
 extern "C" {
     BOOL IntersectRect(RECT* dest, const RECT* src1, const RECT* src2);
+    void OffsetRect(RECT* rect, int dx, int dy);
 }
 
 /* ================================================================== */
@@ -103,6 +116,23 @@ extern int g_viewport_rect_left;        /* 0x4AAD14 */
 extern int g_viewport_rect_top;         /* 0x4AAD18 */
 extern int g_viewport_rect_right;       /* 0x4AAD1C */
 extern int g_viewport_rect_bottom;      /* 0x4AAD20 */
+
+/* Scroll offset applied to the viewport rect (immediately following it
+ * in memory, but a separate pair of globals — not part of the RECT
+ * above). Read by center_on_point (0x42D440). */
+extern int g_viewport_x;                /* 0x4AAD24 */
+extern int g_viewport_y;                /* 0x4AAD28 */
+
+/* Client-area metrics, consumed by center_on_point (0x42D440) as four
+ * consecutive dwords forming a RECT (left/top/right/bottom), then offset
+ * by g_viewport_x/g_viewport_y above via OffsetRect. The names look like
+ * scalar width/height/offset metrics but the disassembly stores all four
+ * into one contiguous stack RECT and passes &rect to OffsetRect — treat
+ * them as that RECT's four fields, not as independent scalars. */
+extern int g_client_width;              /* 0x485220 — RECT.left   */
+extern int g_client_height;             /* 0x485224 — RECT.top    */
+extern int g_client_offset_x;           /* 0x485228 — RECT.right  */
+extern int g_client_offset_y;           /* 0x48522C — RECT.bottom */
 
 /* ================================================================== */
 /* Host-only mirror views for foreign object layouts                   */
@@ -231,30 +261,100 @@ void GameView::cleanup()
 /**
  * GameView::center_on_point — vtable[3] (+0x0C). Address: 0x42D440.
  *
- * BLOCKED — genuinely not reconstructed this pass (see GameView.h's
- * doc comment for the full evidence of what it does: a ~550-byte
- * scroll-deadzone viewport recenter). select_building and
- * track_building dispatch to it correctly (through this virtual slot,
- * matching the binary's own vtable[3] dispatch) so their own logic
- * type-checks and is otherwise faithful; only this one method's body
- * is deferred. Loud stub per CLAUDE.md's stub policy: logs and asserts
- * rather than silently doing nothing.
+ * Verified against raw vtable bytes: GameView's vtable (0x477D30) slot 3
+ * is this function itself (0x42D440), overriding Entity::MoveTo's slot
+ * ([3] on Entity's own vtable 0x477488 is 0x405C00). The two repositions
+ * of `this` below are therefore `this->Entity::MoveTo(...)` (explicitly
+ * scoped, matching the original's hardcoded `CALL 0x00405C00` — a plain
+ * virtual `this->MoveTo(...)` would recurse into center_on_point). The
+ * two repositions of game_object_sub are ordinary `MoveTo(...)` calls —
+ * genuinely virtual in the original too, but unambiguous since
+ * game_object_sub's dynamic type is exactly Entity.
  *
- * TODO: decompile 0x42D440 (tracked in PROGRESS.md).
+ * See GameView.h's doc comment for the full field/geometry breakdown.
  */
 void GameView::center_on_point(int center_x, int center_y)
 {
-    (void)center_x;
-    (void)center_y;
-#ifndef _WIN32
-    fprintf(stderr,
-            "STUB: GameView::center_on_point (0x42D440, vtable[3]) reached at %s:%d "
-            "— not yet decompiled\n",
-            __FILE__, __LINE__);
-    assert(false &&
-           "GameView::center_on_point (0x42D440) is not yet reconstructed; "
-           "see core/GameView.h's doc comment and PROGRESS.md");
-#endif
+    /* Client rect, consumed as {left, top, right, bottom} (see the
+     * globals' declarations above for why these look like scalar
+     * metrics but are read as one RECT). */
+    RECT client_rect;
+    client_rect.left   = g_client_width;
+    client_rect.top    = g_client_height;
+    client_rect.right  = g_client_offset_x;
+    client_rect.bottom = g_client_offset_y;
+    OffsetRect(&client_rect, g_viewport_x, g_viewport_y);
+
+    /* No null check in the original — both resources are dereferenced
+     * unconditionally, matching this reconstruction. */
+    RESDATA* own_res = static_cast<RESDATA*>(this->resource);                 /* +0x40 */
+    RESDATA* sub_res  = static_cast<RESDATA*>(this->game_object_sub.resource); /* +0x124 */
+    int deadzone = own_res->frame_width + (sub_res->frame_width >> 1);
+
+    if (center_x < 0) {
+        center_x = 0;
+    }
+
+    if (this->dim_flag) {                                                     /* +0xAD */
+        if (client_rect.right - deadzone < center_x) {
+            this->dim_flag = 0;
+            this->StopSound(0);            /* vtable[7], generic state-change notify */
+
+            /* Reposition every child TrackPiece for the "anchored left"
+             * side, matching track_building's own +0x28-as-next-pointer
+             * chain-walk idiom (game/TrackPiece.h's `sub_resource` is a
+             * genuine linked-list "next" pointer despite its int32_t
+             * declared type — see track_building's identical comment). */
+            for (TrackPiece* child = static_cast<TrackPiece*>(this->child_surface); /* +0xD0 */
+                 child != nullptr;
+                 child = reinterpret_cast<TrackPiece*>(
+                     static_cast<uintptr_t>(static_cast<uint32_t>(child->sub_resource)))) {
+                RESDATA* child_res = child->resource;
+                child->screen_rect.left  = own_res->frame_width - child_res->frame_w - child_res->world_x;
+                child->screen_rect.right = own_res->frame_width - child_res->world_x;
+                child->Render();                                              /* vtable[8] */
+            }
+
+            /* Notification still runs even with an empty child list —
+             * the original jumps directly here, not around it. */
+            this->game_object_sub.StopSound(this->dim_flag);
+        } else {
+            this->Entity::MoveTo(((sub_res->frame_width >> 1) - 3) + center_x,
+                                  center_y - (own_res->frame_height >> 1));
+            this->game_object_sub.MoveTo(center_x - (sub_res->frame_width >> 1),
+                                          center_y - (sub_res->frame_height >> 1));
+            return;
+        }
+    }
+
+    if (center_x < client_rect.left + deadzone) {
+        this->dim_flag = 1;
+        this->StopSound(1);
+
+        /* Reposition every child TrackPiece for the "anchored right" side. */
+        for (TrackPiece* child = static_cast<TrackPiece*>(this->child_surface);
+             child != nullptr;
+             child = reinterpret_cast<TrackPiece*>(
+                 static_cast<uintptr_t>(static_cast<uint32_t>(child->sub_resource)))) {
+            RESDATA* child_res = child->resource;
+            child->screen_rect.left  = child_res->world_x;
+            child->screen_rect.right = child_res->frame_w + child_res->world_x;
+            child->Render();
+        }
+
+        this->game_object_sub.StopSound(this->dim_flag);
+
+        this->Entity::MoveTo(((sub_res->frame_width >> 1) - 3) + center_x,
+                              center_y - (own_res->frame_height >> 1));
+        this->game_object_sub.MoveTo(center_x - (sub_res->frame_width >> 1),
+                                      center_y - (sub_res->frame_height >> 1));
+        return;
+    }
+
+    this->Entity::MoveTo((center_x - deadzone) + 3,
+                          center_y - (own_res->frame_height >> 1));
+    this->game_object_sub.MoveTo(center_x - (sub_res->frame_width >> 1),
+                                  center_y - (sub_res->frame_height >> 1));
 }
 
 /**

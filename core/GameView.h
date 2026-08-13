@@ -27,8 +27,12 @@
  *   [0]  +0x00: scalar deleting destructor (0x42CD60; body 0x42CD80)
  *   [1]  +0x04: Panel::UpdateChild          (0x454890, inherited)
  *   [2]  +0x08: GameObject::PtInRect        (0x436A10, inherited)
- *   [3]  +0x0C: center_on_point               (0x42D440 — NOT reconstructed,
- *               see method doc; was misattributed to Town::set_mode)
+ *   [3]  +0x0C: center_on_point               (0x42D440 — scroll-deadzone
+ *               viewport recenter; was misattributed to Town::set_mode.
+ *               NOTE: this slot is GameView's own override of
+ *               Entity::MoveTo's slot [3] — see method doc for why every
+ *               reposition of `this` inside it uses a hardcoded, explicitly
+ *               scoped Entity::MoveTo call instead of virtual dispatch)
  *   [4]  +0x10: GameView-family slot        (0x42D670, not covered here)
  *   [5]  +0x14: Panel slot                  (0x454A60, inherited)
  *   [6]  +0x18: Panel::Init                 (0x454680, inherited)
@@ -184,22 +188,40 @@ public:
     void cleanup();
 
     /**
-     * center_on_point — vtable[3]. Address: 0x42D440.
+     * center_on_point — vtable[3] (+0x0C). Address: 0x42D440.
      *
-     * BLOCKED — not reconstructed this pass. Confirmed (via disassembly)
-     * to be a ~550-byte scroll-deadzone viewport recenter: reads the
-     * client rect + viewport globals, compares the target point against
-     * a deadzone derived from this->resource and game_object_sub.resource
-     * dimensions, flips the +0xAD side flag when the target crosses the
-     * deadzone, repositions each child TrackPiece in the +0xD0 list, and
-     * finally repositions `this` and game_object_sub via
-     * GameObject::SetWorldPos. select_building and track_building dispatch
-     * to it through this slot (previously miscoded as a 4-arg call to
-     * the unrelated Town::set_mode/UI_WindowBase::set_mode).
+     * Scroll-deadzone viewport recenter. Reads the client rect
+     * ({g_client_width, g_client_height, g_client_offset_x,
+     * g_client_offset_y} consumed as a RECT and offset by
+     * {g_viewport_x, g_viewport_y}), compares the (clamped-to-0) target
+     * X against a deadzone derived from this->resource->frame_width and
+     * game_object_sub.resource->frame_width, flips the +0xAD dim_flag
+     * side when the target crosses the deadzone, repositions/re-renders
+     * every child TrackPiece in the +0xD0 list from its own resource's
+     * frame_w/world_x, notifies via StopSound(dim_flag) on both `this`
+     * and game_object_sub (vtable slot 7 — a generic "state changed"
+     * callback here, not audio), and finally repositions `this` and
+     * game_object_sub via MoveTo.
      *
-     * Declared and dispatched correctly so callers type-check; body is a
-     * loud stub per CLAUDE.md's stub policy (see core/GameView.cpp).
-     * TODO: decompile 0x42D440.
+     * IMPORTANT: GameView overrides Entity::MoveTo's own vtable slot
+     * ([3]) with this method, so a virtual `this->MoveTo(...)` (or the
+     * non-virtual `SetWorldPos` alias, which just forwards to the
+     * virtual MoveTo) called from inside this function would recurse
+     * back into center_on_point. The original's disassembly confirms
+     * this: both repositions of `this` are a hardcoded
+     * `CALL 0x00405C00` (Entity::MoveTo) rather than a vtable dispatch —
+     * reconstructed here as an explicitly-scoped `this->Entity::MoveTo(...)`
+     * call, the same bypass pattern already used by render_selection for
+     * Entity::Draw vs. Panel::DispatchEvent (see that method's doc). The
+     * paired reposition of game_object_sub *is* genuine vtable dispatch in
+     * the original (through the embedded Entity's own vtable pointer),
+     * and unambiguously resolves to Entity::MoveTo since game_object_sub's
+     * dynamic type is exactly Entity — written as an ordinary
+     * `game_object_sub.MoveTo(...)` call.
+     *
+     * select_building and track_building dispatch to it through this
+     * slot (previously miscoded as a 4-arg call to the unrelated
+     * Town::set_mode/UI_WindowBase::set_mode).
      */
     virtual void center_on_point(int center_x, int center_y);
 
