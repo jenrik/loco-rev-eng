@@ -111,7 +111,7 @@ extern "C" {
      * distinct, redundant overload bound to a since-removed separate stub
      * in shared/stubs_impl.cpp). UI_DestroyTooltip's real return type is
      * void, not void* (unused by any caller here either way). */
-    int* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int16_t param, int32_t x, int32_t y); /* @ 0x423C50 */
+    Entity* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int16_t param, int32_t x, int32_t y); /* @ 0x423C50 */
     void __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x423D20 */
     /* TODO(deferred — see docs/landmine-sweep-worklist.md): address corrected
      * 0x40DD90 -> 0x40D170. Ghidra confirms every `TrackPiece_SetZoom(...)`

@@ -15,6 +15,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cassert>
+#include <new>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -26,8 +27,6 @@ extern "C" {
     void  __stdcall DefWindowProcA(HWND hWnd, UINT Msg,
                                    void* wParam, void* lParam);  /* USER32 */
 }
-    void  __thiscall GameObject_BaseCtor(void* self, int a, int b,
-                                          int c, int d);          /* 0x405790 */
     int   __thiscall ResourceManager_GetById(void** mgr, int id); /* 0x460A30 */
 
 /* External declarations from other modules */
@@ -395,53 +394,41 @@ void* UI_Manager::createMessageBox(int resourceId, short param2,
 /* UI_Manager::createTooltip                                           */
 /* Address: 0x423C50                                                    */
 /* ================================================================== */
-int* UI_Manager::createTooltip(int resourceId, short param2,
-                                int posX, int posY)
+Entity* UI_Manager::createTooltip(int resourceId, short param2,
+                                   int posX, int posY)
 {
-    /* Allocate 0x88 bytes for tooltip GameObject. 0x88 is this call site's
-     * real x86 evidence, but the concrete type constructed here is bigger
-     * than the base GameObject (sizeof(GameObject) == 0x38) — it's some
-     * still-unidentified GameObject-derived tooltip class whose full field
-     * layout hasn't been reconstructed, so there's no sizeof(Type) to take
-     * yet (guessing one would violate CLAUDE.md's evidence-only rule).
-     * GameObject_BaseCtor (0x405790) is still an undecompiled stub
-     * (shared/stubs_impl.cpp) that never writes through `obj`, so this is
-     * not a live overflow today; revisit once the real derived type is
-     * identified and GameObject_BaseCtor is decompiled. */
-    void* obj = operator_new(0x88);
-    if (obj == NULL) {
+    /* 0x88 was this call site's real x86 allocation size; it matches
+     * sizeof(Entity) on x86 exactly (core/Entity.h's fields run +0x24..
+     * +0x87), confirmed independently by every real user of the returned
+     * pointer treating it as a plain Entity* (ui/UIEntity.cpp's pTooltip
+     * StopSound/SetVisible/Update calls) and by network/DirectPlay.cpp's
+     * own shadow-GameObject site needing the identical size. Use
+     * sizeof(Entity) (the real host size, pointer fields widen it past
+     * 0x88) rather than the stale x86 literal, and construct through
+     * Entity's real constructor (0x405790) — not the free-function
+     * "GameObject_BaseCtor" misdeclaration fixed elsewhere this session. */
+    void* mem = operator_new(sizeof(Entity));
+    if (mem == NULL) {
         return NULL;
     }
+    Entity* obj = new (mem) Entity(resourceId, param2, 0, 0);
 
-    /* Call GameObject_BaseCtor(this, resourceId, param2, 0, 0) */
-    GameObject_BaseCtor(obj, resourceId, param2, 0, 0);
+    if (obj->initialized) {
+        /* Position — vtable[3], Entity::SetWorldPos overriding
+         * GameObject::MoveTo. */
+        obj->MoveTo(posX, posY);
 
-    int* result = (int*)obj;
+        obj->blit_flags |= 2;
 
-    /* Check if initialization succeeded (flag at +0x18) */
-    if ((char)result[6] == 1) {     /* result[6] = *(int*)(obj + 0x18) */
-        /* Set position — original vtable[3], which on every GameObject-
-         * derived class in this tree is MoveTo(int x, int y) (see
-         * core/GameObject.h's vtable dump). */
-        static_cast<GameObject*>(obj)->MoveTo(posX, posY);
-
-        /* Set flag bit 0x02 at +0x2C */
-        result[0x0B] |= 2;          /* result[11] = *(int*)(obj + 0x2C) |= 2 */
-
-        /* Add to text_list (unordered — key_size is 0, so this appends). */
-        text_list.Add(result);
+        /* Unordered append — text_list's key_size is 0. */
+        text_list.Add(obj);
     } else {
-        /* Initialization failed — destroy */
-        if (result != NULL) {
-            void** vtbl = *(void***)result;
-            typedef void* (__thiscall* DtorFn)(void*, byte);
-            DtorFn dtor = (DtorFn)vtbl[0];
-            dtor(result, 1);
-        }
+        obj->~Entity();
+        GLOBAL_free(mem);
         return NULL;
     }
 
-    return result;
+    return obj;
 }
 
 /* ================================================================== */
@@ -720,24 +707,15 @@ void UI_ResetTooltips(void* mgr, int param)
 }
 
 /**
- * UI_CreateTooltip — Address: 0x423C50. NOT wired to
- * UI_Manager::createTooltip (which is itself fully modeled — see its own
- * doc comment in UI_Utils.h). createTooltip's first action is
- * GameObject_BaseCtor (0x405790), an unimplemented assert-stub
- * (shared/stubs_impl.cpp). Real call sites reach this facade during
- * ordinary gameplay object construction (e.g. ui/UIEntity.cpp's
- * constructor, whenever a resource's childCount > 0) — wiring the
- * facade today would turn "silently does nothing" into "aborts the
- * process" on that path. Kept as a loud (not silent) stub per CLAUDE.md's
- * stub policy until 0x405790 is implemented.
+ * UI_CreateTooltip — Address: 0x423C50, wired to UI_Manager::createTooltip.
+ * Its previous blocker ("depends on GameObject_BaseCtor 0x405790, still
+ * unimplemented") was a misreading — 0x405790 is Entity's real constructor,
+ * already implemented (core/Entity.cpp); the free-function declaration was
+ * simply the wrong shape to ever call it. See PROGRESS.md's 2026-08-14
+ * entry.
  */
-int* UI_CreateTooltip(void* mgr, int resourceId, int16_t param2, int x, int y);
-int* UI_CreateTooltip(void* mgr, int resourceId, int16_t param2, int x, int y)
+Entity* UI_CreateTooltip(void* mgr, int resourceId, int16_t param2, int x, int y);
+Entity* UI_CreateTooltip(void* mgr, int resourceId, int16_t param2, int x, int y)
 {
-    (void)mgr; (void)resourceId; (void)param2; (void)x; (void)y;
-    fprintf(stderr, "STUB: %s at %s:%d (0x423C50 — UI_Manager::createTooltip "
-                    "is modeled but not wired; depends on GameObject_BaseCtor "
-                    "0x405790, still unimplemented)\n", __func__, __FILE__, __LINE__);
-    assert(0 && "UI_CreateTooltip: blocked on GameObject_BaseCtor (0x405790)");
-    return nullptr;
+    return static_cast<UI_Manager*>(mgr)->createTooltip(resourceId, param2, x, y);
 }

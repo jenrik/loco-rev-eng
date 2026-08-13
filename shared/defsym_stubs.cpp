@@ -257,9 +257,8 @@ void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
 void NETMAN_SendAck(void*);
 void NETMAN_SendAck(void*) { /* host no-op */ }
 /* UI_CreateTooltip(void*, int, short, int, int): removed — the one
- * canonical UI_CreateTooltip is now declared/defined (as a deliberate
- * loud stub, blocked on GameObject_BaseCtor 0x405790) in
- * ui/UI_Utils.cpp. */
+ * canonical UI_CreateTooltip is now declared/defined for real in
+ * ui/UI_Utils.cpp, wired to UI_Manager::createTooltip (2026-08-14). */
 void UIPANEL_LockSurface(void*);
 void UIPANEL_LockSurface(void*) { /* host no-op */ }
 /* RESDATA_CreateChildSprite(void*, void*, int, int) — 0x4546D0.

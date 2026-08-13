@@ -69,8 +69,8 @@ extern void TrackPiece_SetZoom(void* tool, int zoom);          /* 0x40D170 */
 
 /* Tooltip */
 extern void UI_DestroyTooltip(void* mgr, int handle);          /* 0x423D20 */
-extern int* UI_CreateTooltip(void* mgr, int res_id, int16_t unk,
-                              int x, int y);                    /* 0x423C50 */
+extern Entity* UI_CreateTooltip(void* mgr, int res_id, int16_t unk,
+                                 int x, int y);                    /* 0x423C50 */
 
 /* Audio */
 extern void GameAudio_UpdateVolume(void* audio, uint8_t mute); /* 0x4135B0 */

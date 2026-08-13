@@ -28,6 +28,7 @@
 
 struct Collection;
 class GameObject;
+class Entity;
 
 /**
  * Typed 0x18-byte collection embedded by UI_Manager.  The original binary
@@ -249,29 +250,29 @@ public:
                            int x, int y, char useUpdate);
 
     /**
-     * Create a tooltip (0x88-byte GameObject).
+     * Create a tooltip (a plain Entity — 0x88 bytes on x86, confirmed by
+     * every real caller of the returned pointer treating it as Entity*).
      * Address: 0x423C50
      *
-     * Allocates 0x88 bytes, calls GameObject_BaseCtor, sets position via
-     * vtable[3], sets flag bit 0x02 at +0x2C, adds to text_list via
+     * Constructs a real Entity(resourceId, param2, 0, 0), sets position via
+     * vtable[3] (Entity::SetWorldPos, overriding GameObject::MoveTo), sets
+     * flag bit 0x02 on Entity::blit_flags, adds to text_list via
      * UITimerList::Add (unordered — text_list's key_size is 0).
      *
-     * BLOCKED from the free-function facade (UI_CreateTooltip): the first
-     * thing this method does is call GameObject_BaseCtor (0x405790),
-     * which remains an unimplemented assert-stub (shared/stubs_impl.cpp).
-     * This method itself is fully modeled from the real 0x423C50
-     * disassembly; the facade is deliberately left unwired so that real
-     * call sites (e.g. ui/UIEntity.cpp's constructor, whenever a
-     * resource's childCount > 0) don't start aborting the process. See
-     * UI_CreateTooltip's own doc comment in UI_Utils.cpp.
+     * The free-function facade (UI_CreateTooltip, UI_Utils.cpp) now wires
+     * to this method for real — its own prior blocker ("GameObject_BaseCtor
+     * 0x405790 unimplemented") was a misreading: 0x405790 is Entity's real
+     * constructor, already implemented (core/Entity.cpp), just misdeclared
+     * as a free function at several unrelated call sites (see PROGRESS.md's
+     * 2026-08-14 entry).
      *
      * @param resourceId  Resource ID for the tooltip sprite
      * @param param2      Resource-specific short parameter
      * @param posX        Tooltip X position
      * @param posY        Tooltip Y position
-     * @return            GameObject pointer (0x88 bytes), or NULL on failure
+     * @return            The new tooltip Entity, or NULL on failure
      */
-    int* createTooltip(int resourceId, short param2, int posX, int posY);
+    Entity* createTooltip(int resourceId, short param2, int posX, int posY);
 
     /**
      * Destroy a specific tooltip from text_list.

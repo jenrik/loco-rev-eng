@@ -521,9 +521,11 @@ void CGWND_QuitToMenu()
  * ABI) -- on this 64-bit host that's a real pointer-width mismatch, the
  * same class of issue as CGWND_ValidatePaletteData above. The real body
  * also dispatches 2 virtual calls (vtable slots 1 and 3) on the tooltip
- * object returned by UI_CreateTooltip, whose concrete class isn't
- * established here. Deferring rather than reconstruct a pointer from an
- * int or guess the tooltip object's vtable shape.
+ * object returned by UI_CreateTooltip — now known to be a plain Entity*
+ * (ui/UI_Utils.cpp), so slots 1/3 are GameObject::InvalidateRect/
+ * Entity::SetWorldPos; that no longer blocks this function, the `int
+ * thisPtr` pointer-width mismatch above still does. Deferring rather
+ * than reconstruct a pointer from an int.
  * =================================================================== */
 void TrainStationWindow_UpdateTooltip(int thisPtr)
 {
