@@ -68,7 +68,14 @@ public:
     int32_t   current_frame;       // +0x4C  current animation frame index (set by SetFrame)
     int32_t   anim_tick;           // +0x50  animation tick counter (incremented by UpdateAnim,
                                    //          reset to 0 by SetFrame)
-    uint16_t  prev_frame;          // +0x54  previous frame index, initialized to 0xFFFF
+    int16_t   prev_frame;          // +0x54  previous frame index / countdown timer.
+                                   //   -1 (0xFFFF) means "inactive"; GameView::
+                                   //   update_cursor_child (0x42D770) disassembles to
+                                   //   `TEST AX,AX; JL ...` on this field — a SIGNED
+                                   //   16-bit test, not unsigned. Must stay int16_t:
+                                   //   as uint16_t, `>= 0` is always true and the
+                                   //   -1 sentinel wraps into an endless decrementing
+                                   //   countdown instead of staying "inactive".
     uint8_t   render_enabled;      // +0x56  1 = render this piece (default, set to 1)
     uint8_t   _pad_57;             // +0x57
 

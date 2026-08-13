@@ -621,8 +621,11 @@ void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
  * violation since C++ mangling does not encode return type. */
 void Town_CheckOccupied(void*, int, int, int, int);
 void Town_CheckOccupied(void*, int, int, int, int) { /* host no-op */ }
-void Town_SelectBuilding(void*, void*);
-void Town_SelectBuilding(void*, void*) { /* host no-op */ }
+/* Town_SelectBuilding(void*, void*) — real implementation now in
+ * town/Town.cpp (calls GameView::select_building with a real Building*).
+ * Removed the no-op stub here per CLAUDE.md's "no --defsym-style
+ * placeholders" rule; a duplicate definition here would also be a link
+ * error against the real one. */
 void UIPANEL_BlitSurface(void*, int, int, void*, int, int);
 void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { /* host no-op */ }
 void DDRAW_SelectBuilding(void*, void*);

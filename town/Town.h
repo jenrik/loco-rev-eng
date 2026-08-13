@@ -6,8 +6,6 @@
  * Reverse engineered via Ghidra decompilation.
  *
  * Town is the primary in-game view window. It manages:
- *   - Building selection/highlight overlay (selection_active, overlay panel)
- *   - Building placement and tracking (track_building per-frame)
  *   - Postcard creation, sending, receiving, and album management
  *   - Network session management for multiplayer postcard exchange
  *   - Cursor indicator sprites for valid/invalid placement feedback
@@ -128,7 +126,10 @@ public:
     uint8_t    _pad_91[0x3F];           // +0x91  padding to +0xD0
 
     /** Child TrackPiece sprite list (created by RESDATA_CreateChildSprite,
-     *  linked via +0x28). Tracked per-frame by track_building. */
+     *  linked via +0x28). NOTE: the per-frame tracking that used to be
+     *  cited here (track_building) was moved to GameView — see this
+     *  class's own field-list note above; unclear whether this exact
+     *  field is genuinely read by any surviving Town:: method. */
     TrackPiece* children_list;          // +0xD0  child sprite list head
 
     /* Cursor indicator child sprites (duplicates of +0x170/+0x174,
@@ -413,76 +414,29 @@ public:
     char handle_tile_click();
 
     /* ================================================================ */
-    /* Building selection and tracking                                   */
+    /* Building selection and tracking — NOT Town methods                */
+    /*                                                                    */
+    /* is_valid_placement/select_building/track_building/deselect_building/ */
+    /* update_selection/render_selection/send_postcard (0x42CF90/0x42D040/  */
+    /* 0x42D1A0/0x42D280/0x42D3A0/0x42D400/0x42D770) used to be declared    */
+    /* here as Town:: methods. Ghidra disassembly (2026-08-13 session)      */
+    /* confirmed every call site loads ECX with the bare immediate          */
+    /* 0x4852A0 (or is called from one of these methods with `this`         */
+    /* unchanged) — the real receiver is the GameView global instance       */
+    /* (core/GameView.h/.cpp), not this class. Moved there (send_postcard   */
+    /* renamed update_cursor_child: its sole xref is a GameView vtable      */
+    /* slot reached only from track_building's own child loop, never a     */
+    /* postcard call site).                                                */
+    /*                                                                      */
+    /* handle_tile_click (0x42CE10, below) and postcard_command_handler     */
+    /* (0x42D6B0, further below) show the SAME "ECX = bare immediate        */
+    /* 0x4852A0" receiver evidence and very likely belong on GameView too — */
+    /* deliberately left on this class as a follow-up (out of scope for     */
+    /* the pass that moved the six methods above): this class's own field   */
+    /* model below for +0x88..+0x1B8 was built from exactly these two       */
+    /* now-suspect methods and has not been re-verified against GameView's  */
+    /* real layout.                                                        */
     /* ================================================================ */
-
-    /**
-     * is_valid_placement — Static placement check (__cdecl, not a method).
-     * Address: 0x42CF90
-     *
-     * Validates entity initialized (+0x18) and tile type byte at
-     * resource+8: 0x07 always valid; 0x08/0x02/0x06 must be visible;
-     * 0x04 must be connected (+0x62C); 0x03 must be a building tile;
-     * 0x0C valid when resource id > 0x300F.
-     */
-    static bool is_valid_placement(Building* entity);
-
-    /**
-     * select_building — Select/focus a building (or NULL to deselect).
-     * Address: 0x42D040
-     *
-     * Validates, centers the viewport via set_mode, sets zoom (1 for
-     * type 6, else 3), renders the track piece, invalidates the tile
-     * rect and notifies DDRAW_SelectBuilding. The NULL path clears the
-     * selection, restores the active panel, and hides self + child_panel.
-     * Returns selection_active.
-     */
-    byte select_building(Building* building);
-
-    /**
-     * track_building — Per-frame tracking of the selected building.
-     * Address: 0x42D1A0
-     *
-     * Auto-deselects an invisible depot (type 6), re-centers the
-     * viewport when the building center moved, queries cursor position
-     * via GameObject_GetRelPos, updates each child sprite and the
-     * child panel.
-     */
-    void track_building();
-
-    /**
-     * deselect_building — Remove the building selection overlay.
-     * Address: 0x42D280 (RET 0x10 — 4 stack args; the body reads only
-     * `this`-relative fields, never the incoming stack values, matching
-     * the same unused-trailing-args pattern documented on
-     * BuildingMgr::DispatchAll).
-     *
-     * Computes a clip rect from viewport_inset and overlay dimensions,
-     * intersects it with the viewport rect, blits the cached background
-     * back to the primary surface, then re-blits the panel overlay.
-     */
-    void deselect_building(int32_t unused1, int32_t unused2,
-                           int32_t unused3, int32_t unused4);
-
-    /**
-     * update_selection — Blit the selection overlay panel to primary.
-     * Address: 0x42D3A0 (RET 0x10 — 4 stack args, same unused-trailing
-     * pattern as deselect_building above).
-     *
-     * Source from viewport_inset, dest from overlay_dest, flag 0x40.
-     */
-    void update_selection(int32_t unused1, int32_t unused2,
-                          int32_t unused3, int32_t unused4);
-
-    /**
-     * render_selection — Draw the selection highlight for one tile.
-     * Address: 0x42D400
-     *
-     * If selection_active, calls GameObject_Draw (0x405E60) directly
-     * with the caller's tile rect (5 stack args; RET 0x14).
-     */
-    void render_selection(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
-                          int32_t extra);
 
     /* ================================================================ */
     /* Viewport / tile occupancy checks — NOT Town methods               */
@@ -638,25 +592,25 @@ public:
     int postcard_command_handler(TrackPiece* control, uint32_t wParam,
                                  uint32_t lParam);
 
-    /**
-     * send_postcard — Postcard sending lifecycle handler.
-     * Address: 0x42D770
-     *
-     * Counts down the TrackPiece +0x54 timer and fires the zoom/
-     * animation when it reaches 0 (zoom level 2). For MSG 0x3806 with
-     * a world pointer at building+0x44C, saves the world to disk.
-     */
-    byte send_postcard(TrackPiece* track_piece);
+    /* send_postcard (0x42D770) moved to GameView::update_cursor_child —
+     * see the "Building selection and tracking" note above. */
 
     /**
-     * postcard_mouse_handler — Postcard button mouse dispatch (vtable[20]).
+     * postcard_mouse_handler — Postcard button mouse dispatch (vtable[20]
+     * on THIS class's own vtable, 0x477D88 — unrelated to GameView's
+     * vtable[20] at the same byte offset in its own, different vtable;
+     * see core/GameView.h's class doc comment for that distinction).
      * Address: 0x430800
      *
-     * Called from the child-update loop in track_building with the child
-     * pointer (interpreted as packed mouse coords) and from the postcard
-     * window proc path. Guards on audio_playing/flag_E8/postcard_active,
-     * hit-tests the buttons and dispatches the send/zoom/deselect
-     * actions.
+     * Called from the postcard window proc path. Guards on
+     * audio_playing/flag_E8/postcard_active, hit-tests the buttons and
+     * dispatches the send/zoom/deselect actions.
+     *
+     * NOTE: this doc comment previously (incorrectly) claimed
+     * track_building's child-update loop called this method — that
+     * loop actually dispatches through GameView's own, unrelated
+     * vtable[20] slot (GameView::update_cursor_child, 0x42D770); fixed
+     * per the same evidence that moved track_building off this class.
      */
     /** Binary slot [20] 0x430800 (postcard_mouse_handler); packed x,y in lParam. */
     LRESULT on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;

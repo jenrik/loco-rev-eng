@@ -259,10 +259,11 @@ public:
     void Render(byte enable_tile_map);
 
     /**
-     * StopSound — halt panel sound playback (vtable[7], inherited from
-     * GameObject in the binary but not yet decompiled for UIPANEL).
+     * StopSound — halt panel sound playback (vtable[7], overrides
+     * Entity::StopSound — Panel's real base is Entity, not GameObject
+     * directly; see game/Panel.h).
      */
-    void StopSound(int param);
+    void StopSound(int param) override;
 };
 
 /* ================================================================== */

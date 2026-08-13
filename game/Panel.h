@@ -9,44 +9,45 @@
  * tooltip, and a state machine that selects the displayed resource
  * type based on (panelState, panelSubstate) fields.
  *
- * Size: >= 0xDC bytes (extends GameObject)
+ * Size: >= 0xDC bytes (extends Entity)
  * Vtable: 0x4784C8 (VTBL_PANEL)
  *
- * Class hierarchy:
+ * Class hierarchy (verified via RESDATA_BaseInit @ 0x4544E0, which keeps
+ * ECX unmodified through CALL 0x00405790, Entity's own
+ * (resource_id, anim_idx, world_x, world_y) constructor):
  *   GameObject
- *     └─ Panel  ← this class
+ *     └─ Entity
+ *          └─ Panel  ← this class
  *
  * Vtable layout:
  *   [0]  +0x00: scalar deleting destructor (Panel_Dtor_ScalarDeleting, 0x454580)
- *   [1]  +0x04: InvalidateRect (inherited from GameObject)
- *   [2]  +0x08: PtInRect (inherited from GameObject)
- *   [3]  +0x0C: (inherited from GameObject)
- *   [4]  +0x10: (inherited from GameObject)
- *   [5]  +0x14: (inherited from GameObject)
- *   [6]  +0x18: Init (Panel_Init, 0x454680) — overrides GameObject::InitBase
+ *   [1]  +0x04: InvalidateRect (inherited from Entity/GameObject)
+ *   [2]  +0x08: PtInRect (inherited from Entity/GameObject)
+ *   [3]  +0x0C: SetWorldPos/MoveTo (inherited from Entity, overrides GameObject::MoveTo)
+ *   [4]  +0x10: InvokeCallback1 (inherited from Entity/GameObject)
+ *   [5]  +0x14: InvokeCallback2 (inherited from Entity/GameObject)
+ *   [6]  +0x18: Init (Panel_Init, 0x454680) — overrides Entity::InitBase
  *   [7]  +0x1C: UpdateResourceByState (0x453FB0) — state-driven resource selector
- *   [8]  +0x20: SetFrame (inherited from GameObject)
- *   ...  +0x24+: (inherited from GameObject)
+ *   [8]  +0x20: SetFrame (inherited from Entity)
+ *   ...  +0x24+: (inherited from Entity, see core/Entity.h for slots [9]-[14])
  */
 
 #pragma once
 
-#include "../core/GameObject.h"
+#include "../core/Entity.h"
 
 // Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
-class Panel : public GameObject {
+class Panel : public Entity {
 public:
     /* ================================================================ */
     /* Fields (offsets from this)                                        */
     /* ================================================================ */
 
-    /* GameObject fields (0x00..0x3F) inherited */
-    /* ... see GameObject.h for offsets 0x00-0x3C ... */
-
-    void*    surface_ref;         // +0x40  surface reference (from resource)
-    int32_t  anim_index;          // +0x?? animation frame index
-    uint8_t  _pad_44[0x5C];       // +0x44..+0x9F
+    /* GameObject fields (0x00..0x23) and Entity fields (0x24..0x87,
+     * including resource/parent at +0x40 and anim_index at +0x28) are
+     * inherited — see core/GameObject.h and core/Entity.h. Panel's own
+     * fields begin immediately afterward, at +0x88. */
 
     /* Byte +0x88: "update_child" flag — when non-zero, TileMap_InvalidateRect
        is called on the child rects during UpdateChild. Also checked in

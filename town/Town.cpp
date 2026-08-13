@@ -38,6 +38,7 @@
 
 #include "Town.h"
 #include "../core/GameObject.h"
+#include "../core/GameView.h"
 #include "../game/Building.h"
 #include "../game/TrackPiece.h"
 #include "../game/World.h"
@@ -50,7 +51,12 @@
 #include "../network/NetworkPlayerList.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
-#include "../ui/UI_ChildWindow.h"
+/* ui/UI_ChildWindow.h removed: this file has zero references to any
+ * UI_ChildWindow* symbol (confirmed via grep) and it conflicts on
+ * UI_IsBitmapReady's linkage (extern "C" there vs. C++ linkage in
+ * game/Panel.h, now transitively pulled in via core/GameView.h) —
+ * a genuine pre-existing cross-header inconsistency, not something
+ * this file needs to resolve since it was never using the header. */
 #ifndef _WIN32
 #include <cassert>
 #include <cstdio>
@@ -74,8 +80,13 @@ void* ResourceManager_GetById(void* resmgr, int id);
 void*  operator_new(size_t size);               /* 0x465CE0 */
 void   GLOBAL_free(void* ptr);                  /* 0x465CD0 */
 
-/* C++ linkage — these have C++ mangled symbol definitions in object files */
-void   GameObject_GetRelPos(void* obj, int* out, int x, int y);  /* 0x436A40 */
+/* GameObject_GetRelPos (0x436A40) — was declared here for
+ * track_building's own use, now moved to core/GameView.cpp along with
+ * track_building itself; no remaining caller in this file. Removed
+ * rather than left dangling: game/Panel.h's own declaration (now
+ * transitively visible via core/GameView.h) has a different, ambiguous
+ * signature (`int __thiscall`, this file's was `void`, no calling
+ * convention) that hard-conflicts once both are visible in one TU. */
 
 /* UIPANEL_Blit — real def: ui/UIPANEL_Surface.cpp:0x42B050, C++-mangled
  * (no extern "C"). Was declared inside the extern "C" block below with a
@@ -89,11 +100,12 @@ bool   UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
                     int32_t dest_x, uint32_t dest_y,
                     void* dest_surface, uint32_t clip_left, uint32_t clip_top,
                     int32_t clip_right, uint32_t clip_bottom, uint32_t flags); /* 0x42B050 */
-/* GameObject_Draw — real address 0x405E60 (disassembly shows __thiscall + 6 stack args,
- * RET 0x18), but current stubs_impl.cpp:436 only defines (void*). The render_selection
- * call site passes 6 arguments; this mismatch is recorded as blocked-by-scope since
- * the stub is in shared/ which is outside my modification scope. */
-void   GameObject_Draw(void* self);  /* stub @ shared/stubs_impl.cpp:436 */
+/* GameObject_Draw (0x405E60) — RESOLVED, no longer declared here. It was
+ * only ever called from render_selection, which was misattributed to Town;
+ * render_selection moved to core/GameView.cpp (GameView::render_selection)
+ * and now issues a real typed virtual call (`this->Draw(rect, extra, 0)`)
+ * against the inherited Entity::Draw instead of this stub. See
+ * shared/stubs_impl.cpp's own updated comment for the same resolution. */
 
 /* UIPANEL_CreateSurface — real def: graphics/LOCOBITMAP.cpp:0x42A110,
  * C++-mangled __fastcall(ECX=this) constructor for UIPANEL_Surface (zeroes
@@ -882,309 +894,12 @@ char Town::handle_tile_click()
     return 0;
 }
 
-/* ================================================================== */
-/* Town::is_valid_placement — Static buildable-tile check (__cdecl)    */
-/* Address: 0x42CF90                                                   */
-/* ================================================================== */
-bool Town::is_valid_placement(Building* entity)
-{
-    uint8_t tile_type = 0;
-    if (entity != nullptr && entity->initialized == 1) {      /* +0x18 */
-        if (entity->resource != nullptr) {                    /* +0x40 */
-            tile_type = static_cast<RESDATA*>(entity->resource)->object_type;
-        }
-    }
-
-    if (tile_type == 0) {
-        return false;
-    }
-    if (tile_type == 0x07) {        /* always buildable */
-        return true;
-    }
-    if (tile_type == 0x08 || tile_type == 0x02 || tile_type == 0x06) {
-        return entity->visible == 1;                    /* +0x24 */
-    }
-    if (tile_type == 0x04 &&
-        /* +0x62C is well past RESDATA's documented/asserted 0x1D8 size —
-         * this resource type's data extends beyond the common RESDATA
-         * header into fields RESDATA doesn't model; kept as a raw offset
-         * read rather than forced through RESDATA's (too-small) type. */
-        *reinterpret_cast<uint8_t*>(
-            reinterpret_cast<intptr_t>(entity->resource) + 0x62C) == 1) {
-        return true;                /* connected tile */
-    }
-    if (tile_type == 0x03 &&
-        RESDATA_IsBuildingTile(static_cast<int32_t>(
-            reinterpret_cast<intptr_t>(entity->resource)))) {
-        return true;                /* building tile */
-    }
-    if (tile_type == 0x0C) {        /* large-ID tile (ID > 0x300F) */
-        int32_t id = -1;
-        if (entity->resource != nullptr) {
-            id = static_cast<RESDATA*>(entity->resource)->resource_id;
-        }
-        if (id > 0x300F) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* ================================================================== */
-/* Town::select_building — Select/focus a building (NULL = deselect)   */
-/* Address: 0x42D040                                                   */
-/* ================================================================== */
-byte Town::select_building(Building* building)
-{
-    if (building != nullptr && g_game_mode == 3) {
-        bool valid = Town::is_valid_placement(building);
-        if (valid && g_demo_mode != 1) {
-            this->selection_active = 1;                         /* +0x88 */
-
-            uint16_t tile_type = 0;
-            if (building->resource != nullptr) {
-                tile_type = static_cast<RESDATA*>(building->resource)->object_type;
-            }
-            this->selected_building_type = tile_type;           /* +0x16C */
-
-            if (g_ddraw_active == 0) {
-                g_active_panel = this;
-            }
-
-            this->selected_building = building;                 /* +0xE0 */
-
-            int center_x = (building->screen_rect.right -
-                            building->screen_rect.left) / 2 +
-                           building->screen_rect.left;
-            int center_y = (building->screen_rect.bottom -
-                            building->screen_rect.top) / 2 +
-                           building->screen_rect.top;
-            /* vtable[3] dispatch; the binary pushes only the two
-             * center coords (0x42D0D3..0x42D0DB) leaving the trailing
-             * set_mode args undefined — reproduced with zeros. */
-            this->set_mode(center_x,
-                           reinterpret_cast<void*>(static_cast<intptr_t>(center_y)),
-                           0, 0);
-
-            short zoom = (this->selected_building_type == 6) ? 1 : 3;
-            this->track_piece->SetZoom(zoom);                   /* 0x40D170 */
-
-            this->track_piece->Render();                        /* vtable[8] */
-
-            /* Binary reads this+0x08..+0x14 as the invalidate rect
-             * (0x42D10C..0x42D122); kept as raw base-slot access. */
-            TileMap_InvalidateRect(&g_tilemap,
-                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 8),
-                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 0xC),
-                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 0x10),
-                *reinterpret_cast<int*>(reinterpret_cast<intptr_t>(this) + 0x14));
-
-            DDRAW_SelectBuilding(&g_ddraw_building, this->selected_building);
-
-            return this->selection_active;
-        }
-    }
-
-    /* Deselect path */
-    this->selection_active = 0;                                 /* +0x88 */
-    this->selected_building_type = 0;                           /* +0x16C */
-
-    /* In the binary: g_active_panel = (g_ddraw_active == 1)
-     * ? &g_ddraw_building : 0  (0x42D156..0x42D16C). */
-    g_active_panel = (g_ddraw_active == 1) ? &g_ddraw_building : nullptr;
-
-    this->hide();                                               /* vtable[1] */
-
-    if (this->child_panel) {
-        this->child_panel->hide();                                /* vtable[1] */
-    }
-
-    return this->selection_active;
-}
-
-/* ================================================================== */
-/* Town::deselect_building — Remove the building selection overlay     */
-/* Address: 0x42D280                                                   */
-/* ================================================================== */
-void Town::deselect_building(int32_t /*unused1*/, int32_t /*unused2*/,
-                              int32_t /*unused3*/, int32_t /*unused4*/)
-{
-    RECT clip_rect;
-    int right_inset, bottom_inset;
-
-    if (this->selected_building_type == 7) {
-        right_inset  = this->overlay_dest_right - 0x90;
-        bottom_inset = this->overlay_dest_bottom - 0x8C;
-    } else {
-        right_inset  = this->overlay_dest_right >> 2;
-        bottom_inset = this->overlay_dest_bottom >> 2;
-    }
-
-    clip_rect.left   = this->viewport_inset_left + right_inset;
-    clip_rect.right  = this->viewport_inset_right - right_inset;
-    clip_rect.top    = this->viewport_inset_top + bottom_inset;
-    clip_rect.bottom = this->viewport_inset_bottom - bottom_inset;
-
-    RECT viewport_rect;
-    viewport_rect.left   = g_viewport_rect_left;
-    viewport_rect.top    = g_viewport_rect_top;
-    viewport_rect.right  = g_viewport_rect_right;
-    viewport_rect.bottom = g_viewport_rect_bottom;
-    IntersectRect(&clip_rect, &clip_rect, &viewport_rect);
-
-    /* overlay_panel's own ddraw_surf field (no extra dereference). */
-    void* backing_surface = view(this->overlay_panel)->ddraw_surf;
-
-    /* backing_surface vtable slot 5 (IDirectDrawSurface4::Blt, standard
-     * COM order): (surface, &backup, primary, rect, 0x1000000, 0) —
-     * restore the cached background. Kept as raw vtable dispatch rather
-     * than a typed IDirectDrawSurface4::Blt() call: the second argument
-     * here is this->backup_surface passed as a uint32_t scalar, not
-     * `&this->backup_surface` as a RECT* (which is how the same field
-     * group is used elsewhere, e.g. handle_tile_click's
-     * SetRect((RECT*)&this->backup_surface, ...)) — that mismatch needs
-     * Ghidra disassembly to resolve before this can be safely retyped;
-     * not done here to avoid guessing at DirectDraw parameter semantics. */
-    using BltFn = void (*)(void*, uint32_t, void*, RECT*, uint32_t, int);
-    reinterpret_cast<BltFn>((*reinterpret_cast<void***>(backing_surface))[5])(
-        backing_surface,
-        this->backup_surface,
-        g_primary_surface,
-        &clip_rect,
-        0x1000000,
-        0);
-
-    /* Panel anim-table flag at +0x20 + index*0x18 + 0x16; the index is
-     * the base timerId slot (+0x28), repurposed as panel index. */
-    uint32_t panel_flags = 0;
-    int panel_index = static_cast<int>(this->timerId);           /* +0x28 */
-    PanelGraphicsView* pgfx = panel_graphics_view(this->panel_graphics);
-    const uint8_t* anim_entry = reinterpret_cast<const uint8_t*>(pgfx->anim_table) +
-                                 panel_index * 0x18;
-    if (anim_entry[0x16] == 1) {
-        panel_flags = 0x20;
-    }
-
-    void* panel_surface = pgfx->surface;
-    UIPANEL_Blit(
-        panel_surface,
-        this->backup_surface,
-        this->backup_x,
-        this->backup_y,
-        this->backup_width,
-        backing_surface,
-        this->backup_surface,
-        this->backup_x,
-        this->backup_y,
-        this->backup_width,
-        panel_flags);
-}
-
-/* ================================================================== */
-/* Town::track_building — Per-frame tracking of the selected building  */
-/* Address: 0x42D1A0                                                   */
-/* ================================================================== */
-void Town::track_building()
-{
-    if (!this->selection_active) {                               /* +0x88 */
-        return;
-    }
-
-    if (this->selected_building_type == 6 &&                     /* +0x16C */
-        this->selected_building->visible == 0) {                 /* +0x24 */
-        this->select_building(nullptr);
-    }
-
-    Building* building = this->selected_building;                /* +0xE0 */
-    int cx = (building->screen_rect.right - building->screen_rect.left) / 2 +
-             building->screen_rect.left;
-    int cy = (building->screen_rect.bottom - building->screen_rect.top) / 2 +
-             building->screen_rect.top;
-
-    if (this->building_center_x != cx ||                         /* +0x190 */
-        this->building_center_y != cy) {                         /* +0x194 */
-        /* vtable[3] dispatch; binary pushes only (cx, cy). */
-        this->set_mode(cx, reinterpret_cast<void*>(static_cast<intptr_t>(cy)), 0, 0);
-        this->building_center_x = cx;
-        this->building_center_y = cy;
-    }
-
-    int local_8[2];
-    GameObject_GetRelPos(this, local_8, g_cursor_world_x, g_cursor_world_y);
-
-    /* Update each child sprite (vtable[20] dispatch per child). Chained
-     * via TrackPiece::sub_resource (+0x28) — Ghidra-confirmed as a real
-     * linked-list "next" pointer (RESDATA_CreateChildSprite writes each
-     * new child's address into the previous child's +0x28 via
-     * `*(void**)(prev+0x28) = new_child`), despite game/TrackPiece.h
-     * currently declaring it `int32_t` — a pre-existing, wider landmine
-     * (game/TrackPiece.cpp's own destructor already works around the
-     * same mismatch via a uint32_t truncate-then-widen cast rather than
-     * a real pointer field). Matching that established workaround here
-     * rather than reading the full 8 bytes as `*(void**)`, which would
-     * pull in 4 bytes of the adjacent `flags`/_pad_2E fields as garbage
-     * upper address bits on this 64-bit host. Not fixing TrackPiece.h's
-     * field type itself: out of scope for town/Town.cpp, touches
-     * game/ScriptedObject.cpp's independent +0x28 use too. */
-    for (TrackPiece* child = this->children_list;                /* +0xD0 */
-         child != nullptr;
-         child = reinterpret_cast<TrackPiece*>(
-             static_cast<uintptr_t>(static_cast<uint32_t>(child->sub_resource)))) {
-        this->on_mouse_move(this->hWnd, 0x200, 0,
-                            static_cast<LPARAM>(reinterpret_cast<intptr_t>(child)));
-    }
-
-    if (this->child_panel) {                                     /* +0xE4 */
-        this->child_panel->hide();                                /* vtable[1] */
-    }
-}
-
-/* ================================================================== */
-/* Town::update_selection — Blit the selection overlay to primary      */
-/* Address: 0x42D3A0                                                   */
-/* ================================================================== */
-void Town::update_selection(int32_t /*unused1*/, int32_t /*unused2*/,
-                             int32_t /*unused3*/, int32_t /*unused4*/)
-{
-    UIPANEL_Blit(
-        this->overlay_panel,              /* +0x17C */
-        this->viewport_inset_left,        /* +0xEC */
-        this->viewport_inset_top,         /* +0xF0 */
-        this->viewport_inset_right,       /* +0xF4 */
-        this->viewport_inset_bottom,      /* +0xF8 */
-        g_primary_surface,
-        this->overlay_dest_left,          /* +0x114 */
-        this->overlay_dest_top,           /* +0x118 */
-        this->overlay_dest_right,         /* +0x11C */
-        this->overlay_dest_bottom,        /* +0x120 */
-        0x40);
-}
-
-/* ================================================================== */
-/* Town::render_selection — Draw the selection highlight for one tile  */
-/* Address: 0x42D400 (__thiscall, 5 stack args, RET 0x14)              */
-/*                                                                     */
-/* The binary calls GameObject_Draw (0x405E60) directly with           */
-/* (0, arg5, rect{arg1..arg4}).                                        */
-/* ================================================================== */
-void Town::render_selection(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
-                            int32_t extra)
-{
-    if (this->selection_active) {                                /* +0x88 */
-        RECT rect;
-        rect.left   = x1;
-        rect.top    = y1;
-        rect.right  = x2;
-        rect.bottom = y2;
-        /* BUG: Binary disassembly (0x42D40E..0x42D431) shows the code
-         * pushes: PUSH 0; PUSH arg5; PUSH rect{4}; CALL 0x405E60.
-         * That's 6 arguments total. But the real GameObject_Draw signature
-         * (verified in game/Panel.h) takes only (void* self). There's a
-         * signature mismatch in the original code. For now, calling with
-         * just the self pointer to match the reconstructed signature. */
-        GameObject_Draw(this);
-    }
-}
+/* is_valid_placement/select_building/track_building/deselect_building/
+ * update_selection/render_selection (0x42CF90/0x42D040/0x42D1A0/0x42D280/
+ * 0x42D3A0/0x42D400) moved to core/GameView.cpp — see town/Town.h's
+ * "Building selection and tracking" field-list note for the evidence
+ * (every call site loads ECX with the bare immediate 0x4852A0, not a
+ * Town pointer-variable dereference). */
 
 /* ================================================================== */
 /* Town::postcard_init_list — Initialize postcard dialog (vtable[8])   */
@@ -1634,76 +1349,8 @@ int Town::postcard_command_handler(TrackPiece* control, uint32_t wParam,
     return 1;
 }
 
-/* ================================================================== */
-/* Town::send_postcard — Postcard sending lifecycle handler            */
-/* Address: 0x42D770                                                   */
-/* ================================================================== */
-byte Town::send_postcard(TrackPiece* track_piece)
-{
-    if (track_piece == nullptr) {
-        return 0;
-    }
-
-    if (track_piece->prev_frame >= 0) {                          /* +0x54 */
-        track_piece->prev_frame--;
-    }
-
-    int res_id = track_piece->resource->resource_id;             /* +0x44 -> +4 */
-
-    if (res_id == 0x3806) {
-        if (track_piece->prev_frame == 0 &&
-            track_piece->zoom_level == 2) {
-            track_piece->SetZoom(1);
-
-            /* world pointer at building+0x44C */
-            void* world = *reinterpret_cast<void**>(
-                reinterpret_cast<intptr_t>(this->selected_building) + 0x44C);
-            if (world) {
-                this->select_building(nullptr);
-                DDRAW_SelectBuilding(&g_ddraw_building, nullptr);
-
-                /* Save the world (0x43CF47/0x43CF53/0x43CF5D). The
-                 * binary passes &g_world (0x4A98B0 = World storage);
-                 * the host uses the g_world value — same singleton. */
-                char player_id = *reinterpret_cast<char*>(
-                    reinterpret_cast<intptr_t>(world) + 0x78);
-                uint16_t resource_id = *reinterpret_cast<uint16_t*>(
-                    reinterpret_cast<intptr_t>(world) + 0x7A);
-                /* game/World.h declares both of these taking Vehicle* —
-                 * `world` here is the World singleton (read from
-                 * Building+0x44C, see comment above), not a Vehicle.
-                 * That parameter type looks like a pre-existing signature
-                 * bug in World.h (out of scope for this file); cast
-                 * locally rather than touching the shared declaration. */
-                World_GetObjectAt(static_cast<Vehicle*>(world));
-                World_RenderAll(static_cast<Vehicle*>(world));
-                static_cast<World*>(g_world)->SaveToFile(resource_id,
-                                                         player_id, 1);
-            }
-        }
-    } else if (res_id == 0x3807) {
-        if (track_piece->prev_frame >= 0) {
-            DDRAW_SelectBuilding(&g_ddraw_building, this->selected_building);
-            track_piece->prev_frame = -1;
-        }
-
-        if (g_ddraw_active) {
-            track_piece->SetZoom(2);
-        } else {
-            track_piece->SetZoom(1);
-        }
-        return 1;
-    } else if (res_id - 0x3808 == 0) {
-        if (track_piece->prev_frame == 0 &&
-            track_piece->zoom_level == 2) {
-            track_piece->SetZoom(1);
-            this->select_building(nullptr);
-            return 1;
-        }
-    }
-
-    return 1;
-}
+/* Town::send_postcard (0x42D770) moved to GameView::update_cursor_child —
+ * see town/Town.h's "Building selection and tracking" note. */
 
 /* ================================================================== */
 /* Town::clear_postcard_ui — Clear/reset the postcard UI               */
@@ -2925,11 +2572,13 @@ void Train_HandleTrackBuild(void* subsystem, int msg)
 }
 
 /* ================================================================== */
-/* Typed wrappers for TileMap::ProcessRect's Town dispatch calls.       */
+/* Typed wrappers for TileMap::ProcessRect's GameView dispatch calls.   */
 /* Declared in world/tilemap.h; implemented here (not in tilemap.cpp)  */
 /* to avoid pulling this file's own headers into that one. Real         */
 /* signatures verified against each callee's RET immediate — see       */
-/* Town::render_selection/deselect_building/update_selection above.    */
+/* core/GameView.h's render_selection/deselect_building/update_selection*/
+/* doc comments (moved there from this class — see the "Building        */
+/* selection and tracking" note in Town.h).                             */
 /*                                                                      */
 /* Re-declared locally (matching world/tilemap.h exactly) rather than   */
 /* #include-ing that header: tilemap.h pulls in its own, differently-   */
@@ -2946,17 +2595,68 @@ extern void* g_town_view; /* 0x4852A0 */
 
 void Town_RenderSelection(int x1, int y1, int x2, int y2, int extra)
 {
-    static_cast<Town*>(g_town_view)->render_selection(x1, y1, x2, y2, extra);
+    static_cast<GameView*>(g_town_view)->render_selection(x1, y1, x2, y2, extra);
 }
 
 void Town_DeselectBuilding(void)
 {
     /* deselect_building's 4 stack args are proven unused by its body
      * (RET 0x10, but every field it reads is this-relative) — pass 0s. */
-    static_cast<Town*>(g_town_view)->deselect_building(0, 0, 0, 0);
+    static_cast<GameView*>(g_town_view)->deselect_building(0, 0, 0, 0);
 }
 
 void Town_UpdateSelection(void)
 {
-    static_cast<Town*>(g_town_view)->update_selection(0, 0, 0, 0);
+    static_cast<GameView*>(g_town_view)->update_selection(0, 0, 0, 0);
+}
+
+/* ================================================================== */
+/* Town_SelectBuilding — two genuinely distinct overloads already      */
+/* exist across the tree (different mangled symbols, since C++          */
+/* overload resolution/mangling includes parameter types):              */
+/*                                                                       */
+/*   void Town_SelectBuilding(void*, void*)  — game/BuildingMgr.cpp,     */
+/*     town/sdl3_town_mode3.cpp. Callers already pass a real pointer     */
+/*     (or nullptr) — safe to forward directly.                         */
+/*                                                                       */
+/*   int  Town_SelectBuilding(void*, int)    — world/tilemap.h/.cpp,     */
+/*     world/scriptengine.cpp, game/World.cpp. Two live call sites       */
+/*     (world/tilemap.cpp:1740, game/World.cpp:913) truncate a real      */
+/*     pointer through `int` for a nonzero building — the same           */
+/*     pointer-in-int32_t hazard graphics/DDRAW.cpp's own                */
+/*     DDRAW_SelectBuilding(void*, int) bridge already documents and     */
+/*     rejects loudly rather than silently corrupting a pointer on this  */
+/*     64-bit host. Every OTHER call site of this overload passes        */
+/*     literal 0 (deselect) — handled safely.                            */
+/*                                                                        */
+/* Both used to be no-op stubs (shared/stubs_impl.cpp,                   */
+/* shared/defsym_stubs.cpp) — wiring them to the real                    */
+/* GameView::select_building is a genuine behavior change: building       */
+/* selection via BuildingMgr/World/tilemap/scriptengine now actually      */
+/* does something instead of silently no-op'ing.                        */
+/* ================================================================== */
+void Town_SelectBuilding(void* town_view, void* building)
+{
+    static_cast<GameView*>(town_view)->select_building(static_cast<Building*>(building));
+}
+
+int Town_SelectBuilding(void* town_view, int building)
+{
+    if (building == 0) {
+        return static_cast<GameView*>(town_view)->select_building(nullptr);
+    }
+#ifndef _WIN32
+    fprintf(stderr,
+            "STUB: Town_SelectBuilding(void*, int) called with a nonzero `int` "
+            "building at %s:%d — a real Building* cannot be carried in an int on "
+            "this 64-bit host (see world/tilemap.cpp:1740 and game/World.cpp:913, "
+            "which truncate a real pointer through int); matching the identical, "
+            "already-documented hazard in graphics/DDRAW.cpp's "
+            "DDRAW_SelectBuilding(void*, int) bridge.\n",
+            __FILE__, __LINE__);
+    assert(false &&
+           "Town_SelectBuilding(void*, int) called with a nonzero building — "
+           "pointer-in-int32_t truncation hazard, see comment above");
+#endif
+    return 0;
 }

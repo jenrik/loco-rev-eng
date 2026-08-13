@@ -345,25 +345,19 @@
     ... + more Town-specific virtual slots ...                          */
 
 /* ================================================================== */
-/* TownGameView — Town scroll view / game view widget                    */
-/* Not a window — derived from GameObject (vtable 0x477820)             */
+/* GameView (historically "TownGameView / ScrollView") — viewport         */
+/* scrolling / building-selection helper. Derived GameObject -> Entity -> */
+/* Panel -> GameView (verified: game/Panel.h's real base is Entity, not   */
+/* GameObject directly).                                                 */
+/*                                                                       */
+/* This block used to document a stale, unverified 15-slot layout        */
+/* (Draw at 0x42F900, etc.) — none of those addresses had any real        */
+/* xrefs. core/GameView.h is now the canonical, byte-verified 22-slot     */
+/* layout (read directly from 0x477D30..0x477D88, the latter being       */
+/* Town's own unrelated vtable and the hard ceiling); see that header's   */
+/* class doc comment rather than duplicating it here.                    */
 /* ================================================================== */
-#define VTBL_TOWN_GAMEVIEW             0x00477D30  /* TownGameView / ScrollView vtable
-    [0]  +0x00: scalar deleting destructor (0x42D810)
-    [1]  +0x04: (inherited from GameObject: StopSound)
-    [2]  +0x08: (inherited)
-    [3]  +0x0C: HitTest dispatch
-    [4]  +0x10: (inherited)
-    [5]  +0x14: (inherited)
-    [6]  +0x18: Init (GameObject::InitBase)
-    [7]  +0x1C: SetAnimState (overridden)
-    [8]  +0x20: SetFrame (inherited from GameObject)
-    [9]  +0x24: SetName (inherited)
-    [10] +0x28: Draw (TownGameView_Draw, 0x42F900)
-    [11] +0x2C: DrawConnected
-    [12] +0x30: OnTimerTick
-    [13] +0x34: (overridden)
-    [14] +0x38: AnimStateSelect (inherited)                             */
+#define VTBL_GAMEVIEW                  0x00477D30  /* GameView vtable — see core/GameView.h */
 
 /* ================================================================== */
 /* PostcardPreviewWindow — Postcard preview/send dialog                 */

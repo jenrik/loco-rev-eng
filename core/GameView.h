@@ -1,58 +1,82 @@
 // Status: INTEGRATED
 /**
- * GameView.h — Town viewport scrolling helper class
+ * GameView.h — Town viewport scrolling / building-selection helper class
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
  * GameView (historically "TownGameView / ScrollView") is the viewport
- * scrolling / camera helper embedded at the g_town_view global
- * (0x4852A0).  It is created once during startup and is shared with the
- * town integration (town/Town.h owns the postcard handlers that live in
- * this vtable's town-family slots).
+ * scrolling / camera / building-selection helper embedded at the
+ * g_town_view global (0x4852A0). It is created once during startup.
  *
- * Class hierarchy (binary):
+ * Class hierarchy (binary, corrected — Panel's real base is Entity, not
+ * GameObject directly; see game/Panel.h):
  *   GameObject (vtable 0x477820)
- *     └─ Panel (vtable 0x4784C8)
- *          └─ GameView  <- this class (vtable 0x477D30)
+ *     └─ Entity (vtable 0x477488)
+ *          └─ Panel (vtable 0x4784C8)
+ *               └─ GameView  <- this class (vtable 0x477D30)
  *
- * Vtable layout (0x477D30 — 20 slots, bytes verified against the
- * binary; the compiler-managed C++ vtable is a host-model
- * approximation, the binary slot numbers are authoritative):
+ * Vtable layout (0x477D30 — 22 slots, read directly from the raw vtable
+ * bytes 0x477D30..0x477D88; 0x477D88 is Town's own unrelated vtable and
+ * is the hard ceiling). All addresses below were confirmed by
+ * disassembling their sole call sites — every one of TileMap_ProcessRect
+ * (0x456700) and GameLoop_FrameUpdate (0x45C3EA)'s calls into this family
+ * load ECX with the bare immediate 0x4852A0, not a pointer-variable
+ * dereference, proving the receiver is this single global object, not
+ * the heap-allocated Town (town/Town.h):
  *   [0]  +0x00: scalar deleting destructor (0x42CD60; body 0x42CD80)
- *   [1]  +0x04: Panel::UpdateChild          (0x454890)
+ *   [1]  +0x04: Panel::UpdateChild          (0x454890, inherited)
  *   [2]  +0x08: GameObject::PtInRect        (0x436A10, inherited)
- *   [3]  +0x0C: GameView/Town slot          (0x42D440)
- *   [4]  +0x10: Town postcard click handler (0x42D670)
- *   [5]  +0x14: Panel slot                  (0x454A60)
+ *   [3]  +0x0C: center_on_point               (0x42D440 — NOT reconstructed,
+ *               see method doc; was misattributed to Town::set_mode)
+ *   [4]  +0x10: GameView-family slot        (0x42D670, not covered here)
+ *   [5]  +0x14: Panel slot                  (0x454A60, inherited)
  *   [6]  +0x18: Panel::Init                 (0x454680, inherited)
- *   [7]  +0x1C: GameObject::StopSound       (0x405A20, inherited)
- *   [8]  +0x20: GameObject::SetFrame        (0x405DE0, inherited)
- *   [9]  +0x24: GameObject::SetVisible      (0x4061B0, inherited)
- *   [10] +0x28: GameView::Update            (0x42D1A0 — Ghidra label
- *               "Town_TrackBuilding"; per-frame tracking)
+ *   [7]  +0x1C: Entity::StopSound           (0x405A20, inherited)
+ *   [8]  +0x20: Entity::SetFrame            (0x405DE0, inherited)
+ *   [9]  +0x24: Entity::SetVisible          (0x4061B0, inherited)
+ *   [10] +0x28: track_building                (0x42D1A0 — per-frame
+ *               selection tracking; formerly misattributed to
+ *               Town::track_building)
  *   [11] +0x2C: Panel::DispatchEvent        (0x454900, inherited)
- *   [12] +0x30: GameObject::DrawConnected   (0x405FD0, inherited)
- *   [13] +0x34: GameObject::SetName         (0x405E20, inherited)
- *   [14] +0x38: GameObject::SetAnimState    (0x405A50, inherited)
+ *   [12] +0x30: Entity::DrawConnected       (0x405FD0, inherited)
+ *   [13] +0x34: Entity::SetName             (0x405E20, inherited)
+ *   [14] +0x38: Entity::SetAnimState        (0x405A50, inherited)
  *   [15] +0x3C: GameView::cleanup           (0x42CDD0)
  *   [16] +0x40: Panel::HandleKey            (0x454AE0, inherited)
- *   [17] +0x44: Town postcard command handler (0x42D6B0)
- *   [18] +0x48: Town-family slot            (0x44EF00)
- *   [19] +0x4C: Town-family slot            (0x42D760)
+ *   [17] +0x44: GameView-family slot        (0x42D6B0, not covered here —
+ *               formerly misattributed to Town::postcard_command_handler;
+ *               its only xref is this vtable slot, so it is GameView's own
+ *               method, deferred to a follow-up pass)
+ *   [18] +0x48: GameView-family slot        (0x44EF00, not covered here)
+ *   [19] +0x4C: GameView-family slot        (0x42D760, not covered here)
+ *   [20] +0x50: update_cursor_child            (0x42D770 — per-child cursor-
+ *               sprite animation tick; formerly misattributed to
+ *               Town::send_postcard, whose only xref is track_building's
+ *               own child loop, not any postcard call site)
+ *   [21] +0x54: render_selection              (0x42D400 — formerly
+ *               misattributed to Town::render_selection)
  *
  * NOTE: earlier headers claimed overrides at "SetAnimState (slot 7)",
  * "Draw 0x42F900" and "method_13 0x42D840" — none of those addresses
  * are referenced anywhere; the verified layout above replaces them.
+ *
+ * town/Town.h documents its own (independently-evidenced, narrower) field
+ * model for +0x88..+0x1B8 for the methods that stay on Town this pass
+ * (handle_tile_click, postcard_command_handler) — those methods show the
+ * SAME "ECX = bare immediate 0x4852A0" receiver evidence as this class
+ * and are very likely GameView's own methods too, but are deliberately
+ * left on Town as a documented follow-up (see town/Town.h's own note).
  */
 
 #pragma once
 
 #include "../game/Panel.h"
 #include "../core/Entity.h"
+#include "../game/TrackPiece.h"
 #include "../resources/ResourceManager.h"   /* ResourceObject */
 
-class ResourceObject;
+class Building;
 
 /* ================================================================== */
 /* GameView class                                                       */
@@ -64,24 +88,66 @@ public:
     /* GameView-specific fields                                          */
     /*                                                                   */
     /* The binary layout: Panel fields to +0xDF, then:                   */
-    /*   scroll_x            +0xE0                                       */
+    /*   selected_building   +0xE0                                       */
     /*   embedded Entity     +0xE4..+0x16B (constructed by 0x405790)     */
-    /*   +0x16C..+0x17B      unmodeled tail (town-side fields)           */
-    /*   child_resource      +0x17C                                      */
-    /* Total size: 0x180 bytes.  Natural host layout is compiler-managed */
-    /* (x86 layout parity is a documentation concern only).              */
+    /*   selected_building_type +0x16C                                   */
+    /*   +0x170..+0x177     unmodeled tail (not touched by this pass's   */
+    /*                      methods — see handle_tile_click, deferred)   */
+    /*   track_piece         +0x178                                      */
+    /*   overlay_panel       +0x17C                                      */
+    /*   backup_surface/x/y/width +0x180..+0x18C                        */
+    /*   building_center_x/y +0x190/+0x194                              */
+    /* Running size is at least 0x198 bytes (both track_building and      */
+    /* deselect_building read +0x190/+0x194); this is a global instance,  */
+    /* so there is no allocation size to appeal to for an exact total.   */
+    /*                                                                   */
+    /* IMPORTANT for reviewers: +0xEC/+0x114/+0x124 below are NOT        */
+    /* separate GameView fields — they are `game_object_sub`'s own       */
+    /* inherited GameObject::screen_rect / Entity::source_rect /         */
+    /* Entity::resource, reached through the embedded Entity at +0xE4    */
+    /* (+0xE4 + 0x08/0x30/0x40). The "panel index" field track_building   */
+    /* and deselect_building read at absolute +0x28 is a DIFFERENT thing:*/
+    /* it is Entity::anim_index INHERITED DIRECTLY on `this` (via        */
+    /* Panel : Entity : GameObject), not any field of game_object_sub.  */
+    /* Do not conflate the two +0x28-shaped-looking accesses.            */
     /* ================================================================ */
 
-    int32_t  scroll_x;               /* +0xE0  scroll/camera position */
+    Building* selected_building;     /* +0xE0  currently selected/tracked building */
 
     /* Embedded Entity sub-object — constructed with Entity(-1,-1,0,0)
      * (0x405790) in the binary; modeled as a real typed member so the
      * compiler manages its lifecycle and virtual dispatch. */
     Entity   game_object_sub;        /* +0xE4 */
 
-    /* +0x16C..+0x17B: town-side fields (not modeled here). */
+    uint16_t selected_building_type; /* +0x16C  tile type of selected_building */
 
-    ResourceObject* child_resource;  /* +0x17C, released by cleanup() */
+    /* +0x170..+0x177: unmodeled (handle_tile_click's cursor sprites,
+       deferred — see class doc comment). */
+
+    TrackPiece* track_piece;         /* +0x178  cursor/zoom control for the
+                                         selected building (set_building) */
+
+    /* UIPANEL_Surface pointer by evidence (deselect_building/
+     * update_selection dereference its own +0x1C field directly and pass
+     * it to UIPANEL_Blit), but kept as ResourceObject* to match the
+     * already-integrated cleanup() below and the same generic
+     * resource-handle idiom used throughout this codebase for
+     * resource-shaped objects (see resources/ResourceManager.cpp).
+     * Cast at the two Blit-shaped use sites via the same
+     * UIPANEL_SurfaceView mirror town/Town.cpp already uses for this
+     * exact field on this exact object (pre-existing, documented
+     * LOCOBITMAP.h PostcardAlbum-conflict workaround -- see Town.h's
+     * overlay_panel comment). */
+    ResourceObject* overlay_panel;   /* +0x17C, released by cleanup() */
+
+    /* Backup surface data — background restore on deselect. */
+    uint32_t backup_surface;         /* +0x180 */
+    uint32_t backup_x;                /* +0x184 */
+    int32_t  backup_y;                /* +0x188 */
+    uint32_t backup_width;            /* +0x18C */
+
+    int32_t  building_center_x;      /* +0x190  cached selected-building center X */
+    int32_t  building_center_y;      /* +0x194  cached selected-building center Y */
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */
@@ -92,8 +158,8 @@ public:
      *
      * Binary sequence: RESDATA_BaseInit (Panel base init, 0x4544E0),
      * embedded Entity(-1,-1,0,0) at +0xE4, GameView vtable, type=0x0E,
-     * scroll_x=0, +0xAD active flag=1, child_resource=nullptr.  In
-     * natural C++ the Panel base and the Entity member are constructed
+     * selected_building=nullptr, +0xAD active flag=1, overlay_panel=nullptr.
+     * In natural C++ the Panel base and the Entity member are constructed
      * first and the compiler emits the GameView vtable.
      */
     GameView();
@@ -111,19 +177,143 @@ public:
     /**
      * Cleanup — Address: 0x42CDD0 (vtable[15]).
      *
-     * Destroys the child resource (vtable[0] with flag 1), resets the
+     * Destroys the overlay panel (vtable[0] with flag 1), resets the
      * embedded Entity (vtable[6]) and self (Panel::Init, 0x454680),
      * then runs RESDATA_DtorBase (0x454630).
      */
     void cleanup();
+
+    /**
+     * center_on_point — vtable[3]. Address: 0x42D440.
+     *
+     * BLOCKED — not reconstructed this pass. Confirmed (via disassembly)
+     * to be a ~550-byte scroll-deadzone viewport recenter: reads the
+     * client rect + viewport globals, compares the target point against
+     * a deadzone derived from this->resource and game_object_sub.resource
+     * dimensions, flips the +0xAD side flag when the target crosses the
+     * deadzone, repositions each child TrackPiece in the +0xD0 list, and
+     * finally repositions `this` and game_object_sub via
+     * GameObject::SetWorldPos. select_building and track_building dispatch
+     * to it through this slot (previously miscoded as a 4-arg call to
+     * the unrelated Town::set_mode/UI_WindowBase::set_mode).
+     *
+     * Declared and dispatched correctly so callers type-check; body is a
+     * loud stub per CLAUDE.md's stub policy (see core/GameView.cpp).
+     * TODO: decompile 0x42D440.
+     */
+    virtual void center_on_point(int center_x, int center_y);
+
+    /**
+     * track_building — vtable[10] (+0x28). Address: 0x42D1A0.
+     *
+     * Per-frame tracking of the selected building. Auto-deselects an
+     * invisible depot (type 6 with selected_building->visible == 0),
+     * re-centers the viewport via center_on_point when the building's
+     * screen-space center moved, updates each child TrackPiece in the
+     * +0xD0 (Panel::child_surface) list via update_cursor_child, and
+     * invalidates the embedded Entity.
+     *
+     * Called by: GameLoop_FrameUpdate (0x45C3EA), ECX = bare immediate
+     * 0x4852A0.
+     */
+    void track_building();
+
+    /**
+     * is_valid_placement — Static buildable-tile check (__cdecl, not a
+     * method — no receiver). Address: 0x42CF90.
+     *
+     * Validates entity initialized (+0x18) and tile type byte at
+     * resource+8: 0x07 always valid; 0x08/0x02/0x06 must be visible;
+     * 0x04 must be connected (+0x62C); 0x03 must be a building tile;
+     * 0x0C valid when resource id > 0x300F.
+     *
+     * Called only by select_building (0x42D06A) — moved alongside it.
+     */
+    static bool is_valid_placement(Building* entity);
+
+    /**
+     * select_building — vtable slot NOT used here (dispatched only via
+     * direct calls in the binary). Address: 0x42D040.
+     *
+     * Select/focus a building (or nullptr to deselect). Validates via
+     * is_valid_placement (g_game_mode == 3, demo mode off), stores the
+     * building, recenters the viewport via center_on_point, sets the
+     * cursor zoom (1 for depot/type 6, else 3), renders the track piece
+     * cursor, invalidates the tile rect, and notifies
+     * DDRAW_Building::SelectBuilding. The nullptr path clears the
+     * selection and hides the embedded Entity.
+     *
+     * Called by: track_building (0x42D1D1, ECX unchanged from `this`),
+     * TileMap_HandleClick (0x456051/0x456072, ECX = bare immediate
+     * 0x4852A0), and externally via the Town_SelectBuilding free-function
+     * wrapper (town/Town.cpp).
+     *
+     * @return  selection_active (Panel::update_child_flags, +0x88 —
+     *          reused by this class as the selection-active gate)
+     */
+    uint8_t select_building(Building* building);
+
+    /**
+     * deselect_building — Address: 0x42D280 (RET 0x10 — 4 stack args; the
+     * body reads only `this`-relative fields, never the incoming stack
+     * values).
+     *
+     * Removes the building-selection overlay: computes a clip rect from
+     * game_object_sub.screen_rect and game_object_sub.source_rect
+     * dimensions, intersects it with the viewport rect, blits the cached
+     * background back to the primary surface via overlay_panel's own
+     * Blt slot, then re-blits the panel overlay via UIPANEL_Blit.
+     */
+    void deselect_building(int32_t unused1, int32_t unused2,
+                           int32_t unused3, int32_t unused4);
+
+    /**
+     * update_selection — Address: 0x42D3A0 (RET 0x10 — 4 stack args, same
+     * unused-trailing pattern as deselect_building above).
+     *
+     * Blits the selection overlay panel to the primary surface: source
+     * from game_object_sub.screen_rect, dest from game_object_sub.source_rect,
+     * flag 0x40.
+     */
+    void update_selection(int32_t unused1, int32_t unused2,
+                          int32_t unused3, int32_t unused4);
+
+    /**
+     * render_selection — vtable[21] (+0x54). Address: 0x42D400.
+     *
+     * If selection_active (Panel::update_child_flags, +0x88), draws the
+     * embedded Entity's base-class Entity::Draw (0x405E60, called
+     * directly on `this`, not game_object_sub — ECX is never reloaded
+     * between the +0x88 check and the CALL) with the caller's tile rect.
+     */
+    void render_selection(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
+                          int32_t extra);
+
+    /**
+     * update_cursor_child — vtable[20] (+0x50). Address: 0x42D770.
+     *
+     * Per-child cursor-sprite animation tick, dispatched ONLY from
+     * track_building's own child loop (its sole xref in the entire
+     * binary is the vtable[20] DATA slot at 0x477D80 — it has zero call
+     * sites of its own). Ghidra's prior label ("Town_SendPostcard") was
+     * a misnomer inherited from Town's unrelated postcard subsystem;
+     * the body only recognizes the three handle_tile_click cursor
+     * resource IDs (0x3806/0x3807/0x3808), never anything postcard-shaped.
+     * Counts down child->prev_frame and fires zoom/deselect transitions.
+     */
+    uint8_t update_cursor_child(TrackPiece* child);
 };
 
 /* ================================================================== */
 /* Global instance                                                     */
 /*                                                                     */
-/* The town view is an object EMBEDDED at the g_town_view global       */
+/* The GameView instance lives at the fixed address g_town_view names  */
 /* (binary 0x4852A0); the canonical declaration lives in               */
 /* world/tilemap.h (extern void* g_town_view) and the host definition  */
-/* in shared/stubs_impl.cpp.  The Game methods pass the object address */
-/* (&g_town_view) to GameObject::PtInRect / town handlers.             */
+/* in shared/stubs_impl.cpp. Callers pass the pointer VALUE, cast to   */
+/* GameView*, e.g. town/Town.cpp's Town_RenderSelection/               */
+/* Town_DeselectBuilding/Town_UpdateSelection wrappers:                */
+/*   static_cast<GameView*>(g_town_view)->render_selection(...)        */
+/* — not its address (&g_town_view) — matching the disassembly's bare  */
+/* `mov ecx, 0x4852A0` receiver load.                                  */
 /* ================================================================== */

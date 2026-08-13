@@ -256,8 +256,11 @@ byte Panel::Init(int resource_id, int anim_index, byte force_reload)
     byte cResult = static_cast<byte>(result);
 
     if (cResult != 0 && resource_id != 0x2401) {
+        /* this->resource is the inherited Entity::resource/parent union
+         * member (core/Entity.h) — was a locally-duplicated "surface_ref"
+         * field here before Panel's Entity base class was recovered. */
         const auto* resource_surface = reinterpret_cast<const PanelResourceSurfaceFields*>(
-            this->surface_ref);
+            this->resource);
         void* surface = resource_surface->surface;
         int surface_locked = reinterpret_cast<const SurfaceLockFields*>(surface)->locked;
 

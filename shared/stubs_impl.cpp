@@ -384,19 +384,21 @@ void* g_tile_occupied_bitmap = nullptr;
  *      real resource -- see PersistenceAdapter.h's documented 0/497
  *      placement-coverage gap) -- both guards kept, they're correct and
  *      needed regardless of when this is next attempted.
- *   2. Town::render_selection (town/Town.cpp:1185) calls a stale
- *      GameObject_Draw(void*) free-function stub whose real target,
- *      per the disassembly's own address (0x405E60), is Entity::Draw
- *      itself (get_xrefs_to confirms 0x42D431 really is among
- *      0x405E60's callers -- not a stale comment). But `Town : public
- *      UI_WindowBase` (ui/UI_WindowBase.h) has NO Entity/GameObject base
- *      at all, so the original's raw `CALL 0x405E60` with a `Town*` in
- *      ECX relies on some layout relationship between Town and Entity
- *      that isn't evidenced yet -- fixing this without that evidence
- *      would mean reinterpret_cast-ing Town to Entity on a guess, which
- *      CLAUDE.md forbids. Needs its own investigation (own
- *      Remaining-work bullet below) before this flip can be reattempted.
- * `ATTR_0047f108` stays reverted until both are resolved. */
+ *   2. RESOLVED (2026-08-13, GameView-misattribution session):
+ *      render_selection (0x42D400) was never a Town:: method at all --
+ *      TileMap_ProcessRect's own call site loads ECX with the bare
+ *      immediate 0x4852A0 (GameView's global instance), never a Town
+ *      pointer-variable dereference. GameView really is Entity-derived
+ *      (GameObject -> Entity -> Panel -> GameView, see core/GameView.h),
+ *      so the original's raw `CALL 0x405E60` is just
+ *      `game_view->Draw(rect, extra, 0)` -- Entity::Draw, inherited,
+ *      no cast needed. Moved to GameView::render_selection
+ *      (core/GameView.cpp), which now calls `this->Draw(...)` for real
+ *      instead of the stale GameObject_Draw(void*) stub. The `Town :
+ *      public UI_WindowBase` layout-relationship blocker this bullet
+ *      used to describe never existed; it was a wrong-class assumption.
+ * Bullet 1's UIPANEL_Surface/FrameData gap is unrelated and still open;
+ * `ATTR_0047f108` stays reverted until that one is resolved too. */
 int ATTR_0047f108 = 0;
 int DAT_00481170 = 0;
 int DAT_0048118c = 0;
@@ -769,8 +771,11 @@ void HelpWnd_PlayNarration(void*, int, int);
 void HelpWnd_PlayNarration(void*, int, int) { /* host no-op */ }
 void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int);
 void Town_BlitElement(void*, unsigned int, unsigned int, int, unsigned int, void*, unsigned int, unsigned int, int, unsigned int, unsigned int) { /* host no-op */ }
-void Town_SelectBuilding(void* self, int i);
-void Town_SelectBuilding(void* self, int i) { (void)self; (void)i; }
+/* Town_SelectBuilding(void*, int) — real implementation now in
+ * town/Town.cpp (calls GameView::select_building). Removed the no-op
+ * stub here per CLAUDE.md's "no --defsym-style placeholders" rule; a
+ * duplicate definition here would also be a link error against the
+ * real one. */
 void TileMap_InvalidateDirtyRects(void*, char);
 void TileMap_InvalidateDirtyRects(void*, char) { /* host no-op */ }
 void ScriptEngine_Call(void* self);

@@ -454,7 +454,7 @@ void ScriptedObject::MoveTo(int x, int y)
             }
 
             /* Get sprite frame width from RESDATA (+0x14 = frame_width) */
-            sprite_width = static_cast<const RESDATA*>(this->surface_ref)->frame_width;
+            sprite_width = static_cast<const RESDATA*>(this->resource)->frame_width;
 
             /* Check against ScriptEngine right bound */
             if (this->script_engine_active != 0) {
@@ -484,7 +484,7 @@ void ScriptedObject::MoveTo(int x, int y)
                 x = this->scroll_panel_offset;
             }
             else {
-                sprite_width = static_cast<const RESDATA*>(this->surface_ref)->frame_width;
+                sprite_width = static_cast<const RESDATA*>(this->resource)->frame_width;
                 if (x > g_world_width - sprite_width) {
                     x = g_world_width - sprite_width;
                 }
@@ -528,7 +528,7 @@ void ScriptedObject::MoveTo(int x, int y)
         }
     }
     else {  /* Direction flag == 1 — positive direction */
-        int sprite_w = static_cast<const RESDATA*>(this->surface_ref)->frame_width;
+        int sprite_w = static_cast<const RESDATA*>(this->resource)->frame_width;
 
         if (this->script_engine_active != 0) {
             se_vmove(this, sprite_w + x, y + 14);
