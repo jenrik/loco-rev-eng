@@ -120,52 +120,15 @@ int32_t WIN32_StreamMem::WriteChar(int32_t /*ch*/)
     return -1;
 }
 
-/* ================================================================== */
-/* External reference for WIN32_StreamClose below.                     */
-/*                                                                       */
-/* WNDPROC_StreamCleanup — 0x464620. Already has a real (still no-op)   */
-/* symbol resolved by shared/defsym_stubs.cpp, shared by ui/HelpWnd.cpp  */
-/* and others via this exact `void*` overload; NOT implemented here.    */
-/* Its own real body remains its own tracked gap (PROGRESS.md           */
-/* "win32_stream.c removed").                                            */
-/* ================================================================== */
-extern void WNDPROC_StreamCleanup(void* stream);
-
-/* ================================================================== */
-/* WNDPROC_StreamPutChar — TODO: decompile 0x4648E0                    */
-/*                                                                       */
-/* Deferred. Disassembly (4 instructions):                              */
-/*   MOV EAX, [ECX - 0xC]                                               */
-/*   MOV EDX, [EAX + 0x4]                                               */
-/*   MOV dword ptr [EDX + ECX - 0xC], 0x479234                          */
-/*   RET                                                                */
-/* i.e. it treats [child-0xC] as a "connector" object pointer, reads    */
-/* the connector's own +0x4 field as a second table base, and stores a  */
-/* fixed label address (0x479234) at (that table base) + (the child's   */
-/* own pointer value used as a byte offset). That arithmetic is only    */
-/* meaningful inside the original 32-bit x86 process's address space;   */
-/* reproducing it on a 64-bit host with unrelated heap addresses would  */
-/* compute an unrelated, likely invalid, write address instead of       */
-/* detaching the child stream as intended. The connector/table types    */
-/* are not reconstructed (only reachable via WNDPROC_StreamFromMemory,  */
-/* itself still a stub), so there is no typed replacement available     */
-/* yet either. Tracked in PROGRESS.md alongside "win32_stream.c         */
-/* removed". Called by: WIN32_StreamClose (0x463A60).                  */
-/* ================================================================== */
-static void WNDPROC_StreamPutChar(void* /*child*/)
-{
-    fprintf(stderr, "STUB: WNDPROC_StreamPutChar (0x4648E0) reached — "
-                     "connector/vtable hierarchy not yet reconstructed, "
-                     "see resources/Win32StreamMem.cpp\n");
-    assert(false && "WNDPROC_StreamPutChar: deferred, see TODO in Win32StreamMem.cpp");
-}
-
-/* ================================================================== */
-/* WIN32_StreamClose — 0x463A60                                        */
-/* ================================================================== */
-void WIN32_StreamClose(void* streamOwner)
-{
-    char* embeddedStream = static_cast<char*>(streamOwner) + 0xC;
-    WNDPROC_StreamPutChar(embeddedStream);
-    WNDPROC_StreamCleanup(embeddedStream);
-}
+/* WIN32_StreamClose (0x463A60) and its two callees are intentionally not
+ * defined here — see Win32StreamMem.h's doc comment on 0x463A60 for the
+ * full evidence trail. The address this file previously called
+ * "WNDPROC_StreamPutChar" (0x4648E0) under a deferred-stub TODO is not a
+ * distinct, undecompiled function at all: it is the exact same address
+ * already fully resolved this session as WNDPROC_Stream_DtorVftableReset
+ * (resources/Win32Stream.h's WIN32_StreamDestroy doc comment) — pure MSVC
+ * vptr-retagging bookkeeping that real C++ virtual-base destruction
+ * already reproduces. WIN32_StreamClose itself has zero real callers
+ * anywhere in this codebase (confirmed via grep) and, in the original
+ * binary, is called only by a compiler-generated SEH unwind funclet
+ * (Unwind@004766a5, confirmed via get_xrefs_to) — not game logic. */

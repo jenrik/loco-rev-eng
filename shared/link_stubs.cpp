@@ -365,8 +365,13 @@ int WIN32_SendNetworkData(void*, int, void*, int, int) {
     }
     return 0;
 }
-void WNDPROC_StreamCleanup(void*);
-void WNDPROC_StreamCleanup(void*){}
+/* WNDPROC_StreamCleanup(void*) extern "C" no-op removed: its only real
+ * caller was resources/Win32StreamMem.cpp's WIN32_StreamClose, itself
+ * removed as compiler-generated EH-unwind-only dead code (see that
+ * file's doc comment on 0x463A60) -- confirmed via grep that nothing
+ * else in the tree calls the free function by this name. The real
+ * address, 0x464620, is StreamObject::~StreamObject() (real destructor,
+ * resources/StreamObject.h/.cpp). */
 void WIN32_CloseHandle(void*);
 void WIN32_CloseHandle(void*){}
 void WIN32_timeEndPeriod(uint32_t); void WIN32_timeKillEvent(uint32_t);

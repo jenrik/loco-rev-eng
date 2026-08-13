@@ -29,9 +29,10 @@
  *   vtable +0x08 SetBuffer      0x464250  -> override, NOT YET a Ghidra
  *     Function — deferred stub.
  *   vtable +0x1C WriteChar      0x464260  -> override; IS disassembled
- *     (Ghidra mislabels it "WNDPROC_StreamClose", unrelated to this task's
- *     WIN32_StreamClose at 0x463A60) but implementing it correctly also
- *     requires the AllocateDefaultBuffer override below — deferred stub.
+ *     (Ghidra mislabels it "WNDPROC_StreamClose", unrelated to the real
+ *     WIN32_StreamClose at 0x463A60 documented below) but implementing it
+ *     correctly also requires the AllocateDefaultBuffer override below —
+ *     deferred stub.
  *   vtable +0x28 AllocateDefaultBuffer  0x464120 -> the original DOES
  *     override this (Ghidra mislabels it "WNDPROC_StreamOpen"; 130
  *     instructions implementing a growable-buffer reallocation, not a
@@ -96,17 +97,30 @@ private:
     int32_t field_58_;    /* +0x58 */
 };
 
-/** WIN32_StreamClose — 0x463A60. Flushes and tears down the
- *  WNDPROC_StreamBuf-family object embedded at +0xC within streamOwner
- *  (matching the +0xC sub-object referenced by WNDPROC_StreamFromMemory,
- *  0x464490, itself still a stub — see PROGRESS.md "win32_stream.c
- *  removed"). streamOwner's own type is not reconstructed, so it stays
- *  void*, matching the convention already used throughout this stream
- *  family (see resources/ResourceManager.cpp's WIN32_Stream* declaration
- *  block). Not a WIN32_StreamMem method: it is only reachable, in the
- *  original binary, from a compiler-generated SEH unwind funclet
- *  (0x4766A8) cleaning up an in-progress WIN32_StreamMem_Ctor on
- *  exception; that unwind plumbing is not reconstructed here (see
- *  AGENTS.md "compiler-generated ... EH ... helpers are documented but
- *  not reimplemented") — only WIN32_StreamClose's own logical body is. */
-void WIN32_StreamClose(void* streamOwner);
+/* WIN32_StreamClose (0x463A60) is intentionally NOT declared as a
+ * callable function here. Disassembly (8 instructions) shows its entire
+ * body is:
+ *   LEA ESI, [ECX+0xC]                    ; the WNDPROC_StreamBuf-family
+ *                                          ; sub-object embedded at +0xC
+ *   CALL WNDPROC_Stream_DtorVftableReset(ESI)   ; pure vptr-retag
+ *                                                ; bookkeeping (see
+ *                                                ; resources/Win32Stream.h's
+ *                                                ; WIN32_StreamDestroy doc
+ *                                                ; comment — same shape,
+ *                                                ; same target address)
+ *   CALL WNDPROC_StreamCleanup(ESI)             ; = StreamObject::
+ *                                                ; ~StreamObject(), now a
+ *                                                ; real destructor (see
+ *                                                ; resources/StreamObject.h)
+ * i.e. the exact same two-call shape WIN32_StreamDestroy+WNDPROC_
+ * StreamCleanup already had, now resolved as ~WIN32_Stream()'s bookkeeping-
+ * plus-real-body pattern. get_xrefs_to(0x463A60) confirms its ONLY real
+ * caller in the original binary is Unwind@004766a5 — a compiler-generated
+ * SEH unwind funclet cleaning up an in-progress WIN32_StreamMem_Ctor on
+ * exception, not game logic. Real C++ exception-safe construction (a
+ * partially-constructed WIN32_StreamMem's base/member destructors run
+ * automatically on an exception during its own constructor) already
+ * reproduces this for free, and this codebase has zero real callers of
+ * WIN32_StreamClose (confirmed via grep) — nothing here calls it in the
+ * first place. See CLAUDE.md's "compiler-generated ... EH ... helpers
+ * are documented but not reimplemented" rule. */

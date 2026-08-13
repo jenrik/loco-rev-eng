@@ -416,12 +416,13 @@ void __ftol(double) { /* host no-op */ }
  * observable effect once real C++ virtual-base destruction is in play,
  * and every real caller now uses a real WIN32_Stream local instead of
  * calling it (see Win32Stream.h's doc comment on 0x463A80 for the full
- * evidence trail). The free-function WNDPROC_StreamCleanup(void*) below
- * remains a silent no-op: it is genuinely still needed by
- * resources/Win32StreamMem.cpp's WIN32_StreamClose (0x463A60), a
- * separate, not-yet-reconstructed caller outside this pass's scope. */
-void WNDPROC_StreamCleanup(void*);
-void WNDPROC_StreamCleanup(void*) { /* host no-op */ }
+ * evidence trail). WNDPROC_StreamCleanup(void*)'s (C++-linkage) silent
+ * no-op is removed too: its only real caller was
+ * resources/Win32StreamMem.cpp's WIN32_StreamClose, itself removed as
+ * compiler-generated EH-unwind-only dead code (see that file's doc
+ * comment on 0x463A60) -- confirmed via grep. The real address,
+ * 0x464620, is StreamObject::~StreamObject() (real destructor,
+ * resources/StreamObject.h/.cpp). */
 void TileMap_SetViewport(void*, void*);
 void TileMap_SetViewport(void*, void*) { /* host no-op */ }
 void TileMap_GetTileAt(void*, void*);
