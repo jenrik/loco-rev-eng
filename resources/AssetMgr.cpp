@@ -33,6 +33,7 @@
 // Status: TRANSCRIBED
 
 #include "AssetMgr.h"
+#include <new>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -755,22 +756,67 @@ void AssetMgr::ClearTree()
     resource_array = nullptr;
 }
 
-/* Free-function compatibility shim over AssetMgr::ClearTree — see the
- * evidence comment on the declaration in AssetMgr.h.
- *
- * Fixes a pre-existing call-0 landmine: native/ddraw_spritedata.c declares
- * `extern void __cdecl AssetMgr_ReadFile(void* tree_ptr);` and both that
- * file and this one are compiled as C++ (see meson.build), so both sides
- * must be name-mangled identically. Before this fix, the only real
- * definition took `uint32_t*` (mangled `_Z17AssetMgr_ReadFilePj`), so the
- * caller's `_Z17AssetMgr_ReadFilePv` (`void*`) was never defined anywhere
- * in the linked binary — confirmed via `nm` — and silently resolved to a
- * wrapped garbage address under this tree's
- * `-Wl,--unresolved-symbols=ignore-all` linker policy.
- * DDRAW_SpriteDataDtor's call is the real, currently-linked call site. */
-void AssetMgr_ReadFile(void* tree_ptr)
+/* AssetMgr_ReadFile free-function shim removed 2026-08-14: its one real
+ * caller (formerly "DDRAW_SpriteDataDtor", graphics/DDRAW.cpp) was
+ * SpriteData::~SpriteData(), which is now AssetMgr::~AssetMgr() below —
+ * an ordinary member function calling ClearTree() directly, no
+ * free-function bridge needed. */
+
+/* ================================================================== */
+/* AssetMgr::AssetMgr / AssetMgr::~AssetMgr                            */
+/* Addresses: 0x45CDF0 / 0x45CE10 — see AssetMgr.h for full evidence.   */
+/* ================================================================== */
+AssetMgr::AssetMgr(uint16_t mode)
+    : entry_count(0)
+    , pair_matrix(nullptr)
+    , resource_array(nullptr)
+    , mode(mode)
+    , active_flag(nullptr)
+    , traversal_step(0)
+    , step_direction_buf(nullptr)
+    , step_node_id_buf(nullptr)
+    , result_array(nullptr)
+    , tree_entry(nullptr)
+    , heap_entry(nullptr)
 {
-    reinterpret_cast<AssetMgr*>(tree_ptr)->ClearTree();
+}
+
+AssetMgr::~AssetMgr()
+{
+    ClearTree();
+    if (pair_matrix != nullptr) {
+        CRT_free(pair_matrix);
+        pair_matrix = nullptr;
+    }
+}
+
+/* Thin bridges so callers that can't safely #include this header (its
+ * extern "C" operator_new/GLOBAL_free/CRT_wcsstr block conflicts with
+ * their own locally-declared, differently-typed copies — see
+ * world/tilemap.cpp) can still construct/destroy a real AssetMgr through
+ * a minimal signature. */
+void* AssetMgr_Construct(void* mem, uint16_t mode)
+{
+    return new (mem) AssetMgr(mode);
+}
+
+void AssetMgr_Destruct(void* obj)
+{
+    static_cast<AssetMgr*>(obj)->~AssetMgr();
+}
+
+/* AssetMgr_Size — real host sizeof(AssetMgr) for callers across the same
+ * boundary that can't #include this header. sizeof(AssetMgr) is NOT 0x2C
+ * on this host: every field past mode is a raw pointer (pair_matrix,
+ * resource_array, active_flag, step_direction_buf, step_node_id_buf,
+ * result_array, tree_entry, heap_entry), 8 bytes here vs. 4 on the
+ * original x86 — the stale 0x2C literal at TileMap::TileMap()'s
+ * operator_new call site undersizes the allocation and corrupts the heap
+ * (caught live via meson test's integration suite, 2026-08-14; see
+ * PROGRESS.md). */
+size_t AssetMgr_Size()
+{
+    return sizeof(AssetMgr);
 }
 
 /* ================================================================== */

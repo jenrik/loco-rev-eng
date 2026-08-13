@@ -4,7 +4,7 @@
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * This file covers four groups:
+ * This file covers three groups:
  *
  *   A) DDRAW_Building class  (vtable 0x478548, size ~0x5B0):
  *      Building/station/vehicle sprite manager. Manages selection popups,
@@ -12,15 +12,11 @@
  *      day/night animation. Associated with global g_ddraw_building at
  *      0x4A9EF0. Extends RESDATA (vtable 0x478274).
  *
- *   B) SpriteData struct  (size 0x10):
- *      Lightweight sprite resource descriptor. Holds a 4-ary tree pointer
- *      plus an allocated pixel buffer. Resource ID stored at +0x0C.
- *
- *   C) FileData struct  (size 0x10):
+ *   B) FileData struct  (size 0x10):
  *      Loaded game resource file descriptor. Holds file stream handle,
  *      list of decompressed sub-blocks, total size, and alloc'd filename.
  *
- *   D) C free functions:
+ *   C) C free functions:
  *      Surface management (create, unlock, release, restore),
  *      audio initialization (DirectSound),
  *      error string lookup tables,
@@ -64,36 +60,15 @@ struct GameAudio;
 struct UIPANEL_Surface;
 class  Building;
 
-/* ================================================================== */
-/* SpriteData — lightweight sprite resource descriptor                */
-/* Size: 0x10 bytes                                                   */
-/* ================================================================== */
-
-struct SpriteData {
-    void*     tree_node;         /* +0x00  AssetMgr 4-ary tree node      */
-    void*     pixel_buffer;      /* +0x04  allocated pixel data buffer   */
-    uint32_t  file_size;         /* +0x08  total file size in bytes      */
-    uint16_t  resource_id;       /* +0x0C  numeric resource identifier   */
-    /* total: 0x0E bytes + alignment padding to 0x10 */
-
-    /**
-     * SpriteData::SpriteData — constructor.
-     * Address: 0x45CDF0, __thiscall
-     *
-     * Zeroes tree_node/pixel_buffer/file_size, stores resource_id.
-     */
-    explicit SpriteData(uint16_t res_id);
-
-    /**
-     * SpriteData::~SpriteData — destructor.
-     * Address: 0x45CE10, __fastcall
-     *
-     * Detaches this node from the AssetMgr tree (AssetMgr_ReadFile,
-     * despite the misleading Ghidra-inferred name — see resources/AssetMgr.h),
-     * then frees pixel_buffer if allocated.
-     */
-    ~SpriteData();
-};
+/* SpriteData (previously declared here, 0x10 bytes) removed 2026-08-14:
+ * it had zero independent evidence anywhere in the binary. Its ctor/dtor
+ * (0x45CDF0/0x45CE10) have exactly 2 xrefs each, both from
+ * TileMap::TileMap()/~TileMap() (world/tilemap.cpp) — the objects they
+ * construct/destroy are genuine AssetMgr instances (0x2C bytes, matching
+ * sizeof(AssetMgr) exactly; the "resource_id" ctor parameter is really
+ * AssetMgr::mode, confirmed by AssetMgr::UpdateAdjacencyGraph reading it
+ * back via `(short)param_1[3]`). See resources/AssetMgr.h for the real
+ * AssetMgr::AssetMgr/~AssetMgr this was renamed to. */
 
 /* ================================================================== */
 /* FileData — loaded game resource file descriptor                    */

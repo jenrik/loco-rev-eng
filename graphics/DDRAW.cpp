@@ -1323,48 +1323,9 @@ void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag)
     g_ddraw_building->DispatchToSubObjects(x, y, w, h, flag);
 }
 
-/* Matches resources/AssetMgr.h's real declaration (native/ddraw_spritedata.c
- * has its own copy for that TU; declared locally here rather than
- * #include-ing AssetMgr.h to avoid pulling its headers into this file). */
-extern void AssetMgr_ReadFile(void* tree_ptr);
-
-/* ================================================================== */
-/* SpriteData::SpriteData                                               */
-/* Address: 0x45CDF0, __thiscall                                        */
-/* ================================================================== */
-SpriteData::SpriteData(uint16_t res_id)
-    : tree_node(nullptr)
-    , pixel_buffer(nullptr)
-    , file_size(0)
-    , resource_id(res_id)
-{
-}
-
-/* ================================================================== */
-/* SpriteData::~SpriteData                                             */
-/* Address: 0x45CE10, __fastcall                                       */
-/* ================================================================== */
-SpriteData::~SpriteData()
-{
-    AssetMgr_ReadFile(this);
-    if (pixel_buffer != nullptr) {
-        CRT_free(pixel_buffer);
-        pixel_buffer = nullptr;
-    }
-}
-
-/* Thin bridges so callers that can't safely #include this file's own
- * DDRAW.h (its many global declarations conflict with their own locally-
- * declared, differently-typed copies — see world/tilemap.cpp) can still
- * construct/destroy a real SpriteData through a minimal void*-only
- * signature, rather than falling back to a mismatched free-function
- * declaration that silently binds to an unrelated stub. */
-void* SpriteData_Construct(void* mem, uint16_t res_id)
-{
-    return new (mem) SpriteData(res_id);
-}
-
-void SpriteData_Destruct(void* obj)
-{
-    static_cast<SpriteData*>(obj)->~SpriteData();
-}
+/* SpriteData::SpriteData/~SpriteData and their SpriteData_Construct/
+ * Destruct bridges (formerly here) removed 2026-08-14 — renamed to the
+ * real AssetMgr::AssetMgr/~AssetMgr and their AssetMgr_Construct/Destruct
+ * bridges, now in resources/AssetMgr.h/.cpp. See that header's comment
+ * for the evidence (exactly 2 xrefs each, both TileMap::TileMap()/
+ * ~TileMap()). world/tilemap.cpp's call sites were updated to match. */

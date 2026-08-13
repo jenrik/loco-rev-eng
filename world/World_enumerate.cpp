@@ -47,15 +47,19 @@ void __fastcall World_EnumeratePostLoadAssets(TileMap* tilemap)
         return;
     }
 
-    /* Enumerate first asset category list (asset_load_ptr, +0x52488) */
-    uint32_t* cat_a = static_cast<uint32_t*>(tilemap->asset_load_ptr);
+    /* Enumerate first asset category list (asset_load_ptr, +0x52488).
+     * AssetMgr_EnumerateCategory takes the object as a raw uint32_t*
+     * (its own cross-boundary shim signature, resources/AssetMgr.h) —
+     * reinterpret_cast, not static_cast, since AssetMgr* and uint32_t*
+     * are unrelated types from the compiler's view. */
+    uint32_t* cat_a = reinterpret_cast<uint32_t*>(tilemap->asset_load_ptr);
     if (cat_a != nullptr && *cat_a != 0) {
         AssetMgr_EnumerateCategory(cat_a);
     }
 
     /* Second enumeration (only in town mode) */
     if (g_game_mode == 3) {
-        uint32_t* cat_b = static_cast<uint32_t*>(tilemap->asset_enum_ptr);
+        uint32_t* cat_b = reinterpret_cast<uint32_t*>(tilemap->asset_enum_ptr);
         if (cat_b != nullptr && *cat_b != 0) {
             AssetMgr_EnumerateCategory(cat_b);
         }

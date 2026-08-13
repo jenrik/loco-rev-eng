@@ -134,12 +134,15 @@ extern void     CGWND_SetMode(int mode);
 extern void     Game_DeselectGameObject(int game);
 extern void     World_Init(void* world);
 extern void     UI_CleanupTooltips(void* mgr);
-/* Thin void*-only bridges over the real SpriteData::SpriteData/~SpriteData
- * (graphics/DDRAW.h/.cpp) — this file can't #include DDRAW.h directly, its
- * many global declarations (g_ddraw_building/g_tilemap/g_primary_surface)
- * conflict with this file's own locally-declared, differently-typed copies. */
-extern void*    SpriteData_Construct(void* mem, uint16_t res_id);
-extern void     SpriteData_Destruct(void* obj);
+/* Thin bridges over the real AssetMgr::AssetMgr/~AssetMgr
+ * (resources/AssetMgr.h/.cpp) — this file can't #include AssetMgr.h
+ * directly, its extern "C" operator_new/GLOBAL_free block conflicts with
+ * this file's own locally-declared, differently-typed copies. Previously
+ * named SpriteData_Construct/Destruct; that type name/identity had zero
+ * independent evidence anywhere and was removed 2026-08-14. */
+extern void*    AssetMgr_Construct(void* mem, uint16_t mode);
+extern void     AssetMgr_Destruct(void* obj);
+extern size_t   AssetMgr_Size();
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);
 extern void*    Entity_GetSubObjectPosition(void* obj, int* out_xy, int direction);
 extern void     GameObject_GetSubObjectWorldPos(void* obj, int* out_packed);
@@ -317,39 +320,41 @@ TileMap::TileMap()
     viewport_x = 0;
     viewport_y = 0;
 
-    /* Allocate first sprite-data object at +0x52488 (asset_load_ptr).
-     * 0x2C is this call site's own real x86 evidence. DDRAW_SpriteDataCtor
-     * (now graphics/DDRAW.h's SpriteData::SpriteData, 0x45CDF0) only
-     * constructs the first 0xE bytes (tree_node/pixel_buffer/file_size/
-     * resource_id) — confirmed via full decompile+disassembly, not a
-     * stub anymore. The remaining ~0x1E bytes of this 0x2C allocation are
-     * genuinely unaccounted for by SpriteData: World_enumerate.cpp's
-     * AssetMgr_LoadFileEx/EnumFiles call sites below (~line 2207) reinterpret
-     * this SAME pointer as a full `AssetMgr*` and call real AssetMgr methods
-     * on it, and DDRAW_SpriteDataDtor's own body (see ~SpriteData) passes
-     * `this` itself (not a sub-field) to AssetMgr_ReadFile, which also casts
-     * to `AssetMgr*`. So this object is constructed as a small SpriteData
-     * header but consumed elsewhere as (or aliased with) a real AssetMgr —
-     * keeping the 0x2C literal here is deliberate: switching to
-     * sizeof(SpriteData) would under-allocate for whatever AssetMgr-shaped
-     * data those other call sites expect. Not fully reconciled this pass —
-     * flagged in PROGRESS.md as a follow-up (needs sizeof(AssetMgr) checked
-     * against 0x2C, and a decision on whether asset_load_ptr/asset_enum_ptr
-     * are genuinely AssetMgr instances with a SpriteData-shaped header, or
-     * two unrelated types that happen to alias). */
-    void* mem1 = operator_new(0x2C);
+    /* Allocate first AssetMgr object at +0x52488 (asset_load_ptr), mode 7.
+     * 0x2C was this call site's real x86 allocation size — resolved
+     * 2026-08-14: this was previously modeled as a 0x10-byte "SpriteData"
+     * because its ctor (0x45CDF0) only touches the first 3 dwords plus a
+     * 16-bit mode value, but get_xrefs_to on that ctor/dtor shows exactly
+     * 2 call sites each in the whole binary, both right here in
+     * TileMap::TileMap()/~TileMap() — there is no independent SpriteData
+     * anywhere. World_enumerate.cpp's AssetMgr_LoadFileEx/EnumFiles call
+     * sites below reinterpret this same pointer as a full AssetMgr* and
+     * call real AssetMgr methods (UpdateAdjacencyGraph/
+     * EnumeratePostLoadAdjacency) that read the mode value back via
+     * `(short)this->mode` — confirming mode 7/8 is the real parameter,
+     * not a "resource_id".
+     *
+     * Use AssetMgr_Size() (the real host size), NOT the stale 0x2C x86
+     * literal: every AssetMgr field past mode is a raw pointer, 8 bytes
+     * here vs. 4 on x86, so sizeof(AssetMgr) on this host is well past
+     * 0x2C. Allocating only 0x2C first caused a live heap-corruption
+     * crash (glibc malloc assertion, caught by the integration suite) —
+     * this is the exact same "undersized fixed-size allocation on 64-bit
+     * host" landmine already documented for network/DirectPlay.cpp's
+     * shadow_mem, missed here on the first pass since this fix was about
+     * the type identity question, not (yet) the size one. */
+    void* mem1 = operator_new(AssetMgr_Size());
     if (mem1 != NULL) {
-        asset_load_ptr = SpriteData_Construct(mem1, 7);
+        asset_load_ptr = static_cast<AssetMgr*>(AssetMgr_Construct(mem1, 7));
     } else {
         asset_load_ptr = NULL;
     }
 
-    /* Allocate second sprite-data object at +0x5248C (asset_enum_ptr) —
-     * see the mem1 comment above for the SpriteData/AssetMgr aliasing
-     * caveat. */
-    void* mem2 = operator_new(0x2C);
+    /* Allocate second AssetMgr object at +0x5248C (asset_enum_ptr), mode 8
+     * — see the mem1 comment above. */
+    void* mem2 = operator_new(AssetMgr_Size());
     if (mem2 != NULL) {
-        asset_enum_ptr = SpriteData_Construct(mem2, 8);
+        asset_enum_ptr = static_cast<AssetMgr*>(AssetMgr_Construct(mem2, 8));
     } else {
         asset_enum_ptr = NULL;
     }
@@ -381,14 +386,14 @@ TileMap::~TileMap()
 
     /* Free asset load pointer (+0x52488) */
     if (asset_load_ptr != NULL) {
-        SpriteData_Destruct(asset_load_ptr);
+        AssetMgr_Destruct(asset_load_ptr);
         GLOBAL_free(asset_load_ptr);
         asset_load_ptr = NULL;
     }
 
     /* Free asset enum pointer (+0x5248C) */
     if (asset_enum_ptr != NULL) {
-        SpriteData_Destruct(asset_enum_ptr);
+        AssetMgr_Destruct(asset_enum_ptr);
         GLOBAL_free(asset_enum_ptr);
         asset_enum_ptr = NULL;
     }

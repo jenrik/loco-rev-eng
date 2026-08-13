@@ -107,7 +107,16 @@ extern "C" {
 extern const char s_invalid_path_error[];  /* "ERROR: Invalid path in GetOppositeDirection" */
 
 /* ================================================================== */
-/* AssetMgr struct — non-virtual, 0x2C bytes                           */
+/* AssetMgr struct — non-virtual, 0x2C bytes on x86                     */
+/*                                                                     */
+/* That 0x2C is the identity evidence for the ctor/dtor below: it is   */
+/* the exact literal TileMap::TileMap() (world/tilemap.cpp) originally */
+/* passed to operator_new before this reconstruction, which is why     */
+/* those two allocations are AssetMgr objects and not a smaller,       */
+/* unrelated "SpriteData" type (removed 2026-08-14 — see the ctor's own */
+/* doc comment). On THIS HOST, sizeof(AssetMgr) is NOT 0x2C: 8 of the   */
+/* 11 fields below are raw pointers (8 bytes here vs. 4 on x86) — use   */
+/* AssetMgr_Size() at any allocation site, never the 0x2C literal.      */
 /* ================================================================== */
 struct AssetMgr {
     uint32_t  entry_count;         /* +0x00  number of active entries */
@@ -121,6 +130,49 @@ struct AssetMgr {
     uint32_t* result_array;        /* +0x20  allocated result array */
     uint32_t* tree_entry;          /* +0x24  tree entry lookup */
     uint32_t* heap_entry;          /* +0x28  heap entry lookup */
+
+    /**
+     * AssetMgr::AssetMgr — constructor.
+     * Address: 0x45CDF0, __thiscall
+     *
+     * Zeroes entry_count/pair_matrix/resource_array, stores mode. The
+     * original store is a 16-bit MOV (`mov word ptr [this+0xC], cx`), so
+     * only the low 16 bits of `mode` are evidenced as written — the high
+     * 16 bits of a fresh operator_new(0x2C) allocation were left as
+     * whatever the allocator happened to return. No reader anywhere in
+     * the binary reads more than the low 16 bits back (UpdateAdjacencyGraph
+     * reads `(short)this->mode`), so this reconstruction zero-extends the
+     * parameter instead of replicating that accidental partial write —
+     * behaviorally identical for every real caller, and safer.
+     * active_flag/traversal_step/step_direction_buf/step_node_id_buf/
+     * result_array/tree_entry/heap_entry are likewise zero-initialized
+     * here even though the original ctor never touches them (confirmed
+     * via disassembly — only entry_count/pair_matrix/resource_array/mode
+     * are written): every real reader of those fields (EnumerateCategory)
+     * always allocates fresh into them before use, so their pre-first-use
+     * value is unobservable either way; zero-initializing removes a real
+     * uninitialized-read on the `_WIN32`-only path that exercises this
+     * class (dead on the SDL3 host build today).
+     *
+     * Address 0x45CDF0 has exactly 2 xrefs in the whole binary, both
+     * TileMap::TileMap() (world/tilemap.cpp) — this is the only way an
+     * AssetMgr object is ever constructed. Previously misattributed as
+     * "SpriteData::SpriteData" in graphics/DDRAW.h; that name/type had
+     * zero independent evidence anywhere and was removed (2026-08-14).
+     */
+    explicit AssetMgr(uint16_t mode);
+
+    /**
+     * AssetMgr::~AssetMgr — destructor.
+     * Address: 0x45CE10, __fastcall
+     *
+     * Calls ClearTree(), then frees pair_matrix if allocated (CRT_free,
+     * matching UpdateAdjacencyGraph's own CRT_malloc_zero allocation of
+     * the same field). Address 0x45CE10 has exactly 2 xrefs, both
+     * TileMap::~TileMap(). Previously misattributed as
+     * "SpriteData::~SpriteData".
+     */
+    ~AssetMgr();
 
     /* ---------------------------------------------------------------- */
     /* Tree search, traversal, and pair-matrix methods.                 */
@@ -258,18 +310,19 @@ uint8_t* __thiscall AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t
 /* straight into the real methods; signatures match each caller's       */
 /* existing declaration exactly so no caller-side changes are needed.   */
 /*                                                                       */
-/*   AssetMgr_ReadFile           — native/ddraw_spritedata.c            */
-/*     (fixes a pre-existing call-0 landmine: that file's declaration    */
-/*     takes `void*`, but the free function this replaces took          */
-/*     `uint32_t*` — a different Itanium mangled symbol. Confirmed via   */
-/*     `nm` that the old `_Z17AssetMgr_ReadFilePv` was never defined     */
-/*     anywhere in the linked binary before this fix.)                  */
+/*   AssetMgr_Construct/Destruct — world/tilemap.cpp (TileMap::TileMap()/*
+/*     ~TileMap()), bridging to AssetMgr::AssetMgr/~AssetMgr. Previously */
+/*     the caller-visible names were SpriteData_Construct/Destruct       */
+/*     (graphics/DDRAW.cpp) — see this struct's ctor/dtor doc comments   */
+/*     for why that type name/identity had no independent evidence.      */
 /*   AssetMgr_LoadFileEx/EnumFiles — world/tilemap.{h,cpp}, `_WIN32`-    */
 /*     only call sites (dead code on the SDL3 host path; kept for the    */
 /*     mingw typecheck build's fidelity).                                */
 /*   AssetMgr_EnumerateCategory  — world/World_enumerate.cpp             */
 /* ================================================================== */
-void AssetMgr_ReadFile(void* tree_ptr);
+void* AssetMgr_Construct(void* mem, uint16_t mode);
+void  AssetMgr_Destruct(void* obj);
+size_t AssetMgr_Size();  /* real host sizeof(AssetMgr) — NOT 0x2C, see AssetMgr.cpp */
 void AssetMgr_LoadFileEx(uint32_t* ptr);
 void AssetMgr_EnumFiles(uint32_t* ptr);
 void AssetMgr_EnumerateCategory(uint32_t* param_1);
