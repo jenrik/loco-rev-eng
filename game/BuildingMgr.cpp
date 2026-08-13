@@ -28,7 +28,8 @@ extern ResourceManager g_resmgr;    // 0x4855e8 — object, not a pointer (was v
                                      // a widespread cross-TU landmine — see
                                      // PROGRESS.md's g_resmgr sweep)
 extern int g_game_mode;         // 0x4851f4
-extern void* g_tooltip_mgr;     // 0x4fd220
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr; // 0x4fd220
 extern void* g_game;            // 0x4854c8
 extern void* g_town_view;       // 0x4852a0
 extern uint8_t g_click_on_building; // 0x48556c
@@ -225,7 +226,7 @@ void BuildingMgr::RemoveObject(Building* object, bool show_message)
     if (found == object) {
         --*managed_count;
         if (g_game_mode == 3 && show_message)
-            UI_CreateMessageBox(&g_tooltip_mgr, 0x3860, 0, 'W',
+            UI_CreateMessageBox(g_tooltip_mgr, 0x3860, 0, 'W',
                                 object->world_x, object->world_y, 1);
         delete object;                                       // vtable[0](1)
     }

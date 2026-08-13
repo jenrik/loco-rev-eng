@@ -48,7 +48,8 @@ struct TrackChildStateFields {
 /* External references                                                 */
 /* ================================================================== */
 
-extern void* g_tooltip_mgr;                  /* 0x4FD220 — tooltip manager instance */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;            /* 0x4FD220 — tooltip manager instance */
 extern void* DAT_00485270;                   /* 0x485270 — global sprite/return value */
 extern void* g_font_normal;                  /* 0x485478 — normal font handle */
 extern int32_t g_game_mode;                  /* 0x4851F4 */

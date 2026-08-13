@@ -69,7 +69,7 @@ extern void TrackPiece_SetZoom(void* tool, int zoom);          /* 0x40D170 */
 
 /* Tooltip */
 extern void UI_DestroyTooltip(void* mgr, int handle);          /* 0x423D20 */
-extern void* UI_CreateTooltip(void* mgr, int res_id, int unk,
+extern int* UI_CreateTooltip(void* mgr, int res_id, int16_t unk,
                               int x, int y);                    /* 0x423C50 */
 
 /* Audio */
@@ -116,7 +116,8 @@ extern void*    g_asset_mgr;             /* 0x485600 */
 extern void*    g_audio_mgr;             /* 0x4FD38C */
 extern void*    g_audio;                 /* 0x4FD3BC */
 extern void*    g_netman;                /* 0x4FD3AC */
-extern void*    g_tooltip_mgr;           /* 0x4FD220 */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;        /* 0x4FD220 */
 extern void*    g_tilemap;               /* 0x4AAE90 */
 extern void*    g_town_view;             /* 0x4AAD2C */
 extern void*    g_ddraw_building;        /* 0x4A9EF0 */

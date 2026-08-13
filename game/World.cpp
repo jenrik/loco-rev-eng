@@ -98,7 +98,8 @@ extern void*      g_ddraw_building;           /* 0x004A9EF0 */
 extern InputMgr  g_input_mgr;                /* 0x004A9990 — static InputMgr object (input/InputMgr.h) */
 class TileMap;
 extern TileMap*     g_tilemap;                  /* 0x004AAD08 */
-extern void*      g_tooltip_mgr;              /* 0x004FD220  UI/tooltip manager */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;             /* 0x004FD220  UI/tooltip manager */
 extern uint8_t    g_click_on_town;            /* 0x0048557C */
 extern Entity*    g_selected_building;        /* binary slot 0x00485380 — never written in
                                                  loco.exe (distinct from the town/building

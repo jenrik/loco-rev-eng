@@ -65,7 +65,8 @@ void  GLOBAL_free(void* ptr) { std::free(ptr); }
 void*    g_game = nullptr;                /* 0x4854C8 */
 void*    g_world = nullptr;               /* 0x4A98B0 */
 void*    g_netman = nullptr;              /* 0x4FD3AC */
-void*    g_tooltip_mgr = nullptr;         /* 0x4FD220 */
+class UI_Manager;
+UI_Manager* g_tooltip_mgr = nullptr;      /* 0x4FD220 */
 void*    g_asset_mgr = nullptr;           /* 0x485600 */
 void*    g_audio = nullptr;               /* 0x4FD3BC */
 void*    g_building_mgr = nullptr;        /* 0x485448 */

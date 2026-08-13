@@ -135,7 +135,8 @@ extern DDRAW_Building* g_ddraw_building;  /* 0x4A9EF0 */
 extern int g_viewport_x;            /* 0x4AAD24 — viewport scroll X */
 extern int g_viewport_y;            /* 0x4AAD28 — viewport scroll Y */
 
-extern void* g_tooltip_mgr;         /* 0x4FD220 — points at the real UI_Manager
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;   /* 0x4FD220 — points at the real UI_Manager
                                       * singleton (DDRAW.cpp defines the backing
                                       * `static UI_Manager g_tooltip_mgr_instance`
                                       * — see that file's doc comment for the
@@ -362,9 +363,8 @@ extern void* g_active_panel;          /* 0x4FD3E0  active UI panel override
                                         * DDRAW_SelectBuilding/0x459180 stores
                                         * through [0x4fd3e0]; 0x4852A0 below is
                                         * g_town_view, not this global)         */
-extern void* g_tooltip_mgr;           /* 0x4FD220 — see the other declaration
-                                        * above for the real UI_Manager backing
-                                        * object and construction evidence */
+/* g_tooltip_mgr declared once, above (see that declaration for the real
+ * UI_Manager backing object and construction evidence). */
 extern void* g_town_view;             /* 0x4852A0  town view object
                                         * (corrected: matches game/World.cpp and
                                         * world/tilemap.cpp's g_town_view decls,

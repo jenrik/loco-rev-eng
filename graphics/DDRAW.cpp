@@ -212,9 +212,13 @@ int   g_viewport_y;         /* 0x4AAD28 */
  * Ghidra's signature matcher; decompilation shows the real behavior is
  * growing an exit-function-pointer table). Every real caller across the
  * codebase (Game_HandleLeftClick, INPUT_CheckScheduledEvents, TileMap_-
- * ProcessRect, etc.) takes "&g_tooltip_mgr" or reads it expecting a live
- * UI_Manager, confirming this reading — see ui/UI_Utils.h's UI_Manager()
- * doc comment for the full xref/disassembly evidence chain.
+ * ProcessRect, etc.) reads `g_tooltip_mgr` expecting a live UI_Manager
+ * object (not a pointer to one), confirming this reading — see
+ * ui/UI_Utils.h's UI_Manager() doc comment for the full xref/
+ * disassembly evidence chain. (A handful of call sites erroneously
+ * passed `&g_tooltip_mgr` — the address of this pointer variable, one
+ * level too shallow — instead of `g_tooltip_mgr` itself; all fixed to
+ * pass the object pointer directly.)
  *
  * The faithful C++ reconstruction is therefore a real global object with
  * automatic (static) storage duration: the compiler already performs
@@ -226,7 +230,7 @@ int   g_viewport_y;         /* 0x4AAD28 */
  * on Windows and non-Windows builds, so no #ifndef _WIN32 guard applies.
  */
 static UI_Manager g_tooltip_mgr_instance;
-void* g_tooltip_mgr = &g_tooltip_mgr_instance;   /* 0x4FD220 */
+UI_Manager* g_tooltip_mgr = &g_tooltip_mgr_instance;   /* 0x4FD220 */
 
 void* g_world_state;        /* 0x4A98B0 */
 void* g_tilemap;            /* 0x4AAD08 */

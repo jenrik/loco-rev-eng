@@ -127,7 +127,8 @@ extern TileMap* g_tilemap;    /* TileMap singleton, 0x4AAD08 — matches
                                 * TU also includes Netman.h. */
 extern Netman* g_netman;      /* NetMan singleton */
 extern InputMgr g_input_mgr;  /* 0x4A9990 — static InputMgr object */
-extern void* g_tooltip_mgr;   /* Tooltip manager */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;   /* Tooltip manager */
 
 /* ================================================================== */
 /* Vehicle constructor                                                  */

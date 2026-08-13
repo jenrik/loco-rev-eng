@@ -249,8 +249,10 @@ void RESDATA_SoundObject_GetTextLength(int);
 void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
 void NETMAN_SendAck(void*);
 void NETMAN_SendAck(void*) { /* host no-op */ }
-void UI_CreateTooltip(void*, int, short, int, int);
-void UI_CreateTooltip(void*, int, short, int, int) { /* host no-op */ }
+/* UI_CreateTooltip(void*, int, short, int, int): removed — the one
+ * canonical UI_CreateTooltip is now declared/defined (as a deliberate
+ * loud stub, blocked on GameObject_BaseCtor 0x405790) in
+ * ui/UI_Utils.cpp. */
 void UIPANEL_LockSurface(void*);
 void UIPANEL_LockSurface(void*) { /* host no-op */ }
 /* RESDATA_CreateChildSprite(void*, void*, int, int) — 0x4546D0.
@@ -763,8 +765,8 @@ void Game_SetScreenMode(void*, int, int, int);
 void Game_SetScreenMode(void*, int, int, int) { /* host no-op */ }
 void BuildingMgr_DestroyAll(void*, int);
 void BuildingMgr_DestroyAll(void*, int) { /* host no-op */ }
-void UI_ResetTooltips(void*, int);
-void UI_ResetTooltips(void*, int) { /* host no-op */ }
+/* UI_ResetTooltips(void*, int): removed — real definition now in
+ * ui/UI_Utils.cpp, routing to UI_Manager::resetTooltips. */
 void World_Reset(void*, int);
 void World_Reset(void*, int) { /* host no-op */ }
 void Cursor_Show(void*);

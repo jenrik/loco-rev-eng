@@ -63,7 +63,8 @@ void  __fastcall CGWND_SetPause(void* self, char pause);  /* @ 0x408130 */
 extern int32_t g_world_width;        /* 0x4AAD0C — world width in pixels     */
 extern int32_t g_world_height;       /* 0x4AAD10 — world height in pixels    */
 /* g_game_time declared as uint32_t in shared/types.h */
-extern void*   g_tooltip_mgr;        /* 0x4FD220 — tooltip manager singleton */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;    /* 0x4FD220 — tooltip manager singleton */
 
 /* World center coordinates (computed from world dimensions) */
 extern int32_t DAT_004aad34;         /* 0x4AAD34 — world center X            */
@@ -400,7 +401,7 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
 
         /* Create tooltip child object */
         this->pTooltip = UI_CreateTooltip(
-            &g_tooltip_mgr,
+            g_tooltip_mgr,
             RES_childCount(res),     /* Note: overloaded — child resource ID */
             this->field_8A,
             this->screen_rect.left + tooltipXOff,
@@ -433,7 +434,7 @@ UIEntity::UIEntity(int32_t resourceId, int16_t param2, char direction,
 UIEntity::~UIEntity()
 {
     if (this->pTooltip != nullptr) {
-        UI_DestroyTooltip(&g_tooltip_mgr,
+        UI_DestroyTooltip(g_tooltip_mgr,
                            static_cast<int>(reinterpret_cast<intptr_t>(this->pTooltip)));
     }
 }

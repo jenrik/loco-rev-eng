@@ -101,7 +101,8 @@ extern void*    g_scripted_object;   /* 0x4AA9B0 */
 extern void*    g_town_view;         /* 0x4AA818 */
 extern void*    g_ddraw_building;    /* 0x4851D0 */
 extern void*    g_building_mgr;      /* 0x485448 */
-extern void*    g_tooltip_mgr;       /* 0x4FD220 */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;    /* 0x4FD220 */
 extern void*    g_second_overlay;    /* 0x4851D0 */
 extern void*    g_world;             /* 0x4A98B0 */
 /* g_game_mode declared int32_t in world/tilemap.h (included above) —

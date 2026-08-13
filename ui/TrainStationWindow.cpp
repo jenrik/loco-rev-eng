@@ -37,7 +37,8 @@ extern int      g_viewport_rect_top;   /* 0x4AAD18 */
 extern int      g_viewport_rect_right; /* 0x4AAD1C */
 extern int      g_viewport_rect_bottom;/* 0x4AAD20 */
 extern void*    g_tilemap;             /* 0x4AAD08 */
-extern void*    g_tooltip_mgr;         /* 0x4FD220 */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;      /* 0x4FD220 */
 class ResourceManager;
 extern ResourceManager g_resmgr;       /* 0x4855E8 — object, not a pointer (was void*,
                                          * a widespread cross-TU landmine — see
@@ -316,7 +317,7 @@ void TrainStationWindow::hide()
                       reinterpret_cast<const RECT*>(&g_viewport_rect_left));
 
         /* Destroy tooltip */
-        UI_DestroyTooltip(&g_tooltip_mgr, this->tooltip_ptr);
+        UI_DestroyTooltip(g_tooltip_mgr, this->tooltip_ptr);
         this->tooltip_ptr = nullptr;
 
         /* Invalidate affected tilemap regions */

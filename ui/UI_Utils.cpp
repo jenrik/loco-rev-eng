@@ -8,10 +8,13 @@
 // Status: TRANSCRIBED
 
 #include "UI_Utils.h"
+#include "UIEntity.h"        /* for resetTooltips' typed Entity::SetVisible dispatch */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include <stdint.h>
 #include <cstring>
+#include <cstdio>
+#include <cassert>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -34,8 +37,8 @@ extern ResourceManager g_resmgr;         /* 0x4855E8 — object, not a pointer (
                                            * a widespread cross-TU landmine — see
                                            * PROGRESS.md's g_resmgr sweep) */
 
-/* Global tooltip manager pointer (set externally) */
-extern void* g_tooltip_mgr;              /* 0x4FD220 */
+/* Global tooltip manager singleton (defined in graphics/DDRAW.cpp). */
+extern UI_Manager* g_tooltip_mgr;        /* 0x4FD220 */
 
 /* FPS gate threshold for CreateMessageBox */
 extern double DAT_00481170;              /* 0x481170 — FPS threshold */
@@ -94,12 +97,125 @@ void UITimerList::Resize(uint32_t new_capacity)
 
 void* UITimerList::GetItem(uint32_t index) const
 {
+    /* original vtable[8] (0x424030) forwards to vtable[7] (0x424530),
+     * which bounds-checks against `capacity` before reading. */
+    if (index >= capacity) {
+        return nullptr;
+    }
     return items[index];
 }
 
 uint32_t UITimerList::GetCount() const
 {
     return count;
+}
+
+/* ================================================================== */
+/* UITimerList::RemoveAt — original vtable[4] (0x4356E0) + vtable[3]    */
+/* (0x4241E0, Ghidra-named "UI_HandleScrollMessage" — a FLIRT misnomer, */
+/* not a scroll message handler).                                      */
+/* ================================================================== */
+void UITimerList::RemoveAt(uint32_t index)
+{
+    if (index >= capacity) {
+        return;
+    }
+    void* item = items[index];
+    if (item == nullptr) {
+        return;
+    }
+    if (index < count - 1) {
+        std::memmove(&items[index], &items[index + 1],
+                     (count - index - 1) * sizeof(void*));
+    }
+    items[count - 1] = nullptr;
+    --count;
+
+    /* Delete the extracted item through its own virtual destructor —
+     * the typed equivalent of the original's manual
+     * `(**(code**)*item)(1)` scalar-deleting-destructor dispatch. Every
+     * item ever added to one of UI_Manager's three lists is a
+     * GameObject-derived tooltip/message-box entity (text_list holds
+     * plain Entity-sized objects from GameObject_BaseCtor; pos_list/
+     * update_list hold UIEntity from UI_CreateMessageBox's
+     * UIEntity_Ctor). */
+    delete static_cast<GameObject*>(item);
+}
+
+/* ================================================================== */
+/* UITimerList::RemoveAll — original vtable[6] (0x424270, Ghidra-named  */
+/* "UI_SetScrollPos" — another FLIRT misnomer).                        */
+/* ================================================================== */
+void UITimerList::RemoveAll()
+{
+    while (count != 0) {
+        RemoveAt(count - 1);
+    }
+}
+
+/* ================================================================== */
+/* UITimerList::SetAt — original vtable[10] (0x424790).                */
+/* ================================================================== */
+void* UITimerList::SetAt(uint32_t index, void* item)
+{
+    if (index > count) {
+        return nullptr;
+    }
+    if (index >= capacity) {
+        /* Same 1.1x growth policy as InsertAt (0x477C10). This branch is
+         * not reached by any call path exercised today — InsertAt below
+         * always grows first — kept for fidelity with the original's
+         * always-present guard. */
+        Resize(static_cast<uint32_t>((index + 1) * 1.1));
+    }
+    if (items[index] != nullptr) {
+        delete static_cast<GameObject*>(items[index]);
+        items[index] = nullptr;
+    }
+    items[index] = item;
+    return items[index];
+}
+
+/* ================================================================== */
+/* UITimerList::InsertAt — original vtable[17] (0x4248C0).             */
+/* ================================================================== */
+uint32_t UITimerList::InsertAt(uint32_t index, void* item)
+{
+    if (index > count) {
+        return static_cast<uint32_t>(-1);
+    }
+    if (capacity < count + 1) {
+        Resize(static_cast<uint32_t>((count + 1) * 1.1));
+    }
+    if (index != count) {
+        std::memmove(&items[index + 1], &items[index],
+                     (count - index) * sizeof(void*));
+        items[index] = nullptr;
+    }
+    SetAt(index, item);
+    ++count;
+    return index;
+}
+
+/* ================================================================== */
+/* UITimerList::Add — original vtable[13] (0x4362B0).                  */
+/* ================================================================== */
+void UITimerList::Add(void* item)
+{
+    if (key_size != 0) {
+        /* Keyed linear-scan insert (comparator vtable[18]/0x424960) is
+         * not reconstructed — only update_list has a non-zero key_size,
+         * and update_list is only ever populated by UI_CreateMessageBox
+         * (0x423AB0), an unimplemented stub that always returns nullptr
+         * on every call site in this tree. Fail loudly rather than
+         * silently inserting unsorted if that ever changes. */
+        fprintf(stderr, "STUB: UITimerList::Add keyed-insert branch "
+                        "(key_size=%d) not implemented (0x424960 not "
+                        "reconstructed)\n", key_size);
+        assert(0 && "UITimerList::Add: keyed-insert branch unreachable-but-unimplemented");
+        return;
+    }
+    InsertAt(count, item);
 }
 
 /* ================================================================== */
@@ -177,27 +293,9 @@ void UI_Manager::reset()
 /* ================================================================== */
 void UI_Manager::freeTooltipManager()
 {
-    /* Call vtable+0x18 on each timer (pos_list first, then update, then text) */
-    {
-        void** vtbl = *(void***)&this->pos_list;
-        typedef void (__thiscall* CleanupFn)(void*);
-        CleanupFn cleanup = (CleanupFn)vtbl[6];
-        cleanup(&this->pos_list);
-    }
-
-    {
-        void** vtbl = *(void***)&this->update_list;
-        typedef void (__thiscall* CleanupFn)(void*);
-        CleanupFn cleanup = (CleanupFn)vtbl[6];
-        cleanup(&this->update_list);
-    }
-
-    {
-        void** vtbl = *(void***)&this->text_list;
-        typedef void (__thiscall* CleanupFn)(void*);
-        CleanupFn cleanup = (CleanupFn)vtbl[6];
-        cleanup(&this->text_list);
-    }
+    pos_list.RemoveAll();
+    update_list.RemoveAll();
+    text_list.RemoveAll();
 }
 
 /* ================================================================== */
@@ -322,22 +420,16 @@ int* UI_Manager::createTooltip(int resourceId, short param2,
 
     /* Check if initialization succeeded (flag at +0x18) */
     if ((char)result[6] == 1) {     /* result[6] = *(int*)(obj + 0x18) */
-        /* Set position via vtable[3] (HitTest/SetPos) */
-        void** vtbl = *(void***)result;
-        typedef void (__thiscall* SetPosFn)(void*, int, int);
-        SetPosFn setPos = (SetPosFn)vtbl[3];
-        setPos(result, posX, posY);
+        /* Set position — original vtable[3], which on every GameObject-
+         * derived class in this tree is MoveTo(int x, int y) (see
+         * core/GameObject.h's vtable dump). */
+        static_cast<GameObject*>(obj)->MoveTo(posX, posY);
 
         /* Set flag bit 0x02 at +0x2C */
         result[0x0B] |= 2;          /* result[11] = *(int*)(obj + 0x2C) |= 2 */
 
-        /* Add to text_list at +0x04 */
-        {
-            void** vtbl2 = *(void***)&this->text_list;
-            typedef void (__thiscall* AddFn)(void*, void*);
-            AddFn addFn = (AddFn)vtbl2[0x0D];
-            addFn(&this->text_list, result);
-        }
+        /* Add to text_list (unordered — key_size is 0, so this appends). */
+        text_list.Add(result);
     } else {
         /* Initialization failed — destroy */
         if (result != NULL) {
@@ -358,21 +450,8 @@ int* UI_Manager::createTooltip(int resourceId, short param2,
 /* ================================================================== */
 void UI_Manager::cleanupTooltips()
 {
-    /* Call vtable+0x18 on pos_list */
-    {
-        void** vtbl = *(void***)&this->pos_list;
-        typedef void (__thiscall* CleanupFn)(void*);
-        CleanupFn cleanup = (CleanupFn)vtbl[6];
-        cleanup(&this->pos_list);
-    }
-
-    /* Call vtable+0x18 on update_list (NOT text_list) */
-    {
-        void** vtbl = *(void***)&this->update_list;
-        typedef void (__thiscall* CleanupFn)(void*);
-        CleanupFn cleanup = (CleanupFn)vtbl[6];
-        cleanup(&this->update_list);
-    }
+    pos_list.RemoveAll();
+    update_list.RemoveAll();
 }
 
 /* ================================================================== */
@@ -381,29 +460,12 @@ void UI_Manager::cleanupTooltips()
 /* ================================================================== */
 void UI_Manager::destroyTooltip(int* tooltipPtr)
 {
-    void** textVtbl = *(void***)&this->text_list;
-
-    /* Get count from text_list */
-    int count = (int)this->text_list.GetCount();
-
-    if (count == 0) {
-        return;
-    }
-
-    /* Search for tooltipPtr in text_list items */
-
-    uint32_t idx = 0;
-    while (idx < (uint32_t)count) {
-        int* item = (int*)this->text_list.GetItem(idx);
-        if (item == tooltipPtr) {
-            /* Found — remove at index via vtable[4] */
-            void** vtbl = *(void***)&this->text_list;
-            typedef void (__thiscall* RemoveAtFn)(void*, int);
-            RemoveAtFn removeAt = (RemoveAtFn)vtbl[4];
-            removeAt(&this->text_list, idx);
+    uint32_t count = text_list.GetCount();
+    for (uint32_t idx = 0; idx < count; ++idx) {
+        if (text_list.GetItem(idx) == tooltipPtr) {
+            text_list.RemoveAt(idx);
             return;
         }
-        idx++;
     }
 }
 
@@ -415,48 +477,38 @@ void UI_Manager::hideTooltip()
 {
     /* Process update_list (+0x34) */
     {
-        void** updateVtbl = *(void***)&this->update_list;
-        typedef void (__thiscall* RemoveAtFn)(void*, int);
-
-        RemoveAtFn removeAt = (RemoveAtFn)updateVtbl[4];
-
         uint32_t idx = 0;
-        int count = (int)this->update_list.GetCount();
-        while (idx < (uint32_t)count) {
-            int* item = (int*)this->update_list.GetItem(idx);
+        uint32_t count = update_list.GetCount();
+        while (idx < count) {
+            int* item = static_cast<int*>(update_list.GetItem(idx));
             if (item != NULL) {
                 /* Call UI_Window_UpdateScroll on the item */
                 extern char __fastcall UI_Window_UpdateScroll(int* item);
                 char completed = UI_Window_UpdateScroll(item);
                 if (completed == 1) {
-                    removeAt(&this->update_list, idx);
+                    update_list.RemoveAt(idx);
                 }
             }
             idx++;
-            count = (int)this->update_list.GetCount();
+            count = update_list.GetCount();
         }
     }
 
     /* Process pos_list (+0x1C) */
     {
-        void** posVtbl = *(void***)&this->pos_list;
-        typedef void (__thiscall* RemoveAtFn)(void*, int);
-
-        RemoveAtFn removeAt = (RemoveAtFn)posVtbl[4];
-
         uint32_t idx = 0;
-        int count = (int)this->pos_list.GetCount();
-        while (idx < (uint32_t)count) {
-            int* item = (int*)this->pos_list.GetItem(idx);
+        uint32_t count = pos_list.GetCount();
+        while (idx < count) {
+            int* item = static_cast<int*>(pos_list.GetItem(idx));
             if (item != NULL) {
                 extern char __fastcall UI_Window_UpdateScroll(int* item);
                 char completed = UI_Window_UpdateScroll(item);
                 if (completed == 1) {
-                    removeAt(&this->pos_list, idx);
+                    pos_list.RemoveAt(idx);
                 }
             }
             idx++;
-            count = (int)this->pos_list.GetCount();
+            count = pos_list.GetCount();
         }
     }
 }
@@ -552,42 +604,31 @@ void UI_Manager::resetTooltips(int param)
 {
     /* Process update_list (+0x34) */
     {
-        void** updateVtbl = *(void***)&this->update_list;
-
-
         uint32_t idx = 0;
-        int count = (int)this->update_list.GetCount();
-        while (idx < (uint32_t)count) {
-            int* item = (int*)this->update_list.GetItem(idx);
+        uint32_t count = update_list.GetCount();
+        while (idx < count) {
+            void* item = update_list.GetItem(idx);
             if (item != NULL) {
-                /* Call vtable[9] (offset 0x24) — reset method */
-                void** vtbl = *(void***)item;
-                typedef void (__thiscall* ResetFn)(void*, int);
-                ResetFn reset = (ResetFn)vtbl[9];
-                reset(item, param);
+                /* original vtable[9] == UIEntity::SetVisible — see
+                 * ui/UIEntity.h's live vtable-slot dump. */
+                static_cast<Entity*>(item)->SetVisible(param != 0);
             }
             idx++;
-            count = (int)this->update_list.GetCount();
+            count = update_list.GetCount();
         }
     }
 
     /* Process pos_list (+0x1C) */
     {
-        void** posVtbl = *(void***)&this->pos_list;
-
-
         uint32_t idx = 0;
-        int count = (int)this->pos_list.GetCount();
-        while (idx < (uint32_t)count) {
-            int* item = (int*)this->pos_list.GetItem(idx);
+        uint32_t count = pos_list.GetCount();
+        while (idx < count) {
+            void* item = pos_list.GetItem(idx);
             if (item != NULL) {
-                void** vtbl = *(void***)item;
-                typedef void (__thiscall* ResetFn)(void*, int);
-                ResetFn reset = (ResetFn)vtbl[9];
-                reset(item, param);
+                static_cast<Entity*>(item)->SetVisible(param != 0);
             }
             idx++;
-            count = (int)this->pos_list.GetCount();
+            count = pos_list.GetCount();
         }
     }
 }
@@ -606,17 +647,97 @@ void UI_Manager::resetTooltips(int param)
 void UI_SetTooltipText(int x, int y, int w, int h);
 void UI_SetTooltipText(int x, int y, int w, int h)
 {
-    static_cast<UI_Manager*>(g_tooltip_mgr)->setTooltipText(x, y, w, h, 1);
+    g_tooltip_mgr->setTooltipText(x, y, w, h, 1);
 }
 
 void UI_SetTooltipPos(int x, int y, int w, int h, int flag);
 void UI_SetTooltipPos(int x, int y, int w, int h, int flag)
 {
-    static_cast<UI_Manager*>(g_tooltip_mgr)->setTooltipPos(x, y, w, h, flag);
+    g_tooltip_mgr->setTooltipPos(x, y, w, h, flag);
 }
 
 void UI_UpdateTooltip(int x, int y, int w, int h, int flag);
 void UI_UpdateTooltip(int x, int y, int w, int h, int flag)
 {
-    static_cast<UI_Manager*>(g_tooltip_mgr)->updateTooltip(x, y, w, h, flag);
+    g_tooltip_mgr->updateTooltip(x, y, w, h, flag);
+}
+
+/* ================================================================== */
+/* Free-function facades for UI_Manager's tooltip-lifecycle methods.    */
+/*                                                                      */
+/* Declared with a `void* mgr` parameter (rather than `UI_Manager*`) to */
+/* match every existing extern declaration of these five names across  */
+/* the tree — dozens of TUs each carry their own local                  */
+/* `extern void* g_tooltip_mgr`-style forward declaration and pass that */
+/* value straight through. The real object underneath is always the    */
+/* UI_Manager singleton at 0x4FD220 (g_tooltip_mgr, graphics/DDRAW.cpp), */
+/* so `static_cast<UI_Manager*>(mgr)` here is a real-type recovery, not */
+/* a manual layout cast, following the same pattern already established */
+/* by UI_SetTooltipText/UI_SetTooltipPos/UI_UpdateTooltip above.        */
+/* ================================================================== */
+
+/** UI_CleanupTooltips — Address: 0x423D00. See UI_Manager::cleanupTooltips. */
+void UI_CleanupTooltips(void* mgr);
+void UI_CleanupTooltips(void* mgr)
+{
+    static_cast<UI_Manager*>(mgr)->cleanupTooltips();
+}
+
+/** UI_HideTooltip — Address: 0x423D70. See UI_Manager::hideTooltip.
+ *  Safe to wire despite UI_Window_UpdateScroll (0x423560) remaining an
+ *  assert-stub: both lists hideTooltip iterates are populated only by
+ *  UI_CreateMessageBox (0x423AB0), itself an unimplemented stub that
+ *  always returns nullptr today, so the loop body is unreachable. */
+void UI_HideTooltip(void* mgr);
+void UI_HideTooltip(void* mgr)
+{
+    static_cast<UI_Manager*>(mgr)->hideTooltip();
+}
+
+/** UI_DestroyTooltip — Address: 0x423D20. See UI_Manager::destroyTooltip.
+ *  `tooltip` is a GameObject* smuggled through an int handle by every
+ *  caller in this tree that uses this (void*, int) overload (game/
+ *  Panel.cpp, game/ScriptedObject.cpp — out of scope to retype here);
+ *  matches the original 32-bit x86 ABI, where a pointer and an int are
+ *  the same width, exactly. */
+void UI_DestroyTooltip(void* mgr, int tooltip);
+void UI_DestroyTooltip(void* mgr, int tooltip)
+{
+    // ABI_BOUNDARY: `tooltip` is a pointer value carried through this
+    // (void*, int) overload's `int` parameter, matching the original
+    // 32-bit x86 ABI where a pointer and an int are the same width — the
+    // established shape of every caller of this overload (see doc
+    // comment above). Not a stand-in for a known object's field layout.
+    static_cast<UI_Manager*>(mgr)->destroyTooltip(
+        reinterpret_cast<int*>(static_cast<intptr_t>(tooltip)));
+}
+
+/** UI_ResetTooltips — Address: 0x423F80. See UI_Manager::resetTooltips. */
+void UI_ResetTooltips(void* mgr, int param);
+void UI_ResetTooltips(void* mgr, int param)
+{
+    static_cast<UI_Manager*>(mgr)->resetTooltips(param);
+}
+
+/**
+ * UI_CreateTooltip — Address: 0x423C50. NOT wired to
+ * UI_Manager::createTooltip (which is itself fully modeled — see its own
+ * doc comment in UI_Utils.h). createTooltip's first action is
+ * GameObject_BaseCtor (0x405790), an unimplemented assert-stub
+ * (shared/stubs_impl.cpp). Real call sites reach this facade during
+ * ordinary gameplay object construction (e.g. ui/UIEntity.cpp's
+ * constructor, whenever a resource's childCount > 0) — wiring the
+ * facade today would turn "silently does nothing" into "aborts the
+ * process" on that path. Kept as a loud (not silent) stub per CLAUDE.md's
+ * stub policy until 0x405790 is implemented.
+ */
+int* UI_CreateTooltip(void* mgr, int resourceId, int16_t param2, int x, int y);
+int* UI_CreateTooltip(void* mgr, int resourceId, int16_t param2, int x, int y)
+{
+    (void)mgr; (void)resourceId; (void)param2; (void)x; (void)y;
+    fprintf(stderr, "STUB: %s at %s:%d (0x423C50 — UI_Manager::createTooltip "
+                    "is modeled but not wired; depends on GameObject_BaseCtor "
+                    "0x405790, still unimplemented)\n", __func__, __FILE__, __LINE__);
+    assert(0 && "UI_CreateTooltip: blocked on GameObject_BaseCtor (0x405790)");
+    return nullptr;
 }

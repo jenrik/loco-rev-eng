@@ -153,7 +153,8 @@ extern void  GLOBAL_free(void* ptr);               /* 0x465CD0 */
 extern void* g_game;                               /* 0x4854C8 */
 extern void* g_world;                              /* 0x4A98B0 */
 extern void* g_netman;                             /* 0x4FD3AC */
-extern void* g_tooltip_mgr;                        /* 0x4FD220 */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;                  /* 0x4FD220 */
 extern int32_t g_player_id;                        /* 0x4AAD46 */
 extern int32_t g_in_build_mode;                    /* 0x4FD199 */
 extern uint8_t g_allow_building_placement;         /* 0x4FD3DC */

@@ -101,8 +101,18 @@ extern "C" {
      * Start) has zero callers in this tree today. */
     void* __thiscall RESDATA_CreateChildSprite(void* obj, int32_t resId, int32_t param3, int32_t param4); /* @ 0x4546D0 */
     int32_t __thiscall ResourceManager_GetById(void* resmgr, int32_t resId); /* @ 0x446EA0 */
-    void* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int32_t param, int32_t x, int32_t y); /* @ 0x428DA0 */
-    void* __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x428E40 */
+    /* Addresses corrected: 0x428DA0/0x428E40 do not exist as functions
+     * (confirmed via Ghidra — no function, zero xrefs at either address).
+     * The real UI_CreateTooltip/UI_DestroyTooltip are UI_Manager::
+     * createTooltip/destroyTooltip at 0x423C50/0x423D20 (ui/UI_Utils.cpp).
+     * `param`'s real width is int16_t, not int32_t (matches the one
+     * canonical UI_CreateTooltip overload used tree-wide — see
+     * ui/UIEntity.cpp; this file's own previous int32_t declaration was a
+     * distinct, redundant overload bound to a since-removed separate stub
+     * in shared/stubs_impl.cpp). UI_DestroyTooltip's real return type is
+     * void, not void* (unused by any caller here either way). */
+    int* __thiscall UI_CreateTooltip(void* mgr, int32_t resId, int16_t param, int32_t x, int32_t y); /* @ 0x423C50 */
+    void __thiscall UI_DestroyTooltip(void* mgr, int32_t tooltipId);  /* @ 0x423D20 */
     /* TODO(deferred — see docs/landmine-sweep-worklist.md): address corrected
      * 0x40DD90 -> 0x40D170. Ghidra confirms every `TrackPiece_SetZoom(...)`
      * call this file's own disassembly resolves to (e.g. inside
@@ -148,7 +158,10 @@ extern "C" {
      * `void*`, an undetected type mismatch across TUs until this file
      * started including tilemap.h directly (for RESDATA_ScriptedObject_
      * Dispatch's declaration) and the compiler could see both at once. */
-    extern void* g_tooltip_mgr;               /* @ 0x4AA500 */
+    /* Address corrected: 0x4FD220, not 0x4AA500 (matches every other
+     * declaration of this global tree-wide, and DDRAW.cpp's definition). */
+    class UI_Manager;
+    extern UI_Manager* g_tooltip_mgr;         /* @ 0x4FD220 */
     extern void* g_audio;                      /* @ 0x4FD3BC */
     extern void* g_audio_mgr;                  /* @ 0x4A9E0C */
     extern void* g_town_view;                  /* @ 0x4A9E1C */
@@ -693,13 +706,13 @@ uint32_t __fastcall RESDATA_ScriptedObject::Start()
 
             /* Destroy old tooltip */
             if (this->tooltip_id != nullptr) {                       /* +0xA0 */
-                UI_DestroyTooltip(&g_tooltip_mgr, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->tooltip_id)));
+                UI_DestroyTooltip(g_tooltip_mgr, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->tooltip_id)));
             }
 
             /* Create tooltip */
             if (this->drag_flag != 0) {                              /* +0x24 */
                 void* tooltip = UI_CreateTooltip(
-                    &g_tooltip_mgr, 0x3887, 1,
+                    g_tooltip_mgr, 0x3887, 1,
                     this->x + 0x32,                                   /* +0x08 */
                     this->y + 0x32);                                  /* +0x0C */
                 this->tooltip_id = tooltip;                          /* +0xA0 */
@@ -809,11 +822,11 @@ void __fastcall RESDATA_ScriptedObject::Update()
             this->dispatch_state = 0;                                /* +0x740 */
 
             if (this->tooltip_id != nullptr) {                       /* +0xA0 */
-                UI_DestroyTooltip(&g_tooltip_mgr, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->tooltip_id)));
+                UI_DestroyTooltip(g_tooltip_mgr, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->tooltip_id)));
             }
             if (this->drag_flag != 0) {                              /* +0x24 */
                 void* tooltip = UI_CreateTooltip(
-                    &g_tooltip_mgr, 0x3887, 0,
+                    g_tooltip_mgr, 0x3887, 0,
                     this->x + 0x32,                                   /* +0x08 */
                     this->y + 0x32);                                  /* +0x0C */
                 this->tooltip_id = tooltip;                          /* +0xA0 */

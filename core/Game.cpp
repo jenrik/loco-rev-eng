@@ -115,7 +115,8 @@ extern void*    g_cursor;              /* Cursor window object */
 extern void*    g_postcard;            /* PostcardAlbum window object */
 extern void*    g_postcard_send;       /* postcard-send window object */
 extern void*    g_ui_main;             /* UI main window object */
-extern void*    g_tooltip_mgr;         /* 0x004FD220 tooltip manager */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;      /* 0x004FD220 tooltip manager */
 extern GameAudio* g_audio;             /* 0x004FD38C audio system */
 
 /* Town-view overlays (hit-test objects embedded at their globals) */
@@ -766,7 +767,7 @@ void Game::HandleLeftClick()
             }
             this->selected_object->OnOccupantReady(
                 static_cast<Entity*>(obj));
-            UI_CreateMessageBox(&g_tooltip_mgr, 0x386D, 0, 'W',
+            UI_CreateMessageBox(g_tooltip_mgr, 0x386D, 0, 'W',
                                 wx, wy, 1);
             this->selected_object->next_action_time = 0;
             this->SelectGameObject(nullptr);
@@ -1137,7 +1138,7 @@ int Game::SelectGameObject(Building* obj)
         if (this->mouse_move_flag == 0) {      /* +0xC4 */
             this->selected_visible = 1;        /* +0xEC */
         }
-        UI_CreateMessageBox(&g_tooltip_mgr, 0x386D, 0, 'W',
+        UI_CreateMessageBox(g_tooltip_mgr, 0x386D, 0, 'W',
                             obj->world_x, obj->world_y, 1);
 
         /* Selection sound from the resource (+0x174). */

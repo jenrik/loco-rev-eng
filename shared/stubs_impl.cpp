@@ -691,12 +691,15 @@ void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, un
 void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int) { /* host no-op */ }
 void UI_CreateChildWindow(void*, int, int);
 void UI_CreateChildWindow(void*, int, int) { /* host no-op */ }
-void UI_CleanupTooltips(void* self);
-void UI_CleanupTooltips(void* self) { (void)self; }
-void UI_DestroyTooltip(void* self, int i);
-void UI_DestroyTooltip(void* self, int i) { (void)self; (void)i; }
-void UI_CreateTooltip(void* self, int a, int b, int c, int d);
-void UI_CreateTooltip(void* self, int a, int b, int c, int d) { (void)self; (void)a; (void)b; (void)c; (void)d; }
+/* UI_CleanupTooltips(void*) / UI_DestroyTooltip(void*, int) / UI_CreateTooltip
+ * (void*, int, int, int, int): removed. UI_CleanupTooltips and
+ * UI_DestroyTooltip now have real definitions in ui/UI_Utils.cpp routing
+ * to UI_Manager::cleanupTooltips/destroyTooltip. The (void*, int, int,
+ * int, int) UI_CreateTooltip overload was a redundant duplicate of the
+ * canonical (void*, int, short, int, int) overload (also now in
+ * ui/UI_Utils.cpp) — its only two callers (game/ScriptedObject.cpp,
+ * world/scriptengine.cpp) were retyped to the canonical short-param
+ * signature so there is exactly one UI_CreateTooltip symbol. */
 void UI_IsBitmapReady(int);
 void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /* UI_Window_UpdateScroll — Address: 0x423560. Real function (a UIEntity
@@ -704,13 +707,18 @@ void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __
  * Entity-shaped vtable dump at 0x477A90 plus field-offset matches
  * against UIEntity/Entity/GameObject's already-named fields), but NOT
  * a working implementation here: its only real caller is 0x423D70
- * (UI_HideTooltip / UI_Manager::hideTooltip in ui/UI_Utils.cpp), which
- * itself has zero reachable callers today (UI_Manager is never
- * instantiated; g_tooltip_mgr is permanently nullptr — see
- * PROGRESS.md). Deferred rather than transcribed: correct behavior
- * also depends on two more not-yet-reconstructed UIEntity virtual
- * overrides (UI_ShowWindow 0x423840, UI_HideWindow 0x423870 — see
- * ui/UIEntity.h). This was previously a *silently* wrong stub: it
+ * (UI_HideTooltip / UI_Manager::hideTooltip in ui/UI_Utils.cpp).
+ * g_tooltip_mgr is a real UI_Manager singleton now (graphics/DDRAW.cpp),
+ * and UI_HideTooltip is wired to hideTooltip(), but this is still
+ * unreachable in practice: hideTooltip only calls this on non-null items
+ * in update_list/pos_list, and both lists are populated only by
+ * UI_CreateMessageBox (0x423AB0), an unimplemented stub that always
+ * returns nullptr on every call site in this tree today — so both lists
+ * stay permanently empty and this loop body never runs. Deferred rather
+ * than transcribed: correct behavior also depends on two more not-yet-
+ * reconstructed UIEntity virtual overrides (UI_ShowWindow 0x423840,
+ * UI_HideWindow 0x423870 — see ui/UIEntity.h). This was previously a
+ * *silently* wrong stub: it
  * returned void while every call site declares/uses a char return
  * (`if (UI_Window_UpdateScroll(item) == 1)`), which is undefined
  * behavior (the caller reads garbage out of AL/EAX) — same bug class
@@ -845,8 +853,8 @@ void  RESMGR_VehicleAnimationTick(void* self);
 void  RESMGR_VehicleAnimationTick(void* self) { (void)self; }
 void  World_UpdateTick(void* self);
 void  World_UpdateTick(void* self) { (void)self; }
-void  UI_HideTooltip(void* self);
-void  UI_HideTooltip(void* self) { (void)self; }
+/* UI_HideTooltip(void*): removed — real definition now in
+ * ui/UI_Utils.cpp, routing to UI_Manager::hideTooltip. */
 void  RESDATA_ScriptedObject_Update(void* self);
 void  RESDATA_ScriptedObject_Update(void* self) { (void)self; }
 /* Town_TrackBuilding (0x42D1A0) and DDRAW_UpdateBuilding (0x459DA0) are

@@ -101,7 +101,8 @@ extern void*    g_building_mgr;          /* 0x485448 */
 /* g_tilemap declared canonically in tilemap.h (TileMap* singleton) */
 extern void*    g_game;                  /* 0x4854C8 */
 extern void*    g_world;                 /* 0x4A98B0 */
-extern void*    g_tooltip_mgr;           /* 0x4FD220 */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;        /* 0x4FD220 */
 extern HWND     g_main_window;
 
 /* Bitmask lookup table */

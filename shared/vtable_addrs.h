@@ -589,6 +589,26 @@
 #define VTBL_TIMERLIST_C                0x00477B40  /* TimerList variant C        */
 #define VTBL_TIMERLIST_WRAPPER          0x00477AE8  /* TimerList wrapper          */
 #define VTBL_TIMERLIST_WRAPPER2         0x00477AEC  /* TimerList wrapper 2        */
+/* Byte-dumped and decompiled in full this session (ui/UI_Utils.h/.cpp's
+ * UITimerList): VTBL_TIMERLIST_A/VTBL_TIMERLIST_C are transient
+ * construction-time vtables (UI_Manager's ctor, 0x4238C0, sets each
+ * TimerList's vtable pointer to A/C first, then B/WRAPPER once fully
+ * constructed — A/C are never the *live* vtable for any TimerList that
+ * survives construction). VTBL_TIMERLIST_B (text_list's real vtable) and
+ * VTBL_TIMERLIST_WRAPPER (pos_list's and update_list's real vtable) are
+ * both 22 slots (0x58 bytes) and share identical function pointers at
+ * every slot this class's own methods use: slot0=Resize (0x435D10),
+ * slot3=RemoveAndGet (0x4241E0), slot4=RemoveAt (0x4356E0),
+ * slot6=RemoveAll (0x424270), slot7=GetItemRaw (0x424530),
+ * slot8=GetItem (0x424030), slot10=SetAt (0x424790),
+ * slot11=GetCount (0x424000), slot12=HasLiveSlot (0x424760),
+ * slot13=Add (0x4362B0), slot17=InsertAt (0x4248C0),
+ * slot18=Compare (0x424960, keyed-insert only — not reconstructed).
+ * This is the SAME collection-vtable layout other classes reuse for
+ * their own unrelated collections at some of the same slot addresses
+ * (e.g. game/BuildingMgr.cpp's Building collection: slot3=RemoveElement
+ * at this same 0x4241E0) — a shared template instantiation family, not
+ * something specific to UI_Manager. */
 
 /* ================================================================== */
 /* TimerSlotList — Timer slot list (Collection layout, 16 bytes)       */

@@ -215,7 +215,8 @@ extern void*    g_netman;               /* 0x4FD3AC */
 extern void*    g_game;                 /* 0x4854C8 */
 extern void*    g_main_window;          /* 0x4AA4A0 */
 extern void*    g_async_task_queue;     /* 0x4A9AD0 */
-extern void*    g_tooltip_mgr;          /* 0x4FD220 */
+class UI_Manager;
+extern UI_Manager* g_tooltip_mgr;       /* 0x4FD220 */
 extern "C" void UI_ProcessObjectTimers(void);         /* 0x420000, __cdecl */
 extern "C" void Game_DispatchCursorFeedback(void* game);  /* 0x411760, __cdecl */
 class TileMap;
