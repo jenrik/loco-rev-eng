@@ -154,13 +154,23 @@ void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flag); /* @ 0x0
 
 void* AssetMgr_LoadFile(void** assetMgr, const uint8_t* name, int32_t* outSize); /* @ 0x00457C00 */
 void* WNDPROC_StreamFromMemory(void* stream, char* data, int32_t size, int32_t flag); /* @ 0x00460C10 */
-void* WIN32_StreamOpenFile(void* stream, const char* path, uint32_t mode, void* param, int32_t flag); /* @ 0x00461710 */
-void* WIN32_StreamOpenPath(void* stream, const char* path, uint32_t mode, void* param); /* @ 0x00461640 */
-void* WIN32_StreamOpen(void* stream, int32_t flag);   /* @ 0x00461600 */
-void WIN32_StreamDestroyImmediate(void* stream);      /* @ 0x00461800 */
-void WIN32_StreamDestroy(int32_t* streamInfo);        /* @ 0x004617C0 */
-void WNDPROC_StreamCleanup(int32_t* streamInfo);      /* @ 0x00460D50 */
-uint32_t WIN32_StreamRead(void* stream, void* buf, uint32_t size); /* @ 0x00461880 */
+/* The WIN32_StreamOpen(File/Path)/Destroy(Immediate)/WNDPROC_StreamCleanup/
+ * WIN32_StreamRead declarations formerly here (addresses 0x461600-
+ * 0x461880) were dead — RESMGR_OpenResourceFile (declared in
+ * ResourceManager.h, real address 0x448A70) is not yet implemented in
+ * this file, so nothing calls them — AND wrong: 0x4617C0/0x461600/etc.
+ * actually belong to unrelated functions (WIN32_QueueAsyncTask/
+ * WIN32_SendNetworkData; confirmed via Ghidra decompile), not this
+ * family at all. Removed rather than fixed, since there is nothing here
+ * to fix. When RESMGR_OpenResourceFile is implemented for real, it
+ * should use a real resources/Win32Stream.h WIN32_Stream local (RAII
+ * construction/destruction) for its outer stream, matching
+ * game/TrainStation.cpp/game/ScriptedObject.cpp/ui/HelpWnd.cpp/
+ * ui/CursorEditWindow.cpp/ui/UIPANEL_Surface.cpp's real addresses
+ * (WIN32_StreamOpen 0x463890, WIN32_StreamOpenPath 0x463AA0,
+ * WIN32_StreamRead 0x463810, WIN32_StreamDestroyImmediate 0x463B10) —
+ * WIN32_StreamDestroy (0x463A80) no longer exists as a callable symbol
+ * at all (see Win32Stream.h's doc comment on that address). */
 
 void* CRT_FindFirstFile(const char* path, void* findData); /* @ 0x00468310 */
 int32_t CRT_FindNextFile(void* handle, void* findData);    /* @ 0x00468350 */

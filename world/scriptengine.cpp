@@ -201,11 +201,19 @@ extern "C" {
     void* __thiscall AssetMgr_LoadFile(void* mgr, void* name, int32_t* outSize);  /* @ 0x00457C00 */
     void CRT_free(void* ptr);                       /* @ 0x00465280 */
     void* operator_new(uint32_t size);              /* @ 0x00465CE0 */
-    void __thiscall WIN32_StreamOpen(void* stream, int32_t flag);        /* @ 0x00461600 */
-    void __thiscall WIN32_StreamOpenPath(void* stream, const char* path, uint32_t mode, void* param); /* @ 0x00461640 */
-    void __thiscall WIN32_StreamDestroyImmediate(void* stream);          /* @ 0x00461800 */
-    void __thiscall WIN32_StreamDestroy(void* stream);                   /* @ 0x004617C0 */
-    void __thiscall WNDPROC_StreamCleanup(void* stream);                 /* @ 0x00460D50 */
+    /* The WIN32_StreamOpen/OpenPath/Destroy(Immediate)/WNDPROC_StreamCleanup
+     * declarations formerly here (addresses 0x461600-0x460D50) were dead
+     * (nothing in this file calls them) AND wrong: those addresses
+     * actually belong to unrelated functions (WIN32_QueueAsyncTask/
+     * WIN32_SendNetworkData; confirmed via Ghidra decompile), not this
+     * family at all — same stale-scaffolding pattern found and removed
+     * in resources/ResourceManager.cpp. A future pass adding real
+     * WIN32_Stream usage here should use resources/Win32Stream.h's real
+     * class (RAII construction/destruction) and its real addresses
+     * (WIN32_StreamOpen 0x463890, WIN32_StreamOpenPath 0x463AA0,
+     * WIN32_StreamDestroyImmediate 0x463B10) — WIN32_StreamDestroy
+     * (0x463A80) no longer exists as a callable symbol at all (see
+     * Win32Stream.h's doc comment on that address). */
     /* `engine` is a misnomer inherited from this function's address label:
      * Ghidra confirms the zoom-setting call inside resolves to
      * TrackPiece::SetZoom (0x40D170), and every accessed offset (+0x2C

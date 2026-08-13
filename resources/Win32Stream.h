@@ -19,7 +19,50 @@
  *   WIN32_StreamDestroyImmediate 0x463B10  -> CloseNow()
  *
  * WIN32_StreamDestroy (0x463A80) is deliberately NOT reconstructed as a
- * WIN32_Stream method — see the free-function facade below for why.
+ * callable function at all (not even a free-function facade) — its real
+ * behavior settles the question rather than merely defers it:
+ *
+ * Disassembly (4 instructions) shows this function's real argument is
+ * `&stream->StreamObject_subobject` (`this+0xC` in the original x86
+ * layout — confirmed via the `MOV EAX,[ECX-0xC]` back-reference at the
+ * function's own entry, not a decompiler artifact) and its ENTIRE body is:
+ *   MOV EAX, [ECX-0xC]                    ; own-identity vtable pointer
+ *   MOV EDX, [EAX+0x4]                    ; vtable slot [1] = vbase offset
+ *   MOV [EDX+ECX-0xC], 0x479184           ; re-tag the StreamObject
+ *                                          ; subobject's own vptr slot
+ *   JMP WNDPROC_Stream_DtorVftableReset (0x4648E0, tail call, same shape,
+ *                                          re-tags the same slot to 0x479234)
+ * i.e. it does no cleanup whatsoever — it is pure MSVC "walk down
+ * re-tagging each virtual-base vptr as the destructor chain unwinds"
+ * bookkeeping, EXACTLY analogous to WIN32_OStream_DtorVftableReset/
+ * WNDPROC_OStream_DtorVftableReset documented in WndProcOStream.h (same
+ * instruction shape, different constant). Confirmed end-to-end by
+ * tracing all ~15 real callers in the original binary (game/
+ * TrainStation.cpp, game/ScriptedObject.cpp, ui/HelpWnd.cpp,
+ * ui/CursorEditWindow.cpp, ui/UIPANEL_Surface.cpp, input/
+ * BuildingDescriptorEditor.cpp, ui/AboutDialog.cpp, UI_ChildWindow_Create,
+ * RESMGR_OpenResourceFile, WIN32_Stream_ScalarDtor itself): every one
+ * constructs a WIN32_Stream in a raw local buffer via
+ * WIN32_StreamOpen(&buf,1), then on cleanup calls
+ * WIN32_StreamDestroy(&buf.StreamObject_subobject) immediately followed
+ * by WNDPROC_StreamCleanup(&buf.StreamObject_subobject) — a SEPARATE
+ * function (0x464620) on the exact same pointer that does the real
+ * cleanup (frees an owned rdbuf, tears down the lock, decrements a shared
+ * refcount). That pairing is exactly what a real C++ `~WIN32_Stream()`
+ * does: virtual-base vptr bookkeeping (free, from the compiler) followed
+ * by `~StreamObject()`'s real body — now implemented for real as
+ * StreamObject::~StreamObject() (see StreamObject.h/.cpp's doc comments
+ * for the full evidence trail). Every one of the ~15 callers has been
+ * converted to a real stack-allocated WIN32_Stream local with real C++
+ * construction/destruction (or, for the few callers that never actually
+ * call WIN32_StreamDestroy — input/BuildingDescriptorEditor.cpp,
+ * ui/AboutDialog.cpp, resources/ResourceManager.cpp,
+ * world/scriptengine.cpp, UI_ChildWindow_Create — left as the
+ * dead/unresolved declarations or authorized stubs they already were).
+ * With every real caller converted, WIN32_StreamDestroy has no remaining
+ * reason to exist as a callable symbol in this codebase at all: real C++
+ * virtual-base destruction ordering provides its one real effect (correct
+ * vtable identity during the unwind) automatically, for free.
  *
  * The original's `initBase` parameter on WIN32_StreamOpen/OpenFile (and the
  * matching parameter on AttachBuffer's underlying original function, see
@@ -100,7 +143,8 @@ void* WIN32_StreamOpenFile(void* stream, const char* path, uint32_t flags,
 void WIN32_StreamOpenPath(void* stream, const char* path, uint32_t flags,
                            uint32_t shareMask);
 
-/* 0x463810 */
+/* 0x463810. Accepts any WNDPROC_Stream-family object (not just
+ * WIN32_Stream) — see the .cpp definition for why. */
 void* WIN32_StreamRead(void* stream, void* buf, uint32_t size);
 
 /* 0x463B10 */
@@ -118,17 +162,9 @@ void WIN32_StreamDestroyImmediate(void* stream);
  * separately tracked follow-up this header already defers. */
 size_t WIN32_Stream_Size();
 
-/* 0x463A80 — deliberately NOT implemented (loud deferred stub in the
- * .cpp). Disassembly shows this function's real argument is
- * `&stream->StreamObject_subobject` (`this+0xc` in the original x86
- * layout — confirmed via the `MOV EAX,[ECX-0xc]` back-reference at the
- * function's own entry, not a decompiler artifact), but every real
- * caller in the tree passes something else (the outer object's own base
- * address, or an arbitrary sub-offset that doesn't match +0xc either) —
- * none of the ~15 call sites' own (already-flagged-inconsistent) extern
- * declarations agree with the callee's true contract or with each other.
- * Safely reconstructing which offset an incoming `void*` actually points
- * at here would require guessing, which CLAUDE.md's evidence-only rule
- * and stub policy both forbid. Deferred pending the separate
- * caller-declaration-unification pass already tracked in PROGRESS.md. */
-void WIN32_StreamDestroy(void* connector);
+/* WIN32_StreamDestroy (0x463A80) is intentionally NOT declared as a
+ * callable function here — see the class doc comment above for the full
+ * evidence trail. It is pure MSVC vptr-retagging bookkeeping with no
+ * observable effect once real C++ virtual-base destruction is in play;
+ * every real caller has been converted to a real WIN32_Stream local and
+ * no longer calls it. */

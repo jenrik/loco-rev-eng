@@ -411,10 +411,15 @@ void __ftol(double);
 void __ftol(double) { /* host no-op */ }
 /* WIN32_StreamDestroy(void*)/WIN32_StreamDestroyImmediate(void*) silent
  * no-ops removed: DestroyImmediate is now a real implementation in
- * resources/Win32Stream.h/.cpp; Destroy is now a LOUD deferred stub there
- * instead (CLAUDE.md forbids silent no-op stubs for internal logic —
- * see that file's doc comment for why it can't be safely implemented
- * yet). */
+ * resources/Win32Stream.h/.cpp; Destroy no longer exists as a callable
+ * symbol at all — it was pure MSVC vptr-retagging bookkeeping with no
+ * observable effect once real C++ virtual-base destruction is in play,
+ * and every real caller now uses a real WIN32_Stream local instead of
+ * calling it (see Win32Stream.h's doc comment on 0x463A80 for the full
+ * evidence trail). The free-function WNDPROC_StreamCleanup(void*) below
+ * remains a silent no-op: it is genuinely still needed by
+ * resources/Win32StreamMem.cpp's WIN32_StreamClose (0x463A60), a
+ * separate, not-yet-reconstructed caller outside this pass's scope. */
 void WNDPROC_StreamCleanup(void*);
 void WNDPROC_StreamCleanup(void*) { /* host no-op */ }
 void TileMap_SetViewport(void*, void*);

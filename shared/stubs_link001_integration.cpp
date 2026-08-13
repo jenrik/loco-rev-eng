@@ -45,7 +45,12 @@ extern void* Win32Stream_RealOpenFile(void*, const char*, uint32_t, uint32_t, in
     asm("_Z20WIN32_StreamOpenFilePvPKcjji");
 extern void* Win32Stream_RealRead(void*, void*, uint32_t) asm("_Z16WIN32_StreamReadPvS_j");
 extern void Win32Stream_RealDestroyImmediate(void*) asm("_Z28WIN32_StreamDestroyImmediatePv");
-extern void Win32Stream_RealDestroy(void*) asm("_Z19WIN32_StreamDestroyPv");
+/* No WIN32_StreamDestroy bridge here anymore: resources/Win32Stream.h/.cpp
+ * no longer define that symbol at all (0x463A80 is pure MSVC vptr-
+ * retagging bookkeeping with no observable effect once real C++
+ * virtual-base destruction is in play — see that header's doc comment on
+ * it), and every real caller has been converted to a real WIN32_Stream
+ * local that no longer calls it. */
 
 extern "C" {
 
@@ -76,14 +81,6 @@ void* WIN32_StreamRead(void* stream, void* buf, int32_t size)
 void WIN32_StreamDestroyImmediate(void* stream)
 {
     Win32Stream_RealDestroyImmediate(stream);
-}
-
-void WIN32_StreamDestroy(void* connector)
-{
-    /* Real body (resources/Win32Stream.cpp) is itself a documented loud
-     * deferred stub (0x463A80) — forward rather than duplicate the
-     * fprintf/assert. */
-    Win32Stream_RealDestroy(connector);
 }
 
 } /* extern "C" */

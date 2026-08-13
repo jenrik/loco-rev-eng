@@ -63,14 +63,23 @@ extern void  __thiscall RESMGR_PlaySound(int resId);                         /* 
 extern void* __thiscall AssetMgr_LoadFile(void* assetMgr,                    /* 0x45CD00 */
                                            const char* path, int* sizeOut);
 
-/* WIN32 stream I/O */
+/* WIN32 stream I/O.
+ *
+ * None of these have a live call in this file today: LoadCredits() below
+ * is not yet implemented (still documentation-only). WIN32_StreamDestroy/
+ * WNDPROC_StreamCleanup are removed here as dead declarations — when
+ * LoadCredits is implemented for real, it should use a real
+ * resources/Win32Stream.h WIN32_Stream local (RAII construction/
+ * destruction) for its outer stream, matching game/TrainStation.cpp,
+ * game/ScriptedObject.cpp, ui/HelpWnd.cpp, ui/CursorEditWindow.cpp, and
+ * ui/UIPANEL_Surface.cpp, not these free functions — WIN32_StreamDestroy
+ * no longer exists as a callable symbol at all (see that header's doc
+ * comment on 0x463A80). */
 extern void  __fastcall WIN32_StreamOpen(void* stream, int mode);            /* 0x463890 */
 extern void  __fastcall WIN32_StreamOpenPath(void* stream,                   /* 0x463AA0 */
                                               const char* path,
                                               int mode, int flags);
-extern void  __fastcall WIN32_StreamDestroy(int* stream);                    /* 0x463A80 */
 extern void  __fastcall WIN32_StreamDestroyImmediate(void* stream);          /* 0x463B10 */
-extern void  __fastcall WNDPROC_StreamCleanup(int* stream);                  /* 0x464620 */
 extern void* __fastcall WNDPROC_StreamFromMemory(void* stream,               /* 0x464490 */
                                                    char* data, int size,
                                                    int mode);
@@ -416,8 +425,12 @@ void AboutDialog::LoadCredits()
          - Same read-append loop as Phase 2
 
      Phase 4: Cleanup
-       - WIN32_StreamDestroy (cleanup attempt, may fail silently)
-       - WNDPROC_StreamCleanup (final stream cleanup)
+       - The outer stream (the one Phase 1 opens) is destroyed by real
+         C++ RAII once resources/Win32Stream.h's WIN32_Stream is used for
+         it, matching game/TrainStation.cpp/ui/HelpWnd.cpp et al: no
+         WIN32_StreamDestroy call needed at all (that symbol no longer
+         exists — 0x463A80 is documented as pure MSVC vptr-retagging
+         bookkeeping, not cleanup, in Win32Stream.h's doc comment).
 
      The text lines are appended sequentially with a separator between
      each line, building up the scrolling credit text. Lines starting
@@ -434,9 +447,7 @@ void AboutDialog::LoadCredits()
          WNDPROC_StreamSeekForward (0x464C70)
          wcsstr                  (0x471480)
          WIN32_StreamOpenPath    (0x463AA0)
-         WIN32_StreamDestroyImmediate (0x463B10)
-         WIN32_StreamDestroy     (0x463A80)
-         WNDPROC_StreamCleanup   (0x464620) */
+         WIN32_StreamDestroyImmediate (0x463B10) */
 }
 
 /* ================================================================== */

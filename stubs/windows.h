@@ -115,9 +115,16 @@ COLORREF  SetBkColor(HDC, COLORREF);
 int       SetBkMode(HDC, int);
 BOOL      GetTextExtentPoint32A(HDC, LPCSTR, int, SIZE*);
 
-/* CRT equivalents (for stubbing when CRT is static) */
-void*     operator_new(size_t);
-void      GLOBAL_free(void*);
+/* CRT equivalents (for stubbing when CRT is static).
+ * operator_new(size_t)/GLOBAL_free(void*) are NOT declared here: they are
+ * this project's own custom allocator hooks (0x465CE0/0x465CD0), not real
+ * Win32 APIs, and every .cpp call site in the tree already declares them
+ * with C++ linkage (matching their real definition in
+ * shared/stubs_impl.cpp, also C++ linkage) — a C-linkage declaration here
+ * conflicted with all of those the moment any file transitively included
+ * both this header and one of those declarations in the same TU (hit
+ * while converting ui/HelpWnd.cpp and game/ScriptedObject.cpp to use
+ * resources/Win32Stream.h's real WIN32_Stream class). */
 void*     CRT_malloc(size_t);
 void      CRT_free(void*);
 void*     CRT_calloc(size_t, size_t);

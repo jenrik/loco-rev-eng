@@ -34,6 +34,12 @@ void __stdcall WNDPROC_EnterCriticalSection(void* cs);  /* 0x464D90 */
 void __stdcall WNDPROC_LeaveCriticalSection(void* cs);  /* 0x464DA0 */
 }
 
+/* operator_new(size_t) (0x465CE0) — this project's own custom allocator
+ * hook, not a real Win32 API; C++ linkage, matching every other .cpp call
+ * site in the tree and its real definition in shared/stubs_impl.cpp (see
+ * resources/WndProcStreamBuf.cpp's equivalent declaration/comment). */
+void* operator_new(size_t size);
+
 /* ================================================================== */
 /* CRT low-level I/O (_write/_close/_lseek, 0x468CF0/0x468BF0/0x469230). */
 /* On the original path these are the statically-linked MSVC CRT calls   */

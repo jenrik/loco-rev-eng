@@ -690,6 +690,21 @@
     WNDPROC_Stream_DtorVftableReset itself, which that scalar dtor calls
     internally). Poked into the StreamObject subobject by
     WNDPROC_Stream::AttachBuffer's initBase branch. */
+#define VTBL_STREAMOBJECT_ALONE         0x0047922C  /* "PTR_WNDPROC_StreamDtor" —
+    StreamObject's OWN bare identity vtable (poked in by
+    WNDPROC_StreamCleanup, 0x464620, StreamObject::~StreamObject()'s real
+    address, as its very first instruction: `*param_1 =
+    &PTR_WNDPROC_StreamDtor_0047922c;`). This is the terminal step of the
+    same re-tagging chain as VTBL_WIN32_STREAM_VIEW/VTBL_WNDPROC_STREAM_VIEW
+    below — WIN32_StreamDestroy pokes VTBL_WIN32_STREAM_VIEW, then
+    WNDPROC_Stream_DtorVftableReset pokes VTBL_WNDPROC_STREAM_VIEW, then
+    WNDPROC_StreamCleanup pokes this one, immediately before doing its own
+    real cleanup (free owned rdbuf, tear down locks/refcount) — the point
+    at which the object's identity has unwound all the way down to "bare
+    StreamObject, nothing more derived." Real C++ virtual-base destruction
+    provides the equivalent identity-narrowing automatically; only the
+    real cleanup body is reproduced, as StreamObject::~StreamObject()
+    (resources/StreamObject.h/.cpp). */
 #define VTBL_WIN32_STREAM               0x00479188  /* WIN32_Stream's own vbtable
     [0]=0, [1]=0xC (WIN32_Stream adds no own fields beyond WNDPROC_Stream,
     same vbase offset). Poked into `*this` by WIN32_StreamOpen/OpenFile
@@ -698,7 +713,14 @@
     vtable (1 slot: scalar deleting destructor, target 0x463940 ==
     WIN32_Stream_ScalarDtor, chains to WIN32_StreamDestroy 0x463A80 then
     WNDPROC_Stream_DtorVftableReset 0x4648E0). Poked in by WIN32_StreamOpen/
-    OpenFile after WNDPROC_Stream::AttachBuffer runs. */
+    OpenFile after WNDPROC_Stream::AttachBuffer runs. WIN32_StreamDestroy/
+    WNDPROC_Stream_DtorVftableReset are both pure MSVC vptr-retagging
+    bookkeeping (poke a constant into this exact vbtable-relative slot,
+    nothing else) — documented, not reimplemented, exactly like
+    VTBL_WNDPROC_OSTREAM_VIEW's/VTBL_WIN32_OSTREAM_VIEW's equivalent pair
+    below; see resources/Win32Stream.h's doc comment on 0x463A80 for the
+    full evidence trail (real C++ virtual-base destruction provides the
+    same guarantee for free). */
 
 #define VTBL_WNDPROC_OSTREAM            0x00479288  /* WNDPROC_OStream's own vbtable
     [0]=0, [1]=8 (own data: _reserved_04@+4 ONLY — no gcount_-equivalent,

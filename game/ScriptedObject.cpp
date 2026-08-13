@@ -12,14 +12,17 @@
 #include "../game/TrackPiece.h"
 #include "../core/Entity.h"
 #include "../town/Town.h"
+#include "../resources/Win32Stream.h"
 
 /* ================================================================== */
 /* Win32 API imports — C linkage only                                  */
 /* ================================================================== */
-extern "C" {
-    void __stdcall ClientToScreen(HWND hwnd, void* point);    /* IAT 0x477378 */
-    void __stdcall SetCursorPos(int x, int y);                /* IAT 0x477250 */
-}
+/* ClientToScreen/SetCursorPos: declared by stubs/windows.h (canonical
+ * POINT*-typed signature) — transitively included below via
+ * resources/Win32Stream.h. This file's own former duplicate declaration
+ * of ClientToScreen used a looser `void* point` parameter, which
+ * conflicted once both headers landed in the same TU (same fix as
+ * ui/HelpWnd.cpp's GetClientRect/SetRect/etc. cleanup). */
 
 /* ================================================================== */
 /* CRT helpers — C++ linkage                                            */
@@ -29,15 +32,13 @@ int   __cdecl CRT_sprintf_buf(void* buf, const char* fmt, ...); /* 0x466D60 */
 
 /* ================================================================== */
 /* Win32 stream I/O — C++ linkage                                       */
+/*                                                                       */
+/* stream_obj/parsed_stream below use the WNDPROC_StreamFromMemory heap- */
+/* stream variant — a separate, not-yet-reconstructed class; unrelated   */
+/* to WIN32_Stream and out of this pass's scope.                         */
 /* ================================================================== */
-void  WIN32_StreamOpen(void* stream, int mode);               /* 0x463890 */
-void  WIN32_StreamDestroy(void* stream);                      /* 0x463A80 */
-void  WIN32_StreamDestroyImmediate(void* stream);             /* 0x463B10 */
-int   WIN32_StreamOpenPath(void* stream, const char* path,
-                            int flags, int unk);               /* 0x463AA0 */
 void* WNDPROC_StreamFromMemory(void* obj, char* data,
                                int size, int mode);            /* 0x464490 */
-void  WNDPROC_StreamCleanup(void* stream);                    /* 0x464620 */
 size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 void* AssetMgr_LoadFile(void* mgr, const char* name,
                         int* out_size);                        /* 0x45CD00 */
@@ -321,16 +322,22 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
     char dat_path[260];
     char asset_path[260];
     int  loaded_size;
-    int  stream_handle[2];
-
-    WIN32_StreamOpen(stream_handle, 1);                      /* 0x463890 */
+    /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
+     * original's WIN32_StreamOpen(&buf,1) construction and paired
+     * WIN32_StreamDestroy(&buf)+WNDPROC_StreamCleanup(&buf) destruction;
+     * see StreamObject::~StreamObject()'s doc comment for the full
+     * evidence trail. Also fixes a pre-existing stack buffer-overflow
+     * bug: the previous `int stream_handle[2]` (8 bytes) was smaller
+     * than sizeof(WIN32_Stream) even on the original x86 (0x5C bytes),
+     * let alone this host's wider pointer fields. */
+    WIN32_Stream stream_handle;
 
     this->sub_entity[0x82] = 0;                              /* loaded_flag at +0x162 = Entity::name[6] */
     this->unk_flag    = 0;                                   /* +0x63A */
 
+    /* stream_handle's destructor runs automatically here (real C++ RAII)
+     * on every path, including this early return. */
     if (name_suffix == nullptr) {
-        WIN32_StreamDestroy(stream_handle);                  /* 0x463A80 */
-        WNDPROC_StreamCleanup(stream_handle);                 /* 0x464620 */
         return;
     }
 
@@ -403,34 +410,38 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
 
     /* Fall back to disk file I/O if archive load didn't succeed */
     if (this->sub_entity[0x82] == 0) {
-        WIN32_StreamOpenPath(stream_handle, dat_path, 0x20,
-                             g_stream_open_flags);            /* 0x463AA0 */
+        stream_handle.OpenPath(dat_path, 0x20, g_stream_open_flags); /* 0x463AA0 */
 
-        /* Check stream error flag */
-        const uint8_t* stream_bytes = reinterpret_cast<const uint8_t*>(stream_handle);
-        int idx = *reinterpret_cast<const int*>(stream_bytes + 4);
-        if ((*reinterpret_cast<const uint8_t*>(stream_bytes + idx + 8) & 4) == 0) {
+        /* Check stream error flag: real state_bits/kBadBit check,
+         * replacing the original's vbtable-relative raw read of the
+         * same field (`*(rdbuf-independent StreamObject::state_bits) &
+         * kBadBit`, confirmed via disassembly at 0x44B290). */
+        if ((stream_handle.state_bits & StreamObject::kBadBit) == 0) {
             char loaded;
 
-            loaded = ScriptedObject_ParseStream(stream_handle);      /* 0x41E9F0 */
+            loaded = ScriptedObject_ParseStream(&stream_handle);      /* 0x41E9F0 */
             this->sub_entity[0x82] = loaded;
 
             if (loaded != 0) {
-                loaded = UI_ChildWindow_Render(this, stream_handle); /* 0x424E00 */
+                loaded = UI_ChildWindow_Render(this, &stream_handle); /* 0x424E00 */
             }
             this->sub_entity[0x82] = loaded;
 
             if (loaded != 0) {
-                loaded = this->LoadFromStream(stream_handle);
+                loaded = this->LoadFromStream(&stream_handle);
             }
             this->sub_entity[0x82] = loaded;
         }
 
-        WIN32_StreamDestroyImmediate(stream_handle);          /* 0x463B10 */
+        /* Matches the original's WIN32_StreamDestroyImmediate — NOT the
+         * object's own destructor, which still runs once at scope exit
+         * below. */
+        stream_handle.CloseNow();                             /* 0x463B10 */
     }
 
-    WIN32_StreamDestroy(stream_handle);                      /* 0x463A80 */
-    WNDPROC_StreamCleanup(stream_handle);                     /* 0x464620 */
+    /* stream_handle's destructor runs automatically here (real C++
+     * RAII) — replaces the original's WIN32_StreamDestroy+
+     * WNDPROC_StreamCleanup pair. */
 }
 
 /* ================================================================== */
@@ -564,13 +575,13 @@ void ScriptedObject::MoveTo(int x, int y)
             /* NOTE: This reconstructs the ClientToScreen pattern from the binary.
                The original passes a stack-based POINT struct. */
             {
-                int pt[2];
-                pt[0] = screen_x;
-                pt[1] = screen_y;
+                POINT pt;
+                pt.x = screen_x;
+                pt.y = screen_y;
                 uintptr_t main_window_base = *reinterpret_cast<const uintptr_t*>(g_main_window);
                 HWND main_hwnd = *reinterpret_cast<HWND*>(main_window_base + 8);
-                ClientToScreen(main_hwnd, pt);
-                SetCursorPos(pt[0], pt[1]);
+                ClientToScreen(main_hwnd, &pt);
+                SetCursorPos(pt.x, pt.y);
             }
 
             /* Pack cursor position into global for save/restore */

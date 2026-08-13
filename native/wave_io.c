@@ -166,6 +166,10 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     extern int* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
     extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
     extern WNDPROC_Stream* WIN32_StreamOpen(void* stream, int mode);
+    /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) on this host
+     * (wider than the original x86's 0x5C: StreamObject grew a real vptr
+     * once ~StreamObject() became virtual, see StreamObject.h). */
+    extern size_t WIN32_Stream_Size();
     extern int   WIN32_StreamOpenPath(void* stream, const char* path, int flags, const char* mode);
     extern int   WIN32_StreamRead(void* stream, void* buf, int size);
     extern void* __cdecl CRT_malloc(size_t size);
@@ -189,6 +193,14 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
         asset_data = AssetMgr_LoadFile(&g_asset_mgr, rel_path, &data_size);
 
         if (asset_data != NULL) {
+            /* WNDPROC_StreamFromMemory constructs a distinct,
+             * not-yet-fully-modeled concrete class (its own vtable,
+             * 0x479210 — see resources/Win32Stream.h's WIN32_StreamRead
+             * doc comment) that also embeds a StreamObject at +0xC, so it
+             * is equally undersized by the literal `0x5C` below; no
+             * `*_Size()` helper exists for that class yet to fix this
+             * correctly (out of this pass's scope — same gap as
+             * ui/UIPANEL_Surface.cpp's `mem_stream`). */
             WNDPROC_Stream* stream_mem = static_cast<WNDPROC_Stream*>(operator_new(0x5C));
             if (stream_mem != NULL) {
                 stream = WNDPROC_StreamFromMemory(stream_mem, reinterpret_cast<const char*>(asset_data), data_size, 1);
@@ -198,7 +210,10 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 
     /* Step 2: Fall back to direct file open */
     if (stream == NULL) {
-        WNDPROC_Stream* stream_file = static_cast<WNDPROC_Stream*>(operator_new(0x5C));
+        /* This constructs a real WIN32_Stream (resources/Win32Stream.h)
+         * via WIN32_StreamOpen below — use the real host size, not the
+         * original x86's 0x5C. */
+        WNDPROC_Stream* stream_file = static_cast<WNDPROC_Stream*>(operator_new(WIN32_Stream_Size()));
         if (stream_file != NULL) {
             /* DAT_00479190 is a global void* holding the mode value/pointer
              * itself (see shared/defsym_stubs.cpp's real definition and the

@@ -5,16 +5,17 @@
  * Reverse engineered via Ghidra decompilation + disassembly.
  *
  * See Win32Stream.h for the class/address map and the free-function
- * facades' scope (WIN32_StreamDestroy is a deliberate, evidenced loud
- * stub — see its doc comment there and in this file below).
+ * facades' scope. WIN32_StreamDestroy (0x463A80) is intentionally not
+ * defined anywhere in this file — see the header's doc comment on it for
+ * the full evidence trail (pure MSVC vptr-retagging bookkeeping, not
+ * cleanup; every real caller has been converted to a real WIN32_Stream
+ * local and no longer calls it).
  */
 
 // Status: VALIDATED
 
 #include "Win32Stream.h"
 
-#include <cassert>
-#include <cstdio>
 #include <new>
 
 extern "C" {
@@ -111,7 +112,15 @@ void WIN32_StreamOpenPath(void* stream, const char* path, uint32_t flags,
 
 void* WIN32_StreamRead(void* stream, void* buf, uint32_t size)
 {
-    return static_cast<WIN32_Stream*>(stream)->Read(buf, size);
+    /* Read() (0x463810) belongs to WNDPROC_Stream, not WIN32_Stream — see
+     * WndProcStream.h's address map: it operates purely on WNDPROC_Stream/
+     * StreamObject-level state, and real callers pass both WIN32_Stream
+     * instances and other WNDPROC_Stream-derived-but-not-WIN32_Stream
+     * instances (e.g. the WNDPROC_StreamFromMemory heap-stream variant,
+     * see ui/UIPANEL_Surface.cpp) through this exact facade. Downcasting
+     * to WIN32_Stream* here was UB for the latter case — fixed to cast to
+     * the actual owning class instead. */
+    return static_cast<WNDPROC_Stream*>(stream)->Read(buf, size);
 }
 
 void WIN32_StreamDestroyImmediate(void* stream)
@@ -119,21 +128,9 @@ void WIN32_StreamDestroyImmediate(void* stream)
     static_cast<WIN32_Stream*>(stream)->CloseNow();
 }
 
-/* 0x463A80 — see Win32Stream.h's doc comment for the full rationale:
- * disassembly proves the real argument is `&stream->StreamObject_subobject`
- * (this+0xc in the original layout), but no caller in this tree reliably
- * supplies that offset, and the ~15 call sites' own declarations disagree
- * with the callee's contract and with each other. Guessing an offset here
- * would violate CLAUDE.md's evidence-only rule, so this stays a loud,
- * tracked stub pending the separate caller-unification pass. */
-void WIN32_StreamDestroy(void* connector)
-{
-    fprintf(stderr,
-            "STUB: WIN32_StreamDestroy (0x463A80) reached with connector=%p "
-            "— its real argument contract (this+0xc, a StreamObject "
-            "sub-object address) does not match any caller in this tree; "
-            "see resources/Win32Stream.h\n",
-            connector);
-    assert(false &&
-           "WIN32_StreamDestroy: deferred, see TODO in resources/Win32Stream.h");
-}
+/* WIN32_StreamDestroy (0x463A80) is intentionally not defined here — see
+ * Win32Stream.h's doc comment on it for the full evidence trail. It is
+ * pure MSVC vptr-retagging bookkeeping (proven via disassembly, not
+ * guessed) with no observable effect once real C++ virtual-base
+ * destruction is in play; every real caller has been converted to a real
+ * WIN32_Stream local and no longer calls it. */

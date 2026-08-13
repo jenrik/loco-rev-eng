@@ -30,6 +30,10 @@ extern void*  __thiscall WIN32_StreamOpenFile(void* stream, char* path,
                                                int mode, const char* flags,
                                                int flag2);                        /* 0x463970 */
 extern void   __thiscall WNDPROC_StreamReadLine(void* stream, short* buf);        /* 0x464BC0 */
+/* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) on this host
+ * (wider than the original x86's 0x5C: StreamObject grew a real vptr
+ * once ~StreamObject() became virtual, see StreamObject.h). */
+extern size_t WIN32_Stream_Size();
 /* DAT_00479190 is a global void* holding the mode value itself (confirmed via
  * disassembly of this function and of Game_LoadWaveFile in native/wave_io.c:
  * both do a single `MOV reg,[0x479190]` load before pushing it as an
@@ -140,7 +144,15 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
                                         reinterpret_cast<byte*>(filePath + relOffset - 1),
                                         &initialSize);  /* initial size = 2048 */
         if (loadedData != NULL) {
-            streamMem = operator_new(0x5C);  /* stream object: 92 bytes */
+            /* WNDPROC_StreamFromMemory constructs a distinct,
+             * not-yet-fully-modeled concrete class (its own vtable,
+             * 0x479210 — see resources/Win32Stream.h's WIN32_StreamRead
+             * doc comment) that also embeds a StreamObject at +0xC, so it
+             * is equally undersized by the literal `0x5C` below; no
+             * `*_Size()` helper exists for that class yet to fix this
+             * correctly (out of this pass's scope — same gap as
+             * ui/UIPANEL_Surface.cpp's `mem_stream`). */
+            streamMem = operator_new(0x5C);  /* stream object: original x86 size, not host size */
             if (streamMem != NULL) {
                 streamObj = WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<char*>(loadedData),
                                                       *(loadedData - 1), 1);
@@ -150,7 +162,10 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
 
     /* Step 4: Fallback to direct file open */
     if (streamObj == NULL) {
-        streamMem = operator_new(0x5C);
+        /* This constructs a real WIN32_Stream (resources/Win32Stream.h)
+         * via WIN32_StreamOpenFile below — use the real host size, not
+         * the original x86's 0x5C. */
+        streamMem = operator_new(WIN32_Stream_Size());
         if (streamMem != NULL) {
             streamObj = WIN32_StreamOpenFile(streamMem, filePath, 0xA0,
                                               static_cast<const char*>(DAT_00479190), 1);

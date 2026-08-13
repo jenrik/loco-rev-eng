@@ -35,14 +35,22 @@ extern "C" {
 
     /* Win32-stream family (see resources/WndProcStreamBuf.h / Win32StreamFile.h
      * for the reconstructed class hierarchy; these free-function entry
-     * points that DRIVE that hierarchy — WIN32_StreamOpen/OpenPath/Destroy —
-     * are declared here matching their established call shape elsewhere
-     * in this tree, e.g. game/TrainStation.cpp, ui/CursorEditWindow.cpp). */
+     * points that DRIVE that hierarchy — WIN32_StreamOpen/OpenPath/
+     * DestroyImmediate — are declared here matching their established
+     * call shape elsewhere in this tree, e.g. game/TrainStation.cpp,
+     * ui/CursorEditWindow.cpp. WIN32_StreamDestroy/WNDPROC_StreamCleanup
+     * were declared here too but had no live call in this file — this
+     * function never constructs the outer stack-based WIN32_Stream the
+     * original always does at entry (see handle_edit_message's doc
+     * comment); removed as dead declarations rather than fixed, since
+     * there is nothing here to fix. resources/Win32Stream.h's real
+     * WIN32_Stream class is what a future pass reconciling this
+     * function's outer-stream gap should use, not these free functions —
+     * WIN32_StreamDestroy no longer exists as a callable symbol at all
+     * (see that header's doc comment). */
     void  WIN32_StreamOpen(void* streamOut, int mode);
     void  WIN32_StreamOpenPath(void* streamOut, const char* path, int mode, int unk);
-    void  WIN32_StreamDestroy(int streamHandle);
     void  WIN32_StreamDestroyImmediate(void* stream);
-    void  WNDPROC_StreamCleanup(void* stream);
     void* WNDPROC_StreamFromMemory(void* stream, const char* data, int size, int mode);
 
     /* .dat directive-line scanning primitives. These are callees of

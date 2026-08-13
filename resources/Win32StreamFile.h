@@ -33,18 +33,15 @@
  *                       => the fd is borrowed from elsewhere, so the
  *                       destructor only flushes and leaves it open
  *
- * This class is now open-capable (Open()) and read-capable (Underflow()),
- * but is still not wired to any caller: the higher-level entry points that
- * construct it (WIN32_StreamOpen 0x463890, WIN32_StreamOpenPath 0x463AA0,
- * WIN32_StreamRead 0x463810, WIN32_StreamDestroy*, WNDPROC_StreamFromMemory
- * 0x464490 for the WIN32_StreamMem-backed sibling path) are real,
- * fully-decompiled functions per 2026-08-10's investigation (see
- * PROGRESS.md "win32_stream.c removed (partial)") but NOT YET IMPLEMENTED
- * on the host or wired to callers — that wiring needs two still-open
- * design questions answered first (how the `fd_ != -1` success gate reaches
- * through a `WNDPROC_StreamBuf* rdbuf` base pointer without a forbidden
- * cast, and disassembly-level disambiguation of two callers' ambiguous
- * stack-offset patterns), tracked in the same PROGRESS.md entry.
+ * This class is open-capable (Open()) and read-capable (Underflow()), and
+ * IS wired to real callers via WIN32_Stream (Win32Stream.h): WIN32_Stream
+ * owns a heap-allocated WIN32_StreamFile as its rdbuf, and the fd_ != -1
+ * success gate is reached from callers through a real, typed
+ * `static_cast<WIN32_StreamFile*>(stream.rdbuf)->fileHandle()` — no
+ * forbidden cast needed, since the concrete rdbuf type is known at every
+ * real call site once the caller holds a real WIN32_Stream object (see
+ * game/TrainStation.cpp, game/ScriptedObject.cpp, ui/HelpWnd.cpp,
+ * ui/CursorEditWindow.cpp, ui/UIPANEL_Surface.cpp for worked examples).
  */
 
 // Status: VALIDATED

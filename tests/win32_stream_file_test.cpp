@@ -3,13 +3,10 @@
  * win32_stream_file_test.cpp — WIN32_StreamFile / WNDPROC_StreamBuf
  * regressions
  *
- * Nothing in the tree calls these classes yet (the higher-level
- * WIN32_StreamOpen / WIN32_StreamRead / WIN32_StreamDestroy layer that
- * would construct and drive them is still a no-op stub -- see
- * PROGRESS.md's "win32_stream.c removed" entry). This test exists so the five
- * newly-reconstructed methods (Ctor, DtorBody, WriteChar, Flush, SetBuffer)
- * are actually exercised somewhere, rather than only proven to compile and
- * link. It drives the classes directly against real temp files.
+ * This test exercises WIN32_StreamFile/WNDPROC_StreamBuf directly against
+ * real temp files, independent of the higher-level WIN32_Stream facade
+ * (resources/Win32Stream.h) that most real callers now go through — see
+ * PROGRESS.md's "Stream tail" entry for that layer's current state.
  */
 
 #include "resources/Win32StreamFile.h"

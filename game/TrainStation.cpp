@@ -10,6 +10,8 @@
  */
 
 #include "TrainStation.h"
+#include "../resources/Win32Stream.h"
+#include "../resources/Win32StreamFile.h"
 #include <cassert>
 #include <cctype>
 #include <cstddef>
@@ -34,13 +36,11 @@ void* __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id);
 int   __thiscall RESMGR_LoadSoundResource(void* res_handle);
 void  __thiscall RESMGR_ReleaseSoundResource(void* res_handle);
 
-/* Win32 stream helpers */
-int   __fastcall WIN32_StreamOpen(int* stream, int mode);
-int   __fastcall WIN32_StreamOpenPath(int* stream, char* path, int mode, int flags);
-void  __fastcall WIN32_StreamDestroy(int* stream);
-void  __fastcall WIN32_StreamDestroyImmediate(int* stream);
+/* Win32 stream helpers (mem_stream/render_stream below use the
+ * WNDPROC_StreamFromMemory heap-stream variant — a separate, not-yet-
+ * reconstructed class; unrelated to WIN32_Stream and out of this pass's
+ * scope). */
 void* __thiscall WNDPROC_StreamFromMemory(void* stream, char* data, int size, int mode);
-void  __fastcall WNDPROC_StreamCleanup(void* stream);
 
 /* Asset manager */
 void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
@@ -327,7 +327,16 @@ uint8_t TrainStation::Render(void* stream)
 /* ================================================================== */
 void TrainStation::Init(int32_t param1, int32_t param2)
 {
-    int     stream_handle[2];       /* local stream handle pair */
+    /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
+     * original's WIN32_StreamOpen(&buf,1) construction and paired
+     * WIN32_StreamDestroy(&buf)+WNDPROC_StreamCleanup(&buf) destruction;
+     * see StreamObject::~StreamObject()'s doc comment for the full
+     * evidence trail. Also fixes a pre-existing stack buffer-overflow
+     * bug: the previous `int stream_handle[2]` (8 bytes) was smaller
+     * than sizeof(WIN32_Stream) even on the original x86 (0x5C bytes),
+     * let alone this host's wider pointer fields — WIN32_StreamOpen was
+     * placement-constructing a full WIN32_Stream into it regardless. */
+    WIN32_Stream stream_handle;
     char    dat_filename[264];      /* .dat filename buffer */
     char    bmp_filename[264];      /* .bmp filename buffer */
     int     file_size;
@@ -337,9 +346,6 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     int16_t i;
 
     /* SEH prologue (compiler-managed) */
-
-    /* Step 1: Open Win32 stream */
-    WIN32_StreamOpen(stream_handle, 1);  /* mode 1 = read */
 
     /* Step 2: Initialize all TrainStation-specific fields to defaults */
     this->field_168       = 0;                          /* +0x168 */
@@ -351,10 +357,9 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     this->removable_flag  = 0;                          /* +0x16C */
     this->loaded          = 0;                          /* +0x162 (inherited from ChildWindow) */
 
-    /* Step 3: Early return if param2 is 0 (no sprite loading) */
+    /* Step 3: Early return if param2 is 0 (no sprite loading).
+     * stream_handle's destructor runs automatically here (real C++ RAII). */
     if (param2 == 0) {
-        WIN32_StreamDestroy(stream_handle);
-        WNDPROC_StreamCleanup(stream_handle);
         return;
     }
 
@@ -421,30 +426,38 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     /* Step 4b: Fall back to re-opening the .dat file from disk using full path
        (address 0x436619: MOV EAX,[0x00479190] loads resource directory reference) */
     {
-        WIN32_StreamOpenPath(stream_handle, dat_filename, 0x20,
+        stream_handle.OpenPath(dat_filename, 0x20,
                             static_cast<int>(reinterpret_cast<uintptr_t>(g_resource_dir_path)));
 
-        /* Check if stream has data (stream field at +0x4C) */
-        const uint8_t* stream_bytes = reinterpret_cast<const uint8_t*>(stream_handle);
-        const int* stream_offset = reinterpret_cast<const int*>(stream_bytes + 0x4C);
+        /* Check if the file actually opened: rdbuf->fileHandle() != -1,
+         * matching the original's `*(rdbuf+0x4C) != -1` (the WIN32_Stream
+         * vbtable-relative reach-through to rdbuf's fileHandle field —
+         * now a real, typed accessor via WIN32_StreamFile::fileHandle()). */
+        WIN32_StreamFile* file = static_cast<WIN32_StreamFile*>(stream_handle.rdbuf);
 
-        /* Guard: skip rendering if stream.offset == -1 */
-        if (*stream_offset != -1) {
+        /* Guard: skip rendering if the file failed to open */
+        if (file != nullptr && file->fileHandle() != -1) {
             /* Call virtual Render method */
-            uint8_t render_ok = this->Render(stream_handle);
+            uint8_t render_ok = this->Render(&stream_handle);
             this->loaded = render_ok;                    /* 0x4365E0 or 0x436653 */
 
             /* If render succeeded, call base Render directly for additional processing */
             if (render_ok != 0) {
-                uint8_t base_render_ok = ChildWindow::Render(stream_handle);
+                uint8_t base_render_ok = ChildWindow::Render(&stream_handle);
                 this->loaded = (base_render_ok != 0) ? 1 : 0;  /* 0x4365FD */
             }
 
-            /* Clean up the stream */
-            void** stream_vt = *reinterpret_cast<void***>(stream_handle);
-            using StreamDestructor = void (__thiscall*)(int);
-            StreamDestructor destroy = reinterpret_cast<StreamDestructor>(stream_vt[0]);
-            destroy(1);  /* dtor with free */
+            /* Immediately close the file handle (matches the original's
+             * WIN32_StreamDestroyImmediate, i.e. WIN32_Stream::CloseNow() —
+             * NOT the object's own destructor, which still runs once at
+             * scope exit below). The previous reconstruction here called
+             * a scalar-deleting-destructor-with-free-flag-1 through a
+             * manually read vtable slot on the undersized raw buffer —
+             * wrong on two counts: it didn't match the original's real
+             * call (WIN32_StreamDestroyImmediate, not a delete), and
+             * manual vtable dispatch on a stack object is exactly the
+             * landmine class CLAUDE.md's evidence-only rule forbids. */
+            stream_handle.CloseNow();
         }
     }
 
@@ -494,9 +507,10 @@ void TrainStation::Init(int32_t param1, int32_t param2)
         this->hotspotY = 8;   /* default vertical offset (8 pixels) */
     }
 
-    /* Step 5: Clean up stream */
-    WIN32_StreamDestroy(stream_handle);
-    WNDPROC_StreamCleanup(stream_handle);
+    /* Step 5: stream_handle's destructor runs automatically here (real
+     * C++ RAII) — replaces the original's WIN32_StreamDestroy+
+     * WNDPROC_StreamCleanup pair, see the local declaration's doc
+     * comment above. */
 
     /* SEH epilogue (compiler-managed) */
 }

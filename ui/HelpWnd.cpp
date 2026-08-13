@@ -31,6 +31,7 @@
 
 #include "HelpWnd.h"
 #include "../audio/AudioChannel.h"
+#include "../resources/Win32Stream.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
@@ -54,30 +55,25 @@
 extern "C" {
     /* Win32 API */
     extern HWND   __stdcall GetDesktopWindow(void);
-    extern BOOL   __stdcall GetClientRect(HWND, void* lpRect);
     extern HICON  __stdcall LoadIconA(HINSTANCE, LPCSTR);
-    extern BOOL   __stdcall SetRect(void* rect, int l, int t, int r, int b);
-    extern BOOL   __stdcall OffsetRect(void* rect, int dx, int dy);
     extern BOOL   __stdcall CopyRect(void* dst, void* src);
-    extern BOOL   __stdcall PtInRect(const void* rect, POINT pt);
     extern BOOL   __stdcall SetRectEmpty(void* rect);
     extern int    __stdcall SetBkMode(void* hdc, int mode);
-    extern int    __stdcall SetTextColor(void* hdc, int color);
     extern void*  __stdcall SelectObject(void* hdc, void* obj);
     extern int    __stdcall DrawTextA(void* hdc, const char* str, int len,
                                        void* rect, int format);
     extern LRESULT __stdcall DefWindowProcA(HWND, UINT, WPARAM, LPARAM);
     extern BOOL   __stdcall KillTimer(HWND, UINT_PTR);
-    extern UINT_PTR __stdcall SetTimer(HWND, UINT_PTR, UINT, void* proc);
-    extern void   __stdcall GetWindowRect(HWND, void* rect);
     extern void   __stdcall Sleep(DWORD ms);
+    /* GetClientRect/SetRect/OffsetRect/PtInRect/SetTextColor/SetTimer/
+     * GetWindowRect are declared by stubs/windows.h (canonical RECT-,
+     * COLORREF-, and HDC-typed signatures) — transitively included below
+     * via resources/Win32Stream.h. This file's own duplicate declarations
+     * of those seven were the looser, void*-typed originals; removed
+     * rather than kept side by side once Win32Stream.h's real include of
+     * windows.h made the mismatch a hard conflicting-declaration error. */
 
     /* Game functions (C-linkage) */
-    extern void   WIN32_StreamOpen(void* stream, int mode);
-    extern void   WIN32_StreamOpenPath(void* stream, const char* path, int mode, int unknown);
-    extern void   WIN32_StreamDestroy(void* stream);
-    extern void   WIN32_StreamDestroyImmediate(void* stream);
-    extern void   WNDPROC_StreamCleanup(void* stream);
     extern void*  WNDPROC_StreamFromMemory(void* self, char* data, int size, int mode);
     extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
 
@@ -1049,7 +1045,18 @@ uint HelpWnd::play_narration(int windowMode, uint pageResourceType)
 char HelpWnd::reset_pages()
 {
     char result = 0;
-    int stream[0x41] = {0};
+    /* Real WIN32_Stream object (see resources/Win32Stream.h), not a raw
+     * placement-new buffer: the original's WIN32_StreamOpen(&buf,1) /
+     * WIN32_StreamDestroy(&buf)+WNDPROC_StreamCleanup(&buf) pair around
+     * this local is exactly WIN32_Stream's real constructor/destructor
+     * (see StreamObject::~StreamObject()'s doc comment for the evidence
+     * trail) — real C++ construction/destruction replaces both ends of
+     * that pair. NOTE: this fixes a pre-existing bug in the previous
+     * hand-rolled-buffer version of this function, which passed the
+     * object's own base address to WIN32_StreamDestroy instead of
+     * &object->StreamObject_subobject (this+0xC in the original layout) —
+     * the wrong-offset problem documented in Win32Stream.h. */
+    WIN32_Stream stream;
     int* loadedData = NULL;
 
     /* Reset all page indices */
@@ -1067,9 +1074,6 @@ char HelpWnd::reset_pages()
     /* Disable navigation buttons */
     this->nextBtnEnabled = 0;
     this->prevBtnEnabled = 0;
-
-    /* Open stream for reading */
-    WIN32_StreamOpen(stream, 1);  /* mode 1 = read */
 
     /* Build help data file path */
     char fileBuf[0x200];
@@ -1107,15 +1111,14 @@ char HelpWnd::reset_pages()
 
     /* Fallback: load directly from file */
     if (result == 0) {
-        WIN32_StreamOpenPath(stream, fileBuf, 0x20, 0x479190);
-        result = (char)this->load_help_data(stream);
-        WIN32_StreamDestroyImmediate(stream);
+        stream.OpenPath(fileBuf, 0x20, 0x479190);
+        result = (char)this->load_help_data(&stream);
+        stream.CloseNow();
     }
 
-    /* Cleanup */
-    WIN32_StreamDestroy(stream);
-    WNDPROC_StreamCleanup(stream);
-
+    /* `stream`'s destructor runs automatically here (real C++ RAII) —
+     * replaces the original's WIN32_StreamDestroy+WNDPROC_StreamCleanup
+     * pair, see the local declaration's doc comment above. */
     return result;
 }
 

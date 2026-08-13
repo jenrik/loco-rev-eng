@@ -13,6 +13,8 @@
 // Status: INTEGRATED
 
 #include "CursorEditWindow.h"
+#include "../resources/Win32Stream.h"
+#include "../resources/Win32StreamFile.h"
 #include <cstring>
 #include <cassert>
 #include <cstdio>
@@ -28,11 +30,14 @@ extern void  __cdecl GLOBAL_free(void* ptr);        /* 0x465CD0 */
 extern void  __cdecl CRT_free(void* ptr);           /* 0x466C70 */
 extern int   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D60 */
 
-/* Stream / WNDPROC helpers */
-extern void   __thiscall WIN32_StreamOpen(void* stream, int mode);        /* 0x463890 */
-extern void   __thiscall WIN32_StreamDestroy(void* stream);                /* 0x463A80 */
-extern void   __thiscall WIN32_StreamDestroyImmediate(void* stream);       /* 0x463B10 */
-extern void   __thiscall WNDPROC_StreamCleanup(void* stream);              /* 0x464620 */
+/* Stream / WNDPROC helpers.
+ *
+ * localStream below is a real WIN32_Stream object (resources/Win32Stream.h)
+ * — see CursorEditWindow::init()'s doc comment for why this replaces the
+ * former raw `int localStream[22]` buffer plus its manual
+ * WIN32_StreamOpen/WIN32_StreamDestroy+WNDPROC_StreamCleanup construction/
+ * destruction pair. streamAlloc/streamResult below still use the separate,
+ * not-yet-reconstructed WNDPROC_StreamFromMemory heap-stream variant. */
 extern int*   __thiscall WNDPROC_StreamFromMemory(void* stream, const char* data,
                                                    int size, int mode);    /* 0x464490 */
 extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
@@ -65,10 +70,6 @@ extern uint8_t __fastcall CGWND_ValidatePaletteData(int classPtr);        /* 0x4
 /* Asset manager */
 extern int*   __thiscall AssetMgr_LoadFile(void* mgr, const char* path,
                                             int* outSize);                 /* 0x45CD00 */
-
-extern "C" {
-    void WIN32_StreamOpenPath(void* stream, const char* path, int32_t mode, int32_t fileType); /* 0x463AA0 */
-}
 
 namespace {
 using StreamDestructor = void (__fastcall *)(void*);
@@ -248,9 +249,17 @@ uint8_t CursorEditWindow::Render(void* stream)
 /* ================================================================== */
 void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 {
-    /* Local stream for file operations */
-    int localStream[22];  /* WIN32_Stream object (88 bytes) */
-    WIN32_StreamOpen(&localStream[0], 1);
+    /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
+     * original's WIN32_StreamOpen(&buf,1) construction and paired
+     * WIN32_StreamDestroy(&buf)+WNDPROC_StreamCleanup(&buf) destruction;
+     * see StreamObject::~StreamObject()'s doc comment for the full
+     * evidence trail. Also fixes two pre-existing bugs in this file's
+     * former raw `int localStream[22]` buffer: (1) 88 bytes is smaller
+     * than sizeof(WIN32_Stream) on this host (0x80 bytes, wider pointer
+     * fields than the original x86's 0x5C — see Win32Stream.h), and
+     * (2) the cleanup calls below passed `&localStream[2]` (this+0x8),
+     * not this+0xC — the wrong-offset bug documented in Win32Stream.h. */
+    WIN32_Stream localStream;
 
     int* pLoadedData = nullptr;  /* AssetMgr loaded data pointer */
     int  dataSize = 0;
@@ -260,10 +269,9 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     this->field_7AA = 0;           /* +0x7AA (short) */
     this->loaded = 0;              /* +0x162 (inherited, byte) */
 
-    /* If nameParam is 0 (null pointer cast), skip all loading */
+    /* If nameParam is 0 (null pointer cast), skip all loading.
+     * localStream's destructor runs automatically here (real C++ RAII). */
     if (nameParam == 0) {
-        WIN32_StreamDestroy(&localStream[2]);
-        WNDPROC_StreamCleanup(&localStream[2]);
         return;
     }
 
@@ -316,32 +324,39 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
     /* --- Attempt 2: Fall back to direct file open --- */
     if (this->loaded == 0) {
-        WIN32_StreamOpenPath(
-            &localStream[0], datPath, 0x20,
+        localStream.OpenPath(
+            datPath, 0x20,
             *reinterpret_cast<const int*>(static_cast<uintptr_t>(0x479190)));
 
-        /* Check if file is open by validating stream data pointer */
-        const int* stream_vtable;
-        std::memcpy(&stream_vtable, &localStream[0], sizeof(stream_vtable));
-        int vt4 = stream_vtable[4];
-        const auto* stream_bytes = reinterpret_cast<const uint8_t*>(&localStream[0]);
-        int offset_xx = *reinterpret_cast<const int*>(stream_bytes + vt4 + 0x4C);
-        if (offset_xx != -1) {   /* valid file handle */
+        /* Check if the file actually opened: rdbuf->fileHandle() != -1,
+         * matching the original's `*(rdbuf+0x4C) != -1` (the WIN32_Stream
+         * vbtable-relative reach-through to rdbuf's fileHandle field —
+         * now a real, typed accessor via WIN32_StreamFile::fileHandle()).
+         * The previous version of this check read `stream_vtable[4]`
+         * (vtable slot 4) as the vbase byte offset — disassembly (see
+         * CursorEditWindow::init's doc comment) proves the real vbase
+         * offset lives in vtable slot [1], not [4]; that stale manual
+         * computation is removed along with the raw offset entirely. */
+        WIN32_StreamFile* file = static_cast<WIN32_StreamFile*>(localStream.rdbuf);
+        if (file != nullptr && file->fileHandle() != -1) {   /* valid file handle */
             /* Call Render() to process data from the file stream */
-            this->loaded = this->Render(&localStream[0]);
+            this->loaded = this->Render(&localStream);
 
             if (this->loaded != 0) {
-                uint8_t baseRenderResult = ChildWindow::Render(&localStream[0]);
+                uint8_t baseRenderResult = ChildWindow::Render(&localStream);
                 this->loaded = (baseRenderResult != 0) ? 1 : 0;
             }
 
-            WIN32_StreamDestroyImmediate(&localStream[0]);
+            /* Matches the original's WIN32_StreamDestroyImmediate — NOT
+             * the object's own destructor, which still runs once at
+             * scope exit below. */
+            localStream.CloseNow();
         }
     }
 
-    /* Clean up local stream */
-    WIN32_StreamDestroy(&localStream[2]);
-    WNDPROC_StreamCleanup(&localStream[2]);
+    /* localStream's destructor runs automatically here (real C++ RAII) —
+     * replaces the original's WIN32_StreamDestroy+WNDPROC_StreamCleanup
+     * pair. */
 }
 
 /* ================================================================== */

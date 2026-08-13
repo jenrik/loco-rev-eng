@@ -23,8 +23,33 @@
  * 0x465960) — every one of those functions reaches this exact struct
  * shape through the vbtable lookup and reads/writes these offsets.
  *
+ * ~StreamObject() (0x464620, Ghidra-labeled "WNDPROC_StreamCleanup") is
+ * this class's real destructor body — confirmed by tracing every one of
+ * WIN32_StreamDestroy's (0x463A80, see Win32Stream.h) ~15 real callers in
+ * the original binary: each constructs a WIN32_Stream in a raw local
+ * buffer via WIN32_StreamOpen(&buf, 1), then on cleanup calls
+ * WIN32_StreamDestroy(&buf.StreamObject_subobject) immediately followed
+ * by WNDPROC_StreamCleanup(&buf.StreamObject_subobject) on the exact same
+ * pointer. WIN32_StreamDestroy (0x463A80) itself does no cleanup: its 4
+ * instructions read this object's own vptr, take vbtable slot [1] (the
+ * byte offset from a WNDPROC_Stream-family object's own identity down to
+ * this virtual base), and re-tag that slot's vptr to the next-more-
+ * specific-than-WIN32_Stream identity before tail-calling the next
+ * descent step (WNDPROC_Stream_DtorVftableReset, 0x4648E0) — classic MSVC
+ * "walk down re-tagging each virtual-base vptr as the destructor chain
+ * unwinds" bookkeeping, exactly analogous to WIN32_OStream_DtorVftableReset/
+ * WNDPROC_OStream_DtorVftableReset documented in WndProcOStream.h. Real
+ * C++ virtual-base destruction ordering provides the same guarantee for
+ * free, so it is not reproduced — see Win32Stream.h's WIN32_StreamDestroy
+ * doc comment for the address map of that whole re-tagging chain.
+ * WNDPROC_StreamCleanup (0x464620), by contrast, is genuine cleanup logic
+ * (frees an owned rdbuf, tears down the lock, decrements the shared
+ * refcount) and IS reproduced below, as this class's one real destructor.
+ *
  * Field layout:
- *   +0x00..0x03: unknown — never read by any function examined so far
+ *   +0x00: vtable ptr (compiler-managed; not stored here — confirmed a
+ *          real vptr, not padding, by WIN32_StreamDestroy's re-tagging
+ *          chain above, which pokes exactly this slot)
  *   +0x04: rdbuf          WNDPROC_StreamBuf* — this stream's own buffer
  *   +0x08: state_bits     eofbit(1) | failbit(2) | badbit(4)
  *   +0x0C..0x1F: unknown — never read by any function examined so far
@@ -57,7 +82,7 @@
 
 #include "../shared/types.h"
 
-// Status: TRANSCRIBED
+// Status: VALIDATED
 /* compat.h is force-included for the native build; undefine the three
  * duplicate macro definitions before the stub Win32 header supplies them. */
 #ifdef INVALID_HANDLE_VALUE
@@ -81,7 +106,9 @@ class WNDPROC_Stream; /* WndProcStream.h — forward declared to avoid a
 /* StreamObject layout                                                 */
 /* ================================================================== */
 struct StreamObject {
-    uint8_t             _unknown_00[0x04];  /* +0x00..+0x03 */
+    /* +0x00 vtable ptr — compiler-managed (this class is polymorphic
+     * because ~StreamObject() below is virtual; see the class doc comment
+     * above for the evidence this slot is real, not unused padding). */
     WNDPROC_StreamBuf*  rdbuf;              /* +0x04 */
     uint32_t            state_bits;         /* +0x08 */
     uint8_t             _unknown_0C[0x10];  /* +0x0C..+0x1B */
@@ -125,6 +152,21 @@ struct StreamObject {
      * construction ordering already provides that, so it is not
      * reproduced. */
     StreamObject();
+
+    /* 0x464620 (Ghidra auto-analysis named this "WNDPROC_StreamCleanup"; it
+     * is this class's real destructor body — see the class doc comment
+     * above for the full evidence trail distinguishing it from
+     * WIN32_StreamDestroy's pure vptr-retagging). Resets sync_flag to -1,
+     * tears down this object's own critical_section, decrements the
+     * process-global StreamObject refcount (tearing down the shared
+     * global critical_section when it reaches zero), deletes the owned
+     * rdbuf if any (mirrors AttachBuffer's identical ownership check),
+     * then clears rdbuf and resets state_bits to badbit — matching the
+     * original's exact field-write ordering. Virtual so that deleting
+     * through any less-derived pointer into this virtual base still runs
+     * this body, matching the original's own polymorphic vtable-slot
+     * dispatch evidence. */
+    virtual ~StreamObject();
 
 protected:
     /* 0x464680 (Ghidra auto-analysis named this "WNDPROC_StreamFlush"; it

@@ -27,10 +27,16 @@
 /* External references                                                 */
 /* ================================================================== */
 
-/* operator_new(size_t)/GLOBAL_free are already declared by stubs/windows.h
- * (included via WndProcStreamBuf.h); declaring a second operator_new
- * overload here (e.g. uint32_t, as ResourceManager.cpp/ResDataSave.cpp do)
- * would make plain integer-literal calls ambiguous between the two. */
+/* operator_new(size_t)/GLOBAL_free (0x465CE0/0x465CD0) — this project's
+ * own custom allocator hooks, not real Win32 APIs. Declared with C++
+ * linkage here, matching every other .cpp call site in the tree and
+ * their real definition in shared/stubs_impl.cpp. Previously relied on
+ * a stray C-linkage declaration inside stubs/windows.h's extern "C"
+ * block, which conflicted the first time a file transitively included
+ * both this header and one of the ~21 correct C++-linkage declarations
+ * in the same TU (removed from windows.h; see its own comment there). */
+void* operator_new(size_t size);
+void  GLOBAL_free(void* ptr);
 
 extern "C" {
 /* Win32 CRITICAL_SECTION wrappers — thin IAT forwarders in the original

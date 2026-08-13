@@ -27,6 +27,8 @@
 
 #include "UIPANEL.h"
 #include "UIPANEL_Surface.h"
+#include "../resources/Win32Stream.h"
+#include "../resources/Win32StreamFile.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -115,19 +117,37 @@ extern "C" {
     extern int   g_shared_palette_refcount;            /* 0x485250 — shared palette refcount */
     extern int   g_surface_alloc_counter;              /* 0x485254 — surface allocation counter */
 
-    /* Memory stream / file helpers */
-    int  WIN32_StreamOpen(void* stream, int mode);
-    int  WIN32_StreamOpenPath(void* stream, LPCSTR path, int flags, int unk);
+    /* Memory stream / file helpers.
+     *
+     * stream_buf below is a real WIN32_Stream object (resources/
+     * Win32Stream.h) — see UIPANEL_StretchBlit's doc comment for why this
+     * replaces the former undersized raw `void* stream_buf[6]` buffer and
+     * its manual, offset-buggy WIN32_StreamOpen/WIN32_StreamDestroy
+     * construction/destruction. mem_stream/stream below (when non-null
+     * and not &stream_buf) is the separate, not-yet-reconstructed
+     * WNDPROC_StreamFromMemory heap-stream variant — confirmed a
+     * genuinely distinct concrete class (its own vtable at 0x479210, not
+     * WIN32_Stream's 0x479184) — unrelated to WIN32_Stream. */
     extern size_t WIN32_Stream_Size(); /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
-    void WIN32_StreamDestroy(void* stream);
     void WIN32_StreamDestroyImmediate(void* stream);
-    /* Real def (shared/link_stubs.cpp) is extern "C" (plain, unmangled) —
-     * a C++-linkage declaration here mangles to a distinct, unlinked
-     * symbol regardless of matching parameter types. */
+    /* This file's own extern "C" (unmangled) WIN32_StreamRead — part of
+     * the pre-existing, separately tracked LINK-001 multi-declaration
+     * cluster for this symbol (see shared/stubs_link001_integration.cpp/
+     * stubs_link001_batch2_streams.cpp for the other conflicting
+     * declarations/stub variants). Including resources/Win32Stream.h
+     * above (for the real WIN32_Stream class, needed for this pass's
+     * WIN32_StreamDestroy contract fix) makes its own, separate
+     * C++-linkage WIN32_StreamRead facade declaration simultaneously
+     * visible; unqualified calls below become ambiguous between the two
+     * distinctly-linked candidates. Resolved by binding through an
+     * explicitly-typed function pointer matching this exact extern "C"
+     * signature — preserves this file's pre-existing binding unchanged
+     * rather than switching it (out of this pass's scope; that whole
+     * cluster needs its own dedicated unification pass). */
     extern "C" void WIN32_StreamRead(void* stream, void* buf, int32_t size);
+    constexpr void (*ReadStreamBytesC)(void*, void*, int32_t) = WIN32_StreamRead;
     void Stream_BeginRead(void* stream, uint32_t offset, int mode);
     void* WNDPROC_StreamFromMemory(void* obj, char* data, int size, int mode);
-    void WNDPROC_StreamCleanup(void* stream);
     void* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
     /* Real def: graphics/sdl3_ddraw.cpp (host path, guarded #ifndef _WIN32);
      * first param is the same IDirectDrawSurface4* typed elsewhere in this
@@ -318,15 +338,23 @@ extern "C" {
      * (mode=1, hi-color). Stores result at +0x1C (ddraw_surf) or +0x18 (pixels). */
     UIPANEL_Surface* s = (UIPANEL_Surface*)surface;
 
-    void* stream_buf[6];         /* WIN32_Stream struct */
+    /* Real WIN32_Stream object — replaces the original's WIN32_StreamOpen
+     * (&buf,1) construction and paired WIN32_StreamDestroy(&buf)+
+     * WNDPROC_StreamCleanup(&buf) destruction; see
+     * StreamObject::~StreamObject()'s doc comment for the full evidence
+     * trail. Also fixes a pre-existing stack buffer-overflow bug: the
+     * former `void* stream_buf[6]` (48 bytes on this host) was smaller
+     * than sizeof(WIN32_Stream) (0x80 bytes — see Win32Stream.h), and the
+     * cleanup at the bottom of this function computed its destroy target
+     * by dereferencing stream_buf+8 as an already-decoded pointer VALUE
+     * (rather than computing &stream_buf->StreamObject_subobject),
+     * reading and branching on essentially arbitrary bytes. */
+    WIN32_Stream stream_buf;
     void* asset_data = NULL;
     int asset_size = 0;
     void* mem_stream = NULL;
     void* stream = NULL;
     uint8_t result = 1;
-
-    /* Initialize stream */
-    WIN32_StreamOpen(stream_buf, 1);
 
     /* Free existing pixel buffer */
     if (s->pixels != NULL) {
@@ -357,9 +385,16 @@ extern "C" {
 
     /* Fallback to disk file if asset manager didn't provide it */
     if (stream == NULL) {
-        WIN32_StreamOpenPath(stream_buf, file_path, 0xA0, 0x479190);
-        if (*(int*)((uintptr_t)(*(int*)((intptr_t)stream_buf + 4)) + 0x4C) != -1) {
-            stream = stream_buf;
+        stream_buf.OpenPath(file_path, 0xA0, 0x479190);
+        /* Check if the file actually opened: rdbuf->fileHandle() != -1
+         * (real, typed accessor — see WIN32_Stream stream_buf's doc
+         * comment above for why this replaces the previous raw-offset
+         * read here). */
+        {
+            WIN32_StreamFile* file = static_cast<WIN32_StreamFile*>(stream_buf.rdbuf);
+            if (file != nullptr && file->fileHandle() != -1) {
+                stream = &stream_buf;
+            }
         }
         if (stream == NULL) {
             goto cleanup;
@@ -388,12 +423,12 @@ extern "C" {
         uint32_t biClrImportant;
     } bmp_info_header;
 
-    WIN32_StreamRead(stream, &bmp_file_header, sizeof(bmp_file_header));
+    ReadStreamBytesC(stream, &bmp_file_header, sizeof(bmp_file_header));
     if (bmp_file_header.bfType != 0x4D42) { /* 'BM' */
         goto cleanup;
     }
 
-    WIN32_StreamRead(stream, &bmp_info_header, sizeof(bmp_info_header));
+    ReadStreamBytesC(stream, &bmp_info_header, sizeof(bmp_info_header));
 
     /* Path A: 8-bit indexed BMP with palette (software buffer mode) */
     if (bmp_info_header.biBitCount == 8 &&
@@ -438,7 +473,7 @@ extern "C" {
         int padding = row_stride - bmp_info_header.biWidth;
 
         for (int y = 0; y < bmp_info_header.biHeight; y++) {
-            WIN32_StreamRead(stream, dest_row, bmp_info_header.biWidth);
+            ReadStreamBytesC(stream, dest_row, bmp_info_header.biWidth);
             dest_row -= bmp_info_header.biWidth;
             if (padding > 0) {
                 Stream_BeginRead(stream, padding, 1);
@@ -446,7 +481,7 @@ extern "C" {
         }
     } else {
         /* Path B: hi-color or DDraw surface — use DDRAW helper */
-        WIN32_StreamDestroyImmediate(stream_buf);
+        stream_buf.CloseNow();
 
         IDirectDrawSurface4* new_surf = DDRAW_LoadBmpToSurface(file_path, 16, param_3, param_4, 0);
         s->ddraw_surf = new_surf;
@@ -461,24 +496,42 @@ extern "C" {
 
 cleanup:
     if (mem_stream != NULL) {
+        /* `stream` (if non-null and taken from the AssetMgr path) IS
+         * `mem_stream` — this call destroys/frees it via its own scalar
+         * deleting destructor. The original's real tail (0x42AB10) has no
+         * further destroy call on `stream`/`mem_stream` beyond this one —
+         * a stray `if (stream != NULL && stream != &stream_buf)
+         * WIN32_StreamDestroyImmediate(stream);` branch used to sit here
+         * with no counterpart in the disassembly: it called
+         * WIN32_Stream::CloseNow() on this already-destroyed heap object,
+         * which is not even a WIN32_Stream in the first place (0x464490's
+         * disassembly shows a distinct vtable, 0x479210, with a
+         * WIN32_StreamMem rdbuf, not WIN32_StreamFile) — a use-after-free
+         * on top of the exact over-narrow-downcast bug already fixed in
+         * WIN32_StreamRead's facade (resources/Win32Stream.cpp). Removed
+         * rather than widened, since CloseNow() genuinely is a
+         * WIN32_Stream-only method and this caller was simply wrong to
+         * call it here at all. */
         void (**dtor)(void*) = *(void***)mem_stream;
         (*dtor)(mem_stream);
-    }
-
-    if (stream != NULL && stream != stream_buf) {
-        WIN32_StreamDestroyImmediate(stream);
     }
 
     if (asset_data != NULL) {
         CRT_free(asset_data);
     }
 
-    if (*(int*)((uintptr_t)(*(int*)((intptr_t)stream_buf + 4)) + 0x4C) != -1) {
-        WIN32_StreamDestroyImmediate(stream_buf);
+    {
+        WIN32_StreamFile* file = static_cast<WIN32_StreamFile*>(stream_buf.rdbuf);
+        if (file != nullptr && file->fileHandle() != -1) {
+            stream_buf.CloseNow();
+        }
     }
 
-    WIN32_StreamDestroy((void*)(intptr_t)(*(int*)((intptr_t)stream_buf + 8)));
-
+    /* stream_buf's destructor runs automatically here (real C++ RAII) —
+     * replaces the original's WIN32_StreamDestroy+WNDPROC_StreamCleanup
+     * pair (the latter of which this function's previous reconstruction
+     * never called at all, an additional pre-existing gap this also
+     * closes). */
     return result;
 }uint32_t __thiscall UIPANEL_ReadPaletteFromBMP(void* surface, void* stream)
 {
@@ -515,7 +568,7 @@ cleanup:
 
     /* Read 256 RGBQUAD entries (1024 bytes) from stream */
     uint8_t rgb_quads[1024];
-    WIN32_StreamRead(stream, rgb_quads, 1024);
+    ReadStreamBytesC(stream, rgb_quads, 1024);
 
     /* Convert each RGBQUAD to 16-bit RGB 5-6-5 */
     for (int i = 0; i < 256; i++) {
