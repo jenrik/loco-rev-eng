@@ -40,14 +40,22 @@
  *     destructor is safe for every object this ctor produces, since it
  *     always constructs with ownsMemory_ == 0, so the base destructor's
  *     conditional GLOBAL_free never fires).
- *   vtable +0x04 Flush          0x46E590  -> override, deferred stub.
- *   vtable +0x08 SetBuffer      0x464250  -> override, deferred stub.
- *   vtable +0x1C WriteChar      0x464260  -> override; IS disassembled
- *     (Ghidra mislabels it "WNDPROC_StreamClose", unrelated to the real
- *     WIN32_StreamClose at 0x463A60 documented below) but implementing it
- *     correctly also requires the AllocateDefaultBuffer override below —
- *     deferred stub.
- *   vtable +0x20 Underflow       0x4642F0  -> override, REAL (this batch).
+ *   vtable +0x04 Flush          0x46E590  -> override, REAL. 2-instruction
+ *     body (`xor eax,eax; ret`): unconditionally returns 0. Nothing to sync
+ *     for a memory-backed stream — there is no underlying file descriptor.
+ *   vtable +0x08 SetBuffer      0x464250  -> override, REAL. Ignores the
+ *     `buffer` argument entirely; if `size != 0`, stores it into
+ *     reserveSize_ (own field, see below). Always returns `this`.
+ *   vtable +0x1C WriteChar      0x464260  -> override, REAL (Ghidra
+ *     mislabels it "WNDPROC_StreamClose", unrelated to the real
+ *     WIN32_StreamClose at 0x463A60 documented below). "Overflow" hook: if
+ *     the write region is full (writeHigh_ <= writePtr_), refuses to grow
+ *     unless ownsMemory_ is set (own field — see below), then calls
+ *     AllocateDefaultBuffer() and re-homes the write cursor either onto the
+ *     get-region's tail (first-time setup) or its own previous relative
+ *     offset (subsequent grows). Writes the character and advances
+ *     writePtr_ only if buffering (writeHigh_) is active.
+ *   vtable +0x20 Underflow       0x4642F0  -> override, REAL (prior batch).
  *     Fills the peek/get slot: if the get-region still has unread bytes
  *     (readPtr_ < readHigh_), returns the next byte without advancing. If
  *     exhausted, the original also supports a "growable buffer" refill
@@ -55,35 +63,76 @@
  *     for every real caller (see below), reproduced anyway for basic-block
  *     completeness, since it IS a real branch in this function's body.
  *     Returns -1 on true EOF.
- *   vtable +0x28 AllocateDefaultBuffer  0x464120 -> the original DOES
- *     override this (Ghidra mislabels it "WNDPROC_StreamOpen"; 130
- *     instructions implementing a growable-buffer reallocation, not a
- *     simple allocate-once) — confirmed via a fresh vtable+0x28 read this
- *     batch (a prior session's note claiming this slot was "not
- *     overridden, inherits the base" was wrong and is corrected here).
- *     Declared as a real override below so the class's vtable membership
- *     is honest, but its body stays a deferred stub alongside WriteChar's
- *     (WriteChar's own real behavior depends on it) — never reached by any
- *     of this class's real construction paths (see below), so leaving it
- *     unimplemented changes no observable behavior yet.
- * None of Flush/SetBuffer/WriteChar/AllocateDefaultBuffer's real bodies are
- * in this task's scope; they are overridden here only because
- * WNDPROC_StreamBuf declares Flush/SetBuffer/WriteChar pure virtual and
- * because the original genuinely overrides AllocateDefaultBuffer, so a
- * concrete, instantiable WIN32_StreamMem needs *some* body for each.
- * Tracked in PROGRESS.md.
+ *   vtable +0x28 AllocateDefaultBuffer  0x464120 -> override, REAL (Ghidra
+ *     mislabels it "WNDPROC_StreamOpen"; 130 instructions implementing a
+ *     growable-buffer reallocation, not a simple allocate-once). Computes a
+ *     new size from reserveSize_ and the currently-used byte count,
+ *     allocates via allocHook_ or ::operator new, memcpy's the live bytes
+ *     across, frees the old buffer via freeHook_ or GLOBAL_free, installs
+ *     the new buffer through the base's SetBufferPtrs(), then shifts any
+ *     live read-region and write-region pointers by the delta between the
+ *     old and new buffer addresses.
+ *
+ * None of these four overrides are reachable from WNDPROC_StreamFromMemory
+ * (this class's only real construction path in this codebase — see
+ * WIN32_MemoryStream below), because that path always constructs with
+ * bufferCapacity == 0, which the ctor turns into ownsMemory_ == 0 and
+ * writeHigh_ == nullptr: WriteChar's grow gate (`if (ownsMemory_ == 0)
+ * return -1;`) always fails first, so AllocateDefaultBuffer is never
+ * actually invoked by anything reachable from that path either. A separate,
+ * still-undefined block of code in the 0x464339-0x464460 gap (xrefs to both
+ * WriteChar and AllocateDefaultBuffer resolve there, get_xrefs_to confirms
+ * addresses 0x4643BD/0x46442B with no Ghidra function boundary yet) does
+ * call both of these — a distinct, not-yet-identified caller this batch did
+ * not resolve (out of scope here; tracked in PROGRESS.md). All four are
+ * implemented for real below regardless, since the original class overrides
+ * them for real.
  *
  * Field layout added by this class beyond the WNDPROC_StreamBuf base
  * (offsets are the original x86 layout, documentation only):
- *   +0x4C ownsMemory_   zeroed by the ctor; no further evidence this batch
- *                        (name is a guess by analogy with ownsBuffer_/
- *                        ownsHandle_ — NOT confirmed by a read site).
- *   +0x58 field_58_     set to 1 by the ctor; no further evidence.
- *   +0x60 (unnamed)     read by the real destructor (0x4640B0) as a
- *                        possible free-callback function pointer, but
- *                        never written by this constructor — see above.
- *                        Not represented as a member here (no ctor-side
- *                        evidence for its initial value).
+ *   +0x4C ownsMemory_   Zeroed by the ctor on every real construction path
+ *                        (both the bufferCapacity==0 and !=0 branches set it
+ *                        to 0 unconditionally) — CONFIRMED by two
+ *                        independent read sites this batch: the real
+ *                        destructor (0x4640B0) gates its `GLOBAL_free(
+ *                        bufferStart_)`/freeHook_ call on `ownsMemory_ != 0
+ *                        && bufferStart_ != nullptr`, and WriteChar
+ *                        (0x464260) gates its entire grow-on-demand path on
+ *                        the same flag. Both readings agree: nonzero means
+ *                        "this object owns a heap buffer it is allowed to
+ *                        grow and must free on destruction", zero means
+ *                        "read-only view over caller-owned data" — matching
+ *                        the class doc's description of every real
+ *                        WIN32_MemoryStream construction.
+ *   +0x50 reserveSize_  Own growth-increment/reserve-size hint. Written
+ *                        (conditionally, only if nonzero) by SetBuffer();
+ *                        read by AllocateDefaultBuffer() as the minimum
+ *                        grow-by amount. Never initialized by the ctor —
+ *                        uninitialized on every object until/unless
+ *                        SetBuffer() is called (never is, on any real
+ *                        construction path); this C++ port zero-initializes
+ *                        it for defined behavior (see .cpp ctor comment).
+ *   +0x54 unknown_0x54_ Never read or written by the ctor, destructor, or
+ *                        any of the four overrides below — no evidence this
+ *                        batch. Kept as a neutral placeholder member so the
+ *                        documented field layout accounts for the full
+ *                        0x64-byte object.
+ *   +0x58 field_58_     set to 1 by the ctor; still no read site found in
+ *                        this batch either (checked all four overrides plus
+ *                        the ctor/destructor).
+ *   +0x5C allocHook_    Custom allocator hook: `void* (int32_t size)`.
+ *                        AllocateDefaultBuffer() calls it (size pushed as
+ *                        the sole cdecl-style stack argument, matching the
+ *                        disassembly's `PUSH EDX; CALL EAX; ADD ESP,4`)
+ *                        when non-null, else falls back to `::operator
+ *                        new(size)`. Never set by the ctor — uninitialized
+ *                        on every real object (this port zero-initializes).
+ *   +0x60 freeHook_     Custom free hook: `void (void* ptr)`. Read by both
+ *                        the real destructor (0x4640B0) and
+ *                        AllocateDefaultBuffer() to free the old buffer,
+ *                        falling back to GLOBAL_free() when null. Never set
+ *                        by the ctor — uninitialized on every real object
+ *                        (this port zero-initializes).
  *
  * sizeof(WIN32_StreamMem) on the original x86 is 0x64 bytes (the literal
  * `operator_new(0x64)` immediately preceding WIN32_StreamMem_Ctor's call in
@@ -148,9 +197,8 @@
  */
 
 // Status: VALIDATED (WIN32_StreamMem_Ctor, WIN32_StreamMem::Underflow,
-// WIN32_MemoryStream, WNDPROC_StreamFromMemory; the three remaining
-// deferred vtable overrides on WIN32_StreamMem are TRANSCRIBED-of-a-stub
-// — see .cpp)
+// WIN32_StreamMem::Flush/SetBuffer/WriteChar/AllocateDefaultBuffer,
+// WIN32_MemoryStream, WNDPROC_StreamFromMemory)
 
 #pragma once
 
@@ -180,20 +228,37 @@ public:
      *                         real basic block of the original function). */
     WIN32_StreamMem(char* data, int32_t dataLen, int32_t bufferCapacity);
 
-    /* vtable +0x04, +0x08, +0x1C, +0x28: see file header — deferred, out
-     * of scope for this task, present only so this class is concrete/
-     * instantiable and its vtable membership is honest. */
+    /* vtable +0x04 ("sync"/flush hook). Nothing to sync for a memory-backed
+     * stream — see file header. */
     int32_t Flush() override;                          /* 0x46E590 */
+
+    /* vtable +0x08. Ignores `buffer`; conditionally records `size` as the
+     * grow-by hint consumed by AllocateDefaultBuffer(). See file header. */
     void* SetBuffer(void* buffer, int32_t size) override; /* 0x464250 */
+
+    /* vtable +0x1C ("overflow" hook proper). See file header. */
     int32_t WriteChar(int32_t ch) override;             /* 0x464260 */
+
+    /* vtable +0x28 ("doallocate"). Growable-buffer reallocator. See file
+     * header. */
     int32_t AllocateDefaultBuffer() override;           /* 0x464120 */
 
     /* vtable +0x20 ("underflow" hook). REAL — see file header. */
     int32_t Underflow() override;                       /* 0x4642F0 */
 
 private:
-    int32_t ownsMemory_;  /* +0x4C */
-    int32_t field_58_;    /* +0x58 */
+    /* Custom allocate/free hook function types, matching the cdecl-style
+     * single-stack-argument call sites disassembled in AllocateDefaultBuffer
+     * (0x464120) and the real destructor (0x4640B0) — see file header. */
+    using AllocHookFn = void* (*)(int32_t size);
+    using FreeHookFn  = void (*)(void* ptr);
+
+    int32_t ownsMemory_;      /* +0x4C, see file header */
+    int32_t reserveSize_;     /* +0x50, see file header */
+    int32_t unknown_0x54_;    /* +0x54, see file header */
+    int32_t field_58_;        /* +0x58, see file header */
+    AllocHookFn allocHook_;   /* +0x5C, see file header */
+    FreeHookFn freeHook_;     /* +0x60, see file header */
 };
 
 /* WIN32_StreamClose (0x463A60) is intentionally NOT declared as a
