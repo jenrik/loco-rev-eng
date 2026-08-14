@@ -38,11 +38,15 @@ static Sdl3DirectDraw4* g_sdl_ddraw = nullptr;
 static Sdl3DirectDrawSurface* g_sdl_primary_surface = nullptr;
 static Sdl3DirectDrawSurface* g_sdl_backbuffer = nullptr;
 
-/* Canonical global, real defining declaration in platform/ddraw_globals.cpp
- * (0x485440). Declared void* there and at every consumer site — see this
- * file's own IDirectDraw4-shaped g_sdl_ddraw above for the typed object;
- * g_ddraw is just pointed at it below. */
+/* Canonical globals, real defining declarations in platform/ddraw_globals.cpp
+ * (g_ddraw=0x485440, g_primary_surface=0x4FD3C4, g_backbuffer=0x4FD3C0).
+ * Declared void* there and at every consumer site — see this file's own
+ * IDirectDraw4/Sdl3DirectDrawSurface-shaped g_sdl_ddraw/g_sdl_primary_surface/
+ * g_sdl_backbuffer above for the typed objects; these are just pointed at
+ * them below. */
 extern void* g_ddraw;
+extern void* g_primary_surface;
+extern void* g_backbuffer;
 
 /* Pixel-format globals the original DDRAW_GetSurface (0x45B500) sets after
  * querying the real display mode's DDPIXELFORMAT (555 vs 565); read by
@@ -652,6 +656,8 @@ bool SDL3_EnsurePrimarySurface()
     }
     g_sdl_primary_surface = static_cast<Sdl3DirectDrawSurface*>(primary_iface);
     g_sdl_backbuffer = static_cast<Sdl3DirectDrawSurface*>(backbuffer_iface);
+    g_primary_surface = g_sdl_primary_surface;
+    g_backbuffer = g_sdl_backbuffer;
 
     SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
     SDL_SetRenderDrawColor(renderer, 0, 40, 80, 255);

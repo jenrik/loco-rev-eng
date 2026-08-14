@@ -312,12 +312,12 @@ void  SetPixel(void*, int, int, unsigned int) {}
 
 
 /* ---- Bulk stubs for remaining symbols ---- */
-/* g_ddraw's defining declaration moved to platform/ddraw_globals.cpp
- * (2026-08-14) — that file has no dependencies beyond shared/types.h, so
- * small standalone unit tests that link graphics/sdl3_ddraw.cpp (which
- * now assigns to g_ddraw, see PROGRESS.md's DirectDraw-shim Phase 5 note)
- * can link it too without pulling in the rest of this file's graph. */
-void* g_backbuffer = nullptr;
+/* g_ddraw/g_backbuffer/g_primary_surface's defining declarations moved to
+ * platform/ddraw_globals.cpp (2026-08-14) — that file has no dependencies
+ * beyond shared/types.h, so small standalone unit tests that link
+ * graphics/sdl3_ddraw.cpp (which now assigns to all three, see
+ * PROGRESS.md's DirectDraw-shim Phase 5 note) can link it too without
+ * pulling in the rest of this file's graph. */
 void* g_game = nullptr;
 void* g_audio_mgr = nullptr;
 NetworkPlayerList* g_dplay = nullptr;

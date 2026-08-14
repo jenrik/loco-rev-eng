@@ -849,8 +849,11 @@ struct IDirectDrawSurface4_C {
 /* =========================================================== */
 extern "C" {
 void* g_object_count = nullptr; void* g_cursor_back = nullptr; int32_t g_cursor_refcount = 0;
-void* g_font_normal = nullptr; int32_t g_is_fullscreen = 0; void* g_primary_surface = nullptr;
+void* g_font_normal = nullptr; int32_t g_is_fullscreen = 0;
 int32_t g_surface_lost = 0;
+/* g_primary_surface moved to platform/ddraw_globals.cpp (2026-08-14) —
+ * see that file's own comment; SDL3_EnsurePrimarySurface wires it to a
+ * real Sdl3DirectDrawSurface there. */
 /* g_surface_bpp/g_surface_bshift/g_surface_channel1/g_surface_channel2/
  * g_surface_red_mask/g_surface_blue_mask moved to platform/ddraw_globals.cpp
  * (2026-08-14) — SDL3_EnsurePrimarySurface (graphics/sdl3_ddraw.cpp) sets

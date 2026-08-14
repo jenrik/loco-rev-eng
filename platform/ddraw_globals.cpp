@@ -1,15 +1,30 @@
 /**
  * platform/ddraw_globals.cpp — canonical DirectDraw global defining declarations
  *
- * g_ddraw (0x485440) is declared void* at every consumer site tree-wide
- * (native/ddraw_surface_ops.c, input/Cursor.cpp, input/Cursor_Editor.cpp,
- * input/Cursor_internal.h, core/CGWND.cpp, graphics/DDRAW.h,
- * graphics/LOCOBITMAP.cpp, ui/GameWindow.cpp, ui/UIPANEL.cpp,
- * ui/UIPANEL_Surface.cpp) rather than IDirectDraw4* — see PROGRESS.md's
- * DirectDraw-shim Phase 5 note for why: several of those consumers still
- * dispatch through it by raw vtable slot, and this shim's vtable is not
- * ABI-slot-accurate, so a shared typed declaration would just move a
- * type mismatch to a different call site rather than resolve it.
+ * g_ddraw (0x485440), g_primary_surface (0x4FD3C4), and g_backbuffer
+ * (0x4FD3C0) are declared void* at every consumer site tree-wide rather
+ * than typed IDirectDraw4 / IDirectDrawSurface4 pointers — see PROGRESS.md's
+ * DirectDraw-shim Phase 5/6 notes for why: keeping the declaration untyped avoids
+ * forcing an unrelated retype at call sites that still do their own
+ * pointer arithmetic on the same object for other reasons (e.g.
+ * input/Cursor.cpp's CreateSurface desc buffer), and this shim's vtable
+ * is not ABI-slot-accurate, so nothing may reach these through raw
+ * vtable-slot dispatch regardless of the declared type. Every real
+ * dispatch site now goes through static_cast<IDirectDrawSurface4*>/
+ * static_cast<IDirectDraw4*> at the call boundary (Phase 6, done
+ * 2026-08-14: ui/UIPANEL_Surface.cpp, graphics/LOCOBITMAP.cpp,
+ * ui/UIPANEL.cpp, world/tilemap.cpp, the Cursor subsystem's 28 sites).
+ *
+ * `_g_primary_surface`/`_g_backbuffer` (input/Cursor_internal.h and a few
+ * other files) are a SEPARATE pair of globals sharing the exact same
+ * confirmed addresses as g_primary_surface/g_backbuffer — very likely
+ * duplicate C++ variables for the same original global from incremental
+ * decompilation, not a real distinction, but NOT consolidated here: that
+ * "very likely" hasn't been fully confirmed, so this file deliberately
+ * wires only the non-underscore pair. Consumers of the underscore-
+ * prefixed pair (several Cursor subsystem call sites) stay dormant behind
+ * their existing null checks even after this wiring — a known, separately
+ * tracked gap, not an oversight.
  *
  * g_surface_bpp/g_surface_channel1/g_surface_channel2/g_surface_bshift/
  * g_surface_red_mask/g_surface_blue_mask (0x485274/0x485278/0x48527C/
@@ -35,6 +50,8 @@
 #include <cstdint>
 
 void* g_ddraw = nullptr;
+void* g_primary_surface = nullptr;
+void* g_backbuffer = nullptr;
 
 int32_t g_surface_bpp = 0;
 int32_t g_surface_channel1 = 0;
