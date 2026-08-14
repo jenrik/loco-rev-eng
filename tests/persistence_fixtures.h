@@ -62,6 +62,28 @@
 
 void* operator_new(size_t size) { return std::malloc(size); }
 void  GLOBAL_free(void* ptr) { std::free(ptr); }
+extern "C" void OutputDebugStringA(const char* s) { if (s) std::fprintf(stderr, "DEBUG: %s\n", s); }
+
+/* UIPANEL_Surface's live-instance counter (0x00485254, canonically defined
+ * alongside other unrelated globals in shared/link_stubs.cpp) -- defined
+ * locally rather than pulling that whole stub file in, same reasoning as
+ * this file's other fixtures. Needed once Entity::Draw/DrawConnected
+ * started routing host SpriteResources through UIPANEL_Surface's real
+ * constructor (graphics/UIPANEL_Surface_lifecycle.cpp). */
+int32_t g_ref_count = 0;
+
+/* g_ddraw (0x485440, IDirectDraw4*) and SDL3_WrapSdlSurfaceAsDirectDraw
+ * (graphics/sdl3_ddraw.cpp) -- the real DirectDraw device/surface wrapper
+ * is not linked into this narrow test at all (it would pull in
+ * graphics/sdl3_window.cpp, which duplicates several of this file's own
+ * Win32 stub fixtures). This test never places a real host SpriteResource
+ * with a decoded bitmap, so get_or_create_uipanel_surface() always returns
+ * early before reaching either symbol; declared/stubbed only to satisfy
+ * the linker. */
+void* g_ddraw = nullptr;
+struct IDirectDrawSurface4;
+struct SDL_Surface;
+IDirectDrawSurface4* SDL3_WrapSdlSurfaceAsDirectDraw(SDL_Surface*) { return nullptr; }
 
 void*    g_game = nullptr;                /* 0x4854C8 */
 void*    g_world = nullptr;               /* 0x4A98B0 */
@@ -90,6 +112,10 @@ uint8_t  g_allow_building_placement = 0;  /* 0x4FD3DC — loader/building placem
                                              is a BSS global — zero-initialized; the
                                              loader saves and restores it. */
 uint8_t  g_is_town_mode = 0;              /* 0x485328 — town/tilemap flag */
+uint8_t  g_build_mode = 0;                /* 0x485234 — newly referenced by
+                                             input/InputMgr.cpp's
+                                             INPUT_RemoveObject (message-box
+                                             p2 argument). */
 int32_t  g_demo_mode = 0;                 /* 0x4A9918 */
 int32_t  g_is_game_active = 0;            /* 0x4854C4 */
 uint8_t  g_is_party_mode = 0;             /* 0x48548C */
@@ -99,6 +125,8 @@ uint32_t g_game_time = 0;                 /* 0x4A99B4 */
 char     g_empty_string = 0;              /* 0x4851D0 */
 char     g_install_path[256] = ".";
 char     g_current_save_path[0x108] = ""; /* 0x4AA8F8 */
+int16_t  g_host_original_preview_w = 0;   /* host-only, no x86 address */
+int16_t  g_host_original_preview_h = 0;   /* host-only, no x86 address */
 int32_t  DAT_004a98b4 = 0;                /* 0x4A98B4 */
 int32_t  DAT_004a98b8[4] = {0, 0, 0, 0};  /* 0x4A98B8 */
 double   _DAT_00481170 = 0.0;             /* 0x481170 — FPS threshold (GameObject.cpp) */
@@ -218,7 +246,7 @@ void TileMap::FullReset()
     }
     g_fixture_full_reset_count++;
 }
-void* TileMap::ScrollTo(TileMapObject*, int)
+void* TileMap::ScrollTo(ResourceGameObject*, int)
 {
     if (!g_fixture_record_tilemap) {
         fixture_reached_TileMap_ScrollTo();
@@ -237,6 +265,13 @@ void* TileMap::GetObjectAt(short, short, short)
 { fixture_reached_TileMap_GetObjectAt(); return nullptr; }
 void* TileMap::FindNearestObject(unsigned short, int, int, int)
 { fixture_reached_TileMap_FindNearestObject(); return nullptr; }
+/* TileMap::GetViewport — newly referenced by input/InputMgr.cpp's
+ * INPUT_RemoveObject (its neighbour-cascade search); unreachable in
+ * these tests (TileMap::ScrollTo above never calls the real body that
+ * would lead here), so it stays fail-loud like its siblings. */
+LOUD_FIXTURE(TileMap_GetViewport)
+ResourceGameObject* TileMap::GetViewport(ResourceGameObject*, int)
+{ fixture_reached_TileMap_GetViewport(); return nullptr; }
 
 /* Fake TileMap/Netman storage for the recording tests: a zeroed
  * instance is a safe stand-in because every fixture method above never
@@ -393,6 +428,14 @@ int RESDATA_IsRoadTile(void*);
 int RESDATA_IsRoadTile(void*)
 { fixture_reached_RESDATA_IsRoadTile(); return 0; }
 
+/* RESDATA_IsSceneryTile (0x44BD90) — newly referenced by
+ * input/InputMgr.cpp's INPUT_RemoveObject (neighbour-cascade
+ * classification); unreachable in these tests for the same reason as
+ * RESDATA_IsBuildingTile/IsRoadTile above. */
+LOUD_FIXTURE(RESDATA_IsSceneryTile)
+int RESDATA_IsSceneryTile(int)
+{ fixture_reached_RESDATA_IsSceneryTile(); return 0; }
+
 /* AssetMgr_ReadPairValue (0x45DD80) — newly referenced by
  * game/Building.cpp::StepToward/FindNearestConnectionNode, fixing the
  * void*-first-param call-0 landmine (docs/landmine-sweep-worklist.md,
@@ -447,6 +490,11 @@ uint32_t sprite_resource_id(const SpriteResource*) { return 0; }
 SpriteBitmap* sprite_bitmap(SpriteResource*) { return nullptr; }
 uint32_t sprite_width(const SpriteResource*) { return 0; }
 uint32_t sprite_height(const SpriteResource*) { return 0; }
+uint32_t sprite_frame_width(const SpriteResource*) { return 0; }
+bool load_and_draw_town_backdrop(const char*) { return false; }
+SDL_Surface* bitmap_surface(const SpriteBitmap*) { return nullptr; }
+uint32_t bitmap_width(const SpriteBitmap*) { return 0; }
+uint32_t bitmap_height(const SpriteBitmap*) { return 0; }
 }  // namespace loco::assets
 const loco::assets::SpriteMetadata* ResourceManager_GetSpriteMetadata(void*) { return nullptr; }
 #endif  /* !PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER */

@@ -18,13 +18,17 @@
  * World new/load/save (INPUT_NewWorld 0x41E120, INPUT_LoadWorld 0x41D320,
  * INPUT_LoadSaveFile 0x41D5C0, INPUT_SaveCurrentWorld 0x41D9B0) are
  * implemented over the canonical InputMgr (see the persistence-milestone
- * notes in PROGRESS.md); the editor placement helpers (INPUT_PlaceObject
- * 0x41DD80, INPUT_RemoveObject 0x41DEF0) live here as deferred stubs that
- * log loudly and abort, replacing the previous silent no-op stubs.
+ * notes in PROGRESS.md); INPUT_PlaceObject (0x41DD80) and INPUT_RemoveObject
+ * (0x41DEF0) are both fully implemented below (see each function's own
+ * doc comment) -- both are on the load path via TileMap::FindObject and
+ * TileMap::ScrollTo respectively, not editor-only helpers.
  * **Correction (2026-08-12): `INPUT_PlaceObject` IS on the load path** --
  * `TileMap::FindObject` (0x4550C0, world/tilemap.cpp:2247-2330) calls it
  * directly, and `INPUT_LoadSaveFile` reaches `FindObject` while replaying
  * a save's entity records. Tracked in PROGRESS.md's tile-placement chain.
+ * **Correction (2026-08-14): `INPUT_RemoveObject` IS also on the load
+ * path** -- see its own doc comment; the previous "editor-only" claim
+ * here was disproven the same way.
  *
  * Also implemented here: the verified neighbour-tile offset helpers
  * INPUT_DirToOffset_Up/Left/Down/Right (0x41D8F0/0x41D920/0x41D950/
@@ -143,9 +147,14 @@ bool build_host_resource_path(char* destination, size_t destination_size,
  * These match resource_manager_sdl3.h's real declarations exactly, so
  * they resolve to the same already-compiled symbols at link time. */
 namespace loco::assets {
+class SpriteResource;
 bool is_host_sprite_resource(const void* resource);
 bool sprite_tile_type_byte(const void* resource, uint8_t* out_byte);
 bool sprite_leisure_destination_byte(const void* resource, uint8_t* out_byte);
+bool load_and_draw_town_backdrop(const char* name);
+uint32_t sprite_resource_id(const SpriteResource* resource);
+uint32_t sprite_frame_width(const SpriteResource* resource);
+uint32_t sprite_height(const SpriteResource* resource);
 }  // namespace loco::assets
 void* ResourceManager_GetById(void* ignored_original_manager, uint32_t resource_id);
 #endif
@@ -163,8 +172,14 @@ class UI_Manager;
 extern UI_Manager* g_tooltip_mgr;                  /* 0x4FD220 */
 extern int32_t g_player_id;                        /* 0x4AAD46 */
 extern int32_t g_in_build_mode;                    /* 0x4FD199 */
+extern uint8_t g_build_mode;                       /* 0x485234 */
 extern uint8_t g_allow_building_placement;         /* 0x4FD3DC */
+/* Forward declaration; real definition later in this file (0x423AB0). */
+void UI_CreateMessageBox(void* mgr, int32_t res_id, int32_t p2, char p3,
+                         int32_t x, int32_t y, int32_t p7);
 extern char  g_current_save_path[0x108];           /* 0x4AA8F8 */
+extern int16_t g_host_original_preview_w;          /* host-only, no x86 address */
+extern int16_t g_host_original_preview_h;          /* host-only, no x86 address */
 extern int32_t DAT_004a98b4;                       /* 0x4A98B4 — g_world vehicle count */
 extern int32_t DAT_004a98b8[4];                    /* 0x4A98B8 — level-table entries */
 /* g_tilemap (TileMap*), g_resmgr (ResourceManager), g_player_color and
@@ -562,9 +577,9 @@ int32_t* INPUT_DirToOffset_Right(int32_t* output)   /* 0x41D980 */
 /*   INPUT_PlaceObject     0x41DD80                                    */
 /*   INPUT_FindObjectAt    0x41E1F0                                    */
 /*                                                                      */
-/* INPUT_RemoveObject (0x41DEF0) stays a loud deferred stub — it is    */
-/* editor-only (not on the load/save path) and its caller graph is a   */
-/* later milestone.                                                    */
+/* INPUT_RemoveObject (0x41DEF0) is fully implemented below (see its    */
+/* own doc comment) -- it is NOT editor-only; TileMap::ScrollTo reaches */
+/* it from the load/save path via TileMap::ScrollRect/FindObject.       */
 /* ================================================================== */
 
 /* ================================================================== */
@@ -590,14 +605,20 @@ void loco::host::set_host_placement_available(bool available)
 #endif
 
 /* ================================================================== */
-/* Typed dual-view helpers                                             */
+/* Placed-object typing note                                          */
 /*                                                                      */
-/* The placed objects are simultaneously Entity* (InputMgr collection,  */
-/* Entity::SetName/SetAnimState dispatch) and TileMapObject* (the       */
-/* tilemap grid's placement view, is_moving at +0xC0).  The original    */
-/* passes the same pointer through both roles; these helpers document   */
-/* the cross-cast at the two call boundaries (same pattern as           */
-/* TileMap::FindObject / World.cpp).                                   */
+/* The objects TileMap places (via TileMap::FindObject/INPUT_PlaceObject)*/
+/* are simultaneously Entity* (InputMgr's own collection, Entity::      */
+/* SetName/SetAnimState dispatch) and ResourceGameObject* (the tilemap  */
+/* grid's placement view -- group_active at +0xC0, sub_pos_x/y at       */
+/* +0x88/+0x8A). ResourceGameObject derives from Entity (core/          */
+/* BuildingMgrObjectGroup.h), so this is an ordinary, well-defined      */
+/* static_cast downcast to the object's real dynamic type, not a duck-  */
+/* typed reinterpret_cast -- the `as_entity`/`as_tilemap_object` helpers*/
+/* that used to wrap this via the now-removed TileMapObject mirror      */
+/* struct have been replaced with direct static_cast<ResourceGameObject*>*/
+/* at each call site (see PROGRESS.md's "TileMapObject mirror struct"   */
+/* entry).                                                              */
 /* ================================================================== */
 
 /* Bounded "PARTY" name probe for child records.  The binary scans the
@@ -624,16 +645,6 @@ static bool child_name_has_party(const char name[12])
      * 0x47E4FC) — NUL-terminated substring search on the name field. */
     return std::strstr(name, "PARTY") != nullptr;
 #endif
-}
-
-static Entity* as_entity(TileMapObject* obj)
-{
-    return reinterpret_cast<Entity*>(reinterpret_cast<void*>(obj));
-}
-
-static TileMapObject* as_tilemap_object(Entity* entity)
-{
-    return reinterpret_cast<TileMapObject*>(reinterpret_cast<void*>(entity));
 }
 
 /* ================================================================== */
@@ -723,7 +734,7 @@ void INPUT_NewWorld(InputMgr* self)
         Entity* entity = self->ListGetItem(index);
         if (self->entity_count % 10 == 0) {
             if (static_cast<TileMap*>(g_tilemap)->ScrollTo(
-                    as_tilemap_object(entity), 1) == nullptr) {
+                    static_cast<ResourceGameObject*>(entity), 1) == nullptr) {
                 index++;
             }
 #ifndef _WIN32
@@ -736,7 +747,7 @@ void INPUT_NewWorld(InputMgr* self)
             static_cast<TileMap*>(g_tilemap)->InvalidateDirtyRects(0); /* 0x456150 */
         } else {
             if (static_cast<TileMap*>(g_tilemap)->ScrollTo(
-                    as_tilemap_object(entity), 0) == nullptr) {
+                    static_cast<ResourceGameObject*>(entity), 0) == nullptr) {
                 index++;
             }
         }
@@ -959,8 +970,24 @@ bool entity_matches(Entity* e, int32_t mode)
                    static_cast<uint8_t*>(e->resource) + 0x62C) != 0;
     case 3:
         if (type != 3) return false;
+#ifndef _WIN32
+        /* Same pointer-in-int32_t hazard as INPUT_LoadSaveFile's matching
+         * call site above (see its comment) -- e->resource doesn't fit
+         * losslessly in RESDATA_IsBuildingTile's int32_t ABI parameter on
+         * this host. */
+        {
+            uint8_t tile_byte = 0;
+            if (e->resource != nullptr &&
+                loco::assets::sprite_tile_type_byte(e->resource, &tile_byte)) {
+                return tile_byte == 0x07 || tile_byte == 0x08 ||
+                       tile_byte == 0x09 || tile_byte == 0x0A;
+            }
+            return false;
+        }
+#else
         return RESDATA_IsBuildingTile(static_cast<int32_t>(
             reinterpret_cast<intptr_t>(e->resource))) != 0;
+#endif
     default:
 #ifndef _WIN32
         /* Host hardening: the binary compares resource+0x04 with the
@@ -1131,6 +1158,22 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
         return 0;
     }
 
+#ifndef _WIN32
+    /* Host deviation, broader than the original: the original only feeds
+     * the header's backdrop name (resdata.save.name, e.g. "ARRID" for
+     * Wildwest) to UIPANEL_Hide (0x429EF0) on the "curr" resume path below
+     * -- a fresh scenario start instead gets its backdrop from the
+     * scenario-selection UI calling the same real function earlier, before
+     * INPUT_LoadSaveFile ever runs. That earlier call site is not yet
+     * reconstructed on host (see PROGRESS.md), so a fresh-start load would
+     * otherwise never draw any backdrop at all. Every successful load here
+     * carries the same real backdrop name in its header regardless of which
+     * original call site would have consumed it, so drawing it here for
+     * every load (not just "curr") reproduces the same visible result
+     * without waiting on that separate recovery. */
+    loco::assets::load_and_draw_town_backdrop(resdata.save.name);
+#endif
+
     /* Placement offset: ((player - saved)/2, (color - saved)/2) with
      * the saved fields read as the 16-bit header words at +0x02/+0x04
      * (preview dimensions on designer saves).  The binary computes this
@@ -1142,10 +1185,49 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
      * (cltd/sub/sar — for a negative odd delta, -3/2 = -1, NOT floor
      * division -2), exactly C++ integer division.  trunc_div2
      * reproduces the exact x86 semantics with both operand widths. */
-    int32_t offset_x = trunc_div2(static_cast<int16_t>(g_player_id) -
-                                  static_cast<int32_t>(resdata.save.player_id));
-    int32_t offset_y = trunc_div2(static_cast<int16_t>(g_player_color) -
-                                  static_cast<int32_t>(resdata.save.player_color));
+#ifndef _WIN32
+    /* Host deviation: g_player_id/g_player_color never actually hold
+     * tile_count_x/tile_count_y on host (they stay the network-identity
+     * default of 0 in single-player -- see world/tilemap.cpp's identical
+     * fix and its comment for the full evidence, incl. the disassembly
+     * proving the original binary reuses this storage for both roles).
+     * Left uncorrected, this centering offset always came out as half the
+     * *negative* saved preview size instead of half the *current-vs-saved*
+     * size delta, pinning every placed object toward the top-left corner
+     * regardless of the actual viewport size. Read the live TileMap's own
+     * tile_count_x/tile_count_y directly instead of the wrongly-shared
+     * globals. */
+    const int16_t current_tile_count_x = (g_tilemap != nullptr)
+        ? static_cast<TileMap*>(g_tilemap)->tile_count_x : static_cast<int16_t>(g_player_id);
+    const int16_t current_tile_count_y = (g_tilemap != nullptr)
+        ? static_cast<TileMap*>(g_tilemap)->tile_count_y : static_cast<int16_t>(g_player_color);
+    /* Second host deviation, layered on the first: INPUT_SaveCurrentWorld's
+     * "curr" round trip (see seed_fresh_world_from_fixture,
+     * input/PersistenceAdapter.cpp) also overwrites player_id/player_color
+     * with the *live* g_player_id/g_player_color (0/0 in single-player)
+     * before "curr" is ever read back here, permanently discarding the
+     * original scenario's real design-preview dimensions (64x48 for
+     * Wildwest) that this centering math needs. Those real dimensions were
+     * captured once, before that round trip, into g_host_original_preview_w/h
+     * (PersistenceAdapter.cpp) -- prefer them for a "curr" load specifically,
+     * since resdata.save.player_id/player_color are known-lossy there. A
+     * direct (non-"curr") designer-save load still uses its own real header
+     * fields untouched. */
+    const bool is_curr_load = is_host_current_save_path(path);
+    const int32_t saved_preview_w = (is_curr_load && g_host_original_preview_w != 0)
+        ? g_host_original_preview_w : static_cast<int32_t>(resdata.save.player_id);
+    const int32_t saved_preview_h = (is_curr_load && g_host_original_preview_h != 0)
+        ? g_host_original_preview_h : static_cast<int32_t>(resdata.save.player_color);
+#else
+    const int16_t current_tile_count_x = static_cast<int16_t>(g_player_id);
+    const int16_t current_tile_count_y = static_cast<int16_t>(g_player_color);
+    const int32_t saved_preview_w = static_cast<int32_t>(resdata.save.player_id);
+    const int32_t saved_preview_h = static_cast<int32_t>(resdata.save.player_color);
+#endif
+    int32_t offset_x = trunc_div2(static_cast<int32_t>(current_tile_count_x) -
+                                  saved_preview_w);
+    int32_t offset_y = trunc_div2(static_cast<int32_t>(current_tile_count_y) -
+                                  saved_preview_h);
 
     /* flags != 0: TileMap::FullReset (0x454FE0) first. */
     if (flags != 0) {
@@ -1261,7 +1343,11 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
                 static_cast<short>(static_cast<int>(record->x) + offset_x),
                 static_cast<short>(static_cast<int>(record->y) + offset_y),
                 1, 1);
-            entity = as_entity(reinterpret_cast<TileMapObject*>(found));
+            /* `found` is TileMap::FindObject's pre-existing int* return
+             * view of the placed object; every object it can return is
+             * ResourceGameObject or an Entity-derived class beneath it
+             * (see core/BuildingMgrObjectGroup.h). */
+            entity = reinterpret_cast<Entity*>(found);
         }
         if (entity == nullptr) {
             index++;
@@ -1275,7 +1361,7 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
 #endif
 
         if (flags2 == 0) {
-            as_tilemap_object(entity)->is_moving = 0;   /* +0xC0 */
+            static_cast<ResourceGameObject*>(entity)->group_active = 0;   /* +0xC0 */
         }
 
         /* vtable[13]: SetName (0x405E20) / Building::SetCustomName
@@ -1289,10 +1375,21 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
                 GetResourceType(record->resource_id));
             bool building_tile = false;
 #ifndef _WIN32
-            if (res_type == 3 && entity->resource != nullptr) {
-                building_tile = RESDATA_IsBuildingTile(
-                    static_cast<int32_t>(
-                        reinterpret_cast<intptr_t>(entity->resource))) != 0;
+            /* Same pointer-in-int32_t hazard INPUT_PlaceObject's own
+             * dispatch already avoids: entity->resource is a real host
+             * pointer that doesn't fit losslessly in RESDATA_IsBuildingTile's
+             * int32_t ABI parameter (this host's heap runs well past
+             * 0xFFFFFFFF), and that function's own "reconstruct the pointer
+             * from tile_obj" host branch can only re-sign-extend whatever
+             * garbage the truncation already produced -- it cannot recover
+             * bits that were never passed in. Call the pointer-safe host
+             * accessor directly instead, exactly like INPUT_PlaceObject
+             * does. */
+            uint8_t tile_byte = 0;
+            if (res_type == 3 && entity->resource != nullptr &&
+                loco::assets::sprite_tile_type_byte(entity->resource, &tile_byte)) {
+                building_tile = (tile_byte == 0x07 || tile_byte == 0x08 ||
+                                 tile_byte == 0x09 || tile_byte == 0x0A);
             }
 #else
             if (res_type == 3) {
@@ -1582,7 +1679,7 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
                 }
 #endif
                 static_cast<TileMap*>(g_tilemap)->ScrollTo(
-                    as_tilemap_object(entity), 1);
+                    static_cast<ResourceGameObject*>(entity), 1);
             }
         }
 
@@ -1603,31 +1700,36 @@ char INPUT_LoadWorld(InputMgr* self, const char* path)
 #endif
         {
             TileMap* tilemap = static_cast<TileMap*>(g_tilemap);
+            /* TileMap_FindObject's int* return is TileMap::FindObject's
+             * pre-existing raw-pointer view of the placed object -- every
+             * object it can return is ResourceGameObject or an
+             * Entity-derived class beneath it (see
+             * core/BuildingMgrObjectGroup.h). */
             if (netman->CheckUpEdge() != 0) {
-                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                ResourceGameObject* obj = reinterpret_cast<ResourceGameObject*>(
                     TileMap_FindObject(tilemap, 0xC46,
                         static_cast<short>((player_id >> 1) - 1), 0, 0, 1));
-                if (obj != nullptr) obj->is_moving = 0;
+                if (obj != nullptr) obj->group_active = 0;
             }
             if (netman->CheckDownEdge() != 0) {
-                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                ResourceGameObject* obj = reinterpret_cast<ResourceGameObject*>(
                     TileMap_FindObject(tilemap, 0xC48,
                         static_cast<short>((player_id >> 1) - 1),
                         static_cast<short>(player_color - 2), 0, 1));
-                if (obj != nullptr) obj->is_moving = 0;
+                if (obj != nullptr) obj->group_active = 0;
             }
             if (netman->CheckRightEdge() != 0) {
-                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                ResourceGameObject* obj = reinterpret_cast<ResourceGameObject*>(
                     TileMap_FindObject(tilemap, 0xC42,
                         static_cast<short>(player_id - 3),
                         static_cast<short>((player_color >> 1) - 1), 0, 1));
-                if (obj != nullptr) obj->is_moving = 0;
+                if (obj != nullptr) obj->group_active = 0;
             }
             if (netman->CheckLeftEdge() != 0) {
-                TileMapObject* obj = reinterpret_cast<TileMapObject*>(
+                ResourceGameObject* obj = reinterpret_cast<ResourceGameObject*>(
                     TileMap_FindObject(tilemap, 0xC44, 0,
                         static_cast<short>((player_color >> 1) - 1), 0, 1));
-                if (obj != nullptr) obj->is_moving = 0;
+                if (obj != nullptr) obj->group_active = 0;
             }
         }
 
@@ -1773,7 +1875,8 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
     const int32_t count = self->ListGetCount();
     for (int32_t i = 0; i < count; i++) {
         Entity* entity = self->ListGetItem(i);
-        if (entity == nullptr || as_tilemap_object(entity)->is_moving != 1) {
+        if (entity == nullptr ||
+            static_cast<ResourceGameObject*>(entity)->group_active != 1) {
             continue;
         }
         EntityRecord record;
@@ -1877,23 +1980,226 @@ char INPUT_SaveCurrentWorld(InputMgr* self, const char* name)
 }
 
 /* ================================================================== */
-/* INPUT_RemoveObject (editor-only, deferred; loud)                   */
+/* INPUT_RemoveObject                                                  */
 /* Address: 0x41DEF0                                                   */
 /*                                                                      */
-/* The editor placement helper is not on the load/save path; it stays  */
-/* a loud deferred stub until the editor milestone.                   */
+/* Removes a placed object from InputMgr's entity collection (mirroring */
+/* INPUT_PlaceObject's insert bookkeeping in reverse), then, depending   */
+/* on the object's resource classification, cascades the removal to a   */
+/* connected scenery/track neighbour via TileMap::ScrollTo before        */
+/* optionally showing a removal message box and deleting the object.    */
+/*                                                                      */
+/* CORRECTION (2026-08-14): the previous comment here ("editor-only,     */
+/* not on the load/save path") was wrong. It IS on the load/save path:   */
+/* TileMap::ScrollTo (0x455AB0) calls this at the end of every           */
+/* successful displacement, and TileMap::ScrollRect/FindObject (called   */
+/* from INPUT_LoadSaveFile while replaying a save) can reach ScrollTo.   */
+/* The reason this was never observed crashing before is that            */
+/* ScrollRect's displaceable-object check was reading a hand-written     */
+/* x86-offset mirror struct (world/tilemap.h's now-removed               */
+/* TileMapObject, see PROGRESS.md) that almost never evaluated true on   */
+/* this host -- so ScrollTo's own body (and this function) were, in      */
+/* practice, unreachable dead code from the load/save path specifically  */
+/* because of that separate bug, not because this function was genuinely */
+/* editor-only. Fixing that bug exposed this as a real, load-path-        */
+/* reachable "abort on first use" stub; decompiled and implemented for   */
+/* real per this project's stub policy (internal functions must be       */
+/* fully decompiled; this is game logic, not an OS/hardware wrapper).    */
 /* ================================================================== */
-
 uintptr_t INPUT_RemoveObject(InputMgr* self, void* obj, unsigned int param) /* 0x41DEF0 */
 {
-    (void)self;
-    (void)obj;
-    (void)param;
-    std::fprintf(stderr,
-        "[InputMgr] INPUT_RemoveObject (0x41DEF0) is a deferred stub: "
-        "editor-only, not on the load/save path\n");
-    std::fflush(stderr);
-    std::abort();
+    ResourceGameObject* entity = static_cast<ResourceGameObject*>(obj);
+    if (entity == nullptr) {
+        return 0;
+    }
+
+    /* Classify a resource pointer's TileMapResource::object_type (+0x08)
+     * and resource_id (+0x04). Host: resolved via the sprite accessor
+     * chain (matching TileMap::ScrollRect's established pattern) instead
+     * of raw offsets into what may be an undersized loco::assets::
+     * SpriteResource*. _WIN32: raw offsets into the real TileMapResource.
+     *
+     * CAVEAT: the host branch derives `out_type` from GetResourceType(id)
+     * rather than reading a real TileMapResource::object_type byte (there
+     * is none behind a host SpriteResource*). This follows the precedent
+     * already established by TileMap::ScrollRect's own host branch, but
+     * it has not been independently proven that GetResourceType's return
+     * value space is identical to the +0x08 object_type byte's value
+     * space for every object_type this function compares against (0x0C,
+     * 0x03). Treat the 0x0C/0x03 comparisons below as "as reliable as
+     * ScrollRect's existing pattern", not as freshly verified here. */
+    auto classify = [](void* res, uint8_t* out_type, int32_t* out_id) {
+        *out_type = 0;
+        *out_id = -1;
+        if (res == nullptr) return;
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(res)) {
+            const auto* sprite = static_cast<const loco::assets::SpriteResource*>(res);
+            *out_id = static_cast<int32_t>(loco::assets::sprite_resource_id(sprite));
+            *out_type = static_cast<uint8_t>(GetResourceType(static_cast<UINT>(*out_id)));
+            return;
+        }
+#endif
+        *out_type = field_at<uint8_t>(res, 8);
+        *out_id = field_at<int32_t>(res, 4);
+    };
+
+    /* RESDATA_IsSceneryTile (0x44BD90): tile-state byte at +0x63A is 0x12
+     * or 0x13. Host: resolved via the same sprite_tile_type_byte accessor
+     * RESDATA_IsBuildingTile's own host branch uses (world/tilemap.cpp),
+     * NOT by calling RESDATA_IsSceneryTile directly with a truncated
+     * pointer -- that function takes int32_t (the original x86 ABI's
+     * pointer width) and reads the raw offset unconditionally; a real
+     * host resource pointer does not survive that round-trip (this
+     * host's heap runs well past 0xFFFFFFFF), so the direct call
+     * segfaults the first time it is genuinely reached (confirmed via
+     * coredumpctl against this exact call site). */
+    auto is_scenery_tile = [](void* res) -> bool {
+        if (res == nullptr) return false;
+#ifndef _WIN32
+        uint8_t tile_byte = 0;
+        if (loco::assets::sprite_tile_type_byte(res, &tile_byte)) {
+            return tile_byte == 0x12 || tile_byte == 0x13;
+        }
+        if (loco::assets::is_host_sprite_resource(res)) {
+            return false;
+        }
+#endif
+        return field_at<uint8_t>(res, 0x63A) == 0x12 ||
+               field_at<uint8_t>(res, 0x63A) == 0x13;
+    };
+
+    /* ---- Step 1: remove from InputMgr's entity collection, mirroring */
+    /* INPUT_PlaceObject's insert bookkeeping (entity_count/special_count)*/
+    /* in reverse. ---- */
+    {
+        const int32_t count = self->ListGetCount();
+        for (int32_t i = 0; i < count; i++) {
+            if (self->ListGetItem(i) == entity) {
+                self->ListRemoveAt(i);
+                self->entity_count--;
+
+                bool has_leisure_destination;
+#ifndef _WIN32
+                uint8_t leisure_byte = 0;
+                if (loco::assets::sprite_leisure_destination_byte(entity->resource, &leisure_byte)) {
+                    has_leisure_destination = leisure_byte != 0;
+                } else
+#endif
+                {
+                    has_leisure_destination = entity->resource != nullptr &&
+                        field_at<uint8_t>(entity->resource, 0x62C) != 0;
+                }
+                if (has_leisure_destination) {
+                    self->special_count--;
+                }
+                break;
+            }
+        }
+    }
+
+    /* ---- Step 2: cascade removal to a connected scenery/track          */
+    /* neighbour (Ghidra-confirmed, 0x41DEF0). Two symmetric checks:      */
+    /*   (a) this object is scenery (type 0x0C) with an odd resource_id   */
+    /*       above 0x3010 (decoration-class IDs) -> search the 4          */
+    /*       viewport directions for an initialized track (type 3) tile   */
+    /*       that is itself flagged a scenery tile.                       */
+    /*   (b) this object is a track (type 3) tile that is itself flagged  */
+    /*       a scenery tile -> search for an initialized scenery          */
+    /*       (type 0x0C) neighbour with an odd resource_id above 0x3010.  */
+    /* On the first match found (bounded to the 4 cardinal directions),   */
+    /* the neighbour's 4-slot occupancy_links chain is cleared and        */
+    /* TileMap::ScrollTo is called recursively on it before falling      */
+    /* through to the shared message-box/delete tail below.               */
+    /*                                                                      */
+    /* RECURSION NOTE: the original (0x41DEF0) is not itself recursive --  */
+    /* this C++ translation genuinely re-enters INPUT_RemoveObject via     */
+    /* TileMap_ScrollTo(cascade_target, ...) -> TileMap::ScrollTo ->       */
+    /* INPUT_RemoveObject(cascade_target, ...), because `delete entity`    */
+    /* below only runs after that call returns. A paired scenery+track     */
+    /* object could in principle ping-pong (A's cascade finds B, B's own   */
+    /* cascade search then finds A again, since A has not been deleted     */
+    /* yet). This does NOT happen: `entity->initialized = 0` above runs    */
+    /* before the recursive call is ever reached, and the neighbour scan   */
+    /* requires `neighbor->initialized == 1` -- so by the time B's own     */
+    /* INPUT_RemoveObject call scans for a cascade target, A already       */
+    /* reads initialized == 0 and is skipped. The chain can only extend    */
+    /* forward through not-yet-visited objects, never back the way it      */
+    /* came. ---- */
+    void* resource = entity->resource;
+    uint8_t obj_type = 0;
+    int32_t obj_resource_id = -1;
+    classify(resource, &obj_type, &obj_resource_id);
+
+    ResourceGameObject* cascade_target = nullptr;
+    TileMap* tilemap = static_cast<TileMap*>(g_tilemap);
+
+    if (obj_type == 0x0C && obj_resource_id > 0x3010 && (obj_resource_id & 1) != 0) {
+        entity->initialized = 0;
+        for (int dir = 0; dir < 4 && cascade_target == nullptr; dir++) {
+            ResourceGameObject* neighbor = static_cast<ResourceGameObject*>(
+                TileMap_GetViewport(tilemap, entity, dir));
+            if (neighbor != nullptr && neighbor->initialized == 1) {
+                uint8_t n_type = 0;
+                int32_t n_id = -1;
+                classify(neighbor->resource, &n_type, &n_id);
+                if (n_type == 0x03 && is_scenery_tile(neighbor->resource)) {
+                    cascade_target = neighbor;
+                }
+            }
+        }
+    } else if (obj_type == 0x03 && is_scenery_tile(resource)) {
+        entity->initialized = 0;
+        for (int dir = 0; dir < 4 && cascade_target == nullptr; dir++) {
+            ResourceGameObject* neighbor = static_cast<ResourceGameObject*>(
+                TileMap_GetViewport(tilemap, entity, dir));
+            if (neighbor != nullptr && neighbor->initialized == 1) {
+                uint8_t n_type = 0;
+                int32_t n_id = -1;
+                classify(neighbor->resource, &n_type, &n_id);
+                if (n_type == 0x0C && n_id > 0x3010 && (n_id & 1) != 0) {
+                    cascade_target = neighbor;
+                }
+            }
+        }
+    }
+
+    if (cascade_target != nullptr) {
+        for (int i = 0; i < 4; i++) {
+            cascade_target->occupancy_links[i] = nullptr;
+        }
+        TileMap_ScrollTo(tilemap, cascade_target, static_cast<int>(param));
+    }
+
+    /* ---- Step 3: optional removal message box (low byte of `param`). */
+    if ((param & 0xFF) != 0) {
+        uint16_t frame_width = 0;
+        uint16_t frame_height = 0;
+#ifndef _WIN32
+        if (loco::assets::is_host_sprite_resource(resource)) {
+            const auto* sprite = static_cast<const loco::assets::SpriteResource*>(resource);
+            frame_width = static_cast<uint16_t>(loco::assets::sprite_frame_width(sprite));
+            frame_height = static_cast<uint16_t>(loco::assets::sprite_height(sprite));
+        } else
+#endif
+        if (resource != nullptr) {
+            /* Host hardening: the binary reads +0x14/+0x16 without a null
+             * check (matches this file's established convention for
+             * unconditional binary reads elsewhere, e.g. INPUT_PlaceObject's
+             * +0x62C read comment above). */
+            frame_width = field_at<uint16_t>(resource, 0x14);
+            frame_height = field_at<uint16_t>(resource, 0x16);
+        }
+        const int x = entity->screen_rect.left + (frame_width >> 1);
+        const int y = entity->screen_rect.top + (frame_height >> 1);
+        UI_CreateMessageBox(&g_tooltip_mgr, 0x3860,
+                            static_cast<int32_t>(g_build_mode != 1), 'W', x, y, 1);
+    }
+
+    /* ---- Step 4: vtable[0] scalar deleting destructor, flag=1 -- the   */
+    /* compiler manages this via a normal `delete`. ---- */
+    delete entity;
+    return 1;
 }
 
 /* ================================================================== */

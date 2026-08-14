@@ -38,6 +38,7 @@
 
 #pragma once
 
+#include "../core/BuildingMgrObjectGroup.h"
 #include "../shared/types.h"
 #include <cstddef>
 #include <new>
@@ -119,48 +120,24 @@ struct TileMapResource {
     bool IsEditorSprite() const;
 };
 
-struct TileMapObject {
-    uint8_t _pad_00[6];
-    uint8_t object_state;                /* +0x06  1 = active */
-    uint8_t _pad_07;
-    uint8_t object_type;                 /* +0x08 */
-    uint8_t _pad_09[0x37];
-    TileMapResource* resource;           /* +0x40 */
-    uint8_t _pad_44[0x44];
-    int16_t tile_x;                      /* +0x88  origin tile X */
-    int16_t tile_y;                      /* +0x8A  origin tile Y */
-    uint8_t _pad_8C[0x34];
-    uint8_t is_moving;                   /* +0xC0  1 = object moving */
-    uint8_t _pad_C1[3];
-    /* Per-direction occupancy chain state (GetTileRect 0x457830):      */
-    int32_t occupancy_links[4];          /* +0xC4  adjacent object pointer
-                                          *   per direction */
-    int32_t occupancy_scores[4];         /* +0xD4  accumulated occupancy
-                                          *   score per direction */
-    int32_t occupancy_more;              /* +0xE4  <0 => keep walking the
-                                          *   occupancy chain (read from the
-                                          *   neighbour object) */
-    /* Per-direction buildability chain state (GetTileAt 0x457900):     */
-    int32_t build_links[4];              /* +0xE8  adjacent object pointer
-                                          *   per direction */
-    int32_t build_scores[4];             /* +0xF8  accumulated build score
-                                          *   per direction */
-    int32_t build_more;                  /* +0x108 <0 => keep walking the
-                                          *   build chain (read from the
-                                          *   neighbour object) */
-    uint8_t _pad_10C[0x10];              /* +0x10C..+0x11B */
-
-    /* No fields evidenced past +0x11B: grid_width/height/depth/
-     * occupancy_grid used to be declared here at +0x168, mirroring
-     * TileMapResource's layout, on the theory that a placed object
-     * carries its own runtime copy of its footprint. Disassembly of
-     * ScrollRect (0x4553E0) and FindObject (0x4550C0) disproves this --
-     * every +0x168/+0x169/+0x16a/+0x16e read in both functions is against
-     * the raw TileMapResource the ResourceManager returns (FindObject's
-     * pvVar6/"resource" local), never against a placed TileMapObject.
-     * Removed rather than left as a misleading, unevidenced duplicate --
-     * see world/tilemap.cpp's ScrollRect/FindObject for the real fields. */
-};
+/* TileMapObject removed 2026-08-14 (see PROGRESS.md's "TileMapObject
+ * mirror struct" entry). It was a hand-written x86-offset mirror struct
+ * that every TileMap placement/occupancy routine `reinterpret_cast`ed
+ * onto whatever real polymorphic object a tile-grid slot held. On this
+ * 64-bit host its own `resource` member (declared assuming a 4-byte x86
+ * pointer at +0x40) is actually 8 bytes, silently shifting every field
+ * declared after it by 4 real bytes relative to the struct's own offset
+ * comments -- e.g. `is_moving` (documented +0xC0) landed on real offset
+ * +0xC4, which happens to be the first byte of the *next* object's own
+ * occupancy_links[0], not a movement flag at all. A live memory-
+ * corruption bug, not just an unreliable read.
+ *
+ * Every object TileMap::FindObject can place into the tile grid (via
+ * INPUT_PlaceObject, 0x41DD80) is provably ResourceGameObject or a class
+ * derived from it (RESDATA_GameVehicle, GameVehicle, HelpPageNode) --
+ * see core/BuildingMgrObjectGroup.h's class doc comment for the ctor
+ * chain evidence. All TileMap methods that used to take/return
+ * TileMapObject* now use ResourceGameObject* directly. */
 
 /* ================================================================== */
 /* Tile-entry structure (0x40 bytes each, in tile_data array)          */
@@ -282,27 +259,28 @@ public:
     /* ---- Viewport / scroll ---- */
 
     /** Get neighboring object in a direction — Address: 0x4579D0 */
-    TileMapObject* GetViewport(TileMapObject* sprite, int direction);
+    ResourceGameObject* GetViewport(ResourceGameObject* sprite, int direction);
 
     /** Count valid adjacent tiles for building — Address: 0x4576B0 */
-    char SetViewport(TileMapObject* building_sprite);
+    char SetViewport(ResourceGameObject* building_sprite);
 
     /** Count valid adjacent tiles (generic sprite) — Address: 0x4573E0 */
-    char UpdateViewport(TileMapObject* sprite, short sprite_type);
+    char UpdateViewport(ResourceGameObject* sprite, short sprite_type);
 
     /** Scroll by delta (float-stepped hit test) — Address: 0x455960 */
     uint Scroll(int delta_x, int delta_y, int drag_start_x, int drag_start_y);
 
     /** Scroll to target object position — Address: 0x455AB0 */
-    void* ScrollTo(TileMapObject* target, int scroll_flag);
+    void* ScrollTo(ResourceGameObject* target, int scroll_flag);
 
     /**
      * Validate placement rect scroll — Address: 0x4553E0.
      * target_building is the raw resource (what ResourceManager_GetById
-     * returns), not a placed TileMapObject -- confirmed via disassembly:
-     * every +0x168/+0x169/+0x16a/+0x16e read in this function and in
-     * FindObject's fill loop is against that raw resource. The parameter
-     * was previously mistyped TileMapObject*.
+     * returns), not a placed ResourceGameObject -- confirmed via
+     * disassembly: every +0x168/+0x169/+0x16a/+0x16e read in this
+     * function and in FindObject's fill loop is against that raw
+     * resource. The parameter was previously mistyped TileMapObject*
+     * (the now-removed mirror struct).
      */
     char ScrollRect(char use_sound, TileMapResource* target_building,
                     short delta_x, unsigned short delta_y, int placement_mode);
@@ -310,10 +288,10 @@ public:
     /* ---- Tile occupancy / buildability queries ---- */
 
     /** Get tile occupancy for all 4 directions — Address: 0x457830 */
-    void GetTileRect(TileMapObject* sprite);
+    void GetTileRect(ResourceGameObject* sprite);
 
     /** Get tile buildability for all 4 directions — Address: 0x457900 */
-    void GetTileAt(TileMapObject* sprite);
+    void GetTileAt(ResourceGameObject* sprite);
 
     /* ---- Input handling ---- */
 
@@ -335,7 +313,7 @@ public:
     void ProcessRect(int left, int top, int right, int bottom);
 
     /** Validate object footprint against expected id layout — Address: 0x456D90 */
-    uint ProcessObjectTimer(TileMapObject* param_object);
+    uint ProcessObjectTimer(ResourceGameObject* param_object);
 
     /** Build placement-preview overlay surface — Address: 0x457080 */
     void* CreateOverlay(void* surface, byte fill_byte);
@@ -642,19 +620,19 @@ inline void*    TileMap_GetObjectAt(TileMap* tm, short x, short y, short l) { re
 inline void*    TileMap_GetObjectAtEx(TileMap* tm, short x, short y, short* lo) { return tm->GetObjectAtEx(x, y, lo); }
 inline int*     TileMap_GetTileOrigin(TileMap* tm, int* out_id, short x, short y, short l) { return tm->GetTileOrigin(out_id, x, y, l); }
 inline void     TileMap_GetTileOriginEx(TileMap* tm, int* out_p, short x, short y, short l) { tm->GetTileOriginEx(out_p, x, y, l); }
-inline void     TileMap_GetTileRect(TileMap* tm, TileMapObject* s)  { tm->GetTileRect(s); }
-inline void     TileMap_GetTileAt(TileMap* tm, TileMapObject* s)    { tm->GetTileAt(s); }
-inline void*    TileMap_GetViewport(TileMap* tm, TileMapObject* s, int d) { return tm->GetViewport(s, d); }
-inline char     TileMap_SetViewport(TileMap* tm, TileMapObject* bs) { return tm->SetViewport(bs); }
-inline char     TileMap_UpdateViewport(TileMap* tm, TileMapObject* s, short t) { return tm->UpdateViewport(s, t); }
-inline void*    TileMap_ScrollTo(TileMap* tm, TileMapObject* t, int f) { return tm->ScrollTo(t, f); }
+inline void     TileMap_GetTileRect(TileMap* tm, ResourceGameObject* s)  { tm->GetTileRect(s); }
+inline void     TileMap_GetTileAt(TileMap* tm, ResourceGameObject* s)    { tm->GetTileAt(s); }
+inline void*    TileMap_GetViewport(TileMap* tm, ResourceGameObject* s, int d) { return tm->GetViewport(s, d); }
+inline char     TileMap_SetViewport(TileMap* tm, ResourceGameObject* bs) { return tm->SetViewport(bs); }
+inline char     TileMap_UpdateViewport(TileMap* tm, ResourceGameObject* s, short t) { return tm->UpdateViewport(s, t); }
+inline void*    TileMap_ScrollTo(TileMap* tm, ResourceGameObject* t, int f) { return tm->ScrollTo(t, f); }
 inline char     TileMap_ScrollRect(TileMap* tm, char snd, TileMapResource* b, short dx, unsigned short dy, int pm) { return tm->ScrollRect(snd, b, dx, dy, pm); }
 inline char     TileMap_HandleClick(TileMap* tm, int sx, int sy)    { return tm->HandleClick(sx, sy); }
 inline void     TileMap_ClearInputProcessedFlag(TileMap* tm)        { tm->ClearInputProcessedFlag(); }
 inline void     TileMap_InvalidateRect(TileMap* tm, int l, int t, int r, int b) { tm->InvalidateRect(l, t, r, b); }
 inline void     TileMap_InvalidateDirtyRects(TileMap* tm, char fa)  { tm->InvalidateDirtyRects(fa); }
 inline void     TileMap_ProcessRect(TileMap* tm, int l, int t, int r, int b) { tm->ProcessRect(l, t, r, b); }
-inline uint     TileMap_ProcessObjectTimer(TileMap* tm, TileMapObject* obj) { return tm->ProcessObjectTimer(obj); }
+inline uint     TileMap_ProcessObjectTimer(TileMap* tm, ResourceGameObject* obj) { return tm->ProcessObjectTimer(obj); }
 inline int*     TileMap_FindObject(TileMap* tm, int id, short x, short y, char u, int m) { return tm->FindObject(static_cast<unsigned int>(id), x, y, u, static_cast<unsigned int>(m)); }
 inline void*    TileMap_FindObjectByPos(TileMap* tm, int px, int py) { return tm->FindObjectByPos(px, py); }
 inline void     TileMap_Scroll(TileMap* tm, int dx, int dy, int dsx, int dsy) { tm->Scroll(dx, dy, dsx, dsy); }

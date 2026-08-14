@@ -11,6 +11,7 @@
 #include "Vehicle.h"
 #include "../core/GameObject.h"
 #include "../core/BuildingMgrObjectGroup.h"
+#include "ResdataGameVehicle.h"
 #include "../world/tilemap.h"
 #include <cmath>
 #include <cstdlib>
@@ -643,10 +644,10 @@ void Building::AddOccupant(Entity* entity)
         int tile_x = worldToTile(this->dest_x);
         int tile_y = worldToTile(this->dest_y);
 
-        TileMapObject* tile = static_cast<TileMapObject*>(
+        ResourceGameObject* tile = static_cast<ResourceGameObject*>(
             TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            TileMapResource* tile_parent = tile->resource;
+            TileMapResource* tile_parent = static_cast<TileMapResource*>(tile->resource);
             tile_type = (tile_parent != nullptr) ? tile_parent->object_type : 0;
         } else {
             break;
@@ -705,21 +706,31 @@ void Building::RemoveOccupant()
     /* --- Step 3: Determine road class from entity's model/tile data ---
      * Ghidra-confirmed (0x4336A0): `type_info` is occupant+0x20 (same
      * field AddOccupant calls model_data); its own +0x14 holds a pointer
-     * whose +0x40 is a TileMapResource* (world/tilemap.h) — i.e. the
-     * same TileMapObject-shaped "tile entry" AddOccupant reads via
-     * entry_data above, just followed one level further here to reach
-     * its resource's object_type (the road/tile-class byte at +0x63A,
-     * the same offset already established by the RESDATA_IsBuildingTile/
-     * IsRoadTile cluster). The binary does not null-check the +0x40
-     * resource pointer before reading +0x63A; preserved as-is. */
+     * whose +0x40 is a TileMapResource* (world/tilemap.h) -- i.e. the
+     * same shaped "tile entry" AddOccupant reads via entry_data above,
+     * just followed one level further here to reach its resource's
+     * object_type (the road/tile-class byte at +0x63A, the same offset
+     * already established by the RESDATA_IsBuildingTile/IsRoadTile
+     * cluster). The binary does not null-check the +0x40 resource
+     * pointer before reading +0x63A; preserved as-is.
+     *
+     * `tile_entry`'s concrete class is NOT independently verified the
+     * way ResourceGameObject's tile-grid placement fields are (see
+     * core/BuildingMgrObjectGroup.h) -- it is reached via `occupant`'s
+     * own +0x20/+0x14 chain, whose owning type this pass did not trace.
+     * Left as an explicit raw offset read rather than asserting a
+     * ResourceGameObject* type that isn't backed by the same evidence
+     * (out of scope for the TileMapObject-mirror elimination pass; see
+     * PROGRESS.md's "TileMapObject mirror struct" entry). */
     void* type_info = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(occupant) + 0x20);
-    TileMapObject* tile_entry = (type_info != nullptr)
-        ? *reinterpret_cast<TileMapObject**>(reinterpret_cast<uint8_t*>(type_info) + 0x14)
+    void* tile_entry = (type_info != nullptr)
+        ? *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(type_info) + 0x14)
         : nullptr;
     uint8_t road_class = 0xFF;
 
     if (tile_entry != nullptr) {
-        TileMapResource* tile_res = tile_entry->resource;
+        TileMapResource* tile_res = *reinterpret_cast<TileMapResource**>(
+            reinterpret_cast<uint8_t*>(tile_entry) + 0x40);
         road_class = tile_res->object_type;
     }
 
@@ -756,12 +767,12 @@ void Building::RemoveOccupant()
     int tile_y = worldToTile(exit_y);
 
     /* Validate exit tile (must be type 0x0C = walkable surface) */
-    TileMapObject* tile_obj = static_cast<TileMapObject*>(
+    ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
         TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
 
     bool use_fallback = true;
     if (tile_obj != nullptr) {
-        TileMapResource* tile_frame = tile_obj->resource;
+        TileMapResource* tile_frame = static_cast<TileMapResource*>(tile_obj->resource);
         uint8_t tile_type = (tile_frame != nullptr) ? tile_frame->object_type : 0;
         if (tile_type == 0x0C) {
             use_fallback = false;
@@ -986,10 +997,10 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
     if (res_type == 8) {
         int tile_y = (y < 0) ? -1 : (y >> 4);
         int tile_x = ((x + 4) < 0) ? -1 : ((x + 4) >> 4);
-        TileMapObject* tile = static_cast<TileMapObject*>(
+        ResourceGameObject* tile = static_cast<ResourceGameObject*>(
             TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            TileMapResource* tres = tile->resource;
+            TileMapResource* tres = static_cast<TileMapResource*>(tile->resource);
             if (tres != nullptr && tres->object_type == target_type) {
                 return tile;
             }
@@ -1001,10 +1012,10 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
         uint16_t fh = res_ptr->frame_height;               /* +0x16 */
         int tile_y = ((fh / 2 + y) < 0) ? -1 : ((fh / 2 + y) >> 4);
         int tile_x = ((x + 4) < 0) ? -1 : ((x + 4) >> 4);
-        TileMapObject* tile = static_cast<TileMapObject*>(
+        ResourceGameObject* tile = static_cast<ResourceGameObject*>(
             TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            TileMapResource* tres = tile->resource;
+            TileMapResource* tres = static_cast<TileMapResource*>(tile->resource);
             if (tres != nullptr && tres->object_type == target_type) {
                 return tile;
             }
@@ -1017,10 +1028,10 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
         uint16_t fh = res_ptr->frame_height;               /* +0x16 */
         int tile_y = ((fh + y) < 0) ? -1 : ((fh + y) >> 4);
         int tile_x = ((fw - 4 + x) < 0) ? -1 : ((fw - 4 + x) >> 4);
-        TileMapObject* tile = static_cast<TileMapObject*>(
+        ResourceGameObject* tile = static_cast<ResourceGameObject*>(
             TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
         if (tile != nullptr) {
-            TileMapResource* tres = tile->resource;
+            TileMapResource* tres = static_cast<TileMapResource*>(tile->resource);
             if (tres != nullptr && tres->object_type == target_type) {
                 return tile;
             }
@@ -1043,12 +1054,12 @@ void* Building::FindNearbyObject(int target_type, int x, int y)
 int Building::FindPathToTarget()
 {
     /* Find tile type 3 (road/walkable) at target position */
-    TileMapObject* tile_obj = static_cast<TileMapObject*>(
+    ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
         this->FindNearbyObject(3, this->target_x, this->target_y));
 
     if (tile_obj == nullptr) return 0;
 
-    TileMapResource* resdata = tile_obj->resource;
+    TileMapResource* resdata = static_cast<TileMapResource*>(tile_obj->resource);
     int resource_id = (resdata != nullptr) ? resdata->resource_id : -1;
 
     /* Rail tile check: IDs 0xC6C (straight), 0xC6E (crossing) — block passage */
@@ -1061,16 +1072,17 @@ int Building::FindPathToTarget()
 
     /* Horizontal road (class 0x12) */
     if (road_class == 0x12) {
-        /* Check for vehicle boarding at tile+0x118. Ghidra-confirmed
-         * (Vehicle::state @ +0x5C, game/Vehicle.h) this is a Vehicle*,
-         * not a generic Entity — AddOccupant's `entity+0x38` param is the
-         * same duck-typed convention documented there (Vehicle's own
-         * occupant_tracks[8] @ +0x38). Vehicle_GetOccupantCount was a
-         * void*-taking free-function landmine (docs/landmine-sweep-
+        /* Check for vehicle boarding: RESDATA_GameVehicle::boarding_vehicle
+         * (+0x118, game/ResdataGameVehicle.h) -- tile_obj is a road/track
+         * tile (matched via FindNearbyObject's target_type==3 resource
+         * check above), which is always RESDATA_GameVehicle or a class
+         * derived from it (the only class in the ResourceGameObject
+         * hierarchy with a field at this offset). Vehicle_GetOccupantCount
+         * was a void*-taking free-function landmine (docs/landmine-sweep-
          * worklist.md, callers: Building::FindPathToTarget) that bound
          * to nothing — the real function is the typed method
          * Vehicle::GetOccupantCount() (0x44C370, uint8_t, no args). */
-        Vehicle* vehicle = *reinterpret_cast<Vehicle**>(reinterpret_cast<uint8_t*>(tile_obj) + 0x118);
+        Vehicle* vehicle = static_cast<RESDATA_GameVehicle*>(tile_obj)->boarding_vehicle;
         if (vehicle != nullptr) {
             int32_t vs = vehicle->state;
             if (vs == 0 || vs == 1) {  /* idle or boarding */
@@ -1081,12 +1093,11 @@ int Building::FindPathToTarget()
             }
         }
 
-        /* +0x4C/+0x50: tile_obj's own world pixel position (the universal
-         * GameObject::world_x/world_y convention — core/GameObject.h — NOT
-         * TileMapObject's grid tile_x/tile_y at +0x88/+0x8A, a distinct,
-         * smaller int16 pair). No named field exists for it on
-         * TileMapObject itself; kept as a raw reinterpret_cast. */
-        int tile_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x4C);
+        /* tile_obj's own world pixel position -- GameObject::world_x/
+         * world_y (core/GameObject.h), inherited by ResourceGameObject;
+         * NOT its grid sub_pos_x/sub_pos_y at +0x88/+0x8A (a distinct,
+         * smaller int16 pair). */
+        int tile_x = tile_obj->world_x;
         if (this->world_x == tile_x) {
             uint32_t r = CRT_rand();
             int sign = (r & 1) ? -1 : 1;
@@ -1096,14 +1107,14 @@ int Building::FindPathToTarget()
             this->dest_x = tile_x;
         }
 
-        int tile_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x50);
+        int tile_y = tile_obj->world_y;
         this->dest_y = (tile_y > this->world_y) ? this->world_y - 4 : this->world_y + 4;
         return 1;
     }
 
     /* Vertical road (class 0x13) */
     if (road_class == 0x13) {
-        Vehicle* vehicle = *reinterpret_cast<Vehicle**>(reinterpret_cast<uint8_t*>(tile_obj) + 0x118);
+        Vehicle* vehicle = static_cast<RESDATA_GameVehicle*>(tile_obj)->boarding_vehicle;
         if (vehicle != nullptr) {
             int32_t vs = vehicle->state;
             if (vs == 0 || vs == 1) {
@@ -1114,7 +1125,7 @@ int Building::FindPathToTarget()
             }
         }
 
-        int tile_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x50);
+        int tile_y = tile_obj->world_y;
         if (this->world_y == tile_y) {
             uint32_t r = CRT_rand();
             int sign = (r & 1) ? -1 : 1;
@@ -1123,7 +1134,7 @@ int Building::FindPathToTarget()
             this->dest_y = tile_y;
         }
 
-        int tile_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile_obj) + 0x4C);
+        int tile_x = tile_obj->world_x;
         this->dest_x = (tile_x > this->world_x) ? this->world_x - 4 : this->world_x + 4;
         return 1;
     }
@@ -1602,12 +1613,12 @@ void Building::StepToward(int x, int y)
     int tile_y = (y < 0) ? -1 : (y >> 4);
 
     /* --- Step 2: Look up tile at target tile position --- */
-    TileMapObject* tile = static_cast<TileMapObject*>(
+    ResourceGameObject* tile = static_cast<ResourceGameObject*>(
         TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));  /* 0x455620 */
 
     uint8_t tile_type = 0;
     if (tile != nullptr) {
-        TileMapResource* tile_res = tile->resource;
+        TileMapResource* tile_res = static_cast<TileMapResource*>(tile->resource);
         tile_type = (tile_res != nullptr) ? tile_res->object_type : 0;
     }
 
@@ -1620,7 +1631,7 @@ void Building::StepToward(int x, int y)
      * Branch (b): All other types → fallback direct step toward target.
      *
      * Within branch (a), the binary has two sub-cases:
-     *   (c) Lane-offset: conn_node_id at tile+0xE4 (TileMapObject::
+     *   (c) Lane-offset: conn_node_id at tile+0xE4 (ResourceGameObject::
      *       occupancy_more) == 0xFFFFFFFF → scans the 4-slot
      *       occupancy_scores[4] array at tile+0xD4 for lane selection.
      *   (d) Connection-node traversal: conn_node_id != 0xFFFFFFFF
@@ -1661,10 +1672,10 @@ void Building::StepToward(int x, int y)
                         best_lane = lane;
                     }
                 }
-                TileMapObject* conn = reinterpret_cast<TileMapObject*>(tile->occupancy_links[best_lane]);
+                ResourceGameObject* conn = tile->occupancy_links[best_lane];
                 if (conn != nullptr) {
-                    this->dest_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x4C);
-                    this->dest_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x50);
+                    this->dest_x = conn->world_x;
+                    this->dest_y = conn->world_y;
                     return;
                 }
             }
@@ -1677,16 +1688,16 @@ void Building::StepToward(int x, int y)
              *  3. Math_PointOnLineSegment for path validation
              *  4. If direction differs from node_id, switch lanes
              *  5. Set track/dest to final tile position              */
-            TileMapObject* conn = reinterpret_cast<TileMapObject*>(tile->occupancy_links[conn_node_id]);
+            ResourceGameObject* conn = tile->occupancy_links[conn_node_id];
             if (conn != nullptr) {
                 uint32_t peer_node = static_cast<uint32_t>(conn->occupancy_more);
                 uint8_t dir = AssetMgr_ReadPairValue(
                     static_cast<AssetMgr*>(g_asset_mgr), peer_node, this->track_node_id);
 
-                int conn_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x4C);
-                int conn_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x50);
-                int tile_x2 = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile) + 0x4C);
-                int tile_y2 = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(tile) + 0x50);
+                int conn_x = conn->world_x;
+                int conn_y = conn->world_y;
+                int tile_x2 = tile->world_x;
+                int tile_y2 = tile->world_y;
 
                 uint8_t on_seg = Math_PointOnLineSegment(
                     this->track_x, this->track_y,
@@ -1694,14 +1705,14 @@ void Building::StepToward(int x, int y)
 
                 if (on_seg == 0 &&
                     ((dir - 2) & 3) == conn_node_id &&
-                    tile->occupancy_links[dir] != 0) {
+                    tile->occupancy_links[dir] != nullptr) {
                     conn_node_id = dir;
                 }
 
-                TileMapObject* final_tile = reinterpret_cast<TileMapObject*>(tile->occupancy_links[conn_node_id]);
+                ResourceGameObject* final_tile = tile->occupancy_links[conn_node_id];
                 if (final_tile != nullptr) {
-                    this->track_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(final_tile) + 0x4C);
-                    this->track_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(final_tile) + 0x50);
+                    this->track_x = final_tile->world_x;
+                    this->track_y = final_tile->world_y;
                     this->track_node_id = static_cast<uint32_t>(final_tile->occupancy_more);
 
                     if (this->track_node_id == conn_node_id) {
@@ -1790,13 +1801,13 @@ void Building::TeleportTo(int x, int y)
      * the wrong argument positions. Ghidra-confirmed against 0x432940's
      * decompile: `TileMap_FindNearestObject(&g_tilemap,0xc,target_x,
      * target_y,0x900)`. */
-    TileMapObject* road_tile = static_cast<TileMapObject*>(
+    ResourceGameObject* road_tile = static_cast<ResourceGameObject*>(
         TileMap_FindNearestObject(g_tilemap, 0x0C, x, y, 0x900));
 
     if (road_tile != nullptr) {
         /* Store road tile position in track-follow fields */
-        this->track_x      = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(road_tile) + 0x4C);  /* +0xB8 */
-        this->track_y      = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(road_tile) + 0x50);  /* +0xBC */
+        this->track_x      = road_tile->world_x;  /* +0xB8 */
+        this->track_y      = road_tile->world_y;  /* +0xBC */
 
         /* Get connection node ID from the tile's occupancy_more (+0xE4) */
         int32_t conn_node = road_tile->occupancy_more;
@@ -1821,7 +1832,7 @@ void Building::TeleportTo(int x, int y)
                     best_slot = static_cast<uint8_t>(slot);
                 }
             }
-            TileMapObject* conn_slot_obj = reinterpret_cast<TileMapObject*>(road_tile->occupancy_links[best_slot]);
+            ResourceGameObject* conn_slot_obj = road_tile->occupancy_links[best_slot];
             if (conn_slot_obj != nullptr) {
                 this->track_node_id = conn_slot_obj->occupancy_more;
             } else {
@@ -2034,13 +2045,13 @@ uint8_t Building::CheckPlacementCollision(int x, int y)
 
                 if (tile_x < 0 || tile_y < 0) continue;
 
-                TileMapObject* tile_obj = static_cast<TileMapObject*>(
+                ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
                     TileMap_GetObjectAt(g_tilemap, static_cast<short>(tile_x), static_cast<short>(tile_y), 0));
                 if (tile_obj != nullptr) {
                     /* Check if tile is occupied by another building or obstacle.
                      * The binary checks tile->resource type and occupancy flags.
                      * A non-null tile with certain type flags means blocked. */
-                    TileMapResource* tile_res = tile_obj->resource;
+                    TileMapResource* tile_res = static_cast<TileMapResource*>(tile_obj->resource);
                     if (tile_res != nullptr) {
                         uint8_t tile_type = tile_res->object_type;
                         /* Type 0x01 = building/obstacle, blocks placement */

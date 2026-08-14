@@ -616,7 +616,7 @@ void Game_CheckScreensaverTimeout(void* game)
 
 /* ===================================================================
  * SYMBOL: GameObject_GetSubObjectWorldPos(void*, int*)
- * CALLER: TileMap::ProcessObjectTimer(TileMapObject*) [world/tilemap.cpp:128,2019]
+ * CALLER: TileMap::ProcessObjectTimer(ResourceGameObject*) [world/tilemap.cpp]
  * ACTION: real-implementation. ADDRESS: 0x458310 (60 bytes, decompiled;
  * Ghidra's own comment names this Entity::GetSubObjectWorldPos).
  *
