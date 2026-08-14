@@ -122,7 +122,7 @@ extern int32_t g_screen_width;              /* 0x004851D8 */
 extern int32_t g_screen_height;             /* 0x00485214 */
 extern void*   g_backbuffer;                /* 0x004FD3C0 -- DDraw backbuffer surface */
 extern void*   g_primary_surface;           /* 0x004FD3C4 -- DDraw primary surface */
-extern void*   g_ddraw;                     /* 0x004FD190 -- IDirectDraw4* */
+extern void*   g_ddraw;                     /* 0x485440 -- IDirectDraw4*, confirmed via Ghidra xrefs 2026-08-14; 0x004FD190 (this file's prior comment) resolves to Building_StepToward, not DirectDraw */
 extern uint8_t g_surface_lost;              /* 0x004FD198 -- DDraw surface lost flag */
 extern void*   g_font_small;                /* 0x004855F4 -- small font handle */
 extern void*   g_dplay_config;              /* 0x004FD390 -- DPLAY config */

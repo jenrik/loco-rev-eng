@@ -322,9 +322,18 @@ uint32_t __thiscall DDRAW_LoadFile(FileData* self, const char* path);
 /* DirectX 6.0 SDK (Aug 1998) determination in NOTE-directx-sdk.md.    */
 /* ================================================================== */
 
-extern int*    g_ddraw;               /* 0x4A9908  IDirectDraw4*            */
-extern int*    g_primary_surface;     /* 0x4FF0D8  IDirectDrawSurface4*     */
-extern int*    g_backbuffer;          /* 0x4FF0DC  IDirectDrawSurface4*     */
+/* void* (not int*) to match every other declaration of these three
+ * globals tree-wide — see platform/ddraw_globals.cpp for g_ddraw's real
+ * defining declaration and why it stays void*. Addresses corrected
+ * 2026-08-14 via Ghidra get_xrefs_to/list_names: this header's prior
+ * 0x4A9908/0x4FF0D8/0x4FF0DC were all wrong (0x4A9908 is a distinct
+ * global, DAT_004a9908, the intermediate pre-QueryInterface-upgrade
+ * IDirectDraw object; 0x4FF0D8/0x4FF0DC don't match any real DirectDraw
+ * xrefs at all). None of this header's ~3 includers reference these
+ * three symbols today (dead declarations, unused). */
+extern void*   g_ddraw;               /* 0x485440  IDirectDraw4*            */
+extern void*   g_primary_surface;     /* 0x4FD3C4  IDirectDrawSurface4*     */
+extern void*   g_backbuffer;          /* 0x4FD3C0  IDirectDrawSurface4*     */
 extern int16_t g_surface_bpp;         /* 0x485274  0x22B=555, 0x235=565    */
 extern int16_t g_surface_bshift;      /* 0x48527A  bit-shift mask           */
 

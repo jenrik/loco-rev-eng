@@ -8,6 +8,7 @@
 // Status: TRANSCRIBED
 
 #include "CGWND.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
 #include <cstring>
 #include <cstdio>
@@ -730,8 +731,12 @@ void CGWND_SetMode(int new_mode)
             }
 
             if (g_ddraw != nullptr) {
-                void** dd_vt = *(void***)g_ddraw;
-                ((void(__thiscall*)(HWND,int))dd_vt[0x50 / 4])(
+                /* SetCooperativeLevel — real ABI vtable[20] (byte offset
+                 * 0x50), dispatched by name (see
+                 * native/ddraw_surface_ops.c's DDRAW_ReleaseSurfaces for
+                 * the same call, converted 2026-08-14 — this shim is
+                 * API- not ABI-compatible, see CLAUDE.md). */
+                static_cast<IDirectDraw4*>(g_ddraw)->SetCooperativeLevel(
                     *(HWND*)((uint8_t*)g_main_window + 0x08), 8);
             }
             PostMessageA(*(HWND*)((uint8_t*)g_main_window + 0x08), 0x10, 0, 0);

@@ -42,7 +42,7 @@ extern void  GLOBAL_free(void* ptr);                 /* 0x465CD0 */
 extern void  WIN32_FatalError(void);
 
 /* DirectDraw globals — void* to avoid IDirectDraw4 dependency */
-extern void* g_ddraw;                                /* 0x4FD394 */
+extern void* g_ddraw;                                /* 0x485440 — confirmed via Ghidra xrefs 2026-08-14; 0x4FD394 (this file's prior comment) resolves to unrelated network/train-queue code, not DirectDraw */
 extern void* g_primary_surface;                      /* 0x4FD3C4 */
 extern void* g_backbuffer;                           /* 0x4FD3C0 */
 
