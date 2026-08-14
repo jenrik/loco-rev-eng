@@ -504,8 +504,18 @@ void* NET_SendFile = nullptr;
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
 void NETMAN_ReceiveLayoutSelect(int);
 void NETMAN_ReceiveLayoutSelect(int) { /* host no-op */ }
-void PlayerConfig_SaveToFile(void*);
-void PlayerConfig_SaveToFile(void*) { /* host no-op */ }
+/* PlayerConfig_SaveToFile(void*) removed 2026-08-15 — declared `char*`-
+ * returning at its one real caller (network/DPlayManager.cpp's
+ * DPlayManager::SetPlayerData) but defined `void`-returning here
+ * (Itanium mangling ignores return type, so it linked silently and
+ * `config_str` read an undefined register) — the same return-type-
+ * mismatch landmine documented repeatedly this session. The real
+ * PlayerConfig::SaveToFile() (game/PlayerConfig.cpp, 0x453320) was
+ * already fully implemented; the call site now calls
+ * g_player_config->SaveToFile() directly instead of this facade. This
+ * became live (not just latent) once NetworkPlayerList::RegisterPlayer
+ * was wired to the real DPlayManager::SetPlayerData earlier this
+ * session — that fix made this facade's caller reachable for real. */
 void ResourceManager_Shutdown(int);
 void ResourceManager_Shutdown(int) { /* host no-op */ }
 void DDRAW_FileData_Dtor(void*);

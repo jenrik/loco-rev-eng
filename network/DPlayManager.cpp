@@ -69,7 +69,6 @@ bool __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY,
                               uint32_t dstX, uint32_t dstY, int32_t dstW,
                               uint32_t dstH, uint32_t flags);     /* 0x42B050 */
 void __cdecl    UI_CenterWindow(RECT* outer, RECT* inner);     /* 0x425A50 */
-char* __cdecl PlayerConfig_SaveToFile(void* config);           /* 0x453320 */
 
 /* Inline memory copy utility — matches MSVC's rep movsd pattern */
 static void inline_memcpy(void* dst, const void* src, int32_t len)
@@ -526,7 +525,7 @@ int32_t DPlayManager::SetPlayerData(const char* name)
     char filename[0x504];                /* stack buffer for filename */
     void* hFile;
     uint32_t bytesWritten;
-    char* config_str;
+    const char* config_str;
     int32_t result;
 
     /* Initialize filename buffer */
@@ -543,7 +542,7 @@ int32_t DPlayManager::SetPlayerData(const char* name)
     filename[0x502] = 0;
 
     /* Get player config string and parse to int */
-    config_str = PlayerConfig_SaveToFile(g_player_config);
+    config_str = g_player_config->SaveToFile();
     m_configId = CRT_atoi(config_str);            /* +0x0C */
 
     /* Build filename: "%s_%s.crd" */
