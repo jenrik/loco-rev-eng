@@ -58,6 +58,20 @@ struct DPLAY_SessionData;
 /*                                                                     */
 /* This IS the DPLAY_PlayerSlot structure (vtable 0x478264).           */
 /* Size: 0x39C bytes                                                   */
+/*                                                                     */
+/* NOTE on editor-local reuse of session fields (2026-08-14): before a */
+/* real network session ever applies (InitPlayerFromSession), m_wordValue,*/
+/* m_dwordValue, m_unknown93, and the tail of m_sessionBlk1 are unused  */
+/* scratch bytes from this class's own perspective — CreatePlayer() just */
+/* zeros/defaults them. input/Cursor.cpp's editor UI (Cursor::obj_184,   */
+/* a DPlayManager* constructed via init_network_player) legitimately     */
+/* repurposes that same storage for local, not-yet-networked UI state    */
+/* (upload_id, is_audio_preview, bonus_prize_id, a locomotive-list name) */
+/* via direct field/byte access with its own doc comments at each site — */
+/* not modeled as separate named fields here since nothing in this      */
+/* class's own methods gives them that meaning (only color_r/g/b below  */
+/* had independent confirmation from a second real caller). Once a real */
+/* session is applied, these bytes take on this class's own semantics.  */
 /* ================================================================== */
 class DPlayManager {
 public:
@@ -86,7 +100,9 @@ public:
     /* +0x25 (20 bytes): Session data block 2 — overwritten via InitPlayerFromSession */
     uint8_t     m_sessionBlk2[20];
 
-    /* +0x39: Flag byte — from session */
+    /* +0x39: Flag byte — from session. NetworkPlayerList::RenderPlayer
+     * reads this as a "use custom color" gate before consuming
+     * color_r/g/b below; no stronger evidence for other uses. */
     uint8_t     m_flag39;
 
     /* +0x3A: Word value — copied from session, initialized 0 */
@@ -95,10 +111,18 @@ public:
     /* +0x3C: Dword value — copied from session, initialized 1 */
     int32_t     m_dwordValue;
 
-    /* +0x40 (3 bytes): Byte flags from session */
-    uint8_t     m_flag40;
-    uint8_t     m_flag41;
-    uint8_t     m_flag42;
+    /* +0x40 (3 bytes): Player color RGB triple. Confirmed by two independent
+     * evidence sources (2026-08-14): NetworkPlayerList::RenderPlayer
+     * (network/NetworkPlayerList.cpp, formerly DPLAY_RenderPlayer) computes
+     * a fill color via NET_ComputeColor(slot+0x40, +0x41, +0x42) when
+     * slot+0x39 (m_flag39) is set, to render another player's list-entry
+     * background; input/Cursor.cpp's editor UI independently reads/writes
+     * the same three bytes as color_r/g/b for the local player being
+     * edited. Previously named m_flag40/41/42 ("byte flags from session")
+     * — renamed once both call sites confirmed the same non-flag meaning. */
+    uint8_t     color_r;
+    uint8_t     color_g;
+    uint8_t     color_b;
 
     /* +0x43 (80 bytes): Null-terminated player name */
     char        m_playerName[80];

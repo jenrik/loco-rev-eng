@@ -123,9 +123,9 @@ static void InitSessionDataSnapshot(DPLAY_SessionData* session, const DPlayManag
     session->session_track = slot->m_playerTrack;
     session->word_value = slot->m_wordValue;
     session->dword_value = slot->m_dwordValue;
-    session->flag_38 = slot->m_flag40;
-    session->flag_39 = slot->m_flag41;
-    session->flag_3A = slot->m_flag42;
+    session->flag_38 = slot->color_r;
+    session->flag_39 = slot->color_g;
+    session->flag_3A = slot->color_b;
     session->entry_count = 0x80;
     inline_memcpy(session->track_entries, slot->m_trackEntries,
                   sizeof(session->track_entries));
@@ -261,10 +261,10 @@ void DPlayManager::CreatePlayer()
 
     /* Dynamic dispatch is compiler-managed in reconstructed C++. */
 
-    /* Zero more flags */
-    m_flag40 = 0;                               /* +0x40 */
-    m_flag41 = 0;                               /* +0x41 */
-    m_flag42 = 0;                               /* +0x42 */
+    /* Reset color to black */
+    color_r = 0;                               /* +0x40 */
+    color_g = 0;                               /* +0x41 */
+    color_b = 0;                               /* +0x42 */
 
     /* Set default values */
     m_wordValue = 0;                            /* +0x3A */
@@ -311,9 +311,9 @@ DPlayManager* DPlayManager::InitPlayerFromSession(const DPLAY_SessionData* sessi
     m_playerTrack = session->session_track;
     m_wordValue = session->word_value;
     m_dwordValue = session->dword_value;
-    m_flag40 = session->flag_38;
-    m_flag41 = session->flag_39;
-    m_flag42 = session->flag_3A;
+    color_r = session->flag_38;
+    color_g = session->flag_39;
+    color_b = session->flag_3A;
 
     entry_count = session->entry_count;
     if (entry_count > 128) entry_count = 128;
@@ -344,9 +344,9 @@ bool DPlayManager::LoadLegacySessionWire(const uint8_t* session, size_t size)
         (static_cast<uint32_t>(session[0x35]) << 8) |
         (static_cast<uint32_t>(session[0x36]) << 16) |
         (static_cast<uint32_t>(session[0x37]) << 24));
-    m_flag40 = session[0x38];
-    m_flag41 = session[0x39];
-    m_flag42 = session[0x3A];
+    color_r = session[0x38];
+    color_g = session[0x39];
+    color_b = session[0x3A];
     inline_memcpy(m_playerName, session + 0x3B, sizeof(m_playerName));
     m_unknown93 = session[0x8B];
     m_playerType = session[0x8C];
@@ -454,9 +454,9 @@ void DPlayManager::CopyLogicalStateFrom(const DPlayManager& source)
     m_flag39 = source.m_flag39;
     m_wordValue = source.m_wordValue;
     m_dwordValue = source.m_dwordValue;
-    m_flag40 = source.m_flag40;
-    m_flag41 = source.m_flag41;
-    m_flag42 = source.m_flag42;
+    color_r = source.color_r;
+    color_g = source.color_g;
+    color_b = source.color_b;
     inline_memcpy(m_playerName, source.m_playerName, sizeof(m_playerName));
     m_unknown93 = source.m_unknown93;
     m_playerType = source.m_playerType;

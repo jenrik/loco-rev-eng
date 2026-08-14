@@ -892,15 +892,23 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
      *    If playerData+0x39 flag is set, compute fill color from
      *    fields +0x40/0x41/0x42 via NET_ComputeColor.
      *    Otherwise use WHITE_BRUSH and draw optional highlight rect.
-     *    NOTE: +0x39/+0x40/+0x41/+0x42/+0x43 coincide with DPlayPlayer's
-     *    declared upload_status/color_r/color_g/color_b/player_name fields
-     *    (this file, above) — a possible lead that playerData is really a
-     *    DPlayPlayer*, but +0x10/+0x25/+0x93/+0x96 below have no matching
-     *    DPlayPlayer fields, and DPlayPlayer as declared has no vtable
-     *    slot 0 for the ctx_vtbl dispatch above/below to bind to. Left as
-     *    raw offsets per this function's own top-of-file caveat rather
-     *    than guess; flagged for a dedicated future RE pass, not resolved
-     *    here. */
+     *    RESOLVED (2026-08-14): +0x39/+0x40/+0x41/+0x42/+0x43, and this
+     *    file's own +0x10/+0x25/+0x93/+0x96 offsets below, all match real
+     *    network/DPlayManager.h fields exactly (m_flag39, color_r/g/b,
+     *    m_playerName, m_sessionBlk1, m_sessionBlk2, m_unknown93,
+     *    m_trackEntries) — confirmed independently via input/Cursor.cpp's
+     *    obj_184 usage of the same offsets, which is what motivated
+     *    renaming DPlayManager's +0x40..+0x42 fields from m_flag40/41/42
+     *    to color_r/g/b. The formerly-declared `DPlayPlayer` struct (this
+     *    file, above) was a separate fictional partial view that never
+     *    matched beyond +0x40..+0x43 and has been removed. Retyping
+     *    `playerData` itself to DPlayManager* is NOT done here: this
+     *    function's own vtable dispatch through the same pointer (slots
+     *    17/26, above) doesn't match DPlayManager's real vtable (only
+     *    slot [0], the destructor) and the "register confusion" caveat
+     *    at this function's top means the vtable-dispatch parts of this
+     *    parameter's identity are still unresolved — a dedicated future
+     *    RE pass, not this one. */
     if (*reinterpret_cast<int8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x39) != 0) {
         color = NET_ComputeColor(
             *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x40),

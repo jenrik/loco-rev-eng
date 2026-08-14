@@ -52,21 +52,15 @@
 
 struct UIPANEL_Surface;
 /* ================================================================== */
-/* ================================================================== */
-/* DPlayPlayer — DPLAY player record (0x39C bytes, created by          */
-/* DPLAY_CreatePlayer). Contains player identity, colour, and network  */
-/* state. Used by Cursor (obj_184), VehicleEditor, Train_network.      */
-/* ================================================================== */
-struct DPlayPlayer {
-    uint8_t   _pad_00[0x3A];      /* +0x00..+0x39 */
-    int16_t   upload_status;      /* +0x3A  upload/network status */
-    int32_t   field_3C;           /* +0x3C  flag (0 or 1) */
-    uint8_t   color_r;            /* +0x40  red component */
-    uint8_t   color_g;            /* +0x41  green component */
-    uint8_t   color_b;            /* +0x42  blue component */
-    char      player_name[1];     /* +0x43  variable-length name */
-    /* Total size: 0x39C bytes */
-};
+/* DPlayPlayer struct (a fictional partial view of the 0x39C-byte DPLAY */
+/* player record, matching only +0x3A..+0x43) removed 2026-08-14: it   */
+/* was never independently evidenced and its own comment in            */
+/* RenderPlayer (this file's .cpp, below) already flagged that it did  */
+/* not match every offset RenderPlayer reads. The real type is         */
+/* DPlayManager (network/DPlayManager.h, full 0x39C layout modeled) —  */
+/* see input/Cursor.cpp's obj_184 usage for the independent confirming */
+/* evidence, and RenderPlayer's own updated comment for what remains   */
+/* unresolved about `playerData`'s exact identity in this file. */
 
 /* ================================================================== */
 /* NetworkPlayerList — Top-level DPLAY player/surface cache class      */

@@ -2954,7 +2954,7 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
             memcpy(player->m_playerName, name_buf, sizeof(name_buf));
 
             player->InitPlayer(5, 1, 5, 0x94, 99, 0x48, 0x48);
-            player->m_flag41 = 0xFF;
+            player->color_g = 0xFF;
 
             /* Copy player name from g_player_config + 6 (PlayerConfig::name).
              * PlayerConfig::name is char[14]; this 0x14 (20)-byte copy is the
@@ -3204,7 +3204,7 @@ void Train_ConnectToServer(void* subsystem, void* payload)
          * allocation failed (player stays null) — matches the binary; the
          * only null guard in the original is on the destroy call below. */
         FormatResourceString(&g_resmgr, 0xDF, player->m_playerName, 0x50);
-        player->m_flag41 = 0xFF;
+        player->color_g = 0xFF;
         strcpy(reinterpret_cast<char*>(player->m_sessionBlk1),
                reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)));
         strcpy(reinterpret_cast<char*>(player->m_sessionBlk2), "LEGO LOCO");
