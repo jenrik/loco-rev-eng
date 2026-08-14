@@ -278,8 +278,11 @@ void DDRAW_GetSurfaceWidthHeight(void*,uint16_t*,uint16_t*){}
  * fabricating a DDERR-code-to-string table without Ghidra evidence. */
 void* DDRAW_GetDdrawErrorString(int);
 void* DDRAW_GetDdrawErrorString(int){ fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
-void DPLAY_SetPlayerData(void*,const char*);
-void DPLAY_SetPlayerData(void*,const char*){}
+/* DPLAY_SetPlayerData(void*,const char*) [extern "C"] removed 2026-08-15
+ * — a separate, unmangled symbol from the C++-linkage stub also removed
+ * this pass (shared/defsym_stubs.cpp); zero callers use extern "C"
+ * linkage for this name anywhere in the tree, confirmed via full-tree
+ * grep, so it was already dead, not a live landmine. */
 void DPLAY_CleanupPlayer(void*);
 void DPLAY_CleanupPlayer(void*){}
 /* DPLAY_CreatePlayer(void*) [extern "C"] removed 2026-08-14 — zero real

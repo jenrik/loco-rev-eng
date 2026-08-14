@@ -26,6 +26,7 @@
 // Status: TRANSCRIBED
 
 #include "NetworkPlayerList.h"
+#include "DPlayManager.h"
 #include "../graphics/LOCOBITMAP.h"
 #include "../game/PlayerConfig.h"
 #ifndef _WIN32
@@ -148,7 +149,6 @@ extern void  __cdecl    FormatResourceString(void* resmgr, uint32_t id,
 extern void  __cdecl    UI_CenterWindow(void* outer, void* inner);
 
 /* DPlay helpers */
-extern int32_t __thiscall DPLAY_SetPlayerData(void* slot, const char* path);
 extern uint32_t __cdecl     NET_ComputeColor(uint8_t param1, uint8_t param2,
                                              uint8_t param3);
 
@@ -1330,7 +1330,7 @@ static int16_t count_and_free_postbag_list(PostBagFileNode* node)
 /* Save a DPLAY_PlayerSlot to a .crd file in the specified PostBag     */
 /* subdirectory. Updates message count cache.                          */
 /* ================================================================== */
-uint32_t NetworkPlayerList::RegisterPlayer(void* player_slot,
+uint32_t NetworkPlayerList::RegisterPlayer(DPlayManager* player_slot,
                                                         int32_t type,
                                                         int32_t param3)
 {
@@ -1353,7 +1353,7 @@ uint32_t NetworkPlayerList::RegisterPlayer(void* player_slot,
                   param3);
     }
 
-    result = DPLAY_SetPlayerData(player_slot, filepath);
+    result = static_cast<uint32_t>(player_slot->SetPlayerData(filepath));
     if (static_cast<uint8_t>(result) == 0) {
         return result & 0xFFFFFF00;
     }
@@ -1385,7 +1385,7 @@ void NetworkPlayerList::UnregisterPlayer(const char* filepath)
 /*                                                                      */
 /* Delete a player's .crd file by reading configId from player_slot.   */
 /* ================================================================== */
-void NetworkPlayerList::GetPlayerAddress(void* player_slot,
+void NetworkPlayerList::GetPlayerAddress(DPlayManager* player_slot,
                                                       int32_t type)
 {
     char filepath[0x504];
@@ -1393,7 +1393,7 @@ void NetworkPlayerList::GetPlayerAddress(void* player_slot,
     int32_t configId;
 
     subdir = PostBag_Subdir(type);
-    configId = *reinterpret_cast<int32_t*>(reinterpret_cast<int8_t*>(player_slot) + 0x0C);
+    configId = player_slot->m_configId;
 
     wsprintfA(filepath, reinterpret_cast<const char*>(0x0047ed2c),
               g_install_path,

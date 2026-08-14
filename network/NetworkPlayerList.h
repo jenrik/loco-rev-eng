@@ -51,6 +51,7 @@
 /* Dispatch-table addresses are documentation only; C++ manages dispatch. */
 
 struct UIPANEL_Surface;
+class DPlayManager;
 /* ================================================================== */
 /* DPlayPlayer struct (a fictional partial view of the 0x39C-byte DPLAY */
 /* player record, matching only +0x3A..+0x43) removed 2026-08-14: it   */
@@ -273,15 +274,15 @@ public:
      * Address: 0x444D00 (formerly NET_RegisterPlayer)
      *
      * Constructs filepath based on PostBag subdirectory type, calls
-     * DPLAY_SetPlayerData to write the .crd file, updates the message
-     * count cache by enumerating Sort_Out via NET_GetHostName.
+     * DPlayManager::SetPlayerData to write the .crd file, updates the
+     * message count cache by enumerating Sort_Out via NET_GetHostName.
      *
-     * @param player_slot  DPLAY_PlayerSlot to register
+     * @param player_slot  Real DPlayManager instance to register
      * @param type         PostBag subdirectory type (0-7)
      * @param param3       Additional parameter (subdirectory suffix or 0)
      * @return             1 on success, 0xFFFFFF00 on write failure
      */
-    uint32_t RegisterPlayer(void* player_slot, int32_t type, int32_t param3);
+    uint32_t RegisterPlayer(DPlayManager* player_slot, int32_t type, int32_t param3);
 
     /**
      * UnregisterPlayer — Delete a player's .crd file from PostBag.
@@ -295,13 +296,13 @@ public:
      * GetPlayerAddress — Delete a player's .crd file by player slot ID.
      * Address: 0x445000 (formerly NET_GetPlayerAddress)
      *
-     * Builds path from configId at player_slot+0x0C, deletes the file,
+     * Builds path from player_slot->m_configId, deletes the file,
      * and updates message count cache.
      *
-     * @param player_slot  DPLAY_PlayerSlot
+     * @param player_slot  Real DPlayManager instance
      * @param type         PostBag subdirectory type (0-7)
      */
-    void GetPlayerAddress(void* player_slot, int32_t type);
+    void GetPlayerAddress(DPlayManager* player_slot, int32_t type);
 };
 
 /** Process-owned NetworkPlayerList singleton — original address 0x4FD3B0. */

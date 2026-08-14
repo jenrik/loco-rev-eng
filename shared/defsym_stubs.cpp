@@ -474,8 +474,13 @@ void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
  * linked fine and every caller read an undefined register as the
  * "color"). Removed now that a real, correctly-typed definition exists —
  * keeping both would be a duplicate-definition link error. */
-void DPLAY_SetPlayerData(void*, char const*);
-void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
+/* DPLAY_SetPlayerData(void*, const char*) [C++ linkage] removed
+ * (2026-08-15) — same silent-wrong-stub class as NET_ComputeColor above:
+ * network/NetworkPlayerList.cpp's RegisterPlayer called this expecting a
+ * real int32_t result, but got this always-void no-op (Itanium mangling
+ * ignores return type, so it linked fine and every caller read an
+ * undefined register as the result). RegisterPlayer now calls the real,
+ * already-implemented DPlayManager::SetPlayerData() method directly. */
 void TileMap_UpdateViewport(void*, void*, short);
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
 void TileMap_GetTileRect(void*, void*);

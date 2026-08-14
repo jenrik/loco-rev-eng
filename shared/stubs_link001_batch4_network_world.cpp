@@ -184,14 +184,16 @@ void* TileMap_GetObjectAt(void* tilemap, short x, short y, short layer)
  * ADDRESS: 0x444D00 (formerly labeled NET_RegisterPlayer, now
  *   NetworkPlayerList::RegisterPlayer — see network/NetworkPlayerList.h)
  * ACTION: caller-declaration-is-wrong (real implementation already exists
- *   as NetworkPlayerList::RegisterPlayer(void*, int32_t, int32_t) -> uint32_t;
- *   network/Netman.h's free-function declaration predates that method
- *   being identified/ported and has the wrong return type (void* vs the
- *   real uint32_t) — harmless here since every call site discards the
- *   return value, but still a real declaration/implementation mismatch).
- *   `dplay` in the caller is documented as "0x4FD3AC — DPLAY/
- *   NetworkPlayerList instance", i.e. exactly the receiver
- *   NetworkPlayerList::RegisterPlayer expects.
+ *   as NetworkPlayerList::RegisterPlayer(DPlayManager*, int32_t, int32_t)
+ *   -> uint32_t; network/Netman.h's free-function declaration predates
+ *   that method being identified/ported and has the wrong return type
+ *   (void* vs the real uint32_t) — harmless here since every call site
+ *   discards the return value, but still a real declaration/
+ *   implementation mismatch). `dplay` in the caller is documented as
+ *   "0x4FD3AC — DPLAY/NetworkPlayerList instance", i.e. exactly the
+ *   receiver NetworkPlayerList::RegisterPlayer expects; `playerData`
+ *   at every real caller (game/Train_network.cpp, town/Town.cpp,
+ *   network/Netman.cpp) is a real DPlayManager* (2026-08-14/15).
  * SHOULD_BE_FIXED_AT: network/Netman.h:282 — drop the free-function decl;
  *   network/Netman.cpp:2341 should call
  *   `static_cast<NetworkPlayerList*>(_g_dplay)->RegisterPlayer(dplay, 1, 0)`
@@ -200,8 +202,8 @@ void* TileMap_GetObjectAt(void* tilemap, short x, short y, short layer)
 void* NET_RegisterPlayer(void* dplay, void* playerData, int32_t type, int32_t param)
 {
     if (dplay == nullptr) return nullptr;
-    const uint32_t result =
-        static_cast<NetworkPlayerList*>(dplay)->RegisterPlayer(playerData, type, param);
+    const uint32_t result = static_cast<NetworkPlayerList*>(dplay)->RegisterPlayer(
+        static_cast<DPlayManager*>(playerData), type, param);
     return reinterpret_cast<void*>(static_cast<uintptr_t>(result));
 }
 
