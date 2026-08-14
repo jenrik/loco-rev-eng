@@ -28,79 +28,125 @@
 
 /* =========================================================================
  * DirectDraw types
+ *
+ * Field order/names below match the real DirectX 6.0 SDK layout (see
+ * NOTE-directx-sdk.md for how that SDK version was determined and where its
+ * headers can be sourced) — consulted for the documented struct shape only,
+ * never for ddraw.dll's actual implementation. This project's shim targets
+ * API compatibility (correct names, signatures, field order for by-name
+ * access), not ABI compatibility: absolute byte offsets and sizeof() are NOT
+ * preserved host-side (e.g. lpSurface is a real pointer — 8 bytes on a
+ * 64-bit host vs. 4 in the original 32-bit struct — so every later offset
+ * legitimately differs from the original binary). Per CLAUDE.md, exact x86
+ * layout parity is a non-goal for host-only builds.
  * ========================================================================= */
 
-/* Surface description — matches DDSURFACEDESC from ddraw.h */
-struct DDSURFACEDESC {
-    uint32_t dwSize;
-    uint32_t dwFlags;
-    uint32_t dwWidth;
-    uint32_t dwHeight;
-    int32_t  lPitch;
-    uint32_t dwBackBufferCount;
-    uint32_t dwMipMapCount;
-    uint32_t dwAlphaBitDepth;
-    uint32_t dwReserved;
-    void*    lpSurface;
-    uint32_t dwCKDestBltColorSpaceLowValue;
-    uint32_t dwCKDestBltColorSpaceHighValue;
-    uint32_t dwCKSrcBltColorSpaceLowValue;
-    uint32_t dwCKSrcBltColorSpaceHighValue;
-
-    DDSURFACEDESC()
-        : dwSize(0), dwFlags(0), dwWidth(0), dwHeight(0), lPitch(0),
-          dwBackBufferCount(0), dwMipMapCount(0), dwAlphaBitDepth(0),
-          dwReserved(0), lpSurface(nullptr), dwCKDestBltColorSpaceLowValue(0),
-          dwCKDestBltColorSpaceHighValue(0), dwCKSrcBltColorSpaceLowValue(0),
-          dwCKSrcBltColorSpaceHighValue(0)
-    { std::memset(this, 0, sizeof(*this)); dwSize = sizeof(*this); }
+/* Pixel format description — matches DDPIXELFORMAT from ddraw.h */
+struct DDPIXELFORMAT {
+    uint32_t dwSize = 0;
+    uint32_t dwFlags = 0;
+    uint32_t dwFourCC = 0;
+    uint32_t dwRGBBitCount = 0;
+    uint32_t dwRBitMask = 0;
+    uint32_t dwGBitMask = 0;
+    uint32_t dwBBitMask = 0;
+    uint32_t dwRGBAlphaBitMask = 0;
 };
 
-/* Blit effects — matches DDBLTFX from ddraw.h */
-struct DDBLTFX {
-    uint32_t dwSize;
-    uint32_t dwDDFX;
-    uint32_t dwROP;
-    uint32_t dwDDROP;
-    uint32_t dwRotationAngle;
-    uint32_t dwZBufferOpCode;
-    uint32_t dwZBufferLow;
-    uint32_t dwZBufferHigh;
-    uint32_t dwZBufferBaseDest;
-    uint32_t dwZDestConstBitDepth;
-    uint32_t dwZSrcConstBitDepth;
-    uint32_t dwAlphaEdgeBlendBitDepth;
-    uint32_t dwAlphaEdgeBlend;
-    uint32_t dwReserved;
-    uint32_t dwAlphaDestConstBitDepth;
-    uint32_t dwAlphaSrcConstBitDepth;
-    uint32_t dwFillColor;
-    uint32_t dwDDDestColorBitDepth;
-
-    DDBLTFX()
-        : dwSize(0), dwDDFX(0), dwROP(0), dwDDROP(0), dwRotationAngle(0),
-          dwZBufferOpCode(0), dwZBufferLow(0), dwZBufferHigh(0),
-          dwZBufferBaseDest(0), dwZDestConstBitDepth(0), dwZSrcConstBitDepth(0),
-          dwAlphaEdgeBlendBitDepth(0), dwAlphaEdgeBlend(0), dwReserved(0),
-          dwAlphaDestConstBitDepth(0), dwAlphaSrcConstBitDepth(0),
-          dwFillColor(0), dwDDDestColorBitDepth(0)
-    { std::memset(this, 0, sizeof(*this)); dwSize = sizeof(*this); }
+/* Surface capabilities — matches DDSCAPS2 from ddraw.h */
+struct DDSCAPS2 {
+    uint32_t dwCaps = 0;
+    uint32_t dwCaps2 = 0;
+    uint32_t dwCaps3 = 0;
+    uint32_t dwCaps4 = 0;
 };
 
 /* Color key — matches DDCOLORKEY from ddraw.h */
 struct DDCOLORKEY {
-    uint32_t dwColorSpaceLowValue;
-    uint32_t dwColorSpaceHighValue;
+    uint32_t dwColorSpaceLowValue = 0;
+    uint32_t dwColorSpaceHighValue = 0;
+};
+
+/* Surface description — matches DDSURFACEDESC2 from ddraw.h (the shape
+ * IDirectDraw4/IDirectDrawSurface4 actually use; kept named "DDSURFACEDESC"
+ * because every caller in this tree already spells it that way). Height
+ * precedes width, matching the real SDK — the opposite order this struct
+ * used to have was an in-repo landmine (see NOTE-directx-sdk.md /
+ * PROGRESS.md). `dwSize` is intentionally left unpopulated by the default
+ * constructor: this shim's GetSurfaceDesc/CreateSurface do not validate it
+ * against a fixed byte count (there isn't a single correct one once the
+ * struct isn't x86-sized), so callers that set it explicitly (e.g. to the
+ * original DDSD_SIZE constant) are not contradicted, and callers that don't
+ * set it are not silently miscompared. */
+struct DDSURFACEDESC {
+    uint32_t      dwSize = 0;
+    uint32_t      dwFlags = 0;
+    uint32_t      dwHeight = 0;
+    uint32_t      dwWidth = 0;
+    int32_t       lPitch = 0;
+    uint32_t      dwBackBufferCount = 0;
+    uint32_t      dwMipMapCount = 0;
+    uint32_t      dwAlphaBitDepth = 0;
+    uint32_t      dwReserved = 0;
+    void*         lpSurface = nullptr;
+    DDCOLORKEY    ddckCKDestOverlay;
+    DDCOLORKEY    ddckCKDestBlt;
+    DDCOLORKEY    ddckCKSrcOverlay;
+    DDCOLORKEY    ddckCKSrcBlt;
+    DDPIXELFORMAT ddpfPixelFormat;
+    DDSCAPS2      ddsCaps;
+    uint32_t      dwTextureStage = 0;
+};
+
+/* Blit effects — matches DDBLTFX from ddraw.h. The fill-color/pattern/
+ * z-buffer/alpha-const slots are real unions in the SDK; this shim only
+ * ever needs the DWORD interpretation (dwFillColor etc.), so they're plain
+ * fields here rather than reproducing the union — API-compatible by name,
+ * not byte-identical. */
+struct DDBLTFX {
+    uint32_t   dwSize = 0;
+    uint32_t   dwDDFX = 0;
+    uint32_t   dwROP = 0;
+    uint32_t   dwDDROP = 0;
+    uint32_t   dwRotationAngle = 0;
+    uint32_t   dwZBufferOpCode = 0;
+    uint32_t   dwZBufferLow = 0;
+    uint32_t   dwZBufferHigh = 0;
+    uint32_t   dwZBufferBaseDest = 0;
+    uint32_t   dwZDestConstBitDepth = 0;
+    uint32_t   dwZDestConst = 0;
+    uint32_t   dwZSrcConstBitDepth = 0;
+    uint32_t   dwZSrcConst = 0;
+    uint32_t   dwAlphaEdgeBlendBitDepth = 0;
+    uint32_t   dwAlphaEdgeBlend = 0;
+    uint32_t   dwReserved = 0;
+    uint32_t   dwAlphaDestConstBitDepth = 0;
+    uint32_t   dwAlphaDestConst = 0;
+    uint32_t   dwAlphaSrcConstBitDepth = 0;
+    uint32_t   dwAlphaSrcConst = 0;
+    uint32_t   dwFillColor = 0;
+    DDCOLORKEY ddckDestColorkey;
+    DDCOLORKEY ddckSrcColorkey;
 };
 
 /* DDSURFACEDESC flags */
-#define DDSD_WIDTH        0x00000004
+#define DDSD_CAPS         0x00000001
 #define DDSD_HEIGHT       0x00000002
+#define DDSD_WIDTH        0x00000004
 #define DDSD_PITCH        0x00000008
 #define DDSD_LPSURFACE    0x00000800
 
+/* Surface capabilities (DDSCAPS2.dwCaps) */
+#define DDSCAPS_OFFSCREENPLAIN 0x00000040
+#define DDSCAPS_SYSTEMMEMORY   0x00000800
+
 /* Blt flags */
 #define DDBLT_WAIT        0x01000000
+#define DDBLT_COLORFILL   0x00000400
+#define DDBLT_KEYSRC      0x00008000
+
+/* Lock flags */
+#define DDLOCK_WAIT       0x00000001
 
 /* Color key flags */
 #define DDCKEY_SRCBLT     0x00000001
