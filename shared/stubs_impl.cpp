@@ -13,6 +13,7 @@
 #include "../network/DPlayConfig.h"
 #include "../network/NetworkPlayerList.h"
 #include "../network/DirectPlay.h"
+#include "../game/PlayerConfig.h"
 #include <new>
 #include <cstdlib>
 #include <cassert>
@@ -224,7 +225,7 @@ int  IsRectEmpty(const RECT* r) { return !r || r->left>=r->right || r->top>=r->b
  * definitions in shared/link_stubs.cpp. g_scripted_object: duplicate of
  * shared/defsym_stubs.cpp. g_ddraw_building/g_tooltip_mgr: duplicates of
  * the real typed globals in graphics/DDRAW.cpp. All removed (LINK-001). */
-void* g_player_config = nullptr;
+PlayerConfig* g_player_config = nullptr;
 void* g_config_ini = nullptr;
 void* g_trainstation_window = nullptr;
 DirectPlaySession* g_dplay_peer = nullptr;
