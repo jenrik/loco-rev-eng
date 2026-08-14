@@ -70,14 +70,12 @@ ResourceGameObject::ResourceGameObject(int resource_id)
             timer = static_cast<uint32_t>(CRT_rand() % 0x3d) + g_game_time;
         }
 
-        for (int i = 0; i < 4; ++i) {
-            occupancy_links[i] = nullptr;
-            occupancy_scores[i] = 0;
-            build_links[i] = nullptr;
-            build_scores[i] = 0;
+        for (int i = 0; i < 8; ++i) {
+            fields_c4_e0[i] = 0;
+            fields_e8_104[i] = 0;
         }
-        occupancy_more = -1;
-        build_more = -1;
+        sentinel_e4 = -1;
+        sentinel_108 = -1;
         return;
     }
 #endif
@@ -105,14 +103,12 @@ ResourceGameObject::ResourceGameObject(int resource_id)
     if (frames[anim_index].wait_time >= 0)
         timer = static_cast<uint32_t>(CRT_rand() % 0x3d) + g_game_time;
 
-    for (int i = 0; i < 4; ++i) {
-        occupancy_links[i] = nullptr;
-        occupancy_scores[i] = 0;
-        build_links[i] = nullptr;
-        build_scores[i] = 0;
+    for (int i = 0; i < 8; ++i) {
+        fields_c4_e0[i] = 0;
+        fields_e8_104[i] = 0;
     }
-    occupancy_more = -1;
-    build_more = -1;
+    sentinel_e4 = -1;
+    sentinel_108 = -1;
 }
 
 /** Destructor body. Address: 0x458270. */

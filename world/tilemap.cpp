@@ -806,14 +806,14 @@ int* TileMap::GetTileOrigin(int* out_id, short tile_x, short tile_y, short layer
 
     size_t data_index = (static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y)) * 0x40 +
                         static_cast<int>(layer) * 4 + 0x1C;
-    ResourceGameObject* obj = static_cast<ResourceGameObject*>(ReadTilePointer(data_index));
+    TileMapObject* obj = static_cast<TileMapObject*>(ReadTilePointer(data_index));
 
     if (obj != nullptr) {
         /* Binary reads one 32-bit dword at +0x88, packing tile_x (+0x88,
          * low word) and tile_y (+0x8A, high word) together -- hence
          * "*out_id" here is a packed pair, not just tile_x alone. */
-        *out_id = (static_cast<int32_t>(static_cast<uint16_t>(obj->sub_pos_y)) << 16) |
-                  static_cast<int32_t>(static_cast<uint16_t>(obj->sub_pos_x));
+        *out_id = (static_cast<int32_t>(static_cast<uint16_t>(obj->tile_y)) << 16) |
+                  static_cast<int32_t>(static_cast<uint16_t>(obj->tile_x));
         return out_id;
     }
     *out_id = -1;
@@ -837,12 +837,12 @@ void TileMap::GetTileOriginEx(int* out_packed, short tile_x, short tile_y, short
 
     size_t data_index = (static_cast<int>(tile_x) * 0x41 + static_cast<int>(tile_y)) * 0x40 +
                         static_cast<int>(layer) * 4;
-    ResourceGameObject* obj = static_cast<ResourceGameObject*>(ReadTilePointer(data_index));
+    TileMapObject* obj = static_cast<TileMapObject*>(ReadTilePointer(data_index));
 
     if (obj != nullptr) {
         /* Same packed tile_x/tile_y dword as GetTileOrigin above. */
-        *out_packed = (static_cast<int32_t>(static_cast<uint16_t>(obj->sub_pos_y)) << 16) |
-                      static_cast<int32_t>(static_cast<uint16_t>(obj->sub_pos_x));
+        *out_packed = (static_cast<int32_t>(static_cast<uint16_t>(obj->tile_y)) << 16) |
+                      static_cast<int32_t>(static_cast<uint16_t>(obj->tile_x));
         return;
     }
     *out_packed = -1;
@@ -994,7 +994,7 @@ uint8_t __fastcall RESDATA_IsBuildingTile(int32_t tile_obj)
      * SpriteMetadata::tile_type instead of reading past the real
      * allocation. `is_host_sprite_resource()` correctly returns false (and
      * this falls through to the raw read below) for a pointer that is
-     * NOT a SpriteResource -- notably a real placed ResourceGameObject* once
+     * NOT a SpriteResource -- notably a real placed TileMapObject* once
      * INPUT_PlaceObject/FindObject exist (PROGRESS.md:368's occupancy_grid
      * note); that case isn't reachable yet and isn't guarded here. */
     const void* host_resource =
@@ -1058,9 +1058,9 @@ void TileMap::InvalidateRect(int left, int top, int right, int bottom)
 /* header. If no neighbor defined, returns NULL. After finding a       */
 /* candidate, checks distance is <= 17 pixels.                         */
 /* ================================================================== */
-ResourceGameObject* TileMap::GetViewport(ResourceGameObject* sprite, int direction)
+TileMapObject* TileMap::GetViewport(TileMapObject* sprite, int direction)
 {
-    TileMapResource* resource = static_cast<TileMapResource*>(sprite->resource);
+    TileMapResource* resource = sprite->resource;
     if (resource == NULL) {
         return NULL;
     }
@@ -1096,11 +1096,11 @@ ResourceGameObject* TileMap::GetViewport(ResourceGameObject* sprite, int directi
     }
 
     /* Get the object at the target tile (layer 0) */
-    ResourceGameObject* neighbor = static_cast<ResourceGameObject*>(
+    TileMapObject* neighbor = static_cast<TileMapObject*>(
         ReadTilePointer((tile_x * 0x41 + static_cast<int>(tile_y)) * 0x40));
 
     /* Distance check: verify neighbor is close enough (<= 17 pixels) */
-    if (neighbor != NULL && static_cast<TileMapResource*>(neighbor->resource) != NULL) {
+    if (neighbor != NULL && neighbor->resource != NULL) {
         int neighbor_pos[2];
         Entity_GetSubObjectPosition(neighbor, neighbor_pos,
                                      (direction - 2) & 3);
@@ -1122,32 +1122,32 @@ ResourceGameObject* TileMap::GetViewport(ResourceGameObject* sprite, int directi
 /* For each valid neighbor, checks if buildable. Returns count (0-4)   */
 /* or 1 if any neighbor has a station resource (0xC50/0xC52).          */
 /* ================================================================== */
-char TileMap::SetViewport(ResourceGameObject* building_sprite)
+char TileMap::SetViewport(TileMapObject* building_sprite)
 {
     if (building_sprite == NULL) {
         return 0;
     }
 
-    TileMapResource* resource = static_cast<TileMapResource*>(building_sprite->resource);
+    TileMapResource* resource = building_sprite->resource;
     if (resource->IsEditorSprite()) {     /* 0x41F430 */
         return 0;
     }
 
     /* Get viewport neighbors for all 4 directions */
-    ResourceGameObject* neighbors[4] = {NULL, NULL, NULL, NULL};
+    TileMapObject* neighbors[4] = {NULL, NULL, NULL, NULL};
 
     for (int dir = 0; dir < 4; dir++) {
-        ResourceGameObject* neighbor = GetViewport(building_sprite, dir);
+        TileMapObject* neighbor = GetViewport(building_sprite, dir);
         neighbors[dir] = neighbor;
 
         if (neighbor != NULL) {
-            TileMapResource* res = static_cast<TileMapResource*>(neighbor->resource);
+            TileMapResource* res = neighbor->resource;
 
             /* Skip sprite-editor objects */
             while (res != NULL && res->IsEditorSprite()) {     /* 0x41F430 */
                 neighbor = GetViewport(neighbor, dir);
                 neighbors[dir] = neighbor;
-                res = neighbor == NULL ? NULL : static_cast<TileMapResource*>(neighbor->resource);
+                res = neighbor == NULL ? NULL : neighbor->resource;
             }
 
             /* If neighbor exists but isn't buildable, discard it */
@@ -1171,7 +1171,7 @@ char TileMap::SetViewport(ResourceGameObject* building_sprite)
     /* Check for station resources (0xC50 = station type, 0xC52 = other) */
     for (int dir = 0; dir < 4; ++dir) {
         if (neighbors[dir] != NULL) {
-            TileMapResource* neighbor_resource = static_cast<TileMapResource*>(neighbors[dir]->resource);
+            TileMapResource* neighbor_resource = neighbors[dir]->resource;
             int res_id = neighbor_resource == NULL ? -1 : neighbor_resource->resource_id;
             int expected = (dir & 1) == 0 ? 0xC50 : 0xC52;
             if (res_id == expected) return 1;
@@ -1189,32 +1189,32 @@ char TileMap::SetViewport(ResourceGameObject* building_sprite)
 /* (multi-track) sprites, checks the 2x2 tile neighborhood and        */
 /* subtracts scenery (type 0x0C) tiles from the count.                */
 /* ================================================================== */
-char TileMap::UpdateViewport(ResourceGameObject* sprite, short sprite_type)
+char TileMap::UpdateViewport(TileMapObject* sprite, short sprite_type)
 {
     if (sprite == NULL) {
         return 0;
     }
 
-    TileMapResource* resource = static_cast<TileMapResource*>(sprite->resource);
+    TileMapResource* resource = sprite->resource;
     if (resource->IsEditorSprite()) {     /* 0x41F430 */
         return 0;
     }
 
     /* Get viewport neighbors for all 4 directions */
-    ResourceGameObject* neighbors[4] = {NULL, NULL, NULL, NULL};
+    TileMapObject* neighbors[4] = {NULL, NULL, NULL, NULL};
 
     for (int dir = 0; dir < 4; dir++) {
-        ResourceGameObject* neighbor = GetViewport(sprite, dir);
+        TileMapObject* neighbor = GetViewport(sprite, dir);
         neighbors[dir] = neighbor;
 
         if (neighbor != NULL) {
-            TileMapResource* res = static_cast<TileMapResource*>(neighbor->resource);
+            TileMapResource* res = neighbor->resource;
 
             /* Skip sprite-editor objects */
             while (res != NULL && res->IsEditorSprite()) {     /* 0x41F430 */
                 neighbor = GetViewport(neighbor, dir);
                 neighbors[dir] = neighbor;
-                res = neighbor == NULL ? NULL : static_cast<TileMapResource*>(neighbor->resource);
+                res = neighbor == NULL ? NULL : neighbor->resource;
             }
 
             /* If neighbor exists but is occupied (conflicts), discard it */
@@ -1237,8 +1237,8 @@ char TileMap::UpdateViewport(ResourceGameObject* sprite, short sprite_type)
 
     /* For type 7 (multi-track objects), check 2x2 tile neighborhood */
     if (sprite_type == 7 && valid_count == 4) {
-        int tile_x = sprite->sub_pos_x;
-        int tile_y = sprite->sub_pos_y;
+        int tile_x = sprite->tile_x;
+        int tile_y = sprite->tile_y;
 
         void* corner[4];
         corner[0] = GetObjectAt(static_cast<short>(tile_x - 1), static_cast<short>(tile_y - 1), 0);
@@ -1249,8 +1249,8 @@ char TileMap::UpdateViewport(ResourceGameObject* sprite, short sprite_type)
         /* Subtract scenery tiles (type 0x0C) from valid count */
         for (int i = 0; i < 4; i++) {
             if (corner[i] != NULL) {
-                TileMapResource* corner_res = static_cast<TileMapResource*>(
-                    static_cast<ResourceGameObject*>(corner[i])->resource);
+                TileMapResource* corner_res =
+                    static_cast<TileMapObject*>(corner[i])->resource;
                 char corner_type = corner_res == NULL ? 0 : corner_res->object_type;
                 if (corner_type == 0x0C) {
                     valid_count--;
@@ -1262,7 +1262,7 @@ char TileMap::UpdateViewport(ResourceGameObject* sprite, short sprite_type)
     /* Check for station resources (0xC50/0xC52) */
     for (int dir = 0; dir < 4; ++dir) {
         if (neighbors[dir] != NULL) {
-            TileMapResource* neighbor_resource = static_cast<TileMapResource*>(neighbors[dir]->resource);
+            TileMapResource* neighbor_resource = neighbors[dir]->resource;
             int res_id = neighbor_resource == NULL ? -1 : neighbor_resource->resource_id;
             int expected = (dir & 1) == 0 ? 0xC50 : 0xC52;
             if (res_id == expected) return 1;
@@ -1283,26 +1283,26 @@ char TileMap::UpdateViewport(ResourceGameObject* sprite, short sprite_type)
 /*   walk continues while the neighbour's +0xE4 (occupancy_more) is    */
 /*        negative; stops when it is >= 0 or the chain ends.           */
 /* ================================================================== */
-void TileMap::GetTileRect(ResourceGameObject* sprite)
+void TileMap::GetTileRect(TileMapObject* sprite)
 {
     if (sprite == NULL) return;
 
-    TileMapResource* resource = static_cast<TileMapResource*>(sprite->resource);
+    TileMapResource* resource = sprite->resource;
 
     for (int dir = 0; dir < 4; dir++) {
-        sprite->occupancy_links[dir] = nullptr; /* +0xC4 */
-        sprite->occupancy_scores[dir] = 0;      /* +0xD4 */
+        sprite->occupancy_links[dir] = 0;     /* +0xC4 */
+        sprite->occupancy_scores[dir] = 0;    /* +0xD4 */
 
-        ResourceGameObject* neighbor = GetViewport(sprite, dir);
+        TileMapObject* neighbor = GetViewport(sprite, dir);
         while (neighbor != NULL) {
-            TileMapResource* neighbor_res = static_cast<TileMapResource*>(neighbor->resource);
+            TileMapResource* neighbor_res = neighbor->resource;
             int occupancy = TileMap_IsTileOccupied(
                 reinterpret_cast<intptr_t>(resource),
                 reinterpret_cast<intptr_t>(neighbor_res));
             if (occupancy < 0) break;
 
             if (!neighbor_res->IsEditorSprite()) {     /* 0x41F430 */
-                sprite->occupancy_links[dir] = neighbor;
+                sprite->occupancy_links[dir] = reinterpret_cast<intptr_t>(neighbor);
             }
             sprite->occupancy_scores[dir] += occupancy;
 
@@ -1325,26 +1325,26 @@ void TileMap::GetTileRect(ResourceGameObject* sprite)
 /*   walk continues while the neighbour's +0x108 (build_more) is       */
 /*        negative.                                                    */
 /* ================================================================== */
-void TileMap::GetTileAt(ResourceGameObject* sprite)
+void TileMap::GetTileAt(TileMapObject* sprite)
 {
     if (sprite == NULL) return;
 
-    TileMapResource* resource = static_cast<TileMapResource*>(sprite->resource);
+    TileMapResource* resource = sprite->resource;
 
     for (int dir = 0; dir < 4; dir++) {
-        sprite->build_links[dir] = nullptr;   /* +0xE8 */
+        sprite->build_links[dir] = 0;         /* +0xE8 */
         sprite->build_scores[dir] = 0;        /* +0xF8 */
 
-        ResourceGameObject* neighbor = GetViewport(sprite, dir);
+        TileMapObject* neighbor = GetViewport(sprite, dir);
         while (neighbor != NULL) {
-            TileMapResource* neighbor_res = static_cast<TileMapResource*>(neighbor->resource);
+            TileMapResource* neighbor_res = neighbor->resource;
             int buildable = TileMap_IsTileBuildable(
                 reinterpret_cast<intptr_t>(resource),
                 reinterpret_cast<intptr_t>(neighbor_res));
             if (buildable < 0) break;
 
             if (!neighbor_res->IsEditorSprite()) {     /* 0x41F430 */
-                sprite->build_links[dir] = neighbor;
+                sprite->build_links[dir] = reinterpret_cast<intptr_t>(neighbor);
             }
             sprite->build_scores[dir] += buildable;
 
@@ -1495,24 +1495,11 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
                              * from iy and tile_y from ix -- swapped. */
                             int tile_x = static_cast<int>(ix) + static_cast<int>(delta_x);
                             int tile_y = static_cast<int>(iy) + static_cast<int>(delta_y);
-                            ResourceGameObject* obj = static_cast<ResourceGameObject*>(
+                            TileMapObject* obj = static_cast<TileMapObject*>(
                                 ReadTilePointer(TILE_OFFSET(tile_x, tile_y, iz) - 0x48));
                             if (obj != nullptr) {
-                                /* BUG FIX: this used to read a hand-written
-                                 * x86-offset mirror struct's `is_moving` field.
-                                 * That mirror's own `resource` member (+0x40)
-                                 * was declared as a 4-byte pointer, but is 8
-                                 * bytes on this host, silently shifting every
-                                 * field after it by 4 real bytes -- so the old
-                                 * `is_moving` read actually landed on the real
-                                 * object's occupancy_links[0] (always 0 right
-                                 * after placement), making this displaceable-
-                                 * object check fail almost every time. Reading
-                                 * the real ResourceGameObject::group_active
-                                 * member (ctor sets it to 1 unconditionally,
-                                 * see core/BuildingMgrObjectGroup.h) fixes it. */
                                 if (g_allow_building_placement == 1 &&
-                                    obj->group_active == 1 &&
+                                    obj->is_moving == 1 &&
                                     (g_disable_input == 0 ||
                                      g_game_mode == 3 ||
                                      g_game_mode == 1)) {
@@ -1527,7 +1514,7 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
                                                 iz) - 0x48);
                                         if (ptr) {
                                             ScrollTo(
-                                                static_cast<ResourceGameObject*>(ptr),
+                                                static_cast<TileMapObject*>(ptr),
                                                 placement_mode);
                                         }
                                     }
@@ -1556,26 +1543,20 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
 /*                                                                     */
 /* Verified against disassembly (215 instructions, 0x455AB0-0x455D5E). */
 /* ================================================================== */
-void* TileMap::ScrollTo(ResourceGameObject* target, int scroll_flag)
+void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
 {
     if (target == NULL) {
         return NULL;
     }
 
-    /* Check group_active (+0xC0) and GameObject::initialized (+0x18).
-     * BUG FIX: this used to check a TileMapObject::object_state field
-     * documented at +0x06, which never matched the disassembly -- 0x455AB0
-     * reads `*(char*)(param_1 + 6)` where param_1 is an `undefined4*`
-     * (int-sized stride), i.e. byte offset +0x18, not +0x06. +0x18 is
-     * GameObject::initialized, inherited by every Entity-derived object;
-     * there is no separate +0x06 field on ResourceGameObject. */
-    if (target->group_active == 0 || target->initialized != 1) {
+    /* Check is_moving flag at +0xC0 and object_state at +0x06 */
+    if (target->is_moving == 0 || target->object_state != 1) {
         return NULL;
     }
 
-    TileMapResource* resource = static_cast<TileMapResource*>(target->resource);
-    short base_x = target->sub_pos_x;   /* +0x88 */
-    short tile_y = target->sub_pos_y;   /* +0x8A */
+    TileMapResource* resource = target->resource;
+    short base_x = target->tile_x;   /* +0x88 */
+    short tile_y = target->tile_y;   /* +0x8A */
 
     byte grid_span_y = resource->grid_span_y;       /* +0x16B */
     byte original_span = resource->original_span;    /* +0x16C */
@@ -1757,8 +1738,9 @@ mode3_no_object:
 
         result = static_cast<char>(TileMap_CallSlot17(obj));  /* vtable[17] */
 
-        int res_id = static_cast<TileMapResource*>(
-            static_cast<ResourceGameObject*>(obj)->resource)->resource_id;
+        int res_id = *reinterpret_cast<int*>(
+            reinterpret_cast<uint8_t*>(
+                static_cast<TileMapObject*>(obj)->resource) + 4);
 
         switch (res_id) {
         case 0x820:
@@ -1826,7 +1808,7 @@ mode3_town_select:
                 drag_start_y = screen_y;
                 return 1;
             }
-            ScrollTo(static_cast<ResourceGameObject*>(obj), 1);
+            ScrollTo(static_cast<TileMapObject*>(obj), 1);
         }
         drag_start_x = screen_x;
         scroll_drag_active = 1;
@@ -2182,11 +2164,11 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                             if (g_game_mode == 3) {
                                 if (layer == 0) {
                                     unsigned int res_type = 0;
-                                    ResourceGameObject* tobj = static_cast<ResourceGameObject*>(obj);
+                                    TileMapObject* tobj = static_cast<TileMapObject*>(obj);
                                     if (obj != NULL) {
-                                        /* tobj->resource (Entity::resource, inherited)
-                                         * is a raw x86 TileMapResource* only on
-                                         * _WIN32; on host it's a loco::assets::
+                                        /* tobj->resource is a raw x86
+                                         * TileMapResource* only on _WIN32;
+                                         * on host it's a loco::assets::
                                          * SpriteResource* (see PROGRESS.md's
                                          * "raw fixed-offset reads against
                                          * undersized host resource objects"
@@ -2196,7 +2178,19 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                          * offset, matching ScrollRect's
                                          * established pattern. */
 #ifndef _WIN32
-                                        void* entity_resource = tobj->resource;
+                                        /* tobj (TileMapObject*) is itself a raw
+                                         * x86-offset mirror struct -- reading
+                                         * tobj->resource reinterprets whatever
+                                         * bytes happen to sit at +0x40 in the
+                                         * REAL host object (a proper C++
+                                         * Entity-derived class with a vtable
+                                         * and 64-bit members, not the original
+                                         * byte layout), which is garbage, not
+                                         * the real resource pointer. obj is
+                                         * genuinely an Entity* (see the Draw()
+                                         * call just above) -- read the real
+                                         * Entity::resource member instead. */
+                                        void* entity_resource = static_cast<Entity*>(obj)->resource;
                                         if (loco::assets::is_host_sprite_resource(entity_resource)) {
                                             res_type = GetResourceType(
                                                 loco::assets::sprite_resource_id(
@@ -2209,11 +2203,18 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                          * real-RESDATA-metadata placement-coverage
                                          * gap, same null-resource landmine as the
                                          * is_connected read below) -- res_type
-                                         * stays its already-initialized 0. */
+                                         * stays its already-initialized 0. The
+                                         * original's unconditional resource+4 read
+                                         * below is _WIN32-only: on host, tobj is a
+                                         * raw x86-offset mirror over a real,
+                                         * differently-laid-out C++ object, so
+                                         * dereferencing tobj->resource here would
+                                         * read garbage regardless of this branch. */
 #else
                                         {
                                             res_type = GetResourceType(static_cast<unsigned int>(
-                                                static_cast<TileMapResource*>(tobj->resource)->resource_id));
+                                                *reinterpret_cast<int*>(
+                                                    reinterpret_cast<uint8_t*>(tobj->resource) + 4)));
                                         }
 #endif
                                     }
@@ -2252,14 +2253,15 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                              * on host instead of the raw resource+0x20
                              * pointer chase. */
                             if (obj != NULL) {
-                                ResourceGameObject* tobj = static_cast<ResourceGameObject*>(obj);
+                                TileMapObject* tobj = static_cast<TileMapObject*>(obj);
                                 int anim_index =
                                     static_cast<Entity*>(obj)->anim_index;
                                 bool is_connected = false;
 #ifndef _WIN32
-                                /* Same host-SpriteResource landmine as the
-                                 * res_type read above -- see its comment. */
-                                void* entity_resource = tobj->resource;
+                                /* tobj->resource would reinterpret garbage bytes
+                                 * on host -- see the matching res_type comment
+                                 * above; use the real Entity::resource member. */
+                                void* entity_resource = static_cast<Entity*>(obj)->resource;
                                 if (loco::assets::is_host_sprite_resource(entity_resource)) {
                                     const loco::assets::SpriteMetadata* metadata =
                                         ResourceManager_GetSpriteMetadata(entity_resource);
@@ -2375,13 +2377,13 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
 /* footprint is walked in a clockwise spiral starting from the top     */
 /* row (y = world_y - 1). Returns the validity flag (low byte).        */
 /* ================================================================== */
-uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
+uint TileMap::ProcessObjectTimer(TileMapObject* obj)
 {
     if (obj == NULL) {
         return 0;
     }
 
-    TileMapResource* res = static_cast<TileMapResource*>(obj->resource);
+    TileMapResource* res = obj->resource;
     int packed_world;
     GameObject_GetSubObjectWorldPos(obj, &packed_world);
 
@@ -2393,7 +2395,7 @@ uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
 
     int x_end = static_cast<short>(
         static_cast<unsigned short>(res->grid_span_y) +
-        static_cast<unsigned short>(obj->sub_pos_x) - 1) + 1;
+        static_cast<unsigned short>(obj->tile_x) - 1) + 1;
 
     uint idx = 0;
     char valid = 1;
@@ -2409,11 +2411,11 @@ uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
                 row_y < 0 || tile_count_y <= row_y) {
                 valid = 0;
             } else {
-                ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
                     ReadTilePointer((cur_x * 0x41 + row_y) * 0x40));
                 if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else if (expected != static_cast<TileMapResource*>(tile_obj->resource)->resource_id) {
+                } else if (expected != tile_obj->resource->resource_id) {
                     valid = 0;
                 }
             }
@@ -2428,7 +2430,7 @@ uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
     short col_y = world_y;
     int y_end_2 = static_cast<short>(
         static_cast<unsigned short>(res->original_span) +
-        static_cast<unsigned short>(obj->sub_pos_y) - 1) + 1;
+        static_cast<unsigned short>(obj->tile_y) - 1) + 1;
     while (static_cast<int>(col_y) <= y_end_2) {
         if (idx >= res->expected_count || valid != 1) break;
         int expected = res->expected_ids[idx];
@@ -2437,11 +2439,11 @@ uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
                 col_y < 0 || tile_count_y <= col_y) {
                 valid = 0;
             } else {
-                ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
                     ReadTilePointer((col_y + right_x * 0x41) * 0x40));
                 if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else if (expected != static_cast<TileMapResource*>(tile_obj->resource)->resource_id) {
+                } else if (expected != tile_obj->resource->resource_id) {
                     valid = 0;
                 }
             }
@@ -2461,11 +2463,11 @@ uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
                 col_y < 0 || tile_count_y <= col_y) {
                 valid = 0;
             } else {
-                ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
                     ReadTilePointer((x3 * 0x41 + col_y) * 0x40));
                 if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else if (expected != static_cast<TileMapResource*>(tile_obj->resource)->resource_id) {
+                } else if (expected != tile_obj->resource->resource_id) {
                     valid = 0;
                 }
             }
@@ -2487,11 +2489,11 @@ uint TileMap::ProcessObjectTimer(ResourceGameObject* obj)
                 col_y < 0 || tile_count_y <= col_y) {
                 valid = 0;
             } else {
-                ResourceGameObject* tile_obj = static_cast<ResourceGameObject*>(
+                TileMapObject* tile_obj = static_cast<TileMapObject*>(
                     ReadTilePointer((col_y + x3 * 0x41) * 0x40));
                 if (tile_obj == nullptr) {
                     if (expected != 0) valid = 0;
-                } else if (expected != static_cast<TileMapResource*>(tile_obj->resource)->resource_id) {
+                } else if (expected != tile_obj->resource->resource_id) {
                     valid = 0;
                 }
             }
@@ -2546,9 +2548,8 @@ void TileMap::UpdateAll()
 /* for validation, INPUT_PlaceObject to create, fills tile grid with   */
 /* new object pointers in all occupied cells (occupancy grid indexed   */
 /* [x][y][z] = x*63+y*7+z), then writes the object's span map (at      */
-/* resource +0x4A1) into the origin region, sets the placed object's   */
-/* sub_pos_x/sub_pos_y (ResourceGameObject) and calls MoveTo/vtable[3]  */
-/* (SetWorldPos) with pixel coordinates.                                */
+/* resource +0x4A1) into the origin region, sets tile_x/tile_y and     */
+/* calls vtable[3] (SetWorldPos) with pixel coordinates.               */
 /* ================================================================== */
 int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short tile_y,
                           char unknown, unsigned int mode)
@@ -2636,11 +2637,8 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
         if (ScrollRect(1, resource, tile_x,
                        static_cast<unsigned short>(offset + static_cast<int>(adjusted_y)),
                        static_cast<int>(mode)) != 0) {
-            /* INPUT_PlaceObject (0x41DD80) always constructs a
-             * ResourceGameObject or a class derived from it -- see
-             * core/BuildingMgrObjectGroup.h's class doc comment. */
-            void* placed = INPUT_PlaceObject(&g_input_mgr, target_resource_id);
-            result = reinterpret_cast<int*>(placed);
+            result = reinterpret_cast<int*>(
+                INPUT_PlaceObject(&g_input_mgr, target_resource_id));
             if (result != NULL) {
                 /* Fill the standard layer region of each occupied tile */
                 short gy = 0;
@@ -2658,7 +2656,7 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                  * an earlier transcription read this off
                                  * `result`, which (a) is the wrong object and
                                  * (b) doesn't even declare this field (see
-                                 * ResourceGameObject's own comment on why it was
+                                 * TileMapObject's own comment on why it was
                                  * removed). */
                                 for (int8_t iz = 0; iz < grid_depth; iz++) {
                                     bool occ;
@@ -2775,10 +2773,10 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
 
                 /* Record tile origin and move the object to pixel coords
                  * via vtable[3] (SetWorldPos / MoveTo). */
-                ResourceGameObject* obj = static_cast<ResourceGameObject*>(placed);
-                obj->sub_pos_y = adjusted_y;
-                obj->sub_pos_x = tile_x;
-                obj->MoveTo(
+                TileMapObject* obj = reinterpret_cast<TileMapObject*>(result);
+                obj->tile_y = adjusted_y;
+                obj->tile_x = tile_x;
+                reinterpret_cast<Entity*>(obj)->MoveTo(
                     static_cast<int>(tile_x) << 4,
                     static_cast<int>(adjusted_y) << 4);
             }
@@ -2825,7 +2823,7 @@ uint TileMap::Scroll(int delta_x, int delta_y, int drag_start_x, int drag_start_
         short layer_out;
         void* obj = GetObjectAtEx(tile_x, tile_y, &layer_out);
         if (obj != NULL) {
-            ScrollTo(static_cast<ResourceGameObject*>(obj), 1);
+            ScrollTo(reinterpret_cast<TileMapObject*>(obj), 1);
             result = 1;
         }
         length = length - 1.0;
@@ -2939,18 +2937,18 @@ void* TileMap::CreateOverlay(void* surface, byte fill_byte)
                 continue;
             }
 
-            ResourceGameObject* obj;
+            TileMapObject* obj;
             if (x < 0 || x > 0x51 || y < 0 || y > 0x41) {
                 obj = NULL;
             } else {
-                obj = static_cast<ResourceGameObject*>(
+                obj = static_cast<TileMapObject*>(
                     ReadTilePointer((x * 0x41 + y) * 0x40));
             }
 
             /* The binary re-reads the slot with a bounds check and, for the
              * (unreachable) out-of-range case, dereferences a null object;
              * the null-guard here is the safe host equivalent. */
-            TileMapResource* res = (obj == NULL) ? NULL : static_cast<TileMapResource*>(obj->resource);
+            TileMapResource* res = (obj == NULL) ? NULL : obj->resource;
             uint8_t type = (res == NULL) ? 0 : res->object_type;
 
             switch (type) {
@@ -2978,16 +2976,16 @@ void* TileMap::CreateOverlay(void* surface, byte fill_byte)
                 bool skip = false;
                 switch (delta) {
                 case 0: /* 0xC1E */
-                    skip = (obj->sub_pos_x == x && obj->sub_pos_y == y);
+                    skip = (obj->tile_x == x && obj->tile_y == y);
                     break;
                 case 2: /* 0xC20 */
-                    skip = (obj->sub_pos_x + 2 == x && obj->sub_pos_y == y);
+                    skip = (obj->tile_x + 2 == x && obj->tile_y == y);
                     break;
                 case 4: /* 0xC22 */
-                    skip = (obj->sub_pos_x == x && obj->sub_pos_y + 2 == y);
+                    skip = (obj->tile_x == x && obj->tile_y + 2 == y);
                     break;
                 case 6: /* 0xC24 */
-                    skip = (obj->sub_pos_x + 2 == x && obj->sub_pos_y + 2 == y);
+                    skip = (obj->tile_x + 2 == x && obj->tile_y + 2 == y);
                     break;
                 default: /* 0xC1F/0xC21/0xC23 -> default overlay 5 */
                     skip = false;
@@ -3055,18 +3053,19 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
 
         /* Sweep 1: top edge (y = top), x from left..right */
         for (int x = x0; x <= right && x < tile_count_x; x++) {
-            ResourceGameObject* tile_object = nullptr;
+            TileMapObject* tile_object = nullptr;
             if (!(x < 0 || x > 0x51 || y0 < 0 || y0 > 0x41)) {
-                tile_object = static_cast<ResourceGameObject*>(
+                tile_object = static_cast<TileMapObject*>(
                     ReadTilePointer((x * 0x41 + y0) * 0x40));
             }
             if (tile_object != nullptr) {
-                TileMapResource* resource = static_cast<TileMapResource*>(tile_object->resource);
+                TileMapResource* resource = tile_object->resource;
                 uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
-                                                   tile_object->world_x,
-                                                   tile_object->world_y);
+                                                   entity->world_x,
+                                                   entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
                         best_obj = tile_object;
@@ -3080,18 +3079,19 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
         if (rx >= tile_count_x) rx = tile_count_x;
         int y1 = (top + 1 < 1) ? 0 : top + 1;
         for (int y = y1; y <= bottom && y < tile_count_y; y++) {
-            ResourceGameObject* tile_object = nullptr;
+            TileMapObject* tile_object = nullptr;
             if (!(rx < 0 || rx > 0x51 || y < 0 || y > 0x41)) {
-                tile_object = static_cast<ResourceGameObject*>(
+                tile_object = static_cast<TileMapObject*>(
                     ReadTilePointer((y + rx * 0x41) * 0x40));
             }
             if (tile_object != nullptr) {
-                TileMapResource* resource = static_cast<TileMapResource*>(tile_object->resource);
+                TileMapResource* resource = tile_object->resource;
                 uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
-                                                   tile_object->world_x,
-                                                   tile_object->world_y);
+                                                   entity->world_x,
+                                                   entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
                         best_obj = tile_object;
@@ -3106,18 +3106,19 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
         int by = bottom;
         if (by >= tile_count_y) by = tile_count_y;
         for (; left <= bx && bx >= 0; bx--) {
-            ResourceGameObject* tile_object = nullptr;
+            TileMapObject* tile_object = nullptr;
             if (bx < 0x52 && by >= 0 && by < 0x42) {
-                tile_object = static_cast<ResourceGameObject*>(
+                tile_object = static_cast<TileMapObject*>(
                     ReadTilePointer((bx * 0x41 + by) * 0x40));
             }
             if (tile_object != nullptr) {
-                TileMapResource* resource = static_cast<TileMapResource*>(tile_object->resource);
+                TileMapResource* resource = tile_object->resource;
                 uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
-                                                   tile_object->world_x,
-                                                   tile_object->world_y);
+                                                   entity->world_x,
+                                                   entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
                         best_obj = tile_object;
@@ -3131,18 +3132,19 @@ void* TileMap::FindNearestObject(unsigned short type_filter,
         int ly = bottom - 1;
         if (ly >= tile_count_y) ly = tile_count_y;
         for (; top < ly && ly >= 0; ly--) {
-            ResourceGameObject* tile_object = nullptr;
+            TileMapObject* tile_object = nullptr;
             if (lx >= 0 && lx <= 0x51 && ly >= 0 && ly <= 0x41) {
-                tile_object = static_cast<ResourceGameObject*>(
+                tile_object = static_cast<TileMapObject*>(
                     ReadTilePointer((ly + lx * 0x41) * 0x40));
             }
             if (tile_object != nullptr) {
-                TileMapResource* resource = static_cast<TileMapResource*>(tile_object->resource);
+                TileMapResource* resource = tile_object->resource;
                 uint8_t obj_type = (resource != nullptr) ? resource->object_type : 0;
                 if (obj_type == static_cast<uint8_t>(type_filter)) {
+                    Entity* entity = reinterpret_cast<Entity*>(tile_object);
                     int dist_sq = Math_DistSquared(target_x, target_y,
-                                                   tile_object->world_x,
-                                                   tile_object->world_y);
+                                                   entity->world_x,
+                                                   entity->world_y);
                     if (dist_sq < best_dist_sq) {
                         best_dist_sq = dist_sq;
                         best_obj = tile_object;
