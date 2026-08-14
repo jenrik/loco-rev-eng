@@ -1,4 +1,4 @@
-# Handoff: DirectDraw shim — GetDC blocker, remaining UIPANEL.cpp cleanup
+# Handoff: DirectDraw shim — Cursor subsystem is the last blocker before wiring
 
 Originally written 2026-08-14 to reconcile local `main` with `devbox/main`
 after they diverged 13 vs. 19 commits from a shared base. **That
@@ -20,37 +20,57 @@ re-diverges from a stale base and this same reconciliation has to happen
 again. Updating `devbox/main` to match is a push to a shared remote —
 confirm with the user before doing it, don't push unilaterally.
 
-## Critical blocker: do not wire `g_primary_surface`/`g_backbuffer` yet
+## `GetDC` blocker: RESOLVED — `ui/UIPANEL.cpp`/`world/tilemap.cpp`: RESOLVED
 
-Found while migrating `ui/UIPANEL.cpp` (not committed — reverted after this
-was found; see PROGRESS.md's 2026-08-14 DirectDraw-shim entries for full
-detail):
+The `UIPANEL_BeginPaint` `ExitProcess(1)` landmine described in the previous
+version of this section is fixed (commit `c9c4640`): `Sdl3DirectDrawSurface::
+GetDC`/`ReleaseDC` now succeed with a valid non-null opaque handle instead of
+permanently failing, and `ui/UIPANEL.cpp`'s `GetDC`/`ReleaseDC`/7×`Blt` raw
+dispatch sites are converted to named calls. Ghidra decompile of 0x426B00/
+0x426B90 also caught a real transcription bug: the prior code checked
+`GetDC`'s HRESULT return as if it were the HDC itself, and slot 0x68 was
+mislabeled "Unlock" when it's really `ReleaseDC` (an HDC flows into it, not a
+`RECT*`). `world/tilemap.cpp`'s `TileMap_LockPrimarySurface`/
+`UnlockPrimarySurface` raw ABI-slot dispatch is also converted (commit
+`6eb1645`) — see PROGRESS.md's 2026-08-14 `directdraw-shim-getdc-and-tilemap`
+entry for the full trail.
 
-**`UIPANEL_BeginPaint` (0x426B00) will call `ExitProcess(1)` the moment
-`g_primary_surface` is non-null and any real caller runs.** It retries a raw
-`GetDC` dispatch 1000× at 10ms, then calls `WIN32_FatalError()`/
-`ExitProcess(1)` on failure. `Sdl3DirectDrawSurface::GetDC` is a permanent,
-deliberately-scoped no-op (real GDI device-context interop was explicitly
-out of scope in the shim plan) that always fails. `game/BuildingPanel.cpp`
-has live, real calls into `UIPANEL_BeginPaint`.
+## Current blocker: the Cursor subsystem's own raw dispatch (28 sites)
 
-This inverts the pattern used everywhere else in this shim: elsewhere, a
-null-check-and-fall-through guard is correct because the underlying object
-becoming real *fixes* the path. Here, the object becoming real *arms a timed
-self-destruct*. **A real `GetDC` implementation (or a different, non-fatal
-path for `UIPANEL_BeginPaint`'s callers) is a hard prerequisite for wiring
-`g_primary_surface`/`g_backbuffer`, on top of the already-resolved
-pixel-format fix.** Do not let any integration work (from `devbox/main` or
-the stale mode3 branches below) wire these globals without addressing this
-first — it would turn a currently-safe no-op into a reproducible crash days
-or weeks later when someone least expects it.
+`input/Cursor_internal.h` declares 5 helper functions —
+`Cursor_ComSurfaceRelease`, `Cursor_SurfaceBlt`, `Cursor_SurfaceReleaseDC`,
+`Cursor_SurfaceFill`, `Cursor_SurfaceLegacyBlt` — that each dereference a
+surface's vtable by raw real-ABI slot number (`Release`=2, `Blt`=5 — three
+differently-named helpers all point at this same slot — `ReleaseDC`=0x68/4=26,
+matching the `UIPANEL_EndPaintEx` finding above). This shim is
+API-compatible, not ABI-compatible (`platform/ddraw_interfaces.h`'s
+declaration order doesn't match these numbers), so once `g_primary_surface`/
+`g_backbuffer`/`_g_primary_surface`/`_g_backbuffer` are non-null, every one
+of these dispatches through the wrong compiler-generated slot on a real
+`Sdl3DirectDrawSurface` object — the exact class of bug Phase 5(a) already
+fixed once for `g_ddraw`'s own raw-dispatch sites. This is the last
+prerequisite before wiring is safe.
 
-`ui/UIPANEL.cpp` still has 8 more raw vtable-slot dispatch sites beyond the
-blocked `GetDC` one (`Unlock`×1 in `UIPANEL_EndPaintEx`, `Blt`×7 in
-`UIPANEL_Render`) — clean, low-risk, evidenced conversions, deliberately left
-alone so the file doesn't end up half-migrated again. Convert all of them
-together once `GetDC` has a real answer. `world/tilemap.cpp` also has raw
-vtable dispatch on `g_primary_surface`, not yet examined at all.
+The header's own comment (`Cursor_internal.h:301-304`) claims this is a
+permitted "opaque COM surface" ABI-boundary exception — that was true before
+this session's shim existed, but is stale now that `platform/
+ddraw_interfaces.h`'s `IDirectDrawSurface4` is a real typed interface; CLAUDE.md's
+opaque-COM exception applies only when no typed interface is available.
+
+28 call sites across 5 files, none yet converted: `input/Cursor_Render.cpp`
+(6), `input/Cursor.cpp` (2), `input/Cursor_Editor.cpp` (2), `input/
+Cursor_impls.cpp` (14), `input/Cursor_new_impls.cpp` (4) — operating on
+`this->primary_surface()`/`this->backbuffer()`/`_g_backbuffer`/
+`_g_primary_surface`/`editor_surf_a`/`editor_surf_b`/`target_surf`, all
+confirmed sharing addresses with `g_primary_surface`/`g_backbuffer`. The
+evidence for each slot's real method is already fully resolved in-file
+(comments cite the real interface method by name) — what's left is
+mechanical: convert the "get a function pointer, then call it" two-step
+pattern (`Cursor_SurfaceBlt(surface)(args...)`) into a direct named virtual
+call (`static_cast<IDirectDrawSurface4*>(surface)->Blt(args...)`) at all 28
+sites, plus removing the now-dead helpers/typedefs from `Cursor_internal.h`.
+Not started — stopped here to report the true scope rather than silently
+absorb a second ~30-site sweep without a checkpoint.
 
 ## Stale, do-not-merge-as-is branches (fetched, not integrated)
 
@@ -113,16 +133,25 @@ work to merge. Confirm with the user before reviving any of them.
 
 ## Suggested next steps, in order
 
-1. Real `GetDC` implementation (or a non-fatal path for
-   `UIPANEL_BeginPaint`'s callers) — required before wiring
-   `g_primary_surface`/`g_backbuffer`. This is real, separately-scoped GDI
-   work; do not shortcut it by wiring the globals anyway.
-2. Once `GetDC` has a real answer, convert `ui/UIPANEL.cpp`'s remaining
-   raw-dispatch sites (`Unlock`×1, `Blt`×7) together, plus examine
-   `world/tilemap.cpp`'s raw vtable dispatch on `g_primary_surface`.
-3. Leave the branches above alone unless the user specifically asks to
-   revive one — confirm which problem they're meant to solve first, since
-   the codebase has moved substantially since they were written.
+1. Convert the Cursor subsystem's 28 raw-dispatch call sites (see above) —
+   the last prerequisite before wiring. Evidence is fully resolved; this is
+   a mechanical sweep across 5 files, build/test after each file, same
+   pattern already used for `ui/UIPANEL_Surface.cpp`/`graphics/LOCOBITMAP.cpp`/
+   `ui/UIPANEL.cpp`/`world/tilemap.cpp` this session.
+2. Once that sweep is done and verified, wire `g_primary_surface =
+   g_sdl_primary_surface;` / `g_backbuffer = g_sdl_backbuffer;` inside
+   `SDL3_EnsurePrimarySurface()` (`graphics/sdl3_ddraw.cpp`) — mirroring
+   exactly how `g_ddraw = g_sdl_ddraw;` was wired in Phase 5(b). Both
+   `Sdl3DirectDrawSurface` objects already exist there (constructed via
+   `g_ddraw->CreateSurface(...)`, used internally for rendering) — this is a
+   2-line change once everything upstream is safe. Run `--suite integration`
+   specifically watching `native/DDRAW_DimSurfaceRect.c`/`town/TownTiles.cpp`'s
+   `Town_CheckOccupiedEx` — both confirmed live, and this is the first time
+   they'll exercise a real Lock/Unlock against a real surface end-to-end.
+3. Leave the stale `pi-fabric` branches above alone unless the user
+   specifically asks to revive one — confirm which problem they're meant to
+   solve first, since the codebase has moved substantially since they were
+   written.
 4. If reviving any of the `pi-fabric` work, first update `devbox/main` to
    the merged tip (with user confirmation, since it's a push) so future
    parallel sessions don't re-diverge from the stale `5526b16`.
