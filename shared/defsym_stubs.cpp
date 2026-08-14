@@ -783,8 +783,11 @@ void Cursor_Show(void*);
 void Cursor_Show(void*) { /* host no-op */ }
 void NETMAN_SendMapData(void*, int);
 void NETMAN_SendMapData(void*, int) { /* host no-op */ }
-void CGWND_AudioChannel_IsActive(unsigned int);
-void CGWND_AudioChannel_IsActive(unsigned int) { /* host no-op */ }
+/* CGWND_AudioChannel_IsActive(unsigned int) removed 2026-08-14 — same
+ * return-type-mismatch landmine as AudioChannel_IsActive above (this
+ * `void`-returning stub vs. core/CGWND.cpp's only caller declaring it
+ * `int`-returning). Its one caller now calls AudioChannel::IsActive()
+ * directly instead of through this free-function facade. */
 void CGWND_AudioChannel_Release(void*);
 void CGWND_AudioChannel_Release(void*) { /* host no-op */ }
 void WIN32_CloseHandle(void*);
@@ -815,8 +818,6 @@ void Cursor_Show();
 void Cursor_Show() { /* host no-op */ }
 void NETMAN_SendMapData();
 void NETMAN_SendMapData() { /* host no-op */ }
-void CGWND_AudioChannel_IsActive();
-void CGWND_AudioChannel_IsActive() { /* host no-op */ }
 void CGWND_AudioChannel_Release();
 void CGWND_AudioChannel_Release() { /* host no-op */ }
 void WIN32_CloseHandle();

@@ -713,10 +713,19 @@ void CGWND_SetMode(int new_mode)
                 GameAudio_PlayResourceEx(g_audio, 0x5026, &ch);
 
                 if (ch != 0) {
-                    extern int CGWND_AudioChannel_IsActive(uint32_t ch);
-                    while (!CGWND_AudioChannel_IsActive(ch)) {}
-                    extern void CGWND_AudioChannel_Release(void* ch);
-                    CGWND_AudioChannel_Release((void*)ch);
+                    /* ch is a real 32-bit x86 pointer here (this whole block
+                     * is _WIN32-only). Call the typed method directly rather
+                     * than through CGWND_AudioChannel_IsActive — that
+                     * free-function facade was declared int-returning here
+                     * but defined void-returning in shared/defsym_stubs.cpp
+                     * (return type isn't part of C++ mangling, so every
+                     * caller silently read garbage out of EAX), the same
+                     * landmine class fixed for AudioChannel_IsActive
+                     * elsewhere this session. */
+                    AudioChannel* channel =
+                        reinterpret_cast<AudioChannel*>(static_cast<uintptr_t>(ch));
+                    while (!channel->IsActive()) {}
+                    channel->Release();
                 }
             }
 
