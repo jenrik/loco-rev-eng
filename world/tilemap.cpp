@@ -16,6 +16,7 @@
 
 #include "tilemap.h"
 #include "../core/CGWND.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../ui/UIPANEL_Surface.h"
 
 #include "../core/Entity.h"
@@ -210,35 +211,43 @@ static DirtyRectNode* TileMap_AllocRectNode()
 }
 
 /* ================================================================== */
-/* Primary-surface Lock/Unlock dispatch (DirectDraw surface vtable).   */
+/* Primary-surface Lock/Unlock dispatch (DirectDraw surface).          */
 /*                                                                     */
-/* g_primary_surface (0x4FD3C4) is the DirectDraw primary; slots 25    */
-/* (Lock) and 32 (Unlock) of the standard IDirectDrawSurface4 ABI are  */
-/* called with the ddsurfacedesc buffer at TileMap +0x52494.           */
-/* TODO(integration): type g_primary_surface via sdl3_shims/sdl3_ddraw */
-/* and call Lock/Unlock directly.                                      */
+/* g_primary_surface (0x4FD3C4) is the DirectDraw primary. Previously  */
+/* dispatched via real IDirectDrawSurface4 ABI slots 25 (Lock)/32      */
+/* (Unlock) — this shim is API-compatible, not ABI-compatible (see     */
+/* PROGRESS.md's DirectDraw-shim notes), so those slot numbers do not  */
+/* correspond to Sdl3DirectDrawSurface's own compiler-generated vtable */
+/* order; converted to named calls, 2026-08-14. Neither call site here */
+/* reads the resulting DDSURFACEDESC's contents (only the return code  */
+/* is checked), so a fresh local object is used rather than the        */
+/* class's own ddsurfacedesc_buf (+0x52494) — that field is sized      */
+/* 0x7C bytes, the original x86 sizeof(DDSURFACEDESC), too small for   */
+/* the real host DDSURFACEDESC (larger due to a real 8-byte lpSurface  */
+/* pointer and non-trivial DDPIXELFORMAT/DDSCAPS2 members); reusing it */
+/* here would be a real out-of-bounds write once Lock() populates it.  */
+/* ddsurfacedesc_buf itself is left as-is (still zeroed by the         */
+/* constructor) rather than retyped/removed, since TileMap is a large  */
+/* class and retyping one field risks shifting every subsequent raw-   */
+/* offset field access elsewhere in this file — a separate, dedicated  */
+/* layout audit, not part of this fix.                                 */
 /* ================================================================== */
-typedef int (__thiscall* DDrawSurfaceLockFn)(void* self, void* rect,
-                                              void* desc, unsigned int flags,
-                                              void* handle);
-typedef int (__thiscall* DDrawSurfaceUnlockFn)(void* self, void* rect);
-
-static int TileMap_LockPrimarySurface(void* desc)
+static int TileMap_LockPrimarySurface()
 {
 #ifndef _WIN32
     /* Host deviation: g_primary_surface is never assigned a real
      * DirectDraw surface on this build (DirectDraw is never
-     * initialized) -- dereferencing its vtable here would be a
-     * guaranteed null-pointer read. Report failure exactly like a real
-     * DDraw Lock() failure would (surface_locked stays 0), rather than
+     * initialized) -- dereferencing it here would be a guaranteed
+     * null-pointer read. Report failure exactly like a real DDraw
+     * Lock() failure would (surface_locked stays 0), rather than
      * crash; the caller already tolerates a failed lock. */
     if (g_primary_surface == nullptr) {
         return -1;
     }
 #endif
-    void** vtable = *reinterpret_cast<void***>(g_primary_surface);
-    return (*(reinterpret_cast<DDrawSurfaceLockFn>(vtable[25])))(
-        g_primary_surface, NULL, desc, 0, nullptr);
+    DDSURFACEDESC desc{};
+    return static_cast<IDirectDrawSurface4*>(g_primary_surface)->Lock(
+        nullptr, &desc, 0, nullptr);
 }
 
 static int TileMap_UnlockPrimarySurface()
@@ -248,9 +257,7 @@ static int TileMap_UnlockPrimarySurface()
         return -1;
     }
 #endif
-    void** vtable = *reinterpret_cast<void***>(g_primary_surface);
-    return (*(reinterpret_cast<DDrawSurfaceUnlockFn>(vtable[32])))(
-        g_primary_surface, NULL);
+    return static_cast<IDirectDrawSurface4*>(g_primary_surface)->Unlock(nullptr);
 }
 
 /* ================================================================== */
@@ -2026,11 +2033,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
     while (head != NULL) {
         /* Lock primary surface if not already locked */
         if (surface_locked == 0) {
-            for (int i = 0; i < 0x1F; i++) {
-                reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[i] = 0;
-            }
-            reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[0] = 0x7C;
-            if (TileMap_LockPrimarySurface(ddsurfacedesc_buf) == 0) {
+            if (TileMap_LockPrimarySurface() == 0) {
                 surface_locked = 1;
             }
         }
@@ -2266,11 +2269,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
             Town_DeselectBuilding();
             Town_UpdateSelection();
             if (surface_locked == 0) {
-                for (int i = 0; i < 0x1F; i++) {
-                    reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[i] = 0;
-                }
-                reinterpret_cast<uint32_t*>(ddsurfacedesc_buf)[0] = 0x7C;
-                if (TileMap_LockPrimarySurface(ddsurfacedesc_buf) == 0) {
+                if (TileMap_LockPrimarySurface() == 0) {
                     surface_locked = 1;
                 }
             }
