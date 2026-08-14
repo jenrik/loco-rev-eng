@@ -121,15 +121,18 @@ int    __thiscall NETMAN_CheckTrackConnection(void* netman, int direction, uint8
 int    __thiscall NETMAN_GetPlayerCount(void* netman);                 /* 0x00446890 */
 void   __thiscall NETMAN_SendBuildingData(void* netman, int player_id); /* 0x00446510 */
 
-/* DPLAY player helpers */
-void*  __thiscall DPLAY_CreatePlayer(void* player);          /* 0x004429C0 */
+/* DPLAY player helpers. DPLAY_CreatePlayer/InitPlayer (formerly declared
+ * here at fabricated addresses 0x4429C0/0x00442A40 — both zero-xref,
+ * confirmed via get_xrefs_to; the real addresses are 0x442850/0x442C90,
+ * DPlayManager::CreatePlayer/InitPlayer, network/DPlayManager.h/.cpp)
+ * removed 2026-08-15 — their one real call site now uses the typed
+ * DPlayManager methods directly, see TrainSubsystem::HandleJoinMultiplayer
+ * below. */
 void DPLAY_CopyPlayerData(void* dst, const void* src); /* 0x4426D0 */
 #ifndef _WIN32
 void* DPLAY_DecodePlayerSlots(const void* firstCompactSlot);
 #endif
 void   __thiscall DPLAY_CleanupPlayer(void* player);         /* 0x00442A00 */
-void   __thiscall DPLAY_InitPlayer(void* player, uint8_t mode, uint8_t sub_mode,
-                                    int a, int b, int c, int d, int e); /* 0x00442A40 */
 
 /* NET helpers */
 void   __thiscall NET_GetAttFilePath(uint32_t type, int mode, char* buffer);  /* 0x00445B30 */
@@ -2926,34 +2929,51 @@ void TrainSubsystem::HandleJoinMultiplayer(void* msg)
         NETMAN_QueueMessage(err_msg);
     }
 
-    /* Create and register a DPLAY player for this session. 0x39C is real
-     * x86 evidence for the player record's full original size (see
-     * input/Cursor_impls.cpp's init_network_player for the same value and
-     * the fuller rationale: only a partial view of this record — 0x94 of
-     * 0x39C bytes — is reconstructed as a C++ type so far, and
-     * DPLAY_CreatePlayer is currently a no-op stub, so this is not a live
-     * overflow today). */
+    /* Create and register a DPLAY player for this session. DPLAY_CreatePlayer's
+     * real address is 0x442850 (DPlayManager::CreatePlayer, already
+     * implemented for real, network/DPlayManager.cpp) — this file's extern
+     * declaration's own address comment, 0x4429C0, is fabricated (zero
+     * xrefs anywhere in the binary; get_xrefs_to on the real 0x442850 lists
+     * this exact function, TrainSubsystem::HandleJoinMultiplayer, as one of
+     * its 7 real callers). Matches the operator_new+placement-new+
+     * CreatePlayer() idiom already established at Train_ConnectToServer
+     * (this file, below) and network/Netman.cpp:2333-2336; the
+     * free-function DPLAY_CreatePlayer(void*) declared elsewhere in this
+     * file bound to a no-op/nullptr-returning stub instead of this real
+     * method (2026-08-15). */
     {
-        void* player = DPLAY_CreatePlayer(operator_new(0x39C));
-        if (player) {
+        void* storage = operator_new(sizeof(DPlayManager));
+        DPlayManager* player = nullptr;
+        if (storage != nullptr) {
+            player = ::new (storage) DPlayManager();
+            player->CreatePlayer();
+        }
+        if (player != nullptr) {
             char name_buf[0x50];
             FormatResourceString(&g_resmgr, 0xDF, name_buf, 0x50);
-            /* Copy name into player struct at appropriate offset */
-            memcpy(reinterpret_cast<uint8_t*>(player) + 0x43, name_buf, 0x50);
+            memcpy(player->m_playerName, name_buf, sizeof(name_buf));
 
-            DPLAY_InitPlayer(player, 5, 1, 5, 0x94, 99, 0x48, 0x48);
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(player) + 0x41)) = 0xFF;
+            player->InitPlayer(5, 1, 5, 0x94, 99, 0x48, 0x48);
+            player->m_flag41 = 0xFF;
 
-            /* Copy player name from g_player_config + 6 */
-            memcpy(reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(player) + 0x10)),
-                   reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)), 0x14);
-            /* Copy "LEGO LOCO" as session name at +0x25 */
-            memcpy(reinterpret_cast<uint8_t*>(player) + 0x25, "LEGO LOCO", 10);
+            /* Copy player name from g_player_config + 6 (PlayerConfig::name).
+             * PlayerConfig::name is char[14]; this 0x14 (20)-byte copy is the
+             * original's own width and reads 6 bytes past name[] into the
+             * adjacent PlayerConfig fields — transcribed as-evidenced, not
+             * narrowed to sizeof(name), since the sibling Train_ConnectToServer
+             * block (below) uses a different call (strcpy) on the same source
+             * and neither this file's disassembly nor the caller proves which
+             * width is intentional vs. a pre-existing over-read in the
+             * original binary. */
+            memcpy(player->m_sessionBlk1,
+                   reinterpret_cast<uint8_t*>(g_player_config) + 6, 0x14);
+            /* Copy "LEGO LOCO" as session name */
+            memcpy(player->m_sessionBlk2, "LEGO LOCO", 10);
 
             NET_RegisterPlayer(g_dplay, player, 1, 0);
 
-            void** vt = *reinterpret_cast<void***>(player);
-            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(player, 1);
+            player->~DPlayManager();
+            GLOBAL_free(player);
         }
     }
 
@@ -3166,10 +3186,11 @@ void Train_ConnectToServer(void* subsystem, void* payload)
 
     {
         /* 0x43CACC calls DPlayManager::CreatePlayer (0x442850) — its own
-         * cross-reference list names Train_ConnectToServer as a caller —
-         * not the free function DPLAY_CreatePlayer declared elsewhere in
-         * this file (that extern's own address comment, 0x4429C0, is
-         * itself mid-body of a different function; out of scope here).
+         * cross-reference list names Train_ConnectToServer as a caller.
+         * The free-function DPLAY_CreatePlayer this file used to declare
+         * separately (fabricated address 0x4429C0, zero xrefs) has been
+         * removed — TrainSubsystem::HandleJoinMultiplayer above was its
+         * one real caller, now fixed to use the same idiom as this block.
          * Matches the operator_new+placement-new+CreatePlayer() idiom
          * already established at network/Netman.cpp:2333-2336. */
         void* storage = operator_new(sizeof(DPlayManager));
