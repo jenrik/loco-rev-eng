@@ -14,6 +14,19 @@
 #include <unistd.h>
 #endif
 
+/* IDirectDrawClipper — forward declaration only (g_clipper_0..5 below are
+ * pointers, no complete type needed). Declared outside extern "C" per
+ * CLAUDE.md: C++ class declarations must not be forced to C linkage; the
+ * `extern "C"` on the *variable* declarations themselves is fine — it only
+ * affects the pointer's own symbol name, not the pointee type. Avoids
+ * #include "../platform/ddraw_interfaces.h" here specifically: it pulls in
+ * shared/types.h, which redeclares _g_primary_surface (used a few lines
+ * below) with ordinary C++ linkage — conflicting, within this one
+ * translation unit, with this file's own extern "C" definition of the same
+ * name (a pre-existing, unrelated linkage split between this file and
+ * shared/types.h's canonical declaration; out of scope to reconcile here). */
+struct IDirectDrawClipper;
+
 extern "C" {
 void AudioChannel_Pause();
 void AudioChannel_Pause() { /* host no-op */ }
@@ -185,12 +198,12 @@ void* DAT_004A9908 = nullptr;
 void* DAT_004fd19c = nullptr;
 void* DAT_004fd1ac = nullptr;
 void* DAT_004fd1c0 = nullptr;
-void* g_clipper_0 = nullptr;
-void* g_clipper_1 = nullptr;
-void* g_clipper_2 = nullptr;
-void* g_clipper_3 = nullptr;
-void* g_clipper_4 = nullptr;
-void* g_clipper_5 = nullptr;
+IDirectDrawClipper* g_clipper_0 = nullptr;
+IDirectDrawClipper* g_clipper_1 = nullptr;
+IDirectDrawClipper* g_clipper_2 = nullptr;
+IDirectDrawClipper* g_clipper_3 = nullptr;
+IDirectDrawClipper* g_clipper_4 = nullptr;
+IDirectDrawClipper* g_clipper_5 = nullptr;
 void* g_clipper_surf = nullptr;
 void* _g_cursor_back = nullptr;
 int32_t _g_cursor_refcount = 0;

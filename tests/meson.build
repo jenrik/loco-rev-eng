@@ -186,6 +186,17 @@ sdl3_ddraw_surfacedesc_test = executable('sdl3_ddraw_surfacedesc_test',
 )
 test('sdl3-ddraw-surfacedesc', sdl3_ddraw_surfacedesc_test, env: ['SDL_VIDEODRIVER=dummy'])
 
+# IDirectDrawPalette/IDirectDrawClipper lifecycle regression (DirectDraw shim Phase 4).
+sdl3_ddraw_palette_clipper_test = executable('sdl3_ddraw_palette_clipper_test',
+  'sdl3_ddraw_palette_clipper_test.cpp',
+  objects: [obj_sdl3_window, obj_sdl3_ddraw, obj_sdl3_game_audio, obj_resource_mgr_sdl3,
+            obj_resource_archive, obj_pe_string_table, obj_host_test_events],
+  include_directories: inc_dirs,
+  cpp_args: test_warn_args + ['-include', compat_h],
+  dependencies: [sdl3_dep],
+)
+test('sdl3-ddraw-palette-clipper', sdl3_ddraw_palette_clipper_test, env: ['SDL_VIDEODRIVER=dummy'])
+
 # Mode-2 EditWindow::render regression: recovered backdrop resources reach the SDL primary target.
 mode2_menu_backdrop_test = executable('mode2_menu_backdrop_test',
   'mode2_menu_backdrop_test.cpp',

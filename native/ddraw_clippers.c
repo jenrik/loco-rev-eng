@@ -11,17 +11,33 @@
  */
 
 #include <stdint.h>
+#include "../platform/ddraw_interfaces.h"
 
 /* ================================================================== */
 /* External globals — 6 clipper pointers + 1 surface pointer           */
+/*                                                                     */
+/* The 6 clipper handles are real IDirectDrawClipper* now (see         */
+/* platform/ddraw_interfaces.h) — typed here so Release goes through a */
+/* real virtual method instead of manual vtable-offset arithmetic, per */
+/* CLAUDE.md's anti-pattern rule ("Do not manually read or write       */
+/* VTBL_* in executable code"). They stay permanently null on host     */
+/* today (no code path constructs one), same as before this change.    */
+/*                                                                     */
+/* g_clipper_surf is NOT a DirectDraw object — it's a UIPANEL_Surface*  */
+/* (graphics/LOCOBITMAP.h), a real modeled C++ class. Its destructor    */
+/* isn't declared virtual in the current model yet (a separate,        */
+/* pre-existing gap unrelated to DirectDraw — see that header), so its  */
+/* raw vtable[0] dispatch is left as-is rather than folded into this    */
+/* DirectDraw-interface fix; it's also always null today (same          */
+/* liveness as the clippers), so this is a documentation-only note.     */
 /* ================================================================== */
 
-extern void* g_clipper_0;    /* 0x004FF0FC — 1st clipper handle */
-extern void* g_clipper_1;    /* 0x004FF100 — 2nd clipper handle */
-extern void* g_clipper_2;    /* 0x004FF104 — 3rd clipper handle */
-extern void* g_clipper_3;    /* 0x004FF108 — 4th clipper handle */
-extern void* g_clipper_4;    /* 0x004FF10C — 5th clipper handle */
-extern void* g_clipper_5;    /* 0x004FF0F8 — 6th clipper handle */
+extern IDirectDrawClipper* g_clipper_0;    /* 0x004FF0FC — 1st clipper handle */
+extern IDirectDrawClipper* g_clipper_1;    /* 0x004FF100 — 2nd clipper handle */
+extern IDirectDrawClipper* g_clipper_2;    /* 0x004FF104 — 3rd clipper handle */
+extern IDirectDrawClipper* g_clipper_3;    /* 0x004FF108 — 4th clipper handle */
+extern IDirectDrawClipper* g_clipper_4;    /* 0x004FF10C — 5th clipper handle */
+extern IDirectDrawClipper* g_clipper_5;    /* 0x004FF0F8 — 6th clipper handle */
 extern void* g_clipper_surf; /* 0x004FF110 — clipper surface/UIPANEL surface */
 
 /* Forward declarations (STRICT=2 -Wmissing-declarations). Self-contained
@@ -50,55 +66,15 @@ void __fastcall DDRAW_FreeClipper(void* clipper);
 /* ================================================================== */
 void __cdecl DDRAW_ReleaseClippers(void)
 {
-    /* Release clipper 0 */
-    if (g_clipper_0 != NULL) {
-        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_0);
-        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
-        release_fn(g_clipper_0);   /* vtable[2] = Release() */
-        g_clipper_0 = NULL;
-    }
+    if (g_clipper_0 != NULL) { g_clipper_0->Release(); g_clipper_0 = NULL; }
+    if (g_clipper_1 != NULL) { g_clipper_1->Release(); g_clipper_1 = NULL; }
+    if (g_clipper_2 != NULL) { g_clipper_2->Release(); g_clipper_2 = NULL; }
+    if (g_clipper_3 != NULL) { g_clipper_3->Release(); g_clipper_3 = NULL; }
+    if (g_clipper_4 != NULL) { g_clipper_4->Release(); g_clipper_4 = NULL; }
+    if (g_clipper_5 != NULL) { g_clipper_5->Release(); g_clipper_5 = NULL; }
 
-    /* Release clipper 1 */
-    if (g_clipper_1 != NULL) {
-        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_1);
-        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
-        release_fn(g_clipper_1);
-        g_clipper_1 = NULL;
-    }
-
-    /* Release clipper 2 */
-    if (g_clipper_2 != NULL) {
-        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_2);
-        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
-        release_fn(g_clipper_2);
-        g_clipper_2 = NULL;
-    }
-
-    /* Release clipper 3 */
-    if (g_clipper_3 != NULL) {
-        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_3);
-        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
-        release_fn(g_clipper_3);
-        g_clipper_3 = NULL;
-    }
-
-    /* Release clipper 4 */
-    if (g_clipper_4 != NULL) {
-        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_4);
-        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
-        release_fn(g_clipper_4);
-        g_clipper_4 = NULL;
-    }
-
-    /* Release clipper 5 */
-    if (g_clipper_5 != NULL) {
-        uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_5);
-        int32_t (*release_fn)(void*) = *reinterpret_cast<int32_t (**)(void*)>(vtbl + 2 * sizeof(void*));
-        release_fn(g_clipper_5);
-        g_clipper_5 = NULL;
-    }
-
-    /* Destroy UIPANEL surface */
+    /* Destroy UIPANEL surface — not a DirectDraw object, see the comment
+     * on g_clipper_surf's declaration above. */
     if (g_clipper_surf != NULL) {
         uint8_t* vtbl = *static_cast<uint8_t**>(g_clipper_surf);
         int32_t (*destroy_fn)(uint32_t) = *reinterpret_cast<int32_t (**)(uint32_t)>(vtbl + 0 * sizeof(void*));

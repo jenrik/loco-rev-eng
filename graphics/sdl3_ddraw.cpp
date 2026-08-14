@@ -297,7 +297,7 @@ HRESULT Sdl3DirectDrawSurface::ReleaseDC(void* hdc)
     return -1;
 }
 
-HRESULT Sdl3DirectDrawSurface::SetPalette(void* palette)
+HRESULT Sdl3DirectDrawSurface::SetPalette(IDirectDrawPalette* palette)
 {
     (void)palette;
     /* Palette handling: no-op. SDL3 uses true-color surfaces;
@@ -347,6 +347,73 @@ HRESULT Sdl3DirectDrawSurface::WaitForVerticalBlank(DWORD flags, void* event_han
 {
     (void)flags; (void)event_handle;
     return 0; /* no real vsync modeling; report success like a no-op wait */
+}
+
+/* =========================================================================
+ * Sdl3DirectDrawPalette
+ * ========================================================================= */
+
+Sdl3DirectDrawPalette::Sdl3DirectDrawPalette()
+{
+    std::memset(entries, 0, sizeof(entries));
+}
+
+int32_t Sdl3DirectDrawPalette::QueryInterface(void* iid, void** object)
+{
+    (void)iid;
+    if (object) *object = nullptr;
+    return -1; /* E_NOINTERFACE-equivalent: no real caller in this tree */
+}
+
+uint32_t Sdl3DirectDrawPalette::AddRef()
+{
+    return 1; /* refcounting not modeled; lifetime is Release()-owned */
+}
+
+uint32_t Sdl3DirectDrawPalette::Release()
+{
+    delete this;
+    return 0;
+}
+
+HRESULT Sdl3DirectDrawPalette::SetEntries(DWORD flags, DWORD start, DWORD count, void* entries_in)
+{
+    (void)flags;
+    if (!entries_in || start >= kMaxEntries) return -1;
+    const uint32_t n = std::min<uint32_t>(count, kMaxEntries - start);
+    std::memcpy(&entries[start], entries_in, n * sizeof(entries[0]));
+    return 0;
+}
+
+HRESULT Sdl3DirectDrawPalette::GetEntries(DWORD flags, DWORD start, DWORD count, void* entries_out)
+{
+    (void)flags;
+    if (!entries_out || start >= kMaxEntries) return -1;
+    const uint32_t n = std::min<uint32_t>(count, kMaxEntries - start);
+    std::memcpy(entries_out, &entries[start], n * sizeof(entries[0]));
+    return 0;
+}
+
+/* =========================================================================
+ * Sdl3DirectDrawClipper
+ * ========================================================================= */
+
+int32_t Sdl3DirectDrawClipper::QueryInterface(void* iid, void** object)
+{
+    (void)iid;
+    if (object) *object = nullptr;
+    return -1; /* E_NOINTERFACE-equivalent: no real caller in this tree */
+}
+
+uint32_t Sdl3DirectDrawClipper::AddRef()
+{
+    return 1; /* refcounting not modeled; lifetime is Release()-owned */
+}
+
+uint32_t Sdl3DirectDrawClipper::Release()
+{
+    delete this;
+    return 0;
 }
 
 /* =========================================================================
@@ -418,6 +485,29 @@ HRESULT Sdl3DirectDraw4::CreateSurface(DDSURFACEDESC* desc,
     SDL_SetTextureBlendMode(surf->texture, SDL_BLENDMODE_BLEND);
 
     *out = surf;
+    return 0;
+}
+
+HRESULT Sdl3DirectDraw4::CreatePalette(DWORD flags, void* color_array,
+                                        IDirectDrawPalette** out, void* unused)
+{
+    (void)unused;
+    if (!out) return -1;
+
+    Sdl3DirectDrawPalette* pal = new Sdl3DirectDrawPalette();
+    if (color_array) {
+        pal->SetEntries(flags, 0, Sdl3DirectDrawPalette::kMaxEntries, color_array);
+    }
+    *out = pal;
+    return 0;
+}
+
+HRESULT Sdl3DirectDraw4::CreateClipper(DWORD flags, IDirectDrawClipper** out,
+                                        void* unused)
+{
+    (void)flags; (void)unused;
+    if (!out) return -1;
+    *out = new Sdl3DirectDrawClipper();
     return 0;
 }
 

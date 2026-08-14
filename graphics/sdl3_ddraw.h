@@ -61,11 +61,54 @@ struct Sdl3DirectDrawSurface : IDirectDrawSurface4 {
     HRESULT IsLost() override;
     HRESULT GetDC(void** hdc) override;
     HRESULT ReleaseDC(void* hdc) override;
-    HRESULT SetPalette(void* palette) override;
+    HRESULT SetPalette(IDirectDrawPalette* palette) override;
     HRESULT GetAttachedSurface(void* caps, IDirectDrawSurface4** out) override;
     HRESULT EnumSurfaces(void* callback, void* context) override;
     HRESULT GetCaps(void* caps) override;
     HRESULT WaitForVerticalBlank(DWORD flags, void* event_handle) override;
+};
+
+/* =========================================================================
+ * Sdl3DirectDrawPalette — minimal IDirectDrawPalette
+ *
+ * SDL3 uses true-color surfaces (BMPs are baked to RGBA at load time — see
+ * CLAUDE.md's "Palette handling" note); no real caller in this tree passes
+ * actual color entries today. This class just stores what it's given so
+ * CreatePalette/SetEntries/GetEntries round-trip correctly if ever used.
+ * ========================================================================= */
+
+struct Sdl3DirectDrawPalette : IDirectDrawPalette {
+    static constexpr uint32_t kMaxEntries = 256;
+    uint8_t entries[kMaxEntries][4]; /* PALETTEENTRY-shaped: r,g,b,flags */
+
+    Sdl3DirectDrawPalette();
+    ~Sdl3DirectDrawPalette() override = default;
+    Sdl3DirectDrawPalette(const Sdl3DirectDrawPalette&) = delete;
+    Sdl3DirectDrawPalette& operator=(const Sdl3DirectDrawPalette&) = delete;
+
+    int32_t  QueryInterface(void* iid, void** object) override;
+    uint32_t AddRef() override;
+    uint32_t Release() override;
+    HRESULT  SetEntries(DWORD flags, DWORD start, DWORD count, void* entries_in) override;
+    HRESULT  GetEntries(DWORD flags, DWORD start, DWORD count, void* entries_out) override;
+};
+
+/* =========================================================================
+ * Sdl3DirectDrawClipper — minimal IDirectDrawClipper
+ *
+ * This tree only ever releases opaque clipper objects today
+ * (native/ddraw_clippers.c); nothing sets/queries a real clip list.
+ * ========================================================================= */
+
+struct Sdl3DirectDrawClipper : IDirectDrawClipper {
+    Sdl3DirectDrawClipper() = default;
+    ~Sdl3DirectDrawClipper() override = default;
+    Sdl3DirectDrawClipper(const Sdl3DirectDrawClipper&) = delete;
+    Sdl3DirectDrawClipper& operator=(const Sdl3DirectDrawClipper&) = delete;
+
+    int32_t  QueryInterface(void* iid, void** object) override;
+    uint32_t AddRef() override;
+    uint32_t Release() override;
 };
 
 /* =========================================================================
@@ -90,6 +133,10 @@ struct Sdl3DirectDraw4 : IDirectDraw4 {
     uint32_t Release() override;
 
     HRESULT CreateSurface(DDSURFACEDESC* desc, IDirectDrawSurface4** out,
+                           void* unused) override;
+    HRESULT CreatePalette(DWORD flags, void* color_array,
+                           IDirectDrawPalette** out, void* unused) override;
+    HRESULT CreateClipper(DWORD flags, IDirectDrawClipper** out,
                            void* unused) override;
     HRESULT SetCooperativeLevel(void* hwnd, DWORD flags) override;
     HRESULT SetDisplayMode(DWORD width, DWORD height, DWORD bpp,

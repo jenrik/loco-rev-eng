@@ -207,10 +207,9 @@ struct IDirectDrawSurface4 {
     virtual HRESULT GetDC(void** hdc) = 0;
     virtual HRESULT ReleaseDC(void* hdc) = 0;
 
-    /* Palette. (SetClipper has zero real callers in this tree today and is
-     * deferred to Phase 4, alongside IDirectDrawClipper's own factory —
-     * added when there's a real caller to shape it against, not before.) */
-    virtual HRESULT SetPalette(void* palette) = 0;
+    /* Palette. (SetClipper has zero real callers in this tree today —
+     * deferred until there's a real caller to shape it against.) */
+    virtual HRESULT SetPalette(IDirectDrawPalette* palette) = 0;
 
     /* Multi-surface (backbuffer/z-buffer chains, overlays) */
     virtual HRESULT GetAttachedSurface(void* caps, IDirectDrawSurface4** out) = 0;
@@ -232,13 +231,17 @@ struct IDirectDraw4 {
     virtual uint32_t AddRef() = 0;
     virtual uint32_t Release() = 0;
 
-    /* Surface factory. (CreatePalette/CreateClipper have zero real callers
-     * in this tree today — this project bakes palettes into RGBA at
-     * BMP-load time rather than swapping IDirectDrawPalette objects at
-     * runtime, and clipper creation isn't reached from any live path — so
-     * they're deferred to Phase 4 alongside IDirectDrawPalette/Clipper's
-     * own real implementations, not declared speculatively here.) */
+    /* Surface/palette/clipper factories. CreatePalette/CreateClipper have
+     * zero real callers in this tree today (this project bakes palettes
+     * into RGBA at BMP-load time rather than swapping IDirectDrawPalette
+     * objects at runtime, and clipper creation isn't reached from any live
+     * path), but are declared for interface completeness now that minimal
+     * concrete IDirectDrawPalette/Clipper implementations exist. */
     virtual HRESULT CreateSurface(DDSURFACEDESC* desc, IDirectDrawSurface4** out,
+                                   void* unused) = 0;
+    virtual HRESULT CreatePalette(DWORD flags, void* color_array,
+                                   IDirectDrawPalette** out, void* unused) = 0;
+    virtual HRESULT CreateClipper(DWORD flags, IDirectDrawClipper** out,
                                    void* unused) = 0;
 
     /* Device setup */
