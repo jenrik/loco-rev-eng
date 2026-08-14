@@ -22,6 +22,13 @@ extern char  g_install_path[];     /* 0x4A99C8 — "<data>/art-res/" on the host
 extern void* operator_new(size_t); /* 0x465CE0 */
 extern void  GLOBAL_free(void*);   /* 0x465CD0 */
 
+/* Forward declaration, not #include "../resources/resource_manager_sdl3.h":
+ * see input/InputMgr.cpp's identical comment for the header collision this
+ * avoids. */
+namespace loco::assets { bool load_and_draw_town_backdrop(const char* name); }
+extern int16_t g_host_original_preview_w; /* host-only, no x86 address */
+extern int16_t g_host_original_preview_h; /* host-only, no x86 address */
+
 namespace loco {
 namespace host {
 
@@ -293,6 +300,24 @@ bool seed_fresh_world_from_fixture(InputMgr* mgr)
         return false;
     }
     PersistenceAdapter::instance().document() = std::move(doc);
+
+    /* The scenario's backdrop name (e.g. "ARRID" for Wildwest) lives only in
+     * *this* header -- INPUT_SaveCurrentWorld's "curr" round trip just below
+     * intentionally blanks it (shared/types.h's SaveRegion::name comment:
+     * "INPUT_SaveCurrentWorld writes the empty BSS string"), matching the
+     * original, so it must be captured here, not re-read from "curr" later. */
+    loco::assets::load_and_draw_town_backdrop(
+        PersistenceAdapter::instance().document().header.name);
+
+    /* Same reasoning as the backdrop capture above: the scenario's real
+     * design-preview dimensions (INPUT_LoadSaveFile's placement-centering
+     * offset needs them) live only in *this* header -- the "curr" round
+     * trip below overwrites player_id/player_color with the live
+     * g_player_id/g_player_color before "curr" is ever read back. */
+    g_host_original_preview_w = static_cast<int16_t>(
+        PersistenceAdapter::instance().document().header.player_id);
+    g_host_original_preview_h = static_cast<int16_t>(
+        PersistenceAdapter::instance().document().header.player_color);
 
     std::fprintf(stderr,
         "[HOST] seed_fresh_world: seeded %zu entity + %zu vehicle records "

@@ -475,6 +475,13 @@ int main()
         std::string dir = make_temp_dir();
         std::snprintf(g_install_path, sizeof(g_install_path), "%s/", dir.c_str());
 
+        /* This section's crafted saves are unrelated to the seed_fresh_world
+         * tests just above -- reset the one-shot capture those tests left
+         * set (from Wildwest.sav's own header) so it doesn't leak in and
+         * override this section's own crafted header words. */
+        g_host_original_preview_w = 0;
+        g_host_original_preview_h = 0;
+
         /* (a) delta -3: the offset must be -1 (truncation toward zero),
          * never -2 (floor).  Preview dims 3x3 = 9 bytes; one entity at
          * (0,0). */

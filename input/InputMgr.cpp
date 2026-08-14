@@ -174,6 +174,12 @@ extern int32_t DAT_004a98b8[4];                    /* 0x4A98B8 — level-table e
 /* Host stream helper (resources/ResDataSave.cpp) and placement gate. */
 #ifndef _WIN32
 extern size_t host_stream_bytes_remaining(void* stream);
+/* Captured by seed_fresh_world_from_fixture (PersistenceAdapter.cpp) before
+ * the "curr" round-trip blanks the source scenario's own header words with
+ * the live (always-0 on host) g_player_id/g_player_color -- see the
+ * placement-offset comment in INPUT_LoadSaveFile below. */
+extern int16_t g_host_original_preview_w;
+extern int16_t g_host_original_preview_h;
 #endif
 
 /* UI tooltip entry points (0x423D00 / 0x423D70); host-gated because the
@@ -1141,11 +1147,61 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
      * subtraction; the idiom itself is TRUNCATION TOWARD ZERO
      * (cltd/sub/sar — for a negative odd delta, -3/2 = -1, NOT floor
      * division -2), exactly C++ integer division.  trunc_div2
-     * reproduces the exact x86 semantics with both operand widths. */
+     * reproduces the exact x86 semantics with both operand widths.
+     *
+     * Host deviation: 0x4AAD46/0x4AAD48 are the SAME two addresses this
+     * codebase has already confirmed alias TileMap::tile_count_x/
+     * tile_count_y in the original's fixed-address singleton layout (9
+     * other call sites in world/tilemap.cpp were fixed on this exact
+     * basis -- see PROGRESS.md). This call reads the raw addresses too
+     * (`g_player_id`/`g_player_color`, not a TileMap-relative access),
+     * so on the original binary it transparently reads the live
+     * TileMap's own tile counts -- this is a world-recentering
+     * calculation (center a smaller authored map inside a larger
+     * current one), not a player-identity comparison, matching
+     * designer saves storing per-tile preview data (whose dimensions
+     * equal the map's own tile counts) in the same header words. On
+     * host, TileMap is a heap object, so the live tile counts must be
+     * read explicitly off g_tilemap instead of the (always-0,
+     * genuinely-unrelated) g_player_id/g_player_color globals. Measured
+     * directly: this fixes an exact, reproducible 128px (8-tile) town
+     * offset against tests/reference/wildwest-minimal.png. */
+#ifndef _WIN32
+    int32_t current_tile_count_x = 0;
+    int32_t current_tile_count_y = 0;
+    if (g_tilemap != nullptr) {
+        current_tile_count_x = static_cast<TileMap*>(g_tilemap)->tile_count_x;
+        current_tile_count_y = static_cast<TileMap*>(g_tilemap)->tile_count_y;
+    }
+    /* The host-only seed_fresh_world_from_fixture -> "curr" round trip
+     * (PersistenceAdapter.cpp) has no original-engine equivalent: it
+     * re-serializes a freshly-seeded scenario's carried records through
+     * INPUT_SaveCurrentWorld, which faithfully stamps the header with
+     * the live (always-0) g_player_id/g_player_color, silently losing
+     * the source scenario's own tile-count header words that this
+     * recentering calculation needs. g_host_original_preview_w/h
+     * capture those words before that round trip overwrites them; prefer
+     * them when set (nonzero), falling back to the file's own header
+     * word for a genuine end-user save/load. Consume-once: reset to 0
+     * immediately after reading so a later, unrelated load in the same
+     * session (a real save the player makes, or this file's own second
+     * reload) doesn't keep reusing a stale capture from one seed. */
+    int32_t saved_x = (g_host_original_preview_w != 0)
+        ? static_cast<int32_t>(g_host_original_preview_w)
+        : static_cast<int32_t>(resdata.save.player_id);
+    int32_t saved_y = (g_host_original_preview_h != 0)
+        ? static_cast<int32_t>(g_host_original_preview_h)
+        : static_cast<int32_t>(resdata.save.player_color);
+    g_host_original_preview_w = 0;
+    g_host_original_preview_h = 0;
+    int32_t offset_x = trunc_div2(current_tile_count_x - saved_x);
+    int32_t offset_y = trunc_div2(current_tile_count_y - saved_y);
+#else
     int32_t offset_x = trunc_div2(static_cast<int16_t>(g_player_id) -
                                   static_cast<int32_t>(resdata.save.player_id));
     int32_t offset_y = trunc_div2(static_cast<int16_t>(g_player_color) -
                                   static_cast<int32_t>(resdata.save.player_color));
+#endif
 
     /* flags != 0: TileMap::FullReset (0x454FE0) first. */
     if (flags != 0) {
