@@ -3,6 +3,7 @@
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../network/DPlayManager.h"
 #include "../ui/ButtonSprite.h"
 
@@ -158,7 +159,7 @@ void* Cursor::wait_for_blit(HWND hWnd)
 /*   3. Hide edit control, set focus to hWnd                          */
 /*   4. Reset editor flags and selection indices                       */
 /*   5. Release all toolbar_sprites[64]                                */
-/*   6. Create two DDraw editor surfaces (via g_ddraw vtable[6])      */
+/*   6. Create two DDraw editor surfaces (via g_ddraw->CreateSurface)  */
 /*   7. Handle player data: store + copy name/colours from playerData */
 /*      or call init_network_player() if null                         */
 /*   8. update_network_names(), start 50ms timer 0x53 at +0x19C       */
@@ -214,28 +215,41 @@ void Cursor::show(void* playerData)
         this->toolbar_sprites[i] = nullptr;
     }
 
-    /* Create two DDraw offscreen surfaces for editor toolbar.
-     * g_ddraw is an opaque IDirectDraw4 COM object; CreateSurface via
-     * vtable slot [6] is the documented DirectDraw ABI. Ghidra asm
+    /* Create two DDraw offscreen surfaces for editor toolbar. Ghidra asm
      * @0x416C37-0x416C75 confirms: width = palette_rect.right - left
      * (+0x1B8 minus +0x1B0), height = palette_rect.bottom - top
-     * (+0x1BC minus +0x1B4), dwFlags=7 = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH. */
+     * (+0x1BC minus +0x1B4), dwFlags=7 = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH.
+     *
+     * `desc`/`formatStorage` are kept exactly as originally transcribed —
+     * a raw int[24] whose `- 0x8C` pointer arithmetic further down is a
+     * separate, pre-existing, unverified stack-layout landmine this pass
+     * does not disturb (see PROGRESS.md's DirectDraw-shim Phase 5 note).
+     * CreateSurface itself is dispatched through the real, properly-sized
+     * DDSURFACEDESC below instead of reusing this undersized 96-byte
+     * buffer as the real struct — a 1:1 translation of desc[0..3]'s
+     * already-recovered meaning, nothing new claimed. */
 
     int desc[24] = { 0 };
-    void** ddrawVtbl = *reinterpret_cast<void***>(g_ddraw);
 
     int surfWidth = this->palette_rect.right - this->palette_rect.left;
     int surfHeight = this->palette_rect.bottom - this->palette_rect.top;
 
-    desc[0] = 0x7C;       /* dwSize */
+    desc[0] = 0x7C;       /* dwSize (historical annotation only) */
     desc[1] = 7;          /* dwFlags */
     desc[2] = surfHeight; /* dwHeight */
     desc[3] = surfWidth;  /* dwWidth */
 
+    DDSURFACEDESC surface_desc;
+    surface_desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+    surface_desc.dwHeight = surfHeight;
+    surface_desc.dwWidth = surfWidth;
+
+    IDirectDraw4* dd = static_cast<IDirectDraw4*>(g_ddraw);
+
     /* Create surface A at +0x590 */
-    using CreateSurface = int (*)(void*, int*, void**, int);
-    int err = reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
-        g_ddraw, desc, &this->editor_surf_a, 0);
+    IDirectDrawSurface4* surf_a = nullptr;
+    HRESULT err = dd->CreateSurface(&surface_desc, &surf_a, nullptr);
+    this->editor_surf_a = surf_a;
     if (err != 0) {
         OutputDebugStringA("EDIT WINDOW : failed to create surface A");
     }
@@ -246,8 +260,9 @@ void Cursor::show(void* playerData)
     DDRAW_RestoreSurfaces(this->editor_surf_a, formatStorage);
 
     /* Create surface B at +0x598 */
-    err = reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
-        g_ddraw, desc, &this->editor_surf_b, 0);
+    IDirectDrawSurface4* surf_b = nullptr;
+    err = dd->CreateSurface(&surface_desc, &surf_b, nullptr);
+    this->editor_surf_b = surf_b;
     if (err != 0) {
         OutputDebugStringA("EDIT WINDOW : failed to create surface B");
     }

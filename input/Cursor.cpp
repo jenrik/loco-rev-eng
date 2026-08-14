@@ -3,6 +3,7 @@
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../network/DPlayManager.h"   /* complete type needed: base_destructor()
                                          * below deletes obj_184 (a real
                                          * DPlayManager*, Cursor.h only
@@ -533,19 +534,32 @@ void Cursor::init_sprites()
 
     /* Create shared 256x256 cursor backbuffer if not yet created */
     if (_g_cursor_back == nullptr) {
-        /* Build DDraw surface descriptor: 0x100x0x100, format 0x7C, caps 0x840 */
+        /* `desc`/`formatStorage` (below) are kept exactly as originally
+         * transcribed — a raw int[24] whose `- 0x8C` pointer arithmetic
+         * further down is a separate, pre-existing, unverified stack-
+         * layout landmine this pass does not disturb (see PROGRESS.md's
+         * DirectDraw-shim Phase 5 note). CreateSurface itself is now
+         * dispatched through the real, properly-sized DDSURFACEDESC below
+         * instead of reusing this undersized 96-byte buffer as the real
+         * struct — the field values are a 1:1 translation of desc[0..3]'s
+         * already-recovered meaning (dwFlags=7=DDSD_CAPS|HEIGHT|WIDTH,
+         * dwHeight=dwWidth=0x100), nothing new is claimed. ddsCaps/dwSize
+         * are left at their zero/unset defaults, matching what the
+         * original int[] encoding actually populated (only indices 0-3). */
         int desc[24] = { 0 };
-        desc[0] = 0x7C;       /* dwSize = sizeof(DDSCAPS2) */
-        desc[1] = 7;          /* ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN | ... */
+        desc[0] = 0x7C;       /* dwSize (historical annotation only) */
+        desc[1] = 7;          /* dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH */
         desc[2] = 0x100;      /* dwHeight = 256 */
         desc[3] = 0x100;      /* dwWidth = 256 */
 
-        /* g_ddraw is an opaque IDirectDraw4 COM object; CreateSurface via
-         * vtable slot [6] is the documented DirectDraw ABI. */
-        void** ddrawVtbl = *reinterpret_cast<void***>(g_ddraw);
-        using CreateSurface = int (*)(void*, int*, void**, int);
-        reinterpret_cast<CreateSurface>(ddrawVtbl[6])(
-            g_ddraw, desc, &_g_cursor_back, 0);
+        DDSURFACEDESC surface_desc;
+        surface_desc.dwFlags = DDSD_CAPS | DDSD_HEIGHT | DDSD_WIDTH;
+        surface_desc.dwHeight = 0x100;
+        surface_desc.dwWidth = 0x100;
+
+        IDirectDrawSurface4* created = nullptr;
+        static_cast<IDirectDraw4*>(g_ddraw)->CreateSurface(&surface_desc, &created, nullptr);
+        _g_cursor_back = created;
 
         uint16_t cur_w, cur_h;
         DDRAW_GetSurfaceWidthHeight(_g_cursor_back, &cur_h, &cur_w);
