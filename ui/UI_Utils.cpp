@@ -474,14 +474,9 @@ void UI_Manager::hideTooltip()
         uint32_t idx = 0;
         uint32_t count = update_list.GetCount();
         while (idx < count) {
-            int* item = static_cast<int*>(update_list.GetItem(idx));
-            if (item != NULL) {
-                /* Call UI_Window_UpdateScroll on the item */
-                extern char __fastcall UI_Window_UpdateScroll(int* item);
-                char completed = UI_Window_UpdateScroll(item);
-                if (completed == 1) {
-                    update_list.RemoveAt(idx);
-                }
+            UIEntity* item = static_cast<UIEntity*>(update_list.GetItem(idx));
+            if (item != NULL && item->UpdateScroll()) {
+                update_list.RemoveAt(idx);
             }
             idx++;
             count = update_list.GetCount();
@@ -493,13 +488,9 @@ void UI_Manager::hideTooltip()
         uint32_t idx = 0;
         uint32_t count = pos_list.GetCount();
         while (idx < count) {
-            int* item = static_cast<int*>(pos_list.GetItem(idx));
-            if (item != NULL) {
-                extern char __fastcall UI_Window_UpdateScroll(int* item);
-                char completed = UI_Window_UpdateScroll(item);
-                if (completed == 1) {
-                    pos_list.RemoveAt(idx);
-                }
+            UIEntity* item = static_cast<UIEntity*>(pos_list.GetItem(idx));
+            if (item != NULL && item->UpdateScroll()) {
+                pos_list.RemoveAt(idx);
             }
             idx++;
             count = pos_list.GetCount();
@@ -677,11 +668,11 @@ void UI_CleanupTooltips(void* mgr)
     static_cast<UI_Manager*>(mgr)->cleanupTooltips();
 }
 
-/** UI_HideTooltip — Address: 0x423D70. See UI_Manager::hideTooltip.
- *  Safe to wire despite UI_Window_UpdateScroll (0x423560) remaining an
- *  assert-stub: both lists hideTooltip iterates are populated only by
- *  UI_CreateMessageBox (0x423AB0), itself an unimplemented stub that
- *  always returns nullptr today, so the loop body is unreachable. */
+/** UI_HideTooltip — Address: 0x423D70. See UI_Manager::hideTooltip, which
+ *  now calls the real UIEntity::UpdateScroll (0x423560, 2026-08-14) on
+ *  each item — still unreachable today since both lists hideTooltip
+ *  iterates are populated only by UI_CreateMessageBox (0x423AB0), itself
+ *  an unimplemented stub that always returns nullptr. */
 void UI_HideTooltip(void* mgr);
 void UI_HideTooltip(void* mgr)
 {

@@ -124,7 +124,13 @@ extern size_t WIN32_Stream_Size();
     extern void   GameAudio_PlayResourceEx(void* audio, UINT resId, int* outChannel); /* 0x4131C0 */
     extern void   AudioChannel_Release(void* channel);  /* 0x40ECA0 */
     extern void   GameAudio_UpdateVolume(void* audio, char flag); /* 0x4135B0 */
-    extern int    AudioChannel_IsActive(int channel); /* 0x40EEB0 */
+    /* AudioChannel_IsActive(int) removed 2026-08-14 — landmine: declared
+     * `int`-returning here but shared/defsym_stubs.cpp's only definition
+     * returned `void` (return type doesn't affect C++ mangling, so every
+     * caller silently read a garbage EAX). The real function is already
+     * a proper typed method, AudioChannel::IsActive() (audio/AudioChannel.h,
+     * 0x40EEB0) — call it directly instead of through a free-function
+     * facade that also truncated the pointer through `int`. */
     extern int    Cursor_WaitForBlit(void* self);           /* 0x414BB0 — returns HDC */
     extern void   Cursor_Render(void* cursor, int hWnd,
                                  int hdc, char flag);          /* 0x414C20 */
@@ -1360,7 +1366,7 @@ void HelpWnd::update_anim(int param)
     if (this->field_3064 == 100) this->field_3064 = 0;
 
     if ((this->field_3064 & 1) == 0) {
-        if (AudioChannel_IsActive((int)this->audioChannel) == 0) {
+        if (!this->audioChannel->IsActive()) {
             RESDATA* pd = static_cast<RESDATA*>(this->btnAnim->pixelData);
             if (pd != NULL) {
                 int16_t fi = pd->default_anim;

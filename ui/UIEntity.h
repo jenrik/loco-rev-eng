@@ -145,4 +145,25 @@ public:
      * this override replaces the base behavior entirely).
      */
     void Update() override;
+
+    /**
+     * UpdateScroll — per-frame scroll/slide/bounce animation tick.
+     * Address: 0x423560 (Ghidra label "UI_Window_UpdateScroll"; not a
+     * vtable slot — called directly by UI_Manager::hideTooltip on every
+     * item in update_list/pos_list). Returns true once the animation
+     * has completed (caller removes the item from its list).
+     *
+     * Switches on `direction`: 'D'/'U' bounce vertically within the
+     * world height/above screen top, 'P'/'S' slide horizontally with a
+     * field_8A-indexed pause step before reversing into the other mode,
+     * default plays the resource's current animation frame range to
+     * completion. `animVariant` (+0x94) doubles as the per-tick scroll
+     * step in pixels here, distinct from its animation-variant meaning
+     * elsewhere; `worldX` (+0x8C) doubles as a slide-animation
+     * threshold/reset value, distinct from its placement-position
+     * meaning in the constructor — both are genuine dual uses of the
+     * same storage confirmed directly from this function's own
+     * disassembly, not modeling errors.
+     */
+    bool UpdateScroll();
 };

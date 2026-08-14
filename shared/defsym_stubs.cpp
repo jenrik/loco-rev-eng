@@ -309,8 +309,11 @@ char* CRT_itoa(int value, char* buf, int radix) {
 }
 void Cursor_WaitForBlit(void*);
 void Cursor_WaitForBlit(void*) { /* host no-op */ }
-void AudioChannel_IsActive(int);
-void AudioChannel_IsActive(int) { /* host no-op */ }
+/* AudioChannel_IsActive(int) removed 2026-08-14 — this `void`-returning
+ * stub silently mismatched every real caller's `int`-returning
+ * declaration (return type isn't part of C++ mangling); its one real
+ * caller (ui/HelpWnd.cpp) now calls the real AudioChannel::IsActive()
+ * typed method directly instead. */
 void GAMESTATE_ConnectToNetworkGame(void*);
 void GAMESTATE_ConnectToNetworkGame(void*) { /* host no-op */ }
 void GameWindow_BaseDtor(void*);

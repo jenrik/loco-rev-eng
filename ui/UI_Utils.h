@@ -310,14 +310,14 @@ public:
      * Address: 0x423D70
      *
      * NOT actually "hiding" — this is the animation/scroll tick function.
-     * Iterates both update_list and pos_list, calls UI_Window_UpdateScroll
-     * on each item, removes (via UITimerList::RemoveAt) those that return
-     * 1 (completed). UI_Window_UpdateScroll (0x423560) itself remains an
-     * unimplemented assert-stub, but both lists are populated only by
-     * UI_CreateMessageBox (0x423AB0, itself an unimplemented stub that
-     * always returns nullptr today), so they are always empty and this
-     * loop body is unreachable in the current tree — safe to wire the
-     * free-function facade despite the downstream stub.
+     * Iterates both update_list and pos_list, calls UIEntity::UpdateScroll
+     * (0x423560, implemented 2026-08-14) on each item, removes (via
+     * UITimerList::RemoveAt) those that return true (completed). Both
+     * lists are still populated only by UI_CreateMessageBox (0x423AB0,
+     * itself an unimplemented stub that always returns nullptr today), so
+     * they stay empty and this loop body is unreachable in the current
+     * tree — implemented anyway per the "internal functions must be fully
+     * decompiled" rule, not deferred just because it's currently dead.
      */
     void hideTooltip();
 

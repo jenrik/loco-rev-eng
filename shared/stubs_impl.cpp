@@ -704,36 +704,13 @@ void UI_CreateChildWindow(void*, int, int) { /* host no-op */ }
  * signature so there is exactly one UI_CreateTooltip symbol. */
 void UI_IsBitmapReady(int);
 void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-/* UI_Window_UpdateScroll — Address: 0x423560. Real function (a UIEntity
- * per-frame scroll/animation tick method, confirmed via a 15-slot
- * Entity-shaped vtable dump at 0x477A90 plus field-offset matches
- * against UIEntity/Entity/GameObject's already-named fields), but NOT
- * a working implementation here: its only real caller is 0x423D70
- * (UI_HideTooltip / UI_Manager::hideTooltip in ui/UI_Utils.cpp).
- * g_tooltip_mgr is a real UI_Manager singleton now (graphics/DDRAW.cpp),
- * and UI_HideTooltip is wired to hideTooltip(), but this is still
- * unreachable in practice: hideTooltip only calls this on non-null items
- * in update_list/pos_list, and both lists are populated only by
- * UI_CreateMessageBox (0x423AB0), an unimplemented stub that always
- * returns nullptr on every call site in this tree today — so both lists
- * stay permanently empty and this loop body never runs. Deferred rather
- * than transcribed: correct behavior also depends on two more not-yet-
- * reconstructed UIEntity virtual overrides (UI_ShowWindow 0x423840,
- * UI_HideWindow 0x423870 — see ui/UIEntity.h). This was previously a
- * *silently* wrong stub: it
- * returned void while every call site declares/uses a char return
- * (`if (UI_Window_UpdateScroll(item) == 1)`), which is undefined
- * behavior (the caller reads garbage out of AL/EAX) — same bug class
- * as this session's earlier WIN32_SendNetworkData/NET_UpdatePlayerList
- * fixes. Loud now, and return-type-correct, so if this ever becomes
- * reachable it fails immediately instead of silently misbehaving. */
-char UI_Window_UpdateScroll(int* p);
-char UI_Window_UpdateScroll(int* p) {
-    (void)p;
-    fprintf(stderr, "STUB: %s at %s:%d (0x423560, not yet ported)\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — UI_Window_UpdateScroll");
-    return 0;
-}
+/* UI_Window_UpdateScroll (0x423560): implemented for real as
+ * UIEntity::UpdateScroll() (ui/UIEntity.h/.cpp, 2026-08-14) — the two
+ * previously-missing dependencies this stub's own comment named
+ * (UI_ShowWindow/UI_HideWindow, since renamed StopSound/SetVisible) were
+ * already resolved by an earlier pass. UI_Utils.cpp's hideTooltip() now
+ * calls the typed method directly; this free-function facade has zero
+ * remaining callers. */
 void UIEntity_Ctor(void);
 void UIEntity_Ctor(void) { /* host no-op */ }
 /* UIPANEL_Blit(void*,int...int) and UIPANEL_BeginPaint(void*): duplicates

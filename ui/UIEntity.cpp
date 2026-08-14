@@ -22,6 +22,7 @@
 // Status: TRANSCRIBED
 
 #include "UIEntity.h"
+#include "../audio/AudioChannel.h"   /* AudioChannel::IsActive(), for UpdateScroll */
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
 
@@ -38,10 +39,10 @@ void  __thiscall GameObject_SetWorldPos(void* self,
                                          int x, int y);   /* @ 0x405C00 */
 
 /* Tooltip creation */
-int*  __thiscall UI_CreateTooltip(void* tooltipMgr,
-                                   int resourceId,
-                                   int16_t param,
-                                   int x, int y);        /* @ 0x423C50 */
+Entity* __thiscall UI_CreateTooltip(void* tooltipMgr,
+                                     int resourceId,
+                                     int16_t param,
+                                     int x, int y);        /* @ 0x423C50 */
 
 /* Tooltip destruction — exact (void*, int) signature matching the one
  * real definition in shared/stubs_impl.cpp. Several OTHER files declare
@@ -477,4 +478,159 @@ void UIEntity::Update()
         static_cast<Entity*>(this->pTooltip)->Update();
     }
     this->InvalidateRect();
+}
+
+/* ================================================================== */
+/* UIEntity::UpdateScroll                                              */
+/* Address: 0x423560 (Ghidra label "UI_Window_UpdateScroll")           */
+/*                                                                     */
+/* Not a vtable slot — called directly by UI_Manager::hideTooltip.     */
+/* See the declaration's own doc comment (UIEntity.h) for the dual use */
+/* of animVariant/worldX in this function specifically.                */
+/*                                                                     */
+/* Verified directly against disassemble_function output (not just the */
+/* decompiler's C rendering), instruction by instruction, including:   */
+/*  - the 'D'/'U' parity check (0x42358D-0x4235A6: CDQ/XOR/SUB/AND/XOR/ */
+/*    SUB/JZ) reduces to "branch on anim_index even", confirmed bit-   */
+/*    exact for both positive and negative anim_index.                 */
+/*  - the odd sub-branch genuinely guards screen_rect.bottom > 0 (not   */
+/*    top), asymmetric with the even sub-branch's top < g_world_height  */
+/*    — confirmed at 0x4235A8, not a transcription slip.               */
+/*  - 'P' gates its pause step on field_8A < anim_count-2 (0x423640);   */
+/*    'S' gates on field_8A > 1 (0x4236FF) — genuinely different tests, */
+/*    not a mirrored pair.                                              */
+/*  - the default case's audio_channel check (0x4237BF-0x4237CD) only   */
+/*    calls AudioChannel::IsActive when audio_channel is non-null,      */
+/*    otherwise falls straight to "completed" — matches the short-      */
+/*    circuited `audio_channel != nullptr && !IsActive()` term below.   */
+/* ================================================================== */
+bool UIEntity::UpdateScroll()
+{
+    RESDATA* res = static_cast<RESDATA*>(this->resource);
+
+    /* Every exit path — regardless of which case handled it — repositions
+     * the tooltip child (if any) relative to this entity's new screen
+     * position, unless the animation just completed. Factored out to
+     * avoid replicating the original's cross-case `goto` tail. */
+    auto finish = [this](bool completed) -> bool {
+        if (!completed && this->pTooltip != nullptr) {
+            static_cast<Entity*>(this->pTooltip)->MoveTo(
+                this->screen_rect.left + this->tooltipOffsetX,
+                this->screen_rect.top + this->tooltipOffsetY);
+        }
+        return completed;
+    };
+
+    switch (this->direction) {
+    case 'D':
+    case 'U': {
+        /* Vertical bounce: even anim_index scrolls down while the
+         * bottom edge is still above the world, odd anim_index scrolls
+         * back up while the top edge is still below screen 0. */
+        bool completed = false;
+        if (this->anim_index != 0) {
+            if ((this->anim_index % 2) == 0) {
+                if (this->screen_rect.top < g_world_height) {
+                    this->MoveTo(this->screen_rect.left,
+                                 this->screen_rect.top + this->animVariant);
+                } else {
+                    completed = true;
+                }
+            } else {
+                if (this->screen_rect.bottom > 0) {
+                    this->MoveTo(this->screen_rect.left,
+                                 this->screen_rect.top - this->animVariant);
+                } else {
+                    completed = true;
+                }
+            }
+        }
+        this->Update();
+        return finish(completed);
+    }
+
+    case 'P':
+        /* Horizontal slide, moving left. worldX (as a "target reached"
+         * threshold) gates a field_8A-indexed pause — once anim_index
+         * catches up to field_8A and the current frame has finished
+         * playing — before flipping to 'S' (slide right). */
+        if (this->worldX != 0 && this->screen_rect.right < this->worldX) {
+            if (this->field_8A < static_cast<int32_t>(res->anim_count) - 2) {
+                if (this->anim_index == this->field_8A) {
+                    this->StopSound(this->field_8A + 1);
+                    this->Update();
+                    return finish(false);
+                }
+                const FrameData& fd = res->anim_table[this->anim_index];
+                if (fd.sound_fx_index != -1 ||
+                    this->frame_index != fd.end_frame) {
+                    this->Update();
+                    return finish(false);
+                }
+                this->StopSound(this->field_8A + 2);
+            }
+            this->direction = 'S';
+            this->worldX = 0;
+            this->Update();
+            return finish(false);
+        }
+        if (-static_cast<int32_t>(res->frame_width) < this->world_x) {
+            this->MoveTo(this->screen_rect.left - this->animVariant,
+                         this->screen_rect.top);
+            this->Update();
+            return finish(false);
+        }
+        return finish(true);
+
+    case 'S':
+        /* Horizontal slide, moving right — flips back to 'P' once its
+         * own pause animation finishes. Note the pause gate here is
+         * `field_8A > 1`, not the 'P' case's `field_8A < anim_count-2`
+         * — the two directions are not symmetric in the original. */
+        if (this->worldX != 0 && this->worldX < this->screen_rect.left) {
+            if (this->field_8A > 1) {
+                if (this->anim_index == this->field_8A) {
+                    this->StopSound(this->field_8A - 1);
+                    this->Update();
+                    return finish(false);
+                }
+                const FrameData& fd = res->anim_table[this->anim_index];
+                if (fd.sound_fx_index != -1 ||
+                    this->frame_index != fd.end_frame) {
+                    this->Update();
+                    return finish(false);
+                }
+                this->StopSound(this->field_8A - 2);
+            }
+            this->direction = 'P';
+            this->worldX = 0;
+            this->Update();
+            return finish(false);
+        }
+        if (this->world_x < g_world_width) {
+            this->MoveTo(this->screen_rect.left + this->animVariant,
+                         this->screen_rect.top);
+            this->Update();
+            return finish(false);
+        }
+        return finish(true);
+
+    default: {
+        /* Plain frame playback: still animating if the frame hasn't
+         * reached the range end, the range loops (sound_fx_index != -1),
+         * the wait timer hasn't expired, or the sound is still playing. */
+        const FrameData& fd = res->anim_table[this->anim_index];
+        bool still_animating =
+            static_cast<uint32_t>(this->frame_index) < fd.end_frame ||
+            fd.sound_fx_index != -1 ||
+            g_game_time <= this->timer ||
+            (this->audio_channel != nullptr &&
+             !reinterpret_cast<AudioChannel*>(this->audio_channel)->IsActive());
+        if (still_animating) {
+            this->Update();
+            return finish(false);
+        }
+        return finish(true);
+    }
+    }
 }
