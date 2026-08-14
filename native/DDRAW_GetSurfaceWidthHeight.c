@@ -4,23 +4,20 @@
  * Size: 82 bytes (0x4014E0 — 0x401532)
  * Calling convention: __cdecl
  *
- * Allocates a DDSURFACEDESC2 (31 dwords, dwSize=0x7C) on the stack,
- * zero-fills it via REP STOSD, then calls IDirectDrawSurface4::GetSurfaceDesc
- * at vtable slot 22 (byte offset 0x58). Extracts dwWidth and dwHeight as
- * 16-bit values and writes them to the caller-provided output pointers.
+ * Calls IDirectDrawSurface4::GetSurfaceDesc (real ABI vtable slot 22,
+ * byte offset 0x58 — dispatched by name through platform/ddraw_interfaces.h
+ * here, not by raw slot, since this shim is API- not ABI-compatible, see
+ * CLAUDE.md) and extracts dwWidth/dwHeight as 16-bit values into the
+ * caller-provided output pointers.
  *
  * @param surface     IDirectDrawSurface4* (nullable — stores skipped if null)
- * @param out_height  uint16_t* — receives dwHeight from DDSURFACEDESC2
- * @param out_width   uint16_t* — receives dwWidth from DDSURFACEDESC2
+ * @param out_height  uint16_t* — receives dwHeight from DDSURFACEDESC
+ * @param out_width   uint16_t* — receives dwWidth from DDSURFACEDESC
  *
  * Called by (5 callers): DDRAW_DimSurfaceRect, UIPANEL surface query paths.
  * All callers push 3 stack arguments.
- *
- * Vtable note: CALL [ECX + 0x58] is byte offset 0x58 = vtable slot 22
- * (22 * 4 = 0x58), NOT C array index 0x58 (which would be slot 88 at
- * byte offset 0x160).
  */
-#include "../shared/types.h"
+#include "../platform/ddraw_interfaces.h"
 
 /* Forward declaration (STRICT=2 -Wmissing-declarations). Self-contained
  * rather than pulled from a header: graphics/sdl3_ddraw.h declares a
@@ -34,27 +31,10 @@ void __cdecl DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_height, ui
 
 void __cdecl DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_height, uint16_t* out_width)
 {
-    int ddsd_buf[31];        /* DDSURFACEDESC2 (124 bytes = 31 dwords) */
-    int i;
-
-    /* Zero-fill via REP STOSD (ECX=0x1F) */
-    for (i = 0; i < 31; i++) {
-        ddsd_buf[i] = 0;
-    }
-    ddsd_buf[0] = 0x7C;     /* dwSize = sizeof(DDSURFACEDESC2) */
-
     if (surface != nullptr) {
-        /* Call vtable slot 22 — GetSurfaceDesc (byte offset 0x58) */
-        /* Original: CALL [ECX + 0x58] where ECX = *surface (vtable ptr) */
-        (reinterpret_cast<int (*)(void*, int*)>((*static_cast<void***>(surface))[22]))(
-            surface, ddsd_buf);
-
-        /* dwHeight at DDSURFACEDESC2 offset +0x0C (ddsd_buf[3]) */
-        /* Original: MOV CX, [ESP + 0x10]; MOV [EAX], CX */
-        *out_height = static_cast<uint16_t>(ddsd_buf[3]);
-
-        /* dwWidth at DDSURFACEDESC2 offset +0x08 (ddsd_buf[2]) */
-        /* Original: MOV AX, [ESP + 0x0c]; MOV [EDX], AX */
-        *out_width = static_cast<uint16_t>(ddsd_buf[2]);
+        DDSURFACEDESC desc;
+        static_cast<IDirectDrawSurface4*>(surface)->GetSurfaceDesc(&desc);
+        *out_height = static_cast<uint16_t>(desc.dwHeight);
+        *out_width = static_cast<uint16_t>(desc.dwWidth);
     }
 }

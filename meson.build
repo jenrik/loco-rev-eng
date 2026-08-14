@@ -259,6 +259,7 @@ else
   obj_resource_mgr_sdl3   = lego_loco.extract_objects('resources/resource_manager_sdl3.cpp')
   obj_sdl3_window         = lego_loco.extract_objects('graphics/sdl3_window.cpp')
   obj_sdl3_ddraw          = lego_loco.extract_objects('graphics/sdl3_ddraw.cpp')
+  obj_ddraw_globals       = lego_loco.extract_objects('platform/ddraw_globals.cpp')
   obj_sdl3_game_audio     = lego_loco.extract_objects('audio/sdl3_game_audio.cpp')
   obj_host_test_events    = lego_loco.extract_objects('stubs/host_test_events.cpp')
   obj_win32_stream_file   = lego_loco.extract_objects('resources/Win32StreamFile.cpp')

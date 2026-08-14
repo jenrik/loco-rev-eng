@@ -25,11 +25,24 @@
 static uint32_t g_last_bmp_width  = 0;
 static uint32_t g_last_bmp_height = 0;
 
-// Host-only SDL ownership. The translated program's legacy void* DirectDraw
-// globals remain untouched until their COM-compatible adapter is complete.
+// Host-only SDL ownership. g_ddraw (the canonical decompiled-code-visible
+// global, shared/stubs_impl.cpp) is pointed at this same device once it
+// exists (see SDL3_EnsurePrimarySurface below) so real callers dispatching
+// through g_ddraw by name (native/ddraw_surface_ops.c, input/Cursor.cpp,
+// input/Cursor_Editor.cpp — all converted off raw vtable-slot dispatch,
+// PROGRESS.md's DirectDraw-shim Phase 5 note) see a real object. The
+// primary/backbuffer surfaces stay host-private (g_primary_surface/
+// g_backbuffer remain null) — see that same PROGRESS.md note for the
+// 16bpp-vs-XRGB8888 pixel-format mismatch blocking that half.
 static Sdl3DirectDraw4* g_sdl_ddraw = nullptr;
 static Sdl3DirectDrawSurface* g_sdl_primary_surface = nullptr;
 static Sdl3DirectDrawSurface* g_sdl_backbuffer = nullptr;
+
+/* Canonical global, real defining declaration in shared/stubs_impl.cpp
+ * (0x485440). Declared void* there and at every consumer site — see this
+ * file's own IDirectDraw4-shaped g_sdl_ddraw above for the typed object;
+ * g_ddraw is just pointed at it below. */
+extern void* g_ddraw;
 static SDL3PrimaryPresentationMode g_primary_presentation_mode =
     SDL3PrimaryPresentationMode::Auto;
 
@@ -552,6 +565,7 @@ bool SDL3_EnsurePrimarySurface()
         g_sdl_ddraw->renderer = renderer;
         g_sdl_ddraw->window = window;
         g_sdl_ddraw->owned = false;
+        g_ddraw = g_sdl_ddraw;
     }
     if (g_sdl_primary_surface && g_sdl_primary_surface->texture &&
         g_sdl_backbuffer && g_sdl_backbuffer->texture) return true;
