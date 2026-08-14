@@ -7,12 +7,15 @@
  * cursor restore path, dirty markers (+0x50/+0x54 = -1), hotspot/clip,
  * animation frame advance (frame_count at RESDATA+0x160), and the four
  * blits (background capture, colour-keyed overlay, screen composite,
- * background restore) all match. The literal vtable dispatch on the
- * DirectDraw surfaces is the documented COM ABI for opaque objects.
+ * background restore) all match. DirectDraw surface calls go through the
+ * real platform/ddraw_interfaces.h IDirectDrawSurface4 interface (this
+ * shim is API-compatible, not ABI-compatible, so raw vtable-slot dispatch
+ * would hit the wrong compiler-generated method — converted 2026-08-14).
  */
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../platform/ddraw_interfaces.h"
 
 void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
 {
@@ -21,13 +24,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Address: 0x414C28..0x414C3D                                      */
     /* ================================================================ */
     if (hdc != nullptr) {
-        /* primary_surface→vtable[26] (byte offset 0x68) = IDirectDrawSurface4::
-         * ReleaseDC(surface, hdc) per the documented interface slot table.
-         * DirectDraw surfaces are COM platform API; literal vtable dispatch
-         * preserved as these are opaque COM objects. */
-        SurfaceReleaseDc_t release_dc =
-            Cursor_SurfaceReleaseDC(this->primary_surface());
-        release_dc(this->primary_surface(), hdc);
+        static_cast<IDirectDrawSurface4*>(this->primary_surface())->ReleaseDC(hdc);
     }
 
     /* ================================================================ */
@@ -70,10 +67,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
                 clientR->right  + screenPt.x,
                 clientR->bottom + screenPt.y);
 
-        int result = Cursor_SurfaceBlt(_g_backbuffer)(
-            _g_backbuffer,
+        int result = static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
             &screenDest,
-            this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface()),
             clientR,
             BLIT_WAIT,
             nullptr);
@@ -187,10 +183,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Src rect:  offsetRect (surface coords on primary_surface)     */
     /* Flags: DDBLT_WAIT (0x1000000)                                 */
     {
-        Cursor_SurfaceBlt(this->backbuffer())(
-            this->backbuffer(),
+        static_cast<IDirectDrawSurface4*>(this->backbuffer())->Blt(
             &cursorRect,
-            this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface()),
             &offsetRect,
             BLIT_WAIT,
             nullptr);
@@ -202,10 +197,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Src rect:  srcRect (animation frame sub-rect of sprite sheet) */
     /* Flags: DDBLT_WAIT | DDBLT_KEYSRC (0x1008000)                  */
     {
-        Cursor_SurfaceBlt(this->primary_surface())(
-            this->primary_surface(),
+        static_cast<IDirectDrawSurface4*>(this->primary_surface())->Blt(
             &offsetRect,
-            this->cursor_sprite_surface(),   /* +0x14 = cursor sprite surface (aliased via union) */
+            static_cast<IDirectDrawSurface4*>(this->cursor_sprite_surface()),   /* +0x14 = cursor sprite surface (aliased via union) */
             &srcRect,
             BLIT_KEYSRC_WAIT,
             nullptr);
@@ -236,10 +230,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Src rect:  client_rect(+0x104) (surface-space region)         */
     /* Flags: DDBLT_WAIT (0x1000000)                                 */
     {
-        int result = Cursor_SurfaceBlt(_g_backbuffer)(
-            _g_backbuffer,
+        int result = static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
             &screenDestRect,
-            this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface()),
             clientRect,
             BLIT_WAIT,
             nullptr);
@@ -259,10 +252,9 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
     /* Copies the saved background (captured in Blit 1) back onto    */
     /* the primary surface so the next frame starts clean.           */
     {
-        Cursor_SurfaceBlt(this->primary_surface())(
-            this->primary_surface(),
+        static_cast<IDirectDrawSurface4*>(this->primary_surface())->Blt(
             &spriteDestRect,
-            this->backbuffer(),
+            static_cast<IDirectDrawSurface4*>(this->backbuffer()),
             &offsetRect,
             BLIT_WAIT,
             nullptr);

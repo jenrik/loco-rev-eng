@@ -298,46 +298,18 @@ extern void*   g_audio_mgr;     /* AudioMgr* */
 /* Shared internal functions */
 void Cursor_UnlockAllSurfaces(void);
 
-/* COM IUnknown::Release() via vtable slot [2] on an opaque DirectDraw
- * surface. DirectDraw surfaces are platform COM objects, not decompiled
- * classes — literal vtable dispatch is the documented ABI (AGENTS.md
- * permits this for opaque COM surfaces). */
-static inline void Cursor_ComSurfaceRelease(void* surface) {
-    void** vtbl = *reinterpret_cast<void***>(surface);
-    using ReleaseSurface = void (*)(void*);
-    reinterpret_cast<ReleaseSurface>(vtbl[2])(surface);
-}
-
-/* Surface vtable function pointer types (DirectDraw ABI — __stdcall convention) */
-typedef int (__stdcall *SurfaceBlt_t)(void*, RECT*, void*, RECT*, uint32_t, void*);
-typedef int (__stdcall *SurfacePollBlit_t)(void*, void*);
-using SurfaceReleaseDc_t = void (*)(void*, void*);
-using SurfaceFill_t = int (*)(void*, int, int, int, int, int*);
-using SurfaceLegacyBlt_t = int (*)(void*, int*, void*, int*, int, void*);
-
-static inline SurfaceBlt_t Cursor_SurfaceBlt(void* surface) {
-    void** vtbl = *reinterpret_cast<void***>(surface);
-    return reinterpret_cast<SurfaceBlt_t>(vtbl[0x14 / 4]);
-}
-
-/* vtable slot 26 (byte offset 0x68). In the IDirectDrawSurface4 ABI this
- * is ReleaseDC(surface, hdc) — the pre-render call in Cursor::render
- * (0x414C28) passes the hdc argument. (The previous transcription named
- * it "Lock"; the documented interface slot table says ReleaseDC.) */
-static inline SurfaceReleaseDc_t Cursor_SurfaceReleaseDC(void* surface) {
-    void** vtbl = *reinterpret_cast<void***>(surface);
-    return reinterpret_cast<SurfaceReleaseDc_t>(vtbl[0x68 / 4]);
-}
-
-static inline SurfaceFill_t Cursor_SurfaceFill(void* surface) {
-    void** vtbl = *reinterpret_cast<void***>(surface);
-    return reinterpret_cast<SurfaceFill_t>(vtbl[5]);
-}
-
-static inline SurfaceLegacyBlt_t Cursor_SurfaceLegacyBlt(void* surface) {
-    void** vtbl = *reinterpret_cast<void***>(surface);
-    return reinterpret_cast<SurfaceLegacyBlt_t>(vtbl[5]);
-}
+/* This header previously declared 5 raw-vtable-slot-dispatch helpers
+ * (Cursor_ComSurfaceRelease/Cursor_SurfaceBlt/Cursor_SurfaceReleaseDC/
+ * Cursor_SurfaceFill/Cursor_SurfaceLegacyBlt) for calling DirectDraw
+ * surface methods (Release/Blt/ReleaseDC, all real slots already
+ * identified in their own since-removed comments). Their claim that raw
+ * dispatch was a permitted "opaque COM surface" ABI exception was true
+ * only while no typed interface existed; platform/ddraw_interfaces.h's
+ * real IDirectDrawSurface4 made that stale, since this shim's own
+ * compiler-generated vtable order doesn't match those real ABI slot
+ * numbers (would dispatch through the wrong method on a real object).
+ * Removed 2026-08-14 — all 28 call sites now use
+ * static_cast<IDirectDrawSurface4*>(surface)->Method(...) directly. */
 #define BLIT_WAIT 0x1000000
 #define BLIT_KEYSRC 0x8000
 #define BLIT_KEYSRC_WAIT (BLIT_KEYSRC | BLIT_WAIT)

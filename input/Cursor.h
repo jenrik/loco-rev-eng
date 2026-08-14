@@ -741,10 +741,12 @@ public:
      *
      * Updates scroll button sprite states based on scroll flags.
      *
-     * @param target_surf  int* — target surface (NULL = _g_primary_surface)
+     * @param target_surf  DirectDraw surface (IDirectDrawSurface4*, kept
+     *                     void* at the declaration like every other
+     *                     surface global in this shim) — NULL = _g_primary_surface
      * @param mode         uint8_t — 0 = normal draw, non-zero = alternate surface
      */
-    void draw_color_palette(int* target_surf, uint8_t mode);
+    void draw_color_palette(void* target_surf, uint8_t mode);
 
     /**
      * Animate locomotive colour-change preview.

@@ -14,6 +14,7 @@
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../network/DPlayManager.h"
 #include <new>
 
@@ -242,11 +243,10 @@ void Cursor::update_dirty_rect(uint8_t param)
         CopyRect(&restoreRect, &this->cursor_rect());
         OffsetRect(&restoreRect,
                    -this->clip_rect_left(), -this->clip_rect_top());
-        Cursor_SurfaceLegacyBlt(_g_backbuffer)(
-            _g_backbuffer,
-            reinterpret_cast<int*>(&this->cursor_rect()),
-            this->primary_surface(),
-            reinterpret_cast<int*>(&restoreRect),
+        static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
+            &this->cursor_rect(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface()),
+            &restoreRect,
             BLIT_WAIT, nullptr);
     }
 
@@ -282,10 +282,9 @@ void Cursor::update_dirty_rect(uint8_t param)
                        -this->clip_rect_left(), -this->clip_rect_top());
 
             /* 1. Capture background into backbuffer */
-            Cursor_SurfaceBlt(this->backbuffer())(
-                this->backbuffer(),
+            static_cast<IDirectDrawSurface4*>(this->backbuffer())->Blt(
                 &dstRect,
-                this->primary_surface(),
+                static_cast<IDirectDrawSurface4*>(this->primary_surface()),
                 &offsetUnion,
                 BLIT_WAIT, nullptr);
 
@@ -307,10 +306,9 @@ void Cursor::update_dirty_rect(uint8_t param)
             srcRect.top   = 0;
             srcRect.right = static_cast<LONG>(spriteW + frameOffset);
             srcRect.bottom = static_cast<LONG>(spriteH);
-            Cursor_SurfaceBlt(this->primary_surface())(
-                this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface())->Blt(
                 &dstRect,
-                this->cursor_sprite_surface(),
+                static_cast<IDirectDrawSurface4*>(this->cursor_sprite_surface()),
                 &srcRect,
                 BLIT_KEYSRC_WAIT, nullptr);
 
@@ -320,10 +318,9 @@ void Cursor::update_dirty_rect(uint8_t param)
             destRect.top    = unionRect.top;
             destRect.right  = unionRect.right;
             destRect.bottom = unionRect.bottom;
-            Cursor_SurfaceBlt(_g_backbuffer)(
-                _g_backbuffer,
+            static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
                 &destRect,
-                this->primary_surface(),
+                static_cast<IDirectDrawSurface4*>(this->primary_surface()),
                 &dstRect,
                 BLIT_WAIT, nullptr);
         } else {
@@ -337,26 +334,23 @@ void Cursor::update_dirty_rect(uint8_t param)
             dstRect.bottom = static_cast<LONG>(spriteH);
 
             /* 1. Restore background: backbuffer (+0x5C) ← primary (+0x38) */
-            Cursor_SurfaceBlt(this->backbuffer())(
-                this->backbuffer(),
+            static_cast<IDirectDrawSurface4*>(this->backbuffer())->Blt(
                 &newRect,
-                this->primary_surface(),
+                static_cast<IDirectDrawSurface4*>(this->primary_surface()),
                 &newRect,
                 BLIT_WAIT, nullptr);
 
             /* 2. Overlay cursor sprite (colour-keyed) onto backbuffer */
-            Cursor_SurfaceBlt(this->backbuffer())(
-                this->backbuffer(),
+            static_cast<IDirectDrawSurface4*>(this->backbuffer())->Blt(
                 &newRect,
-                this->cursor_sprite_surface(),
+                static_cast<IDirectDrawSurface4*>(this->cursor_sprite_surface()),
                 nullptr,
                 BLIT_KEYSRC_WAIT, nullptr);
 
             /* 3. Composite backbuffer to scene backbuffer */
-            Cursor_SurfaceBlt(_g_backbuffer)(
-                _g_backbuffer,
+            static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
                 &newRect,
-                this->backbuffer(),
+                static_cast<IDirectDrawSurface4*>(this->backbuffer()),
                 &newRect,
                 BLIT_WAIT, nullptr);
         }
@@ -458,10 +452,9 @@ void Cursor::render_with_viewport(uint8_t param)
         RECT restoreRect;
         CopyRect(&restoreRect, &this->prev_cursor_rect());
         OffsetRect(&restoreRect, -vpRect.left, -vpRect.top);
-        Cursor_SurfaceBlt(_g_backbuffer)(
-            _g_backbuffer,
+        static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
             &this->prev_cursor_rect(),
-            this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface()),
             &restoreRect,
             BLIT_WAIT, nullptr);
     }
@@ -497,10 +490,9 @@ void Cursor::render_with_viewport(uint8_t param)
             OffsetRect(&offsetUnion, -vpRect.left, -vpRect.top);
 
             /* 1. Capture background into cursor backbuffer */
-            Cursor_SurfaceBlt(this->backbuffer())(
-                this->backbuffer(),
+            static_cast<IDirectDrawSurface4*>(this->backbuffer())->Blt(
                 &dstRect,
-                this->primary_surface(),
+                static_cast<IDirectDrawSurface4*>(this->primary_surface()),
                 &offsetUnion,
                 BLIT_WAIT, nullptr);
 
@@ -522,10 +514,9 @@ void Cursor::render_with_viewport(uint8_t param)
             srcRect.top    = 0;
             srcRect.right  = static_cast<LONG>(frameOffset + spriteW);
             srcRect.bottom = static_cast<LONG>(spriteH);
-            Cursor_SurfaceBlt(this->primary_surface())(
-                this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface())->Blt(
                 &dstRect,
-                this->cursor_sprite_surface(),
+                static_cast<IDirectDrawSurface4*>(this->cursor_sprite_surface()),
                 &srcRect,
                 BLIT_KEYSRC_WAIT, nullptr);
 
@@ -535,10 +526,9 @@ void Cursor::render_with_viewport(uint8_t param)
             destRect.top    = unionRect.top;
             destRect.right  = unionRect.right;
             destRect.bottom = unionRect.bottom;
-            Cursor_SurfaceBlt(_g_backbuffer)(
-                _g_backbuffer,
+            static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
                 &destRect,
-                this->backbuffer(),
+                static_cast<IDirectDrawSurface4*>(this->backbuffer()),
                 &offsetUnion,
                 BLIT_WAIT, nullptr);
         } else {
@@ -555,18 +545,16 @@ void Cursor::render_with_viewport(uint8_t param)
             OffsetRect(&offsetUnion, -vpRect.left, -vpRect.top);
 
             /* 1. Capture background into cursor backbuffer */
-            Cursor_SurfaceBlt(this->backbuffer())(
-                this->backbuffer(),
+            static_cast<IDirectDrawSurface4*>(this->backbuffer())->Blt(
                 &dstRect,
-                this->primary_surface(),
+                static_cast<IDirectDrawSurface4*>(this->primary_surface()),
                 &offsetUnion,
                 BLIT_WAIT, nullptr);
 
             /* 2. Overlay cursor sprite (colour-keyed) */
-            Cursor_SurfaceBlt(this->primary_surface())(
-                this->primary_surface(),
+            static_cast<IDirectDrawSurface4*>(this->primary_surface())->Blt(
                 &dstRect,
-                this->cursor_sprite_surface(),
+                static_cast<IDirectDrawSurface4*>(this->cursor_sprite_surface()),
                 nullptr,
                 BLIT_KEYSRC_WAIT, nullptr);
 
@@ -576,10 +564,9 @@ void Cursor::render_with_viewport(uint8_t param)
             destRect.top    = unionRect.top;
             destRect.right  = unionRect.right;
             destRect.bottom = unionRect.bottom;
-            Cursor_SurfaceBlt(_g_backbuffer)(
-                _g_backbuffer,
+            static_cast<IDirectDrawSurface4*>(_g_backbuffer)->Blt(
                 &destRect,
-                this->backbuffer(),
+                static_cast<IDirectDrawSurface4*>(this->backbuffer()),
                 &offsetUnion,
                 BLIT_WAIT, nullptr);
         }

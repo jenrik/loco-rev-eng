@@ -1,6 +1,7 @@
 // Status: INTEGRATED
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../network/DPlayManager.h"
 #include "../ui/ButtonSprite.h"
 
@@ -561,11 +562,11 @@ void Cursor::blit_edit_preview()
 /* src/dst roles of the item blit (src = palette rect, dst = 0,clipH,  */
 /* w,h), position caching in palette_item_rects, scroll button states. */
 /* ================================================================== */
-void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
+void Cursor::draw_color_palette(void* target_surf, uint8_t mode)
 {
     if (target_surf == nullptr) {
         mode = 0;
-        target_surf = static_cast<int*>(_g_primary_surface);
+        target_surf = _g_primary_surface;
     }
 
     /* Determine palette background sprite height */
@@ -604,12 +605,23 @@ void Cursor::draw_color_palette(int* target_surf, uint8_t mode)
             colorKey = 0xFF00FF;
         }
 
-        /* Clear via vtable[5] (fill) on target surface */
-        int fillParams[2];
-        fillParams[0] = 100;
-        fillParams[1] = colorKey;
-        Cursor_SurfaceFill(target_surf)(
-            target_surf, 0, 0, 0, 0x1000400, fillParams);
+        /* Clear via a color-fill Blt (null dest/src rects and src surface,
+         * DDBLT_WAIT|DDBLT_COLORFILL flags) on target surface.
+         *
+         * The previous raw dispatch passed a fabricated 2-int buffer
+         * ({100, colorKey}) reinterpreted as a DDBLTFX*. This shim's
+         * Sdl3DirectDrawSurface::Blt only ever reads fx->dwFillColor from
+         * a real DDBLTFX (graphics/sdl3_ddraw.cpp), so that's the one
+         * field that matters here — set directly by name rather than by
+         * guessing the old buffer's byte layout. (`100` is very likely
+         * the real x86 DDBLTFX's dwSize == sizeof(DDBLTFX) == 0x64 in the
+         * original ABI, which this shim's own DDBLTFX — declaration-order
+         * only, not ABI-accurate — doesn't reproduce; not investigated
+         * further since dwSize isn't read anywhere in this shim.) */
+        DDBLTFX fx{};
+        fx.dwFillColor = static_cast<uint32_t>(colorKey);
+        static_cast<IDirectDrawSurface4*>(target_surf)->Blt(
+            nullptr, nullptr, nullptr, 0x1000400, &fx);
     }
 
     if (mode != 0) {
@@ -753,22 +765,22 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
     auto* paletteData = static_cast<RESDATA*>(this->sprite_37C->pixelData);
     uint palSpriteH = static_cast<uint>(paletteData->frame_height);
 
-    int* drawTarget;   /* first-drawn surface (draw_color_palette target) */
-    int* cleanSurf;    /* clean surface (gets the palette sprite blit) */
+    void* drawTarget;   /* first-drawn surface (draw_color_palette target) */
+    void* cleanSurf;    /* clean surface (gets the palette sprite blit) */
     uint8_t isCleanDirty;
 
     /* Toggle between surface A and B (roles swap each call) */
     if (this->surface_toggle == 0) {                 /* +0x58C */
-        drawTarget = static_cast<int*>(this->editor_surf_a);   /* +0x590 */
-        cleanSurf  = static_cast<int*>(this->editor_surf_b);   /* +0x598 */
+        drawTarget = this->editor_surf_a;   /* +0x590 */
+        cleanSurf  = this->editor_surf_b;   /* +0x598 */
         isCleanDirty = this->surf_b_dirty;                     /* +0x59C */
         this->surface_toggle = 1;
         this->surf_b_dirty = 0;
         this->surf_a_dirty = 1;
     } else {
         isCleanDirty = this->surf_a_dirty;                     /* +0x594 */
-        drawTarget = static_cast<int*>(this->editor_surf_b);   /* +0x598 */
-        cleanSurf  = static_cast<int*>(this->editor_surf_a);   /* +0x590 */
+        drawTarget = this->editor_surf_b;   /* +0x598 */
+        cleanSurf  = this->editor_surf_a;   /* +0x590 */
         this->surface_toggle = 0;
         this->surf_b_dirty = 1;
         this->surf_a_dirty = 0;
@@ -830,28 +842,39 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
                 dstH = srcW;
             }
 
-            /* Blit with colour key */
+            /* Blit with colour key.
+             *
+             * NOTE: these locals hold {x, y, width, height}-shaped values
+             * (see their initializers above/below), not DirectDraw's real
+             * {left, top, right, bottom} RECT semantics -- a pre-existing
+             * mismatch, unrelated to this dispatch-mechanism conversion,
+             * not investigated or corrected here (same class of latent
+             * issue as the already-documented DDBLT_WAIT/DDBLT_ASYNC value
+             * swap found elsewhere this session). Retyped from int[4] to
+             * RECT with the exact same field values/order preserved -- no
+             * behavior change, just removing the untyped raw-dispatch
+             * function-pointer shape. */
             {
-                int blitRect[4] = { srcX, srcY, srcW, srcH };
-                int dstRect[4]  = { dstX, dstY, dstW, dstH };
-                Cursor_SurfaceLegacyBlt(_g_primary_surface)(
-                    _g_primary_surface,
-                    blitRect, drawTarget, dstRect, 0x1008000, nullptr);
+                RECT blitRect = { srcX, srcY, srcW, srcH };
+                RECT dstRect  = { dstX, dstY, dstW, dstH };
+                static_cast<IDirectDrawSurface4*>(_g_primary_surface)->Blt(
+                    &blitRect, static_cast<IDirectDrawSurface4*>(drawTarget), &dstRect,
+                    0x1008000, nullptr);
             }
 
             /* Second blit for the other surface */
             if (direction == 0) {
-                int srcRect2[4] = { this->palette_rect.left, srcY, step * 4, srcH };
-                int dstRect2[4]  = { srcW, 0, step * 4, srcH };
-                Cursor_SurfaceLegacyBlt(_g_primary_surface)(
-                    _g_primary_surface,
-                    srcRect2, cleanSurf, dstRect2, 0x1008000, nullptr);
+                RECT srcRect2 = { this->palette_rect.left, srcY, step * 4, srcH };
+                RECT dstRect2 = { srcW, 0, step * 4, srcH };
+                static_cast<IDirectDrawSurface4*>(_g_primary_surface)->Blt(
+                    &srcRect2, static_cast<IDirectDrawSurface4*>(cleanSurf), &dstRect2,
+                    0x1008000, nullptr);
             } else {
                 int srcW2 = this->palette_rect.right - step * 4;
-                int srcRect2[4] = { srcW, srcY, srcW2, srcH };
-                Cursor_SurfaceLegacyBlt(_g_primary_surface)(
-                    _g_primary_surface,
-                    srcRect2, cleanSurf, nullptr, 0x1008000, nullptr);
+                RECT srcRect2 = { srcW, srcY, srcW2, srcH };
+                static_cast<IDirectDrawSurface4*>(_g_primary_surface)->Blt(
+                    &srcRect2, static_cast<IDirectDrawSurface4*>(cleanSurf), nullptr,
+                    0x1008000, nullptr);
             }
 
             /* End paint per frame */

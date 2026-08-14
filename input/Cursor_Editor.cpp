@@ -351,14 +351,13 @@ void Cursor::hide()
         this->timer_id_19C = 0;
     }
 
-    /* Release editor DDraw surfaces.
-     * vtable[2] = IDirectDrawSurface4::Release() (COM IUnknown). */
+    /* Release editor DDraw surfaces. */
     if (this->editor_surf_a != nullptr) {                            /* +0x590 */
-        Cursor_ComSurfaceRelease(this->editor_surf_a);
+        static_cast<IDirectDrawSurface4*>(this->editor_surf_a)->Release();
         this->editor_surf_a = nullptr;
     }
     if (this->editor_surf_b != nullptr) {                            /* +0x598 */
-        Cursor_ComSurfaceRelease(this->editor_surf_b);
+        static_cast<IDirectDrawSurface4*>(this->editor_surf_b)->Release();
         this->editor_surf_b = nullptr;
     }
 

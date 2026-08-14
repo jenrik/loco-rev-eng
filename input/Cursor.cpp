@@ -187,16 +187,13 @@ void Cursor::base_destructor()
         this->editor_sprites[i] = nullptr;
     }
 
-    /* Release editor DDraw surfaces at +0x590 and +0x598.
-     * vtable[2] = IDirectDrawSurface4::Release() (COM IUnknown).
-     * DirectDraw surfaces are platform API; literal vtable dispatch preserved
-     * because these are opaque COM objects, not our classes. */
+    /* Release editor DDraw surfaces at +0x590 and +0x598. */
     if (this->editor_surf_a != nullptr) {                       /* +0x590 */
-        Cursor_ComSurfaceRelease(this->editor_surf_a);
+        static_cast<IDirectDrawSurface4*>(this->editor_surf_a)->Release();
         this->editor_surf_a = nullptr;
     }
     if (this->editor_surf_b != nullptr) {                       /* +0x598 */
-        Cursor_ComSurfaceRelease(this->editor_surf_b);
+        static_cast<IDirectDrawSurface4*>(this->editor_surf_b)->Release();
         this->editor_surf_b = nullptr;
     }
 
