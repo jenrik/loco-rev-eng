@@ -326,8 +326,12 @@ void GameWindow_Show(void*);
 void GameWindow_Show(void*) { /* host no-op */ }
 void GameWindow_Hide(void*);
 void GameWindow_Hide(void*) { /* host no-op */ }
-void ResourceManager_GetStringById(void*, unsigned int);
-void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
+/* ResourceManager_GetStringById(void*, unsigned int) removed 2026-08-15 —
+ * a dead facade this signature ("UINT id") never matched: the real facade
+ * is (void*, int) (shared/stubs_link001_batch3_resource_audio.cpp). This
+ * overload existed only because ui/HelpWnd.cpp's own declaration used
+ * `UINT id`, silently binding all 9 of its call sites here instead of to
+ * the real implementation — fixed in HelpWnd.cpp; see PROGRESS.md. */
 void* TrainSubsystem_Ctor = nullptr;
 /* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
  * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
@@ -403,8 +407,13 @@ void EditWindow_cleanupSprites(void*) { /* host no-op */ }
 /* RESDATA_FreeWindow removed: its only caller (ui/EditWindow.cpp) now calls
  * the real PopupWindow::DestroyMCIChild() (0x4544A0) instead — see
  * PROGRESS.md. This stub was orphaned dead code, not a live no-op. */
-void ResourceManager_GetStringById(void**, int);
-void ResourceManager_GetStringById(void**, int) { /* host no-op */ }
+/* ResourceManager_GetStringById(void**, int) removed 2026-08-15 — a dead
+ * facade this signature ("void** mgr") never matched: the real facade is
+ * (void* mgr, int id) (shared/stubs_link001_batch3_resource_audio.cpp).
+ * This overload existed only because ui/EditWindow.cpp's own declaration
+ * used `void** mgr` (and cited a wrong address, 0x460AA0, which is
+ * actually inside WIN32_PeekMessageLoop) — fixed in EditWindow.cpp; see
+ * PROGRESS.md. */
 void NameEntryPanel_Ctor(void*, void*, unsigned int);
 void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void NameEntryPanel_CreateWindow(void*, void*);

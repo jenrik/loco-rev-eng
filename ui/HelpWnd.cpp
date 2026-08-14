@@ -119,7 +119,13 @@ extern size_t WIN32_Stream_Size();
                                 int srcX, int srcY, int srcW, int srcH, int mode); /* 0x42B050 */
     extern void   FormatResourceString(void* resmgr, UINT id,
                                         char* buf, int maxLen); /* 0x447330 */
-    extern int    ResourceManager_GetStringById(void* resmgr, UINT id); /* 0x4472B0 */
+    /* Declared UINT id here previously — a different mangled overload from
+     * the real facade (shared/stubs_link001_batch3_resource_audio.cpp,
+     * int id), so this file's 9 call sites silently bound to a dead no-op
+     * stub (shared/defsym_stubs.cpp) instead of the real
+     * ResourceManager::GetStringById (0x4472B0) — confirmed via nm on the
+     * linked binary. Retyped to match the real facade exactly. */
+    extern int    ResourceManager_GetStringById(void* resmgr, int id); /* 0x4472B0 */
     extern void   LoadSoundResource(int handle);             /* loader, see ResourceManager */
     extern void   ReleaseSoundResource(int handle);           /* release refcounted sound */
     extern void   GameAudio_PlayResourceEx(void* audio, UINT resId, int* outChannel); /* 0x4131C0 */

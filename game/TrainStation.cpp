@@ -32,11 +32,6 @@ void* __cdecl operator_new(size_t size);               /* 0x465CE0 */
 void  __cdecl GLOBAL_free(void* ptr);                  /* 0x465CD0 */
 void  __cdecl CRT_free(void* ptr);                     /* 0x466C70 */
 
-/* Resource Manager */
-void* __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id);
-int   __thiscall RESMGR_LoadSoundResource(void* res_handle);
-void  __thiscall RESMGR_ReleaseSoundResource(void* res_handle);
-
 /* Asset manager */
 void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
 
@@ -66,6 +61,34 @@ extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
 void* WNDPROC_StreamWrite(void* stream, void* outBuf);
 extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
+
+/* ResourceManager_GetStringById: same extern-"C"-linkage landmine as
+ * WNDPROC_CriticalSectionLock above — this file's `uint32_t id` declaration
+ * inside the extern "C" block bound to a bare C-linkage no-op stub
+ * (shared/link_stubs.cpp) instead of the real, already-implemented facade
+ * (shared/stubs_link001_batch3_resource_audio.cpp, forwarding to
+ * ResourceManager::GetStringById, 0x4472B0) — confirmed via nm on the
+ * linked binary. Retyped to match that facade's real signature exactly
+ * (ui/TrainStationWindow.cpp already calls it correctly this way) and moved
+ * to ordinary C++-mangled linkage.
+ *
+ * RESMGR_LoadSoundResource/RESMGR_ReleaseSoundResource's own address
+ * annotations here (previously 0x44B8E0/0x44BB90) were also wrong — both
+ * addresses fall inside the unrelated RESDATA_ScriptedObject_ClassifyTileType
+ * (0x44B4F0), confirmed via decompile. Neither has a real implementation
+ * anywhere in the tree yet (every declared overload of both names binds to
+ * a no-op stub — see PROGRESS.md's "RESMGR_LoadSoundResource/
+ * ReleaseSoundResource never implemented" item); retyped their handle
+ * parameter from `void*` to `int` to match the corrected
+ * ResourceManager_GetStringById return type and the project's established
+ * int32_t resource-handle convention (ResourceManager::GetById/
+ * GetStringById), rather than introduce a fresh pointer/int mismatch. This
+ * changes no behavior today — sound_string_id (+0x174) is always 0 per this
+ * file's own OnMouseMove/OnMouseLeave doc comments, so neither call site is
+ * live. */
+int  ResourceManager_GetStringById(void* mgr, int id);   /* 0x4472B0 */
+int  RESMGR_LoadSoundResource(int res_handle);
+void RESMGR_ReleaseSoundResource(int res_handle);
 
 /* ================================================================== */
 /* Global variables referenced                                        */
@@ -141,9 +164,9 @@ void* TrainStation::OnMouseMove(int32_t x, int32_t y)
 {
     /* Load and play the hover sound if a string resource is configured */
     if (this->sound_string_id != 0) {                   /* +0x174 */
-        void* res_handle = ResourceManager_GetStringById(
+        int res_handle = ResourceManager_GetStringById(
             &g_resmgr, this->sound_string_id);
-        if (res_handle != nullptr) {
+        if (res_handle != 0) {
             RESMGR_LoadSoundResource(res_handle);
         }
     }
@@ -169,9 +192,9 @@ void TrainStation::OnMouseLeave()
 {
     /* Release the hover sound if a string resource is configured */
     if (this->sound_string_id != 0) {                   /* +0x174 */
-        void* res_handle = ResourceManager_GetStringById(
+        int res_handle = ResourceManager_GetStringById(
             &g_resmgr, this->sound_string_id);
-        if (res_handle != nullptr) {
+        if (res_handle != 0) {
             RESMGR_ReleaseSoundResource(res_handle);
         }
     }

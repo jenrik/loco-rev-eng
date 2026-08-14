@@ -314,8 +314,15 @@ void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t);
 void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t){}
 void RESMGR_SelectScreensaver(char*);
 void RESMGR_SelectScreensaver(char*){}
-void ResourceManager_GetStringById(void*,uint32_t);
-void ResourceManager_GetStringById(void*,uint32_t){}
+/* ResourceManager_GetStringById(void*,uint32_t) removed 2026-08-15 — this
+ * declaration sat inside this file's outer extern "C" block (line 27),
+ * giving it bare C linkage regardless of its C++-looking signature. That
+ * bare symbol is what game/TrainStation.cpp's own (wrongly) extern-"C"
+ * `uint32_t id` declaration and ui/UI_ChildWindow.cpp's own extern-"C"
+ * declaration both bound to, instead of the real facade
+ * (shared/stubs_link001_batch3_resource_audio.cpp, plain C++ linkage,
+ * `int id`). Both callers moved to ordinary C++-mangled declarations
+ * matching the real facade; see PROGRESS.md. */
 void Train_QueueMessage(void*,void*);
 void Train_QueueMessage(void*,void*){}
 void Train_HandleTrackBuild(void*,void*,int32_t);
