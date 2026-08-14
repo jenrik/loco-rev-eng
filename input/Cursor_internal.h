@@ -176,7 +176,12 @@ void Game_SetScreenMode(void*, char, char, char);
  * transition pump" overload, distinct from the (void*, uint8_t) main-loop
  * pump in core/CGWND_sdl3.cpp. */
 void CGWND_PumpMessages(char);
-int DPLAY_CreatePlayer(void* record);
+/* DPLAY_CreatePlayer(void* record) removed 2026-08-14 — its one real call
+ * site, Cursor::init_network_player() (input/Cursor_impls.cpp), now
+ * constructs a real DPlayManager directly (operator_new(sizeof(DPlayManager))
+ * + placement-new + CreatePlayer()) instead of going through this
+ * free-function facade, which bound to a no-op stub returning a garbage
+ * `int` (the real DPlayManager::CreatePlayer() (0x442850) returns void). */
 /* NOTE on DPLAY_RenderPlayer: the binary call site at 0x418A9C pushes NINE
  * stack args (hdc, player, surface, left, top, right, bottom, hWnd,
  * this+0x138) and the callee (NetworkPlayerList::RenderPlayer, 0x4437C0)
@@ -247,9 +252,16 @@ extern void*   _g_cursor_back;  /* IDirectDrawSurface4* — COM platform object 
  * offsets (see Cursor_impls.cpp update_network_names). */
 class Netman;
 extern Netman* _g_netman;        /* 0x4FD3AC — Netman singleton pointer */
-extern char    g_empty_string[];
-extern void*   g_game;          /* Game* */
-extern void*   g_player_config; /* PlayerConfig* */
+/* Matches the canonical declarations in game/PlayerConfig.h,
+ * network/DPlayManager.h, network/Netman.h (2026-08-14 — these two were
+ * previously declared void* and char[] here, a locally weaker type than
+ * every other declaration of the same two globals tree-wide; unified once
+ * input/Cursor_impls.cpp needed to #include network/DPlayManager.h
+ * directly and the two conflicted at the type level, not just cosmetically). */
+class PlayerConfig;
+extern char          g_empty_string;    /* 0x4851D0 — empty string constant */
+extern void*         g_game;          /* Game* */
+extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern uint8_t g_is_fullscreen;
 extern int32_t g_client_width;
 extern int32_t g_client_height;

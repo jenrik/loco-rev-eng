@@ -666,8 +666,9 @@ void Vehicle_GetNearestTrack(int);
 void Vehicle_GetNearestTrack(int) { /* host no-op */ }
 void GAMESTATE_FindTrackPosition(void*, int, int);
 void GAMESTATE_FindTrackPosition(void*, int, int) { /* host no-op */ }
-void DPLAY_CreatePlayer(void*);
-void DPLAY_CreatePlayer(void*) { /* host no-op */ }
+/* DPLAY_CreatePlayer(void*) removed 2026-08-14 — zero real call sites
+ * tree-wide; its one former caller (Cursor::init_network_player) now
+ * constructs a real DPlayManager directly (input/Cursor_impls.cpp). */
 void GAMESTATE_EditorState_Ctor(void*, char);
 void GAMESTATE_EditorState_Ctor(void*, char) { /* host no-op */ }
 void DPLAY_CleanupPlayer(void*);

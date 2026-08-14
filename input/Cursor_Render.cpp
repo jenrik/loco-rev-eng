@@ -79,7 +79,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
             nullptr);
 
         if (result != 0) {
-            OutputDebugStringA(g_empty_string);
+            OutputDebugStringA(&g_empty_string);
         }
 
         Cursor_UnlockAllSurfaces();
@@ -246,7 +246,7 @@ void Cursor::render(HWND hWnd, void* hdc, uint8_t skipRender)
 
         /* Debug output on failure */
         if (result != 0) {
-            OutputDebugStringA(g_empty_string);
+            OutputDebugStringA(&g_empty_string);
         }
     }
 

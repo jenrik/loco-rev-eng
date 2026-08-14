@@ -342,7 +342,13 @@ int32_t* INPUT_DirToOffset_Left(int32_t* param);
 int32_t* INPUT_DirToOffset_Right(int32_t* param);
 
 /* -- DPLAY helper functions -- */
-void*   DPLAY_CreatePlayer(void* slot);
+/* DPLAY_CreatePlayer(void* slot) declaration removed 2026-08-14 — zero
+ * call sites in this file; the real DPlayManager::CreatePlayer (0x442850,
+ * network/DPlayManager.h) is a real xref caller list member for
+ * NET_ResolveAddress, which lives in this same file — when that call is
+ * reconstructed, construct a real DPlayManager (operator_new(sizeof(
+ * DPlayManager)) + placement-new + CreatePlayer()), not a free-function
+ * facade at this address. */
 int32_t DPLAY_GetPlayerName(void* slot, const char* path);
 int32_t DPLAY_SetPlayerData(void* slot, const char* path);
 void    DPLAY_SetPlayerName(void* slot, int32_t trainId, int8_t specific);

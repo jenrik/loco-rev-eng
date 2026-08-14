@@ -60,7 +60,14 @@ extern void GameObject_MarkDead(void* obj);                                     
 extern void GameObject_InvalidateRect(void* obj);                                       /* 0x405A20 */
 
 /* DPLAY */
-extern void   DPLAY_CreatePlayer(void* slot);                                           /* 0x442850 */
+/* DPLAY_CreatePlayer(void* slot) declaration removed 2026-08-14 — this file
+ * has zero call sites for it today, but VehicleEditor_Ctor IS in the real
+ * DPlayManager::CreatePlayer (0x442850)'s own xref caller list (network/
+ * DPlayManager.h) — i.e. the original ctor calls it and this reconstruction
+ * doesn't yet. When that call is added, construct a real DPlayManager
+ * (operator_new(sizeof(DPlayManager)) + placement-new + CreatePlayer()),
+ * not a free-function declaration at this address — this same pattern was
+ * a live no-op-stub landmine at game/Train_network.cpp before that fix. */
 extern void   DPLAY_CleanupPlayer(void* slot);                                          /* 0x442A00 */
 
 /* Resource classification (same extern used by EditorState.cpp).

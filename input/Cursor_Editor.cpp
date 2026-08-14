@@ -3,6 +3,7 @@
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../network/DPlayManager.h"
 #include "../ui/ButtonSprite.h"
 
 #ifndef _WIN32
@@ -59,7 +60,7 @@ int32_t Cursor::create(HWND hParent)
         0x200,                                    /* dwExStyle: WS_EX_CLIENTEDGE */
         reinterpret_cast<LPCSTR>(static_cast<intptr_t>(0x47E464)),
                                                    /* lpClassName: "EDIT" */
-        &g_empty_string[0],                        /* lpWindowName: "" */
+        &g_empty_string,                        /* lpWindowName: "" */
         0x40001004,                                /* dwStyle: WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL */
         this->window_rect.top,            /* x */
         this->window_rect.right,          /* y */
@@ -161,6 +162,21 @@ void* Cursor::wait_for_blit(HWND hWnd)
 /*   7. Handle player data: store + copy name/colours from playerData */
 /*      or call init_network_player() if null                         */
 /*   8. update_network_names(), start 50ms timer 0x53 at +0x19C       */
+/*                                                                     */
+/* REACHABILITY (2026-08-14): unreached on the host build today — its  */
+/* only real caller, the free function Cursor_Show(void*), is still a  */
+/* no-op stub (shared/defsym_stubs.cpp). Of this function's 4 real x86 */
+/* callers (get_xrefs_to 0x416B80), only CGWND_SetMode's mode-7 case   */
+/* passes a literal NULL; the other 2 push field values (ESI+0x60C,    */
+/* ESI+0x130) from code Ghidra has never bounded as a function, so     */
+/* their producer/allocation is untraced. The `playerData != nullptr`  */
+/* branch below now does `this->obj_184 = static_cast<DPlayManager*>(  */
+/* playerData)` and later `delete`s it — dispatching a REAL virtual    */
+/* destructor through playerData's vptr. Whoever wires Cursor_Show for */
+/* real must first confirm those 2 untraced call sites' `playerData`   */
+/* is a real, placement-new-constructed DPlayManager (same protocol as */
+/* init_network_player/Train_network.cpp), not raw operator_new(0x39C) */
+/* storage — the latter would make this `delete` read a garbage vptr.  */
 /* ================================================================== */
 void Cursor::show(void* playerData)
 {
@@ -250,7 +266,7 @@ void Cursor::show(void* playerData)
         /* Offline mode: create local player if none exists */
         if (this->obj_184 == nullptr) {                              /* +0x184 */
             this->init_network_player();
-            SetWindowTextA(this->hEditWnd, &g_empty_string[0]);
+            SetWindowTextA(this->hEditWnd, &g_empty_string);
         }
     } else {
         /* Network mode: store player data */
@@ -259,17 +275,18 @@ void Cursor::show(void* playerData)
             this->obj_184 = nullptr;
         }
 
-        this->obj_184 = static_cast<CursorEditorRecord*>(playerData); /* +0x184 */
+        /* playerData is a real, already-constructed DPlayManager* — see
+         * input/Cursor.h's removal comment on the former CursorEditorRecord
+         * partial view. */
+        this->obj_184 = static_cast<DPlayManager*>(playerData); /* +0x184 */
 
-        /* Copy player name from playerData+0x43 into edit control */
-        SetWindowTextA(
-            this->hEditWnd,
-            reinterpret_cast<const char*>(
-                reinterpret_cast<uint8_t*>(playerData) + 0x43));
+        /* Copy player name from playerData+0x43 (m_playerName) into edit control */
+        SetWindowTextA(this->hEditWnd, this->obj_184->m_playerName);
 
-        /* Zero the upload session field and mark audio preview */
-        this->obj_184->upload_id = 0;                       /* +0x3A */
-        this->obj_184->is_audio_preview = 1;                /* +0x3C */
+        /* Zero the upload session field and mark audio preview (editor-local
+         * reuse of m_wordValue/m_dwordValue — see DPlayManager.h). */
+        this->obj_184->m_wordValue = 0;                     /* +0x3A */
+        this->obj_184->m_dwordValue = 1;                    /* +0x3C */
 
         /* Copy body colour RGB from player record */
         this->color_r = this->obj_184->color_r;             /* +0x298 */
@@ -278,7 +295,7 @@ void Cursor::show(void* playerData)
 
         /* Copy player name from g_player_config into player record at +0x25 */
         const char* cfgName = reinterpret_cast<const char*>(
-            static_cast<uint8_t*>(g_player_config) + 6);
+            reinterpret_cast<uint8_t*>(g_player_config) + 6);
         size_t nameLen = strlen(cfgName);
         memcpy(reinterpret_cast<uint8_t*>(playerData) + 0x25, cfgName, nameLen);
         reinterpret_cast<char*>(playerData)[0x25 + nameLen] = '\0';

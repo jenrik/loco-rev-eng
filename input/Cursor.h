@@ -90,31 +90,20 @@
 /* ================================================================== */
 class ButtonSprite;   /* ui/ButtonSprite.h — UI button sprite, 0x24 bytes */
 class UIPANEL;          /* ui/UIPANEL.h — UI panel surface, 0x20 bytes */
+class DPlayManager;   /* network/DPlayManager.h — real type of obj_184, see below */
 
-struct CursorEditorRecord {
-    uint8_t  _pad_00[0x10];             // +0x00
-    /* Selected locomotive-list entry name, copied from Cursor::player_names[]
-     * by handle_locomotive_list_click() (0x41A650). Exact width beyond the
-     * copied bytes is unconfirmed; +0x24 is the next known field so this is
-     * an upper bound, not a verified string-buffer size. */
-    char     name[0x14];                // +0x10
-    /* Byte flag set by handle_locomotive_list_click(): 0 if the selected
-     * list index is < Cursor::player_count (+0x6F4), 1 otherwise. Exact
-     * semantic meaning beyond that observed write is not evidenced. */
-    uint8_t  field_24;                   // +0x24
-    uint8_t  _pad_25[0x15];              // +0x25
-    int16_t  upload_id;                 // +0x3A  active custom-content upload
-    int32_t  is_audio_preview;          // +0x3C  preview content type flag
-    uint8_t  color_r;                   // +0x40
-    uint8_t  color_g;                   // +0x41
-    uint8_t  color_b;                   // +0x42
-    uint8_t  _pad_43[0x50];              // +0x43
-    /* Bonus prize ID, written by handle_locomotive_select() (0x41A360) as
-     * Cursor::bonus_ids[index] (+0x370) + 1. */
-    uint8_t  bonus_prize_id;             // +0x93
-};
-static_assert(sizeof(CursorEditorRecord) == 0x94,
-              "CursorEditorRecord layout must match observed field offsets");
+/* CursorEditorRecord (a partial 0x94-byte struct duplicating a subset of
+ * DPlayManager's real layout) removed 2026-08-14: `obj_184` is a real
+ * DPlayManager* (the 0x39C-byte player slot, network/DPlayManager.h),
+ * confirmed by 8 independent byte-for-byte field-offset matches from
+ * +0x10 through +0x93 with zero counter-evidence. init_network_player()
+ * (input/Cursor_impls.cpp) constructs one via operator_new(sizeof(DPlayManager))
+ * + placement-new + CreatePlayer(), exactly like every other real
+ * DPlayManager::CreatePlayer() caller. See DPlayManager.h's own class-level
+ * comment for why several of its fields (m_wordValue, m_dwordValue,
+ * m_unknown93, m_sessionBlk1's tail) are reused by this class's editor UI
+ * for local, not-yet-networked state instead of being given Cursor-specific
+ * names in the canonical class. */
 
 /* ================================================================== */
 /* Cursor class                                                        */
@@ -276,10 +265,10 @@ public:
     int32_t    scroll_visible_count;   // +0x17C  number of visible lines
     int32_t    scroll_end_flag;        // +0x180  byte: 1 = end-of-list reached
 
-    /* +0x184: union — int32_t and CursorEditorRecord* share the same storage */
+    /* +0x184: union — int32_t and DPlayManager* share the same storage */
     union {
-        int32_t              field_184;  // +0x184  integer alias
-        CursorEditorRecord*  obj_184;    // +0x184  editor/player record
+        int32_t         field_184;  // +0x184  integer alias
+        DPlayManager*   obj_184;    // +0x184  real DPlayManager player slot, see above
     };
     uint8_t    ui_active;              // +0x188  byte: master UI-active flag (init 1).
                                        //         When 0 the status/scroll sprites render
@@ -852,8 +841,9 @@ public:
      *     toolbar_sprites[] entry with an origin derived from its
      *     y/width fields.
      *   - Zero (editor mode): writes bonus_ids[index] (+0x370) + 1 into
-     *     the player record's (obj_184, +0x184) bonus_prize_id (+0x93),
-     *     then blits the edit preview.
+     *     the player record's (obj_184, +0x184) DPlayManager::m_unknown93
+     *     (+0x93, editor-local reuse — see DPlayManager.h), then blits the
+     *     edit preview.
      *
      * @param index  Selected locomotive index (also a bonus_ids[] index
      *               in the editor-mode branch — bytes 0-255, no bounds
@@ -884,10 +874,12 @@ public:
      * the clicked row index from scroll_line_height/scroll_top_idx, reads
      * the row's player_names[] entry (+0x59E, 13-byte stride), and if
      * non-empty records the index in toolbar_sentinel (+0x6F0), sets the
-     * player record's (obj_184, +0x184) field_24 flag depending on whether
-     * the index is below player_count (+0x6F4), copies the name into the
-     * record's name buffer, dispatches set_mode with (editor_surface,
-     * editor_resdata), sets editor_state to 6, and blits the edit preview.
+     * player record's (obj_184, +0x184) DPlayManager::m_sessionBlk1[20]
+     * (+0x24, editor-local reuse) depending on whether the index is below
+     * player_count (+0x6F4), copies the name into the first 20 bytes of
+     * DPlayManager::m_sessionBlk1 (+0x10, also editor-local reuse),
+     * dispatches set_mode with (editor_surface, editor_resdata), sets
+     * editor_state to 6, and blits the edit preview.
      */
     void handle_locomotive_list_click(LONG x, LONG y);
 

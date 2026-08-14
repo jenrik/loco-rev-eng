@@ -1,6 +1,7 @@
 // Status: INTEGRATED
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../network/DPlayManager.h"
 #include "../ui/ButtonSprite.h"
 
 #include <cstdio>
@@ -1085,7 +1086,7 @@ void Cursor::draw_network_status()
     if (_g_netman != nullptr &&
         *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(_g_netman) + 0x7C4) == 2) {
         if (this->obj_184 != nullptr) {
-            int status = this->obj_184->upload_id;
+            int status = static_cast<int16_t>(this->obj_184->m_wordValue);
             Sprite_SetState(this->sprite_2EC, (status != 0) ? 1 : 0, nullptr);
         }
     }
@@ -1342,7 +1343,7 @@ void Cursor::handle_locomotive_select(uint32_t index)
 
     /* Editor mode: record a bonus prize ID on the player record. */
     if (this->obj_184 != nullptr) {
-        this->obj_184->bonus_prize_id =
+        this->obj_184->m_unknown93 =
             static_cast<uint8_t>(this->bonus_ids[index & 0xFF]) + 1;   /* +0x370, no bounds check */
     }
     this->blit_edit_preview();
@@ -1468,8 +1469,10 @@ void Cursor::handle_locomotive_list_click(LONG x, LONG y)
 
     this->toolbar_sentinel = rowIndex;                         /* +0x6F0 */
     if (this->obj_184 != nullptr) {                            /* +0x184 */
-        this->obj_184->field_24 = (rowIndex < this->player_count) ? 0 : 1; /* +0x6F4 */
-        std::snprintf(this->obj_184->name, sizeof(this->obj_184->name), "%s", rowName);
+        /* Editor-local reuse of DPlayManager::m_sessionBlk1's tail byte
+         * and first 20 bytes — see DPlayManager.h's class-level comment. */
+        this->obj_184->m_sessionBlk1[20] = (rowIndex < this->player_count) ? 0 : 1; /* +0x6F4 */
+        std::snprintf(reinterpret_cast<char*>(this->obj_184->m_sessionBlk1), 20, "%s", rowName);
     }
 
     this->set_mode(
@@ -1548,7 +1551,7 @@ void Cursor::upload_custom_content()
 
     /* If a player record exists with an active upload, cancel it */
     if (this->obj_184 != nullptr) {
-        int16_t uploadId = this->obj_184->upload_id;
+        int16_t uploadId = static_cast<int16_t>(this->obj_184->m_wordValue);
         if (uploadId != 0) {
             /* The binary builds the NET_FindPlayer key as CONCAT22 of the
              * record pointer's high word and the upload_id. */
@@ -1556,7 +1559,7 @@ void Cursor::upload_custom_content()
                            reinterpret_cast<intptr_t>(this->obj_184) >> 16) << 16) |
                       static_cast<uint16_t>(uploadId);
             NET_FindPlayer(4, key);
-            this->obj_184->upload_id = 0;
+            this->obj_184->m_wordValue = 0;
             this->blit_edit_preview();
             UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
@@ -1668,7 +1671,7 @@ void Cursor::upload_custom_content()
 
         /* Upload the file */
         uint16_t uploadId = NET_UploadAsset(4, filePath);
-        this->obj_184->upload_id = uploadId;
+        this->obj_184->m_wordValue = uploadId;
 
         /* Check if it's a WAV file (search for ".WAV" extension).
          * The binary calls the CRT strstr with the ASCII ".WAV" needle at
@@ -1680,9 +1683,9 @@ void Cursor::upload_custom_content()
         }
 
         if (hasWavExt) {
-            this->obj_184->is_audio_preview = 1;
+            this->obj_184->m_dwordValue = 1;
         } else {
-            this->obj_184->is_audio_preview = 0;
+            this->obj_184->m_dwordValue = 0;
             /* Play as audio if not WAV */
             PlaySoundFile(filePath,
                           this->edit_preview_rect.left,
@@ -1696,9 +1699,9 @@ void Cursor::upload_custom_content()
 
     /* Clean up */
     /* Update upload status sprite (sprite_2EC, +0x2EC):
-     * state = (obj_184->upload_id != 0) ? 1 : 0 */
+     * state = (obj_184->m_wordValue != 0) ? 1 : 0 */
     {
-        int uploadState = (this->obj_184 != nullptr && this->obj_184->upload_id != 0) ? 1 : 0;
+        int uploadState = (this->obj_184 != nullptr && this->obj_184->m_wordValue != 0) ? 1 : 0;
         Sprite_SetState(this->sprite_2EC, uploadState, nullptr);
     }
     UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)

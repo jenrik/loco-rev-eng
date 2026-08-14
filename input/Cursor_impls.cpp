@@ -14,6 +14,8 @@
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../network/DPlayManager.h"
+#include <new>
 
 #ifndef _WIN32
 /* Non-Windows stubs for Win32 functions used by set_capture().
@@ -39,8 +41,17 @@ static inline int ShowCursor(int show) { (void)show; return -1; }
 /* ================================================================== */
 void Cursor::on_create()
 {
-    /* Chain to the base on_create (0x425D30) per the 0x417186 call. */
-    this->on_create();
+    /* Chain to the base on_create (0x425D30) per the 0x417186 call.
+     * Cursor::on_create is a virtual override (Cursor.h, vtable[7]) — a
+     * plain `this->on_create()` here would dispatch back to this same
+     * override and recurse infinitely (same vtable-recursion trap class
+     * as GameView::render_selection/center_on_point, fixed 2026-08-13).
+     * This function is currently unreached on the host build regardless
+     * (Cursor::show, its only caller, is itself unreached — see
+     * Cursor::show's own doc comment), so this was a latent, not live,
+     * guaranteed stack overflow; fixed while auditing this file
+     * (2026-08-14) rather than left for whoever wires up Cursor::show. */
+    this->UI_WindowBase::on_create();
 }
 
 
@@ -677,67 +688,73 @@ void Cursor::update_network_names()
 /* Cursor::init_network_player — Initialize local player data         */
 /* Address: 0x41A0E0 (Ghidra label: INPUT_InitNetworkPlayer)          */
 /*                                                                     */
-/* Deletes any existing record in obj_184 (+0x184), allocates a        */
-/* 0x39C-byte player record, creates it via DPLAY_CreatePlayer,        */
-/* copies the description string at 0x47E4EC into record+0x43, the     */
-/* player name from g_player_config (+6) into record+0x25, syncs       */
-/* colour_r/g/b (+0x298..0x2A0) from record bytes +0x40/+0x41/+0x42,   */
-/* and resets toolbar_sentinel (+0x6F0) and selected_idx_384 (+0x384)  */
-/* to -1 plus the ui_active flag (+0x188).                             */
+/* Deletes any existing record in obj_184 (+0x184), constructs a real  */
+/* DPlayManager player slot via DPlayManager::CreatePlayer(), copies   */
+/* the description string at 0x47E4EC into the slot's m_playerName     */
+/* (+0x43), the player name from g_player_config (+6) into the slot's  */
+/* m_sessionBlk2 (+0x25) and beyond, syncs colour_r/g/b (+0x298..0x2A0)*/
+/* from the slot's own color_r/g/b (+0x40/+0x41/+0x42), and resets     */
+/* toolbar_sentinel (+0x6F0) and selected_idx_384 (+0x384) to -1 plus  */
+/* the ui_active flag (+0x188).                                        */
 /*                                                                     */
 /* Validated against the 0x41A0E0 decompilation: allocation 0x39C,     */
 /* DPLAY_CreatePlayer(record) return stored, both string copies,       */
-/* colour sync, -1 sentinels, +0x189 zero, +0x188 force-1.             */
+/* colour sync, -1 sentinels, +0x189 zero, +0x188 force-1. This        */
+/* function is one of DPlayManager::CreatePlayer's own documented      */
+/* real callers (INPUT_InitNetworkPlayer, network/DPlayManager.h) —    */
+/* confirmed 2026-08-14 that `record`/obj_184 is a real DPlayManager*,  */
+/* not the removed CursorEditorRecord partial view; see input/Cursor.h. */
 /* ================================================================== */
 void Cursor::init_network_player()
 {
     /* Delete any existing record first (the binary unconditionally
-     * releases obj_184 via vtable[0](1) and re-creates it). */
+     * releases obj_184 via vtable[0](1) and re-creates it). Now dispatches
+     * through DPlayManager's real virtual destructor. */
     if (this->obj_184 != nullptr) {                      /* +0x184 */
         delete this->obj_184;
         this->obj_184 = nullptr;
     }
 
-    /* Allocate the 0x39C-byte player record and create it via DPLAY.
-     * 0x39C is real x86 evidence for the record's full original size
-     * (town/Town.h documents the same value from DPLAY_CreatePlayer's own
-     * disassembly), but only its first 0x94 bytes are reconstructed as
-     * input/Cursor.h's CursorEditorRecord (an intentional partial view, see
-     * Cursor::base_destructor's doc comment) — there is no complete C++
-     * type to take a sizeof() of yet, so the literal stays. DPLAY_
-     * CreatePlayer is currently a no-op stub (never writes past `record`),
-     * so this is not a live overflow today; if the full record is ever
-     * reconstructed with pointer fields beyond +0x94, this will need to
-     * become sizeof(the full type) instead. */
-    void* record = operator_new(0x39C);
-    this->obj_184 = static_cast<CursorEditorRecord*>(
-        record != nullptr
-            ? reinterpret_cast<void*>(static_cast<intptr_t>(DPLAY_CreatePlayer(record)))
-            : nullptr);
+    /* Allocate real DPlayManager storage (NOT the x86 0x39C literal — that
+     * size predates the vtable pointer widening to 8 bytes on this host,
+     * per the standing size-audit rule in PROGRESS.md) and construct it
+     * the same way as every other real DPlayManager::CreatePlayer() caller
+     * (placement-new + CreatePlayer(), see game/Train_network.cpp). */
+    void* storage = operator_new(sizeof(DPlayManager));
+    DPlayManager* player = nullptr;
+    if (storage != nullptr) {
+        player = ::new (storage) DPlayManager();
+        player->CreatePlayer();
+    }
+    this->obj_184 = player;
 
     if (this->obj_184 != nullptr) {
-        uint8_t* playerBytes = reinterpret_cast<uint8_t*>(this->obj_184);
-
-        /* Description string at 0x47E4EC → record+0x43.
+        /* Description string at 0x47E4EC → m_playerName (+0x43).
          * The string is not in the Ghidra string table (exact bytes
          * unverified); the previous transcription guessed "LEGO LOCO
          * Player" but only the address is evidence-backed. */
         const char* desc = reinterpret_cast<const char*>(0x47E4EC);
         size_t descLen = strlen(desc);
-        if (descLen > 0x30) descLen = 0x30;   /* record+0x43..0x73 bound */
-        memcpy(playerBytes + 0x43, desc, descLen + 1);
+        if (descLen > 0x30) descLen = 0x30;   /* m_playerName+0..0x30 bound */
+        memcpy(this->obj_184->m_playerName, desc, descLen + 1);
 
-        /* Player name from g_player_config (+6) → record+0x25 */
+        /* Player name from g_player_config (+6) → +0x25 (m_sessionBlk2).
+         * The original's own 0x25..0x48 write width (36 bytes + null)
+         * deliberately spans past m_sessionBlk2's 20 bytes into
+         * m_flag39/m_wordValue/m_dwordValue/color_r/g/b and the first
+         * byte of m_playerName — transcribed as raw byte offsets into the
+         * real object (same precedent as DPlayManager::CopyPlayerData's
+         * own raw-offset writes on `this`), not narrowed to sizeof(m_sessionBlk2). */
         const char* cfgName = reinterpret_cast<const char*>(
-            static_cast<uint8_t*>(g_player_config) + 6);
+            reinterpret_cast<uint8_t*>(g_player_config) + 6);
         size_t nameLen = strlen(cfgName);
         if (nameLen > 0x24) nameLen = 0x24;   /* record+0x25..0x48 bound */
-        memcpy(playerBytes + 0x25, cfgName, nameLen + 1);
+        memcpy(reinterpret_cast<uint8_t*>(this->obj_184) + 0x25, cfgName, nameLen + 1);
 
-        /* Sync colour fields from the record bytes */
-        this->color_r = playerBytes[0x40];               /* +0x298 */
-        this->color_g = playerBytes[0x41];               /* +0x29C */
-        this->color_b = playerBytes[0x42];               /* +0x2A0 */
+        /* Sync colour fields from the slot's own color_r/g/b */
+        this->color_r = this->obj_184->color_r;           /* +0x298 */
+        this->color_g = this->obj_184->color_g;           /* +0x29C */
+        this->color_b = this->obj_184->color_b;           /* +0x2A0 */
     }
 
     /* Reset toolbar selection state */

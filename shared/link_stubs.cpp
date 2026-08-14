@@ -282,8 +282,9 @@ void DPLAY_SetPlayerData(void*,const char*);
 void DPLAY_SetPlayerData(void*,const char*){}
 void DPLAY_CleanupPlayer(void*);
 void DPLAY_CleanupPlayer(void*){}
-void*DPLAY_CreatePlayer(void*);
-void*DPLAY_CreatePlayer(void*){return nullptr;}
+/* DPLAY_CreatePlayer(void*) [extern "C"] removed 2026-08-14 — zero real
+ * call sites tree-wide; its one former caller (Cursor::init_network_player)
+ * now constructs a real DPlayManager directly (input/Cursor_impls.cpp). */
 void DPLAY_InitPlayer(void*,void*,int32_t);
 void DPLAY_InitPlayer(void*,void*,int32_t){}
 /* Confirmed via 0x443440: __thiscall, ECX = this, zero pushed stack args —
@@ -734,10 +735,6 @@ uint8_t Resource_IsValidTrackIndex(void* resource, int16_t idx)
     }
     return 0;
 }
-
-/* DPLAY_CreatePlayer — C++ overloads */
-void*DPLAY_CreatePlayer(void*,const char*,const char*);
-void*DPLAY_CreatePlayer(void*,const char*,const char*){return nullptr;} /* _Z18DPLAY_CreatePlayerPvPKcS1_ */
 
 /* ButtonSprite_Ctor — C++ version */
 void ButtonSprite_Ctor(void*,int32_t);
