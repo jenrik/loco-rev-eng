@@ -147,8 +147,9 @@ void Timer_Resize(void*, int);
 void Timer_Resize(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Collection_Sort(void*);
 void Collection_Sort(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void RESMGR_PlaySound(int);
-void RESMGR_PlaySound(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/* RESMGR_PlaySound(int) removed 2026-08-15 — a fabricated symbol name;
+ * the original binary always calls the real PlaySound(UINT) directly.
+ * ui/AboutDialog.cpp (this stub's only caller) now calls it directly. */
 /** ScriptEngine_constructor — ABI bridge (address: 0x4493A0)
  *  Sets vtable to 0x4782A4, calls InitializeCriticalSection at +0x04.
  *  Called by: BuildingComplex_Ctor (0x434523) on an embedded

@@ -301,8 +301,13 @@ void Sprite_Shutdown(int32_t);
 void Sprite_Shutdown(int32_t){}
 void Sprite_UnlockAll(int32_t);
 void Sprite_UnlockAll(int32_t){}
-void RESMGR_PlaySound(int32_t);
-void RESMGR_PlaySound(int32_t){}
+/* RESMGR_PlaySound(int32_t) [extern "C"] removed 2026-08-15 — a
+ * fabricated symbol name (the original binary calls the real PlaySound
+ * directly, under its real name, at every one of its 66 real call
+ * sites — confirmed via get_xrefs_to/decompile on 0x447930/0x403E80).
+ * graphics/LOCOBITMAP.cpp and ui/AboutDialog.cpp were the two files
+ * still routing through this name; both now call the real
+ * PlaySound(UINT) directly. */
 void RESMGR_GetResourceType(void*,uint32_t);
 void RESMGR_GetResourceType(void*,uint32_t){}
 void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t);

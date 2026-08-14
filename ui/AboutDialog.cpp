@@ -59,7 +59,7 @@ extern int   __cdecl CRT_sprintf_buf(char* buf, const char* format, ...);    /* 
 
 /* Resource manager */
 extern void* __thiscall ResourceManager_GetById(void* resmgr, int resId);    /* 0x446EA0 */
-extern void  __thiscall RESMGR_PlaySound(int resId);                         /* 0x447930 */
+extern void  __cdecl    PlaySound(UINT soundId);                             /* 0x447930 */
 extern void* __thiscall AssetMgr_LoadFile(void* assetMgr,                    /* 0x45CD00 */
                                            const char* path, int* sizeOut);
 
@@ -309,7 +309,7 @@ uint32_t AboutDialog::RenderCredits(HDC hdc)
        struggles to represent cleanly. The key phases are:
 
      Phase 1: Setup
-       - Play credits music (RESMGR_PlaySound with resource 0x5597)
+       - Play credits music (PlaySound with resource 0x5597)
        - Read scroll_pos from +0x148 (word)
        - Set up panel rendering context via panel vtable calls
        - Create a 216x196 pixel render area
@@ -349,7 +349,7 @@ uint32_t AboutDialog::RenderCredits(HDC hdc)
        instruction-level behavior. */
 
     /* Phase 1: Play credits music */
-    RESMGR_PlaySound(0x5597);  /* Lego Loco credits music resource */
+    PlaySound(0x5597);  /* Lego Loco credits music resource */
 
     /* Phase 2: Get scroll position and set up panel */
     /* scroll_pos read from +0x148 (2 bytes, used as initial Y offset) */
