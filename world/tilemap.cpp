@@ -2149,9 +2149,18 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                                 loco::assets::sprite_resource_id(
                                                     reinterpret_cast<loco::assets::SpriteResource*>(
                                                         tobj->resource)));
-                                        } else
-#endif
+                                        } else if (tobj->resource != nullptr) {
+                                            /* else: host-placed entity with no
+                                             * resource at all (PersistenceAdapter.h's
+                                             * documented 0/497 real-RESDATA-metadata
+                                             * placement-coverage gap, same null-
+                                             * resource landmine as the is_connected
+                                             * read below) -- res_type stays its
+                                             * already-initialized 0 rather than
+                                             * dereferencing nullptr + 4. */
+#else
                                         {
+#endif
                                             res_type = GetResourceType(static_cast<unsigned int>(
                                                 *reinterpret_cast<int*>(
                                                     reinterpret_cast<uint8_t*>(tobj->resource) + 4)));
@@ -2205,9 +2214,19 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                         is_connected = metadata->frame_sets[
                                             static_cast<size_t>(anim_index)].is_connected;
                                     }
-                                } else
-#endif
+                                } else if (tobj->resource != nullptr) {
+                                    /* Real x86 resource pointer path (below). When
+                                     * neither branch's condition holds, this is a
+                                     * host-placed entity with no resource at all
+                                     * (PersistenceAdapter.h's documented 0/497
+                                     * real-RESDATA-metadata placement-coverage gap,
+                                     * same null-resource landmine already guarded in
+                                     * Entity::Draw/DrawConnected, core/GameObject.cpp)
+                                     * -- stays not-connected rather than
+                                     * dereferencing nullptr + 0x20. */
+#else
                                 {
+#endif
                                     uint8_t* frame_table = *reinterpret_cast<uint8_t**>(
                                         reinterpret_cast<uint8_t*>(tobj->resource) + 0x20);
                                     is_connected = (frame_table[anim_index * 3 * 8 + 0x17] == 1);

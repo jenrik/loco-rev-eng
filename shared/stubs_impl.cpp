@@ -360,52 +360,38 @@ uint8_t g_allow_building_placement = 0;   /* 0x4FD3DC — loader/building placem
                                              and restores it around its work. */
 void* g_town_view = nullptr;
 void* g_tile_occupied_bitmap = nullptr;
-/* TODO(tilemap-drawing-pipeline): declared here as a scalar but
- * world/tilemap.h declares `extern uint8_t ATTR_0047f108[8]` (real 8-byte
- * bitmask-table type, confirmed via disassembly at 0x455342: `MOV AL, byte
- * ptr [EAX + 0x47f108]` with EAX pre-masked to 0-7). Real byte values
+/* Real 8-byte bitmask-lookup table (world/tilemap.h: `extern uint8_t
+ * ATTR_0047f108[8]`), confirmed via disassembly at 0x455342: `MOV AL, byte
+ * ptr [EAX + 0x47f108]` with EAX pre-masked to 0-7. Real byte values
  * confirmed via direct read of the original binary at 0x47f108: `80 40 20
  * 10 08 04 02 01` -- MSB-first bit ordering (`1 << (7-n)`, not the naive
  * `1 << n`), consistent with bit 0 of a row addressing the most-
  * significant bit of its byte (same convention as bitmap_occupancy/
- * span_map cell parsing elsewhere in this codebase). Fixing the type
- * wakes TileMap::InvalidateDirtyRects/ProcessRect's DirectDraw
- * presentation path (dirty-tile bits go from always-0 to real).
+ * span_map cell parsing elsewhere in this codebase).
  *
- * Third revert (2026-08-13): the previous blocker (null `g_tooltip_mgr`
- * inside ProcessRect's UI_SetTooltipPos call) is fixed for real --
- * `g_tooltip_mgr` is now a real `UI_Manager` singleton (PROGRESS.md's
- * "Wire the real UI_Manager singleton" milestone) -- but flipping this
- * type past that point reaches TWO more, larger, genuinely separate
- * gaps in the same previously-100%-dead rendering path:
- *   1. Entity::Draw/DrawConnected (core/GameObject.cpp) call
+ * Un-reverted (2026-08-14): the type fix was flipped and reverted three
+ * times previously because it wakes TileMap::InvalidateDirtyRects/
+ * ProcessRect's DirectDraw presentation path (dirty-tile bits go from
+ * always-0 to real) for the first time, and each attempt hit a new crash
+ * in that previously-100%-dead code. All three are now resolved or
+ * guarded, in order encountered:
+ *   1. Null `g_cursor_surface` dereference in ProcessRect -- null-guarded
+ *      (world/tilemap.cpp, warn-once skip).
+ *   2. Null `g_tooltip_mgr` inside ProcessRect's UI_SetTooltipPos call --
+ *      `g_tooltip_mgr` is now a real `UI_Manager` singleton (PROGRESS.md's
+ *      "Wire the real UI_Manager singleton" milestone).
+ *   3. Entity::Draw/DrawConnected (core/GameObject.cpp) call
  *      UIPANEL_Blit(resource+0x10, ...) -- confirmed via UIPANEL_Blit's
  *      own body (ui/UIPANEL_Surface.cpp, 0x42B050) that this is a real
  *      `UIPANEL_Surface*` sub-object pointer, not a bitmap. No host
- *      resource carries one (a host SpriteResource* is a small,
- *      unrelated struct), and FrameData::flip_horizontal has no
- *      .dat-derived host mapping either (only ::is_connected is mapped
- *      so far). Guarded both methods against this (warn-once, skip the
- *      blit) plus a null-`resource` case (most host entities never get a
- *      real resource -- see PersistenceAdapter.h's documented 0/497
- *      placement-coverage gap) -- both guards kept, they're correct and
- *      needed regardless of when this is next attempted.
- *   2. RESOLVED (2026-08-13, GameView-misattribution session):
- *      render_selection (0x42D400) was never a Town:: method at all --
- *      TileMap_ProcessRect's own call site loads ECX with the bare
- *      immediate 0x4852A0 (GameView's global instance), never a Town
- *      pointer-variable dereference. GameView really is Entity-derived
- *      (GameObject -> Entity -> Panel -> GameView, see core/GameView.h),
- *      so the original's raw `CALL 0x405E60` is just
- *      `game_view->Draw(rect, extra, 0)` -- Entity::Draw, inherited,
- *      no cast needed. Moved to GameView::render_selection
- *      (core/GameView.cpp), which now calls `this->Draw(...)` for real
- *      instead of the stale GameObject_Draw(void*) stub. The `Town :
- *      public UI_WindowBase` layout-relationship blocker this bullet
- *      used to describe never existed; it was a wrong-class assumption.
- * Bullet 1's UIPANEL_Surface/FrameData gap is unrelated and still open;
- * `ATTR_0047f108` stays reverted until that one is resolved too. */
-int ATTR_0047f108 = 0;
+ *      resource carries one yet (a host SpriteResource* is a small,
+ *      unrelated struct) -- guarded (warn-once, skip the blit) rather
+ *      than fixed; this remains the separately-tracked "DDRAW sprite-data
+ *      management integration" item (PROGRESS.md Priority 3). Flipping
+ *      this type does not resolve it -- entities/vehicles will still
+ *      silently skip their own blit -- but the tile background's own
+ *      dirty-rect/present path no longer depends on it. */
+uint8_t ATTR_0047f108[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 int DAT_00481170 = 0;
 int DAT_0048118c = 0;
 int DAT_00481190 = 0;
