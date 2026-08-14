@@ -45,6 +45,7 @@ class Netman;
 #include "../game/BuildingMgr.h"
 #include "../audio/GameAudio.h"
 #include "../game/World.h"
+#include "../resources/ResourceManager.h"
 
 #ifndef _WIN32
 #include <SDL3/SDL.h>
@@ -263,23 +264,20 @@ static void destroy_subsystem(void* ptr) {
     }
 }
 
-/* ================================================================== */
-/* Helper: Play a sound resource by ID without blocking                 */
-/* ================================================================== */
-#ifdef _WIN32
-static void PlaySound(uint32_t resId) {
-    /* Calls PlaySoundA with SND_ASYNC | SND_NOWAIT | SND_RESOURCE */
-    extern BOOL PlaySoundA(const char* pszSound, HMODULE hmod, DWORD fdwSound);
-    extern HMODULE GetModuleHandleA(const char* name);
-    HMODULE hMod = GetModuleHandleA(nullptr);
-    PlaySoundA((const char*)resId, hMod, 0x20001);  /* SND_RESOURCE | SND_ASYNC | SND_NOWAIT */
-}
-#else
-static void PlaySound(uint32_t resId) {
-    /* No sound on non-Windows for now */
-    (void)resId;
-}
-#endif
+/* Local `static void PlaySound(uint32_t)` helper removed 2026-08-15 —
+ * zero callers anywhere in this file or the tree, no original address
+ * citation (unlike every other reconstructed function here), and a
+ * duplicate of the real, already-implemented, already-correctly-used
+ * PlaySound(UINT) (0x447930, resources/ResourceManager.cpp) —
+ * ui/TrainStationWindow.cpp:255 already calls that real function via
+ * its own `extern void __cdecl PlaySound(uint32_t)` declaration. Having
+ * both a static PlaySound here and the real extern PlaySound in the
+ * same binary was a live tripwire: any TU that saw both declarations
+ * would silently drop the `static` per C++'s linkage rules ([basic.link]
+ * — a name once given external linkage cannot later be redeclared
+ * internal), causing a duplicate-symbol link error depending on include
+ * order. Discovered while wiring RESMGR_Shutdown below, which needed
+ * ResourceManager.h's declaration of the real PlaySound in the same TU. */
 
 
 /* ================================================================== */
@@ -1119,8 +1117,7 @@ void CGWND_Cleanup()
     extern void Game_Shutdown(int* game);
     Game_Shutdown(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4854C8)));
 
-    extern int RESMGR_Shutdown(int resmgr);
-    RESMGR_Shutdown(0x4855E8);
+    g_resmgr.Shutdown();
 
     extern int CRT_0x470650(void);
     CRT_0x470650();

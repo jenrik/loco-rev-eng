@@ -578,9 +578,14 @@ void GameAudio_AllocChannel(GameAudio*,int32_t,void*,int32_t,int32_t,uint32_t,ui
 void GameAudio_AllocChannel(void*,int32_t,void**,int32_t,int32_t,int32_t,int32_t);
 void GameAudio_AllocChannel(void*,int32_t,void**,int32_t,int32_t,int32_t,int32_t){}
 
-/* GameAudio_StopAll */
-void GameAudio_StopAll(GameAudio*);
-void GameAudio_StopAll(GameAudio*){}
+/* GameAudio_StopAll(GameAudio*) removed 2026-08-15 — was a silent-wrong-
+ * stub of the class documented elsewhere in this file (NET_ComputeColor,
+ * UIPANEL_CopySurface): ResourceManager::Shutdown's own real, already-
+ * implemented body called this expecting the receiver's channels to be
+ * actually released, but got this always-empty no-op instead. The call
+ * site (resources/ResourceManager.cpp) now calls the real
+ * GameAudio::StopAll() method directly instead of a free-function
+ * facade. */
 
 /* ResourceManager_GetById overloads live in sdl3_shims/resource_manager_sdl3.cpp. */
 

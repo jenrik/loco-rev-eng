@@ -714,8 +714,18 @@ void GameSetupPanel_drawGrid(void*);
 void GameSetupPanel_drawGrid(void*) { /* host no-op */ }
 void Game_Shutdown(int*);
 void Game_Shutdown(int*) { /* host no-op */ }
-void RESMGR_Shutdown(int);
-void RESMGR_Shutdown(int) { /* host no-op */ }
+/* RESMGR_Shutdown(int) removed 2026-08-15 — its one caller
+ * (core/CGWND.cpp's CGWND_Cleanup) always passed the literal address
+ * 0x4855E8 (confirmed via Ghidra disassembly of 0x407AD2: `MOV ECX,
+ * 0x4855e8` immediately before the real call), i.e. &g_resmgr — this
+ * was another silent-wrong-stub of the class documented elsewhere in
+ * this file: the real ResourceManager::Shutdown() (0x446340) is
+ * already fully implemented, but this free-function facade discarded
+ * the call entirely. The call site now calls g_resmgr.Shutdown()
+ * directly. NOT the same fix as ResourceManager_Shutdown(int32_t)
+ * below, which network/NetHelpers.cpp's PoolAllocator::Shutdown()
+ * still calls with a different, as-yet-unresolved receiver — see
+ * PROGRESS.md. */
 void CRT_0x470650();
 void CRT_0x470650() { /* host no-op */ }
 void* UI_MainMenu_Ctor(void* mem, void*, unsigned int);
