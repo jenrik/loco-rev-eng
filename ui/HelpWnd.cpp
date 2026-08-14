@@ -33,6 +33,7 @@
 #include "../audio/AudioChannel.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamMem.h"
+#include "../game/PlayerConfig.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
@@ -118,7 +119,13 @@ extern size_t WIN32_Stream_Size();
                                 int srcX, int srcY, int srcW, int srcH, int mode); /* 0x42B050 */
     extern void   FormatResourceString(void* resmgr, UINT id,
                                         char* buf, int maxLen); /* 0x447330 */
-    extern int    ResourceManager_GetStringById(void* resmgr, UINT id); /* 0x4472B0 */
+    /* Declared UINT id here previously — a different mangled overload from
+     * the real facade (shared/stubs_link001_batch3_resource_audio.cpp,
+     * int id), so this file's 9 call sites silently bound to a dead no-op
+     * stub (shared/defsym_stubs.cpp) instead of the real
+     * ResourceManager::GetStringById (0x4472B0) — confirmed via nm on the
+     * linked binary. Retyped to match the real facade exactly. */
+    extern int    ResourceManager_GetStringById(void* resmgr, int id); /* 0x4472B0 */
     extern void   LoadSoundResource(int handle);             /* loader, see ResourceManager */
     extern void   ReleaseSoundResource(int handle);           /* release refcounted sound */
     extern void   GameAudio_PlayResourceEx(void* audio, UINT resId, int* outChannel); /* 0x4131C0 */
@@ -192,7 +199,7 @@ extern Game*    g_game;                 /* game singleton */
 extern GameAudio* g_audio;             /* GameAudio singleton */
 extern NetMan*  g_netman;              /* NetMan singleton */
 /* g_demo_mode — declared in shared/types.h */
-extern void*    g_player_config;       /* player config pointer */
+extern PlayerConfig* g_player_config;  /* 0x4AA4A8 — PlayerConfig singleton */
 /* g_config_ini — declared in shared/types.h, not redeclared here */
 extern AssetMgr* g_asset_mgr;          /* asset manager */
 extern char     g_install_path[];      /* game install path string */
@@ -983,7 +990,7 @@ uint HelpWnd::play_narration(int windowMode, uint pageResourceType)
     /* Check tutorial settings */
     char iniBuf[1024];
     Config_GetIniString(g_config_ini, "TUTORIAL",
-        (LPCSTR)((uintptr_t)g_player_config + 6), "", iniBuf, 0x400);
+        g_player_config->name, "", iniBuf, 0x400);
 
     /* Build search key from this->windowMode / this->pageResourceType */
     char keyBuf[20];
@@ -995,7 +1002,7 @@ uint HelpWnd::play_narration(int windowMode, uint pageResourceType)
         if (windowMode != 0) {
             /* Save this tutorial as "watched" */
             Config_GetIniString(g_config_ini, "TUTORIAL",
-                (LPCSTR)((uintptr_t)g_player_config + 6), "", iniBuf, 0x400);
+                g_player_config->name, "", iniBuf, 0x400);
 
             /* Build key again */
             char keyBuf2[20];
@@ -1008,7 +1015,7 @@ uint HelpWnd::play_narration(int windowMode, uint pageResourceType)
             strcat(iniBuf, keyBuf2);
 
             Config_ReadInt(g_config_ini, "TUTORIAL",
-                (LPCSTR)((uintptr_t)g_player_config + 6), iniBuf);
+                g_player_config->name, iniBuf);
         }
     } else if (windowMode != 0) {
         /* Already watched — skip */

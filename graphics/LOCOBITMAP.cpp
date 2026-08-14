@@ -52,9 +52,6 @@ extern "C" {
     void  Sprite_Destroy(void* sprite);                                     /* @0x454BC0 - __fastcall */
     void* ResourceManager_GetById(void* resmgr, uint32_t res_id);           /* @0x446EA0 */
 
-    /* Sound */
-    void  RESMGR_PlaySound(UINT sound_id);                                 /* @0x447930 */
-
     /* UI helpers */
     void* UI_CreateFullWindow(void* self, int32_t param, HWND parent,
                                int32_t x, int32_t y, int32_t w, int32_t h,
@@ -114,6 +111,16 @@ void  CGWND_SetMode(int mode);                                         /* @0x408
 class TileMap;
 void  TileMap_InvalidateRect(TileMap* self, int32_t left, int32_t top,
                               int32_t right, int32_t bottom);           /* @0x455840 */
+
+/* PlaySound: was declared here as `RESMGR_PlaySound` inside the extern "C"
+ * block above — a fabricated symbol name that doesn't exist in the
+ * original binary at all (0x403E80's own disassembly calls the real
+ * PlaySound directly, under its real name, at all 8 call sites in this
+ * file's PostcardAlbum::BlitElement). The real, already-implemented
+ * PlaySound(UINT) (resources/ResourceManager.cpp, 0x447930) has 66 real
+ * callers tree-wide; this file was the one holdout still routing through
+ * a dead, wrongly-named facade. */
+void  PlaySound(UINT soundId);                                         /* @0x447930 */
 
 /* Global variables referenced */
 extern PixelDataCache* g_pixel_cache;       /* PixelDataCache singleton at 0x4FD3B4 */
@@ -414,7 +421,7 @@ void PostcardAlbum::BlitElement(int surface_type)
     switch (surface_type) {
     case 1:
         /* Main button — play sound, blit, set state 1 */
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         this->BlitToSurface(this->sprite_main);
         Sprite_SetState(this->sprite_main, 1, nullptr);
         return;
@@ -426,7 +433,7 @@ void PostcardAlbum::BlitElement(int surface_type)
             Sprite_SetState(this->sprite_toggle_a, 2, nullptr);
             return;
         }
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         this->BlitToSurface(this->sprite_toggle_a);
         Sprite_SetState(this->sprite_toggle_a, 1, nullptr);
         return;
@@ -434,7 +441,7 @@ void PostcardAlbum::BlitElement(int surface_type)
 
     case 3:
         /* Button B — play sound, blit, set state 1 */
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         this->BlitToSurface(this->sprite_button_b);
         Sprite_SetState(this->sprite_button_b, 1, nullptr);
         return;
@@ -446,7 +453,7 @@ void PostcardAlbum::BlitElement(int surface_type)
             Sprite_SetState(this->sprite_toggle_b, 2, nullptr);
             return;
         }
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         this->BlitToSurface(this->sprite_toggle_b);
         Sprite_SetState(this->sprite_toggle_b, 1, nullptr);
         return;
@@ -458,7 +465,7 @@ void PostcardAlbum::BlitElement(int surface_type)
             Sprite_SetState(this->sprite_toggle_c, 2, nullptr);
             return;
         }
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         this->BlitToSurface(this->sprite_toggle_c);
         Sprite_SetState(this->sprite_toggle_c, 1, nullptr);
         return;
@@ -473,19 +480,19 @@ void PostcardAlbum::BlitElement(int surface_type)
         /* Type 6 unique: blit WITHOUT sound first, then play sound AFTER */
         this->BlitToSurface(this->sprite_toggle_d);
         Sprite_SetState(this->sprite_toggle_d, 1, nullptr);
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         return;
     }
 
     case 7:
         /* Indicator sprite — play sound, set state from sprite_state_value (+0x128) */
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         Sprite_SetState(this->sprite_indicator, this->sprite_state_value, nullptr);
         return;
 
     case 9:
         /* Help button — play sound, blit, set state 1 */
-        RESMGR_PlaySound(0x5015);
+        PlaySound(0x5015);
         this->BlitToSurface(this->sprite_help);
         Sprite_SetState(this->sprite_help, 1, nullptr);
         return;

@@ -164,7 +164,14 @@ void  __fastcall DDRAW_InitAudio(void);                         /* 0x4014C2 */
  * previous 0x448D50 annotation named no function at all. */
 extern "C" int Config_ReadInt(void* ini, const char* section,
                                const char* key, const char* def);  /* 0x452DF0 */
-int   __thiscall ResourceManager_GetStringById(void** mgr, int id); /* 0x460AA0 */
+/* ResourceManager_GetStringById: was declared here with a wrong address
+ * (0x460AA0 is inside WIN32_PeekMessageLoop, not this function — confirmed
+ * via decompile) and a wrong `void**` parameter type, which bound this file
+ * to a dead no-op stub instead of the real, already-implemented facade
+ * (shared/stubs_link001_batch3_resource_audio.cpp, forwarding to
+ * ResourceManager::GetStringById, 0x4472B0) that TrainStationWindow.cpp
+ * already calls correctly with this exact signature. */
+int   ResourceManager_GetStringById(void* mgr, int id);            /* 0x4472B0 */
 void  __thiscall RESMGR_ReleaseSoundResource(int res);              /* 0x44BB90 */
 void  __thiscall RESMGR_LoadSoundResource(int res);                 /* 0x44B8E0 */
 /* UI_SetWindowVisible (0x425F20) now declared in ui/UI_WindowBase.h,
@@ -325,7 +332,7 @@ void EditWindow::base_destructor()
     destroy_popup_window(this->pPopupWindow, this->savedPopupWndProc);
 
     /* Release music resource 0x5015 */
-    int musicRes = ResourceManager_GetStringById(reinterpret_cast<void**>(&g_resmgr), 0x5015);
+    int musicRes = ResourceManager_GetStringById(&g_resmgr, 0x5015);
     if (musicRes != 0) {
         RESMGR_ReleaseSoundResource(musicRes);
     }
@@ -509,7 +516,7 @@ void EditWindow::show()
 
     /* 0x420780 loads resource 0x5015 (sounds\toybox\clstray1) on menu entry. */
 #ifdef _WIN32
-    int musicRes = ResourceManager_GetStringById(reinterpret_cast<void**>(&g_resmgr), 0x5015);
+    int musicRes = ResourceManager_GetStringById(&g_resmgr, 0x5015);
     if (musicRes != 0) {
         RESMGR_LoadSoundResource(musicRes);
     }

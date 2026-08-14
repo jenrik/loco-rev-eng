@@ -35,6 +35,7 @@
 #include "../ui/CursorEditWindow.h"
 #include "../game/TrainStation.h"
 #include "../input/BuildingDescriptorEditor.h"
+#include "../audio/GameAudio.h"
 
 /* ================================================================== */
 /* External references                                                 */
@@ -91,12 +92,10 @@ void* CRT_ceil(void* stream, void* buf, uint32_t size);   /* @ 0x00465010 — th
 } /* extern "C" */
 
 /* Sound system (C++ linkage) */
-struct GameAudio;
 extern GameAudio* g_audio;           /* @ 0x004FD3BC */
 extern int32_t g_listener_x;         /* @ 0x004AAD2C */
 extern int32_t g_listener_y;         /* @ 0x004AAD30 */
 
-void GameAudio_StopAll(GameAudio* audio);            /* @ 0x00413140 */
 int32_t GameAudio_AllocChannel(                       /* @ 0x00413210 */
     GameAudio* audio, int32_t soundResource,
     void* pCallback, int32_t x, int32_t y,
@@ -578,7 +577,7 @@ int32_t ResourceManager::Shutdown()
 {
     /* Step 1: Stop all audio */
     if (g_audio != nullptr) {
-        GameAudio_StopAll(g_audio);
+        g_audio->StopAll();
     }
 
     /* Step 2: Free all resources */

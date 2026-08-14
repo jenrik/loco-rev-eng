@@ -350,7 +350,11 @@ int32_t* INPUT_DirToOffset_Right(int32_t* param);
  * DPlayManager)) + placement-new + CreatePlayer()), not a free-function
  * facade at this address. */
 int32_t DPLAY_GetPlayerName(void* slot, const char* path);
-int32_t DPLAY_SetPlayerData(void* slot, const char* path);
+/* DPLAY_SetPlayerData(void*, const char*) declaration removed 2026-08-15
+ * — its only real user, NetworkPlayerList::RegisterPlayer, now calls the
+ * real DPlayManager::SetPlayerData() method directly instead of this
+ * free-function facade (network/NetworkPlayerList.cpp/.h); this
+ * declaration had zero remaining users tree-wide. */
 void    DPLAY_SetPlayerName(void* slot, int32_t trainId, int8_t specific);
 void    DPLAY_CopyPlayerData(void* dstSlot, const void* packet); /* 0x4426D0 */
 void    DPLAY_InitPlayerSlot(void* dstSlot, const void* srcSlot); /* 0x442750 */

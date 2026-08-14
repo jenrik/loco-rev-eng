@@ -21,9 +21,6 @@ extern "C" {
 void   __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 void*  __cdecl operator_new(size_t size);                     /* 0x465CE0 */
 void*  __thiscall ResourceManager_GetById(void* mgr, int32_t resId); /* 0x446EA0 */
-void*  __thiscall ResourceManager_GetStringById(void* mgr, uint32_t id); /* 0x4472B0 */
-int    __thiscall RESMGR_LoadSoundResource(void* resHandle);  /* 0x448D60 */
-void   __thiscall RESMGR_ReleaseSoundResource(void* resHandle); /* 0x448EE0 */
 
 void*  CRT_wcsstr(const void* haystack, const void* needle);
 void   WNDPROC_EnterCriticalSection(void* cs);
@@ -41,6 +38,23 @@ void*  CRT_fabs(void* stream, void* outBuf);
 /* GetResourceType has plain C++ linkage (resources/ResourceManager.h) —
  * declared outside the extern "C" block above, not inside it. */
 extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
+
+/* ResourceManager_GetStringById/RESMGR_LoadSoundResource/
+ * RESMGR_ReleaseSoundResource: same extern-"C"-linkage landmine as
+ * GetResourceType above — all three call sites below are inside `#ifdef
+ * _WIN32` (dead on this host, exercised only by the MinGW typecheck build),
+ * so this was latent rather than live, but the declarations were still
+ * wrong on their own terms: `uint32_t id`/`void*` return desynchronized
+ * ResourceManager_GetStringById from the real facade's `int id -> int`
+ * signature (shared/stubs_link001_batch3_resource_audio.cpp), and
+ * RESMGR_LoadSoundResource/ReleaseSoundResource's `void* resHandle` doesn't
+ * match the corrected int-handle convention either. Retyped for
+ * consistency; neither RESMGR_LoadSoundResource nor
+ * RESMGR_ReleaseSoundResource has a real implementation anywhere in the
+ * tree yet regardless of signature (see PROGRESS.md). */
+int  ResourceManager_GetStringById(void* mgr, int id);      /* 0x4472B0 */
+int  RESMGR_LoadSoundResource(int resHandle);
+void RESMGR_ReleaseSoundResource(int resHandle);
 
 /* WNDPROC_CriticalSectionLock/StreamReadLine/StreamPrintf/StreamWrite have
  * C++ mangled linkage (matches every other file in this tree that calls
@@ -336,8 +350,8 @@ void* ChildWindow::OnMouseMove(int32_t x, int32_t y)
         for (uint16_t i = 0; i < frameSetCount; ++i) {
             const uint16_t stringId =
                 *reinterpret_cast<const uint16_t*>(entryTable + i * 0x18 + 0x0E);
-            void* const strRes = ResourceManager_GetStringById(&g_resmgr, stringId);
-            if (strRes != nullptr) {
+            const int strRes = ResourceManager_GetStringById(&g_resmgr, stringId);
+            if (strRes != 0) {
                 RESMGR_LoadSoundResource(strRes);
             }
         }
@@ -380,8 +394,8 @@ void ChildWindow::OnMouseLeave()
             for (uint16_t i = 0; i < frameSetCount; ++i) {
                 const uint16_t stringId =
                     *reinterpret_cast<const uint16_t*>(entryTable + i * 0x18 + 0x0E);
-                void* const strRes = ResourceManager_GetStringById(&g_resmgr, stringId);
-                if (strRes != nullptr) {
+                const int strRes = ResourceManager_GetStringById(&g_resmgr, stringId);
+                if (strRes != 0) {
                     RESMGR_ReleaseSoundResource(strRes);
                 }
             }

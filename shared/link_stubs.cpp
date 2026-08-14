@@ -278,8 +278,11 @@ void DDRAW_GetSurfaceWidthHeight(void*,uint16_t*,uint16_t*){}
  * fabricating a DDERR-code-to-string table without Ghidra evidence. */
 void* DDRAW_GetDdrawErrorString(int);
 void* DDRAW_GetDdrawErrorString(int){ fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
-void DPLAY_SetPlayerData(void*,const char*);
-void DPLAY_SetPlayerData(void*,const char*){}
+/* DPLAY_SetPlayerData(void*,const char*) [extern "C"] removed 2026-08-15
+ * — a separate, unmangled symbol from the C++-linkage stub also removed
+ * this pass (shared/defsym_stubs.cpp); zero callers use extern "C"
+ * linkage for this name anywhere in the tree, confirmed via full-tree
+ * grep, so it was already dead, not a live landmine. */
 void DPLAY_CleanupPlayer(void*);
 void DPLAY_CleanupPlayer(void*){}
 /* DPLAY_CreatePlayer(void*) [extern "C"] removed 2026-08-14 — zero real
@@ -298,16 +301,28 @@ void Sprite_Shutdown(int32_t);
 void Sprite_Shutdown(int32_t){}
 void Sprite_UnlockAll(int32_t);
 void Sprite_UnlockAll(int32_t){}
-void RESMGR_PlaySound(int32_t);
-void RESMGR_PlaySound(int32_t){}
+/* RESMGR_PlaySound(int32_t) [extern "C"] removed 2026-08-15 — a
+ * fabricated symbol name (the original binary calls the real PlaySound
+ * directly, under its real name, at every one of its 66 real call
+ * sites — confirmed via get_xrefs_to/decompile on 0x447930/0x403E80).
+ * graphics/LOCOBITMAP.cpp and ui/AboutDialog.cpp were the two files
+ * still routing through this name; both now call the real
+ * PlaySound(UINT) directly. */
 void RESMGR_GetResourceType(void*,uint32_t);
 void RESMGR_GetResourceType(void*,uint32_t){}
 void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t);
 void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t){}
 void RESMGR_SelectScreensaver(char*);
 void RESMGR_SelectScreensaver(char*){}
-void ResourceManager_GetStringById(void*,uint32_t);
-void ResourceManager_GetStringById(void*,uint32_t){}
+/* ResourceManager_GetStringById(void*,uint32_t) removed 2026-08-15 — this
+ * declaration sat inside this file's outer extern "C" block (line 27),
+ * giving it bare C linkage regardless of its C++-looking signature. That
+ * bare symbol is what game/TrainStation.cpp's own (wrongly) extern-"C"
+ * `uint32_t id` declaration and ui/UI_ChildWindow.cpp's own extern-"C"
+ * declaration both bound to, instead of the real facade
+ * (shared/stubs_link001_batch3_resource_audio.cpp, plain C++ linkage,
+ * `int id`). Both callers moved to ordinary C++-mangled declarations
+ * matching the real facade; see PROGRESS.md. */
 void Train_QueueMessage(void*,void*);
 void Train_QueueMessage(void*,void*){}
 void Train_HandleTrackBuild(void*,void*,int32_t);
@@ -575,9 +590,14 @@ void GameAudio_AllocChannel(GameAudio*,int32_t,void*,int32_t,int32_t,uint32_t,ui
 void GameAudio_AllocChannel(void*,int32_t,void**,int32_t,int32_t,int32_t,int32_t);
 void GameAudio_AllocChannel(void*,int32_t,void**,int32_t,int32_t,int32_t,int32_t){}
 
-/* GameAudio_StopAll */
-void GameAudio_StopAll(GameAudio*);
-void GameAudio_StopAll(GameAudio*){}
+/* GameAudio_StopAll(GameAudio*) removed 2026-08-15 — was a silent-wrong-
+ * stub of the class documented elsewhere in this file (NET_ComputeColor,
+ * UIPANEL_CopySurface): ResourceManager::Shutdown's own real, already-
+ * implemented body called this expecting the receiver's channels to be
+ * actually released, but got this always-empty no-op instead. The call
+ * site (resources/ResourceManager.cpp) now calls the real
+ * GameAudio::StopAll() method directly instead of a free-function
+ * facade. */
 
 /* ResourceManager_GetById overloads live in sdl3_shims/resource_manager_sdl3.cpp. */
 

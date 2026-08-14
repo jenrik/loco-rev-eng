@@ -339,8 +339,12 @@ void GameWindow_Show(void*);
 void GameWindow_Show(void*) { /* host no-op */ }
 void GameWindow_Hide(void*);
 void GameWindow_Hide(void*) { /* host no-op */ }
-void ResourceManager_GetStringById(void*, unsigned int);
-void ResourceManager_GetStringById(void*, unsigned int) { /* host no-op */ }
+/* ResourceManager_GetStringById(void*, unsigned int) removed 2026-08-15 —
+ * a dead facade this signature ("UINT id") never matched: the real facade
+ * is (void*, int) (shared/stubs_link001_batch3_resource_audio.cpp). This
+ * overload existed only because ui/HelpWnd.cpp's own declaration used
+ * `UINT id`, silently binding all 9 of its call sites here instead of to
+ * the real implementation — fixed in HelpWnd.cpp; see PROGRESS.md. */
 void* TrainSubsystem_Ctor = nullptr;
 /* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
  * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
@@ -416,8 +420,13 @@ void EditWindow_cleanupSprites(void*) { /* host no-op */ }
 /* RESDATA_FreeWindow removed: its only caller (ui/EditWindow.cpp) now calls
  * the real PopupWindow::DestroyMCIChild() (0x4544A0) instead — see
  * PROGRESS.md. This stub was orphaned dead code, not a live no-op. */
-void ResourceManager_GetStringById(void**, int);
-void ResourceManager_GetStringById(void**, int) { /* host no-op */ }
+/* ResourceManager_GetStringById(void**, int) removed 2026-08-15 — a dead
+ * facade this signature ("void** mgr") never matched: the real facade is
+ * (void* mgr, int id) (shared/stubs_link001_batch3_resource_audio.cpp).
+ * This overload existed only because ui/EditWindow.cpp's own declaration
+ * used `void** mgr` (and cited a wrong address, 0x460AA0, which is
+ * actually inside WIN32_PeekMessageLoop) — fixed in EditWindow.cpp; see
+ * PROGRESS.md. */
 void NameEntryPanel_Ctor(void*, void*, unsigned int);
 void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
 void NameEntryPanel_CreateWindow(void*, void*);
@@ -487,8 +496,13 @@ void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
  * linked fine and every caller read an undefined register as the
  * "color"). Removed now that a real, correctly-typed definition exists —
  * keeping both would be a duplicate-definition link error. */
-void DPLAY_SetPlayerData(void*, char const*);
-void DPLAY_SetPlayerData(void*, char const*) { /* host no-op */ }
+/* DPLAY_SetPlayerData(void*, const char*) [C++ linkage] removed
+ * (2026-08-15) — same silent-wrong-stub class as NET_ComputeColor above:
+ * network/NetworkPlayerList.cpp's RegisterPlayer called this expecting a
+ * real int32_t result, but got this always-void no-op (Itanium mangling
+ * ignores return type, so it linked fine and every caller read an
+ * undefined register as the result). RegisterPlayer now calls the real,
+ * already-implemented DPlayManager::SetPlayerData() method directly. */
 void TileMap_UpdateViewport(void*, void*, short);
 void TileMap_UpdateViewport(void*, void*, short) { /* host no-op */ }
 void TileMap_GetTileRect(void*, void*);
@@ -512,8 +526,18 @@ void* NET_SendFile = nullptr;
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
 void NETMAN_ReceiveLayoutSelect(int);
 void NETMAN_ReceiveLayoutSelect(int) { /* host no-op */ }
-void PlayerConfig_SaveToFile(void*);
-void PlayerConfig_SaveToFile(void*) { /* host no-op */ }
+/* PlayerConfig_SaveToFile(void*) removed 2026-08-15 — declared `char*`-
+ * returning at its one real caller (network/DPlayManager.cpp's
+ * DPlayManager::SetPlayerData) but defined `void`-returning here
+ * (Itanium mangling ignores return type, so it linked silently and
+ * `config_str` read an undefined register) — the same return-type-
+ * mismatch landmine documented repeatedly this session. The real
+ * PlayerConfig::SaveToFile() (game/PlayerConfig.cpp, 0x453320) was
+ * already fully implemented; the call site now calls
+ * g_player_config->SaveToFile() directly instead of this facade. This
+ * became live (not just latent) once NetworkPlayerList::RegisterPlayer
+ * was wired to the real DPlayManager::SetPlayerData earlier this
+ * session — that fix made this facade's caller reachable for real. */
 void ResourceManager_Shutdown(int);
 void ResourceManager_Shutdown(int) { /* host no-op */ }
 void DDRAW_FileData_Dtor(void*);
@@ -722,8 +746,18 @@ void GameSetupPanel_drawGrid(void*);
 void GameSetupPanel_drawGrid(void*) { /* host no-op */ }
 void Game_Shutdown(int*);
 void Game_Shutdown(int*) { /* host no-op */ }
-void RESMGR_Shutdown(int);
-void RESMGR_Shutdown(int) { /* host no-op */ }
+/* RESMGR_Shutdown(int) removed 2026-08-15 — its one caller
+ * (core/CGWND.cpp's CGWND_Cleanup) always passed the literal address
+ * 0x4855E8 (confirmed via Ghidra disassembly of 0x407AD2: `MOV ECX,
+ * 0x4855e8` immediately before the real call), i.e. &g_resmgr — this
+ * was another silent-wrong-stub of the class documented elsewhere in
+ * this file: the real ResourceManager::Shutdown() (0x446340) is
+ * already fully implemented, but this free-function facade discarded
+ * the call entirely. The call site now calls g_resmgr.Shutdown()
+ * directly. NOT the same fix as ResourceManager_Shutdown(int32_t)
+ * below, which network/NetHelpers.cpp's PoolAllocator::Shutdown()
+ * still calls with a different, as-yet-unresolved receiver — see
+ * PROGRESS.md. */
 void CRT_0x470650();
 void CRT_0x470650() { /* host no-op */ }
 void* UI_MainMenu_Ctor(void* mem, void*, unsigned int);
