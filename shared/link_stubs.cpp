@@ -886,7 +886,11 @@ void* g_title_font = nullptr; void* g_trackSegmentOffsets = nullptr; void* g_tra
 void* _g_train_resources = nullptr; void* g_train_resources = nullptr; int32_t g_window_bottom = 600;
 int32_t g_window_mode = 0; int32_t g_window_right = 800; void* g_world = nullptr; void* g_about = nullptr;
 void* g_asset_archive = nullptr; void* g_asset_base_path = nullptr; void* _g_audio_config = nullptr;
-void* _g_backbuffer = nullptr; int32_t g_build_mode = 0; void* _g_dplay = nullptr;
+// Same confirmed address as g_backbuffer (platform/ddraw_globals.cpp), which
+// is wired to a real Sdl3DirectDrawSurface. Deliberately left unwired here —
+// see project_directdraw_shim memory / PROGRESS.md Phase 5(c) note.
+void* _g_backbuffer = nullptr;
+int32_t g_build_mode = 0; void* _g_dplay = nullptr;
 void* _g_dplay_config = nullptr; void* _g_dsound_object = nullptr;
 int32_t DAT_0047e0f4=0;int32_t DAT_0047e220=0;int32_t DAT_0047e224=0;
 int32_t _DAT_00481170=0;int32_t DAT_00481218=0;void* g_world_release_a=nullptr;

@@ -208,6 +208,10 @@ void* g_clipper_surf = nullptr;
 void* _g_cursor_back = nullptr;
 int32_t _g_cursor_refcount = 0;
 void* g_net_host_info = nullptr;
+// Same confirmed address as g_primary_surface (platform/ddraw_globals.cpp),
+// which is wired to a real Sdl3DirectDrawSurface. This alias is deliberately
+// left unwired (not fully confirmed as the same original global) — see
+// project_directdraw_shim memory / PROGRESS.md Phase 5(c) note.
 void* _g_primary_surface = nullptr;
 void* g_remote_res_path = nullptr;
 void* s_Configuration_0047e734 = nullptr;
