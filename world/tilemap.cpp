@@ -52,6 +52,7 @@ extern int32_t  g_client_width;          /* 0x00485220 */
 extern int32_t  g_client_height;         /* 0x00485224 */
 extern uint8_t  g_is_fullscreen;         /* 0x00485210 */
 extern int32_t  g_world_width;           /* 0x004AAD0C */
+extern int32_t  g_world_height;          /* 0x004AAD10 */
 extern uint8_t  g_is_town_mode;         /* 0x485328 — town/tilemap flag */
 extern int32_t  g_town_overlay_rect;     /* 0x48538C */
 extern int32_t  g_town_overlay_left;     /* 0x485390 */
@@ -85,11 +86,20 @@ extern uint8_t  g_allow_building_placement; /* 0x4FD3DC — loader/building plac
                                             flag.  DISTINCT from g_is_town_mode
                                             (0x485328); the two were once conflated
                                             under this name (see tilemap.h). */
-extern int32_t  g_player_id;             /* 0x4AAD46 (TileMap.tile_count_x) */
-extern int32_t  g_player_color;          /* 0x4AAD48 (TileMap.tile_count_y) —
-                                    *   host-declared 32-bit; the binary stores
-                                    *   the 16-bit player words adjacently and
-                                    *   loads 16 bits everywhere */
+/* g_player_id/g_player_color (0x4AAD46/0x4AAD48) removed from this file
+ * (2026-08-14): both addresses are actually TileMap.tile_count_x/tile_count_y
+ * (this class's own members, already correctly populated by TileMap::Init) —
+ * the comments here already said so, but every tile-geometry call site
+ * (occupancy-bit indexing in InvalidateRect/ScrollTo/InvalidateDirtyRects/
+ * ProcessRect/FindObject, and the grid bounds checks in
+ * ProcessObjectTimer) still read the wrong, unrelated network-player-identity
+ * global instead, which stays 0 outside a multiplayer session. That
+ * collapsed every row onto the same occupancy bit (bit_idx = 0*y + x = x),
+ * so most placed objects' dirty tracking silently aliased with an unrelated
+ * row and never got redrawn. Fixed by reading this->tile_count_x/
+ * tile_count_y directly; g_player_id/g_player_color remain real, distinct
+ * globals for their genuine network-identity callers elsewhere (Netman.cpp,
+ * InputMgr.cpp, GameSetupPanel_network.cpp, Game.cpp). */
 extern void*    g_cursor_surface;        /* 0x4FD3C8 */
 extern void*    g_primary_surface;       /* 0x4FD3C4 */
 /* NOTE: g_tile_occupied_bitmap removed — occupancy bitmap is now a TileMap member field */
@@ -634,6 +644,26 @@ set_center:
     viewport_x = 0;                 /* +0x1C */
     viewport_y = 0;                 /* +0x20 */
     center_y = height / 2;          /* +0x28 */
+#ifndef _WIN32
+    /* Host deviation: width/height/viewport_rect are documented (tilemap.h)
+     * as aliasing g_world_width/g_world_height/g_viewport_rect_* -- true in
+     * the original because the TileMap singleton lives at a fixed address
+     * and these members sit at the exact global offsets. On host, TileMap
+     * is a normal heap object, so the member writes above never touch the
+     * separate free-standing globals. TileMap_FreeDirtyRects (a free
+     * function reading the globals directly) was clipping every dirty
+     * rect against the never-updated shared/link_stubs.cpp default of
+     * 800x600, silently dropping every placed building/track outside that
+     * box regardless of how large the real world/screen is -- sync
+     * explicitly here, at the one place the original's aliasing would
+     * have updated them for free. */
+    g_world_width = width;
+    g_world_height = height;
+    g_viewport_rect_left = 0;
+    g_viewport_rect_top = 0;
+    g_viewport_rect_right = width;
+    g_viewport_rect_bottom = height;
+#endif
     viewport_center_x =
         (g_client_offset_x - g_client_width) / 2 + g_client_width;
     viewport_center_y =
@@ -1011,7 +1041,7 @@ void TileMap::InvalidateRect(int left, int top, int right, int bottom)
     /* Set dirty bits in occupancy bitmap */
     for (short y = tile_top; y <= tile_bottom; y++) {
         for (short x = tile_left; x <= tile_right; x++) {
-            uint32_t bit_index = g_player_id * static_cast<int>(y) + static_cast<int>(x);
+            uint32_t bit_index = tile_count_x * static_cast<int>(y) + static_cast<int>(x);
             uint8_t& bitmap_byte =
                 static_cast<uint8_t*>(this->occupancy_bitmap)[bit_index >> 3];
             bitmap_byte |= ATTR_0047f108[bit_index & 7];
@@ -1366,17 +1396,21 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
 #ifndef _WIN32
     const loco::assets::SpriteFootprint* host_footprint = nullptr;
     if (loco::assets::is_host_sprite_resource(building)) {
+        /* Null metadata means only "no .dat companion file" -- see
+         * TileMap::FindObject's matching comment for why an all-zero
+         * SpriteFootprint (no occupancy grid, no collision) is the correct
+         * stand-in rather than rejecting placement outright. */
+        static const loco::assets::SpriteFootprint kEmptyFootprint{};
         auto* host_resource = reinterpret_cast<loco::assets::SpriteResource*>(building);
         const loco::assets::SpriteMetadata* metadata =
             loco::assets::host_resource_manager().sprite_metadata(host_resource);
-        if (metadata == nullptr) return 0;
-        host_footprint = &metadata->footprint;
+        host_footprint = metadata ? &metadata->footprint : &kEmptyFootprint;
         grid_w = static_cast<byte>(host_footprint->grid_width);
         grid_h = static_cast<byte>(host_footprint->grid_height);
         grid_depth = static_cast<int8_t>(host_footprint->grid_depth);
         object_type = static_cast<uint8_t>(
             GetResourceType(loco::assets::sprite_resource_id(host_resource)));
-        host_has_tile_type = metadata->has_tile_type;
+        host_has_tile_type = metadata && metadata->has_tile_type;
         host_tile_type_byte = host_has_tile_type ?
             static_cast<uint8_t>(metadata->tile_type) : 0;
     } else
@@ -1571,7 +1605,7 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
                         WriteTileValue(slot_index, 0);
 
                         /* Set occupancy bit (mark as dirty) */
-                        uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
+                        uint32_t bit_idx = static_cast<uint32_t>(tile_count_x) * static_cast<uint32_t>(y) +
                                            static_cast<uint32_t>(x);
                         uint8_t* bitmap_byte =
                             reinterpret_cast<uint8_t*>(this->occupancy_bitmap) + (bit_idx >> 3);
@@ -1892,7 +1926,7 @@ void TileMap::InvalidateDirtyRects(char force_all)
      * horizontal run of consecutive dirty tiles in a row. */
     for (short y = start_y; y < end_y; y++) {
         for (short x = start_x; x < end_x; x++) {
-            uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
+            uint32_t bit_idx = static_cast<uint32_t>(tile_count_x) * static_cast<uint32_t>(y) +
                                static_cast<uint32_t>(x);
             uint8_t* bitmap = reinterpret_cast<uint8_t*>(this->occupancy_bitmap);
             if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
@@ -2098,7 +2132,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                 int cur_tile_idx = tile_idx;
 
                 for (short x = tile_left; x < tile_right; x++) {
-                    uint32_t bit_idx = static_cast<uint32_t>(g_player_id) * static_cast<uint32_t>(y) +
+                    uint32_t bit_idx = static_cast<uint32_t>(tile_count_x) * static_cast<uint32_t>(y) +
                                        static_cast<uint32_t>(x);
                     uint8_t* bitmap = reinterpret_cast<uint8_t*>(this->occupancy_bitmap);
                     if ((ATTR_0047f108[bit_idx & 7] & bitmap[bit_idx >> 3]) != 0) {
@@ -2144,27 +2178,45 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                          * offset, matching ScrollRect's
                                          * established pattern. */
 #ifndef _WIN32
-                                        if (loco::assets::is_host_sprite_resource(tobj->resource)) {
+                                        /* tobj (TileMapObject*) is itself a raw
+                                         * x86-offset mirror struct -- reading
+                                         * tobj->resource reinterprets whatever
+                                         * bytes happen to sit at +0x40 in the
+                                         * REAL host object (a proper C++
+                                         * Entity-derived class with a vtable
+                                         * and 64-bit members, not the original
+                                         * byte layout), which is garbage, not
+                                         * the real resource pointer. obj is
+                                         * genuinely an Entity* (see the Draw()
+                                         * call just above) -- read the real
+                                         * Entity::resource member instead. */
+                                        void* entity_resource = static_cast<Entity*>(obj)->resource;
+                                        if (loco::assets::is_host_sprite_resource(entity_resource)) {
                                             res_type = GetResourceType(
                                                 loco::assets::sprite_resource_id(
                                                     reinterpret_cast<loco::assets::SpriteResource*>(
-                                                        tobj->resource)));
-                                        } else if (tobj->resource != nullptr) {
-                                            /* else: host-placed entity with no
-                                             * resource at all (PersistenceAdapter.h's
-                                             * documented 0/497 real-RESDATA-metadata
-                                             * placement-coverage gap, same null-
-                                             * resource landmine as the is_connected
-                                             * read below) -- res_type stays its
-                                             * already-initialized 0 rather than
-                                             * dereferencing nullptr + 4. */
+                                                        entity_resource)));
+                                        }
+                                        /* else: host-placed entity with no resource
+                                         * at all, or a non-SpriteResource pointer
+                                         * (PersistenceAdapter.h's documented 0/497
+                                         * real-RESDATA-metadata placement-coverage
+                                         * gap, same null-resource landmine as the
+                                         * is_connected read below) -- res_type
+                                         * stays its already-initialized 0. The
+                                         * original's unconditional resource+4 read
+                                         * below is _WIN32-only: on host, tobj is a
+                                         * raw x86-offset mirror over a real,
+                                         * differently-laid-out C++ object, so
+                                         * dereferencing tobj->resource here would
+                                         * read garbage regardless of this branch. */
 #else
                                         {
-#endif
                                             res_type = GetResourceType(static_cast<unsigned int>(
                                                 *reinterpret_cast<int*>(
                                                     reinterpret_cast<uint8_t*>(tobj->resource) + 4)));
                                         }
+#endif
                                     }
                                     if (static_cast<char>(res_type) != 3) {
                                         /* obj == NULL or non-type-3: BuildingMgr
@@ -2206,31 +2258,32 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                     static_cast<Entity*>(obj)->anim_index;
                                 bool is_connected = false;
 #ifndef _WIN32
-                                if (loco::assets::is_host_sprite_resource(tobj->resource)) {
+                                /* tobj->resource would reinterpret garbage bytes
+                                 * on host -- see the matching res_type comment
+                                 * above; use the real Entity::resource member. */
+                                void* entity_resource = static_cast<Entity*>(obj)->resource;
+                                if (loco::assets::is_host_sprite_resource(entity_resource)) {
                                     const loco::assets::SpriteMetadata* metadata =
-                                        ResourceManager_GetSpriteMetadata(tobj->resource);
+                                        ResourceManager_GetSpriteMetadata(entity_resource);
                                     if (metadata != nullptr && anim_index >= 0 &&
                                         static_cast<size_t>(anim_index) < metadata->frame_sets.size()) {
                                         is_connected = metadata->frame_sets[
                                             static_cast<size_t>(anim_index)].is_connected;
                                     }
-                                } else if (tobj->resource != nullptr) {
-                                    /* Real x86 resource pointer path (below). When
-                                     * neither branch's condition holds, this is a
-                                     * host-placed entity with no resource at all
-                                     * (PersistenceAdapter.h's documented 0/497
-                                     * real-RESDATA-metadata placement-coverage gap,
-                                     * same null-resource landmine already guarded in
-                                     * Entity::Draw/DrawConnected, core/GameObject.cpp)
-                                     * -- stays not-connected rather than
-                                     * dereferencing nullptr + 0x20. */
+                                }
+                                /* else: host-placed entity with no resource at all,
+                                 * or a non-SpriteResource pointer (same
+                                 * placement-coverage gap as res_type above) --
+                                 * stays not-connected. The original's
+                                 * unconditional resource+0x20 read below is
+                                 * _WIN32-only, same reasoning as res_type above. */
 #else
                                 {
-#endif
                                     uint8_t* frame_table = *reinterpret_cast<uint8_t**>(
                                         reinterpret_cast<uint8_t*>(tobj->resource) + 0x20);
                                     is_connected = (frame_table[anim_index * 3 * 8 + 0x17] == 1);
                                 }
+#endif
                                 if (is_connected) {
                                     static_cast<Entity*>(obj)->DrawConnected(
                                         RECT{pixel_x, pixel_y,
@@ -2354,8 +2407,8 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
         if (idx >= res->expected_count || valid != 1) break;
         int expected = res->expected_ids[idx];
         if (expected != -1) {
-            if (world_x < 0 || g_player_id <= world_x ||
-                row_y < 0 || g_player_color <= row_y) {
+            if (world_x < 0 || tile_count_x <= world_x ||
+                row_y < 0 || tile_count_y <= row_y) {
                 valid = 0;
             } else {
                 TileMapObject* tile_obj = static_cast<TileMapObject*>(
@@ -2382,8 +2435,8 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
         if (idx >= res->expected_count || valid != 1) break;
         int expected = res->expected_ids[idx];
         if (expected != -1) {
-            if (right_x < 0 || g_player_id <= right_x ||
-                col_y < 0 || g_player_color <= col_y) {
+            if (right_x < 0 || tile_count_x <= right_x ||
+                col_y < 0 || tile_count_y <= col_y) {
                 valid = 0;
             } else {
                 TileMapObject* tile_obj = static_cast<TileMapObject*>(
@@ -2406,8 +2459,8 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
         if (idx >= res->expected_count || valid != 1) break;
         int expected = res->expected_ids[idx];
         if (expected != -1) {
-            if (x3 < 0 || g_player_id <= x3 ||
-                col_y < 0 || g_player_color <= col_y) {
+            if (x3 < 0 || tile_count_x <= x3 ||
+                col_y < 0 || tile_count_y <= col_y) {
                 valid = 0;
             } else {
                 TileMapObject* tile_obj = static_cast<TileMapObject*>(
@@ -2432,8 +2485,8 @@ uint TileMap::ProcessObjectTimer(TileMapObject* obj)
         }
         int expected = res->expected_ids[idx];
         if (expected != -1) {
-            if (x3 < 0 || g_player_id <= x3 ||
-                col_y < 0 || g_player_color <= col_y) {
+            if (x3 < 0 || tile_count_x <= x3 ||
+                col_y < 0 || tile_count_y <= col_y) {
                 valid = 0;
             } else {
                 TileMapObject* tile_obj = static_cast<TileMapObject*>(
@@ -2536,11 +2589,20 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
 #ifndef _WIN32
     const loco::assets::SpriteFootprint* host_footprint = nullptr;
     if (loco::assets::is_host_sprite_resource(res_data)) {
+        /* A null metadata means only "no .dat companion file" -- most
+         * plain sprites (buildings, decorations) have none at all
+         * (resources/resource_manager_sdl3.h's own has_footprint comment).
+         * The original has no such concept (TileMapResource always exists
+         * structurally); bailing out here entirely used to reject placement
+         * for the large majority of resources instead of treating them as
+         * "no occupancy footprint" (an all-zero SpriteFootprint behaves
+         * exactly like that -- see SpriteFootprint::physical_occupied()'s
+         * has_footprint short-circuit). */
+        static const loco::assets::SpriteFootprint kEmptyFootprint{};
         const loco::assets::SpriteMetadata* metadata =
             loco::assets::host_resource_manager().sprite_metadata(
                 static_cast<loco::assets::SpriteResource*>(res_data));
-        if (metadata == nullptr) return NULL;
-        host_footprint = &metadata->footprint;
+        host_footprint = metadata ? &metadata->footprint : &kEmptyFootprint;
         orig_span = static_cast<unsigned short>(host_footprint->bitmap_grid_height);
         span_y = static_cast<byte>(host_footprint->bitmap_grid_width);
         grid_height = static_cast<byte>(host_footprint->grid_height);
@@ -2618,10 +2680,24 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                         WriteTileValue(
                                             tile_index * 0x40 + static_cast<int>(iz) * 4,
                                             StoreTilePointer(result));
-                                        /* active byte = max(active, iz) */
+                                        /* active byte = max(active, iz), compared
+                                         * SIGNED (0x455247's CMP+JL is a signed
+                                         * jump) -- the tile's active byte starts
+                                         * at the sentinel 0xFF ("no layer yet",
+                                         * TileMap::ResetWorldState/0x454FE0's
+                                         * grid-reset loop), which only reads as
+                                         * "less than any real layer index" under
+                                         * a signed compare. An earlier unsigned
+                                         * `uint8_t <=` comparison treated 0xFF as
+                                         * the numeric maximum instead of the
+                                         * sentinel, so the byte could never be
+                                         * raised off 0xFF -- ProcessRect's own
+                                         * read of this same byte casts to
+                                         * `int8_t` for exactly this reason. */
                                         uint8_t& active = tile_data[
                                             (tile_index + 2) * 0x40 - 0x48];
-                                        if (active <= static_cast<uint8_t>(iz)) {
+                                        if (static_cast<int8_t>(active) <=
+                                            static_cast<int8_t>(iz)) {
                                             active = static_cast<uint8_t>(iz);
                                         }
 #ifndef _WIN32
@@ -2667,15 +2743,19 @@ int* TileMap::FindObject(unsigned int target_resource_id, short tile_x, short ti
                                     WriteTileValue(
                                         tile_index * 0x40 + span_slot * 4 + 0x1C,
                                         StoreTilePointer(result));
-                                    /* active byte = max(active, span-1) */
+                                    /* active byte = max(active, span-1), signed
+                                     * compare -- see the matching comment on the
+                                     * physical_occupancy loop's active update
+                                     * above for why this must be signed. */
                                     uint8_t& active = tile_data[
                                         (tile_index + 2) * 0x40 - 0x48];
-                                    if (active <= static_cast<uint8_t>(span_slot)) {
+                                    if (static_cast<int8_t>(active) <=
+                                        static_cast<int8_t>(span_slot)) {
                                         active = static_cast<uint8_t>(span_slot);
                                     }
                                     /* occupancy dirty bit */
                                     uint32_t bit_idx =
-                                        static_cast<uint32_t>(g_player_id) *
+                                        static_cast<uint32_t>(tile_count_x) *
                                             static_cast<uint32_t>(y) +
                                         static_cast<uint32_t>(x + sx);
                                     uint8_t* bitmap_byte =
