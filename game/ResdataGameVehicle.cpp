@@ -8,6 +8,13 @@
 
 #include "ResdataGameVehicle.h"
 
+/* World_DeserializeMap used to round-trip `this` through an `int`
+ * parameter -- a real pointer truncation on this 64-bit host, not an
+ * external ABI boundary (this is host-side glue calling a real C++
+ * method, not original x86 code); see shared/stubs_link001_batch4_
+ * network_world.cpp for the real bridge body. */
+extern void World_DeserializeMap(void* world, RESDATA_GameVehicle* obj);  /* 0x44DAD0 */
+
 #ifndef _WIN32
 #include "../resources/resource_manager_sdl3.h"
 #endif
@@ -45,7 +52,6 @@ uint8_t ResolveVehicleTileType(const void* resource)
 /* External references                                                 */
 /* ================================================================== */
 
-extern void  World_DeserializeMap(void* world, int obj);  /* 0x44DAD0 */
 /* RESDATA_IsRoadTile takes int32_t, not void* — the real implementation
  * (world/tilemap.h) treats it as a __fastcall(int32_t); a void* param
  * declaration here mangled to a symbol nothing defines (genuine call-0,
@@ -192,8 +198,7 @@ RESDATA_GameVehicle::RESDATA_GameVehicle(int resource_id)
 /* ================================================================== */
 RESDATA_GameVehicle::~RESDATA_GameVehicle()
 {
-    World_DeserializeMap(g_world,
-                         static_cast<int>(reinterpret_cast<intptr_t>(this)));
+    World_DeserializeMap(g_world, this);
     /* ~ResourceGameObject() runs automatically after this body */
 }
 

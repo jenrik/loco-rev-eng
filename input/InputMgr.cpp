@@ -1289,10 +1289,21 @@ char INPUT_LoadSaveFile(InputMgr* self, const char* path, int flags, int flags2)
                 GetResourceType(record->resource_id));
             bool building_tile = false;
 #ifndef _WIN32
+            /* RESDATA_IsBuildingTile takes int32_t (the original x86 ABI's
+             * pointer width) -- same truncation defect documented above
+             * (INPUT_FindObjectAt's dispatch, ~line 785). entity->resource
+             * is a real host heap pointer that does not fit losslessly in
+             * int32_t; round-tripping it here classifies against a
+             * truncated/sign-extended pointer, not the real resource
+             * (confirmed via coredumpctl backtrace showing tile_obj as a
+             * negative int32 sign-extending to a wild address). Call the
+             * pointer-safe host accessor directly instead. */
             if (res_type == 3 && entity->resource != nullptr) {
-                building_tile = RESDATA_IsBuildingTile(
-                    static_cast<int32_t>(
-                        reinterpret_cast<intptr_t>(entity->resource))) != 0;
+                uint8_t tile_byte = 0;
+                if (loco::assets::sprite_tile_type_byte(entity->resource, &tile_byte)) {
+                    building_tile = (tile_byte == 0x07 || tile_byte == 0x08 ||
+                                      tile_byte == 0x09 || tile_byte == 0x0A);
+                }
             }
 #else
             if (res_type == 3) {

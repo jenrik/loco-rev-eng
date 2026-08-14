@@ -1581,10 +1581,16 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
             for (; x < x_end; x++) {
                 int tile_idx = y + x * 0x41;
 
-                /* Active layer byte at this + (tile_idx + 2) * 0x40 */
+                /* Active layer byte: tile_data[(tile_idx + 2) * 0x40 - 0x48]
+                 * (this + (tile_idx + 2) * 0x40 in the original x86 layout,
+                 * where tile_data sits at +0x48 -- see the matching, already
+                 * fixed accessor in FindObject's physical_occupancy loop
+                 * above). Raw `this`-relative arithmetic here landed in the
+                 * wrong memory on host, since TileMap has a real vtable and
+                 * offsetof(TileMap, tile_data) is 84, not the assumed
+                 * 0x48 -- confirmed via a standalone offsetof probe. */
                 int8_t* active_layer_byte =
-                    reinterpret_cast<int8_t*>(
-                        reinterpret_cast<uint8_t*>(this) + (tile_idx + 2) * 0x40);
+                    reinterpret_cast<int8_t*>(&tile_data[(tile_idx + 2) * 0x40 - 0x48]);
                 int8_t active = *active_layer_byte;
 
                 for (int8_t layer = 6; layer >= 0; layer--) {
@@ -1647,10 +1653,12 @@ void* TileMap::ScrollTo(TileMapObject* target, int scroll_flag)
             for (; x < x_end; x++) {
                 int tile_idx = y + x * 0x41;
 
-                /* Active layer byte at this + tile_idx*0x40 + 0x81 */
+                /* Active layer byte: tile_data[tile_idx * 0x40 + 0x81 - 0x48]
+                 * (this + tile_idx*0x40 + 0x81 in the original x86 layout;
+                 * see Phase 1's comment above for why the raw `this`-relative
+                 * form is wrong on host). */
                 int8_t* active_layer_byte =
-                    reinterpret_cast<int8_t*>(
-                        reinterpret_cast<uint8_t*>(this) + tile_idx * 0x40 + 0x81);
+                    reinterpret_cast<int8_t*>(&tile_data[tile_idx * 0x40 + 0x81 - 0x48]);
                 int8_t active = *active_layer_byte;
 
                 if (active >= 0) {

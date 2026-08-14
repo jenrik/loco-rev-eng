@@ -77,22 +77,30 @@ uintptr_t SetTimer(HWND hWnd, uintptr_t nIDEvent, UINT uElapse,
 static inline Netman* GameNetman() { return static_cast<Netman*>(g_netman); }
 
 /* ====================================================================
- * SYMBOL: World_DeserializeMap(void*, int)
+ * SYMBOL: World_DeserializeMap(void*, RESDATA_GameVehicle*)
  * CALLER: RESDATA_GameVehicle::~RESDATA_GameVehicle()  (game/ResdataGameVehicle.cpp)
  * ADDRESS: 0x44DAD0
- * ACTION: caller-declaration-is-wrong (real implementation already exists
- *   as World::DeserializeMap(RESDATA_GameVehicle*) in game/World.cpp; the
- *   caller declares a free function instead of calling the method).
- * SHOULD_BE_FIXED_AT: game/ResdataGameVehicle.cpp:24,143 — drop the local
- *   `extern void World_DeserializeMap(void*, int)` and call
- *   `g_world->DeserializeMap(this)` directly (World.cpp already includes
- *   ResdataGameVehicle-compatible forward decls for this).
+ * ACTION: thin bridge to the real World::DeserializeMap(RESDATA_GameVehicle*)
+ *   method (game/World.cpp), kept as a free function (rather than calling
+ *   the method directly from the caller) so narrow-link test executables
+ *   can keep mocking it via tests/persistence_fixtures.h without pulling
+ *   in all of World.cpp.
+ * FIXED (2026-08-14): the `obj` parameter used to be a plain `int`, a real
+ *   64-to-32-bit pointer truncation on this host (this is host-side glue,
+ *   not an original x86 ABI boundary) -- found while investigating a
+ *   `coredumpctl` backtrace through this exact call chain (a corrupted
+ *   `World::vehicles[]` slot read inside `DeserializeMap`); this specific
+ *   crash's `this` pointer happened to survive the truncation intact (a
+ *   small enough heap address), so this fix does not by itself explain
+ *   that crash -- it is a real, independently-evidenced bug worth fixing
+ *   regardless, not a proven root cause of the vehicles[] corruption.
+ *   Retyped to a real `RESDATA_GameVehicle*` parameter; no cast/round-trip
+ *   needed anymore.
  * ==================================================================== */
-void World_DeserializeMap(void* world, int obj)
+void World_DeserializeMap(void* world, RESDATA_GameVehicle* obj)
 {
     if (world == nullptr) return;
-    static_cast<World*>(world)->DeserializeMap(
-        reinterpret_cast<RESDATA_GameVehicle*>(static_cast<intptr_t>(obj)));
+    static_cast<World*>(world)->DeserializeMap(obj);
 }
 
 /* ====================================================================
