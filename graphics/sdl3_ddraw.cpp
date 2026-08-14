@@ -26,7 +26,7 @@ static uint32_t g_last_bmp_width  = 0;
 static uint32_t g_last_bmp_height = 0;
 
 // Host-only SDL ownership. g_ddraw (the canonical decompiled-code-visible
-// global, shared/stubs_impl.cpp) is pointed at this same device once it
+// global, platform/ddraw_globals.cpp) is pointed at this same device once it
 // exists (see SDL3_EnsurePrimarySurface below) so real callers dispatching
 // through g_ddraw by name (native/ddraw_surface_ops.c, input/Cursor.cpp,
 // input/Cursor_Editor.cpp — all converted off raw vtable-slot dispatch,
@@ -38,11 +38,30 @@ static Sdl3DirectDraw4* g_sdl_ddraw = nullptr;
 static Sdl3DirectDrawSurface* g_sdl_primary_surface = nullptr;
 static Sdl3DirectDrawSurface* g_sdl_backbuffer = nullptr;
 
-/* Canonical global, real defining declaration in shared/stubs_impl.cpp
+/* Canonical global, real defining declaration in platform/ddraw_globals.cpp
  * (0x485440). Declared void* there and at every consumer site — see this
  * file's own IDirectDraw4-shaped g_sdl_ddraw above for the typed object;
  * g_ddraw is just pointed at it below. */
 extern void* g_ddraw;
+
+/* Pixel-format globals the original DDRAW_GetSurface (0x45B500) sets after
+ * querying the real display mode's DDPIXELFORMAT (555 vs 565); read by
+ * native/ddraw_surface_ops.c's DDRAW_RestoreSurfaces (colour key) and
+ * native/DDRAW_DimSurfaceRect.c / town/TownTiles.cpp's Town_CheckOccupiedEx
+ * (half-bright dim mask, red/blue channel water-check masks). Set below to
+ * the exact values DDRAW_GetSurface's own decompiled 565 branch uses —
+ * this host build has no real display mode to query, so RGB565 is a fixed
+ * choice (see PROGRESS.md's DirectDraw-shim pixel-format note), not a
+ * behavior invented beyond what that function already evidences.
+ * g_surface_red_mask/g_surface_blue_mask previously had NO defining
+ * declaration anywhere in the tree (shared/link_stubs.cpp, fixed
+ * alongside this). */
+extern int32_t g_surface_bpp;
+extern int32_t g_surface_channel1;
+extern int32_t g_surface_channel2;
+extern int32_t g_surface_bshift;
+extern int32_t g_surface_red_mask;
+extern int32_t g_surface_blue_mask;
 static SDL3PrimaryPresentationMode g_primary_presentation_mode =
     SDL3PrimaryPresentationMode::Auto;
 
@@ -228,10 +247,18 @@ HRESULT Sdl3DirectDrawSurface::Lock(RECT* rect,
 
     if (!texture) return -1;
 
-    /* Create or refresh CPU surface from texture for pixel access */
+    /* Create or refresh CPU surface from texture for pixel access. Real
+     * DirectDraw always ran this game in a 16bpp display mode (see
+     * g_surface_bpp / DDRAW_GetSurface, 0x45B500), so decompiled pixel
+     * code (native/DDRAW_DimSurfaceRect.c, town/TownTiles.cpp's
+     * Town_CheckOccupiedEx) reads/writes real 555/565-packed uint16_t
+     * pixels through this pointer — converting the GPU-side XRGB8888
+     * readback down to RGB565 here (and back up in Unlock) keeps that
+     * code completely unmodified. See PROGRESS.md's DirectDraw-shim
+     * pixel-format note. */
     if (cpu_surface) SDL_DestroySurface(cpu_surface);
 
-    cpu_surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_XRGB8888);
+    cpu_surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGB565);
     if (!cpu_surface) return -1;
 
     /* Read back texture to CPU surface */
@@ -239,8 +266,8 @@ HRESULT Sdl3DirectDrawSurface::Lock(RECT* rect,
     SDL_Surface* readback = SDL_RenderReadPixels(g_sdl_ddraw->renderer, nullptr);
     SDL_SetRenderTarget(g_sdl_ddraw->renderer, nullptr);
     if (readback) {
-        /* Convert to our desired format and copy pixels */
-        SDL_Surface* converted = SDL_ConvertSurface(readback, SDL_PIXELFORMAT_XRGB8888);
+        /* Convert to our desired 16bpp format and copy pixels */
+        SDL_Surface* converted = SDL_ConvertSurface(readback, SDL_PIXELFORMAT_RGB565);
         SDL_DestroySurface(readback);
         if (converted) {
             SDL_DestroySurface(cpu_surface);
@@ -264,9 +291,14 @@ HRESULT Sdl3DirectDrawSurface::Unlock(RECT* rect)
 
     if (!cpu_surface || !texture) return -1;
 
-    /* Upload modified CPU surface back to texture */
-    SDL_UpdateTexture(texture, nullptr,
-                      cpu_surface->pixels, cpu_surface->pitch);
+    /* cpu_surface is RGB565 (see Lock) but the GPU-side texture is
+     * XRGB8888 — convert the (possibly game-modified) 16bpp buffer back up
+     * before uploading. */
+    SDL_Surface* upload = SDL_ConvertSurface(cpu_surface, SDL_PIXELFORMAT_XRGB8888);
+    if (upload) {
+        SDL_UpdateTexture(texture, nullptr, upload->pixels, upload->pitch);
+        SDL_DestroySurface(upload);
+    }
 
     SDL_DestroySurface(cpu_surface);
     cpu_surface = nullptr;
@@ -566,6 +598,20 @@ bool SDL3_EnsurePrimarySurface()
         g_sdl_ddraw->window = window;
         g_sdl_ddraw->owned = false;
         g_ddraw = g_sdl_ddraw;
+
+        /* RGB565 constants, matching DDRAW_GetSurface's (0x45B500) own
+         * decompiled 565 branch exactly (g_surface_bpp=0x235, channel1=0xb,
+         * channel2=6, bshift=0x7bef) plus the standard RGB565 channel masks
+         * its unconditional DAT_00485288/DAT_00485290 assignments store
+         * (red=0xF800, blue=0x001F — blue's position/width is identical in
+         * 555 and 565, so this value holds regardless of the 555/565 choice
+         * made here). */
+        g_surface_bpp = 0x235;
+        g_surface_channel1 = 0xb;
+        g_surface_channel2 = 6;
+        g_surface_bshift = 0x7bef;
+        g_surface_red_mask = 0xF800;
+        g_surface_blue_mask = 0x001F;
     }
     if (g_sdl_primary_surface && g_sdl_primary_surface->texture &&
         g_sdl_backbuffer && g_sdl_backbuffer->texture) return true;

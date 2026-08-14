@@ -830,8 +830,13 @@ struct IDirectDrawSurface4_C {
 extern "C" {
 void* g_object_count = nullptr; void* g_cursor_back = nullptr; int32_t g_cursor_refcount = 0;
 void* g_font_normal = nullptr; int32_t g_is_fullscreen = 0; void* g_primary_surface = nullptr;
-int32_t g_surface_bpp = 0; int32_t g_surface_bshift = 0;
-int32_t g_surface_channel1 = 0; int32_t g_surface_channel2 = 0; int32_t g_surface_lost = 0;
+int32_t g_surface_lost = 0;
+/* g_surface_bpp/g_surface_bshift/g_surface_channel1/g_surface_channel2/
+ * g_surface_red_mask/g_surface_blue_mask moved to platform/ddraw_globals.cpp
+ * (2026-08-14) — SDL3_EnsurePrimarySurface (graphics/sdl3_ddraw.cpp) sets
+ * them for real once a device exists (see PROGRESS.md's DirectDraw-shim
+ * pixel-format note), and that dependency-free TU is what small standalone
+ * unit tests linking graphics/sdl3_ddraw.cpp actually link against. */
 int32_t g_pixel_format_mask = 0; int32_t g_viewport_rect_left = 0; int32_t g_viewport_rect_top = 0;
 int32_t g_viewport_rect_right = 800; int32_t g_viewport_rect_bottom = 600;
 int32_t g_window_left = 0; int32_t g_window_top = 0; int32_t g_listener_x = 0; int32_t g_listener_y = 0;

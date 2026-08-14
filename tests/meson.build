@@ -174,6 +174,18 @@ sdl3_primary_present_test = executable('sdl3_primary_present_test',
 )
 test('sdl3-primary-present', sdl3_primary_present_test, env: ['SDL_VIDEODRIVER=dummy'])
 
+# Lock()/Unlock() 16bpp pixel-format adapter regression: guards the
+# 32bpp-vs-16bpp mismatch documented in PROGRESS.md's DirectDraw-shim note.
+sdl3_ddraw_pixel_format_test = executable('sdl3_ddraw_pixel_format_test',
+  'sdl3_ddraw_pixel_format_test.cpp',
+  objects: [obj_sdl3_window, obj_sdl3_ddraw, obj_ddraw_globals, obj_sdl3_game_audio, obj_resource_mgr_sdl3,
+            obj_resource_archive, obj_pe_string_table, obj_host_test_events],
+  include_directories: inc_dirs,
+  cpp_args: test_warn_args + ['-include', compat_h],
+  dependencies: [sdl3_dep],
+)
+test('sdl3-ddraw-pixel-format', sdl3_ddraw_pixel_format_test, env: ['SDL_VIDEODRIVER=dummy'])
+
 # DDSURFACEDESC field-order regression: guards the dwWidth/dwHeight transposition
 # landmine platform/sdl3_types.h used to have (see NOTE-directx-sdk.md / PROGRESS.md).
 sdl3_ddraw_surfacedesc_test = executable('sdl3_ddraw_surfacedesc_test',
