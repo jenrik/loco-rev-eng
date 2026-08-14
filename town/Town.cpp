@@ -171,7 +171,10 @@ extern "C" {
     int    HelpWnd_PlayNarration(void* audio_mgr, int page, uint flags); /* 0x44F560 */
 
     /* Network */
-    void*  NET_ResolveAddress(const char* hostname);                 /* 0x444C70 */
+    /* NET_ResolveAddress declared in network/DPlayManager.h (real C++
+     * linkage, DPlayManager* return) — this extern "C" duplicate removed
+     * 2026-08-14; it was a live landmine (see DPlayManager.h's own doc
+     * comment) that made every real call site here always get null. */
     void   NET_RegisterPlayer(void* dplay, void* data, int type, int unk); /* 0x4498E0 */
     void   DPLAY_RenderPlayer(void* dplay, int param1, int param2,
                               void* param3, int param4, int param5,
@@ -1883,7 +1886,7 @@ void Town::upload_postcard()
 
     while (hostname) {
         DPlayManager* addr =
-            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
+            NET_ResolveAddress(hostname->path);
         if (addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
             g_dplay->UnregisterPlayer(hostname->path);
@@ -1926,7 +1929,7 @@ void Town::receive_postcard()
 
     while (hostname) {
         DPlayManager* addr =
-            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
+            NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
@@ -1988,7 +1991,7 @@ void Town::list_postcards()
     }
 
     DPlayManager* first_addr =
-        static_cast<DPlayManager*>(NET_ResolveAddress(first_hostname->path));
+        NET_ResolveAddress(first_hostname->path);
     if (!this->selected_player) {
         this->selected_player = first_addr;
         PostBagFileNode* p = first_hostname;
@@ -2004,14 +2007,14 @@ void Town::list_postcards()
     PostBagFileNode* p = first_hostname;
     while (p) {
         DPlayManager* addr =
-            static_cast<DPlayManager*>(NET_ResolveAddress(p->path));
+            NET_ResolveAddress(p->path);
 
         if (!next_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player) &&
             p->next) {
             next_player =
-                static_cast<DPlayManager*>(NET_ResolveAddress(p->next->path));
+                NET_ResolveAddress(p->next->path);
         }
 
         if (addr) {
@@ -2052,7 +2055,7 @@ void Town::save_postcard()
     PostBagFileNode* hostname = NET_GetHostName(2, 0);
     while (hostname) {
         DPlayManager* addr =
-            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
+            NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
@@ -2103,7 +2106,7 @@ void Town::load_postcard()
     PostBagFileNode* hostname = NET_GetHostName(1, 0);
     while (hostname) {
         DPlayManager* addr =
-            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
+            NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {
@@ -2156,7 +2159,7 @@ void Town::delete_postcard()
 
     while (hostname) {
         DPlayManager* addr =
-            static_cast<DPlayManager*>(NET_ResolveAddress(hostname->path));
+            NET_ResolveAddress(hostname->path);
         if (this->selected_player &&
             addr && record_player_id(addr) ==
                     record_player_id(this->selected_player)) {

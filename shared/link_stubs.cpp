@@ -410,8 +410,12 @@ int32_t NET_MapSpecialAsset(int32_t);
 int32_t NET_MapSpecialAsset(int32_t){return 0;}
 int32_t NET_RegisterPlayer(int32_t);
 int32_t NET_RegisterPlayer(int32_t){return 0;}
-int32_t NET_ResolveAddress(void*,int32_t);
-int32_t NET_ResolveAddress(void*,int32_t){return 0;}
+/* NET_ResolveAddress(void*,int32_t) [extern "C"] removed 2026-08-14 — it
+ * was the one real definition every mismatched-signature declaration of
+ * this symbol tree-wide silently bound to (extern "C" ignores signature
+ * mismatches at link time), making every real caller always get null.
+ * Real implementation now at network/DPlayManager.h/.cpp:
+ * DPlayManager* NET_ResolveAddress(const char* hostname). */
 void NETMAN_QueueMessage(void*,int32_t,void*);
 void NETMAN_QueueMessage(void*,int32_t,void*){}
 void NETMAN_CheckTrackConnection(void*,int32_t,int32_t);

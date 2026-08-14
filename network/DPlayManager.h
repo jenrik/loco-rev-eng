@@ -463,6 +463,35 @@ extern char  g_empty_string;    /* 0x4851D0 — empty string constant  */
 extern void* g_primary_surface; /* 0x4FD3C4 — primary DDraw surface  */
 
 /**
+ * NET_ResolveAddress — Resolve a hostname/path to a populated player slot.
+ * Address: 0x444C70
+ *
+ * Allocates a new DPlayManager, initializes it via CreatePlayer(), then
+ * attempts to load its data from the "<hostname>.crd" file via
+ * GetPlayerName(hostname). Returns the populated slot on success; on
+ * failure, deletes the slot (if one was allocated) and returns nullptr.
+ *
+ * Real signature confirmed by direct disassembly: exactly one argument
+ * (const char* hostname/path) — every other tree-wide declaration of this
+ * symbol (graphics/PixelDataCache.cpp, network/Netman.h, town/Town.cpp,
+ * shared/link_stubs.cpp's stub) was `extern "C"`, so the linker bound them
+ * all to the SAME unmangled symbol regardless of mismatched declared
+ * signatures. link_stubs.cpp's stub (`int32_t NET_ResolveAddress(void*,
+ * int32_t){return 0;}`) was therefore the one real definition, making
+ * every real caller unconditionally get null/0 — hostname-based
+ * multiplayer session resolution was completely non-functional on the
+ * host build until this fix (2026-08-14).
+ *
+ * Called by: town/Town.cpp (8 call sites), NETMAN_ReceiveSignalChange
+ * (network/Netman_ReceiveSignalChange.cpp), PixelDataCache::LookupAsset
+ * (graphics/PixelDataCache.cpp)
+ *
+ * @param hostname  Player/session identifier used to build the .crd path
+ * @return          Populated DPlayManager slot, or nullptr on failure
+ */
+DPlayManager* NET_ResolveAddress(const char* hostname);
+
+/**
  * RenderConnectionPanel — Draw the DirectPlay connection panel UI.
  * Address: 0x4421D0 (originally "DPLAY_Ctor")
  *

@@ -623,6 +623,41 @@ int32_t DPlayManager::GetPlayerName(const char* path)
 }
 
 /* ================================================================== */
+/* NET_ResolveAddress — 0x444C70                                      */
+/*                                                                     */
+/* Called by: town/Town.cpp, NETMAN_ReceiveSignalChange,               */
+/*            PixelDataCache::LookupAsset                              */
+/* ================================================================== */
+DPlayManager* NET_ResolveAddress(const char* hostname)
+{
+    void* storage = operator_new(sizeof(DPlayManager));
+    DPlayManager* player = nullptr;
+    if (storage != nullptr) {
+        player = ::new (storage) DPlayManager();
+        player->CreatePlayer();
+    }
+
+    /* The original calls DPLAY_GetPlayerName unconditionally, even on the
+     * allocation-failure path (this == nullptr) — observably identical to
+     * this null-guarded form on every path that doesn't already crash in
+     * the original (GetPlayerName doesn't touch `this` until after its
+     * own CreateFileA succeeds; the only path that differs is "out of
+     * memory AND the .crd file exists and is readable," which crashes in
+     * the original too and isn't worth reproducing as UB here — a
+     * non-virtual call through a null `this` lets the optimizer assume
+     * `player` is never null for the rest of this function, which would
+     * silently discard the `delete player` cleanup below). */
+    if (player != nullptr && static_cast<int8_t>(player->GetPlayerName(hostname)) != 0) {
+        return player;
+    }
+
+    if (player != nullptr) {
+        delete player;
+    }
+    return nullptr;
+}
+
+/* ================================================================== */
 /* SetPlayerName — 0x442BF0                                           */
 /*                                                                     */
 /* Called by: NETMAN_ReceiveSignalChange (0x43EE34),                  */

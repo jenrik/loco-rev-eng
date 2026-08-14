@@ -24,6 +24,7 @@
 // Status: TRANSCRIBED
 
 #include "PixelDataCache.h"
+#include "../game/PlayerConfig.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <cstring>   /* memcpy, memset, strlen */
 #include <cstdint>
@@ -31,13 +32,12 @@
 
 namespace {
 
-/* The player number is an unaligned dword in the recovered x86 config
- * block. memcpy preserves that byte-level contract without type-punning. */
-static uint32_t read_player_number(const uint8_t* config)
+/* +0x18 is PlayerConfig::player_id (game/PlayerConfig.h) — read directly
+ * through the named field now that g_player_config is strongly typed
+ * (2026-08-14; was a raw-offset uint8_t* read before that). */
+static uint32_t read_player_number(const PlayerConfig* config)
 {
-    uint32_t player_number = 0;
-    std::memcpy(&player_number, config + 0x18, sizeof(player_number));
-    return player_number;
+    return static_cast<uint32_t>(config->player_id);
 }
 
 static uint32_t read_asset_value(const void* asset_desc)
@@ -92,8 +92,12 @@ extern "C" {
 
     /* Network/asset lookup */
     bool  NET_CheckAssetExists(uint32_t asset_value, int32_t unknown, char* buffer); /* @0x445930 */
-    void* NET_ResolveAddress(char* buffer);                               /* @0x444C70 */
 }
+/* NET_ResolveAddress declared in network/DPlayManager.h (real C++ linkage,
+ * DPlayManager* return, const char* param) — this extern "C" duplicate
+ * removed 2026-08-14; it was a live landmine that made every real call
+ * site always get null (see DPlayManager.h's own doc comment). */
+#include "../network/DPlayManager.h"
 
 /* ================================================================== */
 /* Global variables                                                    */
@@ -105,12 +109,10 @@ extern "C" {
  */
 PixelDataCache* g_pixel_cache;   /* defined somewhere; actual storage at 0x4FD3B4 */
 
-/**
- * g_player_config -- global player configuration pointer.
- * Address: g_player_config at known global, used for player ID.
- * Accessed as *(uint32_t*)(g_player_config + 0x18) for player number.
- */
-extern uint8_t* g_player_config;  /* @0x4AA4A8 */
+/* g_player_config now declared by network/DPlayManager.h (included below
+ * for the real NET_ResolveAddress declaration) as the canonical
+ * `PlayerConfig*` — this file's own weaker `uint8_t*` duplicate removed
+ * 2026-08-14 (conflicted once both headers landed in the same TU). */
 
 /**
  * g_install_path -- game install path string.
