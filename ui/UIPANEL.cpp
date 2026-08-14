@@ -12,6 +12,7 @@
 // Status: TRANSCRIBED
 
 #include "UIPANEL.h"
+#include "../platform/ddraw_interfaces.h"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 // vtable_addrs.h removed — compiler manages vtables via virtual methods
@@ -27,8 +28,11 @@ void      Sleep(DWORD);
 void      ExitProcess(UINT);
 }
 
-/* DirectDraw blit flags (from ddraw.h, avoiding full include) */
-#define DDBLT_WAIT  0x00000010
+/* DDBLT_WAIT now comes from platform/ddraw_interfaces.h (0x01000000, the
+ * real DirectX value) — this file's own copy was wrong (0x00000010 is
+ * really DDBLT_ASYNC), found 2026-08-14 while migrating off raw vtable
+ * dispatch. Harmless until now: Sdl3DirectDrawSurface::Blt ignores its
+ * flags parameter entirely, so neither value changed behavior. */
 
 /* ================================================================== */
 /* External references                                                 */
@@ -926,35 +930,47 @@ LRESULT __fastcall UIPANEL_OnDestroy(void* self)
 /* Address: 0x426B00                                                   */
 /*                                                                     */
 /* Begins buffered painting to the offscreen surface. Unlocks primary,  */
-/* calls GetDC on primary surface (vtable[0x44]). Retries up to 1000   */
-/* times with 10ms delay on failure, exits on persistent failure via   */
-/* WIN32_FatalError + ExitProcess. Returns HDC from GetDC stored in    */
-/* a PAINTSTRUCT-like struct at +0x4C.                                  */
+/* calls GetDC on primary surface (real IDirectDrawSurface4::GetDC,    */
+/* vtable slot 17 / byte offset 0x44). Retries up to 1000 times with   */
+/* 10ms delay on failure, exits on persistent failure via              */
+/* WIN32_FatalError + ExitProcess.                                     */
+/*                                                                     */
+/* Ghidra decompile of 0x426B00 (2026-08-14) confirms the real ABI:    */
+/* GetDC(void** hdc) returns an HRESULT, not the HDC itself — 0 means  */
+/* success, and the actual handle is written through the out-param.   */
+/* The out-param's storage is this object's own +0x4C scratch slot     */
+/* (previously mislabeled a "PAINTSTRUCT"; its only real use tree-wide */
+/* is holding GetDC's out-param). The prior transcription treated the  */
+/* HRESULT return value itself as the HDC (`while (hdc == NULL)`),     */
+/* which misreads a successful 0/S_OK return as failure — with the     */
+/* old permanently-failing GetDC stub this was unobservable, but it     */
+/* would have spun to the 1000-retry ExitProcess(1) path even on a     */
+/* real, working GetDC. `self`'s real class is unresolved — callers    */
+/* pass at least three unrelated pointer types (UIPANEL, Cursor,       */
+/* BuildingPanel), so this stays raw offset access rather than a       */
+/* fabricated named field (see PROGRESS.md).                            */
 /* ================================================================== */
 HDC __fastcall UIPANEL_BeginPaint(void* self)
 {
     int retry = 0;
-    /* The PAINTSTRUCT/desc struct is at +0x4C on the UIPANEL object */
-    void* desc = (void*)((intptr_t)self + 0x4C);
+    void** hdc_slot = reinterpret_cast<void**>(reinterpret_cast<intptr_t>(self) + 0x4C);
 
     DDRAW_UnlockPrimary();
 
-    /* Call GetDC on primary surface via vtable[0x44] */
-    using GetDCFunc = HDC (__thiscall*)(void* self, void* desc);
-    GetDCFunc getDC = (GetDCFunc)(*(void***)g_primary_surface)[0x44 / 4];
-    HDC hdc = getDC(g_primary_surface, desc);
+    IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
+    HRESULT hr = primary->GetDC(hdc_slot);
 
-    while (hdc == NULL) {
+    while (hr != 0) {
         retry++;
         if (retry > 1000) {
             WIN32_FatalError();
             ExitProcess(1);
         }
         Sleep(10);
-        hdc = getDC(g_primary_surface, desc);
+        hr = primary->GetDC(hdc_slot);
     }
 
-    return hdc;
+    return static_cast<HDC>(*hdc_slot);
 }
 
 /* ================================================================== */
@@ -980,7 +996,8 @@ void __fastcall UIPANEL_EndPaint(void* self)
 /* Address: 0x426B90                                                   */
 /*                                                                     */
 /* Main present pipeline:                                                */
-/*   1. If unlock_param != 0, unlock primary surface via vtable[0x68]  */
+/*   1. If unlock_param != 0, release the HDC obtained from BeginPaint */
+/*      via IDirectDrawSurface4::ReleaseDC (vtable slot 26 / 0x68)     */
 /*   2. If unlock_flag != 0, just DDRAW_UnlockPrimary and return       */
 /*   3. DDRAW_UnlockPrimary                                            */
 /*   4. Path A: No tile_map or blocking flag set -- simple PresentRect */
@@ -988,15 +1005,23 @@ void __fastcall UIPANEL_EndPaint(void* self)
 /*                                                                     */
 /* Parameters: this, hdc (int), unlock_param (int), unlock_flag (byte), */
 /*   restrict_rect (RECT*)                                              */
+/*                                                                     */
+/* unlock_param was previously mislabeled/documented as an "Unlock"    */
+/* call — Ghidra decompile of 0x426B90 (2026-08-14) confirms the value */
+/* reaching slot 0x68 is the raw HDC value real callers obtained from   */
+/* BeginPaint (e.g. input/Cursor_new_impls.cpp's draw_color_bars passes */
+/* its BeginPaint result here with unlock_flag=1), not a RECT* — an HDC */
+/* flowing into this slot is ReleaseDC(HDC), not Unlock(RECT*). Also    */
+/* independently confirmed via input/Cursor_internal.h's own comment on */
+/* the same slot (sourced from Cursor::render, 0x414C28).               */
 /* ================================================================== */
 void __thiscall UIPANEL_EndPaintEx(void* self,
     int hdc, int unlock_param, uint8_t unlock_flag, RECT* restrict_rect)
 {
-    /* Step 1: Unlock primary surface if unlock_param is non-zero */
+    /* Step 1: release the real HDC (if any) obtained from BeginPaint */
     if (unlock_param != 0) {
-        using UnlockFunc = HRESULT (__thiscall*)(void* self, void* rect);
-        UnlockFunc unlock = (UnlockFunc)(*(void***)g_primary_surface)[0x68 / 4];
-        unlock(g_primary_surface, (void*)(uintptr_t)unlock_param);
+        IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
+        primary->ReleaseDC(reinterpret_cast<void*>(static_cast<intptr_t>(unlock_param)));
     }
 
     /* Step 2: If unlock_flag is non-zero, just unlock and return */
@@ -1124,13 +1149,11 @@ void __thiscall UIPANEL_EndPaintEx(void* self,
 
     /* Copy background from offscreen surface to primary (prepare dirty area) */
     {
-        using BltFunc = void (__thiscall*)(void* dst, RECT* dstRect,
-            void* src, RECT* srcRect, uint32_t flags, int unk);
-        BltFunc blt = (BltFunc)(*(void***)g_primary_surface)[0x14 / 4];
-        blt(g_primary_surface, NULL,
-            *(void**)((intptr_t)self + 0x48), /* offscreen surface */
+        static_cast<IDirectDrawSurface4*>(g_primary_surface)->Blt(
+            nullptr,
+            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)), /* offscreen surface */
             &dirty_rect,
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
     }
 
     /* Blit tile content onto primary surface using UIPANEL_Blit */
@@ -1159,14 +1182,11 @@ void __thiscall UIPANEL_EndPaintEx(void* self,
 
     /* Restore background from backbuffer */
     {
-        using BltFunc = void (__thiscall*)(void* dst, RECT* dstRect,
-            void* src, RECT* srcRect, uint32_t flags, int unk);
-        BltFunc blt = (BltFunc)(*(void***)g_primary_surface)[0x14 / 4];
-        blt(g_primary_surface,
+        static_cast<IDirectDrawSurface4*>(g_primary_surface)->Blt(
             (RECT*)((intptr_t)self + 0x50),         /* saved dirty rect */
-            *(void**)((intptr_t)self + 0x48),
+            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)),
             &dirty_rect,
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
     }
 
     DDRAW_UnlockPrimary();
@@ -1277,14 +1297,11 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
 
     /* Step 5: Restore background from backbuffer for cached dirty rect */
     if (cached_dirty_right != 0 && enable_tile_map != 0 && inflate_flag == 0) {
-        using BltFunc = void (__thiscall*)(void* dst, RECT* dstRect,
-            void* src, RECT* srcRect, uint32_t flags, int unk);
-        BltFunc blt = (BltFunc)(*(void***)g_backbuffer)[0x14 / 4];
-        blt(g_backbuffer,
+        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
             (RECT*)((intptr_t)self + 0x50),     /* cached dirty rect */
-            g_primary_surface,
+            static_cast<IDirectDrawSurface4*>(g_primary_surface),
             (RECT*)((intptr_t)self + 0x50),
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
     }
 
     /* Step 6: Reset cursor tracking */
@@ -1307,14 +1324,11 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
         RECT blit_rect = { dirty_left, dirty_top, dirty_right, dirty_bottom };
 
         /* Copy from offscreen surface to primary */
-        using BltFunc = void (__thiscall*)(void* dst, RECT* dstRect,
-            void* src, RECT* srcRect, uint32_t flags, int unk);
-        BltFunc blt = (BltFunc)(*(void***)(*(void**)((intptr_t)self + 0x48)))[0x14 / 4];
-        blt(*(void**)((intptr_t)self + 0x48),
+        static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48))->Blt(
             &blit_rect,
-            g_primary_surface,
+            static_cast<IDirectDrawSurface4*>(g_primary_surface),
             &blit_rect,
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
 
         /* Handle scroll offset */
         int scroll_offset = 0;
@@ -1343,12 +1357,11 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
                      0);
 
         /* Copy from offscreen surface back to primary background */
-        blt = (BltFunc)(*(void***)g_backbuffer)[0x14 / 4];
-        blt(g_backbuffer,
+        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
             (RECT*)((intptr_t)self + 0x50),
-            *(void**)((intptr_t)self + 0x48),
+            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)),
             (RECT*)&blit_rect,   /* approximate: stack variable reuse */
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
         return;
     }
 
@@ -1357,15 +1370,12 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
         RECT lock_rect = { 0, 0, 0, 0 };
 
         /* Lock/copy from primary to offscreen surface */
-        using BltFunc = void (__thiscall*)(void* dst, RECT* dstRect,
-            void* src, RECT* srcRect, uint32_t flags, int unk);
-        BltFunc blt = (BltFunc)(*(void***)(*(void**)((intptr_t)self + 0x48)))[0x14 / 4];
         RECT clip = { dirty_left, dirty_top, dirty_right, dirty_bottom };
-        blt(*(void**)((intptr_t)self + 0x48),
+        static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48))->Blt(
             &lock_rect,
-            g_primary_surface,
+            static_cast<IDirectDrawSurface4*>(g_primary_surface),
             &clip,
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
 
         /* Handle scroll offset */
         int scroll_offset = 0;
@@ -1388,12 +1398,11 @@ void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
                      0);    /* last param unused in this path */
 
         /* Copy offscreen surface back to primary background (backbuffer) */
-        blt = (BltFunc)(*(void***)g_backbuffer)[0x14 / 4];
-        blt(g_backbuffer,
+        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
             (RECT*)((intptr_t)self + 0x50),
-            *(void**)((intptr_t)self + 0x48),
+            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)),
             (RECT*)&tile_h,     /* stack variable reuse */
-            DDBLT_WAIT, 0);
+            DDBLT_WAIT, nullptr);
     }
 }
 #pragma GCC diagnostic pop

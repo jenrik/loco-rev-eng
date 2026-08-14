@@ -332,14 +332,30 @@ HRESULT Sdl3DirectDrawSurface::IsLost()
 
 HRESULT Sdl3DirectDrawSurface::GetDC(void** hdc)
 {
-    (void)hdc;
-    return -1; /* GDI DC not supported */
+    if (hdc == nullptr) return -1;
+
+    /* Real GDI rasterization onto a DirectDraw surface (text, FillRect,
+     * brushes) is out of scope here — the game's real presentation goes
+     * through DirectDraw Blt, and GDI painting on this surface is only
+     * ever a cosmetic legacy path (cursor-editor color bars, network-UI
+     * list highlighting). graphics/sdl3_window.cpp's own HDC-consuming
+     * shims (FillRect, DrawTextA, SetTextColor, SetBkMode) already ignore
+     * their hdc argument entirely, so this only needs to hand back a
+     * valid, distinct, non-null opaque handle — the same "valid
+     * placeholder handle" idiom that file already uses for
+     * CreateSolidBrush/LoadCursorA/LoadIconA. This was previously an
+     * unconditional failure, which made UIPANEL_BeginPaint's (0x426B00)
+     * 1000-retry loop spin for ~10s and then ExitProcess(1) the whole
+     * game the first time g_primary_surface was non-null and any real
+     * caller ran (game/BuildingPanel.cpp, input/Cursor_new_impls.cpp). */
+    *hdc = this;
+    return 0; /* DD_OK */
 }
 
 HRESULT Sdl3DirectDrawSurface::ReleaseDC(void* hdc)
 {
     (void)hdc;
-    return -1;
+    return 0; /* DD_OK */
 }
 
 HRESULT Sdl3DirectDrawSurface::SetPalette(IDirectDrawPalette* palette)
