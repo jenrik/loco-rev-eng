@@ -56,32 +56,25 @@
 /*   [0] scalar deleting destructor (UIPANEL_DestroySurface)          */
 /* ================================================================== */
 
-/* DDraw stub types for host build (the real SDL3 bridge is in
- * src/sdl3_shims/sdl3_ddraw.h; files that need the full bridge
- * include it directly.) */
-struct DDSCAPS2 { DWORD dwCaps; DWORD dwCaps2; DWORD dwCaps3; DWORD dwCaps4; };
-struct DDSURFACEDESC { DWORD dwSize; DWORD dwFlags; DWORD dwHeight; DWORD dwWidth; LONG lPitch; void* lpSurface; DWORD dwBackBufferCount; DWORD dwMipMapCount; DWORD dwAlphaBitDepth; DWORD dwReserved; DDSCAPS2 ddsCaps; };
-struct IDirectDrawSurface4;
-struct IDirectDraw4 { void* vtable; int Release() { return 0; } int CreateSurface(void*, IDirectDrawSurface4**, void*) { return 0; } };
-struct IDirectDrawSurface4 { void* vtable; int Release() { return 0; } int Blt(void*, void*, void*, int, void*) { return 0; } int Lock(void*, void*, int, int) { return 0; } int Unlock(void*) { return 0; } };
-struct DDBLTFX { DWORD dwSize; DWORD dwFillColor; DWORD dwDDFX; };
+/* Real, API-compatible DirectDraw interfaces/structs (platform/
+ * ddraw_interfaces.h) — replaces this file's former local, non-virtual
+ * shadow IDirectDraw4/IDirectDrawSurface4/DDSURFACEDESC/DDSCAPS2/DDBLTFX
+ * (2026-08-14). Those shadow methods were hardcoded `return 0` stubs that
+ * never touched `this`, so every Blt/Lock/Unlock/Release/CreateSurface
+ * call in this file was silently a no-op regardless of what the
+ * underlying object actually was — see PROGRESS.md's DirectDraw-shim
+ * Phase 6 note. Also defines DDSD_CAPS/DDSD_WIDTH/DDSD_HEIGHT/
+ * DDSCAPS_OFFSCREENPLAIN/DDBLT_WAIT/DDBLT_COLORFILL/DDBLT_KEYSRC/
+ * DDLOCK_WAIT, so this file's own copies of those macros are gone too.
+ * FAILED/SUCCEEDED are dropped entirely (were redefinitions — this file
+ * already transitively includes stubs/windows_types.h's real ones via
+ * resources/StreamObject.h -> stubs/windows.h). */
+#include "../platform/ddraw_interfaces.h"
 
 /* UIPANEL_Surface is defined in graphics/LOCOBITMAP.h (pulled in transitively
  * via UIPANEL.h above). Its `ddraw_surf` member is a raw void* there, so this
  * file casts to IDirectDrawSurface4* at each use. `palette_ptr` is
  * `uint16_t*` (a 256-entry lookup table) — no cast needed. */
-#define FAILED(hr) ((int)(hr) < 0)
-#define SUCCEEDED(hr) ((int)(hr) >= 0)
-#define DDBLT_WAIT 0x00000010
-#define DDBLT_COLORFILL 0x00000400
-#define DDBLT_KEYSRC 0x00008000
-#define DDSD_CAPS 0x00000001
-#define DDSD_WIDTH 0x00000004
-#define DDSD_HEIGHT 0x00000002
-#define DDSCAPS_OFFSCREENPLAIN 0x00000040
-#define DDSCAPS_SYSTEMMEMORY 0x00000800
-#define DDLOCK_WAIT 0x00000001
-
 #define VTBL_UIPANEL_SURFACE ((void*)0x477D28)
 
 /* ================================================================== */
@@ -97,10 +90,17 @@ extern "C" {
     int    __stdcall OutputDebugStringA(LPCSTR lpOutputString);
 }
 
-    /* DirectDraw globals */
-    extern IDirectDraw4*      g_ddraw;               /* 0x4FD394 */
-    extern IDirectDrawSurface4* g_primary_surface;   /* 0x4FD3C4 */
-    extern IDirectDrawSurface4* g_backbuffer;        /* 0x4FD3C0 */
+    /* DirectDraw globals. void* here (not the canonical typed pointers) to
+     * match every other declaration site tree-wide — several other
+     * consumers of g_ddraw still can't assume this shim's vtable is
+     * ABI-slot-accurate (see PROGRESS.md's DirectDraw-shim Phase 5 note),
+     * so a shared typed declaration would just move a mismatch elsewhere.
+     * Cast to the real interface at each use below instead. Addresses
+     * corrected 2026-08-14 via Ghidra get_xrefs_to — this file's prior
+     * 0x4FD394 for g_ddraw resolved to unrelated network/train-queue code. */
+    extern void* g_ddraw;               /* 0x485440 */
+    extern void* g_primary_surface;     /* 0x4FD3C4 */
+    extern void* g_backbuffer;          /* 0x4FD3C0 */
     extern void*              g_asset_mgr;           /* 0x4FD3CC */
     extern char               g_surface_lost;         /* 0x4FD218 */
 
@@ -155,7 +155,11 @@ extern "C" {
     int   DDRAW_RestoreSurfaces(IDirectDrawSurface4* surf, void* desc);
     /* Real def (shared/link_stubs.cpp) is extern "C" (plain, unmangled). */
     extern "C" void* DDRAW_GetDdrawErrorString(int code);
-    HDC   DDRAW_LoadBmpToSurface(LPCSTR path, int bpp, int unk1, int unk2, char unk3);
+    /* Real def/return type: graphics/sdl3_ddraw.cpp — was wrongly declared
+     * HDC here (== void*), silently tolerated only by -fpermissive at the
+     * line 486 call site (implicit void*->IDirectDrawSurface4* "conversion",
+     * a real compiler warning, not valid strict C++). Fixed 2026-08-14. */
+    IDirectDrawSurface4* DDRAW_LoadBmpToSurface(LPCSTR path, int bpp, int unk1, int unk2, char unk3);
     void  DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
 
     /* Town tile rendering functions are UIPANEL_Surface methods
@@ -277,8 +281,7 @@ extern "C" {
         }
 
         /* Create new DDraw offscreen surface */
-        DDSURFACEDESC desc;
-        memset(&desc, 0, sizeof(desc));
+        DDSURFACEDESC desc{};
         desc.dwSize = sizeof(desc);
         desc.dwFlags = DDSD_CAPS | DDSD_WIDTH | DDSD_HEIGHT;
         desc.dwHeight = height;
@@ -286,7 +289,7 @@ extern "C" {
         desc.ddsCaps.dwCaps = DDSCAPS_OFFSCREENPLAIN;
 
         IDirectDrawSurface4* new_surf = NULL;
-        HRESULT hr = g_ddraw->CreateSurface(&desc, &new_surf, NULL);
+        HRESULT hr = static_cast<IDirectDraw4*>(g_ddraw)->CreateSurface(&desc, &new_surf, NULL);
         if (FAILED(hr)) {
             DDRAW_GetDdrawErrorString(1);
             return 0;
@@ -677,7 +680,7 @@ bool __thiscall UIPANEL_Blit(void* renderer,
          * mode == 0, below). */
         if (g_surface_lost) {
             if (g_primary_surface != NULL) {
-                HRESULT unlock_hr = g_primary_surface->Unlock(NULL);
+                HRESULT unlock_hr = static_cast<IDirectDrawSurface4*>(g_primary_surface)->Unlock(NULL);
                 if (SUCCEEDED(unlock_hr)) {
                     g_surface_lost = 0;
                 }
@@ -707,16 +710,16 @@ bool __thiscall UIPANEL_Blit(void* renderer,
     /* Software buffer mode (mode == 0): lock pixels, dispatch to exactly
      * one Town_* tile-rendering method (single if/else chain, matching
      * the original — never more than one method per call). */
-    DDSURFACEDESC desc;
+    DDSURFACEDESC desc{};
     uint8_t* pixels;
     uint32_t pitch;
 
     if (dest_surface == (void*)g_primary_surface) {
         if (!g_surface_lost) {
             /* Check surface lost */
-            memset(&desc, 0, sizeof(desc));
+            desc = DDSURFACEDESC{};
             desc.dwSize = sizeof(desc);
-            HRESULT hr = g_primary_surface->Lock(NULL, &desc, DDLOCK_WAIT, NULL);
+            HRESULT hr = static_cast<IDirectDrawSurface4*>(g_primary_surface)->Lock(NULL, &desc, DDLOCK_WAIT, NULL);
             if (SUCCEEDED(hr)) {
                 g_surface_lost = 1;
             }
@@ -725,7 +728,7 @@ bool __thiscall UIPANEL_Blit(void* renderer,
         pitch  = *(uint32_t*)0x4FD1AC;
         pixels = *(uint8_t**)0x4FD1C0;
     } else {
-        memset(&desc, 0, sizeof(desc));
+        desc = DDSURFACEDESC{};
         desc.dwSize = sizeof(desc);
         IDirectDrawSurface4* lock_surf = (IDirectDrawSurface4*)dest_surface;
         HRESULT hr = lock_surf->Lock(NULL, &desc, DDLOCK_WAIT, NULL);
@@ -830,7 +833,7 @@ bool __thiscall UIPANEL_Blit(void* renderer,
     }
     /* Original: `if (iVar4!=0) return uVar3;` (skip clearing on failure,
      * still return the tile-dispatch result either way) then clear. */
-    int unlock_result = g_primary_surface->Unlock(NULL);
+    int unlock_result = static_cast<IDirectDrawSurface4*>(g_primary_surface)->Unlock(NULL);
     if (unlock_result != 0) {
         return result;
     }
