@@ -119,8 +119,9 @@ extern bool    UIPANEL_Blit(void* panel, uint32_t dst_l, uint32_t dst_t, int32_t
 VehicleEditor::VehicleEditor(int res_id, int param_2, char flag) : Entity(res_id, -1, 0, 0)
 {
 #ifdef _WIN32
-    auto* embedded_dplay = ::new (this->dplay_data) DPlayManager;
-    embedded_dplay->CreatePlayer();
+    /* dplay_data is a real DPlayManager member — already default-constructed
+     * by the compiler before this constructor body runs. */
+    this->dplay_data.CreatePlayer();
 #else
     void* dplay_storage = operator_new(sizeof(DPlayManager));
     this->host_dplay_data = dplay_storage != nullptr
@@ -225,15 +226,16 @@ VehicleEditor::~VehicleEditor()
         this->target_building = nullptr;
     }
 
-#ifdef _WIN32
-    reinterpret_cast<DPlayManager*>(this->dplay_data)->~DPlayManager();
-#else
+#ifndef _WIN32
     if (this->host_dplay_data != nullptr) {
         this->host_dplay_data->~DPlayManager();
         GLOBAL_free(this->host_dplay_data);
         this->host_dplay_data = nullptr;
     }
 #endif
+    /* dplay_data (a real DPlayManager member under _WIN32) is destroyed
+     * automatically by the compiler after this destructor body runs —
+     * no explicit ~DPlayManager() call here (that would double-destroy it). */
     GameObject_DtorBody(this);
 }
 
@@ -860,7 +862,7 @@ DPlayManager* VehicleEditor::GetDPlayData()
 {
     if (this->dplay_initialized == 0) return nullptr;
 #ifdef _WIN32
-    return reinterpret_cast<DPlayManager*>(this->dplay_data);
+    return &this->dplay_data;
 #else
     return this->host_dplay_data;
 #endif
@@ -878,14 +880,18 @@ int VehicleEditor::SetDPlayData(const DPlayManager* data)
         return 1;
     }
 #ifdef _WIN32
-    auto* destination = reinterpret_cast<DPlayManager*>(this->dplay_data);
+    auto* destination = &this->dplay_data;
 #else
     auto* destination = this->host_dplay_data;
 #endif
     if (destination == nullptr) return 0;
+    /* Resolved 2026-08-14 (was TODO VE-012, "binary copies an additional
+     * dword at +0x398 after CopyLogicalStateFrom"): 0x40D770's own
+     * disassembly copies that dword too, one field among many — it's
+     * DPlayManager::unknown_0x398 (network/DPlayManager.h), a real but
+     * semantically-unresolved trailing field CopyLogicalStateFrom now
+     * copies directly, so no separate step is needed here. */
     destination->CopyLogicalStateFrom(*data);
-    /* TODO VE-012: binary copies an additional dword at +0x398 after
-     * CopyLogicalStateFrom. Decompile 0x40D770 for exact semantics. */
     this->dplay_initialized = 1;
     return 1;
 }

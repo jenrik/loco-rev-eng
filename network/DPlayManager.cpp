@@ -462,6 +462,7 @@ void DPlayManager::CopyLogicalStateFrom(const DPlayManager& source)
     m_playerType = source.m_playerType;
     m_playerTrack = source.m_playerTrack;
     inline_memcpy(m_trackEntries, source.m_trackEntries, sizeof(m_trackEntries));
+    unknown_0x398 = source.unknown_0x398;
 }
 
 /* ================================================================== */

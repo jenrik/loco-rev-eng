@@ -139,6 +139,31 @@ public:
     /* +0x96..+0x396: 128 track entries @ 6 bytes each = 0x300 bytes */
     uint8_t     m_trackEntries[128 * 6];
 
+    /* +0x398 (4 bytes, 2 bytes of compiler alignment padding after
+     * m_trackEntries fill +0x396..+0x398): unresolved trailing field.
+     * Confirmed real and required by direct disassembly of THREE
+     * independent functions, none of which are this class's own logic
+     * methods: SetPlayerData (0x442A70) and GetPlayerName (0x442B50)
+     * both push the literal 0x398 as their WriteFile/ReadFile length
+     * starting at `this+4`, i.e. they transfer this+4..this+0x39C —
+     * confirming the real object is 0x39C bytes total, not 0x398 (the
+     * size before this field existed). VehicleEditor::SetDPlayData
+     * (0x40D770) copies this exact dword by itself, separately from
+     * CopyLogicalStateFrom's own field-by-field copy (see the "TODO
+     * VE-012" note this resolves in core/VehicleEditor.cpp). Checked
+     * CreatePlayer, InitPlayerFromSession, CopyPlayerData, FreePlayerSlot,
+     * InitPlayerSlot, and CopyLogicalStateFrom directly against their own
+     * disassembly (2026-08-14): none of them read or write it — its
+     * semantic purpose is unresolved, it is simply carried along
+     * verbatim by the bulk-copy paths above. Before this field existed,
+     * every operator_new(sizeof(DPlayManager)) call site in the tree
+     * (Train_network.cpp, Cursor::init_network_player, NET_ResolveAddress)
+     * under-allocated by exactly 4 bytes relative to what SetPlayerData/
+     * GetPlayerName's own file I/O reads/writes — a real, if narrow,
+     * out-of-bounds read/write on every real call, now fixed by adding
+     * this field (which sizeof(DPlayManager) automatically reflects). */
+    int32_t     unknown_0x398;
+
     /* ================================================================ */
     /* UI Render (operates on a Panel, NOT the player slot)              */
     /* ================================================================ */
@@ -398,6 +423,12 @@ public:
     static DPlayManager* __fastcall EnumerateSessions(
         const DPLAY_SessionData* session);
 };
+
+#if defined(_WIN32) && UINTPTR_MAX == 0xffffffffu
+static_assert(sizeof(DPlayManager) == 0x39C,
+              "DPlayManager must retain the recovered x86 allocation size "
+              "(4-byte-short before the unknown_0x398 field was added)");
+#endif
 
 /* ================================================================== */
 /* DPLAY_SessionData — serialized player snapshot for network use      */

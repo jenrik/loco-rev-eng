@@ -86,8 +86,13 @@
 #include "../world/EditorState.h"
 
 class Vehicle;  // forward — see game/Vehicle.h
+#ifdef _WIN32
+/* Complete type needed here (not just forward-declared): the +0x88 slot
+ * below is a real embedded DPlayManager, matching the original x86
+ * layout exactly (see that field's own comment). */
+#include "../network/DPlayManager.h"
+#else
 class DPlayManager;
-#ifndef _WIN32
 struct HostNetworkEditorTag {};
 #endif
 
@@ -96,8 +101,19 @@ public:
     /* Fields at +0x00..+0x87 are inherited from Entity/GameObject —
        see Entity.h and GameObject.h for the base layout. */
 
-    uint8_t   dplay_data[0x398];  // +0x88  DPLAY network sync data (0x398 bytes)
-    uint32_t  dplay_trailer;      // +0x420  final 4 bytes from DPLAY data payload
+#ifdef _WIN32
+    /* +0x88..+0x424: embedded DPlayManager player slot (0x39C bytes,
+     * network/DPlayManager.h). Previously modeled as a `uint8_t[0x398]`
+     * byte array (`dplay_data`) plus a separate `dplay_trailer` dword,
+     * reinterpret_cast'd back to DPlayManager* at every use site — that
+     * split existed only because DPlayManager itself was 4 bytes short
+     * of its real 0x39C size until 2026-08-14 (see DPlayManager.h's
+     * `unknown_0x398` field comment for the full evidence trail). Now
+     * that DPlayManager is correctly sized, this is one real member,
+     * matching CLAUDE.md's "add the fields to the canonical class
+     * instead of a raw byte view" rule — no more reinterpret_cast. */
+    DPlayManager dplay_data;      // +0x88
+#endif
     uint8_t   dplay_initialized;  // +0x424  1 = DPLAY data is valid
 #ifndef _WIN32
     DPlayManager* host_dplay_data = nullptr; // native-width owned copy
