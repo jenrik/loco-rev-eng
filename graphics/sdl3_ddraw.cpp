@@ -27,11 +27,19 @@ static uint32_t g_last_bmp_height = 0;
 
 // Host-only SDL ownership. The translated program's legacy void* DirectDraw
 // globals remain untouched until their COM-compatible adapter is complete.
-static IDirectDraw4* g_sdl_ddraw = nullptr;
-static IDirectDrawSurface4* g_sdl_primary_surface = nullptr;
-static IDirectDrawSurface4* g_sdl_backbuffer = nullptr;
+static Sdl3DirectDraw4* g_sdl_ddraw = nullptr;
+static Sdl3DirectDrawSurface* g_sdl_primary_surface = nullptr;
+static Sdl3DirectDrawSurface* g_sdl_backbuffer = nullptr;
 static SDL3PrimaryPresentationMode g_primary_presentation_mode =
     SDL3PrimaryPresentationMode::Auto;
+
+/* Real DirectDraw rects are (left, top, right, bottom), not (x, y, w, h) —
+ * convert at the API boundary so the interface stays faithful to the real
+ * Blt/Lock/Unlock signatures while the SDL3 backing keeps using SDL_Rect. */
+static SDL_Rect to_sdl_rect(const RECT& r)
+{
+    return SDL_Rect{ r.left, r.top, r.right - r.left, r.bottom - r.top };
+}
 
 static SDL_Surface* loadBmpToSdlSurface(const char* path, int bpp)
 {
@@ -77,7 +85,7 @@ static SDL_Surface* loadBmpToSdlSurface(const char* path, int bpp)
     return converted;
 }
 
-IDirectDrawSurface4::IDirectDrawSurface4()
+Sdl3DirectDrawSurface::Sdl3DirectDrawSurface()
     : texture(nullptr)
     , cpu_surface(nullptr)
     , width(0)
@@ -86,26 +94,42 @@ IDirectDrawSurface4::IDirectDrawSurface4()
     , has_color_key(false)
 {}
 
-IDirectDrawSurface4::~IDirectDrawSurface4()
+Sdl3DirectDrawSurface::~Sdl3DirectDrawSurface()
 {
     if (texture) SDL_DestroyTexture(texture);
     if (cpu_surface) SDL_DestroySurface(cpu_surface);
 }
 
-int IDirectDrawSurface4::Release()
+int32_t Sdl3DirectDrawSurface::QueryInterface(void* iid, void** object)
+{
+    (void)iid;
+    if (object) *object = nullptr;
+    return -1; /* E_NOINTERFACE-equivalent: no real caller in this tree */
+}
+
+uint32_t Sdl3DirectDrawSurface::AddRef()
+{
+    return 1; /* refcounting not modeled; lifetime is Release()-owned */
+}
+
+uint32_t Sdl3DirectDrawSurface::Release()
 {
     delete this;
     return 0;
 }
 
-int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
-                              IDirectDrawSurface4* src,
-                              const SDL_Rect* src_rect,
-                              uint32_t flags, DDBLTFX* fx)
+HRESULT Sdl3DirectDrawSurface::Blt(RECT* dest_rect,
+                                    IDirectDrawSurface4* src_surface,
+                                    RECT* src_rect,
+                                    DWORD flags, DDBLTFX* fx)
 {
     (void)flags;
 
     if (!texture) return -1;
+
+    auto* src = static_cast<Sdl3DirectDrawSurface*>(src_surface);
+    const SDL_Rect dst_sdl = dest_rect ? to_sdl_rect(*dest_rect) : SDL_Rect{};
+    const SDL_Rect src_sdl = src_rect ? to_sdl_rect(*src_rect) : SDL_Rect{};
 
     /* Color-fill blit (no source surface) */
     if (!src || !src->texture) {
@@ -117,9 +141,9 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
 
             SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
             SDL_SetRenderDrawColor(g_sdl_ddraw->renderer, r, g, b, 255);
-            if (dst_rect) {
-                SDL_FRect fr = { static_cast<float>(dst_rect->x), static_cast<float>(dst_rect->y),
-                                 static_cast<float>(dst_rect->w), static_cast<float>(dst_rect->h) };
+            if (dest_rect) {
+                SDL_FRect fr = { static_cast<float>(dst_sdl.x), static_cast<float>(dst_sdl.y),
+                                 static_cast<float>(dst_sdl.w), static_cast<float>(dst_sdl.h) };
                 SDL_RenderFillRect(g_sdl_ddraw->renderer, &fr);
             } else {
                 SDL_RenderFillRect(g_sdl_ddraw->renderer, nullptr);
@@ -132,16 +156,16 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
     /* Texture-to-texture blit */
     SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
 
-    SDL_FRect dst = dst_rect
-        ? SDL_FRect{ static_cast<float>(dst_rect->x), static_cast<float>(dst_rect->y),
-                      static_cast<float>(dst_rect->w), static_cast<float>(dst_rect->h) }
+    SDL_FRect dst = dest_rect
+        ? SDL_FRect{ static_cast<float>(dst_sdl.x), static_cast<float>(dst_sdl.y),
+                      static_cast<float>(dst_sdl.w), static_cast<float>(dst_sdl.h) }
         : SDL_FRect{ 0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height) };
 
     const SDL_FRect* src_frect = nullptr;
     SDL_FRect src_fr;
     if (src_rect) {
-        src_fr = { static_cast<float>(src_rect->x), static_cast<float>(src_rect->y),
-                   static_cast<float>(src_rect->w), static_cast<float>(src_rect->h) };
+        src_fr = { static_cast<float>(src_sdl.x), static_cast<float>(src_sdl.y),
+                   static_cast<float>(src_sdl.w), static_cast<float>(src_sdl.h) };
         src_frect = &src_fr;
     }
 
@@ -164,27 +188,30 @@ int IDirectDrawSurface4::Blt(const SDL_Rect* dst_rect,
     return 0;
 }
 
-int IDirectDrawSurface4::BltFast(int dx, int dy,
-                                  IDirectDrawSurface4* src,
-                                  const SDL_Rect* src_rect,
-                                  uint32_t flags)
+HRESULT Sdl3DirectDrawSurface::BltFast(DWORD dx, DWORD dy,
+                                        IDirectDrawSurface4* src_surface,
+                                        RECT* src_rect,
+                                        DWORD flags)
 {
-    SDL_Rect dst_rect = { dx, dy, 0, 0 };
+    auto* src = static_cast<Sdl3DirectDrawSurface*>(src_surface);
+    int w = 0, h = 0;
     if (src_rect) {
-        dst_rect.w = src_rect->w;
-        dst_rect.h = src_rect->h;
+        w = src_rect->right - src_rect->left;
+        h = src_rect->bottom - src_rect->top;
     } else if (src) {
-        dst_rect.w = src->width;
-        dst_rect.h = src->height;
+        w = src->width;
+        h = src->height;
     }
-    return Blt(&dst_rect, src, src_rect, flags, nullptr);
+    RECT dest_rect{ static_cast<int32_t>(dx), static_cast<int32_t>(dy),
+                     static_cast<int32_t>(dx) + w, static_cast<int32_t>(dy) + h };
+    return Blt(&dest_rect, src_surface, src_rect, flags, nullptr);
 }
 
-int IDirectDrawSurface4::Lock(const SDL_Rect* rect,
-                               DDSURFACEDESC* desc,
-                               uint32_t flags, void* unused)
+HRESULT Sdl3DirectDrawSurface::Lock(RECT* rect,
+                                     DDSURFACEDESC* desc,
+                                     DWORD flags, void* event_handle)
 {
-    (void)rect; (void)flags; (void)unused;
+    (void)rect; (void)flags; (void)event_handle;
 
     if (!texture) return -1;
 
@@ -218,7 +245,7 @@ int IDirectDrawSurface4::Lock(const SDL_Rect* rect,
     return 0;
 }
 
-int IDirectDrawSurface4::Unlock(const SDL_Rect* rect)
+HRESULT Sdl3DirectDrawSurface::Unlock(RECT* rect)
 {
     (void)rect;
 
@@ -234,7 +261,7 @@ int IDirectDrawSurface4::Unlock(const SDL_Rect* rect)
     return 0;
 }
 
-int IDirectDrawSurface4::SetColorKey(uint32_t flags, const DDCOLORKEY* key)
+HRESULT Sdl3DirectDrawSurface::SetColorKey(DWORD flags, const DDCOLORKEY* key)
 {
     (void)flags;
     if (key) {
@@ -247,38 +274,38 @@ int IDirectDrawSurface4::SetColorKey(uint32_t flags, const DDCOLORKEY* key)
     return 0;
 }
 
-int IDirectDrawSurface4::Restore()
+HRESULT Sdl3DirectDrawSurface::Restore()
 {
     /* SDL3 surfaces don't get lost; no-op */
     return 0;
 }
 
-int IDirectDrawSurface4::IsLost()
+HRESULT Sdl3DirectDrawSurface::IsLost()
 {
     return 0; /* never lost in SDL3 */
 }
 
-int IDirectDrawSurface4::GetDC(void** hdc)
+HRESULT Sdl3DirectDrawSurface::GetDC(void** hdc)
 {
     (void)hdc;
     return -1; /* GDI DC not supported */
 }
 
-int IDirectDrawSurface4::ReleaseDC(void* hdc)
+HRESULT Sdl3DirectDrawSurface::ReleaseDC(void* hdc)
 {
     (void)hdc;
     return -1;
 }
 
-int IDirectDrawSurface4::SetPalette(void* pal)
+HRESULT Sdl3DirectDrawSurface::SetPalette(void* palette)
 {
-    (void)pal;
+    (void)palette;
     /* Palette handling: no-op. SDL3 uses true-color surfaces;
      * palette-based rendering would need a shader or lookup table. */
     return 0;
 }
 
-int IDirectDrawSurface4::GetSurfaceDesc(DDSURFACEDESC* desc)
+HRESULT Sdl3DirectDrawSurface::GetSurfaceDesc(DDSURFACEDESC* desc)
 {
     if (!desc) return -1;
     *desc = DDSURFACEDESC{};
@@ -289,23 +316,50 @@ int IDirectDrawSurface4::GetSurfaceDesc(DDSURFACEDESC* desc)
     return 0;
 }
 
-int IDirectDrawSurface4::GetPixelFormat(void* fmt)
+HRESULT Sdl3DirectDrawSurface::GetPixelFormat(DDPIXELFORMAT* fmt)
 {
     (void)fmt;
     return -1; /* not needed for our use cases */
+}
+
+HRESULT Sdl3DirectDrawSurface::GetAttachedSurface(void* caps, IDirectDrawSurface4** out)
+{
+    (void)caps;
+    /* No real caller today; primary/backbuffer are tracked separately by
+     * the free-function bridge below, not via surface attachment chains. */
+    if (out) *out = nullptr;
+    return -1;
+}
+
+HRESULT Sdl3DirectDrawSurface::EnumSurfaces(void* callback, void* context)
+{
+    (void)callback; (void)context;
+    return -1; /* not needed for our use cases */
+}
+
+HRESULT Sdl3DirectDrawSurface::GetCaps(void* caps)
+{
+    (void)caps;
+    return -1; /* not needed for our use cases */
+}
+
+HRESULT Sdl3DirectDrawSurface::WaitForVerticalBlank(DWORD flags, void* event_handle)
+{
+    (void)flags; (void)event_handle;
+    return 0; /* no real vsync modeling; report success like a no-op wait */
 }
 
 /* =========================================================================
  * IDirectDraw4
  * ========================================================================= */
 
-IDirectDraw4::IDirectDraw4()
+Sdl3DirectDraw4::Sdl3DirectDraw4()
     : window(nullptr)
     , renderer(nullptr)
     , owned(false)
 {}
 
-IDirectDraw4::~IDirectDraw4()
+Sdl3DirectDraw4::~Sdl3DirectDraw4()
 {
     if (owned) {
         if (renderer) SDL_DestroyRenderer(renderer);
@@ -313,7 +367,19 @@ IDirectDraw4::~IDirectDraw4()
     }
 }
 
-int IDirectDraw4::Release()
+int32_t Sdl3DirectDraw4::QueryInterface(void* iid, void** object)
+{
+    (void)iid;
+    if (object) *object = nullptr;
+    return -1; /* E_NOINTERFACE-equivalent: no real caller in this tree */
+}
+
+uint32_t Sdl3DirectDraw4::AddRef()
+{
+    return 1; /* refcounting not modeled; lifetime is Release()-owned */
+}
+
+uint32_t Sdl3DirectDraw4::Release()
 {
     if (owned) {
         if (renderer) { SDL_DestroyRenderer(renderer); renderer = nullptr; }
@@ -323,15 +389,15 @@ int IDirectDraw4::Release()
     return 0;
 }
 
-int IDirectDraw4::CreateSurface(DDSURFACEDESC* desc,
-                                 IDirectDrawSurface4** out,
-                                 void* unused)
+HRESULT Sdl3DirectDraw4::CreateSurface(DDSURFACEDESC* desc,
+                                        IDirectDrawSurface4** out,
+                                        void* unused)
 {
     (void)unused;
 
     if (!desc || !out || !renderer) return -1;
 
-    IDirectDrawSurface4* surf = new IDirectDrawSurface4();
+    Sdl3DirectDrawSurface* surf = new Sdl3DirectDrawSurface();
     if (!surf) return -1;
 
     surf->width  = static_cast<int>(desc->dwWidth);
@@ -355,27 +421,28 @@ int IDirectDraw4::CreateSurface(DDSURFACEDESC* desc,
     return 0;
 }
 
-int IDirectDraw4::SetCooperativeLevel(void* hwnd, int level)
+HRESULT Sdl3DirectDraw4::SetCooperativeLevel(void* hwnd, DWORD flags)
 {
-    (void)hwnd; (void)level;
+    (void)hwnd; (void)flags;
     return 0;
 }
 
-int IDirectDraw4::SetDisplayMode(int w, int h, int bpp, int refresh, int flags)
+HRESULT Sdl3DirectDraw4::SetDisplayMode(DWORD width, DWORD height, DWORD bpp,
+                                         DWORD refresh_rate, DWORD flags)
 {
-    (void)w; (void)h; (void)bpp; (void)refresh; (void)flags;
+    (void)bpp; (void)refresh_rate; (void)flags;
 
     if (!window) return -1;
 
     /* SDL3 window size is managed through SDL_SetWindowSize;
      * display mode is set at window creation time. */
-    SDL_SetWindowSize(window, w, h);
+    SDL_SetWindowSize(window, static_cast<int>(width), static_cast<int>(height));
     return 0;
 }
 
-int IDirectDraw4::GetDeviceIdentifier(void* a, int b)
+HRESULT Sdl3DirectDraw4::GetDeviceIdentifier(void* identifier, DWORD flags)
 {
-    (void)a; (void)b;
+    (void)identifier; (void)flags;
     return -1; /* stub */
 }
 
@@ -390,7 +457,7 @@ bool SDL3_EnsurePrimarySurface()
     if (!renderer || !window) return false;
 
     if (!g_sdl_ddraw) {
-        g_sdl_ddraw = new IDirectDraw4();
+        g_sdl_ddraw = new Sdl3DirectDraw4();
         if (!g_sdl_ddraw) return false;
         g_sdl_ddraw->renderer = renderer;
         g_sdl_ddraw->window = window;
@@ -407,12 +474,18 @@ bool SDL3_EnsurePrimarySurface()
     desc.dwFlags = DDSD_WIDTH | DDSD_HEIGHT;
     desc.dwWidth = SDL3_PRIMARY_CANVAS_WIDTH;
     desc.dwHeight = SDL3_PRIMARY_CANVAS_HEIGHT;
-    if (g_sdl_ddraw->CreateSurface(&desc, &g_sdl_primary_surface, nullptr) != 0 ||
-        g_sdl_ddraw->CreateSurface(&desc, &g_sdl_backbuffer, nullptr) != 0) {
-        if (g_sdl_primary_surface) { g_sdl_primary_surface->Release(); g_sdl_primary_surface = nullptr; }
-        if (g_sdl_backbuffer) { g_sdl_backbuffer->Release(); g_sdl_backbuffer = nullptr; }
+    IDirectDrawSurface4* primary_iface = nullptr;
+    IDirectDrawSurface4* backbuffer_iface = nullptr;
+    if (g_sdl_ddraw->CreateSurface(&desc, &primary_iface, nullptr) != 0 ||
+        g_sdl_ddraw->CreateSurface(&desc, &backbuffer_iface, nullptr) != 0) {
+        if (primary_iface) primary_iface->Release();
+        if (backbuffer_iface) backbuffer_iface->Release();
+        g_sdl_primary_surface = nullptr;
+        g_sdl_backbuffer = nullptr;
         return false;
     }
+    g_sdl_primary_surface = static_cast<Sdl3DirectDrawSurface*>(primary_iface);
+    g_sdl_backbuffer = static_cast<Sdl3DirectDrawSurface*>(backbuffer_iface);
 
     SDL_SetRenderTarget(renderer, g_sdl_primary_surface->texture);
     SDL_SetRenderDrawColor(renderer, 0, 40, 80, 255);
@@ -421,7 +494,7 @@ bool SDL3_EnsurePrimarySurface()
     return true;
 }
 
-IDirectDrawSurface4* SDL3_GetPrimarySurface()
+Sdl3DirectDrawSurface* SDL3_GetPrimarySurface()
 {
     return SDL3_EnsurePrimarySurface() ? g_sdl_primary_surface : nullptr;
 }
@@ -649,7 +722,7 @@ IDirectDrawSurface4* DDRAW_LoadBmpToSurface(
     g_last_bmp_width  = static_cast<uint32_t>(raw->w);
     g_last_bmp_height = static_cast<uint32_t>(raw->h);
 
-    IDirectDrawSurface4* surf = new IDirectDrawSurface4();
+    Sdl3DirectDrawSurface* surf = new Sdl3DirectDrawSurface();
     surf->width  = raw->w;
     surf->height = raw->h;
 

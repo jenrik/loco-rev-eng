@@ -1226,6 +1226,24 @@ uint8_t Town_CheckOccupiedEx(int x1, int y1, int x2, int y2)
     uint8_t result = 0;
     IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
 
+#ifndef _WIN32
+    /* g_primary_surface is a real virtual IDirectDrawSurface4* now (see
+     * platform/ddraw_interfaces.h) but stays null until a later shim pass
+     * wires the host DirectDraw device — dispatching Lock/Unlock through a
+     * null pointer would segfault on a null vtable read (and the pixel scan
+     * below would separately segfault reading through a never-populated
+     * g_primary_surface_desc.lpSurface), instead of the old plain-struct
+     * stub's silent no-op. This check is purely a host affordance: once
+     * that device exists, primary is non-null and this function runs
+     * exactly as the original always did. Report "not occupied" rather
+     * than crash — the conservative default for an unavailable check. */
+    if (!primary) {
+        std::fprintf(stderr, "[HOST] Town_CheckOccupiedEx: occupancy scan skipped "
+                              "(DirectDraw device not wired on host)\n");
+        return 0;
+    }
+#endif
+
     if (g_surface_lost == 0) {
         /* NOTE: the binary sets the flag when Lock SUCCEEDS (returns 0)
          * — "lost" is actually the locked state here (0x42CA33..0x42CA37). */

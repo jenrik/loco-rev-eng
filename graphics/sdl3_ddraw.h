@@ -19,23 +19,18 @@
  * translation unit is host-only and compiles to nothing under MinGW. */
 
 /* =========================================================================
- * Forward declarations
- * ========================================================================= */
-
-struct IDirectDrawSurface4;
-struct IDirectDraw4;
-struct IDirectDrawPalette;
-struct IDirectDrawClipper;
-
-/* =========================================================================
- * IDirectDrawSurface4 — SDL3-backed surface
+ * Sdl3DirectDrawSurface — SDL3-backed IDirectDrawSurface4
  *
  * Wraps an SDL_Texture for GPU rendering and an optional SDL_Surface
  * for CPU-side pixel access (Lock/Unlock). The surface owns its
  * SDL resources and destroys them on Release().
+ *
+ * Overrides IDirectDrawSurface4 (platform/ddraw_interfaces.h) — real
+ * DirectDraw method names/signatures, API-compatible only (no ABI/vtable-
+ * slot accuracy target; see that header's scope note).
  * ========================================================================= */
 
-struct IDirectDrawSurface4 {
+struct Sdl3DirectDrawSurface : IDirectDrawSurface4 {
     SDL_Texture* texture;    /* GPU texture for Blit operations             */
     SDL_Surface* cpu_surface; /* CPU buffer for Lock/Unlock, or nullptr      */
     int          width;       /* Surface width in pixels                    */
@@ -43,52 +38,63 @@ struct IDirectDrawSurface4 {
     uint32_t     color_key;   /* Active source color key, or 0 if disabled  */
     bool         has_color_key;
 
-    IDirectDrawSurface4();
-    ~IDirectDrawSurface4();
-    IDirectDrawSurface4(const IDirectDrawSurface4&) = delete;
-    IDirectDrawSurface4& operator=(const IDirectDrawSurface4&) = delete;
+    Sdl3DirectDrawSurface();
+    ~Sdl3DirectDrawSurface() override;
+    Sdl3DirectDrawSurface(const Sdl3DirectDrawSurface&) = delete;
+    Sdl3DirectDrawSurface& operator=(const Sdl3DirectDrawSurface&) = delete;
 
-    int  Release();
-    int  Blt(const SDL_Rect* dst_rect, IDirectDrawSurface4* src,
-             const SDL_Rect* src_rect, uint32_t flags, DDBLTFX* fx);
-    int  BltFast(int dx, int dy, IDirectDrawSurface4* src,
-                 const SDL_Rect* src_rect, uint32_t flags);
-    int  Lock(const SDL_Rect* rect, DDSURFACEDESC* desc,
-              uint32_t flags, void* unused);
-    int  Unlock(const SDL_Rect* rect);
-    int  SetColorKey(uint32_t flags, const DDCOLORKEY* key);
-    int  Restore();
-    int  IsLost();
-    int  GetDC(void** hdc);
-    int  ReleaseDC(void* hdc);
-    int  SetPalette(void* pal);
-    int  GetSurfaceDesc(DDSURFACEDESC* desc);
-    int  GetPixelFormat(void* fmt);
+    int32_t  QueryInterface(void* iid, void** object) override;
+    uint32_t AddRef() override;
+    uint32_t Release() override;
+
+    HRESULT Blt(RECT* dest_rect, IDirectDrawSurface4* src_surface,
+                RECT* src_rect, DWORD flags, DDBLTFX* fx) override;
+    HRESULT BltFast(DWORD dx, DWORD dy, IDirectDrawSurface4* src_surface,
+                     RECT* src_rect, DWORD flags) override;
+    HRESULT Lock(RECT* rect, DDSURFACEDESC* desc, DWORD flags,
+                 void* event_handle) override;
+    HRESULT Unlock(RECT* rect) override;
+    HRESULT GetSurfaceDesc(DDSURFACEDESC* desc) override;
+    HRESULT GetPixelFormat(DDPIXELFORMAT* fmt) override;
+    HRESULT SetColorKey(DWORD flags, const DDCOLORKEY* key) override;
+    HRESULT Restore() override;
+    HRESULT IsLost() override;
+    HRESULT GetDC(void** hdc) override;
+    HRESULT ReleaseDC(void* hdc) override;
+    HRESULT SetPalette(void* palette) override;
+    HRESULT GetAttachedSurface(void* caps, IDirectDrawSurface4** out) override;
+    HRESULT EnumSurfaces(void* callback, void* context) override;
+    HRESULT GetCaps(void* caps) override;
+    HRESULT WaitForVerticalBlank(DWORD flags, void* event_handle) override;
 };
 
 /* =========================================================================
- * IDirectDraw4 — SDL3-backed DirectDraw device
+ * Sdl3DirectDraw4 — SDL3-backed IDirectDraw4
  *
  * Wraps SDL_Window + SDL_Renderer. CreateSurface creates SDL_Texture-
  * backed surfaces. This is a singleton; only one device exists.
  * ========================================================================= */
 
-struct IDirectDraw4 {
+struct Sdl3DirectDraw4 : IDirectDraw4 {
     SDL_Window*   window;
     SDL_Renderer* renderer;
     bool          owned;    /* true if we created the window/renderer       */
 
-    IDirectDraw4();
-    ~IDirectDraw4();
-    IDirectDraw4(const IDirectDraw4&) = delete;
-    IDirectDraw4& operator=(const IDirectDraw4&) = delete;
+    Sdl3DirectDraw4();
+    ~Sdl3DirectDraw4() override;
+    Sdl3DirectDraw4(const Sdl3DirectDraw4&) = delete;
+    Sdl3DirectDraw4& operator=(const Sdl3DirectDraw4&) = delete;
 
-    int  Release();
-    int  CreateSurface(DDSURFACEDESC* desc, IDirectDrawSurface4** out,
-                       void* unused);
-    int  SetCooperativeLevel(void* hwnd, int level);
-    int  SetDisplayMode(int w, int h, int bpp, int refresh, int flags);
-    int  GetDeviceIdentifier(void* a, int b);
+    int32_t  QueryInterface(void* iid, void** object) override;
+    uint32_t AddRef() override;
+    uint32_t Release() override;
+
+    HRESULT CreateSurface(DDSURFACEDESC* desc, IDirectDrawSurface4** out,
+                           void* unused) override;
+    HRESULT SetCooperativeLevel(void* hwnd, DWORD flags) override;
+    HRESULT SetDisplayMode(DWORD width, DWORD height, DWORD bpp,
+                            DWORD refresh_rate, DWORD flags) override;
+    HRESULT GetDeviceIdentifier(void* identifier, DWORD flags) override;
 };
 
 /* =========================================================================
@@ -107,9 +113,13 @@ enum class SDL3PrimaryPresentationMode {
 };
 
 /** Ensure fixed-size canvas and backbuffer targets exist. They are deliberately
- * separate from both the physical SDL display and untranslated DirectDraw globals. */
+ * separate from both the physical SDL display and untranslated DirectDraw globals.
+ * Returns the concrete type (not just IDirectDrawSurface4*) because real callers
+ * (ui/GameSetupPanel.cpp, tests) reach into .texture directly for SDL_SetRenderTarget —
+ * host-only test/rendering code, not decompiled game logic, so this is not a
+ * modeled-object-domain violation. */
 bool SDL3_EnsurePrimarySurface();
-IDirectDrawSurface4* SDL3_GetPrimarySurface();
+Sdl3DirectDrawSurface* SDL3_GetPrimarySurface();
 
 /** Select how the logical canvas is projected to the SDL output. */
 void SDL3_SetPrimaryPresentationMode(SDL3PrimaryPresentationMode mode);

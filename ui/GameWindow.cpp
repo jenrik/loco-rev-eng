@@ -17,6 +17,7 @@
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "../stubs/ddraw.h"
 #include "../shared/vtable_addrs.h"
+#include <cstdio>
 /* vtable_addrs.h: VTBL_* reference constants for documentation and cross-validation */
 /* ================================================================== */
 /* External references                                                 */
@@ -309,16 +310,41 @@ void GameWindow::hide()
 
     /* Restore primary surface if lost */
     if (g_surface_lost != 0) {                       /* 0x4FD218 */
-        int result = ((IDirectDrawSurface4*)g_primary_surface)->Restore();  /* 0x4FD3C4, vtable[32] */
-        if (result == 0) {
-            g_surface_lost = 0;
+#ifndef _WIN32
+        /* g_primary_surface is a real virtual IDirectDrawSurface4* now (see
+         * platform/ddraw_interfaces.h) but stays null until a later shim
+         * pass wires the host DirectDraw device (graphics/DDRAW.h's
+         * g_ddraw/g_primary_surface/g_backbuffer cluster) — dispatching
+         * through a null pointer would segfault on a null vtable read,
+         * instead of the old plain-struct stub's silent no-op. This check
+         * is purely a host affordance: once that device exists, g_primary_surface
+         * is non-null and this falls through to the real call below exactly
+         * as the original code always did. */
+        if (!g_primary_surface) {
+            std::fprintf(stderr, "[HOST] GameWindow::hide: primary surface restore "
+                                  "skipped (DirectDraw device not wired on host)\n");
+        } else
+#endif
+        {
+            int result = ((IDirectDrawSurface4*)g_primary_surface)->Restore();  /* 0x4FD3C4, vtable[32] */
+            if (result == 0) {
+                g_surface_lost = 0;
+            }
         }
     }
 
     /* Blt: save screen content below window from primary to backbuffer */
-    ((IDirectDrawSurface4*)g_backbuffer)->Blt(                     /* 0x4FD3C0, vtable[5] */
-        &destRect, g_primary_surface, &srcRect,
-        DDBLT_WAIT, NULL);
+#ifndef _WIN32
+    if (!g_backbuffer) {
+        std::fprintf(stderr, "[HOST] GameWindow::hide: backbuffer save Blt skipped "
+                              "(DirectDraw device not wired on host)\n");
+    } else
+#endif
+    {
+        ((IDirectDrawSurface4*)g_backbuffer)->Blt(                     /* 0x4FD3C0, vtable[5] */
+            &destRect, g_primary_surface, &srcRect,
+            DDBLT_WAIT, NULL);
+    }
 
     Cursor_UnlockAllSurfaces(this);
 
@@ -364,11 +390,19 @@ void GameWindow::show()
     DDRAW_UnlockPrimary(this->hWnd);                /* +0x08 */
 
     /* Blt: restore window content from its private surface to main backbuffer */
-    ((IDirectDrawSurface4*)g_backbuffer)->Blt(                     /* 0x4FD3C0, vtable[5] */
-        (RECT*)&this->rectLeft,                                     /* +0x18 dest rect */
-        this->backbufferSurface,                                    /* +0x38 src surface */
-        (RECT*)&this->rectLeft,                                     /* +0x18 src rect */
-        DDBLT_WAIT, NULL);
+#ifndef _WIN32
+    if (!g_backbuffer) {
+        std::fprintf(stderr, "[HOST] GameWindow::show: window-content restore Blt skipped "
+                              "(DirectDraw device not wired on host)\n");
+    } else
+#endif
+    {
+        ((IDirectDrawSurface4*)g_backbuffer)->Blt(                     /* 0x4FD3C0, vtable[5] */
+            (RECT*)&this->rectLeft,                                     /* +0x18 dest rect */
+            this->backbufferSurface,                                    /* +0x38 src surface */
+            (RECT*)&this->rectLeft,                                     /* +0x18 src rect */
+            DDBLT_WAIT, NULL);
+    }
 
     Cursor_UnlockAllSurfaces(this);
 }
@@ -596,43 +630,40 @@ int GameWindow::create(int nCmdShow, HWND hWndParent, int x, int y,
 
     /* ---- Create offscreen DDraw surface (if not already present) ---- */
     if (this->backbufferSurface == NULL) {     /* +0x38 */
-        /* Stack-allocated DDSURFACEDESC2 (0x7C bytes = 31 DWORDs).
-         * We use a local struct rather than stubs/ddraw.h's type because
-         * the stub definition may not match the binary's exact field layout.
-         * All offsets verified against Ghidra disassembly at 0x413DE0:
-         * ddsCaps is at +0x68 (0xA8-0x40=0x68 from struct base at ESP+0x40). */
-        struct DDSurfaceDesc {
-            DWORD dwSize;           /* +0x00 */
-            DWORD dwFlags;          /* +0x04 */
-            DWORD dwHeight;         /* +0x08 */
-            DWORD dwWidth;          /* +0x0C */
-            LONG  lPitch;           /* +0x10 */
-            DWORD dwBackBufferCount;/* +0x14 */
-            DWORD dwMipMapCount;    /* +0x18 */
-            DWORD dwAlphaBitDepth;  /* +0x1C */
-            DWORD dwReserved;       /* +0x20 */
-            void* lpSurface;        /* +0x24 */
-            uint8_t _pad_28[0x40];  /* +0x28 padding to reach ddsCaps at +0x68 */
-            DWORD ddsCaps;          /* +0x68 — DDSCAPS2.dwCaps */
-            uint8_t _pad_6C[0x10];  /* +0x6C trailing padding to 0x7C total */
-        };
+        /* platform/ddraw_interfaces.h's DDSURFACEDESC is the canonical
+         * DDSURFACEDESC2-shaped type (real DX6 SDK field order, height
+         * before width, ddsCaps present) that IDirectDraw4::CreateSurface
+         * now genuinely requires — this file previously declared its own
+         * local, byte-offset-annotated shadow struct because the old
+         * stubs/ddraw.h had no DDSURFACEDESC at all; that's no longer
+         * needed now that one real, shared definition exists. */
+        DDSURFACEDESC ddsd;
 
-        DDSurfaceDesc ddsd;
-
-        /* Zero the full descriptor (31 DWORDs = 0x7C bytes) */
-        int32_t* pDesc = (int32_t*)&ddsd;
-        for (int i = 0; i < 31; i++) {
-            pDesc[i] = 0;
-        }
-
-        ddsd.dwSize   = DDSD_SIZE;                         /* 0x7C */
-        ddsd.dwFlags  = DDSD_CAPS_HEIGHT_WIDTH;            /* 7 = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH */
-        ddsd.dwWidth  = nWidth;
-        ddsd.dwHeight = nHeight;
-        ddsd.ddsCaps  = 0x840;                             /* DDSCAPS_OFFSCREENPLAIN (+0x68) */
+        ddsd.dwSize      = DDSD_SIZE;                       /* 0x7C */
+        ddsd.dwFlags     = DDSD_CAPS_HEIGHT_WIDTH;          /* 7 = DDSD_CAPS|DDSD_HEIGHT|DDSD_WIDTH */
+        ddsd.dwWidth     = nWidth;
+        ddsd.dwHeight    = nHeight;
+        ddsd.ddsCaps.dwCaps = 0x840;                        /* DDSCAPS_OFFSCREENPLAIN */
 
         /* Call IDirectDraw4::CreateSurface (vtable[6]) */
         {
+#ifndef _WIN32
+            /* g_ddraw is a real virtual IDirectDraw4* now (see
+             * platform/ddraw_interfaces.h) but stays null until a later
+             * shim pass wires the host DirectDraw device — dispatching
+             * through a null pointer would segfault on a null vtable read,
+             * instead of the old plain-struct stub's silent no-op. This
+             * check is purely a host affordance: once that device exists,
+             * g_ddraw is non-null and this falls through to the real call
+             * below exactly as the original code always did. Fail the same
+             * way the original already handles a real CreateSurface
+             * failure (result != 0), rather than crash. */
+            if (!g_ddraw) {
+                std::fprintf(stderr, "[HOST] GameWindow::create: backbuffer surface "
+                                      "creation skipped (DirectDraw device not wired on host)\n");
+                return 0;
+            }
+#endif
             int result = ((IDirectDraw4*)g_ddraw)->CreateSurface(       /* 0x485440 */
                 &ddsd, &this->backbufferSurface, NULL);
             if (result != 0) {

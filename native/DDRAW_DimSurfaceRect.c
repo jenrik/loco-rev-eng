@@ -44,6 +44,7 @@
 #include "../shared/types.h"
 #include "../graphics/sdl3_ddraw.h"   /* typed IDirectDrawSurface4 + DDSURFACEDESC bridge */
 #include "../game/Panel.h"            /* canonical DDRAW_DimSurfaceRect prototype */
+#include <cstdio>
 
 /* Surface/pixel format globals — canonical addresses/types, matching
  * graphics/DDRAW.h, ui/UIPANEL_Surface.cpp, town/TownTiles.cpp. */
@@ -65,6 +66,23 @@ DDSURFACEDESC g_dim_surface_desc = {};
 int DDRAW_DimSurfaceRect(int left, int top, int right, int bottom)
 {
     IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
+
+#ifndef _WIN32
+    /* g_primary_surface is a real virtual IDirectDrawSurface4* now (see
+     * platform/ddraw_interfaces.h) but stays null until a later shim pass
+     * wires the host DirectDraw device — dispatching Lock/Unlock through a
+     * null pointer would segfault on a null vtable read (and the pixel loop
+     * below would separately segfault writing through a never-populated
+     * g_dim_surface_desc.lpSurface), instead of the old plain-struct stub's
+     * silent no-op. This check is purely a host affordance: once that
+     * device exists, primary is non-null and this function runs exactly as
+     * the original always did. */
+    if (!primary) {
+        std::fprintf(stderr, "[HOST] DDRAW_DimSurfaceRect: dim skipped "
+                              "(DirectDraw device not wired on host)\n");
+        return 1;
+    }
+#endif
 
     /* Lock the primary surface if not already locked. */
     if (g_surface_lost == 0) {

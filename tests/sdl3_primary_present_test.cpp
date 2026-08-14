@@ -12,7 +12,7 @@ int main()
         std::fprintf(stderr, "FAIL: SDL3_WindowInit: %s\n", SDL_GetError());
         return 1;
     }
-    IDirectDrawSurface4* primary = SDL3_GetPrimarySurface();
+    Sdl3DirectDrawSurface* primary = SDL3_GetPrimarySurface();
     SDL_Renderer* renderer = SDL3_GetRenderer();
     if (!primary || !primary->texture || !renderer ||
         primary->width != SDL3_PRIMARY_CANVAS_WIDTH ||

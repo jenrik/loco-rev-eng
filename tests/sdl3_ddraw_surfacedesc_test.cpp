@@ -12,7 +12,7 @@
 
 int main()
 {
-    IDirectDrawSurface4 surface;
+    Sdl3DirectDrawSurface surface;
     surface.width = 320;
     surface.height = 200;
 
