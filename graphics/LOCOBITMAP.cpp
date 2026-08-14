@@ -21,6 +21,7 @@
 
 #include "LOCOBITMAP.h"
 #include "PixelDataCache.h"
+#include "../platform/ddraw_interfaces.h"
 #include <new>
 
 /* ================================================================== */
@@ -161,46 +162,13 @@ protected:
     ~PixelEntryView() = default;
 };
 
-/* IDirectDrawSurface's COM slots used by the recovered present path. */
-/* DirectDrawSurface4's vtable is a COM ABI table.  Every entry is
- * __stdcall; omitting it makes the x86 callee/caller stack contract wrong.
- * Slots 5 and 27 are the only non-IUnknown entries used by this file. */
-struct DirectDrawSurfaceView {
-    virtual HRESULT __stdcall query_interface(const void* riid,
-                                               void** object) = 0; // slot 0
-    virtual uint32_t __stdcall add_reference() = 0;               // slot 1
-    virtual uint32_t __stdcall release() = 0;                     // slot 2
-    virtual HRESULT __stdcall slot3() = 0;
-    virtual HRESULT __stdcall slot4() = 0;
-    virtual HRESULT __stdcall blt(RECT* dst_rect, void* source,
-                                  RECT* src_rect, DWORD flags,
-                                  void* fx) = 0;                   // slot 5
-    virtual HRESULT __stdcall slot6() = 0;
-    virtual HRESULT __stdcall slot7() = 0;
-    virtual HRESULT __stdcall slot8() = 0;
-    virtual HRESULT __stdcall slot9() = 0;
-    virtual HRESULT __stdcall slot10() = 0;
-    virtual HRESULT __stdcall slot11() = 0;
-    virtual HRESULT __stdcall slot12() = 0;
-    virtual HRESULT __stdcall slot13() = 0;
-    virtual HRESULT __stdcall slot14() = 0;
-    virtual HRESULT __stdcall slot15() = 0;
-    virtual HRESULT __stdcall slot16() = 0;
-    virtual HRESULT __stdcall slot17() = 0;
-    virtual HRESULT __stdcall slot18() = 0;
-    virtual HRESULT __stdcall slot19() = 0;
-    virtual HRESULT __stdcall slot20() = 0;
-    virtual HRESULT __stdcall slot21() = 0;
-    virtual HRESULT __stdcall slot22() = 0;
-    virtual HRESULT __stdcall slot23() = 0;
-    virtual HRESULT __stdcall slot24() = 0;
-    virtual HRESULT __stdcall slot25() = 0;
-    virtual HRESULT __stdcall slot26() = 0;
-    virtual HRESULT __stdcall restore() = 0;                      // slot 27
-
-protected:
-    ~DirectDrawSurfaceView() = default;
-};
+/* This file's own ABI-slot-accurate DirectDrawSurfaceView (real COM vtable
+ * slot numbers: blt at 5, restore at 27) was removed 2026-08-14 in favor of
+ * platform/ddraw_interfaces.h's IDirectDrawSurface4 — this project's
+ * DirectDraw shim targets API compatibility (real method names/signatures),
+ * not ABI/vtable-slot accuracy (see PROGRESS.md's DirectDraw-shim notes),
+ * so a slot-accurate local interface would dispatch through the wrong
+ * compiler-generated slot on a real Sdl3DirectDrawSurface object. */
 
 static RECT sprite_rect(const ButtonSprite& sprite)
 {
@@ -1210,22 +1178,22 @@ void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2]
     }
 
     /* Perform the Blt from primary surface to backbuffer. */
-    DirectDrawSurfaceView* backbuffer =
-        reinterpret_cast<DirectDrawSurfaceView*>(g_backbuffer);
-    int32_t blt_result = backbuffer->blt(
-        &blit_rect, g_primary_surface, &src_rect, blit_flags, nullptr);
+    IDirectDrawSurface4* backbuffer = static_cast<IDirectDrawSurface4*>(g_backbuffer);
+    IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
+    int32_t blt_result = backbuffer->Blt(
+        &blit_rect, primary, &src_rect, blit_flags, nullptr);
 
     if (blt_result == 0x887601C2) {  /* DDERR_SURFACELOST */
         /* Surface was lost — restore it and retry */
-        int32_t restore_result = backbuffer->restore(); /* slot 27 = Restore */
+        int32_t restore_result = backbuffer->Restore();
 
         if (restore_result != 0) {
             goto error;  /* Surface restore failed */
         }
 
         /* Retry the blit with DDBLT_WAIT. */
-        blt_result = backbuffer->blt(
-            &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
+        blt_result = backbuffer->Blt(
+            &blit_rect, primary, &src_rect, 0x1000000, nullptr);
 
         if (blt_result == 0) {
             /* Success — invalidate viewport for full redraw */
@@ -1235,17 +1203,17 @@ void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd, int32_t offset_xy[2]
         }
     } else if (use_color_key != 0 && blt_result != 0) {
         /* With color key and non-SURFACELOST error, retry with DDBLT_WAIT. */
-        blt_result = backbuffer->blt(
-            &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
+        blt_result = backbuffer->Blt(
+            &blit_rect, primary, &src_rect, 0x1000000, nullptr);
 
         if (blt_result == 0x887601C2) {
             /* Surface lost again on retry */
-            int32_t restore_result = backbuffer->restore();
+            int32_t restore_result = backbuffer->Restore();
             if (restore_result != 0) {
                 goto error;
             }
-            blt_result = backbuffer->blt(
-                &blit_rect, g_primary_surface, &src_rect, 0x1000000, nullptr);
+            blt_result = backbuffer->Blt(
+                &blit_rect, primary, &src_rect, 0x1000000, nullptr);
         }
     }
 
@@ -1317,7 +1285,7 @@ void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags)
     /* Release DDraw surface via IDirectDrawSurface::Release */
     if (surface->ddraw_surf != nullptr) {
         uint32_t release_result =
-            reinterpret_cast<DirectDrawSurfaceView*>(surface->ddraw_surf)->release();
+            static_cast<IDirectDrawSurface4*>(surface->ddraw_surf)->Release();
         (void)release_result;
         surface->ddraw_surf = nullptr;
     }
