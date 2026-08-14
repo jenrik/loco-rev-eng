@@ -34,8 +34,16 @@
 struct DDSURFACEDESC {
     uint32_t dwSize;
     uint32_t dwFlags;
-    uint32_t dwWidth;
+    /* dwHeight precedes dwWidth in the real DirectDraw API (confirmed via
+     * disassembly of 0x42C5C3-0x42C5D1's SetRect call, which reads offset
+     * +0xC as width and +8 as height) — this struct previously had them
+     * swapped, disagreeing with stubs/native_compat.h's correct order.
+     * Harmless while every real reader/writer accesses these by name, not
+     * raw offset (confirmed via tree-wide grep), but matching the real API
+     * order avoids the field order becoming a trap for a future raw-offset
+     * reader. */
     uint32_t dwHeight;
+    uint32_t dwWidth;
     int32_t  lPitch;
     uint32_t dwBackBufferCount;
     uint32_t dwMipMapCount;
@@ -48,7 +56,7 @@ struct DDSURFACEDESC {
     uint32_t dwCKSrcBltColorSpaceHighValue;
 
     DDSURFACEDESC()
-        : dwSize(0), dwFlags(0), dwWidth(0), dwHeight(0), lPitch(0),
+        : dwSize(0), dwFlags(0), dwHeight(0), dwWidth(0), lPitch(0),
           dwBackBufferCount(0), dwMipMapCount(0), dwAlphaBitDepth(0),
           dwReserved(0), lpSurface(nullptr), dwCKDestBltColorSpaceLowValue(0),
           dwCKDestBltColorSpaceHighValue(0), dwCKSrcBltColorSpaceLowValue(0),
