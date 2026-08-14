@@ -322,26 +322,36 @@ public:
     void hideTooltip();
 
     /**
-     * Set tooltip text — iterate text_list, call vtable[11] on each
-     * initialized+visible tooltip with given rect and flags.
-     * Address: 0x423E00 (RET 0x14 — a real 5th stack arg; every caller
-     * passes literal 1 and the body never reads it).
+     * Set tooltip text — iterate text_list, call vtable[11]
+     * (Entity::Draw, confirmed 2026-08-14) on each initialized+visible
+     * tooltip with a rect built from (left, top, right, bottom).
+     * Address: 0x423E00.
+     *
+     * Correction (2026-08-14): the 5th stack argument is NOT unused —
+     * precise stack-offset tracing of the disassembly (Ghidra's own
+     * decompiler missed it because it's read directly off the stack and
+     * forwarded into the vtable[11] call without ever becoming a named
+     * local) shows it supplies Draw's `enable_scroll` parameter. Every
+     * real caller already passes the correct value (literal 1); the
+     * previous "never reads it" comment described the decompiler's
+     * blind spot, not the real control flow.
      */
-    void setTooltipText(int a1, int a2, int a3, int a4, int unused5);
+    void setTooltipText(int left, int top, int right, int bottom, int enable_scroll);
 
     /**
-     * Set tooltip position — iterate pos_list, call vtable[11] on each
-     * initialized+visible tooltip with given rect and flags.
-     * Address: 0x423E80 (RET 0x14 — same unused 5th arg as setTooltipText).
+     * Set tooltip position — iterate pos_list, call vtable[11]
+     * (Entity::Draw) on each initialized+visible tooltip.
+     * Address: 0x423E80 (same real 5th arg as setTooltipText).
      */
-    void setTooltipPos(int a1, int a2, int a3, int a4, int unused5);
+    void setTooltipPos(int left, int top, int right, int bottom, int enable_scroll);
 
     /**
-     * Update tooltip — iterate update_list, call vtable[11] on each
-     * initialized+visible tooltip. Called from TileMap_ProcessRect.
-     * Address: 0x423F00 (RET 0x14 — same unused 5th arg as setTooltipText).
+     * Update tooltip — iterate update_list, call vtable[11]
+     * (Entity::Draw) on each initialized+visible tooltip. Called from
+     * TileMap_ProcessRect.
+     * Address: 0x423F00 (same real 5th arg as setTooltipText).
      */
-    void updateTooltip(int a1, int a2, int a3, int a4, int unused5);
+    void updateTooltip(int left, int top, int right, int bottom, int enable_scroll);
 
     /**
      * Reset all tooltips — iterate update_list and pos_list, call

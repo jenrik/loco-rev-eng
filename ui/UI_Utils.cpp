@@ -499,30 +499,21 @@ void UI_Manager::hideTooltip()
 }
 
 /* ================================================================== */
-/* UI_Manager::setTooltipText — Iterate text_list, call vtable[11]     */
+/* UI_Manager::setTooltipText — Iterate text_list, call Entity::Draw   */
+/* (vtable[11], confirmed 2026-08-14 — see the declaration's own doc   */
+/* comment for the evidence trail).                                    */
 /* Address: 0x423E00                                                    */
 /* ================================================================== */
-void UI_Manager::setTooltipText(int a1, int a2, int a3, int a4, int /*unused5*/)
+void UI_Manager::setTooltipText(int left, int top, int right, int bottom,
+                                 int enable_scroll)
 {
-    void** textVtbl = *(void***)&this->text_list;
-
-
     uint32_t idx = 0;
     int count = (int)this->text_list.GetCount();
     while (idx < (uint32_t)count) {
-        int* item = (int*)this->text_list.GetItem(idx);
-        if (item != NULL) {
-            /* Check initialized flag at +0x18 */
-            if ((char)item[6] == 1) {            /* +0x18 */
-                /* Check visible flag at +0x24 */
-                if ((char)item[9] == 1) {        /* +0x24 */
-                    /* Call vtable[11] (offset 0x2C) — SetRectAndFlags */
-                    void** vtbl = *(void***)item;
-                    typedef void (__thiscall* SetRectFn)(void*, int, int, int, int, int);
-                    SetRectFn setRect = (SetRectFn)vtbl[11];
-                    setRect(item, a1, a2, a3, a4, item[0x0B]);  /* +0x2C flags */
-                }
-            }
+        UIEntity* item = static_cast<UIEntity*>(this->text_list.GetItem(idx));
+        if (item != NULL && item->initialized == 1 && item->visible == 1) {
+            item->Draw(RECT{left, top, right, bottom}, enable_scroll,
+                       item->blit_flags);
         }
         idx++;
         count = (int)this->text_list.GetCount();
@@ -530,25 +521,20 @@ void UI_Manager::setTooltipText(int a1, int a2, int a3, int a4, int /*unused5*/)
 }
 
 /* ================================================================== */
-/* UI_Manager::setTooltipPos — Iterate pos_list, call vtable[11]       */
+/* UI_Manager::setTooltipPos — Iterate pos_list, call Entity::Draw      */
+/* (vtable[11]).                                                       */
 /* Address: 0x423E80                                                    */
 /* ================================================================== */
-void UI_Manager::setTooltipPos(int a1, int a2, int a3, int a4, int /*unused5*/)
+void UI_Manager::setTooltipPos(int left, int top, int right, int bottom,
+                                int enable_scroll)
 {
-    void** posVtbl = *(void***)&this->pos_list;
-
-
     uint32_t idx = 0;
     int count = (int)this->pos_list.GetCount();
     while (idx < (uint32_t)count) {
-        int* item = (int*)this->pos_list.GetItem(idx);
-        if (item != NULL) {
-            if ((char)item[6] == 1 && (char)item[9] == 1) {
-                void** vtbl = *(void***)item;
-                typedef void (__thiscall* SetRectFn)(void*, int, int, int, int, int);
-                SetRectFn setRect = (SetRectFn)vtbl[11];
-                setRect(item, a1, a2, a3, a4, item[0x0B]);
-            }
+        UIEntity* item = static_cast<UIEntity*>(this->pos_list.GetItem(idx));
+        if (item != NULL && item->initialized == 1 && item->visible == 1) {
+            item->Draw(RECT{left, top, right, bottom}, enable_scroll,
+                       item->blit_flags);
         }
         idx++;
         count = (int)this->pos_list.GetCount();
@@ -556,25 +542,20 @@ void UI_Manager::setTooltipPos(int a1, int a2, int a3, int a4, int /*unused5*/)
 }
 
 /* ================================================================== */
-/* UI_Manager::updateTooltip — Iterate update_list, call vtable[11]    */
+/* UI_Manager::updateTooltip — Iterate update_list, call Entity::Draw   */
+/* (vtable[11]).                                                       */
 /* Address: 0x423F00                                                    */
 /* ================================================================== */
-void UI_Manager::updateTooltip(int a1, int a2, int a3, int a4, int /*unused5*/)
+void UI_Manager::updateTooltip(int left, int top, int right, int bottom,
+                                int enable_scroll)
 {
-    void** updateVtbl = *(void***)&this->update_list;
-
-
     uint32_t idx = 0;
     int count = (int)this->update_list.GetCount();
     while (idx < (uint32_t)count) {
-        int* item = (int*)this->update_list.GetItem(idx);
-        if (item != NULL) {
-            if ((char)item[6] == 1 && (char)item[9] == 1) {
-                void** vtbl = *(void***)item;
-                typedef void (__thiscall* SetRectFn)(void*, int, int, int, int, int);
-                SetRectFn setRect = (SetRectFn)vtbl[11];
-                setRect(item, a1, a2, a3, a4, item[0x0B]);
-            }
+        UIEntity* item = static_cast<UIEntity*>(this->update_list.GetItem(idx));
+        if (item != NULL && item->initialized == 1 && item->visible == 1) {
+            item->Draw(RECT{left, top, right, bottom}, enable_scroll,
+                       item->blit_flags);
         }
         idx++;
         count = (int)this->update_list.GetCount();
