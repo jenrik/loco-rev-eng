@@ -66,6 +66,7 @@
 /* ================================================================== */
 
 struct GameAudio;
+class AudioDirectSoundBuffer;
 
 /* ================================================================== */
 /* ResourceObject — typed view of the common resource vtable            */
@@ -116,8 +117,11 @@ struct ResourceEntry {
 
     /* +0x0A..+0x0B: padding */
 
-    /* +0x0C: buffer/stream pointer (DirectSound buffer) */
-    void* buffer;
+    /* +0x0C: DirectSound secondary buffer — real COM interface, confirmed
+     * via RESMGR_LoadSoundResource/ReleaseSoundResource's own vtable calls
+     * at slots [2]=Release and [18]=Stop (0x08/0x48 byte offsets), matching
+     * AudioDirectSoundBuffer's declared layout (audio/AudioChannel.h). */
+    AudioDirectSoundBuffer* buffer;
 
     /* +0x10..+0x17: additional fields (direct sound format, etc.) */
 

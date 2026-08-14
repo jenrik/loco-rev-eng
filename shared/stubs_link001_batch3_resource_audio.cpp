@@ -320,36 +320,32 @@ void ReleaseSoundResource(int handle)
 /* ReleaseSoundResource(ResourceEntry*)                                 */
 /* Address: 0x448EE0                                                   */
 /*                                                                     */
-/* Declared in resources/ResourceManager.h:828 but never defined         */
-/* anywhere (confirmed via nm on build/lego_loco.p/ui_GameSetupPanel.cpp.o */
-/* -> `U _Z20ReleaseSoundResourceP13ResourceEntry`). GameSetupPanel's own */
-/* destructor calls it, so this is reachable whenever a GameSetupPanel   */
-/* is torn down. The header's doc comment fully documents the real        */
-/* behavior (decrement refcount at +0x120; when it reaches 0 and a        */
-/* DirectSound buffer exists at +0x0C with flag bit0 clear, stop+release  */
-/* it) — the refcount bookkeeping is implemented for real below (it's a   */
-/* plain field decrement on an already-typed struct); the DirectSound     */
-/* buffer stop/release side effect is deferred (would require adapting    */
-/* AudioDirectSoundDevice/AudioChannel's typed interfaces to a raw         */
-/* ResourceEntry::buffer pointer, which is real feature work beyond a      */
-/* single stub function) and only warns once instead of performing it.    */
-/* TODO: decompile 0x448EE0's buffer-release call fully.                  */
+/* Declared in resources/ResourceManager.h:828. Decompiled in full      */
+/* (2026-08-15): decrements refcount at +0x120 (never below 0); when it */
+/* reaches 0 and a DirectSound buffer exists at +0x0C, checks the exact  */
+/* low byte at +0x08 against the literal 1 (`*(char*)(this+8) != 1`,     */
+/* NOT a bitmask test — flags is an int16_t, so this reads only its low  */
+/* byte) before stopping (vtable slot 0x48/4=18) and releasing (vtable   */
+/* slot 8/4=2) the buffer and clearing the field. `entry->buffer` is now */
+/* typed `AudioDirectSoundBuffer*` (resources/ResourceManager.h), the    */
+/* same COM interface audio/AudioChannel.cpp already uses for its own    */
+/* Stop()/Release() calls on channel-owned buffers — confirmed matching  */
+/* vtable slots. GameSetupPanel's own destructor calls this, so it is    */
+/* reachable whenever a GameSetupPanel is torn down.                     */
 /* ================================================================== */
 int32_t ReleaseSoundResource(ResourceEntry* entry)
 {
     if (entry == nullptr) {
         return 1;
     }
-    entry->refcount--;
-    if (entry->refcount <= 0 && entry->buffer != nullptr && (entry->flags & 1) == 0) {
-        static bool warned = false;
-        if (!warned) {
-            std::fprintf(stderr,
-                "STUB: ReleaseSoundResource(ResourceEntry*) — DirectSound buffer stop/"
-                "release not implemented (TODO: decompile 0x448EE0 buffer-release path); "
-                "refcount bookkeeping only, buffer left allocated\n");
-            warned = true;
-        }
+    if (entry->refcount > 0) {
+        entry->refcount--;
+    }
+    if (entry->refcount <= 0 && entry->buffer != nullptr &&
+        static_cast<uint8_t>(entry->flags) != 1) {
+        entry->buffer->Stop();
+        entry->buffer->Release();
+        entry->buffer = nullptr;
     }
     return 1;
 }
