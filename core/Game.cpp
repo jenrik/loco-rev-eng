@@ -1366,17 +1366,42 @@ void Game::ScreenToWorld(int32_t* out_xy, int screen_x, int screen_y)
     uint32_t x = static_cast<uint32_t>(screen_x + g_viewport_x);
     uint32_t y = static_cast<uint32_t>(screen_y + g_viewport_y);
 
+    /* Host deviation: 0x4AAD46/0x4AAD48 (g_player_id/g_player_color) are
+     * the same two addresses this codebase has already confirmed alias
+     * TileMap::tile_count_x/tile_count_y in the original's fixed-address
+     * singleton layout (world/tilemap.cpp's 9 sites, and
+     * InputMgr.cpp's placement-recentering calculation -- see
+     * PROGRESS.md). This clamp only makes sense as a tile-grid bounds
+     * check ((tile_count_x+1)*16 is the pixel width just past the last
+     * tile); with g_player_id/color genuinely 0 in single-player, it
+     * clamped every x >= 16 / y >= 16 down to 15, breaking mouse-to-world
+     * mapping almost everywhere on screen. On the original binary this
+     * is automatic (the same address IS TileMap::tile_count_x/y in that
+     * fixed layout); on host, TileMap is a heap object, so the live tile
+     * counts must be read explicitly off g_tilemap instead. */
+#ifndef _WIN32
+    int32_t tile_count_x = 0;
+    int32_t tile_count_y = 0;
+    if (g_tilemap != nullptr) {
+        tile_count_x = static_cast<TileMap*>(g_tilemap)->tile_count_x;
+        tile_count_y = static_cast<TileMap*>(g_tilemap)->tile_count_y;
+    }
+#else
+    int32_t tile_count_x = g_player_id;
+    int32_t tile_count_y = g_player_color;
+#endif
+
     if (static_cast<int32_t>(x) < 0) {
         x = 0;
     }
-    if ((g_player_id + 1) * 0x10 <= static_cast<int32_t>(x)) {
-        x = static_cast<uint32_t>(g_player_id * 0x10 + 0xF);
+    if ((tile_count_x + 1) * 0x10 <= static_cast<int32_t>(x)) {
+        x = static_cast<uint32_t>(tile_count_x * 0x10 + 0xF);
     }
     if (static_cast<int32_t>(y) < 0) {
         y = 0;
     }
-    if ((g_player_color + 1) * 0x10 <= static_cast<int32_t>(y)) {
-        y = static_cast<uint32_t>(g_player_color * 0x10 + 0xF);
+    if ((tile_count_y + 1) * 0x10 <= static_cast<int32_t>(y)) {
+        y = static_cast<uint32_t>(tile_count_y * 0x10 + 0xF);
     }
 
     const void* parent = this->resource;
