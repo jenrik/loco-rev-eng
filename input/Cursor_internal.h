@@ -260,16 +260,35 @@ extern Netman* _g_netman;        /* 0x4FD3AC — Netman singleton pointer */
  * directly and the two conflicted at the type level, not just cosmetically). */
 class PlayerConfig;
 extern char          g_empty_string;    /* 0x4851D0 — empty string constant */
-extern void*         g_game;          /* Game* */
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
 extern uint8_t g_is_fullscreen;
 extern int32_t g_client_width;
 extern int32_t g_client_height;
 extern int32_t g_viewport_x;
 extern int32_t g_viewport_y;
-extern void*   g_town;          /* Town* */
-extern void*   g_postcard;      /* PostcardAlbum* */
-extern void*   g_postcard_send; /* PostcardPreviewWindow* */
+/* g_town/g_cursor/g_postcard/g_postcard_send occupy one contiguous run of
+ * four pointer-sized globals (0x4FD37C/0x4FD380/0x4FD384/0x4FD388) —
+ * confirmed directly via get_xrefs_to on each address (2026-08-14), not
+ * just by comment consensus: several other files' address comments for
+ * this same cluster disagree with each other and with the confirmed
+ * values (`core/GameLoop.cpp` has all three of town/cursor/postcard_send
+ * rotated onto the wrong address; `town/Town.cpp` and `ui/HelpWnd.cpp`
+ * each have their own, different, wrong value for g_cursor) — those are
+ * pre-existing comment-only errors elsewhere in the tree, not fixed here
+ * (out of scope: they don't affect linkage, `extern` binds by symbol name
+ * regardless of what the trailing comment claims). Retyped from `void*`
+ * to their strongest evidenced types, matching the g_player_config/
+ * g_empty_string precedent above (only forward-declared here — these are
+ * only ever used as pointers in Cursor code, never dereferenced through
+ * their full type, so pulling in each class's full header is unneeded). */
+class Game;
+class Town;
+class PostcardAlbum;
+class PostcardPreviewWindow;
+extern Game*                  g_game;          /* 0x4854C8 */
+extern Town*                  g_town;          /* 0x4FD37C */
+extern PostcardAlbum*         g_postcard;      /* 0x4FD384 */
+extern PostcardPreviewWindow* g_postcard_send; /* 0x4FD388 */
 extern void*   g_ui_main;       /* EditWindow* */
 extern void*   g_main_window;   /* UI_WindowBase* */
 extern void*   g_font_small;    /* HFONT — GDI object */

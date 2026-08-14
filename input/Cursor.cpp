@@ -3,6 +3,14 @@
 
 #include "Cursor.h"
 #include "Cursor_internal.h"
+#include "../network/DPlayManager.h"   /* complete type needed: base_destructor()
+                                         * below deletes obj_184 (a real
+                                         * DPlayManager*, Cursor.h only
+                                         * forward-declares it) — deleting
+                                         * through an incomplete type is UB
+                                         * and would silently skip the
+                                         * destructor (2026-08-14, found via
+                                         * a -Wdelete-incomplete warning) */
 #include "../ui/UI_WindowBase.h"
 #include "../ui/ButtonSprite.h"
 

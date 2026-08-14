@@ -79,9 +79,12 @@ void  LAB_0045c520(void);     /* 0x45C520 - timer callback */
 /* Global singletons (declared in stubs_impl.cpp but not yet in shared headers) */
 extern void*    g_ui_main;           /* 0x4FD378 */
 extern void*    g_town;              /* 0x4FD37C */
-extern void*    g_postcard_send;     /* 0x4FD380 */
-extern void*    g_cursor;            /* 0x4FD384 */
-extern void*    g_postcard;          /* 0x4FD388 */
+extern void*    g_cursor;            /* 0x4FD380 — confirmed via get_xrefs_to
+                                       * (2026-08-14); this file previously had
+                                       * cursor/postcard_send/postcard rotated
+                                       * onto each other's real addresses */
+extern void*    g_postcard;          /* 0x4FD384 */
+extern void*    g_postcard_send;     /* 0x4FD388 */
 extern void*    g_network_thread;    /* 0x4FD398 */
 extern void*    g_network_queue;     /* 0x4FD39C */
 extern void*    g_train;             /* 0x4FD3A4 */

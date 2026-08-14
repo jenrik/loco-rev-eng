@@ -341,8 +341,11 @@ extern void  NETMAN_CheckTimeout(void* netman, int32_t timeoutVal);  /* 0x440820
 /* Window-proc helpers used by the postcard window procs: */
 extern void  CGWND_SetMode(int mode);                                 /* 0x408130 */
 extern void  Cursor_Show(void* c);                                    /* 0x4164F0 */
-extern void* g_cursor;                /* 0x4FD384 — Cursor object */
-extern void* g_postcard;              /* 0x4FD388 — PostcardAlbum object */
+extern void* g_cursor;                /* 0x4FD380 — Cursor object (was
+                                        * miscommented 0x4FD384, confirmed via
+                                        * get_xrefs_to 2026-08-14) */
+extern void* g_postcard;              /* 0x4FD384 — PostcardAlbum object (was
+                                        * miscommented 0x4FD388) */
 
 /* ================================================================== */
 /* Host-only view structs for foreign object layouts                   */

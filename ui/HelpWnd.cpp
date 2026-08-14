@@ -158,11 +158,12 @@ extern size_t WIN32_Stream_Size();
 /* ================================================================== */
 
 extern HelpWnd* g_audio_mgr;           /* 0x4FD2CC */
-extern Town*    g_town;                /* 0x4FD2D0 */
+extern Town*    g_town;                /* 0x4FD37C (was miscommented 0x4FD2D0,
+                                         * confirmed via get_xrefs_to 2026-08-14) */
 class InputMgr;
 extern InputMgr g_input_mgr;           /* 0x4A9990 — static InputMgr object */
-extern PostcardAlbum* g_postcard;      /* 0x4FD2D4 */
-extern Cursor*  g_cursor;              /* 0x4FD2D8 */
+extern PostcardAlbum* g_postcard;      /* 0x4FD384 (was miscommented 0x4FD2D4) */
+extern Cursor*  g_cursor;              /* 0x4FD380 (was miscommented 0x4FD2D8) */
 extern int      g_game_mode;           /* 0x4FD2E0 */
 extern int      g_is_fullscreen;       /* 0x4FD2E4 */
 extern TileMap* g_tilemap;             /* 0x4AAD08 — tilemap singleton */
