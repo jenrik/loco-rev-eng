@@ -8,6 +8,8 @@
 // Status: TRANSCRIBED
 
 #include "AboutDialog.h"
+#include "../graphics/LOCOBITMAP.h"
+#include "../resources/ResourceObject.h"
 #include <cassert>
 #include <cstdio>
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
@@ -107,14 +109,9 @@ extern bool __fastcall UIPANEL_Blit(void* srcSurface, uint32_t srcX, uint32_t sr
 /* CRT wide-string helper for parsing WVE marker */
 extern void* __thiscall wcsstr(const void* str, const void* substr);        /* 0x471480 */
 
-/* UIPANEL surface helpers — real bodies in ui/UIPANEL_Surface.cpp /
- * graphics/LOCOBITMAP.cpp. Declared here with `void*` (not the typed
- * UIPANEL_Surface*) to avoid pulling in graphics/LOCOBITMAP.h's larger,
- * differently-sized same-named struct — see AboutDialog::InitSprites'
- * doc comment and PROGRESS.md for that pre-existing conflict. Matches
- * ui/UIPANEL.cpp's own `void*`-typed local extern for the same address. */
-extern void     __fastcall UIPANEL_CreateSurface(void* surface);            /* 0x42A110 */
-extern size_t   UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
+/* UIPANEL_Surface construction is the real UIPANEL_Surface() constructor
+ * (graphics/LOCOBITMAP.h/.cpp, 0x42A110, included above) — callers use
+ * `new UIPANEL_Surface()`. */
 extern uint32_t __thiscall UIPANEL_InitSurface(void* surface, int width,    /* 0x42A850 */
                                                 int height, int mode,
                                                 uint32_t paletteParam,
@@ -500,29 +497,12 @@ void AboutDialog::InitSprites()
     void* resource = ResourceManager_GetById(&g_resmgr, 0x3daf);
     res_object = resource;
 
-    /* resource->vtable[1](0, 0) — resource objects returned by
-     * ResourceManager_GetById are not yet a modeled C++ hierarchy in this
-     * codebase (still void* everywhere they're used), so this is a direct,
-     * evidence-backed vtable-slot call rather than a guessed method name,
-     * matching this file's own AudioChannel_Release-style precedent
-     * elsewhere in the DDRAW.cpp family for similarly unmodeled objects. */
-    using ResourceGetSurfaceFn = void* (__stdcall*)(void*, int, int);
-    void** resourceVtbl = *reinterpret_cast<void***>(resource);
-    res_surface = reinterpret_cast<ResourceGetSurfaceFn>(resourceVtbl[1])(resource, 0, 0);
+    /* Real ResourceObject::Lock(0, 0) virtual dispatch (resources/
+     * ResourceObject.h) -- resource objects returned by
+     * ResourceManager_GetById are now a modeled C++ hierarchy. */
+    res_surface = static_cast<ResourceObject*>(resource)->Lock(0, 0);
 
-    /* Allocate the screensaver's own UIPANEL surface. The original
-     * allocates exactly 0x20 bytes (the real 32-bit sizeof(UIPANEL_Surface),
-     * graphics/LOCOBITMAP.h) — use UIPANEL_Surface_Size() instead of that
-     * literal since pointer fields widen the struct on this 64-bit host
-     * (see graphics/LOCOBITMAP.cpp). Faithfully proceeds to call
-     * UIPANEL_InitSurface below even if this allocation fails
-     * (screensaver_surface stays nullptr) — an original bug, preserved
-     * as-is rather than fixed. */
-    void* surfaceBuf = operator_new(UIPANEL_Surface_Size());
-    if (surfaceBuf != nullptr) {
-        UIPANEL_CreateSurface(surfaceBuf);
-    }
-    screensaver_surface = surfaceBuf;
+    screensaver_surface = new UIPANEL_Surface();
 
     UIPANEL_InitSurface(screensaver_surface, 0xd8, 0xc4, 0, 0, 0);
     UIPANEL_SetClipRect(screensaver_surface, 9, 0);

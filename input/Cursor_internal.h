@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Cursor.h"
+#include "../resources/ResourceObject.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* Win32 API declarations.
  * NOTE: Most of these are also in stubs/windows.h. The _WIN32 block
@@ -141,8 +142,6 @@ void UIPANEL_EndPaint(void*);
  * already fixed in native/NETMAN_NetworkUI.c;
  * docs/landmine-sweep-worklist.md). */
 void UIPANEL_EndPaintEx(void*, int, int, uint8_t, RECT*);
-void* UIPANEL_CreateSurface(void*);
-size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 void UIPANEL_UnlockSurface(void*);
 void FormatResourceString(void*, UINT, LPSTR, int);
 /* DPLAY_EnumeratePlayers and NET_GetOrCreateSurface are now typed
@@ -319,33 +318,20 @@ void Cursor_UnlockAllSurfaces(void);
 /*                                                                     */
 /* NOTE: The RESDATA_ prefix on GetSurface/ReleaseSurface comes from  */
 /* the RESDATA struct name (defined in shared/types.h), NOT from       */
-/* Ghidra auto-label conventions. These are transitional bridge        */
-/* helpers for Cursor's use of the RESDATA vtable.                     */
-/*                                                                     */
-/* TODO [PROGRESS.md]: Refactor RESDATA from POD struct with manual   */
-/* vtable into a C++ class with virtual methods GetSurface() and       */
-/* ReleaseSurface(). The literal vtable dispatch here (vtbl[1]/[2])    */
-/* is an AGENTS.md §4 anti-pattern; acceptable as a transitional       */
-/* bridge until RESDATA is refactored across all consumers.            */
-/*                                                                     */
-/* RESDATA is defined in shared/types.h as a POD struct with a vtable  */
-/* pointer at +0x00. These helpers provide typed access to RESDATA's   */
-/* vtable slots used by Cursor (other consumers may use different      */
-/* signatures for the same slots depending on the RESDATA subclass).   */
-/*                                                                     */
-/* RESDATA vtable layout (Cursor-specific subset):                     */
-/*   [0]  scalar deleting destructor                                  */
-/*   [1]  GetSurface(resdata, flags, mode) → surface ptr              */
-/*   [2]  ReleaseSurface(resdata)                                     */
+/* Cursor's use of the RESDATA vtable, via real ResourceObject virtual       */
+/* dispatch (resources/ResourceObject.h) -- RESDATA's 3-slot vtable         */
+/* ([0]=dtor, [1]=Lock/GetSurface, [2]=Unlock/ReleaseSurface) is real C++    */
+/* now, not a manually-indexed function-pointer array. Takes `void*` rather */
+/* than `RESDATA*`: RESDATA itself stays an unmodeled POD struct (never the */
+/* runtime type behind any resource pointer on this host-only-executing     */
+/* build -- see resources/ResourceObject.h), so a `RESDATA*` parameter here */
+/* would just be a misleading label on what's really always a              */
+/* loco::assets::SpriteResource*.                                          */
 /* ================================================================== */
-static inline void* RESDATA_GetSurface(RESDATA* resdata, int flags, int mode) {
-    void** vtbl = *reinterpret_cast<void***>(resdata);
-    using GetSurface = void* (*)(void*, int, int);
-    return reinterpret_cast<GetSurface>(vtbl[1])(resdata, flags, mode);
+static inline void* RESDATA_GetSurface(void* resdata, int flags, int mode) {
+    return static_cast<ResourceObject*>(resdata)->Lock(flags, mode);
 }
-static inline void RESDATA_ReleaseSurface(RESDATA* resdata) {
-    void** vtbl = *reinterpret_cast<void***>(resdata);
-    using ReleaseSurface = void (*)(void*);
-    reinterpret_cast<ReleaseSurface>(vtbl[2])(resdata);
+static inline void RESDATA_ReleaseSurface(void* resdata) {
+    static_cast<ResourceObject*>(resdata)->Unlock();
 }
 

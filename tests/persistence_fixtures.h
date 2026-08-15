@@ -476,6 +476,13 @@ bool load_and_draw_town_backdrop(const char*) { return false; }
 SDL_Surface* bitmap_surface(const SpriteBitmap*) { return nullptr; }
 uint32_t bitmap_width(const SpriteBitmap*) { return 0; }
 uint32_t bitmap_height(const SpriteBitmap*) { return 0; }
+// SpriteResource::Lock() (resources/resource_manager_sdl3.cpp) calls through
+// this hook -- registered for real by resources/sprite_uipanel_adapter.cpp,
+// which this narrow cone doesn't link (see g_ddraw's comment above for why).
+// is_host_sprite_resource() always returning false above means Lock() is
+// never reached in this cone regardless; declared only to satisfy the link.
+using SurfaceLockHook = void* (*)(SpriteResource*, int32_t, int32_t);
+void register_surface_lock_hook(SurfaceLockHook) {}
 }  // namespace loco::assets
 const loco::assets::SpriteMetadata* ResourceManager_GetSpriteMetadata(void*) { return nullptr; }
 #endif  /* !PERSISTENCE_FIXTURES_REAL_RESOURCE_MANAGER */

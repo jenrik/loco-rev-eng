@@ -43,6 +43,7 @@
 
 #include "Netman.h"
 #include "DPlayManager.h"
+#include "../graphics/LOCOBITMAP.h"
 #include "../game/Building.h"
 #include "../game/GameConfig.h"
 #include "../game/PlayerConfig.h"
@@ -499,18 +500,13 @@ void Netman::SendMapData(int32_t targetDpId)
     if (!slot) return;
     slot->has_data = 1;
 
-    /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the real host
-     * size (see graphics/LOCOBITMAP.h). */
-    void* surf = operator_new(UIPANEL_Surface_Size());
-    if (surf != nullptr) surf = UIPANEL_CreateSurface(surf);
+    UIPANEL_Surface* surf = new UIPANEL_Surface();
     TileMap_CreateOverlay(g_tilemap, surf, 0);
-    if (surf == nullptr) return;
 
-    const auto* surface_bytes = reinterpret_cast<const uint8_t*>(surf);
-    uint16_t w = *reinterpret_cast<const uint16_t*>(surface_bytes + 8);
-    uint16_t h = *reinterpret_cast<const uint16_t*>(surface_bytes + 0xC);
+    uint16_t w = static_cast<uint16_t>(surf->width);
+    uint16_t h = static_cast<uint16_t>(surf->height);
     int32_t ds = static_cast<int32_t>(w) * static_cast<int32_t>(h);
-    void* px = *reinterpret_cast<void* const*>(surface_bytes + 0x18);
+    void* px = surf->pixels;
 
     uint8_t* pkt = static_cast<uint8_t*>(operator_new(ds + 0x28));
     *reinterpret_cast<uint16_t*>(pkt + 0) = PACKET_MAP_DATA;
@@ -533,7 +529,7 @@ void Netman::SendMapData(int32_t targetDpId)
 
     TrainMessage* m = allocate_train_message();
     if (m == nullptr) {
-        net_delete(surf);
+        delete surf;
         GLOBAL_free(pkt);
         return;
     }
@@ -544,8 +540,7 @@ void Netman::SendMapData(int32_t targetDpId)
     m->flags = 1;
     Train_QueueMessage(_g_train, m);
 
-    /* Delete surf (has vtable with virtual destructor) */
-    net_delete(surf);
+    delete surf;
 }
 
 /* ================================================================== */

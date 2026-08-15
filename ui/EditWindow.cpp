@@ -183,9 +183,6 @@ void    __fastcall Town_BlitElement(void* src, int sx, int sy,
                                     int dx, int dy, int dw, int dh,
                                     int flags);                    /* 0x42B050 */
 
-void*   __thiscall UIPANEL_CreateSurface(void* buf);             /* 0x426E10 */
-void*   UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* 0x42A140 */
-
 /* ================================================================== */
 /* External game function references                                    */
 /* ================================================================== */
@@ -1006,7 +1003,7 @@ void EditWindow::cleanupSprites()
     // primary target directly. Never apply the original x86 surface destructor
     // to the intentionally absent host surface.
 #else
-    if (this->pMainSurface) UIPANEL_DestroySurface(this->pMainSurface, 1);
+    delete this->pMainSurface;
 #endif
     this->pMainSurface = nullptr;
     this->spritesLoaded = 0;
@@ -1048,13 +1045,8 @@ void EditWindow::render()
         if (!blitted) return;
     }
 #else
-    /* 0x20 was the original x86 sizeof(UIPANEL_Surface); pointer fields
-     * widen on this 64-bit host, so use the real size (see
-     * graphics/LOCOBITMAP.h). */
-    void* surface_memory = operator_new(sizeof(UIPANEL_Surface));
-    this->pMainSurface = surface_memory
-        ? static_cast<UIPANEL_Surface*>(UIPANEL_CreateSurface(surface_memory)) : nullptr;
-    if (this->pMainSurface) UIPANEL_InitSurface(this->pMainSurface, 0x500, 0x400, 1, 0, 0);
+    this->pMainSurface = new UIPANEL_Surface();
+    UIPANEL_InitSurface(this->pMainSurface, 0x500, 0x400, 1, 0, 0);
 
     const auto blit_backdrop = [this](uint32_t resource_id, int x, int y) {
         auto* resource = loco::assets::host_resource_manager().get_sprite_by_id(resource_id);

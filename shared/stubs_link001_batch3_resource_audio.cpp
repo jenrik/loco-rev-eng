@@ -28,6 +28,7 @@
 #include "../resources/ResourceManager.h"
 #include "../audio/AudioChannel.h"
 #include "../audio/GameAudio.h"
+#include "../audio/sdl3_dsound_adapter.h"
 
 /* ================================================================== */
 /* RESDATA_Lock / RESDATA_Unlock                                       */
@@ -526,33 +527,36 @@ void GameAudio_UpdateVolume(void* audio, unsigned char mute)
 /* loaded via GetProcAddress on real Windows — a genuine thin OS/DLL      */
 /* wrapper per CLAUDE.md's stub exception #1, not original game logic.    */
 /*                                                                        */
-/* Because GameAudio_Init above now bridges to the real GameAudio::Init(), */
-/* this becomes reachable on every audio-init attempt; a real host-backed   */
-/* DirectSound device already exists (audio/sdl3_dsound.cpp's               */
-/* DirectSoundCreate/IDirectSound), but it implements a different,           */
-/* concrete, SDL3-backed struct — not the abstract COM-style                 */
-/* AudioDirectSoundDevice vtable interface GameAudio::ds_device expects       */
-/* (audio/AudioChannel.h:84), and no adapter class bridging the two exists    */
-/* yet. Building that adapter is real feature work beyond a single stub      */
-/* function, so this returns a documented failure code instead: both real    */
-/* call sites in GameAudio::Init() already check `if (result != 0) return    */
-/* result & 0xFFFFFF00;`, so a nonzero return here makes audio init fail      */
-/* gracefully (no audio device) rather than dereferencing an uninitialized    */
-/* ds_device pointer.                                                        */
+/* Host: constructs a real device through audio/sdl3_dsound_adapter.h's   */
+/* bridge (a real AudioDirectSoundDevice implementation backed by         */
+/* audio/sdl3_dsound.cpp's SDL3 IDirectSound) instead of returning a      */
+/* documented failure code -- see PROGRESS.md's RESDATA/ResourceObject    */
+/* unification entry for the adapter's design. `_WIN32` keeps the old     */
+/* documented-failure stub: on real Windows this would call the actual    */
+/* system DirectSoundCreate, not this host bridge, and that real call is   */
+/* out of this project's host-focused scope. */
 /* ================================================================== */
 int32_t Ordinal_1(int32_t provider, void* out_object)
 {
     (void)provider;
-    (void)out_object;
+    if (out_object == nullptr) {
+        return -1;
+    }
+#ifndef _WIN32
+    AudioDirectSoundDevice* device = Sdl3CreateAudioDirectSoundDevice();
+    *static_cast<AudioDirectSoundDevice**>(out_object) = device;
+    return device != nullptr ? 0 : -1;
+#else
+    *static_cast<AudioDirectSoundDevice**>(out_object) = nullptr;
     static bool warned = false;
     if (!warned) {
         std::fprintf(stderr,
-            "STUB: Ordinal_1(int32_t, void*) not implemented — dsound.dll ordinal-1 "
-            "(DirectSoundCreate) used by GameAudio::Init() (0x412C50); no adapter exists "
-            "yet from the real AudioDirectSoundDevice vtable interface to the host's SDL3 "
-            "IDirectSound (audio/sdl3_dsound.cpp). Returning a failure code so "
-            "GameAudio::Init() takes its documented graceful-failure path.\n");
+            "STUB: Ordinal_1(int32_t, void*) not implemented on _WIN32 — real "
+            "dsound.dll ordinal-1 (DirectSoundCreate) is out of this project's "
+            "host-focused scope. Returning a failure code so GameAudio::Init() "
+            "takes its documented graceful-failure path.\n");
         warned = true;
     }
     return -1;
+#endif
 }

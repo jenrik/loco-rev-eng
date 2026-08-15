@@ -16,6 +16,7 @@
 
 #include "GameObject.h"
 #include "Entity.h"
+#include "../resources/ResourceObject.h"
 #include <cstring>
 
 #ifndef _WIN32
@@ -39,18 +40,6 @@ T* field_at(void* object, size_t offset)
 {
     return reinterpret_cast<T*>(static_cast<uint8_t*>(object) + offset);
 }
-
-/* RESDATA's three recovered virtual entries.  The object is a resource
- * descriptor, not an opaque C pointer: typed dispatch preserves the slot
- * signatures without reading its vptr in executable code. */
-struct ResourceDataView {
-    virtual void* destroy(uint8_t flags) = 0;        /* slot 0 */
-    virtual void* acquire_surface(int x, int y) = 0;/* slot 1 */
-    virtual void release_surface() = 0;              /* slot 2 */
-
-protected:
-    ~ResourceDataView() = default;
-};
 
 } // namespace
 
@@ -192,24 +181,22 @@ Entity::~Entity()
     void* resource = this->resource;
     if (resource != nullptr) {
 #ifndef _WIN32
-        /* Host sprites are owned by ResourceManagerSdl3's cache, not
-         * per-entity refcounted (see Entity::InitBase) -- +0x162's "locked"
-         * flag and release_surface (a null vtable slot on host sprites,
-         * resource_manager_sdl3.cpp's k_resource_vtable) do not apply. */
-        if (!loco::assets::is_host_sprite_resource(resource)) {
+        /* Host sprites carry no +0x162 "locked" flag at all -- a
+         * SpriteResource is a small, unrelated struct (see loco::assets::
+         * is_host_sprite_resource()), so reading that offset on one would
+         * be an out-of-bounds/garbage read, not a meaningful check (this
+         * guard is unrelated to ResourceObject::Unlock() itself, which is
+         * real and safe for both paths -- see Entity::InitBase). */
+        if (!loco::assets::is_host_sprite_resource(resource))
+#endif
+        {
+            /* If resource has a locked flag at +0x162, invalidate rect
+             * and release via ResourceObject::Unlock(). */
             if (*field_at<uint8_t>(resource, 0x162) == 1) {
                 this->InvalidateRect();
-                reinterpret_cast<ResourceDataView*>(resource)->release_surface();
+                static_cast<ResourceObject*>(resource)->Unlock();
             }
         }
-#else
-        /* If resource has a locked flag at +0x162, invalidate rect
-         * and release via resource->vtable[2] */
-        if (*field_at<uint8_t>(resource, 0x162) == 1) {
-            this->InvalidateRect();
-            reinterpret_cast<ResourceDataView*>(resource)->release_surface();
-        }
-#endif
         this->resource = nullptr;
     }
 
@@ -433,16 +420,7 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
         if (resource != nullptr) {
             /* vtable[1] — invalidate */
             this->InvalidateRect();
-
-#ifndef _WIN32
-            /* Host sprites are owned by ResourceManagerSdl3's cache, not
-             * per-entity refcounted -- nothing to release here. */
-            if (!resource_is_host_sprite) {
-                reinterpret_cast<ResourceDataView*>(this->resource)->release_surface();
-            }
-#else
-            reinterpret_cast<ResourceDataView*>(this->resource)->release_surface();
-#endif
+            static_cast<ResourceObject*>(this->resource)->Unlock();
             this->resource = nullptr;
         }
 
@@ -462,18 +440,13 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
 #ifndef _WIN32
         const bool loaded_is_host_sprite =
             loco::assets::is_host_sprite_resource(this->resource);
-        if (!loaded_is_host_sprite) {
-            /* Acquire the resource surface through its typed slot 1 method. */
-            reinterpret_cast<ResourceDataView*>(this->resource)->acquire_surface(
-                this->world_x_raw, this->world_y_raw);
-        }
-        /* Host sprites need no acquire step -- the bitmap is already
-         * decoded and cached by ResourceManagerSdl3. */
-#else
-        /* Acquire the resource surface through its typed slot 1 method. */
-        reinterpret_cast<ResourceDataView*>(this->resource)->acquire_surface(
-            this->world_x_raw, this->world_y_raw);
 #endif
+        /* Acquire the resource surface through its typed ResourceObject::
+         * Lock(). For host sprites this lazily builds and caches the
+         * UIPANEL_Surface adapter (a harmless no-op if it's already
+         * cached from a prior Draw call). */
+        static_cast<ResourceObject*>(this->resource)->Lock(
+            this->world_x_raw, this->world_y_raw);
 
         resource = this->resource;
         uint16_t frame_w;
@@ -487,7 +460,7 @@ int Entity::InitBase(int resource_id, int anim_index, bool force_reload)
                 this->initialized = 0;
                 return 0;
             }
-            frame_w = static_cast<uint16_t>(loco::assets::sprite_width(sprite));
+            frame_w = static_cast<uint16_t>(loco::assets::sprite_frame_width(sprite));
             frame_h = static_cast<uint16_t>(loco::assets::sprite_height(sprite));
         } else
 #endif
@@ -943,7 +916,7 @@ void Entity::SetFrame(int frame_id, bool trigger_invalidate)
 #ifndef _WIN32
     if (loco::assets::is_host_sprite_resource(resource)) {
         frame_w = static_cast<uint16_t>(
-            loco::assets::sprite_width(static_cast<loco::assets::SpriteResource*>(resource)));
+            loco::assets::sprite_frame_width(static_cast<loco::assets::SpriteResource*>(resource)));
     } else
 #endif
     {
@@ -1010,52 +983,59 @@ void Entity::CopyName(const char* name)
 void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 {
     void* resource = this->resource;
+    void* surface_ptr;
+    bool flip_h;
 
 #ifndef _WIN32
     /* resource+0x10 is not a bitmap surface pointer: UIPANEL_Blit's real
      * implementation (ui/UIPANEL_Surface.cpp, 0x42B050) casts its first
      * argument straight to `UIPANEL_Surface*` -- confirmed by reading that
-     * function's own body, not inferred -- matching shared/types.h's
-     * RESDATA::flags doc comment ("+0x10 also aliased as ui_panel
-     * (UIPANEL*) in some contexts"). No host resource carries a
+     * function's own body, not inferred. No host resource carries a
      * UIPANEL_Surface sub-object at any offset (a host `SpriteResource*`
      * is a small, unrelated struct -- see loco::assets::
-     * is_host_sprite_resource()), and FrameData::flip_horizontal (used
-     * below) has no verified .dat-derived host source either (only
-     * ::is_connected has been mapped so far -- see
-     * resources/resource_manager_sdl3.h's AnimationFrameSet). Skip the
-     * blit on host rather than dereference either as if they existed;
-     * this is the separately-tracked "DDRAW sprite-data management
-     * integration" item (PROGRESS.md), not a new landmine. */
+     * is_host_sprite_resource()), so a host resource is routed through
+     * ResourceObject::Lock() -- a real virtual call SpriteResource
+     * (resources/resource_manager_sdl3.cpp) implements by lazily building a
+     * UIPANEL_Surface adapter wrapping the resource's decoded SDL_Surface*
+     * as a real IDirectDrawSurface4 (resources/sprite_uipanel_adapter.cpp)
+     * -- instead of dereferencing +0x10/+0x20 as if the x86 layout existed. */
     if (loco::assets::is_host_sprite_resource(resource)) {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
-            std::fprintf(stderr,
-                "[HOST] Entity::Draw: skipping blit -- host SpriteResource "
-                "has no UIPANEL_Surface/flip_horizontal mapping yet (see "
-                "PROGRESS.md's DDRAW sprite-data management item)\n");
-            std::fflush(stderr);
+        surface_ptr = static_cast<ResourceObject*>(resource)->Lock(0, 0);
+        if (surface_ptr == nullptr || this->visible != 1) {
+            return;
         }
+        flip_h = false;
+        if (const loco::assets::SpriteMetadata* metadata =
+                ResourceManager_GetSpriteMetadata(resource)) {
+            if (this->anim_index >= 0 &&
+                static_cast<size_t>(this->anim_index) < metadata->frame_sets.size()) {
+                flip_h = metadata->frame_sets[static_cast<size_t>(this->anim_index)]
+                             .flip_horizontal;
+            }
+        }
+    } else if (resource == nullptr) {
+        /* Most seeded entities on host carry a null `resource` at all
+         * (PersistenceAdapter.h's documented "0 placed / 497 carried"
+         * gap -- host resources lack the original RESDATA metadata
+         * needed to resolve one). The raw x86 offset read below assumes
+         * a real, non-null resource, which every original caller always
+         * had; guard the host-only null case rather than dereference
+         * `nullptr + 0x10`. */
         return;
-    }
-
-    /* Not a host SpriteResource either: on host, most seeded entities
-     * carry a null `resource` at all (PersistenceAdapter.h's documented
-     * "0 placed / 497 carried" gap -- host resources lack the original
-     * RESDATA metadata needed to resolve one). The raw x86 offset read
-     * just below assumes a real, non-null resource, which every original
-     * caller always had; guard the host-only null case rather than
-     * dereference `nullptr + 0x10`. */
-    if (resource == nullptr) {
-        return;
-    }
+    } else {
 #endif
-
     /* Bail if no surface or not visible */
     if (*field_at<int>(resource, 0x10) == 0 || this->visible != 1) {
         return;
     }
+    surface_ptr = *field_at<void*>(resource, 0x10);
+    /* Check for horizontal flip in FrameData */
+    FrameData* fd = *field_at<FrameData*>(resource, 0x20)
+                    + this->anim_index;
+    flip_h = (fd->flip_horizontal == 1);
+#ifndef _WIN32
+    }
+#endif
 
     RECT clipped;
     if (!IntersectRect(&clipped, &this->screen_rect, &clip_bounds)) {
@@ -1064,13 +1044,9 @@ void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 
     uint32_t flags = extra_flags | this->blit_flags;
 
-    /* Check for horizontal flip in FrameData */
-    FrameData* fd = *field_at<FrameData*>(resource, 0x20)
-                    + this->anim_index;
-
     int src_left, src_top, src_right, src_bottom;
 
-    if (fd->flip_horizontal == 1) {
+    if (flip_h) {
         /* Mirrored: reverse source X */
         src_left  = (this->source_rect.right - clipped.left) + this->screen_rect.left;
         src_right = (this->screen_rect.right + this->source_rect.left) - clipped.right;
@@ -1100,7 +1076,7 @@ void Entity::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
     }
 
     /* Blit via UIPANEL */
-    UIPANEL_Blit(*field_at<void*>(resource, 0x10),
+    UIPANEL_Blit(surface_ptr,
                  clipped.left, clipped.top, clipped.right, clipped.bottom,
                  g_primary_surface,
                  src_left, src_top, src_right, src_bottom,
@@ -1120,39 +1096,48 @@ void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_f
     }
 
     void* resource = this->resource;
+    void* surface_ptr;
+    bool flip_h;
 
 #ifndef _WIN32
-    /* Same host-SpriteResource landmine and same missing-mapping gap as
-     * Entity::Draw above (resource+0x10 is a UIPANEL_Surface* sub-object,
-     * not a bitmap; FrameData::flip_horizontal has no host source yet) --
-     * see that function's doc comment for the full evidence. */
+    /* Same host-SpriteResource landmine as Entity::Draw above (resource+
+     * 0x10 is a UIPANEL_Surface* sub-object, not a bitmap) -- see that
+     * function's doc comment for the full evidence. */
     if (loco::assets::is_host_sprite_resource(resource)) {
-        static bool warned = false;
-        if (!warned) {
-            warned = true;
-            std::fprintf(stderr,
-                "[HOST] Entity::DrawConnected: skipping blit -- host "
-                "SpriteResource has no UIPANEL_Surface/flip_horizontal "
-                "mapping yet (see PROGRESS.md's DDRAW sprite-data "
-                "management item)\n");
-            std::fflush(stderr);
+        surface_ptr = static_cast<ResourceObject*>(resource)->Lock(0, 0);
+        if (surface_ptr == nullptr) {
+            return;
         }
+        flip_h = false;
+        const loco::assets::SpriteMetadata* metadata =
+            ResourceManager_GetSpriteMetadata(resource);
+        if (metadata == nullptr || this->anim_index < 0 ||
+            static_cast<size_t>(this->anim_index) >= metadata->frame_sets.size()) {
+            return;
+        }
+        const loco::assets::AnimationFrameSet& frame_set =
+            metadata->frame_sets[static_cast<size_t>(this->anim_index)];
+        if (!frame_set.is_connected) {
+            return;
+        }
+        flip_h = frame_set.flip_horizontal;
+    } else if (resource == nullptr) {
+        /* Same host-only null-resource gap as Entity::Draw above -- see
+         * that function's doc comment. */
         return;
-    }
-
-    /* Same host-only null-resource gap as Entity::Draw above -- see that
-     * function's doc comment. */
-    if (resource == nullptr) {
-        return;
-    }
+    } else {
 #endif
-
     FrameData* fd = *field_at<FrameData*>(resource, 0x20)
                     + this->anim_index;
 
     if (*field_at<uint8_t>(fd, 0x17) == 0) {
         return;
     }
+    surface_ptr = *field_at<void*>(resource, 0x10);
+    flip_h = (fd->flip_horizontal == 1);
+#ifndef _WIN32
+    }
+#endif
 
     RECT clipped;
     if (!IntersectRect(&clipped, &this->screen_rect, &clip_bounds)) {
@@ -1163,7 +1148,7 @@ void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_f
 
     int src_left, src_top, src_right, src_bottom;
 
-    if (fd->flip_horizontal == 0) {
+    if (!flip_h) {
         /* Normal */
         src_bottom = (clipped.bottom - this->screen_rect.bottom) + this->source_rect.bottom;
         src_right  = (clipped.right - this->screen_rect.right) + this->source_rect.right;
@@ -1206,7 +1191,7 @@ void Entity::DrawConnected(RECT clip_bounds, int enable_scroll, uint32_t extra_f
     SetRect(&src_rect, src2_left, src2_top, src2_right, src2_bottom);
 
     /* Blit connected tile */
-    UIPANEL_Blit(*field_at<void*>(resource, 0x10),
+    UIPANEL_Blit(surface_ptr,
                  clipped.right, clipped.bottom,
                  clipped.left, clipped.top,
                  g_primary_surface,

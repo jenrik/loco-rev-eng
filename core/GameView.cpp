@@ -240,8 +240,10 @@ GameView::~GameView()
  * GameView::cleanup
  * Address: 0x42CDD0 — vtable [15] (+0x3C)
  *
- * 1. Destroys the overlay panel via vtable[0] with flag 1 (the
- *    original does NOT clear the pointer afterwards).
+ * 1. Destroys the overlay panel (the original's vtable[0] scalar deleting
+ *    destructor with flag 1 -- ordinary `delete` reproduces this exactly;
+ *    see ResourceObject.h. The original does NOT clear the pointer
+ *    afterwards, so this doesn't either.)
  * 2. Resets the embedded Entity via its vtable[6] (InitBase, 0x405900)
  *    with (0, -1, 0).
  * 3. Resets self via vtable[6] (Panel::Init, 0x454680) with (0, -1, 0).
@@ -250,7 +252,7 @@ GameView::~GameView()
 void GameView::cleanup()
 {
     if (this->overlay_panel != nullptr) {
-        this->overlay_panel->Destroy(1);
+        delete this->overlay_panel;
     }
 
     this->game_object_sub.InitBase(0, -1, false);

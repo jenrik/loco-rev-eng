@@ -114,8 +114,9 @@ void UIPANEL_BeginPaint() { /* host no-op */ }
  * session — confirmed zero referrers via `nm --print-file-name
  * build/lego_loco.p/*.o | grep "U UIPANEL_Blit$"`. See
  * docs/landmine-sweep-worklist.md. */
-void UIPANEL_CreateSurface();
-void UIPANEL_CreateSurface() { /* host no-op */ }
+/* UIPANEL_CreateSurface() (zero-arg, extern "C") removed 2026-08-14: this
+ * unrelated wrong stub is gone now that every caller uses
+ * `new UIPANEL_Surface()` instead of a free function. */
 /* UIPANEL_EndPaintEx() (zero-arg, extern "C") removed 2026-08-13: this was
  * the plain-C-linkage wrong stub that town/Town.cpp and
  * native/NETMAN_SessionSettings.c used to silently bind to (their own
@@ -479,18 +480,11 @@ void RESDATA_ScriptedObject_AddChild(void*, int, int) { /* host no-op */ }
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int);
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int) { /* host no-op */ }
 void* DPLAY_SetPlayerName = nullptr;
-/* Signature corrected (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
- * cluster): real 2nd param is a UIPANEL_Surface* (Ghidra-confirmed at
- * 0x42A1C0 — dereferences it at the struct's real field offsets), not an
- * int, and callers expect a void* return (they cache it in
- * NetworkPlayerList::surface_cache[]), not void — Itanium mangling ignores
- * return type, so the old `void`-returning stub linked fine and every
- * caller read an undefined register as the "surface" it got back. Still a
- * host no-op (the real deep-copy body at 0x42A1C0 was never transcribed —
- * TODO), but now returns a well-defined value instead of UB. */
-struct UIPANEL_Surface;
-void* UIPANEL_CopySurface(void*, UIPANEL_Surface*);
-void* UIPANEL_CopySurface(void*, UIPANEL_Surface*) { return nullptr; }
+/* UIPANEL_CopySurface(void*, UIPANEL_Surface*) removed 2026-08-14: this
+ * was a placement-style free-function facade for the real deep-copy
+ * constructor (graphics/LOCOBITMAP.cpp's
+ * UIPANEL_Surface::UIPANEL_Surface(const&), 0x42A1C0, now fully
+ * implemented). Callers now use `new UIPANEL_Surface(*src)` directly. */
 /* NET_ComputeColor's real definition now lives in native/NET_Dtor.c
  * (renamed from the stale Ghidra-default-label filename; 0x4441C0). This
  * stub used to be a silent-wrong-stub of exactly the kind documented
@@ -562,8 +556,11 @@ void CRT_free_pattern(void*, int, int, void*);
 void CRT_free_pattern(void*, int, int, void*) { /* host no-op */ }
 void RESDATA_DtorBody(void*);
 void RESDATA_DtorBody(void*) { /* host no-op */ }
-void DDRAW_PresentRect(void*, void*, int*, unsigned char);
-void DDRAW_PresentRect(void*, void*, int*, unsigned char) { /* host no-op */ }
+/* DDRAW_PresentRect(void*,void*,int*,unsigned char) removed 2026-08-15: a
+ * mismatched-signature dead-end overload (real definition is
+ * graphics/sdl3_ddraw.cpp's `int32_t flag`-typed one) that only existed
+ * because network/DirectPlay.cpp's local declaration used `uint8_t flag` --
+ * fixed there instead of perpetuating this trap for a future caller. */
 /* WIN32_RecvNetworkData/WIN32_GetSystemMetrics: these C++-mangled overloads
  * existed only because network/DirectPlay.cpp declared the two functions
  * outside its extern "C" block. Both are now real implementations in

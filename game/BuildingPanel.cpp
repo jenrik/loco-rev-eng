@@ -22,6 +22,8 @@
 
 #include "BuildingPanel.h"
 #include "../ui/UIPANEL_Surface.h"
+#include "../graphics/LOCOBITMAP.h"
+#include "../resources/ResourceObject.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
 namespace {
@@ -47,11 +49,6 @@ struct PanelPlayerEntryView {
     int16_t icon_height;
     void* icon_pixels;
     uint8_t tail_48_4b[4];
-};
-
-struct SurfacePixelFields {
-    uint8_t prefix_00_17[0x18];
-    uint8_t* pixels;
 };
 
 struct OccupantEntryView {
@@ -84,10 +81,6 @@ static_assert(offsetof(OccupantEntryView, next) == 0x10);
 
 void*  operator_new(size_t size);                       /* 0x465CE0 */
 
-/* Plain C++ linkage (matches the real definition in graphics/LOCOBITMAP.cpp) —
- * must NOT be inside the extern "C" block below. */
-size_t UIPANEL_Surface_Size();
-
 /* UIPANEL_EndPaintEx — real def: ui/UIPANEL.cpp:0x426B90, C++ linkage (not
  * extern "C"), void(void* self, int hdc, int unlock_param, uint8_t
  * unlock_flag, RECT* restrict_rect) — the 2nd param is `int hdc`, not
@@ -109,7 +102,6 @@ extern "C" {
 
     /* UIPANEL */
     int    UIPANEL_BeginPaint(void* panel);                  /* 0x42B0C0 — returns HDC */
-    void*  UIPANEL_CreateSurface(void* obj);                  /* 0x42A110 */
 
     /* GDI */
     HDC    BeginPaint(HWND hWnd, void* paint_struct);       /* Win32 BeginPaint */
@@ -189,21 +181,14 @@ void BuildingPanel::init_sprites()
     void* res = ResourceManager_GetById(&g_resmgr, 0x3d87);
     this->main_resource = res;                                   /* +0x28C */
     if (res != nullptr) {
-        /* Get surface via vtable[1] = GetSurface(res, 0, 0) */
-        using GetSurface = void* (__thiscall*)(int, int);
-        void** vtable = reinterpret_cast<void**>(res);
-        GetSurface get_surface = reinterpret_cast<GetSurface>(vtable[1]);
-        this->main_surface = get_surface(0, 0);  /* +0x288 */
+        this->main_surface = static_cast<ResourceObject*>(res)->Lock(0, 0);  /* +0x288 */
     }
 
     /* Load selection frame resource 0x3d88 */
     res = ResourceManager_GetById(&g_resmgr, 0x3d88);
     this->selection_resource = res;                              /* +0x294 */
     if (res != nullptr) {
-        using GetSurface = void* (__thiscall*)(int, int);
-        void** vtable = reinterpret_cast<void**>(res);
-        GetSurface get_surface = reinterpret_cast<GetSurface>(vtable[1]);
-        this->selection_surface = get_surface(0, 0);  /* +0x290 */
+        this->selection_surface = static_cast<ResourceObject*>(res)->Lock(0, 0);  /* +0x290 */
     }
 
     /* Initialize main sprite (+0x298) */
@@ -748,26 +733,16 @@ void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
     int icon_width = static_cast<int>(player_entry->icon_width); /* +0x40 */
     int icon_height = static_cast<int>(player_entry->icon_height); /* +0x42 */
 
-    /* Create temp surface for icon. 0x20 was the original x86
-     * sizeof(UIPANEL_Surface); use the real host size (pointer fields
-     * widen it to 0x30 — see graphics/LOCOBITMAP.h). */
-    void* surface_obj = operator_new(UIPANEL_Surface_Size());
-    void* tmp_surface;
-    if (surface_obj == nullptr) {
-        tmp_surface = nullptr;
-    } else {
-        tmp_surface = UIPANEL_CreateSurface(surface_obj);
-    }
+    UIPANEL_Surface* tmp_surface = new UIPANEL_Surface();
 
-    if (tmp_surface != nullptr) {
+    {
         /* Initialize surface with icon dimensions */
         UIPANEL_InitSurface(tmp_surface, icon_width, icon_height, 0, 0, 0);
 
         /* Copy icon pixel data */
         uint32_t data_size = player_entry->icon_data_size;    /* +0x3C */
         uint8_t* src_data = static_cast<uint8_t*>(player_entry->icon_pixels); /* +0x44 */
-        uint8_t* dst_data = reinterpret_cast<SurfacePixelFields*>(tmp_surface)->pixels;
-                                                               /* surface pixel ptr +0x18 */
+        uint8_t* dst_data = tmp_surface->pixels;
 
         /* Memcpy whole dwords first, then remaining bytes */
         uint32_t dwords = data_size >> 2;
@@ -791,13 +766,7 @@ void BuildingPanel_DrawIcon(uint* cell_rect, int* player_index)
             icon_width, icon_height,
             0x10);                                            /* flags = alpha/transparency */
 
-        /* Release temp surface via vtable[0] */
-        if (tmp_surface != nullptr) {
-            using SurfaceDestructor = void (__thiscall*)(int);
-            void** vtable = reinterpret_cast<void**>(tmp_surface);
-            SurfaceDestructor destroy = reinterpret_cast<SurfaceDestructor>(vtable[0]);
-            destroy(1);                                       /* release surface */
-        }
+        delete tmp_surface;
     }
 }
 

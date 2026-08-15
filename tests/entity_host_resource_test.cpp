@@ -53,7 +53,26 @@ bool UIPANEL_Blit(void*, uint32_t, uint32_t, int32_t, uint32_t,
                    void*, uint32_t, uint32_t, int32_t, uint32_t, uint32_t) {
     return false;
 }
-void GLOBAL_free(void* p) { std::free(p); }
+void* operator_new(size_t size) { return std::malloc(size); }
+void  GLOBAL_free(void* p) { std::free(p); }
+extern "C" void OutputDebugStringA(const char* s) { if (s) std::fprintf(stderr, "DEBUG: %s\n", s); }
+
+/* UIPANEL_Surface's live-instance counter (0x00485254, canonically defined
+ * in shared/link_stubs.cpp) -- defined locally rather than pulling that
+ * whole stub file in, same reasoning as this file's other local fixtures.
+ * Needed once Entity::Draw/DrawConnected started routing host
+ * SpriteResources through UIPANEL_Surface's real constructor
+ * (graphics/UIPANEL_Surface_lifecycle.cpp). */
+int32_t g_ref_count = 0;
+
+/* g_ddraw (0x485440, IDirectDraw4*) and SDL3_WrapSdlSurfaceAsDirectDraw
+ * (graphics/sdl3_ddraw.cpp) -- the real DirectDraw device/surface wrapper
+ * is not linked into this narrow test (it would pull in
+ * graphics/sdl3_window.cpp, which duplicates several of this file's own
+ * Win32 stub fixtures above). Stubbed only to satisfy the linker. */
+void* g_ddraw = nullptr;
+struct IDirectDrawSurface4;
+IDirectDrawSurface4* SDL3_WrapSdlSurfaceAsDirectDraw(SDL_Surface*) { return nullptr; }
 
 void* g_primary_surface = nullptr;
 class ResourceManager {};

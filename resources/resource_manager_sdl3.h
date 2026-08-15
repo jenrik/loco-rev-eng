@@ -58,7 +58,23 @@ struct AnimationFrameSet {
     int next_frame_set = 0;
     int sound_resource_id = 0;
     int replay_delay = 0;
-    int flip_x = 0;
+    // The 9th numeric .dat token. Disassembly confirms the original writes
+    // this token directly (no truncation) to FrameData::volume (+0x14,
+    // shared/types.h): `LEA EDX,[rec+0x14]` at 0x4252CE followed by the
+    // extractor call at 0x4252D5 (UI_ChildWindow_Render, 0x424E00).
+    // Previously misnamed `flip_x` here -- a stale guess, not evidenced;
+    // corrected 2026-08-14 while sourcing FrameData::flip_horizontal below
+    // (see PROGRESS.md's 2026-08-14 "priority3-blit-adapter" entry).
+    int volume = 0;
+    // The 10th (last) numeric .dat token. Disassembly confirms the
+    // original writes this token, truncated to a byte via the same
+    // stack-temp idiom is_connected uses above, to FrameData::
+    // flip_horizontal (+0x16, shared/types.h): `LEA EAX,[ESP+0x12]` +
+    // extractor call at 0x4252DA/0x4252E1, then
+    // `MOV byte ptr [rec+0x16],DL` at 0x4252ED. Previously discarded here
+    // as an unnamed "opaque_field" that only validated row shape -- that
+    // was wrong; it is a real, used field.
+    bool flip_horizontal = false;
 };
 
 // Tile-placement footprint, parsed from the .dat "physical_occupancy" /
@@ -209,9 +225,27 @@ struct SpriteMetadata {
 class SpriteResource;
 class SpriteBitmap;
 
+// SpriteResource::Lock() (a real ResourceObject override, resources/
+// ResourceObject.h) needs to reach the UIPANEL_Surface adapter implemented
+// in resources/sprite_uipanel_adapter.cpp -- a separate translation unit
+// from this file specifically so narrow test executables that link this
+// file without the graphics subsystem don't pick up a
+// UIPANEL_Surface::UIPANEL_Surface()/graphics/sdl3_ddraw.cpp dependency they
+// never call. sprite_uipanel_adapter.cpp registers the hook at static-init
+// time; SpriteResource::Lock() calls it if registered, else returns nullptr
+// (matching the pre-existing "no adapter loaded" behavior for those narrow
+// targets). See PROGRESS.md's DDRAW sprite-data management item.
+using SurfaceLockHook = void* (*)(SpriteResource* resource, int32_t flags, int32_t mode);
+void register_surface_lock_hook(SurfaceLockHook hook);
+
 SpriteBitmap* sprite_bitmap(SpriteResource* resource);
 uint32_t sprite_width(const SpriteResource* resource);
 uint32_t sprite_height(const SpriteResource* resource);
+// Width of a single animation frame -- resource->width is the whole decoded
+// bitmap's width, which is total_frames-many equal-width frames laid out
+// side by side (see Entity::SetFrame). Use this, not sprite_width(), for
+// any frame-relative source-rect X computation.
+uint32_t sprite_frame_width(const SpriteResource* resource);
 uint32_t sprite_resource_id(const SpriteResource* resource);
 uint32_t bitmap_width(const SpriteBitmap* bitmap);
 uint32_t bitmap_height(const SpriteBitmap* bitmap);
@@ -232,6 +266,12 @@ public:
     const SpriteMetadata* sprite_metadata(const SpriteResource* resource) const;
     SDL_Surface* sprite_surface(const SpriteResource* resource) const;
     const std::string& last_error() const { return last_error_; }
+
+    // Decodes an arbitrary archive-relative bitmap path (e.g.
+    // "backdrop/arrid.bmp") that isn't reached through the numeric resource-
+    // ID table -- the town backdrop is selected by name (SaveRegion::name,
+    // shared/types.h) rather than by ID. Caller owns the returned surface.
+    SDL_Surface* load_bitmap_by_path(const std::string& archive_path);
 
 private:
     struct Impl;
@@ -255,6 +295,13 @@ void reset_host_resource_manager();
 // Narrow host-compositor bridge. These free functions let translated UI files
 // use archive-backed sprites without importing the binary-facing C wrappers.
 SpriteResource* host_get_sprite_by_id(uint32_t resource_id);
+
+// Loads "backdrop/<name>.bmp" (SaveRegion::name, shared/types.h) and Blts it
+// as the primary surface's base layer -- the mode-3 town's terrain, selected
+// by the .sav header rather than drawn through any per-tile object (see
+// resources/town_backdrop_adapter.cpp). Returns false if the name is empty,
+// the bitmap can't be found, or there is no primary surface to draw into.
+bool load_and_draw_town_backdrop(const char* name);
 
 // True when `resource` is a genuine loco::assets::SpriteResource returned by
 // this bridge (tag-checked; false for null or any other pointer). Host

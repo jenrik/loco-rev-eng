@@ -4,13 +4,21 @@
  *
  * ResourceManager_Init (0x446050) receives a PE string-table path and its
  * sprite consumers establish these layouts: EditWindow::initSprites (0x421500)
- * reads resource +0x14/+0x16 and calls vtable[4]; EditWindow::render
- * (0x4216F0) reads bitmap +0x08/+0x0C. The bridge preserves those contracts,
- * parses paired DAT animation metadata, and implements the DirectDraw magenta
- * source color key (RGB 255,0,255) documented by DDRAW_RestoreSurfaces.
+ * reads resource +0x14/+0x16; EditWindow::render (0x4216F0) reads bitmap
+ * +0x08/+0x0C. The bridge preserves those contracts, parses paired DAT
+ * animation metadata, and implements the DirectDraw magenta source color key
+ * (RGB 255,0,255) documented by DDRAW_RestoreSurfaces.
+ *
+ * SpriteResource is a real ResourceObject (resources/ResourceObject.h),
+ * matching RESDATA's original 3-slot vtable ([0]=Destroy, [1]=Lock/
+ * GetSurface, [2]=Unlock) via genuine C++ virtual dispatch instead of a
+ * manually-built function-pointer array -- see Lock()'s doc comment for how
+ * it reaches the UIPANEL_Surface adapter without this file linking
+ * graphics/sdl3_ddraw.cpp.
  */
 #include "resource_manager_sdl3.h"
 
+#include "ResourceObject.h"
 #include "pe_string_table.h"
 #include "resource_archive.h"
 
@@ -44,8 +52,20 @@ struct SpriteBitmap {
 // +0x14/+0x16) so adding it can never shift those asserted offsets.
 constexpr uint32_t kSpriteResourceMagic = 0x53505231u; // 'SPR1'
 
-struct SpriteResource {
-    void** vtable;                                     // +0x00
+// SpriteResource is a real ResourceObject subclass -- the compiler-managed
+// vptr occupies +0x00 (where a manually-assigned `void** vtable` used to
+// live), so the two offsetof asserts below still hold: nothing repositions
+// width/height, which several still-untranslated callers
+// (VehicleEditor.cpp, Cursor.cpp, Town.cpp) also read directly at these same
+// offsets pending their own typed-accessor migration. offsetof on a
+// non-standard-layout type (SpriteResource now has virtual functions) is a
+// long-standing, widely-relied-upon compiler extension here, suppressed
+// locally rather than tree-wide.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+struct SpriteResource : public ResourceObject {
     uint8_t padding_08_to_13[0x14 - sizeof(void*)];    // +0x08..+0x13 on x86_64
     uint16_t width;                                    // +0x14: read by initSprites
     uint16_t height;                                   // +0x16: read by initSprites
@@ -54,6 +74,16 @@ struct SpriteResource {
     SpriteMetadata metadata;
     bool has_metadata;
     uint32_t magic = kSpriteResourceMagic;
+
+    // ResourceObject overrides -- Lock()'s definition (below) is how this
+    // reaches the SDL3-backed UIPANEL_Surface adapter. No destructor
+    // override needed: host sprites are cached and owned for the process
+    // lifetime by ResourceManagerSdl3::Impl::resources (never individually
+    // deleted), so the compiler-generated ~SpriteResource() (which tears
+    // down the unique_ptr<SpriteBitmap>/metadata members normally) is
+    // exactly right.
+    void* Lock(int32_t flags, int32_t mode) override;
+    void Unlock() override;
 };
 
 namespace {
@@ -66,21 +96,17 @@ static_assert(offsetof(SpriteBitmap, width) == 0x08,
               "Host bitmap width must match EditWindow::render");
 static_assert(offsetof(SpriteBitmap, height) == 0x0c,
               "Host bitmap height must match EditWindow::render");
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
-void* resource_get_bitmap(void* resource, int, int) {
-    return static_cast<SpriteResource*>(resource)->bitmap.get();
-}
-
-// Legacy ABI adapter only: untranslated callers still invoke the original
-// resource vtable slots. Typed consumers use sprite_bitmap/release_sprite below
-// and never inspect this table. Remove it once every GetById caller is typed.
-void resource_release(void*) {}
-
-void* k_resource_vtable[9] = {
-    nullptr, nullptr, nullptr, nullptr,
-    reinterpret_cast<void*>(&resource_get_bitmap), nullptr, nullptr, nullptr,
-    reinterpret_cast<void*>(&resource_release),
-};
+// Registered by resources/sprite_uipanel_adapter.cpp (a separate translation
+// unit specifically so this file, and the narrow test binaries that link it
+// without the graphics subsystem, don't pull in graphics/sdl3_ddraw.cpp).
+// SpriteResource::Lock() calls through this if a hook is registered,
+// otherwise returns nullptr -- matching the pre-existing "no adapter loaded"
+// behavior for those narrow targets.
+SurfaceLockHook g_surface_lock_hook = nullptr;
 
 std::string game_root_from_environment() {
     const char* configured = std::getenv("LEGO_LOCO_DATA");
@@ -158,7 +184,20 @@ bool classify_tile_track_type(const std::vector<std::string>& tokens, TileTrackT
 bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* metadata) {
     *metadata = SpriteMetadata{};
     const std::string text(bytes.begin(), bytes.end());
-    bool in_animation = false;
+    // Frame-set rows (name + 10 numeric fields) directly follow the
+    // "number_of_frame_sets N" directive -- confirmed against real archive
+    // files (e.g. track/strhlf-v.dat, track/switch-h.dat): there is no
+    // literal "animation" keyword line anywhere in the shipped .dat corpus.
+    // A prior version of this parser gated frame-set-row recognition on
+    // seeing that fictional keyword, so `frame_sets` stayed permanently
+    // empty regardless of frame_set_count -- every placed entity with any
+    // declared frame set then failed Entity::SetAnimState's bounds check
+    // and was torn down as "uninitialized" (see PROGRESS.md's
+    // INPUT_PlaceObject recovery entry). Countdown-bounded the same way
+    // physical_rows_remaining/bitmap_rows_remaining are, matching the
+    // original's exact `frameSetCount`-iteration loop
+    // (UI_ChildWindow_Render, 0x424E00).
+    int frame_set_rows_remaining = 0;
     // The "physical_occupancy"/"bitmap_occupancy" section headers are each
     // immediately followed (skipping blank lines) by one dims line ("W H D"
     // / "W H"); the occupancy grid rows that follow are plain integer lines
@@ -312,16 +351,13 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
                 !parse_int(tokens[3], &metadata->offset_z)) return false;
             continue;
         }
-        if (tokens[0] == "animation") {
-            in_animation = true;
-            continue;
-        }
         if (tokens[0] == "total_number_of_frames" && tokens.size() == 2) {
             if (!parse_int(tokens[1], &metadata->total_frames)) return false;
             continue;
         }
         if (tokens[0] == "number_of_frame_sets" && tokens.size() == 2) {
             if (!parse_int(tokens[1], &metadata->frame_set_count)) return false;
+            frame_set_rows_remaining = metadata->frame_set_count;
             continue;
         }
         // Real archive data uses two distinct spellings for this directive
@@ -339,7 +375,7 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
             continue;
         }
         // DAT comments define an animation row as name plus ten integer fields.
-        if (in_animation && tokens.size() == 11) {
+        if (frame_set_rows_remaining > 0 && tokens.size() == 11) {
             AnimationFrameSet frame_set;
             frame_set.name = tokens[0];
             int is_connected_int = 0;
@@ -347,17 +383,21 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
                              &frame_set.frame_delay, &is_connected_int,
                              &frame_set.restart_delay, &frame_set.next_frame_set,
                              &frame_set.sound_resource_id, &frame_set.replay_delay,
-                             &frame_set.flip_x};
+                             &frame_set.volume};
             bool valid = true;
             for (size_t index = 0; index < 9; ++index) {
                 valid = valid && parse_int(tokens[index + 1], fields[index]);
             }
             frame_set.is_connected = (is_connected_int != 0);
-            // The tenth numeric field is retained only by the original opaque
-            // animation implementation; parsing it validates row shape.
-            int opaque_field = 0;
-            valid = valid && parse_int(tokens[10], &opaque_field);
+            // The 10th numeric token -- see AnimationFrameSet::flip_horizontal's
+            // doc comment for the disassembly evidence that this is a real,
+            // used field (FrameData::flip_horizontal, +0x16), not discardable.
+            int flip_horizontal_int = 0;
+            valid = valid && parse_int(tokens[10], &flip_horizontal_int);
+            frame_set.flip_horizontal = (flip_horizontal_int != 0);
+            --frame_set_rows_remaining;
             if (valid) metadata->frame_sets.push_back(std::move(frame_set));
+            continue;
         }
     }
     return metadata->frame_set_count == 0 ||
@@ -479,7 +519,6 @@ SpriteResource* ResourceManagerSdl3::get_sprite_by_id(uint32_t resource_id) {
     bitmap->surface = surface;
 
     auto resource = std::make_unique<SpriteResource>();
-    resource->vtable = k_resource_vtable;
     resource->width = static_cast<uint16_t>(width);
     resource->height = static_cast<uint16_t>(height);
     resource->bitmap = std::move(bitmap);
@@ -502,6 +541,19 @@ SpriteResource* ResourceManagerSdl3::get_sprite_by_id(uint32_t resource_id) {
     return result;
 }
 
+SDL_Surface* ResourceManagerSdl3::load_bitmap_by_path(const std::string& archive_path) {
+    if (!impl_ && !initialize(game_root_from_environment(), nullptr)) return nullptr;
+    std::vector<uint8_t> bytes;
+    if (!impl_->archive.read(archive_path, &bytes, nullptr)) return nullptr;
+    SDL_IOStream* stream = SDL_IOFromConstMem(bytes.data(), bytes.size());
+    if (!stream) return nullptr;
+    // No magenta color-keying here (unlike get_sprite_by_id's sprites): the
+    // backdrop is an opaque full-frame background, not a keyed sprite --
+    // punching transparency into it on an incidental color match would be
+    // wrong, not just unnecessary.
+    return SDL_LoadBMP_IO(stream, true);
+}
+
 const SpriteMetadata* ResourceManagerSdl3::sprite_metadata(const SpriteResource* sprite) const {
     return sprite && sprite->has_metadata ? &sprite->metadata : nullptr;
 }
@@ -519,11 +571,38 @@ SpriteBitmap* sprite_bitmap(SpriteResource* resource) {
 }
 uint32_t sprite_width(const SpriteResource* resource) { return resource ? resource->width : 0; }
 uint32_t sprite_height(const SpriteResource* resource) { return resource ? resource->height : 0; }
+uint32_t sprite_frame_width(const SpriteResource* resource) {
+    if (!resource) return 0;
+    // The decoded bitmap is a single horizontal strip of total_frames equal-
+    // width frames (confirmed by Entity::SetFrame's own indexing: it only
+    // ever offsets source_rect by frame_id * frame_w along X, never
+    // adjusts Y or wraps rows) -- resource->width is the whole strip's
+    // width, not one frame's. A resource with no metadata or a
+    // total_frames <= 1 is a single-frame sprite, where the two are the
+    // same value anyway.
+    const int total_frames =
+        (resource->has_metadata && resource->metadata.total_frames > 0)
+            ? resource->metadata.total_frames : 1;
+    return resource->width / static_cast<uint32_t>(total_frames);
+}
 uint32_t sprite_resource_id(const SpriteResource* resource) { return resource ? resource->resource_id : 0; }
 uint32_t bitmap_width(const SpriteBitmap* bitmap) { return bitmap ? bitmap->width : 0; }
 uint32_t bitmap_height(const SpriteBitmap* bitmap) { return bitmap ? bitmap->height : 0; }
 SDL_Surface* bitmap_surface(const SpriteBitmap* bitmap) { return bitmap ? bitmap->surface : nullptr; }
 void release_sprite(SpriteResource*) {}
+
+void register_surface_lock_hook(SurfaceLockHook hook) {
+    g_surface_lock_hook = hook;
+}
+
+// Unlock is a no-op: host sprites aren't refcounted per-lock -- matches
+// release_sprite() above and Entity::~Entity's already-documented "not
+// per-entity refcounted" host semantics (core/GameObject.cpp).
+void SpriteResource::Unlock() {}
+
+void* SpriteResource::Lock(int32_t flags, int32_t mode) {
+    return g_surface_lock_hook ? g_surface_lock_hook(this, flags, mode) : nullptr;
+}
 
 ResourceManagerSdl3& host_resource_manager() {
     static ResourceManagerSdl3 instance;

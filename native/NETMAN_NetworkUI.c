@@ -54,6 +54,7 @@
 #include "../ui/ButtonSprite.h"
 #include "../game/GameConfig.h"
 #include "../network/DPlayManager.h"
+#include "../resources/ResourceObject.h"
 
 #include <cassert>
 #include <cstdio>
@@ -119,7 +120,6 @@ extern LRESULT __stdcall DefWindowProcA(void* hWnd, uint32_t Msg, uint32_t wPara
 extern int32_t __cdecl  ResourceManager_GetStringById(void* resmgr, uint32_t id);
 extern void  __cdecl    RESMGR_LoadSoundResource(int32_t resId);
 extern void  __cdecl    Sprite_Init(void* sprite);
-extern void  __cdecl    Sprite_Destroy(void* sprite);
 extern void  __cdecl    Sprite_SetState(void* sprite, int32_t state, int32_t* unk);
 extern void  __cdecl    FormatResourceString(void* resmgr, uint32_t id, char* buf, int32_t bufsize);
 extern void  __cdecl    PlaySound(int32_t soundId);
@@ -183,6 +183,12 @@ extern bool  __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY
                                       int32_t srcW, uint32_t srcH, void* dstSurface,
                                       uint32_t dstX, uint32_t dstY, int32_t dstW,
                                       uint32_t dstH, uint32_t flags);
+
+/* Real def: ui/ButtonSprite.h/.cpp (0x454BC0), C++ linkage (not extern
+ * "C") -- same class of landmine as UIPANEL_Blit above. Was declared
+ * inside the extern "C" block above with matching params but wrong
+ * linkage, so it silently bound to shared/link_stubs.cpp's host no-op. */
+extern void  __cdecl    Sprite_Destroy(void* sprite);
 
 /* Forward declarations for this file's own functions, called out of
  * definition order below. Declared with normal (mangled) C++ linkage,
@@ -350,22 +356,11 @@ void NETMAN_JoinSession(NameEntryPanel* panel)
         void* res = ResourceManager_GetById(&g_resmgr, 0x439);
         panel->spriteTerminator = res;
 
-        /* res->vtable[1] ("Lock/GetSurface" per shared/types.h's RESDATA
-         * convention), called with (0, 0). Matches ui/AboutDialog.cpp's
-         * identical, already-reviewed pattern for the same
-         * ResourceManager_GetById-sourced, still-unmodeled resource
-         * object class (real class not yet in this codebase's hierarchy —
-         * every caller of ResourceManager_GetById still uses `void*`).
-         * Previously read as `(uint8_t*)res + 4` — missing the dereference
-         * of `res` itself to reach its vtable pointer (call-0-shaped bug:
-         * it called through an offset *into the object*, not into its
-         * vtable) — and used a raw x86 byte offset instead of a
-         * pointer-sized slot index (misindexes this host's 8-byte vtable
-         * entries). */
+        /* Real ResourceObject::Lock(0, 0) virtual dispatch (resources/
+         * ResourceObject.h), matching ui/AboutDialog.cpp's identical
+         * pattern for the same ResourceManager_GetById-sourced resource. */
         if (res != nullptr) {
-            using ResourceGetSurfaceFn = void* (__stdcall*)(void*, int, int);
-            void** const resourceVtbl = *reinterpret_cast<void***>(res);
-            panel->childSurface = reinterpret_cast<ResourceGetSurfaceFn>(resourceVtbl[1])(res, 0, 0);
+            panel->childSurface = static_cast<ResourceObject*>(res)->Lock(0, 0);
         }
 
         Sprite_Init(panel->sprite0);

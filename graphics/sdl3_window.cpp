@@ -99,8 +99,23 @@ int SDL3_WindowInit(const char* title, int width, int height)
         return -1;
     }
 
-    g_sdl_window = SDL_CreateWindow(title, width, height,
-                                     SDL_WINDOW_RESIZABLE);
+    /* Host-only test deviation: under the GUI sandbox (LEGO_LOCO_TEST_EVENTS
+     * set -- stubs/host_test_events.h's existing "are we under test" signal),
+     * request true fullscreen instead of a decorated window. Sway (like
+     * other Wayland compositors) draws its title-bar decoration
+     * server-side for ordinary toplevels regardless of the client's
+     * SDL_WINDOW_BORDERLESS hint (confirmed empirically -- borderless alone
+     * left the bar in place), but gives a fullscreen surface the whole
+     * output with no chrome at all. That decoration would otherwise show
+     * up in the sandbox's raw "gui-sandbox shot" capture, corrupting pixel
+     * comparisons against reference screenshots (tests/reference/*.png)
+     * that never have one. A real desktop run keeps the normal decorated,
+     * resizable window. */
+    SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE;
+    if (std::getenv("LEGO_LOCO_TEST_EVENTS") != nullptr) {
+        window_flags |= SDL_WINDOW_FULLSCREEN;
+    }
+    g_sdl_window = SDL_CreateWindow(title, width, height, window_flags);
     if (!g_sdl_window) {
         fprintf(stderr, "SDL3_WindowInit: SDL_CreateWindow failed: %s\n", SDL_GetError());
         fprintf(stderr, "[TRACE] Calling SDL_Quit...\n");

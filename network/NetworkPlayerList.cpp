@@ -116,31 +116,11 @@ extern bool  __cdecl    UIPANEL_Blit(void* surface, uint32_t srcX, uint32_t srcY
                                       void* dstSurface, uint32_t dstX,
                                       uint32_t dstY, int32_t dstW,
                                       uint32_t dstH, uint32_t flags);
-/* UIPANEL_CreateSurface: no local declaration here — the real, fully
- * INTEGRATED implementation (graphics/LOCOBITMAP.h/.cpp, 0x42A110) takes
- * UIPANEL_Surface* and is visible via the LOCOBITMAP.h include above.
- * This file used to shadow it with a local `void* __thiscall
- * UIPANEL_CreateSurface(void* surface)` declaration that, once `surface`
- * below is properly typed UIPANEL_Surface* rather than void*, would lose
- * overload resolution to the real declaration anyway — but the old local
- * declaration bound instead to shared/stubs_impl.cpp's untyped no-op stub
- * (same "wrong local declaration masks a real typed impl elsewhere" shape
- * as UIPANEL_CopySurface below). Removed so the call resolves to the real
- * method. */
-/* Real def: shared/defsym_stubs.cpp (host no-op stub; TODO: decompile
- * 0x42A1C0's deep-copy body for real — never transcribed). The 2nd param
- * and return type were declared int32_t/void* here against Ghidra's
- * decompile of 0x42A1C0, which dereferences the 2nd param as a
- * UIPANEL_Surface* (fields read at +4/+8/+0xC/+0x10/+0x11/+0x14/+0x18/+0x1C
- * match UIPANEL_Surface, graphics/LOCOBITMAP.h, exactly) — the old int32_t
- * param silently truncated the pointer on this 64-bit host, and Itanium
- * mangling ignores return type, so the void*-returning declaration linked
- * against the stub's real `void` return and read an undefined register as
- * the "surface" it cached (call sites store the result straight into
- * surface_cache[], later passed to UIPANEL_DestroySurface). Fixed to the
- * evidenced signature in lockstep with network/Netman.h's unused twin
- * declaration and the stub definition (shared/defsym_stubs.cpp). */
-extern void* __thiscall UIPANEL_CopySurface(void* dst, UIPANEL_Surface* src);
+/* UIPANEL_Surface construction/copy/destruction: no local declarations
+ * here — the real, fully INTEGRATED constructor/copy-constructor/
+ * destructor (graphics/LOCOBITMAP.h/.cpp, 0x42A110/0x42A1C0/0x42A140) are
+ * visible via the LOCOBITMAP.h include above. Callers use
+ * `new UIPANEL_Surface()`, `new UIPANEL_Surface(*src)`, and `delete`. */
 extern void  __cdecl    UIPANEL_StretchBlit(void* surface, const char* path,
                                               int32_t x, int32_t y, int32_t flags);
 extern void* __thiscall ResourceManager_GetById(void* resmgr, uint32_t id);
@@ -416,7 +396,7 @@ NetworkPlayerList::~NetworkPlayerList()
     {
         for (i = 0; i < 256; i++) {
             if (surface_cache[i] != NULL) {
-                UIPANEL_DestroySurface(surface_cache[i], 1);
+                delete surface_cache[i];
                 surface_cache[i] = NULL;
             }
         }
@@ -434,7 +414,7 @@ NetworkPlayerList::~NetworkPlayerList()
 /*                                                                      */
 /* Lookup or create a cached UIPANEL surface keyed by 3-byte tag.      */
 /* ================================================================== */
-void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
+UIPANEL_Surface* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
                                                          uint8_t variant,
                                                          uint8_t tag_low,
                                                          uint8_t no_evict)
@@ -477,12 +457,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
         {
             /* Cache hit — update LRU timestamp and return copy */
             this->lru_timestamps[i] = this->frame_counter;
-
-            void* new_surf = operator_new(sizeof(UIPANEL_Surface));
-            if (new_surf != NULL) {
-                return UIPANEL_CopySurface(new_surf, this->surface_cache[i]);
-            }
-            return NULL;
+            return new UIPANEL_Surface(*this->surface_cache[i]);
         }
     }
 
@@ -513,13 +488,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
     wsprintfA(filepath, reinterpret_cast<const char*>(0x0047ec7c),
               g_install_path, filename);
 
-    /* Create surface from file. UIPANEL_CreateSurface (the real 0x42A110
-     * method, graphics/LOCOBITMAP.h/.cpp) initializes *surface in place and
-     * returns void — it does not hand back a new pointer to reassign. */
-    surface = static_cast<UIPANEL_Surface*>(operator_new(sizeof(UIPANEL_Surface)));
-    if (surface != NULL) {
-        UIPANEL_CreateSurface(surface);
-    }
+    surface = new UIPANEL_Surface();
     UIPANEL_StretchBlit(surface, filepath, 0, 0, 0);
 
     /* Check if surface has valid dimensions. Ghidra's decompile of this
@@ -528,12 +497,8 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
      * UIPANEL_Surface::pixels/ddraw_surf (graphics/LOCOBITMAP.h), not
      * width/height (+0x08/+0x0C). Confirmed correct as originally written;
      * only the raw-offset spelling changes here. */
-    if (surface != NULL &&
-        surface->pixels == nullptr &&
-        surface->ddraw_surf == nullptr) {
-        if (surface != NULL) {
-            UIPANEL_DestroySurface(surface, 1);
-        }
+    if (surface->pixels == nullptr && surface->ddraw_surf == nullptr) {
+        delete surface;
         return NULL;
     }
 
@@ -545,12 +510,7 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
             this->tags[i].tag_low = tag_low;
             this->lru_timestamps[i] = this->frame_counter;
 
-            void* copy = operator_new(sizeof(UIPANEL_Surface));
-            if (copy != NULL) {
-                this->surface_cache[i] = static_cast<UIPANEL_Surface*>(UIPANEL_CopySurface(copy, surface));
-            } else {
-                this->surface_cache[i] = NULL;
-            }
+            this->surface_cache[i] = new UIPANEL_Surface(*surface);
             return surface;
         }
     }
@@ -559,21 +519,15 @@ void* NetworkPlayerList::GetOrCreateSurface(uint8_t type_hi,
     if (no_evict == 0) {
         int32_t lru = find_lru_slot(this);
         if (this->surface_cache[lru] != NULL) {
-            UIPANEL_DestroySurface(this->surface_cache[lru], 1);
+            delete this->surface_cache[lru];
         }
-        this->surface_cache[lru] = NULL;
 
         this->tags[lru].type_hi = type_hi;
         this->tags[lru].variant = variant;
         this->tags[lru].tag_low = tag_low;
         this->lru_timestamps[lru] = this->frame_counter;
 
-        void* copy = operator_new(sizeof(UIPANEL_Surface));
-        if (copy != NULL) {
-            this->surface_cache[lru] = static_cast<UIPANEL_Surface*>(UIPANEL_CopySurface(copy, surface));
-        } else {
-            this->surface_cache[lru] = NULL;
-        }
+        this->surface_cache[lru] = new UIPANEL_Surface(*surface);
     }
 
     return surface;
@@ -600,11 +554,11 @@ void NetworkPlayerList::RenderTrackEntry(void* hdc,
     uint32_t src_w, src_h;
 
     /* Get surface for this track entry's packed type */
-    surface = static_cast<UIPANEL_Surface*>(this->GetOrCreateSurface(
+    surface = this->GetOrCreateSurface(
         entry[0] >> 3,
         (entry[0] & 7) + 1,
         entry[1],
-        0));
+        0);
 
     if (surface == NULL) return;
 
@@ -649,7 +603,7 @@ void NetworkPlayerList::RenderTrackEntry(void* hdc,
                  hdc, src_x_off, src_y_off, src_w, src_h, 0);
 
     /* Release surface copy */
-    UIPANEL_DestroySurface(surface, 1);
+    delete surface;
 }
 
 /* ================================================================== */
@@ -752,9 +706,9 @@ void NetworkPlayerList::RenderSessionFrame(void* hdc)
     }
 
     /* Get session surface (tag 0x1E) */
-    surface = static_cast<UIPANEL_Surface*>(this->GetOrCreateSurface(0x1E, 0, 0, 0));
+    surface = this->GetOrCreateSurface(0x1E, 0, 0, 0);
     if (surface != NULL) {
-        UIPANEL_DestroySurface(surface, 1);
+        delete surface;
     }
 }
 
@@ -781,7 +735,7 @@ void NetworkPlayerList::RenderSessionBase(void* hdc,
     }
 
     /* Get session base surface (tag 0x1F) */
-    surface = static_cast<UIPANEL_Surface*>(this->GetOrCreateSurface(0x1F, 1, param6, 0));
+    surface = this->GetOrCreateSurface(0x1F, 1, param6, 0);
     if (surface != NULL) {
         /* width/height (+0x08/+0x0C) — Ghidra's DPLAY_RenderSessionBase
          * (0x443FF0) reads puVar1[2]/[3], matching UIPANEL_Surface's
@@ -795,7 +749,7 @@ void NetworkPlayerList::RenderSessionBase(void* hdc,
                      (param4 - 1) - surf_w, param3 + 1U,
                      param4 - 1, surf_h + param3 + 1U,
                      hdc, 0, 0, surf_w, surf_h, 0);
-        UIPANEL_DestroySurface(surface, 1);
+        delete surface;
     }
 }
 

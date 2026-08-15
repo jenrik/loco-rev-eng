@@ -64,7 +64,8 @@ class GameSession:
             raise AssertionError(f"isolated game data missing: {self.data_dir}")
 
         started = self._run(
-            ["gui-sandbox", "start"] + (["--visible"] if self.visible else []),
+            ["gui-sandbox", "start", "--size", f"{CANVAS_WIDTH}x{CANVAS_HEIGHT}"]
+            + (["--visible"] if self.visible else []),
             timeout=30,
         )
         (self.artifact_dir / "sandbox-start.log").write_text(
@@ -203,6 +204,10 @@ class GameSession:
         # Park the compositor cursor in a corner to avoid hiding central controls.
         self._run(["gui-sandbox", "move", self.tag, "1", "1"])
         time.sleep(0.1)
+        # The game window is borderless under test (LEGO_LOCO_TEST_EVENTS,
+        # see graphics/sdl3_window.cpp), so the raw compositor capture is
+        # already pixel-comparable against reference screenshots
+        # (tests/reference/*.png) with no decoration to crop out.
         self._run(["gui-sandbox", "shot", self.tag, str(path)], timeout=20)
         self.screenshot_size = self._png_size(path)
         self._record("screenshot", name=name, path=str(path), size=self.screenshot_size)

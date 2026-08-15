@@ -242,8 +242,6 @@ void  CRT_time(void);                         /* 0x466490 */
 
 /* -- Game engine functions -- */
 void  Train_QueueMessage(void* train, TrainMessage* msg);
-void* UIPANEL_CreateSurface(void* surface);
-size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 void  TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flags);
 
 /* -- Resource manager functions -- */
@@ -326,11 +324,6 @@ void    Sprite_SetState(void* sprite, int32_t state, int32_t* unk);
 void    UI_WindowBase_Show(void* window);
 void    UI_WindowBase_Hide(void* window);
 void    UIPANEL_StretchBlit(void* surface, const char* path, int32_t x, int32_t y, int32_t flags);
-/* Real def: shared/defsym_stubs.cpp — signature corrected to match
- * network/NetworkPlayerList.cpp's evidenced declaration (see that file's
- * own comment on this symbol); no caller in this codebase currently
- * declares it via this header. */
-void*   UIPANEL_CopySurface(void* dst, UIPANEL_Surface* src);
 void    Config_GetIniInt(void* ini, const char* section, const char* key, int32_t def);
 void    Config_WriteInt(void* ini, const char* section, const char* key, int32_t val);
 

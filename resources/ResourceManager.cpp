@@ -147,7 +147,14 @@ void Town_CopyTiles8bpp_Transparent(
 void TileMap_InvalidateRect(void* tilemap,
     int32_t left, int32_t top, int32_t right, int32_t bottom); /* @ 0x00455840 */
 
-void UIPANEL_CreateSurface(void* surfOut);           /* @ 0x004286B0 */
+/* UIPANEL_CreateSurface declaration removed 2026-08-14: had zero call
+ * sites in this file (RESMGR_LoadResourceData, the one real xref caller
+ * of the actual constructor at 0x42A110, is declared in
+ * ResourceManager.h but never implemented here) and cited the wrong
+ * address anyway -- 0x004286B0 is UIPANEL_DrawButton, confirmed via
+ * Ghidra decompile, not UIPANEL_CreateSurface. When RESMGR_LoadResourceData
+ * is implemented for real, its surface should be built with
+ * `new UIPANEL_Surface()` (graphics/LOCOBITMAP.h/.cpp, 0x42A110). */
 uint32_t UIPANEL_LockSurface(void* surf);            /* @ 0x00428A70 */
 void TileMap_CreateOverlay(void* tilemap, void* surface, int32_t flag); /* @ 0x00455CB0 */
 
@@ -262,7 +269,9 @@ T& field_at(void* object, size_t offset)
 
 void destroy_resource(int32_t handle)
 {
-    static_cast<ResourceObject*>(pointer_from_handle<void>(handle))->Destroy(1);
+    /* Original vtable[0] scalar deleting destructor with flag 1 -- ordinary
+     * `delete` reproduces this exactly; see resources/ResourceObject.h. */
+    delete static_cast<ResourceObject*>(pointer_from_handle<void>(handle));
 }
 
 int32_t create_string_resource(int32_t resource_id, char* string_data)

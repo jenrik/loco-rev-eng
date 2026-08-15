@@ -8,6 +8,7 @@
 // Status: TRANSCRIBED
 
 #include "TrackPiece.h"
+#include "../resources/ResourceObject.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
 namespace {
@@ -45,10 +46,6 @@ struct TrackViewportFields {
 struct SurfaceFields {
     uint8_t prefix_00_0f[0x10];
     void* surface;
-};
-
-struct OwnedSubResourceFields {
-    void** vtable;
 };
 
 #if UINTPTR_MAX == 0xffffffffu
@@ -157,14 +154,19 @@ TrackPiece::~TrackPiece()
     /* Mark object dead in manager */
     this->MarkDead();
 
-    /* Release sub-resource at +0x28 if non-null */
+    /* Release sub-resource at +0x28 if non-null. Real ResourceObject
+     * virtual destructor (resources/ResourceObject.h) -- `delete`
+     * reproduces the original's scalar-deleting-destructor-with-flag-1
+     * exactly (see CLAUDE.md's "Scalar/vector deleting-destructor
+     * flags... -> remove; keep only user cleanup"). */
     if (this->sub_resource != 0) {
-        /* Call scalar deleting destructor on sub-resource with flags=1 (free) */
-        OwnedSubResourceFields* sub_resource = reinterpret_cast<OwnedSubResourceFields*>(
+        // ABI_BOUNDARY: sub_resource is a 32-bit handle (the original x86
+        // pointer field's width, preserved so this class's own layout stays
+        // offset-compatible on a 64-bit host -- same pointer_from_handle-
+        // style convention resources/ResourceManager.cpp uses), not a
+        // reconstructed-class round-trip.
+        delete reinterpret_cast<ResourceObject*>(
             static_cast<uintptr_t>(static_cast<uint32_t>(this->sub_resource)));
-        using Destructor = void (*)(void*, byte);
-        Destructor destroy = reinterpret_cast<Destructor>(sub_resource->vtable[0]);
-        destroy(sub_resource, 1);
         this->sub_resource = 0;
     }
 

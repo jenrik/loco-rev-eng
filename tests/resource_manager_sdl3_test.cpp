@@ -19,11 +19,6 @@ uint16_t read_u16(const void* base, size_t offset) {
     const auto* bytes = static_cast<const uint8_t*>(base);
     return static_cast<uint16_t>(bytes[offset]) | (static_cast<uint16_t>(bytes[offset + 1]) << 8);
 }
-uint32_t read_u32(const void* base, size_t offset) {
-    const auto* bytes = static_cast<const uint8_t*>(base);
-    return static_cast<uint32_t>(bytes[offset]) | (static_cast<uint32_t>(bytes[offset + 1]) << 8) |
-           (static_cast<uint32_t>(bytes[offset + 2]) << 16) | (static_cast<uint32_t>(bytes[offset + 3]) << 24);
-}
 }
 
 int main() {
@@ -32,22 +27,26 @@ int main() {
     std::string error;
     if (!manager.initialize("lego-loco-unpacked", &error)) return fail(error.c_str()) ? 0 : 1;
 
-    // Exact consumer protocol from EditWindow::initSprites (0x421500).
+    // Exact consumer protocol from EditWindow::initSprites (0x421500)/
+    // EditWindow::render (0x4216F0) -- both real production call sites use
+    // the typed sprite_bitmap()/bitmap_width()/bitmap_height()/
+    // release_sprite() accessors (ui/EditWindow.cpp), not a raw vtable, so
+    // this test exercises the same typed path rather than a legacy raw
+    // vtable-slot dispatch (SpriteResource is a real ResourceObject now --
+    // see resources/ResourceObject.h -- with no vtable slot 4 at all).
     void* resource = ResourceManager_GetById(static_cast<void*>(nullptr), 0x407);
     if (!resource || read_u16(resource, 0x14) != 155 || read_u16(resource, 0x16) != 130) {
         return fail("resource 0x407 did not expose original sprite dimensions") ? 0 : 1;
     }
-    auto** vtable = *reinterpret_cast<void***>(resource);
-    using GetBitmap = void* (*)(void*, int, int);
-    void* bitmap = reinterpret_cast<GetBitmap>(vtable[4])(resource, 0, 0);
-    if (!bitmap || read_u32(bitmap, 0x08) != 155 || read_u32(bitmap, 0x0c) != 130) {
-        return fail("vtable[4] bitmap ABI does not match EditWindow::render") ? 0 : 1;
+    auto* sprite_resource = static_cast<loco::assets::SpriteResource*>(resource);
+    loco::assets::SpriteBitmap* bitmap = loco::assets::sprite_bitmap(sprite_resource);
+    if (!bitmap || loco::assets::bitmap_width(bitmap) != 155 || loco::assets::bitmap_height(bitmap) != 130) {
+        return fail("sprite_bitmap() ABI does not match EditWindow::render") ? 0 : 1;
     }
     if (ResourceManager_GetById(static_cast<void**>(nullptr), 0x407) != resource) {
         return fail("ResourceManager did not cache resource 0x407") ? 0 : 1;
     }
-    using Release = void (*)(void*);
-    reinterpret_cast<Release>(vtable[8])(resource);
+    loco::assets::release_sprite(sprite_resource);
 
     SDL_Surface* surface = ResourceManager_GetSpriteSurface(resource);
     Uint32 color_key = 0xffffffffu;

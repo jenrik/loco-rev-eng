@@ -10,6 +10,11 @@
 #include "GameAudio.h"
 #include "AudioChannel.h"
 #include "../shared/types.h"
+#ifndef _WIN32
+#include "../platform/sdl3_types.h"
+#else
+#include "../stubs/dsound.h"
+#endif
 #include <cstring>
 
 /* ================================================================== */
@@ -55,8 +60,18 @@ extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was v
 extern int32_t g_listener_x;                            /* 0x4AAD2C */
 extern int32_t g_listener_y;                            /* 0x4AAD30 */
 
-/* Four-byte prefix retained by the original channel-pool allocation. */
-struct ChannelAllocationHeader {
+/* Four-byte prefix retained by the original channel-pool allocation
+ * (a single combined malloc, count then contiguous AudioChannel array --
+ * disassembly of 0x412C50: `operator_new(count * 0x3c + 4)`). On the
+ * original 32-bit x86 layout AudioChannel needed only 4-byte alignment, so
+ * the 4-byte count prefix landed the array correctly aligned for free; on
+ * this host, AudioChannel's real pointer members (output_ptr/ds_buffer)
+ * require 8-byte alignment, so this header is padded to match --
+ * `alignas` here is a safe-native-layout fix, not an attempt at x86 layout
+ * parity (a non-goal for host-only code per CLAUDE.md). Found via a UBSan
+ * "member call on misaligned address" report the first time GameAudio::Init()
+ * was ever actually exercised end to end (tests/sdl3_dsound_adapter_test.cpp). */
+struct alignas(alignof(AudioChannel)) ChannelAllocationHeader {
     int32_t count;
 };
 
@@ -135,19 +150,31 @@ uint32_t GameAudio::Init()
     int32_t hr = dev->SetCooperativeLevel(nullptr, 2); /* DSSCL_NORMAL */
 
     if (hr == 0) {
-        /* Create primary buffer */
-        struct {
-            int32_t size;
-            int32_t format;
-        } wfx;
-        wfx.size   = 0x14;
-        wfx.format = 1;
+        /* Create primary buffer. Real DSBUFFERDESC (platform/sdl3_types.h) --
+         * disassembly of the original 0x412C50 confirms all 5 fields
+         * (dwSize=0x14, dwFlags=1=DSBCAPS_PRIMARYBUFFER, dwBufferBytes=0,
+         * dwReserved=0, lpwfxFormat=nullptr), not the 8-byte {size,format}
+         * pair previously here -- an 8-byte struct only "worked" because
+         * CreateSoundBuffer's concrete implementor never dereferenced past
+         * dwFlags; a real implementation reading dwBufferBytes/lpwfxFormat
+         * (at real offsets +8/+16) would read past the end of the struct. */
+        DSBUFFERDESC desc{};
+        desc.dwSize = 0x14;
+        desc.dwFlags = 1;
 
-        hr = dev->CreateSoundBuffer(&wfx, &this->ds_primary, nullptr);
+        hr = dev->CreateSoundBuffer(&desc, &this->ds_primary, nullptr);
 
         if (hr == 0) {
-            /* Set primary buffer format */
-            this->ds_primary->SetFormat(&wfx);
+            /* Set primary buffer format. NOTE: the original's disassembly
+             * (0x412C50) shows this real call passes a DIFFERENT stack
+             * buffer than the DSBUFFERDESC just built above -- almost
+             * certainly a WAVEFORMATEX, since SetFormat's real signature
+             * expects one, not a DSBUFFERDESC*. That buffer's own layout
+             * wasn't identified in this pass; flagged rather than guessed
+             * at. Passing `&desc` here (pre-existing behavior, unchanged by
+             * this fix) is likely still wrong, just no longer additionally
+             * an out-of-bounds read. */
+            this->ds_primary->SetFormat(&desc);
         }
 
         /* Determine channel count */

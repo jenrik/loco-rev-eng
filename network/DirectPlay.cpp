@@ -151,8 +151,16 @@ extern "C" {
 
 }
 
-/* Game engine functions (C++ linkage) */
-void  DDRAW_PresentRect(void* rect, void* hWnd, int32_t* param, uint8_t flag);
+/* Game engine functions (C++ linkage). DDRAW_PresentRect's real definition
+ * (graphics/sdl3_ddraw.cpp) and every other real caller's declaration
+ * (world/tilemap.h, graphics/LOCOBITMAP.h's #else branch) use `int32_t flag`
+ * -- this file's own `uint8_t flag` was a distinct, mismatched C++ overload
+ * that silently bound to shared/defsym_stubs.cpp's no-op stub instead of the
+ * real implementation (same "declaration doesn't match the real symbol"
+ * landmine class as docs/landmine-sweep-worklist.md's prior DDRAW_PresentRect
+ * entry -- that pass fixed every OTHER call site's declaration but missed
+ * this file). */
+void  DDRAW_PresentRect(void* rect, void* hWnd, int32_t* param, int32_t flag);
 
 /* DirectPlay game functions (C++ linkage) */
 uint32_t WIN32_RecvNetworkData(void* session, uint32_t resId, const char* msg);
@@ -238,7 +246,14 @@ static BOOL STDMETHODCALLTYPE DirectPlay_EnumSessionsCallback(LPCDPSESSIONDESC2 
 /* Global state                                                       */
 /* ================================================================== */
 
-extern void* _g_primary_surface;   /* 0x4FD3C4 — primary DirectDraw surface */
+/* g_primary_surface (graphics/DDRAW.h), not this file's former
+ * _g_primary_surface: both share the exact same documented address
+ * (0x4FD3C4) and are very likely the same original global split during
+ * incremental decompilation (see PROGRESS.md's DirectDraw-shim notes) --
+ * but only the non-underscore-prefixed one is actually wired to the real
+ * Sdl3DirectDrawSurface (platform/ddraw_globals.cpp); the underscore twin
+ * is deliberately left null pending a full, separate 8-file consolidation. */
+extern void* g_primary_surface;    /* 0x4FD3C4 — primary DirectDraw surface */
 extern void* _g_dsound_object;     /* 0x4FD398 — shadow GameObject */
 extern void* g_main_window;          /* 0x4AA4A0 */
 extern int32_t g_client_width;
@@ -278,12 +293,18 @@ void DirectPlay_Init(void)
     PlaySoundA(NULL, NULL, 0);
 
     /* Step 2: Get primary surface DC, fill with white, release DC.
-     * _g_primary_surface is declared void* for this project's established
+     * g_primary_surface is declared void* for this project's established
      * cross-file convention (see shared/types.h), but its real type is
      * IDirectDrawSurface4* (Cursor_internal.h's own comment agrees) —
      * typed here so GetDC/ReleaseDC go through real virtual methods,
-     * not manual vtable-offset arithmetic. */
-    IDirectDrawSurface4* primarySurface = static_cast<IDirectDrawSurface4*>(_g_primary_surface);
+     * not manual vtable-offset arithmetic. On host this is the real,
+     * live Sdl3DirectDrawSurface (platform/ddraw_globals.cpp) rather than
+     * the still-dormant `_g_primary_surface` twin. FillRect itself is
+     * currently a no-op on host (the GDI DC shim doesn't rasterize --
+     * PROGRESS.md's Remaining Work), so this step doesn't yet paint the
+     * white background; the shadow entity's own Draw() below (Step 5)
+     * is what actually becomes visible. */
+    IDirectDrawSurface4* primarySurface = static_cast<IDirectDrawSurface4*>(g_primary_surface);
     void* surface_hdc = nullptr;
     primarySurface->GetDC(&surface_hdc);
 

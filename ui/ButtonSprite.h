@@ -133,8 +133,12 @@ public:
 };
 
 /* ================================================================== */
-/* Global helper: Sprite_Destroy (C-linkage free function)             */
+/* Global helper: Sprite_Destroy                                       */
 /* Calls pixelData vtable[2] to release child, zeroes fields.          */
-/* Used internally by ButtonSprite::destroy(). Address: 0x454BC0.     */
-/* ================================================================== */
-extern "C" void __fastcall Sprite_Destroy(void* buttonSprite);
+/* Used internally by ButtonSprite::destroy(). Address: 0x454BC0.      */
+/* C++ linkage (not extern "C" -- this is decompiled game logic, not a */
+/* real C ABI boundary; the old extern "C" here conflicted with        */
+/* network/Netman.h's plain-C++ declaration of the same symbol and     */
+/* mismatched the C++-linkage real definitions in shared/link_stubs.cpp*/
+/* and shared/stubs_impl.cpp). */
+void __fastcall Sprite_Destroy(void* buttonSprite);

@@ -6,6 +6,7 @@
  */
 
 #include "UI_ChildWindow.h"
+#include "../graphics/LOCOBITMAP.h"
 
 #include <cassert>
 #include <cstdio>
@@ -92,11 +93,9 @@ void*  WNDPROC_StreamPrintf(void* stream, void* outBuf);
 void*  WNDPROC_StreamWrite(void* stream, void* outBuf);
 
 #ifdef _WIN32
-extern void*  __thiscall UIPANEL_CreateSurface(void* panel);                    /* 0x42A110 */
 extern uint8_t __thiscall UIPANEL_StretchBlit(void* surface, LPCSTR filePath,
                                                uint32_t param2, int32_t param3,
                                                int32_t param4);                  /* 0x42AB10 */
-extern size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
 #endif
 
 class ResourceManager;
@@ -123,19 +122,6 @@ extern void* DAT_004a99b0;
 #endif
 
 namespace {
-
-#ifdef _WIN32
-/* Call vtable slot 0 (scalar deleting destructor convention: flags=1
- * frees no memory, just releases sub-resources) on a sub-object whose
- * concrete type is not known here. Matches the original's
- * `(**(code**)*obj)(1)` idiom exactly. */
-void ReleaseSubObject(void* obj)
-{
-    void** const vtbl = *reinterpret_cast<void***>(obj);
-    using ScalarDtor = void (*)(void*, int32_t);
-    reinterpret_cast<ScalarDtor>(vtbl[0])(obj, 1);
-}
-#endif
 
 /* Directive-keyword string literals used only by Render() below — read
  * directly from the binary's .rdata this session via Ghidra's read_bytes,
@@ -269,37 +255,21 @@ ChildWindow::~ChildWindow()
     /* Clear the loaded flag — non-vtable operation, works on all platforms */
     loaded = 0;
 
-#ifdef _WIN32
-    /* Release renderSurface sub-object (if present).
-     * Uses the scalar-deleting-destructor convention (vtable[0] with flags=1),
-     * which is Windows x86 ABI specific. */
-    if (renderSurface != nullptr) {
-        ReleaseSubObject(renderSurface);
-        renderSurface = nullptr;
-    }
+    /* Release renderSurface/bitmapSurface (real UIPANEL_Surface destructor,
+     * matching the original's scalar-deleting-destructor call) -- always
+     * safe: both are always null on the host build, since the code that
+     * would create them (OnMouseMove/Render's bitmap-load tail) is
+     * currently Windows-only. */
+    delete renderSurface;
+    renderSurface = nullptr;
 
-    /* Free heapBuffer (if present) — works on all platforms */
     if (heapBuffer != nullptr) {
         GLOBAL_free(heapBuffer);
         heapBuffer = nullptr;
     }
 
-    /* Release bitmapSurface sub-object (if present) — Windows x86 ABI specific */
-    if (bitmapSurface != nullptr) {
-        ReleaseSubObject(bitmapSurface);
-        bitmapSurface = nullptr;
-    }
-#else
-    /* Host-path: The sub-object releases require the scalar-deleting-
-     * destructor ABI (calling vtable[0] with flags=1), which is a Windows
-     * x86 detail. On the host build, these objects are never created
-     * (OnMouseMove is a no-op), so the releases are not reachable; free
-     * heapBuffer as a safety measure. */
-    if (heapBuffer != nullptr) {
-        GLOBAL_free(heapBuffer);
-        heapBuffer = nullptr;
-    }
-#endif
+    delete bitmapSurface;
+    bitmapSurface = nullptr;
 }
 
 /* ================================================================== */
@@ -315,31 +285,22 @@ void* ChildWindow::OnMouseMove(int32_t x, int32_t y)
     }
 
     if (renderSurface == nullptr) {
-        /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the real
-         * host size (see graphics/LOCOBITMAP.h). */
-        void* const raw = operator_new(UIPANEL_Surface_Size());
-        void* const surface = (raw != nullptr) ? UIPANEL_CreateSurface(raw) : nullptr;
-        renderSurface = surface;
-        if (surface == nullptr) {
-            return nullptr;
-        }
-        UIPANEL_StretchBlit(surface, reinterpret_cast<LPCSTR>(&bmpPath[0]), 0,
+        renderSurface = new UIPANEL_Surface();
+        UIPANEL_StretchBlit(renderSurface, reinterpret_cast<LPCSTR>(&bmpPath[0]), 0,
                              static_cast<uint32_t>(x), y);
     }
 
-    int32_t* const surfaceWords = static_cast<int32_t*>(renderSurface);
-    if (surfaceWords[6] == 0 && surfaceWords[7] == 0) {
-        ReleaseSubObject(renderSurface);
+    if (renderSurface->pixels == nullptr && renderSurface->ddraw_surf == nullptr) {
+        delete renderSurface;
         renderSurface = nullptr;
         return nullptr;
     }
 
     field_14 = static_cast<int16_t>(
-        static_cast<uint32_t>(surfaceWords[2]) /
+        static_cast<uint32_t>(renderSurface->width) /
         static_cast<uint16_t>(totalFrameCount));
-    const int16_t surfaceField0C = *reinterpret_cast<const int16_t*>(&surfaceWords[3]);
     overlayRefCount += 1;
-    field_16 = surfaceField0C;
+    field_16 = static_cast<int16_t>(renderSurface->height);
 
     if (ready == 0) {
         INPUT_EditScrollHandler(&DAT_004a99b0, resourceId);
@@ -386,7 +347,7 @@ void ChildWindow::OnMouseLeave()
 #ifdef _WIN32
     const bool isStickyWindow = (sticky == 1);
     if (overlayRefCount == 0 && renderSurface != nullptr && !isStickyWindow) {
-        ReleaseSubObject(renderSurface);
+        delete renderSurface;
         renderSurface = nullptr;
 
         if (frameSetCount != 0) {
@@ -647,23 +608,16 @@ uint8_t ChildWindow::Render(void* stream)
         }
 
 #ifdef _WIN32
-        /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the real
-         * host size (see graphics/LOCOBITMAP.h). */
-        void* const raw = operator_new(UIPANEL_Surface_Size());
-        bitmapSurface = (raw != nullptr) ? UIPANEL_CreateSurface(raw) : nullptr;
-        if (bitmapSurface != nullptr) {
-            UIPANEL_StretchBlit(bitmapSurface, composedPath, 0, 0, 0);
-            int32_t* const surfaceWords = static_cast<int32_t*>(bitmapSurface);
-            if (surfaceWords[6] == 0 && surfaceWords[7] == 0) {
-                ReleaseSubObject(bitmapSurface);
-                bitmapSurface = nullptr;
-            }
+        bitmapSurface = new UIPANEL_Surface();
+        UIPANEL_StretchBlit(bitmapSurface, composedPath, 0, 0, 0);
+        if (bitmapSurface->pixels == nullptr && bitmapSurface->ddraw_surf == nullptr) {
+            delete bitmapSurface;
+            bitmapSurface = nullptr;
         }
         if (bitmapSurface != nullptr && frameCount != 0) {
-            const int32_t* const surfaceWords = static_cast<const int32_t*>(bitmapSurface);
             field_28 = static_cast<int16_t>(
-                static_cast<uint32_t>(surfaceWords[2]) / static_cast<uint16_t>(frameCount));
-            field_2A = *reinterpret_cast<const int16_t*>(&surfaceWords[3]);
+                static_cast<uint32_t>(bitmapSurface->width) / static_cast<uint16_t>(frameCount));
+            field_2A = static_cast<int16_t>(bitmapSurface->height);
         }
 #else
         (void)composedPath;

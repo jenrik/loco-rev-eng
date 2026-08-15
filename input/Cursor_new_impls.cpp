@@ -4,6 +4,7 @@
 #include "../platform/ddraw_interfaces.h"
 #include "../network/DPlayManager.h"
 #include "../ui/ButtonSprite.h"
+#include "../graphics/LOCOBITMAP.h"
 
 #include <cstdio>
 #include <cstdint>
@@ -653,9 +654,9 @@ void Cursor::draw_color_palette(void* target_surf, uint8_t mode)
         int xPos = availWidth - 4;
 
         while (currentIdx <= endIdx) {
-            ButtonSprite* sprite = this->toolbar_sprites[currentIdx];
-            int spriteW = sprite->y;                         /* +0x08 width */
-            int spriteH = sprite->sourceX;                   /* +0x0C height */
+            UIPANEL_Surface* sprite = this->toolbar_sprites[currentIdx];
+            int spriteW = sprite->width;
+            int spriteH = sprite->height;
 
             int availHeight = this->palette_rect.bottom;
             if (mode != 0) {
@@ -942,10 +943,10 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
     if (direction == 0) {
         /* ---- Backward direction ---- */
         uint8_t idx = static_cast<uint8_t>(this->palette_start_idx) - 1;
-        ButtonSprite* surf = this->toolbar_sprites[idx];
+        UIPANEL_Surface* surf = this->toolbar_sprites[idx];
         if (surf == nullptr) {
-            surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
-                this->editor_flags[2], this->editor_flags[1], idx + 1, 1));
+            surf = g_dplay->GetOrCreateSurface(
+                this->editor_flags[2], this->editor_flags[1], idx + 1, 1);
             this->toolbar_sprites[idx] = surf;
         }
 
@@ -954,7 +955,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
             return 0;
         }
 
-        int totalWidth = surf->y + 4;
+        int totalWidth = surf->width + 4;
         this->has_next_page = 1;
 
         uint8_t walkIdx = idx;
@@ -966,9 +967,9 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
                 surf = this->toolbar_sprites[nextIdx];
                 if (surf == nullptr) {
-                    surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
+                    surf = g_dplay->GetOrCreateSurface(
                         this->editor_flags[2], this->editor_flags[1],
-                        static_cast<uint8_t>(nextIdx + 1), 1));
+                        static_cast<uint8_t>(nextIdx + 1), 1);
                     this->toolbar_sprites[nextIdx] = surf;
                 }
 
@@ -977,7 +978,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
                     break;
                 }
 
-                totalWidth += surf->y;
+                totalWidth += surf->width;
                 walkIdx = nextIdx;
 
                 if (totalWidth >= this->palette_rect.right - this->palette_rect.left) {
@@ -1018,8 +1019,8 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
         return 0;
     }
 
-    ButtonSprite* surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
-        this->editor_flags[2], this->editor_flags[1], seqNum + 1, 1));
+    UIPANEL_Surface* surf = g_dplay->GetOrCreateSurface(
+        this->editor_flags[2], this->editor_flags[1], seqNum + 1, 1);
     this->toolbar_sprites[cacheIdx] = surf;
 
     if (surf == nullptr) {
@@ -1027,7 +1028,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
         return 0;
     }
 
-    int totalWidth = surf->y + 4;
+    int totalWidth = surf->width + 4;
     this->has_prev_page = 1;
     uint8_t lastGood = cacheIdx;
 
@@ -1050,9 +1051,9 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
 
             totalWidth += 10;  /* gap */
 
-            surf = static_cast<ButtonSprite*>(g_dplay->GetOrCreateSurface(
+            surf = g_dplay->GetOrCreateSurface(
                 this->editor_flags[2], this->editor_flags[1],
-                nextSeq + 1, 1));
+                nextSeq + 1, 1);
             this->toolbar_sprites[cacheIdx] = surf;
 
             if (surf == nullptr) {
@@ -1060,7 +1061,7 @@ uint8_t Cursor::draw_postcard_preview(uint8_t direction)
                 break;
             }
 
-            totalWidth += surf->y;
+            totalWidth += surf->width;
             lastGood = cacheIdx;
 
             if (totalWidth >= this->palette_rect.right - this->palette_rect.left) {
@@ -1352,13 +1353,12 @@ void Cursor::handle_locomotive_select(uint32_t index)
         this->editor_state = 2;
         this->selected_idx_384 = static_cast<int32_t>(index);  /* +0x384 */
 
-        ButtonSprite* sprite = this->toolbar_sprites[index];   /* +0x48C */
-        /* Decompile: local_8 = sprite->y >> 1; local_4 = sprite->sourceX >> 1;
+        UIPANEL_Surface* sprite = this->toolbar_sprites[index]; /* +0x48C */
+        /* Decompile: local_8 = sprite->width >> 1; local_4 = sprite->height >> 1;
          * &local_8 passed as the origin pointer, with local_8 at the lower
          * stack address (i.e. the first/x field of the {x,y} pair). */
-        UIAnimationOrigin origin{ sprite->y >> 1, sprite->sourceX >> 1 };
-        this->set_render_surface(
-            reinterpret_cast<UIPANEL_Surface*>(sprite), 0, &origin, 0, 1);
+        UIAnimationOrigin origin{ sprite->width >> 1, sprite->height >> 1 };
+        this->set_render_surface(sprite, 0, &origin, 0, 1);
 
         this->field_388 = 0;                                    /* +0x388 */
         return;

@@ -461,8 +461,6 @@ void Cursor_InitNetworkPlayer(void*,int32_t);
 void Cursor_InitNetworkPlayer(void*,int32_t){}
 void UI_CreateFullWindow(void*,int32_t,void*,int32_t,int32_t,int32_t,int32_t,void*,void*,uint32_t);
 void UI_CreateFullWindow(void*,int32_t,void*,int32_t,int32_t,int32_t,int32_t,void*,void*,uint32_t){}
-void UIPANEL_CreateSurface__UIPANEL_Surface(UIPANEL_Surface*);
-void UIPANEL_CreateSurface__UIPANEL_Surface(UIPANEL_Surface*){}
 void UIPANEL_EndPaint(void*);
 void UIPANEL_EndPaint(void*){}
 int32_t UIPANEL_UnlockSurface(void*,uint32_t);

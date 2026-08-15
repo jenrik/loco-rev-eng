@@ -514,6 +514,33 @@ public:
  * by the UIPANEL_* functions (0x42A1xx range).
  */
 struct UIPANEL_Surface {
+    /** UIPANEL_Surface — zero-init every field (0x42A110).
+     *  Address: 0x42A110 */
+    UIPANEL_Surface();
+
+    /** UIPANEL_Surface::~UIPANEL_Surface — scalar dtor, user cleanup only
+     *  (0x42A140): frees palette_ptr when owned, frees pixels, releases
+     *  ddraw_surf. The scalar-deleting-destructor flag and its conditional
+     *  operator-delete call are compiler-generated, not reproduced here.
+     *  Address: 0x42A140 */
+    virtual ~UIPANEL_Surface();
+
+    /** UIPANEL_Surface::UIPANEL_Surface(const&) — deep-copy ctor, a.k.a.
+     *  UIPANEL_CopySurface (0x42A1C0, confirmed by its own
+     *  OutputDebugStringA literal: "LOCOBITMAP COPY CONSTRUCTOR - failed to
+     *  create surface"). Copies palette (new 0x200-byte allocation when
+     *  owned, shared pointer otherwise), pixels (width*height bytes), and
+     *  -- when present -- duplicates ddraw_surf via IDirectDraw4::
+     *  CreateSurface (one retry on failure; the retry re-sets ddsCaps
+     *  because the failed attempt clobbers it) followed by a full-surface
+     *  Blt from the source. Address: 0x42A1C0 */
+    UIPANEL_Surface(const UIPANEL_Surface& other);
+
+    /* No assignment xref exists anywhere in the binary -- deleted rather
+     * than left to an implicit member-wise copy that would double-free
+     * palette_ptr/pixels/ddraw_surf. */
+    UIPANEL_Surface& operator=(const UIPANEL_Surface&) = delete;
+
     /* vtable at +0x00 is compiler-managed via virtual methods */
     int32_t     mode;            // +0x04  0=software pixel buffer, 1=DDraw surface
     int32_t     width;           // +0x08  surface width in pixels (also read as the
@@ -753,14 +780,25 @@ struct UIPANEL_Surface {
                                  RECT* clip_rect, uint32_t flags);
 };
 
-/* ================================================================ */
-/* UIPANEL_Surface management functions (0x42A1xx range)            */
-/* ================================================================ */
-void  UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* @0x42A110 */
-void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* @0x42A140 */
+/* Construction/destruction/copy are the real UIPANEL_Surface() /
+ * ~UIPANEL_Surface() / UIPANEL_Surface(const&) members above (0x42A110 /
+ * 0x42A140 / 0x42A1C0) -- callers use `new UIPANEL_Surface()`, `delete`,
+ * and `new UIPANEL_Surface(*src)` respectively, not free functions. */
 
-/* sizeof(UIPANEL_Surface) on this host — see graphics/LOCOBITMAP.cpp. */
-size_t UIPANEL_Surface_Size();
+/* Canonical global: the one persistent UIPANEL_Surface created by
+ * DDRAW_Init (0x45C8A0) to hold the "2__smisc_thumbpal_bmp" thumbnail
+ * palette bitmap; lives for the process lifetime (no destroy call exists
+ * anywhere in the binary). Address: 0x004FF110 */
+extern UIPANEL_Surface* g_thumbpal_surface;
+
+/* Factory for translation units that cannot include this header directly.
+ * town/Town.cpp is the one known case: it must include both this header
+ * and ui/PostcardAlbum.h, and the two declare genuinely different,
+ * unrelated classes both named `PostcardAlbum` (a separate, pre-existing
+ * landmine -- see town/Town.h's UIPANEL_Surface forward-decl comment).
+ * Equivalent to `new UIPANEL_Surface()`; only usable through a forward
+ * declaration of UIPANEL_Surface, not a substitute constructor call. */
+UIPANEL_Surface* UIPANEL_Surface_New();
 
 /* ================================================================ */
 /* Tile-occupancy / viewport collision checks (0x42C950-0x42CB10)   */

@@ -126,7 +126,8 @@ test('resource-manager-sdl3', resource_manager_sdl3_test,
 entity_host_resource_test = executable('entity_host_resource_test',
   'entity_host_resource_test.cpp',
   objects: [obj_resource_archive, obj_pe_string_table, obj_resource_mgr_sdl3,
-            obj_game_object, obj_entity],
+            obj_game_object, obj_entity, obj_sprite_uipanel_adapter,
+            obj_uipanel_surface_lifecycle],
   include_directories: inc_dirs,
   cpp_args: test_warn_args,
   dependencies: [sdl3_dep],
@@ -245,6 +246,20 @@ sdl3_game_audio_test = executable('sdl3_game_audio_test',
 test('sdl3-game-audio', sdl3_game_audio_test,
   env: ['SDL_AUDIODRIVER=dummy'], workdir: meson.project_source_root())
 
+# DirectSound bridge: GameAudio::Init() through the real AudioDirectSoundDevice/
+# AudioDirectSoundBuffer interface down to the SDL3 backend -- otherwise
+# entirely unexercised (the real host bootstrap path defers device init to
+# the separate SDL3_GameAudio subsystem instead; see the test file header).
+sdl3_dsound_adapter_test = executable('sdl3_dsound_adapter_test',
+  'sdl3_dsound_adapter_test.cpp',
+  objects: [obj_gameaudio, obj_audiochannel, obj_sdl3_dsound, obj_sdl3_dsound_adapter],
+  include_directories: inc_dirs,
+  cpp_args: test_warn_args + ['-include', compat_h],
+  dependencies: [sdl3_dep],
+)
+test('sdl3-dsound-adapter', sdl3_dsound_adapter_test,
+  env: ['SDL_AUDIODRIVER=dummy'], workdir: meson.project_source_root())
+
 # Original MCI launch order recovered from 0x421EB0 / 0x420F7F. Header-only.
 intro_video_sequence_test = executable('intro_video_sequence_test',
   'intro_video_sequence_test.cpp',
@@ -295,7 +310,8 @@ test('host-mode3-bootstrap', host_mode3_bootstrap_test)
 
 persistence_objs = [obj_input_mgr, obj_resdata_save, obj_persistence_adapt, obj_config_ini]
 persistence_cone = [obj_track_pos, obj_game_object, obj_entity, obj_building_mgr_grp,
-                     obj_resdata_vehicle, obj_game_vehicle, obj_help_page_node, obj_building]
+                     obj_resdata_vehicle, obj_game_vehicle, obj_help_page_node, obj_building,
+                     obj_sprite_uipanel_adapter, obj_uipanel_surface_lifecycle]
 
 # Canonical InputMgr regression: ctor 0x41D250 / dtor body 0x41D2D0 / embedded
 # entity-collection ops / ResetWorldState 0x41E100. Links the real InputMgr.o;
@@ -344,7 +360,8 @@ test('input-world', input_world_test, workdir: meson.project_source_root())
 input_place_object_test = executable('input_place_object_test',
   'input_place_object_test.cpp',
   objects: persistence_objs + persistence_cone +
-           [obj_resource_archive, obj_pe_string_table, obj_resource_mgr_sdl3],
+           [obj_resource_archive, obj_pe_string_table, obj_resource_mgr_sdl3,
+            obj_town_backdrop_adapter],
   include_directories: inc_dirs + [include_directories('.')],
   cpp_args: test_warn_args + ['-include', compat_h],
   dependencies: [sdl3_dep],
@@ -358,6 +375,7 @@ test('input-place-object', input_place_object_test,
 # ---------------------------------------------------------------------------
 
 test('uipanel-surface-linkage', find_program('uipanel_surface_linkage_test.sh'), args: [lego_loco])
+test('uipanel-surface-construction', find_program('uipanel_surface_construction_test.sh'), args: [lego_loco])
 test('host-menu-renderer-linkage', find_program('host_menu_renderer_linkage_test.sh'), args: [lego_loco])
 test('host-intro-video-linkage', find_program('host_intro_video_linkage_test.sh'), args: [lego_loco])
 

@@ -10,20 +10,15 @@
  */
 
 #include <stdint.h>
+#include "../graphics/LOCOBITMAP.h"
 
 /* ================================================================== */
 /* External references                                                 */
 /* ================================================================== */
 
-extern void* operator_new(uint32_t size);
-
-extern void* __cdecl UIPANEL_CreateSurface(void* surface_mem);
 extern void  __cdecl UIPANEL_StretchBlit(void* surface, char* bmp_name,
                                           uint32_t bmp_type, int32_t x, int32_t y);
 extern void  __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...);
-
-/* Global surface pointer at 0x4FF110 */
-extern void* g_thumbpal_surface;   /* 0x004FF110 — thumbnail palette surface */
 
 /* Global format string at 0x481178 — offset past "Lego_" prefix */
 extern const char g_thumbpal_bmp_name[];  /* "2__smisc_thumbpal_bmp" at 0x4A99C8 */
@@ -49,13 +44,7 @@ extern const char g_thumbpal_bmp_name[];  /* "2__smisc_thumbpal_bmp" at 0x4A99C8
 uint32_t __cdecl DDRAW_Init(void);
 uint32_t __cdecl DDRAW_Init(void)
 {
-    void* surface_mem = operator_new(0x20);
-
-    if (surface_mem != NULL) {
-        g_thumbpal_surface = UIPANEL_CreateSurface(surface_mem);
-    } else {
-        g_thumbpal_surface = NULL;
-    }
+    g_thumbpal_surface = new UIPANEL_Surface();
 
     /* "2__smisc_thumbpal_bmp" resource (at 0x4A99C8) */
     char local_buf[0x104];

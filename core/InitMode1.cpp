@@ -130,18 +130,16 @@ void CGWND::initMode1()
         Game_SetScreenMode(&g_game, 0, 1, 0);
 
         /* Initialize DirectPlay compositing (0x45E090):
-         *   - Fills primary surface with black
-         *   - Creates shadow GameObject
-         *   - Presents first frame */
-#ifndef _WIN32
-        /* Host deviation: DirectPlay_Init dereferences a 0x402 shadow
-         * GameObject's loaded resource (+0x16 frame height), which the SDL
-         * host does not populate; presentation is SDL-primary-composed. */
-        std::fprintf(stderr, "[HOST] initMode1 PATH A: DirectPlay_Init skipped (host presentation layer)\n");
-        std::fflush(stderr);
-#else
+         *   - Fills primary surface with white (currently a no-op on host --
+         *     the GDI DC shim doesn't rasterize FillRect yet)
+         *   - Creates shadow GameObject (resource 0x402, the loading-screen
+         *     spinner/logo sprite)
+         *   - Presents first frame
+         * Real ResourceObject::Lock() dispatch (see PROGRESS.md's RESDATA/
+         * ResourceObject unification entry) makes the shadow entity's Draw()
+         * and DDRAW_PresentRect's actual present both work on host now --
+         * this is no longer the host-unsafe call it used to be. */
         DirectPlay_Init();
-#endif
 
         /* Disable main window during loading to prevent input */
         EnableWindow(hWnd, FALSE);
@@ -149,21 +147,14 @@ void CGWND::initMode1()
         /* Pump messages once to render the initial loading frame */
         CGWND_PumpMessages(1);
 
-        /* The Windows path initializes the four full-screen overlays here.
-         * Their original ResourceObject::Lock surfaces are not yet represented
-         * by the SDL resource bridge; invoking those paths would dispatch an
-         * x86 resource slot against a host sprite.  The objects are still
-         * constructed for the mode-3 dependency cone, but their presentation
-         * setup stays explicitly deferred until typed SDL surface adapters
-         * exist. */
-#ifndef _WIN32
-        if (g_demo_mode != 1) {
-            std::fprintf(stderr,
-                "[HOST] initMode1 PATH A: Town/Cursor/Postcard overlay setup "
-                "deferred (SDL ResourceObject surface adapter unavailable)\n");
-            std::fflush(stderr);
-        }
-#else
+        /* Initializes the four full-screen overlays. Each one's resource
+         * surface now comes from real ResourceObject::Lock() virtual
+         * dispatch (resources/ResourceObject.h) -- on host, SpriteResource's
+         * override lazily builds a real UIPANEL_Surface/IDirectDrawSurface4
+         * adapter (resources/sprite_uipanel_adapter.cpp), so this no longer
+         * needs a host-only skip branch (formerly "SDL ResourceObject
+         * surface adapter unavailable" -- see PROGRESS.md's RESDATA/
+         * ResourceObject unification entry). */
         if (g_demo_mode != 1) {
             /* --- Incremental subsystem initialization ---
              * Each step initializes a subsystem then presents + pumps
@@ -192,7 +183,6 @@ void CGWND::initMode1()
                 CGWND_PumpMessages(1);
             }
         }
-#endif
 
         /* Start async background task for loading/intro playback.
          * Callback at 0x45DE40 handles the loading sequence; the SDL host

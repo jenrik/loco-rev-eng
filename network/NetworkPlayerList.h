@@ -164,8 +164,8 @@ public:
      * @param no_evict  If non-zero, skip eviction when cache is full
      * @return          UIPANEL surface pointer, or NULL if not found/created
      */
-    void* GetOrCreateSurface(uint8_t type_hi, uint8_t variant,
-                              uint8_t tag_low, uint8_t no_evict);
+    UIPANEL_Surface* GetOrCreateSurface(uint8_t type_hi, uint8_t variant,
+                                        uint8_t tag_low, uint8_t no_evict);
 
     /**
      * RenderTrackEntry — Blit a cached track entry surface onto a HDC.

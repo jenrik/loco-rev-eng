@@ -148,8 +148,12 @@ UIPANEL::UIPANEL()
     GameObject_BaseCtor(&this->child_sprites,   /* +0x3F0 */
                         -1, -1, 0, 0);          /* 0x405790 */
 
-    /* Step 3: Create embedded offscreen surface at +0x478 */
-    UIPANEL_CreateSurface(&this->surface_buf);  /* 0x42A110 */
+    /* Step 3: embedded offscreen surface at +0x478 (surface_buf, a real
+     * UIPANEL_Surface value member) is already default-constructed by now
+     * -- member construction runs before this constructor body, so no
+     * explicit UIPANEL_CreateSurface(&this->surface_buf) call is needed
+     * (that free function no longer exists; see graphics/LOCOBITMAP.h/.cpp,
+     * 0x42A110 is UIPANEL_Surface::UIPANEL_Surface()). */
 
     /* Step 4: Set final vtable -- UIPANEL */
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */

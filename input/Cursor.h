@@ -89,7 +89,7 @@
 /* Forward declarations                                                */
 /* ================================================================== */
 class ButtonSprite;   /* ui/ButtonSprite.h — UI button sprite, 0x24 bytes */
-class UIPANEL;          /* ui/UIPANEL.h — UI panel surface, 0x20 bytes */
+struct UIPANEL_Surface; /* graphics/LOCOBITMAP.h — DDraw surface wrapper, 0x20 bytes on x86 */
 class DPlayManager;   /* network/DPlayManager.h — real type of obj_184, see below */
 
 /* CursorEditorRecord (a partial 0x94-byte struct duplicating a subset of
@@ -308,7 +308,7 @@ public:
     int32_t    editor_blit_w;          // +0x1E0  source width for editor background blit
     int32_t    editor_blit_h;          // +0x1E4  source height for editor background blit
 
-    UIPANEL*   background_surface;     // +0x1E8  background panel surface
+    UIPANEL_Surface* background_surface; // +0x1E8  background panel surface
     void*      editor_surface;         // +0x1EC  locked editor sprite-sheet surface (IDirectDrawSurface*)
     RESDATA*   editor_resdata;         // +0x1F0  RESDATA* for editor sprite-sheet (resource 0x3CB9)
 
@@ -393,7 +393,13 @@ public:
     RECT       palette_item_rects[16]; // +0x38C  cached palette item on-screen positions
                                        //         (16 RECTs, 0x100 bytes)
 
-    ButtonSprite*  toolbar_sprites[64];    // +0x48C  toolbar icon sprite array (64 entries)
+    /* Real element type is UIPANEL_Surface* (loaded via
+     * NET_GetOrCreateSurface, see draw_postcard_preview below), not
+     * ButtonSprite* -- confirmed by every reader treating field @+0x08 as
+     * width and @+0x0C as height (UIPANEL_Surface's real layout,
+     * graphics/LOCOBITMAP.h), not ButtonSprite's unrelated y/sourceX
+     * fields at those same offsets. */
+    UIPANEL_Surface* toolbar_sprites[64];  // +0x48C  toolbar icon sprite array (64 entries)
     int32_t    surface_toggle;         // +0x58C  dword toggle (0/1) selecting which editor
                                        //         offscreen surface is the draw target;
                                        //         inverted each draw_locomotive_preview call

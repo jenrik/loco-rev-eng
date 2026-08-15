@@ -8,6 +8,7 @@
 // Status: TRANSCRIBED
 
 #include "ButtonSprite.h"
+#include "../resources/ResourceObject.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -45,16 +46,12 @@ extern "C" {
 extern void* _g_primary_surface;  /* 0x4FD3C4 */
 
 namespace {
-using PixelReleaseFunction = void (__fastcall *)(void*);
-using PixelSurfaceFunction = void* (__fastcall *)(void*, int, int);
 
 void release_pixel_data(void* pixel_data)
 {
     const auto* pixel_header = reinterpret_cast<const uint32_t*>(pixel_data);
     if (pixel_header[4] != 0) {
-        void** vtable = *reinterpret_cast<void***>(pixel_data);
-        auto release = reinterpret_cast<PixelReleaseFunction>(vtable[2]);
-        release(pixel_data);
+        static_cast<ResourceObject*>(pixel_data)->Unlock();
     }
 }
 }
@@ -121,10 +118,8 @@ bool ButtonSprite::init()
         return false;
     }
 
-    /* Query vtable[1] of pixel data to get surface pointer */
-    void** vtable = *reinterpret_cast<void***>(data);
-    auto get_surface = reinterpret_cast<PixelSurfaceFunction>(vtable[1]);
-    void* surf = get_surface(data, 0, 0);
+    /* Query the resource's surface via real ResourceObject::Lock() dispatch. */
+    void* surf = static_cast<ResourceObject*>(data)->Lock(0, 0);
     this->surface = surf;  /* +0x18 */
 
     return (surf != NULL);

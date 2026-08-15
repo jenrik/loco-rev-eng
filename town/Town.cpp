@@ -51,6 +51,7 @@
 #include "../network/NetworkPlayerList.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
+#include "../resources/ResourceObject.h"
 /* ui/UI_ChildWindow.h removed: this file has zero references to any
  * UI_ChildWindow* symbol (confirmed via grep) and it conflicts on
  * UI_IsBitmapReady's linkage (extern "C" there vs. C++ linkage in
@@ -107,23 +108,13 @@ bool   UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
  * against the inherited Entity::Draw instead of this stub. See
  * shared/stubs_impl.cpp's own updated comment for the same resolution. */
 
-/* UIPANEL_CreateSurface — real def: graphics/LOCOBITMAP.cpp:0x42A110,
- * C++-mangled __fastcall(ECX=this) constructor for UIPANEL_Surface (zeroes
- * fields, sets vtable, increments the global surface ref-count), `void`
- * return. This file used to declare `void* UIPANEL_CreateSurface(void*)`
- * *inside* the extern "C" block below, mislabeled with 0x42AF30 (which
- * Ghidra confirms is actually UIPANEL_ReadPaletteFromBMP, an unrelated
- * function) — the extern "C" linkage collapsed the declared name down to
- * plain C linkage, which resolved not to the real mangled constructor but
- * to shared/defsym_stubs.cpp's unrelated 0-arg `UIPANEL_CreateSurface()`
- * no-op placeholder (confirmed via objdump: the call in handle_tile_click
- * disassembled to `call 0x4ba150 <UIPANEL_CreateSurface>`, an empty `ret`
- * stub, distinct from the real ctor at a different address entirely) — a
- * silent-wrong-stub landmine: overlay_panel was left with whatever garbage
- * `operator_new` returned in EAX, never actually constructed. Moved out of
- * extern "C" with the correct signature so it binds to the real ctor. */
-void   UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* 0x42A110 */
-size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
+/* UIPANEL_Surface construction is the real UIPANEL_Surface() constructor
+ * (graphics/LOCOBITMAP.h/.cpp, 0x42A110). This file can't include
+ * graphics/LOCOBITMAP.h directly (see UIPANEL_Surface's forward-decl
+ * comment in Town.h -- it collides with ui/PostcardAlbum.h's own,
+ * unrelated `PostcardAlbum` class), so it goes through the factory
+ * function declared for exactly this case instead of `new` directly. */
+UIPANEL_Surface* UIPANEL_Surface_New();
 
 /* UIPANEL_EndPaintEx — real def: ui/UIPANEL.cpp:0x426B90, C++ linkage (not
  * extern "C"), void(void* self, int hdc, int unlock_param, uint8_t
@@ -143,7 +134,6 @@ void   UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
 extern "C" {
     /* Resource management */
     void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
-    void   Sprite_Destroy(void* sprite);                             /* 0x454BC0 */
     void   Sprite_Init(void* sprite);                                /* 0x454BF0 */
     void   Sprite_SetState(void* sprite, int state, int* unk);      /* 0x454C30 */
 
@@ -360,18 +350,6 @@ char panel_load_resource(void* obj, int res_id, int a, int b)
     using LoadResourceFn = char (*)(void*, int, int, int);
     void** vtable = *reinterpret_cast<void***>(obj);
     return reinterpret_cast<LoadResourceFn>(vtable[6])(obj, res_id, a, b);
-}
-
-/* RESDATA vtable slot 1 = Lock/GetSurface (per shared/types.h's own doc
- * comment on RESDATA::vtable). RESDATA is a raw resource-blob overlay,
- * not a live C++ polymorphic object (no compiler-managed vtable on the
- * host side), so this stays a raw dispatch rather than a typed virtual
- * call. */
-void* resdata_get_surface(void* res, int a, int b)
-{
-    using GetSurfaceFn = void* (*)(void*, int, int);
-    void** vtable = *reinterpret_cast<void***>(res);
-    return reinterpret_cast<GetSurfaceFn>(vtable[1])(res, a, b);
 }
 
 /* UIPANEL_Surface (canonical definition: graphics/LOCOBITMAP.h) mirrored
@@ -879,21 +857,7 @@ char Town::handle_tile_click()
     if (loaded) {
         loaded = panel_load_resource(this->child_panel, 0x3804, -1, 0);
         if (loaded) {
-            /* UIPANEL_CreateSurface (0x42A110) is a placement-style
-             * constructor: it initializes *surface_obj in place and
-             * returns void (MSVC constructor ABI echoes `this` back in
-             * EAX, which is what the original decompile's fabricated
-             * "return value" actually reflects) — surface_obj itself,
-             * not any call result, is what gets stored into
-             * overlay_panel. */
-            /* 0x20 was the original x86 sizeof(UIPANEL_Surface); use the
-             * real host size (see graphics/LOCOBITMAP.h). */
-            UIPANEL_Surface* surface_obj =
-                static_cast<UIPANEL_Surface*>(operator_new(UIPANEL_Surface_Size()));
-            if (surface_obj) {
-                UIPANEL_CreateSurface(surface_obj);
-            }
-            this->overlay_panel = surface_obj;
+            this->overlay_panel = UIPANEL_Surface_New();
 
             if (this->overlay_panel) {
                 UIPANEL_Surface* pgfx_surface =
@@ -1448,7 +1412,7 @@ void Town::init_overlay_sprite()
 
     void* res = ResourceManager_GetById(&g_resmgr, 0x3CF7);
     this->overlay_resource = res;                                /* +0x644 */
-    this->overlay_surface = resdata_get_surface(res, 0, 0);      /* +0x648 */
+    this->overlay_surface = static_cast<ResourceObject*>(res)->Lock(0, 0);      /* +0x648 */
     this->overlay_initialized = 1;
 }
 
@@ -1473,15 +1437,15 @@ void Town::init_postcard_sprites()
 
     void* res = ResourceManager_GetById(&g_resmgr, 0x3CF8);
     this->background_resource = res;                             /* +0x64C */
-    this->background_surface = resdata_get_surface(res, 0, 0);   /* +0x650 */
+    this->background_surface = static_cast<ResourceObject*>(res)->Lock(0, 0);   /* +0x650 */
 
     res = ResourceManager_GetById(&g_resmgr, 0x3CFB);
     this->button_strip_resource = res;                           /* +0x664 */
-    this->button_strip_surface = resdata_get_surface(res, 0, 0); /* +0x668 */
+    this->button_strip_surface = static_cast<ResourceObject*>(res)->Lock(0, 0); /* +0x668 */
 
     res = ResourceManager_GetById(&g_resmgr, 0x3CFA);
     this->send_confirm_resource = res;                           /* +0x69C */
-    this->send_confirm_surface = resdata_get_surface(res, 0, 0); /* +0x6A0 */
+    this->send_confirm_surface = static_cast<ResourceObject*>(res)->Lock(0, 0); /* +0x6A0 */
 
     this->sprites_initialized = 1;                               /* +0x5F9 */
 }

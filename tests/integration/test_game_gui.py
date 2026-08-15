@@ -103,6 +103,13 @@ def test_singleplayer_go_plays_click_sound_and_leaves_main_menu(game):
     game.click_logical(925, 700, "main-menu go")
     game.wait_for_event("audio_queued", after_sequence=before_go, resource_id=0x5015)
     game.wait_for_event("mode_changed", after_sequence=before_go, new_mode=1)
+    # Mode-1 loading screen: Town::init_overlay_sprite/Cursor::init_background/
+    # PostcardAlbum::InitWindowSurface now run un-stubbed on host (see
+    # core/InitMode1.cpp, PROGRESS.md's RESDATA/ResourceObject unification
+    # entry) -- screenshot this transient window, not just the mode-3
+    # settle, so a regression that silently no-ops them again would show up
+    # as a visual diff here even if it doesn't crash.
+    game.screenshot("singleplayer-mode1-loading-screen")
     game.wait_for_event("mode_changed", new_mode=3, timeout=10)
     assert not any(
         item.get("event") == "screen_presented"

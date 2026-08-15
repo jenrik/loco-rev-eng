@@ -339,7 +339,7 @@ void* g_font_small = nullptr;
  * global with no recovered initializer). */
 void* g_font_scroll_down_hint = nullptr;
 void* g_last_cursor_pos = nullptr;
-void* g_thumbpal_surface = nullptr;
+UIPANEL_Surface* g_thumbpal_surface = nullptr;
 extern "C" const char g_thumbpal_bmp_name[] = "";
 int g_screen_width = 800;
 int g_screen_height = 600;
@@ -721,20 +721,13 @@ void UIEntity_Ctor(void) { /* host no-op */ }
  * Removed 2026-08-13 after fixing all known callers; confirmed via `nm`
  * that no remaining .o (native or mingw-typecheck) has an undefined
  * reference to its mangled name (_Z18UIPANEL_EndPaintExPvS_ihP4RECT). */
-/* Returns `self` (2026-08-08, network/NetworkPlayerList.cpp STRICT=2
- * cluster): the real definition (0x42A110, graphics/LOCOBITMAP.cpp
- * UIPANEL_CreateSurface(UIPANEL_Surface*)) is a placement-style constructor
- * that initializes *self in place; this narrower void*-param overload is
- * the one every other caller in the tree (EditWindow.cpp, Town.cpp,
- * UI_ChildWindow.cpp, BuildingPanel.cpp, Cursor.cpp, Netman.cpp,
- * NetworkPlayerList.cpp) actually links against, and every one of them
- * chains the result back into the same surface variable (`surface =
- * UIPANEL_CreateSurface(surface)`), expecting identity to be preserved —
- * previously `void`-returning, which is UB read by every caller (Itanium
- * mangling ignores return type, so it linked clean). Still a host no-op
- * (init logic itself not ported), but now well-defined. */
-void* UIPANEL_CreateSurface(void* self);
-void* UIPANEL_CreateSurface(void* self) { return self; }
+/* UIPANEL_CreateSurface(void*) removed 2026-08-14: this narrower
+ * void*-param overload was a silent-wrong-stub every caller in the tree
+ * used to bind to instead of the real placement constructor
+ * (graphics/LOCOBITMAP.cpp's UIPANEL_Surface::UIPANEL_Surface(), 0x42A110).
+ * All callers now use `new UIPANEL_Surface()` directly; the C++ overload
+ * set no longer has anything for a stray `UIPANEL_CreateSurface(void*)`
+ * declaration to bind to. */
 void UIPANEL_StretchBlit(void*, void*, int, int, int);
 void UIPANEL_StretchBlit(void*, void*, int, int, int) { /* host no-op */ }
 void UIPANEL_SetClipRect(void* self, int a, int b);

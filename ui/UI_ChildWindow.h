@@ -69,6 +69,8 @@
 
 #include "../shared/types.h"
 
+struct UIPANEL_Surface; /* graphics/LOCOBITMAP.h — DDraw surface wrapper */
+
 // Status: INTEGRATED
 
 class ChildWindow {
@@ -88,7 +90,7 @@ public:
                                      //        showed it's a WNDPROC_StreamWrite(stream, &this+0xC)
                                      //        target for the "ShadowId" keyword, a plain int32, not
                                      //        a stream/void* pointer)
-    void*      renderSurface;      // +0x10  render surface / child object (released in dtor)
+    UIPANEL_Surface* renderSurface; // +0x10  render surface / child object (released in dtor)
     int16_t    field_14;           // +0x14  zeroed; purpose not evidenced
     int16_t    field_16;           // +0x16  zeroed; purpose not evidenced
     uint8_t    sticky;             // +0x18  sticky flag; OnMouseLeave checks (!= 1) before releasing
@@ -106,15 +108,13 @@ public:
                                      //        (frameSetCount entries, 0x18 bytes each — populated
                                      //        by Render()'s cursor_frame_set branch, read by
                                      //        OnMouseMove/OnMouseLeave via entry+0x0E "stringId")
-    void*      bitmapSurface;      // +0x24  static bitmap surface for this window's own frame
+    UIPANEL_Surface* bitmapSurface; // +0x24  static bitmap surface for this window's own frame
                                      //        image (was misnamed `subObject`; created in Render()
-                                     //        via operator_new(UIPANEL_Surface_Size())+
-                                     //        UIPANEL_CreateSurface (was the original x86's
-                                     //        operator_new(0x20)), the
-                                     //        same construction idiom as OnMouseMove's overlay
-                                     //        `renderSurface` at +0x10 but for a *different*,
-                                     //        statically-loaded surface — released in dtor via its
-                                     //        own vtable slot 0, flags=1, same as renderSurface).
+                                     //        via `new UIPANEL_Surface()`, the same construction
+                                     //        idiom as OnMouseMove's overlay `renderSurface` at
+                                     //        +0x10 but for a *different*, statically-loaded
+                                     //        surface — released in dtor via `delete`, same as
+                                     //        renderSurface).
     int16_t    field_28;           // +0x28  computed in Render()'s tail as
                                      //        bitmapSurface[0x08](dword)/frameCount — same
                                      //        "per-frame width" role as OnMouseMove's field_14 for

@@ -33,6 +33,13 @@
 struct Sdl3DirectDrawSurface : IDirectDrawSurface4 {
     SDL_Texture* texture;    /* GPU texture for Blit operations             */
     SDL_Surface* cpu_surface; /* CPU buffer for Lock/Unlock, or nullptr      */
+    SDL_Surface* lock_snapshot; /* cpu_surface's content at Lock() time, or
+                                  * nullptr -- lets Unlock() tell which
+                                  * pixels the caller actually edited vs.
+                                  * which came along for the ride, so a
+                                  * Blt() that ran while locked isn't
+                                  * clobbered by the write-back (see
+                                  * Unlock()'s comment). */
     int          width;       /* Surface width in pixels                    */
     int          height;      /* Surface height in pixels                   */
     uint32_t     color_key;   /* Active source color key, or 0 if disabled  */
@@ -200,6 +207,18 @@ bool SDL3_BlitSurfaceToPrimary(SDL_Surface* source, int x, int y);
 /** Composite a source rectangle from a decoded bitmap at native pixel coordinates. */
 bool SDL3_BlitSurfaceRectToPrimary(SDL_Surface* source, const SDL_Rect& source_rect,
                                    int x, int y);
+
+/** Wrap an already-loaded SDL_Surface (not owned; caller keeps it alive for
+ * the returned surface's lifetime is not required -- a texture copy is made
+ * immediately) as a real IDirectDrawSurface4, the same way
+ * DDRAW_LoadBmpToSurface does for a fresh BMP load, minus the file I/O. Has
+ * no original x86 counterpart -- purely a host adapter for resources that
+ * already have a decoded SDL_Surface (see resources/resource_manager_sdl3.h's
+ * SpriteBitmap), so entities backed by those resources can go through
+ * UIPANEL_Blit's real IDirectDrawSurface4::Blt() path instead of being
+ * skipped. Returns nullptr if the renderer isn't up yet or texture creation
+ * fails. */
+IDirectDrawSurface4* SDL3_WrapSdlSurfaceAsDirectDraw(SDL_Surface* surface);
 
 /** Draw the host replacement for the original native EDIT control directly
  * onto the fixed primary canvas. Coordinates are logical canvas pixels. */

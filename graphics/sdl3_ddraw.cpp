@@ -124,6 +124,7 @@ static SDL_Surface* loadBmpToSdlSurface(const char* path, int bpp)
 Sdl3DirectDrawSurface::Sdl3DirectDrawSurface()
     : texture(nullptr)
     , cpu_surface(nullptr)
+    , lock_snapshot(nullptr)
     , width(0)
     , height(0)
     , color_key(0)
@@ -134,6 +135,7 @@ Sdl3DirectDrawSurface::~Sdl3DirectDrawSurface()
 {
     if (texture) SDL_DestroyTexture(texture);
     if (cpu_surface) SDL_DestroySurface(cpu_surface);
+    if (lock_snapshot) SDL_DestroySurface(lock_snapshot);
 }
 
 int32_t Sdl3DirectDrawSurface::QueryInterface(void* iid, void** object)
@@ -261,6 +263,7 @@ HRESULT Sdl3DirectDrawSurface::Lock(RECT* rect,
      * code completely unmodified. See PROGRESS.md's DirectDraw-shim
      * pixel-format note. */
     if (cpu_surface) SDL_DestroySurface(cpu_surface);
+    if (lock_snapshot) { SDL_DestroySurface(lock_snapshot); lock_snapshot = nullptr; }
 
     cpu_surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGB565);
     if (!cpu_surface) return -1;
@@ -279,6 +282,11 @@ HRESULT Sdl3DirectDrawSurface::Lock(RECT* rect,
         }
     }
 
+    /* Snapshot what we're handing back so Unlock() can tell which pixels
+     * the caller actually wrote vs. which just came along for the ride --
+     * see Unlock()'s comment for why that distinction matters. */
+    lock_snapshot = SDL_DuplicateSurface(cpu_surface);
+
     if (desc) {
         desc->lpSurface = cpu_surface->pixels;
         desc->lPitch    = cpu_surface->pitch;
@@ -295,17 +303,66 @@ HRESULT Sdl3DirectDrawSurface::Unlock(RECT* rect)
 
     if (!cpu_surface || !texture) return -1;
 
-    /* cpu_surface is RGB565 (see Lock) but the GPU-side texture is
-     * XRGB8888 — convert the (possibly game-modified) 16bpp buffer back up
-     * before uploading. */
-    SDL_Surface* upload = SDL_ConvertSurface(cpu_surface, SDL_PIXELFORMAT_XRGB8888);
+    /* Real DirectDraw hands Lock() callers a pointer straight into the
+     * surface's own backing memory; Unlock() is just a bookkeeping signal,
+     * not a copy-back. This shim can't do that -- Lock's buffer is a
+     * separate CPU-side RGB565 conversion of a GPU texture, needed so
+     * native/DDRAW_DimSurfaceRect.c and Town_CheckOccupiedEx see real
+     * 16bpp pixels (see Lock()'s comment) -- so naively pushing the whole
+     * buffer back here would clobber anything a Blt() wrote to the same
+     * texture while the lock was outstanding. That nesting is real, not a
+     * reconstruction bug: TileMap::InvalidateDirtyRects (world/tilemap.cpp)
+     * locks the primary surface, calls ProcessRect (which draws every
+     * visible Entity through UIPANEL_Blit's hardware Blt path), then
+     * unlocks -- confirmed against the original's own decompiled
+     * TileMap_InvalidateDirtyRects (0x456150), which nests the identical
+     * Blt-during-lock pattern around the same primary surface. Diff
+     * cpu_surface against the lock_snapshot taken at Lock() time instead:
+     * pixels the caller actually changed win; everything else keeps
+     * whatever the texture holds right now, preserving any Blt() that ran
+     * in between. */
+    SDL_SetRenderTarget(g_sdl_ddraw->renderer, texture);
+    SDL_Surface* readback = SDL_RenderReadPixels(g_sdl_ddraw->renderer, nullptr);
+    SDL_SetRenderTarget(g_sdl_ddraw->renderer, nullptr);
+    SDL_Surface* current = readback ? SDL_ConvertSurface(readback, SDL_PIXELFORMAT_RGB565)
+                                     : nullptr;
+    if (readback) SDL_DestroySurface(readback);
+
+    SDL_Surface* merged = cpu_surface; /* fallback: old clobbering behavior */
+    if (current && lock_snapshot &&
+        current->w == cpu_surface->w && current->h == cpu_surface->h) {
+        SDL_LockSurface(cpu_surface);
+        SDL_LockSurface(lock_snapshot);
+        SDL_LockSurface(current);
+        for (int y = 0; y < current->h; ++y) {
+            const auto* edited = reinterpret_cast<const uint16_t*>(
+                static_cast<const uint8_t*>(cpu_surface->pixels) + y * cpu_surface->pitch);
+            const auto* original = reinterpret_cast<const uint16_t*>(
+                static_cast<const uint8_t*>(lock_snapshot->pixels) + y * lock_snapshot->pitch);
+            auto* dest = reinterpret_cast<uint16_t*>(
+                static_cast<uint8_t*>(current->pixels) + y * current->pitch);
+            for (int x = 0; x < current->w; ++x) {
+                if (edited[x] != original[x]) dest[x] = edited[x];
+            }
+        }
+        SDL_UnlockSurface(current);
+        SDL_UnlockSurface(lock_snapshot);
+        SDL_UnlockSurface(cpu_surface);
+        merged = current;
+    }
+
+    /* merged is RGB565 (see Lock) but the GPU-side texture is XRGB8888 --
+     * convert back up before uploading. */
+    SDL_Surface* upload = SDL_ConvertSurface(merged, SDL_PIXELFORMAT_XRGB8888);
     if (upload) {
         SDL_UpdateTexture(texture, nullptr, upload->pixels, upload->pitch);
         SDL_DestroySurface(upload);
     }
 
+    if (current) SDL_DestroySurface(current);
     SDL_DestroySurface(cpu_surface);
     cpu_surface = nullptr;
+    if (lock_snapshot) { SDL_DestroySurface(lock_snapshot); lock_snapshot = nullptr; }
 
     return 0;
 }
@@ -904,6 +961,26 @@ IDirectDrawSurface4* DDRAW_LoadBmpToSurface(
     if (!surf->texture) {
         fprintf(stderr, "SDL3: LoadBmpToSurface(%s) texture creation failed: %s\n",
                 path, SDL_GetError());
+        delete surf;
+        return nullptr;
+    }
+
+    SDL_SetTextureBlendMode(surf->texture, SDL_BLENDMODE_BLEND);
+    return surf;
+}
+
+IDirectDrawSurface4* SDL3_WrapSdlSurfaceAsDirectDraw(SDL_Surface* surface)
+{
+    if (!surface || !g_sdl_ddraw || !g_sdl_ddraw->renderer) return nullptr;
+
+    Sdl3DirectDrawSurface* surf = new Sdl3DirectDrawSurface();
+    surf->width  = surface->w;
+    surf->height = surface->h;
+
+    surf->texture = SDL_CreateTextureFromSurface(g_sdl_ddraw->renderer, surface);
+    if (!surf->texture) {
+        fprintf(stderr, "SDL3: WrapSdlSurfaceAsDirectDraw texture creation failed: %s\n",
+                SDL_GetError());
         delete surf;
         return nullptr;
     }

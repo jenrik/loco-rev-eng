@@ -4,6 +4,7 @@
 #include "Cursor.h"
 #include "Cursor_internal.h"
 #include "../platform/ddraw_interfaces.h"
+#include "../graphics/LOCOBITMAP.h"
 #include "../network/DPlayManager.h"   /* complete type needed: base_destructor()
                                          * below deletes obj_184 (a real
                                          * DPlayManager*, Cursor.h only
@@ -119,18 +120,9 @@ void Cursor::base_destructor()
         this->hBrush = nullptr;
     }
 
-    /* Release background surface (UIPANEL object at +0x1E8).
-     * The binary calls its scalar deleting destructor vtable[0](1)
-     * (0x4166F6). UIPANEL's full definition lives in ui/UIPANEL.h but
-     * pulling it here conflicts with the ResourceManager_GetById bridge
-     * declaration (game/Panel.h); this explicit dispatch reproduces the
-     * exact binary ABI instead. */
-    if (this->background_surface != nullptr) {                  /* +0x1E8 */
-        void** vtbl = *reinterpret_cast<void***>(this->background_surface);
-        using DeletePanel = void (*)(void*, uint8_t);
-        reinterpret_cast<DeletePanel>(vtbl[0])(this->background_surface, 1);
-        this->background_surface = nullptr;
-    }
+    /* Release background surface (UIPANEL_Surface at +0x1E8, 0x4166F6). */
+    delete this->background_surface;                             /* +0x1E8 */
+    this->background_surface = nullptr;
 
     /* Cleanup editor sprites if initialized */
     if (this->editor_initialized != 0) {                        /* +0x2C0 */
@@ -596,17 +588,9 @@ void Cursor::init_background()
     RECT bgRect;
     SetRect(&bgRect, 0, 0, 0x500, 0x400);
 
-    /* Create the background UIPANEL surface. 0x20 was the original x86
-     * sizeof(UIPANEL_Surface); use the real host size (see
-     * graphics/LOCOBITMAP.h). */
-    void* panel = operator_new(UIPANEL_Surface_Size());
-    void* surface;
-    if (panel != nullptr) {
-        surface = UIPANEL_CreateSurface(panel);
-    } else {
-        surface = nullptr;
-    }
-    this->background_surface = static_cast<UIPANEL*>(surface);   /* +0x1E8 */
+    /* Create the background surface. */
+    UIPANEL_Surface* surface = new UIPANEL_Surface();
+    this->background_surface = surface;                           /* +0x1E8 */
 
     UIPANEL_InitSurface(surface, 0x500, 0x400, 1, 0, 0);
 

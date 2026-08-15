@@ -62,6 +62,8 @@
 
 #include "../ui/GameWindow.h"
 
+struct UIPANEL_Surface; /* graphics/LOCOBITMAP.h — DDraw surface wrapper */
+
 // Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 class AboutDialog : public GameWindow {
@@ -135,7 +137,7 @@ public:
                                          //         (parsed from '<number>' tag in credits file).
                                          //         Zeroed in ctor, parsed by RenderCredits.
 
-    void*      screensaver_surface;     // +0x1158 UIPANEL surface handle for the screensaver's
+    UIPANEL_Surface* screensaver_surface; // +0x1158 UIPANEL surface handle for the screensaver's
                                          //         scrolling background sprite. Zeroed in ctor,
                                          //         allocated+initialized by InitSprites, used as
                                          //         the blit source in RenderScreensaver.

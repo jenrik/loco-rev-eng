@@ -22,7 +22,9 @@
 #include "LOCOBITMAP.h"
 #include "PixelDataCache.h"
 #include "../platform/ddraw_interfaces.h"
+#include "../resources/ResourceObject.h"
 #include <new>
+#include <cstring>
 
 /* ================================================================== */
 /* External references                                                 */
@@ -49,7 +51,6 @@ extern "C" {
     ButtonSprite* RESDATA_CreateSpriteObject(void* mem, uint32_t resource_id); /* @0x454B50 */
     void  Sprite_SetState(void* sprite, int32_t state, void* surface);      /* @0x454C30 */
     bool  Sprite_Init(void* sprite);                                        /* @0x454BF0 - __fastcall */
-    void  Sprite_Destroy(void* sprite);                                     /* @0x454BC0 - __fastcall */
     void* ResourceManager_GetById(void* resmgr, uint32_t res_id);           /* @0x446EA0 */
 
     /* UI helpers */
@@ -150,18 +151,6 @@ extern int32_t g_viewport_rect_bottom;  /* 0x004851E0 */
 
 namespace {
 
-/* ResourceData's recovered COM-like table has a destructor at slot 0,
- * surface acquisition at slot 1, and release at slot 2.  This interface
- * gives those calls typed C++ dispatch without open-coded vtable indexing. */
-struct ResourceDataView {
-    virtual void* destroy(uint8_t flags) = 0;
-    virtual void* get_surface(int flags, int mode) = 0;
-    virtual void release_surface() = 0;
-
-protected:
-    ~ResourceDataView() = default;
-};
-
 struct PixelEntryView {
     virtual void* destroy(int flags) = 0;
 
@@ -202,18 +191,19 @@ static void destroy_allocated_sprite(ButtonSprite* sprite)
     }
 }
 
+// Real ResourceObject virtual dispatch (resources/ResourceObject.h) --
+// slot 0 is a real virtual destructor (delete reproduces the original's
+// scalar-deleting-destructor-with-flag-1 exactly), slot 1 is Lock/GetSurface.
 static void destroy_resource(void* resource)
 {
-    if (resource != nullptr) {
-        reinterpret_cast<ResourceDataView*>(resource)->destroy(1);
-    }
+    delete static_cast<ResourceObject*>(resource);
 }
 
 static void* resource_surface(void* resource)
 {
     return resource == nullptr
         ? nullptr
-        : reinterpret_cast<ResourceDataView*>(resource)->get_surface(0, 0);
+        : static_cast<ResourceObject*>(resource)->Lock(0, 0);
 }
 
 } // namespace
@@ -1234,76 +1224,11 @@ error:
 
 /* ================================================================== */
 /* UIPANEL_Surface management functions                                */
+/*                                                                      */
+/* Construction/destruction/copy (0x42A110/0x42A140/0x42A1C0) and the   */
+/* UIPANEL_Surface_New() factory live in                                */
+/* graphics/UIPANEL_Surface_lifecycle.cpp -- a separate, minimal-        */
+/* dependency translation unit so narrow test executables and           */
+/* resources/sprite_uipanel_adapter.cpp don't need this file's much     */
+/* larger PostcardAlbum/Win32 dependency graph just to construct one.   */
 /* ================================================================== */
-
-/* Returns sizeof(UIPANEL_Surface) on this host (0x30 bytes here vs. the
- * original x86's 0x20 — palette_ptr/pixels/ddraw_surf widen from 4 to 8
- * bytes, plus the host-only trailing `palette` field). Exists so callers
- * across the tree that allocate raw memory for UIPANEL_CreateSurface can
- * get the real size without each one including this header (many declare
- * their own local, weakly-typed `void*`-based UIPANEL_CreateSurface
- * prototype instead). */
-size_t UIPANEL_Surface_Size()
-{
-    return sizeof(UIPANEL_Surface);
-}
-
-/* ────────────────────────────────────────────────────────────────── */
-/* UIPANEL_CreateSurface — Constructor for UIPANEL_Surface            */
-/* Address: 0x42A110 — __fastcall (ECX=this)                         */
-/* ────────────────────────────────────────────────────────────────── */
-void UIPANEL_CreateSurface(UIPANEL_Surface* surface)
-{
-/* In the binary: surface->vtable = VTBL_*. Compiler-managed in natural C++. */
-    surface->mode        = 0;                         /* +0x04 */
-    surface->width       = 0;                         /* +0x08 */
-    surface->height      = 0;                         /* +0x0C */
-    surface->has_palette = 0;                         /* +0x10 */
-    surface->flags       = 0;                         /* +0x11 */
-    surface->palette_ptr = nullptr;                   /* +0x14 */
-    surface->pixels      = nullptr;                   /* +0x18 */
-    surface->ddraw_surf  = nullptr;                   /* +0x1C */
-
-    g_ref_count++;  /* 0x00485254 */
-}
-
-/* ────────────────────────────────────────────────────────────────── */
-/* UIPANEL_DestroySurface — Scalar dtor (vtable[0] at 0x477D28)     */
-/* Address: 0x42A140 — __thiscall (ECX=this)                        */
-/* ────────────────────────────────────────────────────────────────── */
-void* UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags)
-{
-    /* Restore vtable */
-/* In the binary: surface->vtable = VTBL_*. Compiler-managed in natural C++. */
-
-    /* Free palette allocation (0x200 bytes, 128 uint32 entries) */
-    if ((surface->has_palette == 1) && (surface->palette_ptr != nullptr)) {
-        GLOBAL_free(surface->palette_ptr);           /* @0x465CD0 */
-        surface->palette_ptr = nullptr;
-        surface->has_palette = 0;
-    }
-
-    /* Free pixel buffer */
-    if (surface->pixels != nullptr) {
-        GLOBAL_free(surface->pixels);
-        surface->pixels = nullptr;
-    }
-
-    /* Release DDraw surface via IDirectDrawSurface::Release */
-    if (surface->ddraw_surf != nullptr) {
-        uint32_t release_result =
-            static_cast<IDirectDrawSurface4*>(surface->ddraw_surf)->Release();
-        (void)release_result;
-        surface->ddraw_surf = nullptr;
-    }
-
-    /* Decrement global ref count */
-    g_ref_count--;  /* 0x00485254 */
-
-    /* Optionally free heap memory (scalar deleting dtor flag) */
-    if ((flags & 1) != 0) {
-        GLOBAL_free(surface);
-    }
-
-    return surface;
-}

@@ -66,7 +66,6 @@ IDirectSound::~IDirectSound()
 
 int IDirectSound::Release()
 {
-    this->~IDirectSound();
     delete this;
     return DS_OK;
 }
@@ -269,7 +268,6 @@ int IDirectSoundBuffer::Unlock(void* ptr1, uint32_t bytes1,
 
 int IDirectSoundBuffer::Release()
 {
-    this->~IDirectSoundBuffer();
     delete this;
     return DS_OK;
 }

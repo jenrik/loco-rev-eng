@@ -49,6 +49,7 @@
 #pragma once
 
 #include "../shared/types.h"
+#include "ResourceObject.h"
 
 // Status: TRANSCRIBED
 #if defined(__GNUC__)
@@ -67,21 +68,6 @@
 
 struct GameAudio;
 class AudioDirectSoundBuffer;
-
-/* ================================================================== */
-/* ResourceObject — typed view of the common resource vtable            */
-/* ================================================================== */
-class ResourceObject {
-public:
-    /* Original slot 0 is the compiler-generated scalar deleting
-     * destructor. This bridge names the slot without writing a vtable. */
-    virtual void Destroy(uint8_t flags) = 0;
-    virtual void* Lock(int32_t flags, int32_t mode) = 0;
-    virtual void Unlock() = 0;
-
-protected:
-    ~ResourceObject() = default;
-};
 
 /* ================================================================== */
 /* RESDATA — resource data object (loaded by ResourceManager)          */
