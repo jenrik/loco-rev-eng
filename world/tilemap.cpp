@@ -20,6 +20,7 @@
 #include "../ui/UIPANEL_Surface.h"
 
 #include "../core/Entity.h"
+#include "../core/BuildingMgrObjectGroup.h"
 #include "../input/InputMgr.h"
 #ifndef _WIN32
 #include "../resources/resource_manager_sdl3.h"
@@ -1495,11 +1496,47 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
                              * from iy and tile_y from ix -- swapped. */
                             int tile_x = static_cast<int>(ix) + static_cast<int>(delta_x);
                             int tile_y = static_cast<int>(iy) + static_cast<int>(delta_y);
-                            TileMapObject* obj = static_cast<TileMapObject*>(
-                                ReadTilePointer(TILE_OFFSET(tile_x, tile_y, iz) - 0x48));
-                            if (obj != nullptr) {
+                            void* occupant_ptr =
+                                ReadTilePointer(TILE_OFFSET(tile_x, tile_y, iz) - 0x48);
+                            if (occupant_ptr != nullptr) {
+                                /* Displaceable-occupant check. The original x86
+                                 * reads [occupant+0xC0] (0x455513); this is NOT a
+                                 * generic "is_moving" flag on a hand-offset mirror
+                                 * struct -- it is ResourceGameObject::group_active
+                                 * (core/BuildingMgrObjectGroup.h), set to 1
+                                 * unconditionally by the constructor (0x4580a0)
+                                 * and never written anywhere else in that class's
+                                 * methods (verified: CreateMember/RestartAnimation/
+                                 * IsMemberActionActive/UpdateScheduledAnimation/dtor
+                                 * decompiles show no other +0xC0 access). Every
+                                 * non-null occupant reaching this point was placed
+                                 * exclusively by TileMap::FindObject's call to
+                                 * INPUT_PlaceObject -- the only writer of non-null
+                                 * tile_data slots tree-wide (grep-confirmed:
+                                 * WriteTileValue/StoreTilePointer are only used in
+                                 * this file, and FindObject is the only call site
+                                 * that stores a non-zero value) -- which itself
+                                 * only ever constructs GameVehicle, HelpPageNode,
+                                 * RESDATA_GameVehicle, or ResourceGameObject
+                                 * (input/InputMgr.cpp's INPUT_PlaceObject), all
+                                 * four deriving from ResourceGameObject. So this
+                                 * is a closed-world-evidenced downcast, not a
+                                 * guess; dynamic_cast confirms it at runtime
+                                 * rather than trusting the invariant blindly,
+                                 * matching this codebase's established
+                                 * Entity-subtype-narrowing pattern (e.g.
+                                 * input/InputMgr.cpp's dynamic_cast<Building*>).
+                                 * Building objects are never tile_data occupants
+                                 * at all (BuildingMgr tracks them separately;
+                                 * only TileMap::GetObjectAt/GetObjectAtEx *read*
+                                 * this same grid, never write a Building into
+                                 * it), so Building's own unrelated +0xC0 field
+                                 * (track_node_id, game/Building.h) never reaches
+                                 * this check. */
+                                ResourceGameObject* occupant = dynamic_cast<ResourceGameObject*>(
+                                    static_cast<Entity*>(occupant_ptr));
                                 if (g_allow_building_placement == 1 &&
-                                    obj->is_moving == 1 &&
+                                    occupant != nullptr && occupant->group_active == 1 &&
                                     (g_disable_input == 0 ||
                                      g_game_mode == 3 ||
                                      g_game_mode == 1)) {
@@ -1513,6 +1550,27 @@ char TileMap::ScrollRect(char use_sound, TileMapResource* target_building,
                                                 static_cast<short>(iy + delta_y),
                                                 iz) - 0x48);
                                         if (ptr) {
+                                            /* ORDERING HAZARD: group_active is
+                                             * unconditionally 1 for every real
+                                             * ResourceGameObject, so this branch
+                                             * is now reachable whenever an
+                                             * occupant exists here (previously
+                                             * always false, so ScrollTo was
+                                             * never actually called from this
+                                             * site). ScrollTo (below) still
+                                             * reads its target's is_moving/
+                                             * object_state through the SAME
+                                             * broken TileMapObject mirror this
+                                             * fix just removed from ScrollRect,
+                                             * plus raw (non-host-adapted)
+                                             * TileMapResource grid-dimension
+                                             * reads -- see ScrollTo's own doc
+                                             * comment. Fix ScrollTo's mirror/
+                                             * host-resource reads before
+                                             * InputMgr::INPUT_PlaceObject's
+                                             * entity->initialized gate (see
+                                             * PROGRESS.md) is fixed and this
+                                             * path starts firing on real data. */
                                             ScrollTo(
                                                 static_cast<TileMapObject*>(ptr),
                                                 placement_mode);

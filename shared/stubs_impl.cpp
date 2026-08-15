@@ -111,6 +111,14 @@ uint8_t  g_flag_4A9F80 = 0;                /* 0x4A9F80 */
 uint8_t  g_placement_blocked = 0;          /* 0x48558C */
 char     g_install_path[256] = ".";
 char     g_current_save_path[0x108] = "";  /* 0x4AA8F8 — current save name */
+/* Host-only bookkeeping, no real x86 address: a scenario's real design-
+ * preview dimensions (SaveRegion::player_id/player_color on a designer save,
+ * e.g. 64/48 for Wildwest.sav), captured once by seed_fresh_world_from_fixture
+ * before INPUT_SaveCurrentWorld's "curr" round trip overwrites those same
+ * header fields with the live g_player_id/g_player_color -- see
+ * input/InputMgr.cpp's INPUT_LoadSaveFile placement-offset comment. */
+int16_t  g_host_original_preview_w = 0;
+int16_t  g_host_original_preview_h = 0;
 /* g_sound_cache — 0x49161C, indexed by sound ID (PlaySound 0x447930
  * bounds-checks to 0x5000..0x605F; sized to 0x6060 so the direct
  * g_sound_cache[soundId] read is always in bounds).  The old

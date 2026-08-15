@@ -119,9 +119,33 @@ struct TileMapResource {
     bool IsEditorSprite() const;
 };
 
+/* KNOWN-CORRUPT MIRROR STRUCT (2026-08-15): every field below is read via a
+ * reinterpret_cast onto whatever real, polymorphic C++ object (ResourceGameObject,
+ * RESDATA_GameVehicle, Building, plain Entity, ...) actually occupies a tile_data
+ * slot -- see world/tilemap.cpp's TileMap::ScrollRect/ScrollTo doc comments and
+ * PROGRESS.md's Priority-1 "TileMapObject mirror struct" item for the full
+ * writeup. TileMap::ScrollRect's occupancy-blocker check has been converted off
+ * this struct (now a real dynamic_cast<ResourceGameObject*>::group_active read);
+ * TileMap::ScrollTo has NOT and still reads is_moving/object_state through this
+ * mirror -- do not assume either field below is reliable outside that one
+ * remaining call site until ScrollTo is fixed too. Two fields are independently
+ * confirmed wrong even as *documentation* of the original x86 layout, not just
+ * broken on this 64-bit host:
+ *   - object_state (+0x06): TileMap::ScrollTo's real disassembly (0x455AB0)
+ *     indexes its `target` parameter as an `undefined4*`/int* array, so the
+ *     real read is int-array index 6 = byte offset 0x18, not 6 -- i.e. this is
+ *     GameObject::initialized, not a distinct "+0x06 object_state" field at all.
+ *   - is_moving (+0xC0): confirmed to be ResourceGameObject::group_active
+ *     (core/BuildingMgrObjectGroup.h), not a real "currently moving" concept --
+ *     the constructor (0x4580a0) sets it to 1 unconditionally and nothing in
+ *     that class ever clears it again (verified by decompiling every one of its
+ *     methods), so in practice it means "this occupant is a live, constructed
+ *     ResourceGameObject", not "is moving". */
 struct TileMapObject {
     uint8_t _pad_00[6];
-    uint8_t object_state;                /* +0x06  1 = active */
+    uint8_t object_state;                /* +0x06 mis-documented -- real x86 read
+                                          *   is byte offset 0x18 (GameObject::
+                                          *   initialized), see struct doc above */
     uint8_t _pad_07;
     uint8_t object_type;                 /* +0x08 */
     uint8_t _pad_09[0x37];
@@ -130,7 +154,8 @@ struct TileMapObject {
     int16_t tile_x;                      /* +0x88  origin tile X */
     int16_t tile_y;                      /* +0x8A  origin tile Y */
     uint8_t _pad_8C[0x34];
-    uint8_t is_moving;                   /* +0xC0  1 = object moving */
+    uint8_t is_moving;                   /* +0xC0  really ResourceGameObject::
+                                          *   group_active, see struct doc above */
     uint8_t _pad_C1[3];
     /* Per-direction occupancy chain state (GetTileRect 0x457830):      */
     int32_t occupancy_links[4];          /* +0xC4  adjacent object pointer
