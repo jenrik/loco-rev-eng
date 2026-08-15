@@ -172,8 +172,14 @@ static void PumpMessages_SDL3(uint8_t filter)
         bool isMouseEvent = false;
         switch (event.type) {
         case SDL_EVENT_QUIT:
-            stop_text_input();
-            return;  /* window close button */
+            /* Real dispatch: CGWND::WndProc's WM_CLOSE case
+             * (HandleStartupModeMessage/HandleGameplayMessage) defers to
+             * the real quit state machine (CGWND_ShutdownOrDeferToMode10)
+             * instead of tearing down immediately here — matching the
+             * original's WM_CLOSE contract. The loop notices real
+             * completion via WM_QUIT in the post-event drain below. */
+            CGWND_MainWndProc(main_wnd_hwnd(), WM_CLOSE, 0, 0);
+            break;
         case SDL_EVENT_KEY_DOWN:
             if (loco::intro::isActive()) {
                 // MCI child subclass 0x4207C0 accepts every WM_KEYDOWN and
@@ -185,19 +191,30 @@ static void PumpMessages_SDL3(uint8_t filter)
                 if (menu->hostHandleKey(static_cast<int32_t>(event.key.key))) break;
             }
             if (event.key.key == SDLK_ESCAPE) {
-                stop_text_input();
                 /* Host-only event-stream consistency: this raw ESC exit
-                 * IS the mode-10 quit path (the same contract the
-                 * focused-edit 0x420C19 branch satisfies via
-                 * CGWND_SetMode(10)); the pump just skips the SetMode
-                 * switch.  Emit the mode change so the test observer sees
-                 * the same quit transition whether or not the edit field
-                 * had focus (pre-existing Sway content-rect y-offset race
-                 * could land the click 25px above the field and miss
-                 * focus — the game still quit through mode 10). */
+                 * satisfies the same contract as the focused-edit 0x420C19
+                 * branch (EditWindow::hostHandleKey), which already calls
+                 * the real CGWND_SetMode(10) when Escape is pressed with
+                 * the field focused — this is the fallback for when the
+                 * edit field didn't have focus (pre-existing Sway
+                 * content-rect y-offset race). CGWND_SetMode(10) now posts
+                 * a real WM_CLOSE (core/CGWND.cpp), so this goes through
+                 * the same deferred quit machinery as every other close
+                 * path instead of returning immediately.
+                 *
+                 * Deliberately NOT routed through HandleGameplayMessage's
+                 * WM_KEYDOWN case for gameplay modes (3+): that dispatch
+                 * also reaches g_active_panel->HandleKey() (unverified
+                 * receiver) and the 'W' fullscreen-toggle case
+                 * (CGWND_ToggleFullscreen has no definition anywhere in
+                 * this tree — an unresolved-symbol call under this
+                 * project's --unresolved-symbols=ignore-all link setting,
+                 * i.e. a real crash risk, not just a missing feature).
+                 * Full gameplay keyboard dispatch needs its own pass once
+                 * those are resolved. */
                 extern int g_game_mode;
                 loco::host_test::emit_mode_changed(g_game_mode, 10);
-                return;  /* Escape to quit */
+                CGWND_SetMode(10);
             }
             break;
         case SDL_EVENT_TEXT_INPUT:
@@ -307,19 +324,37 @@ static void PumpMessages_SDL3(uint8_t filter)
             return;
         }
 
-        /* Check for quit */
-        if (event.type == SDL_EVENT_QUIT) {
-            break;
-        }
-
-        // CGWND_SetMode(10) has queued the exit sweep 0x5026 and
-        // stopped background music.  Return immediately so the caller can
-        // tear down the window, then drain audio headlessly — the original
-        // posts WM_CLOSE right after starting playback and lets DirectSound
-        // hardware buffers outlive the window.
-        if (g_game_mode == 10) {
-            stop_text_input();
-            return;
+        /* Drain posted (non-SDL-sourced) messages: WM_TIMER from the real
+         * present-timer (SetTimer(hWnd, 0x47, 150, nullptr), started by
+         * CGWND::initMode1 — sets g_present_due via CGWND::WndProc's real
+         * WM_TIMER case), and WM_CLOSE re-posted by CGWND_SetMode(10)'s
+         * deferred quit path. A real WM_QUIT means CGWND_ShutdownOrDefer-
+         * ToMode10 completed real teardown (PostQuitMessage) — matching
+         * WinMain's own `msg.message != WM_QUIT` loop-exit test, this is
+         * the one real signal that ends the pump. */
+        {
+            MSG queued;
+            bool quit_pending = false;
+            int drain_count = 0;
+            while (PeekMessageA(&queued, nullptr, 0, 0, PM_REMOVE)) {
+                if (queued.message == WM_QUIT) { quit_pending = true; break; }
+                TranslateMessage(&queued);
+                DispatchMessageA(&queued);
+                /* Defensive bound: a real message loop drains until the
+                 * queue is empty, but a WndProc bug that re-posts a message
+                 * to itself every dispatch (a real failure mode this pass
+                 * hit once already) would otherwise spin here forever. */
+                if (++drain_count > 1000) {
+                    fprintf(stderr, "[WARN] PumpMessages_SDL3: message drain "
+                                    "exceeded 1000 in one iteration, deferring "
+                                    "the rest to next iteration\n");
+                    break;
+                }
+            }
+            if (quit_pending) {
+                stop_text_input();
+                return;
+            }
         }
 
         // Host-only replacement for original MCIWnd playback. Do not present
@@ -340,7 +375,14 @@ static void PumpMessages_SDL3(uint8_t filter)
             loco::host::RunPendingAsyncTask();
         }
 
-        /* Game logic tick */
+        /* Game logic tick. Real WinMain gates this on a second, independent
+         * timer flag (DAT_00485444, a 28ms winmm timeSetEvent callback,
+         * LAB_0045c520/0x45C520) — deliberately NOT reproduced here:
+         * timeSetEvent is currently a total no-op stub (shared/stubs_impl.cpp)
+         * and LAB_0045c520 itself is an unimplemented assert-stub, so gating
+         * on that flag would freeze gameplay entirely rather than throttle
+         * it. Ticking every host loop iteration (as before) until that
+         * dependency chain is reconstructed for real. */
         GameLoop_FrameUpdate();
         SDL3_GameAudioPump();
 
@@ -349,27 +391,48 @@ static void PumpMessages_SDL3(uint8_t filter)
         EditWindow* const menu = active_host_menu();
         if (menu != nullptr) menu->hostRenderFrame();
 
-        // The primary DirectDraw target is now the sole frame source. The
-        // fallback preserves the launch screen until any target exists.
-        bool presented = SDL3_PresentPrimarySurface();
-        if (!presented && g_renderer) {
-            SDL_SetRenderDrawColor(g_renderer, 0, 40, 80, 255);
-            SDL_RenderClear(g_renderer);
-            SDL_RenderPresent(g_renderer);
-            presented = true;
-        }
+        /* Presentation cadence: the real WinMain only gates CGWND_Present
+         * on g_present_due (WM_TIMER id 0x47) in its gameplay-phase loop —
+         * the menu-phase (mode 2) blocking GetMessageA loop has no present
+         * call in the evidenced original at all, so mode 2 keeps presenting
+         * every host iteration here (also avoids a blank first-launch menu
+         * screen before mode 1 has ever started the 0x47 timer — it isn't
+         * running yet the very first time mode 2 is shown). Mode 1 (loading
+         * spinner) and every gameplay-adjacent mode share the same real
+         * 0x47 timer, so they're gated the same way. */
+        const bool should_present = (g_game_mode == 2) || (g_present_due != 0);
+        if (should_present) {
+            g_present_due = 0;
 
-        // Emit readiness only after SDL has presented the corresponding frame.
-        // This is passive test observability and cannot drive the state machine.
-        if (presented && menu != nullptr) {
-            if (menu->dialogState == 0 || menu->dialogState == 7) {
-                loco::host_test::emit_screen_presented("main_menu", menu->dialogState);
-            } else if (menu->dialogState == 3 || menu->dialogState == 4 ||
-                       menu->dialogState == 5) {
-                loco::host_test::emit_screen_presented(
-                    menu->dialogState == 5 ? "multiplayer_lobby" : "game_setup",
-                    menu->dialogState);
+            // The primary DirectDraw target is now the sole frame source. The
+            // fallback preserves the launch screen until any target exists.
+            bool presented = SDL3_PresentPrimarySurface();
+            if (!presented && g_renderer) {
+                SDL_SetRenderDrawColor(g_renderer, 0, 40, 80, 255);
+                SDL_RenderClear(g_renderer);
+                SDL_RenderPresent(g_renderer);
+                presented = true;
             }
+
+            // Emit readiness only after SDL has presented the corresponding
+            // frame. This is passive test observability and cannot drive
+            // the state machine.
+            if (presented && menu != nullptr) {
+                if (menu->dialogState == 0 || menu->dialogState == 7) {
+                    loco::host_test::emit_screen_presented("main_menu", menu->dialogState);
+                } else if (menu->dialogState == 3 || menu->dialogState == 4 ||
+                           menu->dialogState == 5) {
+                    loco::host_test::emit_screen_presented(
+                        menu->dialogState == 5 ? "multiplayer_lobby" : "game_setup",
+                        menu->dialogState);
+                }
+            }
+        } else {
+            // Bounded, message-interruptible-in-spirit wait, matching the
+            // real loop's MsgWaitForMultipleObjects(0, NULL, 0, 3, 0xBF) —
+            // avoids spinning at full CPU while waiting for the next
+            // present/tick.
+            SDL_Delay(3);
         }
     }
 }

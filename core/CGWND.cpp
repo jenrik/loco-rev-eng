@@ -754,16 +754,16 @@ void CGWND_SetMode(int new_mode)
                 }
             }
 
+            HWND main_hwnd = static_cast<CGWND*>(g_main_window)->hWnd;
             if (g_ddraw != nullptr) {
                 /* SetCooperativeLevel — real ABI vtable[20] (byte offset
                  * 0x50), dispatched by name (see
                  * native/ddraw_surface_ops.c's DDRAW_ReleaseSurfaces for
                  * the same call, converted 2026-08-14 — this shim is
                  * API- not ABI-compatible, see CLAUDE.md). */
-                static_cast<IDirectDraw4*>(g_ddraw)->SetCooperativeLevel(
-                    *(HWND*)((uint8_t*)g_main_window + 0x08), 8);
+                static_cast<IDirectDraw4*>(g_ddraw)->SetCooperativeLevel(main_hwnd, 8);
             }
-            PostMessageA(*(HWND*)((uint8_t*)g_main_window + 0x08), 0x10, 0, 0);
+            PostMessageA(main_hwnd, 0x10 /* WM_CLOSE */, 0, 0);
 #else
             // Host-only equivalent of the original 0x5026 exit-sound
             // request.  Queue the exit sweep while the audio device is
@@ -773,6 +773,13 @@ void CGWND_SetMode(int new_mode)
             bool ok = SDL3_GameAudioPlayResource(0x5026);
             fprintf(stderr, "[audio] CGWND_SetMode(10): PlayResource(0x5026) -> %s\n", ok ? "true" : "FALSE");
             SDL3_GameAudioStopLooping();
+
+            /* Real contract (matches the _WIN32 branch above): defer the
+             * actual quit to whoever next drains the main window's message
+             * queue, rather than the host detecting g_game_mode == 10
+             * directly and short-circuiting out of its own loop. */
+            HWND main_hwnd = static_cast<CGWND*>(g_main_window)->hWnd;
+            PostMessageA(main_hwnd, 0x10 /* WM_CLOSE */, 0, 0);
 #endif
         }
         return;
@@ -990,6 +997,38 @@ void CGWND_Cleanup()
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectRight",  g_window_right);
     Config_WriteInt(g_config_ini, "WINDOW ATTRIBUTES", "RectBottom", g_window_bottom);
     Config_WriteInt(g_config_ini, "PROCESS", "CleanExit", 1);
+
+#ifndef _WIN32
+    /* Host-only deviation: PHASE 2 onward is real subsystem teardown that
+     * has never been exercised on host until the WM_CLOSE quit
+     * state-machine work made it reachable for the first time, and it
+     * hits three separate un-reconstructed blockers before it could ever
+     * complete cleanly:
+     *   - PHASE 2 does raw vtable dispatch on _g_network_thread
+     *     (`(*(void***)_g_network_thread)[0]`) — the concrete type behind
+     *     that global has never been modeled.
+     *   - PHASE 2's thread-join loop casts the literal x86 address
+     *     0x4A9AD0 to a live pointer and polls it via
+     *     WIN32_GetThreadResult in an unbounded spin — meaningless (and
+     *     unbounded-hang-risk) on a 64-bit host where that address isn't
+     *     a real object.
+     *   - PHASE 4's destroy_subsystem calls reach UI_WindowBase's real
+     *     base destructor (UI_WindowBase_BaseDtor, shared/stubs_impl.cpp)
+     *     for every UI subsystem (g_ui_main, g_town, g_postcard, g_cursor,
+     *     g_postcard_send, g_trainstation_window, g_about) — a loud,
+     *     deliberate stub-policy assert, not a bug, because that
+     *     destructor's real body has never been reconstructed.
+     * CleanExit=1/window-position bookkeeping above (PHASE 1) is real
+     * game state (read back by initMode1's PATH B via g_clean_exit) and
+     * must still run. main.cpp already performs its own host resource
+     * teardown after CGWND_Cleanup returns (~CGWND, GLOBAL_free,
+     * CoUninitialize, SDL3_GameAudioStopAll, SDL3_WindowQuit) before
+     * process exit, so returning here does not leak the process — it
+     * just defers PHASES 2-7's original-game-object teardown until each
+     * blocker above is reconstructed. Revisit this guard once all three
+     * are real. */
+    return;
+#endif
 
     /* ================================================================ */
     /* PHASE 2: Network thread teardown                                  */
@@ -1325,8 +1364,15 @@ extern void DDRAW_PresentRect(void* rect, void* hwnd, int* scroll, int force);
 extern void WIN32_PostQuit(void);
 
 #ifndef _WIN32
-extern int32_t SendMessageA(void*, uint32_t, uint32_t, int32_t);   /* shared/link_stubs.cpp — host no-op */
-extern int32_t GetWindowRect(HWND, RECT*);                          /* shared/link_stubs.cpp — host no-op */
+/* extern "C" required: shared/link_stubs.cpp defines both inside its own
+ * extern "C" block, so plain C++ (mangled) declarations here would look
+ * for a symbol that doesn't exist — silently resolved to a call through
+ * address 0 under this project's --unresolved-symbols=ignore-all link
+ * setting, rather than a link error (found via a live SIGSEGV, `call
+ * 0x0`, the first time CGWND_CloseAllSubwindows was ever actually
+ * executed — see PROGRESS.md). */
+extern "C" int32_t SendMessageA(void*, uint32_t, uint32_t, int32_t);   /* shared/link_stubs.cpp — host no-op */
+extern "C" int32_t GetWindowRect(HWND, RECT*);                          /* shared/link_stubs.cpp — host no-op */
 #endif
 
 /* New globals this reconstruction introduces (all previously unnamed
@@ -1863,7 +1909,6 @@ bool CGWND::HandleGameplayMessage(HWND hWnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam, LRESULT* out)
 {
     extern void Game_SetScreenMode(void* game, int a, int b, int c);
-    extern void ResourceManager_AnimateClock(void* mgr, uint32_t gameTime);
     extern void* g_active_panel;      /* 0x4FD3E0 — active UI panel override */
     extern uint8_t g_has_selection;   /* 0x4854EC (world/tilemap.h) */
 
@@ -1875,11 +1920,20 @@ bool CGWND::HandleGameplayMessage(HWND hWnd, UINT msg, WPARAM wParam,
         return true;
 
     case 0x10:  /* WM_CLOSE */
-        if (g_game_mode != 10 && g_demo_mode != 1) {
-            static_cast<TrainStationWindow*>(g_trainstation_window)->show(0, 0);
-            *out = 0;
-            return true;
-        }
+        /* FALLBACK, not the real original behavior, when mode != 10 and
+         * not in demo mode: the real path here opens the TrainStationWindow
+         * hub instead of quitting. TrainStationWindow::show() (0x436EC0) is
+         * real, integrated code, but its sound-loading step unconditionally
+         * calls RESMGR_LoadSoundResource (0x448D60) — documented in
+         * PROGRESS.md's Priority-2 list as still having no real
+         * implementation ("entry is garbage and entry->is_valid is a wild
+         * read"). Calling into it from a live WM_CLOSE handler would risk a
+         * crash/UB, not just an unimplemented feature, so this deliberately
+         * falls back to closing instead of opening the hub in both
+         * branches — matching this reconstruction's own documented scope
+         * boundary (TrainStationWindow hub explicitly out of scope until
+         * RESMGR_LoadSoundResource is real). Revisit once that dependency
+         * is implemented. */
         CGWND_ShutdownOrDeferToMode10();
         *out = 0;
         return true;
@@ -2138,7 +2192,7 @@ bool CGWND::HandleGameplayMessage(HWND hWnd, UINT msg, WPARAM wParam,
 
     case 0x406:
         if (g_game_mode != 10) {
-            ResourceManager_AnimateClock(&g_resmgr, static_cast<uint32_t>(wParam));
+            g_resmgr.AnimateClock(static_cast<int32_t>(wParam));
         }
         return false;
 

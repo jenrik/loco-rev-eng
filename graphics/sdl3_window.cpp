@@ -19,6 +19,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <mutex>
 
 #ifndef _WIN32
 
@@ -30,11 +31,16 @@ static SDL_Window*   g_sdl_window   = nullptr;
 static SDL_Renderer* g_sdl_renderer = nullptr;
 static bool          g_sdl_initialized = false;
 
-/* Message queue for PeekMessage/GetMessage */
+/* Message queue for PeekMessage/GetMessage. Guarded by g_msg_queue_mutex:
+ * SDL_AddTimer callbacks run on SDL's own timer thread (sdl_timer_callback
+ * below now posts WM_TIMER directly from that thread for the no-TIMERPROC
+ * case), so this is no longer main-thread-only like it was when every
+ * poster was PostMessageA/PeekMessageA/GetMessageA called from main(). */
 struct QueuedMsg {
     MSG msg;
 };
 static std::vector<QueuedMsg> g_msg_queue;
+static std::mutex             g_msg_queue_mutex;
 
 /* Timer tracking */
 struct TimerInfo {
@@ -43,6 +49,10 @@ struct TimerInfo {
     UINT       elapse;
     TIMERPROC  callback;
     SDL_TimerID sdl_timer_id;
+    bool       killed = false;  /* set by KillTimer; distinct from
+                                  * callback==nullptr, which now means
+                                  * "post WM_TIMER instead of calling a
+                                  * callback" (see sdl_timer_callback) */
 };
 static std::map<uintptr_t, TimerInfo> g_timers;
 
@@ -72,6 +82,17 @@ static uintptr_t g_next_hwnd = 1;   /* HWNDs are opaque pointers */
 static HWND g_main_hwnd = nullptr;
 
 /* =========================================================================
+ * Message posting (internal)
+ * ========================================================================= */
+
+static void post_message(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    QueuedMsg qm = { { hwnd, msg, wParam, lParam, 0, {0, 0} } };
+    std::lock_guard<std::mutex> lock(g_msg_queue_mutex);
+    g_msg_queue.push_back(qm);
+}
+
+/* =========================================================================
  * SDL timer callback
  * ========================================================================= */
 
@@ -79,21 +100,21 @@ static Uint32 sdl_timer_callback(void* userdata, SDL_TimerID timer_id, Uint32 in
 {
     (void)timer_id; (void)interval;
     TimerInfo* ti = reinterpret_cast<TimerInfo*>(userdata);
-    if (ti && ti->callback) {
-        ti->callback(ti->hwnd, WM_TIMER, ti->id, SDL_GetTicks());
-        return ti->elapse; /* re-trigger every elapse ms */
+    if (!ti || ti->killed) {
+        return 0; /* timer was killed; stop re-triggering */
     }
-    return 0; /* callback was nulled (timer killed); stop re-triggering */
-}
-
-/* =========================================================================
- * Message posting (internal)
- * ========================================================================= */
-
-static void post_message(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    QueuedMsg qm = { { hwnd, msg, wParam, lParam, 0, {0, 0} } };
-    g_msg_queue.push_back(qm);
+    if (ti->callback) {
+        ti->callback(ti->hwnd, WM_TIMER, ti->id, SDL_GetTicks());
+    } else {
+        /* Real Win32 contract: SetTimer(..., NULL) posts WM_TIMER into the
+         * window's message queue instead of invoking a callback directly.
+         * This used to be a silent no-op — the missing piece behind
+         * CGWND::initMode1's loading-spinner timer (and the main window's
+         * present timer) never actually firing. Runs on SDL's timer
+         * thread, hence post_message's own mutex. */
+        post_message(ti->hwnd, WM_TIMER, ti->id, 0);
+    }
+    return ti->elapse; /* re-trigger every elapse ms */
 }
 
 /* =========================================================================
@@ -506,6 +527,7 @@ BOOL PeekMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin,
         translate_and_post_sdl_event(sdl_ev);
     }
 
+    std::lock_guard<std::mutex> lock(g_msg_queue_mutex);
     if (g_msg_queue.empty()) return false;
 
     *lpMsg = g_msg_queue.front().msg;
@@ -520,13 +542,18 @@ BOOL GetMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
     (void)hWnd; (void)wMsgFilterMin; (void)wMsgFilterMax;
 
     /* Block until a message is available */
-    while (g_msg_queue.empty()) {
+    while (true) {
+        {
+            std::lock_guard<std::mutex> lock(g_msg_queue_mutex);
+            if (!g_msg_queue.empty()) break;
+        }
         SDL_Event sdl_ev;
         if (SDL_WaitEvent(&sdl_ev)) {
             translate_and_post_sdl_event(sdl_ev);
         }
     }
 
+    std::lock_guard<std::mutex> lock(g_msg_queue_mutex);
     *lpMsg = g_msg_queue.front().msg;
     g_msg_queue.erase(g_msg_queue.begin());
     if (lpMsg->message == WM_QUIT) return false;
@@ -753,13 +780,15 @@ BOOL KillTimer(HWND hWnd, uintptr_t uIDEvent)
     auto it = g_timers.find(uIDEvent);
     if (it != g_timers.end()) {
         SDL_RemoveTimer(it->second.sdl_timer_id);
-        /* Null the callback but keep the entry in the map.
-         * SDL_RemoveTimer prevents future callbacks, but an in-flight
-         * callback may still hold a pointer to this TimerInfo.  If we
-         * erase, that callback reads freed memory.  Nulling callback
-         * ensures the in-flight callback returns 0 (no re-trigger)
-         * instead of calling through a dangling pointer. */
-        it->second.callback = nullptr;
+        /* Mark killed but keep the entry in the map. SDL_RemoveTimer
+         * prevents future callbacks, but an in-flight callback may still
+         * hold a pointer to this TimerInfo; erasing here would make that
+         * callback read freed memory. `killed` (not just nulling
+         * `callback`) is what sdl_timer_callback checks to stop
+         * re-triggering — a null callback now has its own real meaning
+         * (post WM_TIMER instead of invoking a TIMERPROC), so it can no
+         * longer double as the "this timer was killed" signal. */
+        it->second.killed = true;
     }
     return true;
 }
@@ -986,11 +1015,13 @@ BOOL DestroyWindow(HWND hWnd)
 
 void PostQuitMessage(int nExitCode)
 {
-    (void)nExitCode;
-    SDL_Event ev;
-    SDL_zero(ev);
-    ev.type = SDL_EVENT_QUIT;
-    SDL_PushEvent(&ev);
+    /* Real Win32 semantics: post an actual WM_QUIT, which GetMessageA
+     * returns false for and a Peek-based loop checks msg.message against
+     * directly — not another SDL_EVENT_QUIT (that would just re-enter
+     * translate_and_post_sdl_event and post a second WM_CLOSE instead,
+     * never actually stopping a GetMessageA-driven loop). WM_QUIT is
+     * conventionally targeted at HWND NULL, not a specific window. */
+    post_message(nullptr, WM_QUIT, static_cast<WPARAM>(nExitCode), 0);
 }
 
 BOOL ClientToScreen(HWND hWnd, POINT* lpPoint)
