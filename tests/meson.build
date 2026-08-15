@@ -271,8 +271,9 @@ test('intro-video-sequence', intro_video_sequence_test)
 # SDL3 timer safety regression: rapid SetTimer/KillTimer cycles under thread contention.
 sdl3_timer_stress_test = executable('sdl3_timer_stress_test',
   'sdl3_timer_stress_test.cpp',
-  objects: [obj_sdl3_window, obj_sdl3_game_audio, obj_resource_mgr_sdl3,
-            obj_resource_archive, obj_pe_string_table, obj_host_test_events],
+  objects: [obj_sdl3_window, obj_sdl3_ddraw, obj_ddraw_globals, obj_sdl3_game_audio,
+            obj_resource_mgr_sdl3, obj_resource_archive, obj_pe_string_table,
+            obj_host_test_events],
   include_directories: inc_dirs,
   cpp_args: test_warn_args + ['-include', compat_h],
   dependencies: [sdl3_dep],

@@ -31,6 +31,7 @@ static SDL_Renderer* g_renderer = nullptr;
 
 extern void* g_ui_main;
 extern void* g_game;
+extern void* g_main_window;
 extern int g_game_mode;
 
 void CGWND_PumpMessages(void* cgwnd_ptr, uint8_t filter);
@@ -38,6 +39,14 @@ void CGWND_PumpMessages(void* cgwnd_ptr, uint8_t filter);
 static EditWindow* active_host_menu()
 {
     return g_game_mode == 2 ? static_cast<EditWindow*>(g_ui_main) : nullptr;
+}
+
+/* The real main CGWND window's HWND, for calling CGWND_MainWndProc
+ * directly — CGWND::WndProc's own entry guard requires the exact
+ * `this->hWnd` it was constructed with, not any other window handle. */
+static HWND main_wnd_hwnd()
+{
+    return (g_main_window != nullptr) ? static_cast<CGWND*>(g_main_window)->hWnd : nullptr;
 }
 
 /**
@@ -205,11 +214,18 @@ static void PumpMessages_SDL3(uint8_t filter)
             if (EditWindow* menu = active_host_menu()) {
                 menu->hostHandlePointer(event.motion.x, event.motion.y, false);
             }
-            if (Game* game = active_host_game()) {
+            if (active_host_game()) {
                 uint32_t packed = 0;
                 if (host_pack_game_lparam(event.motion.x, event.motion.y, &packed)) {
-                    game->screensaver_active = 1;      /* +0x8E, 0x4622D8 */
-                    game->packed_mouse_pos = packed;   /* +0x90, 0x4622DF */
+                    /* Real dispatch: CGWND::WndProc's WM_MOUSEMOVE case
+                     * (HandleGameplayMessage, 0x200) writes the identical
+                     * screensaver_active/packed_mouse_pos fields this used
+                     * to write by hand — see its own doc comment for the
+                     * exact original addresses. Going through real dispatch
+                     * also picks up the mode-8/mode-4 sub-cases this direct
+                     * write never had. */
+                    CGWND_MainWndProc(main_wnd_hwnd(), WM_MOUSEMOVE, 0,
+                                       static_cast<LPARAM>(packed));
                     emit_town_input("mouse_move", packed);
                 }
             }
@@ -226,20 +242,26 @@ static void PumpMessages_SDL3(uint8_t filter)
                 if (EditWindow* menu = active_host_menu()) {
                     menu->hostHandlePointer(event.button.x, event.button.y, true);
                 }
-                if (Game* game = active_host_game()) {
+                if (active_host_game()) {
                     uint32_t packed = 0;
                     host_pack_game_lparam_clamped(event.button.x, event.button.y, &packed);
-                    game->click_on_selected = 1;          /* +0xE6, 0x462380 */
-                    game->left_click_flag = 1;            /* +0xA4, 0x462387 */
-                    game->left_click_screen_pos = packed; /* +0xA8, 0x46238E */
+                    /* Real dispatch: WM_LBUTTONDOWN (HandleGameplayMessage,
+                     * 0x201) writes click_on_selected/left_click_flag/
+                     * left_click_screen_pos and additionally does the real
+                     * SetFocus/SetForegroundWindow this manual write never
+                     * did. */
+                    CGWND_MainWndProc(main_wnd_hwnd(), WM_LBUTTONDOWN, 0,
+                                       static_cast<LPARAM>(packed));
                     emit_town_input("left_click", packed);
                 }
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                if (Game* game = active_host_game()) {
+                if (active_host_game()) {
                     uint32_t packed = 0;
                     host_pack_game_lparam_clamped(event.button.x, event.button.y, &packed);
-                    game->right_click_flag = 1;            /* +0xB4, 0x4623E4 */
-                    game->right_click_screen_pos = packed; /* +0xB8, 0x4623EB */
+                    /* Real dispatch: WM_RBUTTONDOWN (0x204) writes
+                     * right_click_flag/right_click_screen_pos. */
+                    CGWND_MainWndProc(main_wnd_hwnd(), WM_RBUTTONDOWN, 0,
+                                       static_cast<LPARAM>(packed));
                     emit_town_input("right_click", packed);
                 }
             }
@@ -247,20 +269,24 @@ static void PumpMessages_SDL3(uint8_t filter)
             break;
         case SDL_EVENT_MOUSE_BUTTON_UP:
             if (event.button.button == SDL_BUTTON_LEFT) {
-                if (Game* game = active_host_game()) {
+                if (active_host_game()) {
                     uint32_t packed = 0;
                     host_pack_game_lparam_clamped(event.button.x, event.button.y, &packed);
-                    game->click_on_selected = 0;          /* +0xE6, 0x4623B2 */
-                    game->mouse_move_flag = 1;            /* +0xC4, 0x4623B9 */
-                    game->mouse_move_screen_pos = packed; /* +0xC8, 0x4623C0 */
+                    /* Real dispatch: WM_LBUTTONUP (0x202) writes
+                     * click_on_selected=0/mouse_move_flag/
+                     * mouse_move_screen_pos. */
+                    CGWND_MainWndProc(main_wnd_hwnd(), WM_LBUTTONUP, 0,
+                                       static_cast<LPARAM>(packed));
                     emit_town_input("left_release", packed);
                 }
             } else if (event.button.button == SDL_BUTTON_RIGHT) {
-                if (Game* game = active_host_game()) {
+                if (active_host_game()) {
                     uint32_t packed = 0;
                     host_pack_game_lparam_clamped(event.button.x, event.button.y, &packed);
-                    game->mouse_drag_flag = 1;            /* +0xD4, 0x46240F */
-                    game->mouse_drag_screen_pos = packed; /* +0xD8, 0x462416 */
+                    /* Real dispatch: WM_RBUTTONUP (0x205) writes
+                     * mouse_drag_flag/mouse_drag_screen_pos. */
+                    CGWND_MainWndProc(main_wnd_hwnd(), WM_RBUTTONUP, 0,
+                                       static_cast<LPARAM>(packed));
                     emit_town_input("right_release", packed);
                 }
             }

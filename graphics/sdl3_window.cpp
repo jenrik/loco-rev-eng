@@ -11,6 +11,7 @@
 #include "sdl3_window.h"
 #include <SDL3/SDL.h>
 #include "sdl3_game_audio.h"
+#include "sdl3_ddraw.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -60,6 +61,15 @@ struct WindowData {
 };
 static std::map<HWND, WindowData*> g_windows;
 static uintptr_t g_next_hwnd = 1;   /* HWNDs are opaque pointers */
+
+/* The real main CGWND window's HWND — the first top-level window ever
+ * created (CGWND::RegisterWindowClass's CreateWindowExA call, always the
+ * very first window construction in the real program order per
+ * GameLoop_Setup). Captured explicitly rather than assuming callers know
+ * it happens to be HWND(1); every SDL-event-to-WM_* translation below
+ * targets this window specifically, since SDL has exactly one real
+ * window/event stream to attribute events to. */
+static HWND g_main_hwnd = nullptr;
 
 /* =========================================================================
  * SDL timer callback
@@ -225,6 +235,10 @@ HWND CreateWindowExA(DWORD dwExStyle, LPCSTR lpClassName, LPCSTR lpWindowName,
         wd->sdl_win = nullptr;
     }
 
+    if (g_windows.empty()) {
+        g_main_hwnd = hwnd;   /* the real main CGWND window — see declaration comment */
+    }
+
     g_windows[hwnd] = wd;
 
     if (wd->visible) {
@@ -277,7 +291,7 @@ BOOL SetWindowPos(HWND hWnd, HWND hWndInsertAfter, int X, int Y,
     if (!(uFlags & SWP_NOMOVE)) { wd->x = X; wd->y = Y; }
     if (!(uFlags & SWP_NOSIZE)) { wd->width = cx; wd->height = cy; }
 
-    if (g_sdl_window && hWnd == reinterpret_cast<HWND>(1)) {
+    if (g_sdl_window && hWnd == g_main_hwnd) {
         SDL_SetWindowSize(g_sdl_window, wd->width, wd->height);
         SDL_SetWindowPosition(g_sdl_window, wd->x, wd->y);
     }
@@ -349,7 +363,7 @@ BOOL SetWindowTextA(HWND hWnd, LPCSTR lpString)
 
 HWND GetDesktopWindow(void)
 {
-    return reinterpret_cast<HWND>(1); /* return first window as "desktop" */
+    return g_main_hwnd; /* return first window as "desktop" */
 }
 
 HWND FindWindowA(LPCSTR lpClassName, LPCSTR lpWindowName)
@@ -411,6 +425,76 @@ BOOL AdjustWindowRect(RECT* lpRect, DWORD dwStyle, BOOL bMenu)
  * Message loop
  * ========================================================================= */
 
+/* Packs an already-projected canvas position the same way Win32's real
+ * MAKELPARAM does (X in the low word, Y in the high word), matching
+ * core/CGWND_sdl3.cpp's own host_pack_game_lparam{,_clamped} helpers —
+ * each component truncated to 16 bits *before* combining, not just OR'd
+ * in raw (a wide X could otherwise bleed into Y's bits). */
+static LPARAM pack_lparam_xy(float canvas_x, float canvas_y)
+{
+    const uint16_t x = static_cast<uint16_t>(static_cast<int32_t>(canvas_x));
+    const uint16_t y = static_cast<uint16_t>(static_cast<int32_t>(canvas_y));
+    return static_cast<LPARAM>((static_cast<uint32_t>(y) << 16) | x);
+}
+
+/* Translates one raw SDL event into the matching WM_* message(s) and posts
+ * it to the real main window's queue. Shared by PeekMessageA and
+ * GetMessageA so a message picked up by SDL_WaitEvent (GetMessageA) gets
+ * the same treatment as one picked up by SDL_PollEvent (PeekMessageA)
+ * instead of being silently discarded.
+ *
+ * Mouse coordinates are projected through the same logical-canvas mapping
+ * CGWND_sdl3.cpp's host input dispatch already uses, not raw SDL window
+ * coordinates — WM_MOUSEMOVE uses the strict (rejecting) projection since
+ * the original only generates that message while the pointer is actually
+ * over the client area; button transitions use the clamped projection
+ * since Win32 mouse capture can deliver an out-of-client-rect button
+ * message unconditionally (see SDL3_DisplayToPrimaryCanvasClamped's own
+ * doc comment). */
+static void translate_and_post_sdl_event(const SDL_Event& sdl_ev)
+{
+    switch (sdl_ev.type) {
+    case SDL_EVENT_QUIT:
+        post_message(g_main_hwnd, WM_CLOSE, 0, 0);
+        break;
+    case SDL_EVENT_KEY_DOWN:
+        post_message(g_main_hwnd, WM_KEYDOWN, sdl_ev.key.key, 0);
+        break;
+    case SDL_EVENT_KEY_UP:
+        post_message(g_main_hwnd, WM_KEYUP, sdl_ev.key.key, 0);
+        break;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+        UINT msg = sdl_ev.button.button == SDL_BUTTON_LEFT  ? WM_LBUTTONDOWN :
+                   sdl_ev.button.button == SDL_BUTTON_RIGHT ? WM_RBUTTONDOWN : 0;
+        float cx = 0.0f, cy = 0.0f;
+        if (msg != 0 &&
+            SDL3_DisplayToPrimaryCanvasClamped(sdl_ev.button.x, sdl_ev.button.y, &cx, &cy)) {
+            post_message(g_main_hwnd, msg, 0, pack_lparam_xy(cx, cy));
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        UINT msg = sdl_ev.button.button == SDL_BUTTON_LEFT  ? WM_LBUTTONUP :
+                   sdl_ev.button.button == SDL_BUTTON_RIGHT ? WM_RBUTTONUP : 0;
+        float cx = 0.0f, cy = 0.0f;
+        if (msg != 0 &&
+            SDL3_DisplayToPrimaryCanvasClamped(sdl_ev.button.x, sdl_ev.button.y, &cx, &cy)) {
+            post_message(g_main_hwnd, msg, 0, pack_lparam_xy(cx, cy));
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_MOTION: {
+        float cx = 0.0f, cy = 0.0f;
+        if (SDL3_DisplayToPrimaryCanvas(sdl_ev.motion.x, sdl_ev.motion.y, &cx, &cy)) {
+            post_message(g_main_hwnd, WM_MOUSEMOVE, 0, pack_lparam_xy(cx, cy));
+        }
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 BOOL PeekMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin,
                    UINT wMsgFilterMax, UINT wRemoveMsg)
 {
@@ -419,35 +503,7 @@ BOOL PeekMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin,
     /* Pump SDL events into our queue */
     SDL_Event sdl_ev;
     while (SDL_PollEvent(&sdl_ev)) {
-        switch (sdl_ev.type) {
-            case SDL_EVENT_QUIT:
-                post_message(reinterpret_cast<HWND>(1), WM_CLOSE, 0, 0);
-                break;
-            case SDL_EVENT_KEY_DOWN:
-                post_message(reinterpret_cast<HWND>(1), WM_KEYDOWN, sdl_ev.key.key, 0);
-                break;
-            case SDL_EVENT_KEY_UP:
-                post_message(reinterpret_cast<HWND>(1), WM_KEYUP, sdl_ev.key.key, 0);
-                break;
-            case SDL_EVENT_MOUSE_BUTTON_DOWN:
-                post_message(reinterpret_cast<HWND>(1),
-                    sdl_ev.button.button == SDL_BUTTON_LEFT  ? WM_LBUTTONDOWN :
-                    sdl_ev.button.button == SDL_BUTTON_RIGHT ? WM_RBUTTONDOWN : 0,
-                    0, (((static_cast<int>(sdl_ev.button.y) << 16) | static_cast<int>(sdl_ev.button.x))));
-                break;
-            case SDL_EVENT_MOUSE_BUTTON_UP:
-                post_message(reinterpret_cast<HWND>(1),
-                    sdl_ev.button.button == SDL_BUTTON_LEFT  ? WM_LBUTTONUP :
-                    sdl_ev.button.button == SDL_BUTTON_RIGHT ? WM_RBUTTONUP : 0,
-                    0, (((static_cast<int>(sdl_ev.button.y) << 16) | static_cast<int>(sdl_ev.button.x))));
-                break;
-            case SDL_EVENT_MOUSE_MOTION:
-                post_message(reinterpret_cast<HWND>(1), WM_MOUSEMOVE, 0,
-                    (((static_cast<int>(sdl_ev.motion.y) << 16) | static_cast<int>(sdl_ev.motion.x))));
-                break;
-            default:
-                break;
-        }
+        translate_and_post_sdl_event(sdl_ev);
     }
 
     if (g_msg_queue.empty()) return false;
@@ -465,26 +521,9 @@ BOOL GetMessageA(MSG* lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
 
     /* Block until a message is available */
     while (g_msg_queue.empty()) {
-        /* Pump SDL events */
         SDL_Event sdl_ev;
         if (SDL_WaitEvent(&sdl_ev)) {
-            switch (sdl_ev.type) {
-                case SDL_EVENT_QUIT:
-                    lpMsg->hwnd = reinterpret_cast<HWND>(1);
-                    lpMsg->message = WM_QUIT;
-                    lpMsg->wParam = 0;
-                    lpMsg->lParam = 0;
-                    return true; /* WM_QUIT returns nonzero? Actually GetMessage returns 0 for WM_QUIT */
-                default:
-                    break;
-            }
-        }
-        /* Run PeekMessage to fill the queue */
-        MSG tmp;
-        if (PeekMessageA(&tmp, nullptr, 0, 0, PM_REMOVE)) {
-            *lpMsg = tmp;
-            if (lpMsg->message == WM_QUIT) return false;
-            return true;
+            translate_and_post_sdl_event(sdl_ev);
         }
     }
 
