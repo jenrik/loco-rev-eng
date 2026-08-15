@@ -224,6 +224,7 @@ BOOL  IntersectRect(RECT* lprcDst, const RECT* lprcSrc1, const RECT* lprcSrc2);
  * ========================================================================= */
 
 HWND     SetFocus(HWND hWnd);
+BOOL     SetForegroundWindow(HWND hWnd);
 HGDIOBJ  GetStockObject(int fnObject);
 BOOL    DrawEdge(HDC hdc, RECT* qrc, UINT edge, UINT grfFlags);
 COLORREF SetBkColor(HDC hdc, COLORREF color);

@@ -321,6 +321,15 @@ BOOL EnableWindow(HWND hWnd, BOOL bEnable)
     return true;
 }
 
+BOOL SetForegroundWindow(HWND hWnd)
+{
+    auto it = g_windows.find(hWnd);
+    if (it != g_windows.end() && g_sdl_window) {
+        SDL_RaiseWindow(g_sdl_window);
+    }
+    return true;
+}
+
 BOOL InvalidateRect(HWND hWnd, const RECT* lpRect, BOOL bErase)
 {
     (void)lpRect; (void)bErase;

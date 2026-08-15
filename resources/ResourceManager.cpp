@@ -23,6 +23,7 @@
 // Status: TRANSCRIBED
 
 #include "ResourceManager.h"
+#include "../core/CGWND.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 #include <stdint.h>
 #include <string.h>
@@ -208,6 +209,117 @@ int   __stdcall FreeLibrary(void* hLib);
 
 ResourceManager g_resmgr;       /* @ 0x004855E8 */
 ScreenSaverModule g_scrsaver_mod;  /* @ 0x004A9910 */
+
+/* ================================================================== */
+/* ScreenSaverModule::FilterMessage                                     */
+/* Address: 0x4484A0 (Ghidra: FUN_004484a0)                             */
+/*                                                                      */
+/* Only ever consulted by CGWND::WndProc (0x4618C0, core/CGWND.cpp)     */
+/* when g_demo_mode == 1; see that method's own doc comment.            */
+/* ================================================================== */
+namespace {
+
+extern "C" {
+    void*   __stdcall LoadCursorA(void* hInstance, const char* lpCursorName);
+    void    __stdcall SetCursor(void* hCursor);
+    int32_t __stdcall ShowCursor(int32_t bShow);
+    void    __stdcall OutputDebugStringA(const char* lpOutputString);
+}
+
+/* Shared "verify password (if configured), then close" tail used by
+ * every trigger message below. Posts WM_CLOSE to the main window on
+ * success; on a rejected password, resets the guard so a later attempt
+ * can retry. The original checks `this+4` (closing_flag) again after
+ * this runs before deciding what to return, but nothing can change it
+ * between the two checks in this single-threaded call — the second
+ * check is always false when the first was, so it is not repeated
+ * here (CLAUDE.md: simplify proven-redundant assembly-shaped checks). */
+void close_screensaver_if_verified(ScreenSaverModule& mod, HWND main_hwnd)
+{
+    mod.closing_flag = 1;
+
+    bool verified = true;
+    if (mod.get_password_status != nullptr) {
+        const int status = mod.get_password_status(1);
+        if ((status & 1) == 1) {
+            const int result = mod.verify_screen_save_pwd(main_hwnd);
+            verified = (result != 0);
+        }
+    }
+
+    if (!verified) {
+        mod.closing_flag = 0;
+        mod.idle_move_count = 0;
+        return;
+    }
+
+    PostMessageA(main_hwnd, 0x10 /* WM_CLOSE */, 0, 0);
+    mod.idle_move_count = 0;
+}
+
+} // namespace
+
+int ScreenSaverModule::FilterMessage(UINT msg, WPARAM wParam)
+{
+    extern void* g_main_window;  /* 0x4AA4A0 — CGWND* (stored as void* project-
+                                   * wide per shared/stubs_impl.cpp's own
+                                   * definition; every other call site casts
+                                   * to CGWND* rather than indexing offsets). */
+    CGWND* main_wnd = static_cast<CGWND*>(g_main_window);
+    HWND main_hwnd = (main_wnd != nullptr) ? main_wnd->hWnd : nullptr;
+
+    switch (msg) {
+    case 0x1C:  /* WM_ACTIVATEAPP — only the deactivate transition matters */
+        if (wParam != 0) return 0;
+        if (this->closing_flag != 0) return 2;
+        close_screensaver_if_verified(*this, main_hwnd);
+        return 2;
+
+    case 0x20: {  /* WM_SETCURSOR — force the arrow cursor visible */
+        /* ABI_BOUNDARY: MAKEINTRESOURCE(IDC_ARROW) — Win32's standard-
+         * cursor-ID-as-pointer convention, not a modeled game object. */
+        void* cursor = LoadCursorA(
+            nullptr, reinterpret_cast<const char*>(static_cast<uintptr_t>(0x7F00)));
+        SetCursor(cursor);
+        int32_t count = ShowCursor(1);
+        while (count < 0) { count = ShowCursor(1); }
+        return 1;
+    }
+
+    case 0x100:  /* WM_KEYDOWN */
+    case 0x201:  /* WM_LBUTTONDOWN */
+    case 0x204:  /* WM_RBUTTONDOWN */
+    case 0x207:  /* WM_MBUTTONDOWN */
+    case 0x104:  /* WM_SYSKEYDOWN */
+    case 0x105:  /* WM_SYSKEYUP */
+    case 0x106:  /* WM_SYSCHAR */
+        if (this->closing_flag != 0) return 3;
+        close_screensaver_if_verified(*this, main_hwnd);
+        return 3;
+
+    case 0x112:  /* WM_SYSCOMMAND */
+        if ((wParam & 0xFFF0) == 0xF060) {  /* SC_MINIMIZE */
+            OutputDebugStringA("ScreenSaver: SC_MINIMIZE intercepted\n");
+            return 3;
+        }
+        if ((wParam & 0xFFF0) == 0xF130) {  /* SC_TASKLIST */
+            OutputDebugStringA("ScreenSaver: SC_TASKLIST intercepted\n");
+            return 3;
+        }
+        return 2;
+
+    case 0x200:  /* WM_MOUSEMOVE — debounced: only closes after 3 moves */
+        if (this->closing_flag != 0) return 1;
+        ++this->idle_move_count;
+        if (this->idle_move_count > 2) {
+            close_screensaver_if_verified(*this, main_hwnd);
+        }
+        return 1;
+
+    default:
+        return 0;
+    }
+}
 
 /* ================================================================== */
 /* Constants                                                           */

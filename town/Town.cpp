@@ -281,7 +281,12 @@ extern char   g_game_mode;              /* 0x4852AC — current game mode */
 extern int    g_cursor_world_x;         /* 0x4FD348 — cursor world X */
 extern int    g_cursor_world_y;         /* 0x4FD34C — cursor world Y */
 extern void*  g_active_panel;           /* 0x4FD3E0 — active panel override */
-extern void*  g_main_window;            /* 0x4FD230 — main CGWND window */
+extern void*  g_main_window;            /* 0x4AA4A0 — main CGWND window (was
+                                          * mislabeled 0x4FD230 here; confirmed
+                                          * 0x4AA4A0 via repeated get_xrefs_to
+                                          * while reconstructing MainWndProc,
+                                          * which dereferences this exact
+                                          * address for every hWnd read) */
 extern void*  g_world;                  /* 0x4A98B0 — World singleton */
 
 /* Viewport rect globals (one RECT at 0x4AAD14) */

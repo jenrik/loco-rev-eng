@@ -254,7 +254,17 @@ static BOOL STDMETHODCALLTYPE DirectPlay_EnumSessionsCallback(LPCDPSESSIONDESC2 
  * Sdl3DirectDrawSurface (platform/ddraw_globals.cpp); the underscore twin
  * is deliberately left null pending a full, separate 8-file consolidation. */
 extern void* g_primary_surface;    /* 0x4FD3C4 — primary DirectDraw surface */
-extern void* _g_dsound_object;     /* 0x4FD398 — shadow GameObject */
+extern void* _g_dsound_object;     /* 0x4FD3D8 — shadow GameObject (was
+                                     * mislabeled 0x4FD398 here; that address
+                                     * belongs to an unrelated network-thread
+                                     * global — confirmed via get_xrefs_to on
+                                     * both addresses while reconstructing
+                                     * MainWndProc's 0x405/0x407 handlers,
+                                     * which both operate on this same
+                                     * object; see core/CGWND.cpp's
+                                     * CGWND_Cleanup, which already declares
+                                     * it without a (correct) address
+                                     * comment) */
 extern void* g_main_window;          /* 0x4AA4A0 */
 extern int32_t g_client_width;
 extern int32_t g_client_height;      /* primary surface width */

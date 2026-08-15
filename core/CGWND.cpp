@@ -12,6 +12,7 @@
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
 #include <cstring>
 #include <cstdio>
+#include <cassert>
 
 /* Subsystem class headers — for InitAllSubsystems and typed dispatch */
 #include "../ui/EditWindow.h"
@@ -44,6 +45,8 @@
 // Netman: forward-declared below (Netman.h conflicts with Config_GetIniInt)
 class Netman;
 #include "../game/BuildingMgr.h"
+#include "../game/Panel.h"        /* for g_active_panel->HandleKey (WndProc) */
+#include "../world/scriptengine.h" /* for g_scripted_object->EnterBuildMode (WndProc) */
 #include "../audio/GameAudio.h"
 #include "../game/World.h"
 #include "../resources/ResourceManager.h"
@@ -62,6 +65,19 @@ namespace loco { namespace host { void HostPostLoadWorker(void* param); } }
 /* ================================================================== */
 
 #ifdef _WIN32
+/* PAINTSTRUCT: not provided by this project's Windows compatibility
+ * headers (stubs/windows.h) — mirrors graphics/sdl3_window.h's own
+ * definition so the (MinGW typecheck only, never linked) _WIN32 path
+ * has a matching layout for BeginPaint/EndPaint below. */
+struct PAINTSTRUCT {
+    HDC   hdc;
+    BOOL  fErase;
+    RECT  rcPaint;
+    BOOL  fRestore;
+    BOOL  fIncUpdate;
+    uint8_t rgbReserved[32];
+};
+
 extern "C" {
     /* Windows API */
     HWND  GetDesktopWindow(void);
@@ -89,6 +105,15 @@ extern "C" {
     BOOL   TranslateMessage(const struct tagMSG* lpMsg);
     LONG   DispatchMessageA(const struct tagMSG* lpMsg);
     void   SetCursor(void* hCursor);
+    HWND   SetFocus(HWND hWnd);
+    BOOL   SetForegroundWindow(HWND hWnd);
+    void   Sleep(DWORD dwMilliseconds);
+    BOOL   DestroyWindow(HWND hWnd);
+    void   PostQuitMessage(int nExitCode);
+    LRESULT DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+    BOOL   OffsetRect(struct RECT* lprc, int dx, int dy);
+    LRESULT SendMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+    BOOL   GetWindowRect(HWND hWnd, struct RECT* lpRect);
     int    KillTimer(HWND hWnd, uintptr_t uIDEvent);
     uintptr_t SetTimer(HWND hWnd, uintptr_t nIDEvent, uint32_t uElapse,
                        void (*lpTimerFunc)(HWND,uint32_t,uintptr_t,DWORD));
@@ -110,6 +135,8 @@ extern "C" {
     BOOL   DrawTextA(HDC hdc, const char* lpchText, int cchText,
                       struct RECT* lprc, UINT format);
     BOOL   GetOpenFileNameA(void* lpofn);
+    HDC    BeginPaint(HWND hWnd, struct PAINTSTRUCT* lpPaint);
+    BOOL   EndPaint(HWND hWnd, const struct PAINTSTRUCT* lpPaint);
 
     /* CRT helpers */
     unsigned int CRT_time(unsigned int* t);
@@ -137,7 +164,6 @@ extern "C" {
 static inline int Config_GetIniInt(void*, const char*, const char*, int d) { return d; }
 static inline void Config_WriteInt(void*, const char*, const char*, unsigned int) {}
 static inline void Config_GetIniString(void*, const char*, const char*, const char*, char* out, unsigned int) { if(out) out[0]=0; }
-static inline void FormatResourceString(void*, unsigned int, char* buf, int sz) { if(buf&&sz>0) buf[0]=0; }
 static inline unsigned int CRT_time() { return 0; }
 static inline int CRT_toupper(int c) { return (c>='a'&&c<='z')?c-32:c; }
 static inline int CRT_atoi(const char* s) { return s?atoi(s):0; }
@@ -474,20 +500,20 @@ int CGWND::InitGame()
 #endif
     /* Gate 1: Color depth check (8-bit paletted = 8 bpp) */
     if (colorDepth < 0x80000000 || g_screen_bpp > 0x10) {
-        FormatResourceString(&g_resmgr, 0x7A, msg, sizeof(msg));
+        g_resmgr.FormatResourceString(0x7A, msg, sizeof(msg));
     } else {
         /* Gate 2: Mouse check */
         int mousePresent = GetSystemMetrics(0x13);  /* SM_MOUSEPRESENT */
         if (mousePresent == 0) {
-            FormatResourceString(&g_resmgr, 0x7B, msg, sizeof(msg));
+            g_resmgr.FormatResourceString(0x7B, msg, sizeof(msg));
         } else {
             /* Gate 3: Screen width in range 800-1280 */
             if (g_screen_width < 0x501) {
-                FormatResourceString(&g_resmgr, 0x7A, msg, sizeof(msg));
+                g_resmgr.FormatResourceString(0x7A, msg, sizeof(msg));
             } else if (g_screen_width > 799) {
                 return 1;
             } else {
-                FormatResourceString(&g_resmgr, 0x7A, msg, sizeof(msg));
+                g_resmgr.FormatResourceString(0x7A, msg, sizeof(msg));
             }
         }
     }
@@ -1167,7 +1193,7 @@ BOOL CGWND::RegisterWindowClass()
 
     wc.hInstance     = this->hInstance;              /* +0x0C */
     wc.style         = 0xB;                          /* CS_BYTEALIGNCLIENT | CS_HREDRAW | CS_VREDRAW */
-    wc.lpfnWndProc   = (WNDPROC)0x4618C0;            /* MainWndProc */
+    wc.lpfnWndProc   = &CGWND_MainWndProc;           /* real trampoline, was (WNDPROC)0x4618C0 */
     wc.cbClsExtra    = 0;
     wc.cbWndExtra    = 0;
     wc.hIcon         = LoadIconA(this->hInstance, (LPCSTR)0x65);  /* IDI_APPLICATION = 101 */
@@ -1205,21 +1231,51 @@ BOOL CGWND::RegisterWindowClass()
     GetClientRect(this->hWnd, &g_client_rect);
     return TRUE;
 
-#else /* !_WIN32 — SDL3 window */
+#else /* !_WIN32 — SDL3, routed through the real Win32 message-pump         */
+      /* emulation layer (graphics/sdl3_window.cpp) rather than grabbing    */
+      /* SDL3_GetWindow() directly, so DispatchMessageA can actually reach  */
+      /* CGWND_MainWndProc once something drives that pump. The real       */
+      /* SDL_Window (created by SDL3_WindowInit in main.cpp) stays reachable*/
+      /* via SDL3_GetWindow() for the call sites that need it directly     */
+      /* (SDL3_GetRenderer, SDL3_DisplayToPrimaryCanvas*, etc.) — nothing   */
+      /* in this tree treats CGWND::hWnd as an SDL_Window* (confirmed via   */
+      /* grep before this change), so becoming a shim HWND here is safe.   */
 
-    /* SDL3: The window was already created by SDL3_WindowInit in main.cpp.
-     * Retrieve it via SDL3_GetWindow() and make it visible. */
-    SDL_Window* win = SDL3_GetWindow();
-    if (win == nullptr) {
+    WNDCLASSA wc;
+    wc.style         = 0xB;
+    wc.lpfnWndProc   = &CGWND_MainWndProc;
+    wc.cbClsExtra    = 0;
+    wc.cbWndExtra    = 0;
+    wc.hInstance     = this->hInstance;
+    wc.hIcon         = nullptr;
+    wc.hCursor       = nullptr;
+    wc.hbrBackground = nullptr;
+    wc.lpszMenuName  = nullptr;
+    wc.lpszClassName = s_LEGO_LOCO_0047e1c0;
+
+    RegisterClassA(&wc);
+
+    this->hWnd = CreateWindowExA(
+        0, s_LEGO_LOCO_0047e1c0, s_LEGO_LOCO_0047e1c0,
+        0x82000000 /* WS_POPUP | WS_VISIBLE */,
+        0, 0, g_screen_width, g_screen_height,
+        nullptr, nullptr, this->hInstance, nullptr);
+
+    if (this->hWnd == nullptr) {
         return FALSE;
     }
-    this->hWnd = static_cast<HWND>(win);
 
-    SDL_ShowWindow(win);
-
-    /* Query client area size */
-    int w, h;
-    SDL_GetWindowSize(win, &w, &h);
+    /* Make the real SDL window (created earlier by SDL3_WindowInit)
+     * visible and size the client rect from it — the shim HWND above is
+     * an opaque registry key, not a real window; presentation still goes
+     * through the one real SDL_Window. */
+    SDL_Window* win = SDL3_GetWindow();
+    int w = g_screen_width;
+    int h = g_screen_height;
+    if (win != nullptr) {
+        SDL_ShowWindow(win);
+        SDL_GetWindowSize(win, &w, &h);
+    }
     g_client_rect.left   = 0;
     g_client_rect.top    = 0;
     g_client_rect.right  = w;
@@ -1232,17 +1288,1016 @@ BOOL CGWND::RegisterWindowClass()
 
 
 /* ================================================================== */
-int CGWND_InstallPathInit()
+/* CGWND::WndProc and friends — the main window's real WNDPROC          */
+/* Address: 0x4618C0 (Ghidra: FUN_004618c0, renamed CGWND_MainWndProc)  */
+/*                                                                      */
+/* Session findings that correct/extend the original dispatch prompt's */
+/* description (see PROGRESS.md for the full writeup):                 */
+/*   - WM_CLOSE (0x10) has TWO distinct handling sites, one per mode    */
+/*     group, not one: in modes {0,1,2} it always tears down (with an  */
+/*     error dialog first when wParam != 0); in every other mode it     */
+/*     opens TrainStationWindow unless mode is already 10 or demo mode  */
+/*     is active, in which case it defers to the same real shutdown.    */
+/*   - The real shutdown routine (0x463430, renamed                     */
+/*     CGWND_ShutdownOrDeferToMode10) is NOT unconditional teardown: for */
+/*     any mode other than 1 or 10 it just calls CGWND_SetMode(10) and   */
+/*     returns immediately, deferring to the async two-step quit         */
+/*     machinery (CGWND_SetMode(10) eventually re-posts WM_CLOSE once    */
+/*     the mode has settled) — only mode 1/10 do the real teardown.      */
+/*   - No live PostMessageA/SendMessageA call site anywhere in this tree */
+/*     posts messages 0x401/0x402/0x403/0x404/0x408 with an object       */
+/*     argument, so several sub-cases are genuinely dead code today;     */
+/*     they are still dispatched faithfully (counters, DefWindowProcA    */
+/*     forwarding) but their vtable/receiver-dependent payload is        */
+/*     explicitly left as a documented blocked case rather than guessed. */
+/* ================================================================== */
+
+/* DDRAW_PresentRect (0x401280) — canonically declared in graphics/
+ * LOCOBITMAP.h, already included above under _WIN32 (see this file's own
+ * host-menu-bootstrap include guard higher up), so only the host (#else)
+ * shape needs re-declaring here. A _WIN32-guarded copy of the other shape
+ * would be a pure duplicate of LOCOBITMAP.h's own declaration — harmless
+ * today but a needless second place for the signature to drift. */
+#ifndef _WIN32
+extern void DDRAW_PresentRect(void* rect, void* hwnd, int* scroll, int force);
+#endif
+
+extern void WIN32_PostQuit(void);
+
+#ifndef _WIN32
+extern int32_t SendMessageA(void*, uint32_t, uint32_t, int32_t);   /* shared/link_stubs.cpp — host no-op */
+extern int32_t GetWindowRect(HWND, RECT*);                          /* shared/link_stubs.cpp — host no-op */
+#endif
+
+/* New globals this reconstruction introduces (all previously unnamed
+ * Ghidra DAT_* addresses with no prior declaration anywhere in this
+ * tree, confirmed via repeated grep before adding). */
+uint8_t  g_present_due = 0;                    /* 0x4AA4A4 — set by WM_TIMER
+                                                 * id 0x47; the future main-
+                                                 * loop rebuild (tracked in
+                                                 * PROGRESS.md) is what will
+                                                 * consume this to gate
+                                                 * CGWND_Present(0). */
+static uint8_t  g_wndproc_displaychange_guard = 0;  /* 0x4FF138 — WM_DISPLAYCHANGE reentry guard */
+static uint8_t  g_wndproc_sizing_active = 0;         /* 0x4FF13C — WM_ENTERSIZEMOVE/EXITSIZEMOVE guard,
+                                                        * also read by WM_NCHITTEST */
+static uint32_t g_winmain_frame_counter_402 = 0;     /* 0x4FF12C — WinMain's own per-iteration counter */
+static uint32_t g_winmain_frame_counter_403 = 0;     /* 0x4FF118 */
+static uint32_t g_winmain_frame_counter_404 = 0;     /* 0x4FF128 */
+
+/* ================================================================== */
+/* CGWND_ShutdownOrDeferToMode10                                        */
+/* Address: 0x463430 (Ghidra: FUN_00463430)                             */
+/*                                                                      */
+/* Only actually tears down when g_game_mode is already 1 or 10;        */
+/* otherwise defers by requesting the async mode-10 quit transition     */
+/* (CGWND_SetMode(10) plays the exit sound and posts WM_CLOSE itself    */
+/* once ready — see core/CGWND.cpp's CGWND_SetMode case 10) and returns */
+/* without doing anything else.                                        */
+/* ================================================================== */
+void CGWND_CloseAllSubwindows();   /* 0x4634F0 — forward decl, defined below */
+
+static void CGWND_ShutdownOrDeferToMode10()
 {
-#ifdef _WIN32
+    CGWND* self = static_cast<CGWND*>(g_main_window);
+
+    if (g_game_mode == 1 || g_game_mode == 10) {
+        if (self != nullptr && self->hWnd != nullptr) {
+            ShowWindow(self->hWnd, 0 /* SW_HIDE */);
+            WIN32_PostQuit();
+        }
+        /* falls through to the real teardown below */
+    } else if (self != nullptr) {
+        CGWND_SetMode(10);
+        return;
+    }
+
+    CGWND_CloseAllSubwindows();
+
+    if (self != nullptr) {
+        CGWND_Cleanup();
+        if (self->hWnd != nullptr) {
+            DestroyWindow(self->hWnd);
+            self->hWnd = nullptr;
+        }
+    }
+
+    extern void WIN32_CloseThreadHandle(void* h);
+    extern void* g_async_task_queue;
+    WIN32_CloseThreadHandle(&g_async_task_queue);
+
+    if (g_timer_id != 0 && self != nullptr) {
+        KillTimer(self->hWnd, static_cast<uintptr_t>(g_timer_id));
+        g_timer_id = 0;
+    }
+
+    PostQuitMessage(0);
+    extern int DAT_00485444;   /* 0x485444 — core/GameLoop.cpp's frame-tick gate */
+    DAT_00485444 = 0;
+}
+
+/* ================================================================== */
+/* CGWND_CloseAllSubwindows                                             */
+/* Address: 0x4634F0 (Ghidra: FUN_004634f0)                             */
+/*                                                                      */
+/* Posts WM_CLOSE to every live subsystem window, and asks the main     */
+/* menu's popup (if any) to switch to state 7 first. Called only from   */
+/* CGWND_ShutdownOrDeferToMode10's real-teardown path.                  */
+/* ================================================================== */
+/* network/Netman.h declares this with plain C++ linkage, but its only real
+ * callers (native/NETMAN_NetworkUI.c, native/NETMAN_SessionSettings.c) are C
+ * files, giving it C linkage there — a pre-existing declared-linkage
+ * mismatch (same class of landmine as WNDPROC_CriticalSectionLock, not
+ * introduced here). Matching the C files' `extern "C"` linkage gives this
+ * call the best chance of resolving to whatever real definition exists; if
+ * none does, this is an already-existing gap, not a new one. A linkage-
+ * specification like `extern "C"` is only legal at namespace scope, not
+ * inside a function body, so this must be file-scope, not local to
+ * CGWND_CloseAllSubwindows() below. */
+extern "C" void UI_MainMenu_SetState(void* ui_main, int32_t state);
+
+void CGWND_CloseAllSubwindows()
+{
+    if (g_about != nullptr) {
+        SendMessageA(static_cast<AboutDialog*>(g_about)->hWnd, 0x10, 0, 0);
+    }
+    if (g_audio_mgr != nullptr) {
+        SendMessageA(static_cast<HelpWnd*>(g_audio_mgr)->hWnd, 0x10, 0, 0);
+    }
+    if (g_trainstation_window != nullptr) {
+        SendMessageA(static_cast<TrainStationWindow*>(g_trainstation_window)->hWnd, 0x10, 0, 0);
+    }
+    if (g_cursor != nullptr) {
+        SendMessageA(static_cast<Cursor*>(g_cursor)->hWnd, 0x10, 0, 0);
+    }
+    if (g_town != nullptr) {
+        SendMessageA(static_cast<Town*>(g_town)->hWnd, 0x10, 0, 0);
+    }
+    if (g_postcard != nullptr) {
+        SendMessageA(static_cast<PostcardAlbum*>(g_postcard)->hWnd, 0x10, 0, 0);
+    }
+    if (g_postcard_send != nullptr) {
+        SendMessageA(g_postcard_send->hWnd, 0x10, 0, 0);
+    }
+    if (g_ui_main != nullptr) {
+        EditWindow* ui = static_cast<EditWindow*>(g_ui_main);
+        if (ui->pPanelB != nullptr) {
+            SendMessageA(ui->pPanelB->hWnd, 0x10, 0, 0);
+        }
+        if (ui->pPanelA != nullptr) {
+            SendMessageA(ui->pPanelA->hWnd, 0x10, 0, 0);
+        }
+        if (ui->pPopupWindow != nullptr) {
+            UI_MainMenu_SetState(g_ui_main, 7);
+        }
+        SendMessageA(ui->hWnd, 0x10, 0, 0);
+    }
+}
+
+/* ================================================================== */
+/* CGWND_EnterGameplayPresentation                                      */
+/* Address: 0x45E400 (Ghidra: FUN_0045e400) — WM_USER+5 (0x405) handler */
+/*                                                                      */
+/* Signals a frame present, switches to mode 3, tears down the splash   */
+/* audio config/DirectSound objects, then restores window focus.        */
+/* ================================================================== */
+static void CGWND_EnterGameplayPresentation()
+{
+    CGWND* self = static_cast<CGWND*>(g_main_window);
+    SendMessageA(self->hWnd, 0x407, 1, 0);
+    CGWND_SetMode(3);
+
+    extern void* _g_audio_config;
+    if (_g_audio_config != nullptr) {
+        destroy_subsystem(_g_audio_config);
+        _g_audio_config = nullptr;
+    }
+
+    /* Original decompile re-checks the same object this method's sibling
+     * (CGWND_PresentLoadingSpinner) draws every WM_USER+7 tick — the
+     * loading-screen shadow Entity is torn down here, once real gameplay
+     * has actually started (get_xrefs_to on its real address, 0x4FD3D8,
+     * showed both handlers reading/writing it). Its real concrete type
+     * (Entity*, placement-new-constructed in network/DirectPlay.cpp) is
+     * known, so a real `delete` replaces the original's raw
+     * vtable[0](1) scalar-deleting-destructor dispatch. */
+    extern void* _g_dsound_object;
+    if (_g_dsound_object != nullptr) {
+        delete static_cast<Entity*>(_g_dsound_object);
+        _g_dsound_object = nullptr;
+    }
+
+    PlaySoundA(nullptr, nullptr, 0);
+    EnableWindow(self->hWnd, TRUE);
+    SetFocus(self->hWnd);
+}
+
+/* ================================================================== */
+/* CGWND_PresentLoadingSpinner                                          */
+/* Address: 0x45E210 (Ghidra: FUN_0045e210) — WM_USER+7 (0x407) handler */
+/*                                                                      */
+/* Clears the "present due" flag, then advances/redraws the loading-    */
+/* screen shadow entity (_g_dsound_object) once (flags == 0) or plays a  */
+/* short animated 4-frame "spin up" sequence (flags != 0) before         */
+/* settling. Entity vtable slots confirmed against core/Entity.h:        */
+/* +0x1C StopSound(int), +0x28 Update(), +0x2C Draw(RECT,int,uint32_t). */
+/* ================================================================== */
+static void CGWND_PresentLoadingSpinner(char flags)
+{
+    g_present_due = 0;
+
+    extern void* _g_dsound_object;   /* 0x4FD3D8 — shadow GameObject, real
+                                       * type Entity* (network/DirectPlay.cpp) */
+    if (_g_dsound_object == nullptr) {
+        return;
+    }
+    Entity* shadow = static_cast<Entity*>(_g_dsound_object);
+    HWND main_hwnd = static_cast<CGWND*>(g_main_window)->hWnd;
+
+    auto draw_and_present = [&]() {
+        shadow->Draw(shadow->screen_rect, 0, 0);
+        DDRAW_PresentRect(&shadow->screen_rect, main_hwnd, nullptr, 0);
+    };
+
+    if (flags == 0) {
+        shadow->Update();
+        draw_and_present();
+        return;
+    }
+
+    shadow->StopSound(1);
+    draw_and_present();
+    Sleep(0x4B);
+    for (int i = 0; i < 2; ++i) {
+        shadow->Update();
+        draw_and_present();
+        Sleep(0x4B);
+    }
+    shadow->Update();
+    draw_and_present();
+    Sleep(0xFA);
+}
+
+/* ================================================================== */
+/* CGWND::HandleStartupModeMessage — modes {0,1,2} curated message set  */
+/* Address: 0x4618C0's startup-mode branch                              */
+/* ================================================================== */
+bool CGWND::HandleStartupModeMessage(HWND hWnd, UINT msg, WPARAM wParam,
+                                      LPARAM lParam, LRESULT* out)
+{
+    switch (msg) {
+    case 0xF: {  /* WM_PAINT */
+        PAINTSTRUCT ps;
+        BeginPaint(hWnd, &ps);
+        DDRAW_PresentRect(&ps.rcPaint, this->hWnd, nullptr, 0);
+        EndPaint(hWnd, &ps);
+        *out = 0;
+        return true;
+    }
+    case 1:   /* WM_CREATE */
+    case 2:   /* WM_DESTROY */
+        *out = 0;
+        return true;
+
+    case 0x20:   /* WM_SETCURSOR */
+    case 0x200:  /* WM_MOUSEMOVE */
+        SetCursor(nullptr);
+        *out = 0;
+        return true;
+
+    case 0x10: {  /* WM_CLOSE — always tears down in these modes */
+        if (wParam != 0) {
+            char msgbuf[512] = {};
+            g_resmgr.FormatResourceString(0x14a, msgbuf, sizeof(msgbuf));
+            MessageBoxA(nullptr, msgbuf, s_LEGO_LOCO_0047e1c0, 0x30);
+        }
+        CGWND_ShutdownOrDeferToMode10();
+        *out = 0;
+        return true;
+    }
+
+    case 0x112:  /* WM_SYSCOMMAND — only SC_CLOSE matters here */
+        if ((wParam & 0xFFF0) == 0xF140) {
+            WIN32_PostQuit();
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+
+    case 0x100:  /* WM_KEYDOWN — no-op while loading/menu */
+        *out = 0;
+        return true;
+
+    case 0x113:  /* WM_TIMER — only id 0x47 (loading spinner) matters */
+        if (wParam == 0x47) {
+            g_present_due = 1;
+        }
+        *out = 0;
+        return true;
+
+    case 0x207:  /* WM_MBUTTONDOWN */
+    case 0x201:  /* WM_LBUTTONDOWN */
+    case 0x203:  /* WM_LBUTTONDBLCLK */
+    case 0x204:  /* WM_RBUTTONDOWN */
+        *out = 0;
+        return true;
+
+    case 0x405:  /* WM_USER+5 */
+        Sleep(0x14);
+        CGWND_EnterGameplayPresentation();
+        *out = 0;
+        return true;
+
+    case 0x407:  /* WM_USER+7 */
+        CGWND_PresentLoadingSpinner(static_cast<char>(wParam));
+        *out = 0;
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+/* ================================================================== */
+/* CGWND::HandleSizingMessage — WM_SIZING (0x214)                       */
+/* Address: 0x4618C0's WM_SIZING block                                  */
+/*                                                                      */
+/* Only does real work while a fullscreen window is being resized       */
+/* (rare in practice — fullscreen windows aren't user-resizable on      */
+/* most platforms). Clamps the drag rect to the world size, re-syncs    */
+/* scroll position and dirty rects, and updates the trainstation        */
+/* tooltip if one is active.                                            */
+/* ================================================================== */
+LRESULT CGWND::HandleSizingMessage(LPARAM lParam)
+{
+    if (g_is_fullscreen == 0) {
+        return 1;
+    }
+
+    // ABI_BOUNDARY: WM_SIZING's real Win32 contract packs a RECT*
+    // directly into LPARAM; this is the message's own wire format,
+    // not a modeled game object.
+    RECT* rect = reinterpret_cast<RECT*>(static_cast<uintptr_t>(lParam));
+    int cx_frame = GetSystemMetrics(2);
+    int cy_frame = GetSystemMetrics(3);
+    DWORD style = GetWindowLongA(this->hWnd, -16 /* GWL_STYLE */);
+
+    if (g_world_width < rect->right - rect->left) {
+        RECT probe = {0, 0, g_world_width, rect->bottom - rect->top};
+        AdjustWindowRect(&probe, style, FALSE);
+        if ((probe.right + cx_frame) - probe.left < rect->right - rect->left) {
+            rect->right = (probe.right + cx_frame - probe.left) + rect->left;
+        }
+        g_window_left = rect->left; g_window_top = rect->top;
+        g_window_right = rect->right; g_window_bottom = rect->bottom;
+    }
+
+    {
+        RECT probe = {0, 0, 0x80, rect->bottom - rect->top};
+        AdjustWindowRect(&probe, style, FALSE);
+        if (rect->right - rect->left < (probe.right + cx_frame) - probe.left) {
+            rect->right = (probe.right + cx_frame - probe.left) + rect->left;
+            g_window_left = rect->left; g_window_top = rect->top;
+            g_window_right = rect->right; g_window_bottom = rect->bottom;
+        }
+    }
+
+    if (g_world_height < rect->bottom - rect->top) {
+        RECT probe = {0, 0, rect->right - rect->left, g_world_height};
+        AdjustWindowRect(&probe, style, FALSE);
+        if ((probe.bottom + cy_frame) - probe.top < rect->bottom - rect->top) {
+            rect->bottom = (probe.bottom + cy_frame - probe.top) + rect->top;
+        }
+        g_window_left = rect->left; g_window_top = rect->top;
+        g_window_right = rect->right; g_window_bottom = rect->bottom;
+    }
+
+    {
+        RECT probe = {0, 0, rect->right - rect->left, 0x80};
+        AdjustWindowRect(&probe, style, FALSE);
+        int probe_h = (probe.bottom + cy_frame) - probe.top;
+        if (rect->bottom - rect->top < probe_h) {
+            rect->bottom = probe_h + rect->top;
+            g_window_left = rect->left; g_window_top = rect->top;
+            g_window_right = rect->right; g_window_bottom = rect->bottom;
+        }
+    }
+
+    int dx = (g_world_width - g_viewport_x < rect->right - rect->left)
+                 ? (g_world_width - g_viewport_x + rect->left - rect->right) : 0;
+    CGWND_ScrollHorizontal(dx);
+    int dy = (g_world_height - g_viewport_y < rect->bottom - rect->top)
+                 ? (g_world_height - g_viewport_y + rect->top - rect->bottom) : 0;
+    CGWND_ScrollVertical(dy);
+
+    extern void TileMap_InvalidateRect(TileMap* tm, int l, int t, int r, int b);
+    extern void TileMap_InvalidateDirtyRects(TileMap* tm, char flag);
+
+    RECT edge1 = {g_window_left, rect->top, g_window_right, g_window_top};
+    OffsetRect(&edge1, g_viewport_x, g_viewport_y);
+    if (edge1.top < edge1.bottom) {
+        TileMap_InvalidateRect(g_tilemap, edge1.left, edge1.top, edge1.right, edge1.bottom);
+    }
+
+    RECT edge2 = {rect->left, g_window_top, g_window_left, g_window_bottom};
+    OffsetRect(&edge2, g_viewport_x, g_viewport_y);
+    if (edge2.left < edge2.right) {
+        TileMap_InvalidateRect(g_tilemap, edge2.left, edge2.top, edge2.right, edge2.bottom);
+    }
+
+    RECT edge3 = {g_window_right, g_window_top, rect->right, g_window_bottom};
+    OffsetRect(&edge3, g_viewport_x, g_viewport_y);
+    if (edge3.left < edge3.right) {
+        TileMap_InvalidateRect(g_tilemap, edge3.left, edge3.top, edge3.right, edge3.bottom);
+    }
+
+    RECT edge4 = {g_window_left, g_window_bottom, g_window_right, rect->bottom};
+    OffsetRect(&edge4, g_viewport_x, g_viewport_y);
+    if (edge4.top < edge4.bottom) {
+        TileMap_InvalidateRect(g_tilemap, edge4.left, edge4.top, edge4.right, edge4.bottom);
+    }
+
+    extern int32_t g_client_width;   /* world/tilemap.h — same underlying
+                                       * memory as g_client_rect, see that
+                                       * header's own aliasing note */
+    extern int32_t g_client_height;
+    {
+        RECT wr = {};
+        GetWindowRect(this->hWnd, &wr);
+        g_window_left = wr.left; g_window_top = wr.top;
+        g_window_right = wr.right; g_window_bottom = wr.bottom;
+    }
+    {
+        RECT cr = {};
+        GetClientRect(this->hWnd, &cr);
+        g_client_width = cr.right; g_client_height = cr.bottom;
+        g_client_offset_x = cr.left; g_client_offset_y = cr.top;
+    }
+
+    extern void Sprite_LockAll(TileMap* tm);
+    Sprite_LockAll(g_tilemap);
+    TileMap_InvalidateDirtyRects(g_tilemap, 1);
+
+    if (g_trainstation_window != nullptr &&
+        static_cast<TrainStationWindow*>(g_trainstation_window)->tooltip_active != 0) {
+        /* TrainStationWindow_UpdateTooltip is a pre-existing loud-deferred
+         * stub (shared/stubs_link001_batch5_ui_graphics.cpp) — it takes
+         * `this` as a plain `int` (a documented pre-existing 32-bit-only
+         * pointer-width hazard, not introduced here) and only logs a
+         * warning; not fixed as part of this pass. */
+        extern void TrainStationWindow_UpdateTooltip(int thisPtr);
+        TrainStationWindow_UpdateTooltip(
+            static_cast<int>(reinterpret_cast<uintptr_t>(g_trainstation_window)));
+    }
+    return 1;
+}
+
+/* ================================================================== */
+/* CGWND::HandleUserCommandMessage — WM_USER+1 (0x401) sub-switch        */
+/* Address: 0x4618C0's 0x401 case                                       */
+/* ================================================================== */
+/* ui/UIPANEL_Draw.cpp declares these inside `extern "C" { }` with their
+ * original x86 calling conventions — match linkage AND convention here, or
+ * the MinGW typecheck build (which compiles this file under _WIN32, where
+ * __fastcall/__thiscall are real GCC attributes, not no-ops) will see
+ * conflicting declarations of the same extern "C" symbol. A linkage-
+ * specification like `extern "C"` is only legal at namespace scope, not
+ * inside a function body, so this must be file-scope, not local to
+ * CGWND::HandleUserCommandMessage below. */
+extern "C" {
+    void __fastcall UIPANEL_InitSprite(void* self);
+    void __fastcall UIPANEL_BlitSprite(void* self);
+    void __fastcall UIPANEL_BlitSpriteEx(void* self);
+    void __thiscall UIPANEL_Hide(void* self, const char* filename);
+}
+
+bool CGWND::HandleUserCommandMessage(WPARAM wParam, LPARAM lParam, LRESULT* out)
+{
+    extern uint8_t g_second_overlay_bounds[];  /* 0x4AA818 (core/Game.cpp) */
+
+    switch (wParam) {
+    case 0: {
+        g_scripted_object->EnterBuildMode(0);     /* 0x44A9D0, world/scriptengine.h */
+
+        extern void* g_town_view;                /* 0x4852A0 */
+        extern void* g_ddraw_building;            /* 0x4A9EF0 */
+        extern int   Town_SelectBuilding(void*, int);
+        extern int   DDRAW_SelectBuilding(void*, int);
+        Town_SelectBuilding(g_town_view, 0);
+        DDRAW_SelectBuilding(g_ddraw_building, 0);
+
+        /* Original also checks `g_main_window == 0` here; every reachable
+         * call already passed WndProc's own hWnd-vs-g_main_window guard,
+         * so that check is provably always false at this point (confirmed
+         * via get_xrefs_to: nothing between here and function entry reads
+         * 0x4AA4A0 again) — simplified to the unconditional branch. */
+        CGWND_QuitToMenu();
+        *out = 0;
+        return true;
+    }
+
+    case 5:
+        UIPANEL_InitSprite(g_second_overlay_bounds);
+        *out = 0;
+        return true;
+    case 6:
+        UIPANEL_BlitSprite(g_second_overlay_bounds);
+        *out = 0;
+        return true;
+    case 7:
+        UIPANEL_BlitSpriteEx(g_second_overlay_bounds);
+        *out = 0;
+        return true;
+
+    case 8:
+        if (lParam == 0) {
+            *out = 0;
+            return true;
+        }
+        static_cast<Town*>(g_town)->net_update_flag = 1;
+        CGWND_SetMode(5);
+        *out = 0;
+        return true;
+
+    case 9: {
+        extern char INPUT_SaveCurrentWorld(InputMgr*, const char*);
+        extern char INPUT_LoadWorld(InputMgr*, const char*);
+        INPUT_SaveCurrentWorld(&g_input_mgr, "curr");
+        // ABI_BOUNDARY: WM_USER+1 case 9's LPARAM is a raw filename
+        // string pointer per the original message's own contract.
+        UIPANEL_Hide(g_second_overlay_bounds, reinterpret_cast<const char*>(static_cast<uintptr_t>(lParam)));
+        INPUT_LoadWorld(&g_input_mgr, "curr");
+        *out = 0;
+        return true;
+    }
+
+    case 0xA:
+        /* Decompile literally passes g_postcard here, despite
+         * CGWND_GameSetup_RenderPlayerSlots's own doc comment describing
+         * a GameSetupPanel receiver — no live poster of 0x401/0xA exists
+         * in this tree to cross-check against; preserved as decompiled. */
+        CGWND_GameSetup_RenderPlayerSlots(g_postcard);
+        *out = 0;
+        return true;
+
+    case 0xB:
+        /* BLOCKED — lParam's object type (indexed at +0x120 to reach a
+         * Vehicle*, per World_GetObjectAt/World_RenderAll's signatures)
+         * is not evidenced anywhere else in this tree, and this exact
+         * sub-case has no live poster to cross-check against. Not
+         * guessed; see this method's doc comment and PROGRESS.md. */
+        *out = 0;
+        return true;
+
+    default:
+        *out = 0;
+        return true;
+    }
+}
+
+/* ================================================================== */
+/* CGWND::HandleGameplayMessage — every mode other than {0,1,2}          */
+/* Address: 0x4618C0's gameplay branch                                  */
+/* ================================================================== */
+bool CGWND::HandleGameplayMessage(HWND hWnd, UINT msg, WPARAM wParam,
+                                   LPARAM lParam, LRESULT* out)
+{
+    extern void Game_SetScreenMode(void* game, int a, int b, int c);
+    extern void ResourceManager_AnimateClock(void* mgr, uint32_t gameTime);
+    extern void* g_active_panel;      /* 0x4FD3E0 — active UI panel override */
+    extern uint8_t g_has_selection;   /* 0x4854EC (world/tilemap.h) */
+
+    bool quit_to_menu_requested = false;
+
+    switch (msg) {
+    case 0x14:  /* WM_ERASEBKGND */
+        *out = 1;
+        return true;
+
+    case 0x10:  /* WM_CLOSE */
+        if (g_game_mode != 10 && g_demo_mode != 1) {
+            static_cast<TrainStationWindow*>(g_trainstation_window)->show(0, 0);
+            *out = 0;
+            return true;
+        }
+        CGWND_ShutdownOrDeferToMode10();
+        *out = 0;
+        return true;
+
+    case 0x84: {  /* WM_NCHITTEST */
+        LRESULT hit = DefWindowProcA(hWnd, msg, wParam, lParam);
+        if (g_wndproc_sizing_active == 0) {
+            if (hit == 1 /* HTCLIENT */) {
+                if (g_has_selection == 0) {
+                    Game_SetScreenMode(g_game, 1, 1, 0);
+                    *out = 1;
+                    return true;
+                }
+            } else if (g_has_selection != 0) {
+                Game_SetScreenMode(g_game, 0, 1, 0);
+            }
+        }
+        *out = hit;
+        return true;
+    }
+
+    case 0x48:  /* WM_POWER */
+        quit_to_menu_requested = (wParam == 1);
+        break;
+
+    case 0x112: {  /* WM_SYSCOMMAND */
+        uint32_t masked = wParam & 0xFFF0;
+        if (masked == 0xF030) {  /* SC_MAXIMIZE */
+            if (g_is_fullscreen == 0) { *out = 0; return true; }
+            CGWND_SetFullscreenMode(1);
+            *out = 0;
+            return true;
+        }
+        if (masked == 0xF060) {  /* SC_MINIMIZE */
+            PostMessageA(this->hWnd, 0x10, 0, 0);
+            *out = 0;
+            return true;
+        }
+        if (masked == 0xF140) {  /* SC_CLOSE */
+            WIN32_PostQuit();
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+    }
+
+    case 0x100: {  /* WM_KEYDOWN */
+        if (wParam < 0x20 || wParam > 0x5A) {
+            if (g_active_panel != nullptr) {
+                uint32_t handled = static_cast<Panel*>(g_active_panel)->HandleKey(static_cast<int>(wParam));
+                if (handled != 0) { *out = 0; return true; }
+            }
+            if (wParam == 0x1B) {  /* VK_ESCAPE */
+                PostMessageA(this->hWnd, 0x10, 0, 0);
+                *out = 0;
+                return true;
+            }
+            /* BLOCKED — VK_RETURN (0xD) build-mode entry: the decompiled
+             * call `Panel_Init(&g_scripted_object, 0x2400, 1, 0)` matches
+             * Panel::Init's real signature, but world/scriptengine.h's
+             * RESDATA_ScriptedObject (the only g_scripted_object typed in
+             * this tree) is NOT Panel-derived and already declares its
+             * own 0-arg Init() — a genuine receiver/signature conflict,
+             * not resolved here. A second condition, `wParam ==
+             * 0x564B5F51`, could not be verified against disassembly
+             * (out of this session's captured range) and is not encoded.
+             */
+        }
+        return false;
+    }
+
+    case 0x102: {  /* WM_CHAR */
+        if (wParam > 0x1F && wParam < 0x7F) {
+            WPARAM ch = wParam;
+            if (ch > 0x60 && ch < 0x7B) {
+                ch = static_cast<WPARAM>(CRT_toupper(static_cast<int>(ch)));
+            }
+            if (g_active_panel == nullptr ||
+                static_cast<Panel*>(g_active_panel)->HandleKey(static_cast<int>(ch)) == 0) {
+                if (ch == 0x51) {  /* 'Q' */
+                    PostMessageA(this->hWnd, 0x10, 0, 0);
+                    *out = 0;
+                    return true;
+                }
+                if (ch == 0x57) {  /* 'W' */
+                    CGWND_ToggleFullscreen();
+                    *out = DefWindowProcA(hWnd, msg, 0x57, lParam);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    case 0x200: {  /* WM_MOUSEMOVE */
+        if (g_game_mode == 8) {
+            PostMessageA(static_cast<HelpWnd*>(g_audio_mgr)->hWnd, 0x200, wParam, lParam);
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        Game* game = static_cast<Game*>(g_game);
+        game->screensaver_active = 1;
+        game->packed_mouse_pos = static_cast<uint32_t>(lParam);
+        if (g_game_mode == 4 && game->resource != nullptr &&
+            GetResourceType(static_cast<RESDATA*>(game->resource)->resource_id) != 5) {
+            game->Update();
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+    }
+
+    case 0x114: {  /* WM_HSCROLL */
+        int16_t pos = static_cast<int16_t>(wParam >> 16);
+        switch (wParam & 0xFFFF) {
+        case 0: CGWND_ScrollHorizontal(-4); break;
+        case 1: CGWND_ScrollHorizontal(4); break;
+        case 2: CGWND_ScrollHorizontal(-0x100); break;
+        case 3: CGWND_ScrollHorizontal(0x100); break;
+        case 4: CGWND_ScrollHorizontal(pos - g_viewport_x); break;
+        default: return false;
+        }
+        *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+        return true;
+    }
+
+    case 0x115: {  /* WM_VSCROLL */
+        int16_t pos = static_cast<int16_t>(wParam >> 16);
+        switch (wParam & 0xFFFF) {
+        case 0: CGWND_ScrollVertical(-4); break;
+        case 1: CGWND_ScrollVertical(4); break;
+        case 2: CGWND_ScrollVertical(-0x100); break;
+        case 3: CGWND_ScrollVertical(0x100); break;
+        case 4: CGWND_ScrollVertical(pos - g_viewport_y); break;
+        default: return false;
+        }
+        *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+        return true;
+    }
+
+    case 0x214:  /* WM_SIZING */
+        *out = this->HandleSizingMessage(lParam);
+        return true;
+
+    /* Cases 0x201/0x203/0x202/0x204/0x206/0x205 write directly into
+     * Game's own per-frame input fields (core/Game.h) — confirmed
+     * against core/CGWND_sdl3.cpp's own doc comment, which already
+     * documents this exact assembly address range (0x462380-0x462426)
+     * against the same fields for its bespoke SDL mouse-dispatch path. */
+    case 0x201:  /* WM_LBUTTONDOWN */
+    case 0x203:  /* WM_LBUTTONDBLCLK */
+        SetFocus(this->hWnd);
+        SetForegroundWindow(this->hWnd);
+        static_cast<Game*>(g_game)->click_on_selected = 1;
+        static_cast<Game*>(g_game)->left_click_flag = 1;
+        static_cast<Game*>(g_game)->left_click_screen_pos = static_cast<uint32_t>(lParam);
+        *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+        return true;
+
+    case 0x202:  /* WM_LBUTTONUP */
+        static_cast<Game*>(g_game)->click_on_selected = 0;
+        static_cast<Game*>(g_game)->mouse_move_flag = 1;
+        static_cast<Game*>(g_game)->mouse_move_screen_pos = static_cast<uint32_t>(lParam);
+        *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+        return true;
+
+    case 0x204:  /* WM_RBUTTONDOWN */
+    case 0x206:  /* WM_RBUTTONDBLCLK */
+        static_cast<Game*>(g_game)->right_click_flag = 1;
+        static_cast<Game*>(g_game)->right_click_screen_pos = static_cast<uint32_t>(lParam);
+        *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+        return true;
+
+    case 0x205:  /* WM_RBUTTONUP */
+        static_cast<Game*>(g_game)->mouse_drag_flag = 1;
+        static_cast<Game*>(g_game)->mouse_drag_screen_pos = static_cast<uint32_t>(lParam);
+        *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+        return true;
+
+    case 0x401:  /* WM_USER+1 */
+        return this->HandleUserCommandMessage(wParam, lParam, out);
+
+    case 0x232:  /* WM_EXITSIZEMOVE */
+        g_wndproc_sizing_active = 0;
+        if (g_is_fullscreen == 0) {
+            *out = 0;
+            return true;
+        }
+        {
+            RECT wr = {};
+            GetWindowRect(this->hWnd, &wr);
+            g_window_left = wr.left; g_window_top = wr.top;
+            g_window_right = wr.right; g_window_bottom = wr.bottom;
+            extern int32_t g_client_width;
+            extern int32_t g_client_height;
+            RECT cr = {};
+            GetClientRect(this->hWnd, &cr);
+            g_client_width = cr.right; g_client_height = cr.bottom;
+            g_client_offset_x = cr.left; g_client_offset_y = cr.top;
+        }
+        {
+            extern void Sprite_LockAll(TileMap* tm);
+            extern void TileMap_InvalidateRect(TileMap* tm, int l, int t, int r, int b);
+            extern void TileMap_InvalidateDirtyRects(TileMap* tm, char flag);
+            Sprite_LockAll(g_tilemap);
+            CGWND_ScrollHorizontal(0);
+            CGWND_ScrollVertical(0);
+            TileMap_InvalidateRect(g_tilemap, g_viewport_rect_left, g_viewport_rect_top,
+                                    g_viewport_rect_right, g_viewport_rect_bottom);
+            TileMap_InvalidateDirtyRects(g_tilemap, 1);
+        }
+        *out = 0;
+        return true;
+
+    case 0x402:
+        if (g_game_mode != 10 && wParam != 0) {
+            ++g_winmain_frame_counter_402;
+            /* BLOCKED — vtable[+0x3C] dispatch on the wParam-supplied
+             * callback object: no live poster of this message exists in
+             * this tree, and the vtable slot's meaning differs per
+             * concrete subclass (confirmed via core/GameView.h, which
+             * documents its own override at this exact slot as
+             * GameView::cleanup — a different class overriding it
+             * differently is exactly what makes the receiver
+             * undeterminable here). See this method's doc comment. */
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+
+    case 0x403:
+        if (g_game_mode != 10) {
+            ++g_winmain_frame_counter_403;
+            /* BLOCKED — calls a named-but-receiver-ambiguous helper
+             * (Ghidra: FUN_00434d70, renamed
+             * BuildingMgr_CheckTrainProximity): its own decompiled body
+             * needs a `this` with a vtable-backed vehicle-list field at
+             * +0x4C, which rules out CGWND (only 0x28 bytes) as the
+             * receiver; the disassembly range that would show what
+             * register is really loaded into ECX here (0x4624FC-
+             * 0x462DA5) was unavailable through this session's tooling. */
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+
+    case 0x404:
+        if (g_game_mode != 10) {
+            ++g_winmain_frame_counter_404;
+            /* BLOCKED — same reasoning as 0x403 (Ghidra: FUN_004202b0,
+             * renamed UI_DismissExpiredCounter). */
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+
+    case 0x406:
+        if (g_game_mode != 10) {
+            ResourceManager_AnimateClock(&g_resmgr, static_cast<uint32_t>(wParam));
+        }
+        return false;
+
+    case 0x408:
+        if (g_game_mode != 10 && wParam != 0) {
+            /* BLOCKED — vtable[+0x48] dispatch, same reasoning as 0x402. */
+            *out = DefWindowProcA(hWnd, msg, wParam, lParam);
+            return true;
+        }
+        return false;
+
+    case 0x231:  /* WM_ENTERSIZEMOVE */
+        g_wndproc_sizing_active = 1;
+        *out = 0;
+        return true;
+
+    case 0x215:  /* WM_CAPTURECHANGED */
+        if (g_has_selection == 0) { *out = 0; return true; }
+        // ABI_BOUNDARY: WM_CAPTURECHANGED's real Win32 contract packs
+        // the HWND losing capture directly into LPARAM.
+        if (reinterpret_cast<HWND>(static_cast<uintptr_t>(lParam)) == this->hWnd) { *out = 0; return true; }
+        if (reinterpret_cast<HWND>(static_cast<uintptr_t>(lParam)) ==
+            static_cast<HelpWnd*>(g_audio_mgr)->hWnd) { *out = 0; return true; }
+        Game_SetScreenMode(g_game, 0, 1, 0);
+        *out = 0;
+        return true;
+
+    case 0x216:  /* WM_MOVING */
+        if (g_trainstation_window == nullptr ||
+            static_cast<TrainStationWindow*>(g_trainstation_window)->tooltip_active == 0) {
+            *out = 0;
+            return true;
+        }
+        if (g_is_fullscreen == 0) { *out = 0; return true; }
+        {
+            /* See HandleSizingMessage's identical call for why this is a
+             * pre-existing loud-deferred stub, not fixed here. */
+            extern void TrainStationWindow_UpdateTooltip(int thisPtr);
+            TrainStationWindow_UpdateTooltip(
+                static_cast<int>(reinterpret_cast<uintptr_t>(g_trainstation_window)));
+        }
+        *out = 0;
+        return true;
+
+    case 0x218:  /* WM_POWERBROADCAST */
+        quit_to_menu_requested = (wParam == 4);
+        break;
+
+    default:
+        return false;
+    }
+
+    if (quit_to_menu_requested) {
+        /* Original also checks `g_main_window == 0` — provably always
+         * false here, same reasoning as HandleUserCommandMessage's case
+         * 0. Simplified to the unconditional call. */
+        CGWND_QuitToMenu();
+        WIN32_PostQuit();
+        *out = 1;
+        return true;
+    }
+    return false;
+}
+
+/* ================================================================== */
+/* CGWND::WndProc                                                       */
+/* Address: 0x4618C0                                                    */
+/* ================================================================== */
+LRESULT CGWND::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    /* Entry guard: only the main window itself is handled here. */
+    if (hWnd != this->hWnd) {
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+
+    /* Demo-mode screensaver "close on any input" gate. */
+    if (g_demo_mode == 1) {
+        int filtered = g_scrsaver_mod.FilterMessage(msg, wParam);
+        if (filtered != 0) {
+            if (filtered == 2) return 0;
+            if (filtered == 3) return 1;
+            return DefWindowProcA(hWnd, msg, wParam, lParam);
+        }
+    }
+
+    /* WM_DISPLAYCHANGE (0x7E): something else changed the resolution
+     * out from under the game. If it matches what the game already
+     * expects, ignore it; otherwise show a fatal error and shut down. */
+    if (msg == 0x7E) {
+        if (g_wndproc_displaychange_guard != 0) {
+            return 0;
+        }
+        uint32_t new_width  = static_cast<uint32_t>(lParam) & 0xFFFF;
+        uint32_t new_height = static_cast<uint32_t>(lParam) >> 16;
+        if (new_width == static_cast<uint32_t>(g_screen_width) &&
+            new_height == static_cast<uint32_t>(g_screen_height) &&
+            wParam == g_screen_bpp) {
+            return 0;
+        }
+        ShowWindow(this->hWnd, 0 /* SW_HIDE */);
+        char msgbuf[256] = {};
+        g_resmgr.FormatResourceString(0x14b, msgbuf, sizeof(msgbuf));
+        g_wndproc_displaychange_guard = 1;
+        MessageBoxA(nullptr, msgbuf, s_LEGO_LOCO_0047e1c0, 0);
+        CGWND_ShutdownOrDeferToMode10();
+        g_wndproc_displaychange_guard = 0;
+        return 0;
+    }
+
+    LRESULT result = 0;
+    if (g_game_mode == 0 || g_game_mode == 1 || g_game_mode == 2) {
+        if (this->HandleStartupModeMessage(hWnd, msg, wParam, lParam, &result)) {
+            return result;
+        }
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+
+    if (this->HandleGameplayMessage(hWnd, msg, wParam, lParam, &result)) {
+        return result;
+    }
+    return DefWindowProcA(hWnd, msg, wParam, lParam);
+}
+
+/* ================================================================== */
+/* CGWND_MainWndProc — free-function WNDPROC trampoline                 */
+/* Address: 0x4618C0                                                    */
+/* ================================================================== */
+LRESULT CGWND_MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (g_main_window == nullptr) {
+        /* Can't happen in the real binary (the WNDCLASS is registered by
+         * CGWND::RegisterWindowClass, itself a CGWND method — g_main_window
+         * always exists by the time any message can arrive), but stay
+         * defensive rather than dereference a null CGWND*. */
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+    return static_cast<CGWND*>(g_main_window)->WndProc(hWnd, msg, wParam, lParam);
+}
+
+
+/* ================================================================== */
 /* CGWND_InstallPathInit — Read install path from registry, load INI   */
 /* Address: 0x4068D0 — free function; no this pointer                  */
 /* ================================================================== */
 int CGWND_InstallPathInit()
 {
-
-
-    return (mkdir_result == 0 && path_len > 2) ? 1 : 0;
+#ifdef _WIN32
+    /* TODO: decompile 0x4068D0's real Win32 path (HKEY registry read +
+     * PlayerConfig_Ctor("lego.ini") init). Never executed: this codebase
+     * only ships the #else (SDL3/POSIX) path below; _WIN32 exists solely
+     * so the mingw typecheck build can validate surrounding declarations
+     * (see CLAUDE.md's cross/mingw32-typecheck.txt docs — "not linked, not
+     * a shippable target"). Loud-fail rather than silently return success
+     * per this project's stub policy. */
+    std::fprintf(stderr,
+        "STUB: CGWND_InstallPathInit (0x4068D0) _WIN32 registry-read path "
+        "not implemented\n");
+    assert(false && "CGWND_InstallPathInit: _WIN32 path not decompiled");
+    return 0;
 
 #else /* !_WIN32 — POSIX with environment variable */
 

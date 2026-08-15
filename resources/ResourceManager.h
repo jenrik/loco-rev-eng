@@ -127,18 +127,71 @@ struct ResourceEntry {
 /* Size: ~0x80+ bytes.                                                */
 /* ================================================================== */
 struct ScreenSaverModule {
-    /* +0x00..+0x6F: other fields (not yet mapped) */
+    /* +0x00..+0x03: other fields (not yet mapped) */
+    uint8_t  _pad_00[4];
 
-    /* +0x70: GetPasswordStatus function pointer */
-    void* get_password_status;
+    /* +0x04: "screensaver is closing" guard — set the first time
+     * FilterMessage decides to close the game, so re-entrant input
+     * during the close sequence doesn't re-trigger it. Confirmed by
+     * FilterMessage's own repeated `this+4 != 0 -> already closing` checks
+     * (0x4484A0). */
+    uint8_t  closing_flag;
+    uint8_t  _pad_05[0x0B];  /* +0x05..+0x0F */
 
-    /* +0x74: VerifyScreenSavePwd function pointer */
-    void* verify_screen_save_pwd;
+    /* +0x10: idle mouse-move debounce counter — WM_MOUSEMOVE only closes
+     * the screensaver after 3 consecutive moves, avoiding a single-pixel
+     * jitter false trigger. Confirmed via FilterMessage's own counter
+     * site (Ghidra: DAT_004a9920, which lies inside this struct's own
+     * memory range, not a separate global). */
+    int32_t  idle_move_count;
+    uint8_t  _pad_14[0x5C]; /* +0x14..+0x6F */
+
+    /* +0x70: GetPasswordStatus function pointer — real password.cpl
+     * export, resolved via GetProcAddress (RESMGR_LoadCompressedResource,
+     * 0x4487F0, not yet ported). Called with a single int argument by
+     * every FilterMessage call site.
+     * ABI_BOUNDARY: raw external DLL export pointer, not a game vtable —
+     * called directly, never cast to/from a modeled game object. */
+    int (__stdcall *get_password_status)(int);
+
+    /* +0x74: VerifyScreenSavePwd function pointer — same DLL, called with
+     * the main window's HWND to show the real password-verification UI.
+     * ABI_BOUNDARY: same as get_password_status. */
+    int (__stdcall *verify_screen_save_pwd)(HWND);
 
     /* +0x78: HMODULE for password.cpl (loaded via LoadLibrary) */
     void* password_cpl_module;
 
     /* +0x7C..+0x7F: padding */
+
+    /**
+     * FilterMessage — demo-mode "close screensaver on any input" gate.
+     * Address: 0x4484A0 (Ghidra: FUN_004484a0, renamed
+     * ScreenSaverModule_FilterMessage)
+     * __thiscall
+     *
+     * Only ever consulted by CGWND::WndProc (0x4618C0) when
+     * g_demo_mode == 1. Intercepts WM_ACTIVATEAPP (deactivate),
+     * WM_KEYDOWN, WM_LBUTTONDOWN/WM_RBUTTONDOWN/WM_MBUTTONDOWN,
+     * WM_SYSKEYDOWN/WM_SYSKEYUP/WM_SYSCHAR, and (after 3 consecutive
+     * moves) WM_MOUSEMOVE: on any of these it verifies the screensaver
+     * password (via the two password.cpl exports above, when loaded —
+     * currently always null in this tree, since
+     * RESMGR_LoadCompressedResource is not yet ported, so every real
+     * invocation takes the "close immediately" path) and posts WM_CLOSE
+     * to the main window once verified/absent. WM_SETCURSOR forces the
+     * arrow cursor visible. WM_SYSCOMMAND SC_MINIMIZE/SC_TASKLIST are
+     * swallowed outright (screensaver can't be minimized or task-listed
+     * away).
+     *
+     * @param msg     Window message being filtered.
+     * @param wParam  The message's WPARAM.
+     * @return 0  message not consumed — caller continues normal dispatch.
+     *         1  consumed — caller should forward to DefWindowProcA.
+     *         2  consumed — caller should return 0 immediately.
+     *         3  consumed — caller should return 1 immediately.
+     */
+    int FilterMessage(UINT msg, WPARAM wParam);
 };
 
 /* ================================================================== */

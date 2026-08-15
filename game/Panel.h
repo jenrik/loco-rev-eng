@@ -203,17 +203,26 @@ public:
     char HitTestChildren(int x, int y);
 
     /**
-     * Handle keyboard events for scripted objects.
+     * Handle keyboard events for scripted objects (vtable[16] = +0x40).
      * Address: 0x454AE0
      * __thiscall
      *
      * Enter (0x0D) triggers Zoom on +0xD8 child with type check.
      * Escape (0x1B) triggers Zoom on +0xDC child with type check.
      *
+     * Confirmed virtual: core/GameView.h documents vtable slot [16] +0x40
+     * as "Panel::HandleKey (0x454AE0, inherited)" for GameView (a Panel
+     * subclass whose vtable was read directly from raw bytes) — the same
+     * address appears unchanged at the same slot, i.e. GameView does not
+     * override it. MainWndProc (0x4618C0) dispatches WM_KEYDOWN/WM_CHAR
+     * through g_active_panel's vtable at this exact offset, so any
+     * concrete Panel-family object stored there must reach this override
+     * through real virtual dispatch, not a fixed non-virtual call.
+     *
      * @param key_code  Virtual key code
      * @return          uint (or modified EAX from callees)
      */
-    uint HandleKey(int key_code);
+    virtual uint HandleKey(int key_code);
 };
 
 /* ================================================================== */

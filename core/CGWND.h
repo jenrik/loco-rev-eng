@@ -143,7 +143,72 @@ public:
      */
     void initMode1();
 
+    /**
+     * WndProc — the main game window's real WNDPROC behavior.
+     * Address: 0x4618C0 (Ghidra: originally FUN_004618c0)
+     *
+     * The original ABI requires a raw C-linkage callback (WNDPROC, no
+     * `this`); CGWND_MainWndProc (free function, declared below) is the
+     * actual `wc.lpfnWndProc` trampoline and is the one stored in the
+     * WNDCLASSA. It resolves g_main_window and forwards every message to
+     * this real instance method, which expresses the original's message
+     * map as ordinary typed C++.
+     *
+     * See core/CGWND.cpp for the full message map, and PROGRESS.md for
+     * this session's findings that correct/extend the dispatch prompt's
+     * initial description — most notably that WM_CLOSE (0x10) has two
+     * distinct handling sites (one per mode group), and that the real
+     * shutdown routine (CGWND_ShutdownOrDeferToMode10, 0x463430) defers
+     * to CGWND_SetMode(10) and returns immediately unless the mode is
+     * already 1 or 10.
+     */
+    LRESULT WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+private:
+    /* ---- WndProc message-group helpers -------------------------------
+     * Split along the real control flow: modes {0,1,2} (pre-gameplay —
+     * loading screen, main menu) get a small curated message set; every
+     * other mode gets the full gameplay dispatch. Each returns true and
+     * sets *out if it produced a result; false means "fall through to
+     * DefWindowProcA". WM_SIZING (0x214) and the WM_USER+1 (0x401)
+     * sub-switch are large enough, and self-contained enough, to split
+     * out of HandleGameplayMessage on their own. */
+    bool HandleStartupModeMessage(HWND hWnd, UINT msg, WPARAM wParam,
+                                   LPARAM lParam, LRESULT* out);
+    bool HandleGameplayMessage(HWND hWnd, UINT msg, WPARAM wParam,
+                                LPARAM lParam, LRESULT* out);
+    LRESULT HandleSizingMessage(LPARAM lParam);           /* WM_SIZING, 0x214 */
+    bool HandleUserCommandMessage(WPARAM wParam, LPARAM lParam, LRESULT* out); /* WM_USER+1, 0x401 */
+
 };
+
+/**
+ * CGWND_MainWndProc — free-function WNDPROC trampoline for the main
+ * window. Address: 0x4618C0 (same original function as CGWND::WndProc
+ * above; split here into "raw C-ABI callback" + "typed instance logic"
+ * as real C++ — the original single x86 function does both).
+ *
+ * This is the literal value stored in WNDCLASSA::lpfnWndProc
+ * (core/CGWND.cpp's RegisterWindowClass, both the _WIN32 and host
+ * branches) — replacing the previous `(WNDPROC)0x4618C0` raw address
+ * literal.
+ */
+LRESULT CGWND_MainWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+/**
+ * g_present_due — Address: 0x4AA4A4.
+ *
+ * Set to 1 by CGWND::WndProc's WM_TIMER (0x113) handler when the fired
+ * timer id is 0x47 (the only id this window ever installs). Cleared by
+ * CGWND_PresentLoadingSpinner (core/CGWND.cpp) after it redraws/presents
+ * the shadow-spinner frame. The original winmain loop (0x462B2D range)
+ * polls this flag once per iteration to decide whether a present is due
+ * this frame; the still-pending host main-loop rebuild (PumpMessages_SDL3,
+ * core/CGWND_sdl3.cpp — see PROGRESS.md) needs to read it the same way
+ * once it is routed through DispatchMessageA instead of its own bespoke
+ * SDL_PollEvent switch.
+ */
+extern uint8_t g_present_due;
 
 /* ================================================================== */
 /* Free functions in the core address range (0x406000-0x413fff)     */
