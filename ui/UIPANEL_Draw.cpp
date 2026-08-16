@@ -143,7 +143,16 @@ extern "C" {
                                              g_allow_building_placement) */
 
     /* TrackPiece helpers */
-    /* CGWND_TrackPiece_SetZoom already declared elsewhere */
+    /* CGWND_TrackPiece_SetZoom — previously declared transitively via
+     * game/Panel.h; that declaration was removed (2026-08-16) once
+     * HandleKey's own two call sites were converted to the real, typed
+     * TrackPiece::SetZoom (0x40D170, game/TrackPiece.h), but this file's
+     * own 13 call sites (untouched, Status: TRANSCRIBED, raw-offset-cast
+     * style) were not accounted for at the time and lost their only
+     * declaration. Restored locally, matching ui/HelpWnd.cpp's own
+     * identical local declaration (same real stub, shared/stubs_impl.cpp)
+     * rather than reintroducing it into game/Panel.h. */
+    void CGWND_TrackPiece_SetZoom(void*, int);
 
     /* Town tile rendering */
     void   Town_BlitElement(void* self, uint32_t sx, uint32_t sy, int sw, uint32_t sh,

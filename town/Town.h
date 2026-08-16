@@ -8,7 +8,11 @@
  * Town is the primary in-game view window. It manages:
  *   - Postcard creation, sending, receiving, and album management
  *   - Network session management for multiplayer postcard exchange
- *   - Cursor indicator sprites for valid/invalid placement feedback
+ *
+ * (Cursor indicator sprites for valid/invalid placement feedback were
+ * previously attributed here via handle_tile_click; confirmed to be
+ * GameView's own method and moved to core/GameView.h/.cpp — see the
+ * "Building selection and tracking" note below.)
  *
  * Class hierarchy (verified from Town_Ctor @ 0x42E900, which calls
  * UI_WindowBase_Ctor directly):
@@ -17,12 +21,15 @@
  *
  * Size: 0x6E0 bytes. Vtable: 0x477D88.
  *
- * NOTE: The region +0xE9..+0x5ED serves double duty as the postcard
- * data/filename buffer (0x504 bytes) during postcard save/load
- * operations (save_postcard_as, save_received_postcard), overlapping
- * with viewport/overlay/panel fields. This is safe because those
- * operations only run during postcard UI transitions when the viewport
- * is not being rendered.
+ * NOTE: +0xE9..+0x5ED (0x504 bytes) is the postcard data/filename buffer
+ * used during postcard save/load operations (save_postcard_as,
+ * save_received_postcard). It used to be documented as double-duty with
+ * named viewport/overlay/panel/cursor fields on the theory those fields
+ * were genuine Town members sharing the same storage — re-verified while
+ * moving handle_tile_click/HitTestChild off this class: every one of
+ * those named fields was evidenced only by those two (now-moved,
+ * GameView-owned) methods, so there was never a real Town-side union to
+ * document — see the field list below.
  *
  * ================================================================
  * Vtable layout (0x477D88) — verified from raw vtable bytes
@@ -125,88 +132,37 @@ public:
     uint8_t    postcard_click_flag;     // +0x90  click suppression flag
     uint8_t    _pad_91[0x3F];           // +0x91  padding to +0xD0
 
-    /** Child TrackPiece sprite list (created by RESDATA_CreateChildSprite,
-     *  linked via +0x28). NOTE: the per-frame tracking that used to be
-     *  cited here (track_building) was moved to GameView — see this
-     *  class's own field-list note above; unclear whether this exact
-     *  field is genuinely read by any surviving Town:: method. */
-    TrackPiece* children_list;          // +0xD0  child sprite list head
-
-    /* Cursor indicator child sprites (duplicates of +0x170/+0x174,
-     * stored by handle_tile_click from res 0x3807/0x3808). */
-    TrackPiece* cursor_valid_dup;       // +0xD8  dup of cursor_valid_sprite
-    TrackPiece* cursor_invalid_dup;     // +0xDC  dup of cursor_invalid_sprite
-
-    Building*  selected_building;       // +0xE0  currently selected building
-    /* child_panel's exact concrete class is unidentified (never assigned
-     * within Town.cpp — wired up externally, presumably during CGWND's
-     * subsystem init). Retyped to UI_WindowBase* on vtable-membership
-     * evidence: every dispatch site calls vtable slot [1] (Hide,
-     * verified against Town's own base-class vtable layout above) and
-     * vtable slot [6] (create_full_window, via panel_load_resource) —
-     * both are UI_WindowBase base-class slots shared by every subclass,
-     * so the call is valid through UI_WindowBase* regardless of the
-     * concrete type. */
-    UI_WindowBase* child_panel;         // +0xE4  child panel object
+    /* +0xD0..+0xE7: formerly children_list/cursor_valid_dup/cursor_invalid_dup
+     * /selected_building/child_panel. Re-verified while moving
+     * handle_tile_click and HitTestChild (formerly "postcard_command_
+     * handler") to GameView (core/GameView.h/.cpp): a tree-wide grep of
+     * this file shows every one of those five fields was read/written
+     * ONLY inside those same two now-moved methods (children_list/
+     * child_panel had already been flagged suspect even before this pass
+     * — this confirms it — and cursor_valid_dup/cursor_invalid_dup/
+     * selected_building were the (Panel-derived-class-shaped, not
+     * UI_WindowBase-shaped) evidence trail this class's own doc used to
+     * cite). No surviving Town:: method touches this range; left as an
+     * honest gap rather than reasserting fields this class doesn't use. */
+    uint8_t    _pad_D0[0xE8 - 0xD0];    // +0xD0  padding to +0xE8
 
     uint8_t    flag_E8;                 // +0xE8  dialog guard flag (GetSaveFileNameA)
-    /* +0xE9..+0x5ED: postcard data/filename buffer (0x504 bytes) —
-       overlaps the viewport/overlay/panel fields below during save ops. */
 
-    /* Viewport inset rect — visible area within the Town window */
-    int32_t    viewport_inset_left;     // +0xEC
-    int32_t    viewport_inset_top;      // +0xF0
-    int32_t    viewport_inset_right;    // +0xF4
-    int32_t    viewport_inset_bottom;   // +0xF8
-
-    uint8_t    _pad_FC[0x18];           // +0xFC  padding to +0x114
-
-    /* Overlay destination rect — selection highlight on screen */
-    int32_t    overlay_dest_left;       // +0x114
-    int32_t    overlay_dest_top;        // +0x118
-    int32_t    overlay_dest_right;      // +0x11C
-    int32_t    overlay_dest_bottom;     // +0x120
-
-    /* panel_graphics's own concrete class is likewise unidentified (never
-     * assigned within Town.cpp). TODO: identify it (likely BuildingPanel-
-     * family; game/BuildingPanel.h's current field layout does NOT match
-     * the two confirmed offsets below, so it is a different class) and
-     * fold into a real canonical header. Kept void* here; Town.cpp
-     * mirrors the two Ghidra-confirmed fields via a local
-     * PanelGraphicsView struct rather than raw offsets at each use site. */
-    void*      panel_graphics;          // +0x124  building panel object:
-                                        //   +0x10 = UIPANEL_Surface* (surface ptr, blit source —
-                                        //           its own +8/+0xC are read directly as
-                                        //           width/height, matching UIPANEL_Surface exactly)
-                                        //   +0x20 = anim table (0x18-byte entries)
-    uint8_t    _pad_128[0x44];          // +0x128  padding to +0x16C
-
-    uint16_t   selected_building_type;  // +0x16C  tile type of selected building
-                                        //         (6 = depot, 7 = remove tool)
-
-    /* Cursor indicator sprites (created by handle_tile_click) */
-    TrackPiece* cursor_valid_sprite;    // +0x170  valid-placement cursor (res 0x3807)
-    TrackPiece* cursor_invalid_sprite;  // +0x174  invalid-placement cursor (res 0x3808)
-
-    TrackPiece* track_piece;            // +0x178  track-piece zoom control
-                                        //         (cursor hover sprite res 0x3806)
-    /* Real type UIPANEL_Surface* (created via UIPANEL_CreateSurface +
-     * UIPANEL_InitSurface in handle_tile_click; its own +8/+0xC/+0x1C
-     * are read directly as width/height/ddraw_surf, matching
-     * UIPANEL_Surface exactly). Forward-declared only — see the
-     * UIPANEL_Surface forward-decl comment above for why the full
-     * definition isn't included here. */
-    UIPANEL_Surface* overlay_panel;     // +0x17C  UIPANEL surface for selection overlay
-
-    /* Backup surface data — background restore on deselect */
-    uint32_t   backup_surface;          // +0x180  backup surface handle
-    uint32_t   backup_x;                // +0x184  backup region source X
-    int32_t    backup_y;                // +0x188  backup region source Y
-    uint32_t   backup_width;            // +0x18C  backup region width
-    int32_t    building_center_x;       // +0x190  cached building center X
-    int32_t    building_center_y;       // +0x194  cached building center Y
-
-    uint8_t    _pad_198[0x5ED - 0x198]; // +0x198  padding to +0x5ED
+    /* +0xE9..+0x5EC (0x504 bytes): postcard data/filename buffer — see
+     * save_postcard_as/save_received_postcard, which read/write this
+     * range directly via `reinterpret_cast<char*>(this) + 0xE9`. This
+     * used to be sub-declared as named viewport_inset_(x/y),
+     * overlay_dest_(x/y), panel_graphics, selected_building_type,
+     * cursor_valid_sprite, cursor_invalid_sprite, track_piece,
+     * overlay_panel, backup_(surface/x/y/width), and
+     * building_center_(x/y) fields on the theory that they shared this
+     * space with the postcard buffer via a double-duty union — all of
+     * those sub-fields were, like the ones above, evidenced only by
+     * handle_tile_click/HitTestChild, now confirmed to be GameView's own
+     * fields at GameView's own (unrelated, Panel-derived) offsets, not a
+     * real union with this class's postcard buffer. Collapsed to a single
+     * pad matching the real, still-used 0x504-byte buffer size. */
+    uint8_t    _pad_E9[0x5ED - 0xE9];   // +0xE9  padding to +0x5ED
 
     /* --- Postcard UI fields (+0x5ED..+0x6D6) --- */
     uint8_t    audio_playing;           // +0x5ED  1 = postcard open/close sound playing
@@ -400,19 +356,6 @@ public:
      */
     bool init_sprites(HWND hParent);
 
-    /**
-     * handle_tile_click — Create placement cursor indicator sprites.
-     * Address: 0x42CE10
-     *
-     * MISNAMED: this is not a click handler. Creates 3 TrackPiece child
-     * sprites (valid=0x3807 -> +0x170/+0xD8, invalid=0x3808 -> +0x174/+0xDC,
-     * hover=0x3806 -> +0x178), loads animation resources 0x3805 (self) and
-     * 0x3804 (child_panel) via vtable[6], creates the overlay UIPANEL
-     * surface at +0x17C and initializes the backup rect at +0x180.
-     * Returns 1 on success.
-     */
-    char handle_tile_click();
-
     /* ================================================================ */
     /* Building selection and tracking — NOT Town methods                */
     /*                                                                    */
@@ -428,14 +371,15 @@ public:
     /* slot reached only from track_building's own child loop, never a     */
     /* postcard call site).                                                */
     /*                                                                      */
-    /* handle_tile_click (0x42CE10, below) and postcard_command_handler     */
-    /* (0x42D6B0, further below) show the SAME "ECX = bare immediate        */
-    /* 0x4852A0" receiver evidence and very likely belong on GameView too — */
-    /* deliberately left on this class as a follow-up (out of scope for     */
-    /* the pass that moved the six methods above): this class's own field   */
-    /* model below for +0x88..+0x1B8 was built from exactly these two       */
-    /* now-suspect methods and has not been re-verified against GameView's  */
-    /* real layout.                                                        */
+    /* handle_tile_click (0x42CE10) and HitTestChild (0x42D6B0, formerly    */
+    /* "postcard_command_handler" — a doubly wrong name: no postcards, no   */
+    /* WM_COMMAND) showed the SAME "ECX = bare immediate 0x4852A0" receiver  */
+    /* evidence (handle_tile_click) or an even stronger one (HitTestChild's  */
+    /* sole xref is GameView's own vtable slot [17] DATA reference, with no  */
+    /* direct call sites at all) — confirmed and moved to GameView in a      */
+    /* later pass (core/GameView.h/.cpp). This class's own field model for   */
+    /* +0x88..+0x1B8 was built from exactly these two methods and has been   */
+    /* corrected accordingly (see the field list above).                    */
     /* ================================================================ */
 
     /* ================================================================ */
@@ -579,18 +523,21 @@ public:
      *
      * Checks selection_active, delegates to RESDATA_HitTestChildren and
      * suppresses double clicks via postcard_click_flag.
+     *
+     * FLAGGED (not fixed this pass): this is very likely also a
+     * misattributed GameView method, not a Town one — it occupies
+     * GameView's own vtable slot [4] (0x42D670, core/GameView.h),
+     * overriding Panel::HitTestChildren, and RESDATA_HitTestChildren
+     * (which it delegates to) is exactly Panel::HitTestChildren
+     * (game/Panel.cpp), whose own per-child loop dispatches
+     * GameView::HitTestChild (vtable[17], moved off this class in the
+     * same pass that moved handle_tile_click here). Left on Town as a
+     * documented follow-up, out of scope for this pass.
      */
     char postcard_click_handler(int x, int y);
 
-    /**
-     * postcard_command_handler — WM_COMMAND handler for postcard controls.
-     * Address: 0x42D6B0
-     *
-     * Dispatches resource IDs 0x3806/0x3807/0x3808 on a TrackPiece
-     * control: zoom changes and building (de)selection.
-     */
-    int postcard_command_handler(TrackPiece* control, uint32_t wParam,
-                                 uint32_t lParam);
+    /* postcard_command_handler (0x42D6B0) moved to GameView::HitTestChild
+     * — see the "Building selection and tracking" note above. */
 
     /* send_postcard (0x42D770) moved to GameView::update_cursor_child —
      * see the "Building selection and tracking" note above. */

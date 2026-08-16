@@ -36,6 +36,8 @@
 
 #include "../core/Entity.h"
 
+class TrackPiece;
+
 // Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 class Panel : public Entity {
@@ -76,8 +78,32 @@ public:
 
     void*    child_surface;       // +0xD0  child surface/panel (destroyed in dtor)
     int32_t  panel_substate;      // +0xD4  sub-state for resource type selection
-    int32_t  panel_state;         // +0xD8  main state for resource type selection
-    void*    child_ptr;           // +0xDC  child object pointer (also used as int)
+
+    /* +0xD8/+0xDC: Ghidra-confirmed TrackPiece* pointer slots (see
+     * HandleKey below, which dereferences both as TrackPiece* with no
+     * ambiguity: `+0x48`/`+0x54` match TrackPiece::zoom_level/prev_frame
+     * exactly, and HandleKey's own disassembly (0x454AE0) confirms its
+     * ONLY guard is `CMP word ptr [reg+0x48], 0x1` — no additional +0x18
+     * check). Previously declared `int32_t panel_state` / `void*
+     * child_ptr` on the theory that Panel::UpdateResourceByState (0x453FB0)
+     * reads +0xD8 as a small signed int — but UpdateResourceByState is NOT
+     * a Panel vtable override (Panel's real vtable slot [7], read directly
+     * from the raw vtable bytes at 0x4784C8, is 0x405A20 = Entity::StopSound,
+     * unmodified), so it is not evidence of a Panel field. UpdateResourceByState's
+     * containing (Ghidra-unbounded, address ~0x453F00) function is a
+     * genuine but currently-unidentified caller; nothing anywhere in the
+     * CURRENT reconstructed tree ever writes an integer into these slots
+     * (a grep-based finding, not a binary-wide one — the real x86 binary's
+     * unidentified 0x453F00-ish caller may still write one; that receiver
+     * class is not established here). Retyped as the pointer role that is
+     * actually written (GameView::handle_tile_click, core/GameView.cpp)
+     * and read (HandleKey below) elsewhere in this class family; the "< 0"
+     * decision-table arms this retype makes unreachable in
+     * UpdateResourceByState are dropped under that same unverified-for-
+     * one-caller model, not a fully closed finding — see that method's own
+     * doc comment. */
+    TrackPiece* enter_zoom_child;  // +0xD8  child zoomed by HandleKey's Enter (0x0D)
+    TrackPiece* escape_zoom_child; // +0xDC  child zoomed by HandleKey's Escape (0x1B)
 
     /* ================================================================ */
     /* Virtual methods                                                   */
@@ -109,20 +135,52 @@ public:
     virtual byte Init(int resource_id, int anim_index, byte force_reload);
 
     /**
-     * UpdateResourceByState — select resource type based on internal state (vtable[7]).
-     * Address: 0x453FB0
+     * UpdateResourceByState — select resource type based on internal state.
+     * Address: 0x453FB0. NOT a vtable override despite the name/prior doc:
+     * Panel's real vtable slot [7] (read directly from the raw vtable
+     * bytes at 0x4784C8) is 0x405A20 = Entity::StopSound, unmodified — so
+     * this is an ordinary (non-virtual) method, called directly by an
+     * as-yet-unidentified caller (address ~0x453F00, no function boundary
+     * defined in Ghidra today).
      *
-     * State-machine that maps (panel_state, panel_substate) to a resource
-     * type value (0, 2, 4, 6, 8, 10, 12, or 14). If the current resource
-     * at +0x28 differs from the target, dispatches vtable[7] with the new
-     * type to trigger a resource update.
+     * State-machine that maps (panel_substate, panel_substate-adjacent int
+     * read from +0xD8 before that slot was retyped to `enter_zoom_child`
+     * — see that field's own doc comment) to a resource type value (0, 2,
+     * 4, 6, 8, 10, 12, or 14). If the current resource type (+0x28,
+     * anim_index) differs from the target, dispatches Entity::StopSound
+     * (vtable[7], a generic "state changed" notification here, not audio —
+     * matching GameView::center_on_point's identical use of the same slot)
+     * with the new type.
+     *
+     * BLOCKED (not this pass): the receiver class of this method's caller
+     * is unresolved, so it is unclear which concrete Panel-family object
+     * exercises the +0xD8-as-int reading today. The reconstructed tree has
+     * no int-assignment site for that slot, but that is a grep over the
+     * CURRENT source tree, not the original binary — the real, still-
+     * unidentified caller of this method may genuinely write a negative
+     * sentinel there. The "state < 0" decision-table arms this method used
+     * to have (target types 10/12/14) are dropped in the C++ body below
+     * under the pointer-only model +0xD8's retype implies; that is an
+     * unverified-for-this-one-caller simplification, not a closed finding.
      */
-    virtual void UpdateResourceByState();
+    void UpdateResourceByState();
 
     /**
-     * Hit-test dispatch on child objects (vtable slot 17 = 0x44).
+     * HitTestChild — per-child hit-test/zoom callback, dispatched from
+     * HitTestChildren's own +0xD0 child loop (vtable slot 17 = 0x44).
+     * Base Panel leaves slots [17]-[20] pointing at a shared trap stub
+     * (0x467E90, `PUSH 0x19; CALL 0x468B90; RET` — not a real
+     * implementation); GameView is the only known override of slot [17]
+     * (GameView::HitTestChild, 0x42D6B0 — core/GameView.h/.cpp). Slots
+     * [18]-[20] are out of scope here.
+     *
+     * @param child  the TrackPiece being hit-tested (pushed as the first
+     *               stack arg by HitTestChildren, NOT the vtable receiver)
+     * @param x      screen X (HitTestChildren passes GameObject_GetRelPos's
+     *               output)
+     * @param y      screen Y
      */
-    virtual int HitTestChild(int x, int y);
+    virtual uint8_t HitTestChild(TrackPiece* child, int x, int y);
 
     /* ================================================================ */
     /* Non-virtual methods                                               */
@@ -192,9 +250,22 @@ public:
 
     /**
      * Hit-test children — finds if a click point hits any child sprite
-     * in the linked list at +0xD0.
+     * in the linked list at +0xD0, dispatching HitTestChild (vtable[17])
+     * per child.
      * Address: 0x4549E0
      * __thiscall
+     *
+     * NOTE: this is actually Panel's vtable slot [4] (confirmed via the
+     * raw vtable bytes at 0x4784C8), not a plain non-virtual method as
+     * previously declared — GameView (core/GameView.h) overrides slot [4]
+     * with its own click-gating method (0x42D670, "GameView-family slot",
+     * not yet reconstructed) which calls this function directly (not
+     * virtually) after checking selection state; this function's own
+     * internal per-child dispatch through `this`'s vtable slot [17] is
+     * what resolves polymorphically to GameView::HitTestChild for a
+     * GameView receiver. Declared non-virtual here pending a full
+     * slot [4] audit (out of scope for this pass — see core/GameView.h's
+     * class doc comment).
      *
      * @param x  Screen X coordinate
      * @param y  Screen Y coordinate
@@ -207,8 +278,8 @@ public:
      * Address: 0x454AE0
      * __thiscall
      *
-     * Enter (0x0D) triggers Zoom on +0xD8 child with type check.
-     * Escape (0x1B) triggers Zoom on +0xDC child with type check.
+     * Enter (0x0D) triggers Zoom on enter_zoom_child (+0xD8) with type check.
+     * Escape (0x1B) triggers Zoom on escape_zoom_child (+0xDC) with type check.
      *
      * Confirmed virtual: core/GameView.h documents vtable slot [16] +0x40
      * as "Panel::HandleKey (0x454AE0, inherited)" for GameView (a Panel
@@ -244,6 +315,20 @@ extern int  __stdcall IntersectRect(RECT* out, RECT* a, RECT* b);
 extern int __cdecl DDRAW_DimSurfaceRect(int left, int top, int right, int bottom); /* 0x401540 */
 extern void* __cdecl operator_new(size_t size);                     /* 0x465CE0 */
 extern void  __cdecl GLOBAL_free(void* ptr);                         /* 0x465CD0 */
-extern int   __thiscall UI_IsBitmapReady(int handle);                /* 0x424C30 */
-extern void* __cdecl ResourceManager_GetById(void** resmgr, UINT id); /* 0x4472B0 */
-extern void  __fastcall CGWND_TrackPiece_SetZoom(void* obj, int zoom); /* 0x47xxxx */
+/* Address corrected to 0x4255F0 (confirmed via Ghidra: `get_function`
+ * resolves that address to UI_IsBitmapReady, __fastcall, int return/param;
+ * the previous 0x424C30 disassembles to the unrelated UI_ChildWindow_Create). */
+extern int   __thiscall UI_IsBitmapReady(int handle);                /* 0x4255F0 */
+/* NOTE: this declaration is unused in Panel.cpp today and its address
+ * (0x4472B0) and shape (void** resmgr, void* return, __cdecl) do not match
+ * the real ResourceManager::GetById (0x446EA0, __thiscall, `int32_t
+ * GetById(int32_t)` — resources/ResourceManager.h) — one of many
+ * inconsistent redeclarations of this symbol tree-wide (a known, larger,
+ * separately-tracked landmine class; not fixed here). Prefer
+ * `g_resmgr.GetById(id)` in new code instead of this free-function shape. */
+extern void* __cdecl ResourceManager_GetById(void** resmgr, UINT id); /* 0x4472B0, unused/unverified */
+/* CGWND_TrackPiece_SetZoom removed (was an unresolved-address, void*-typed
+ * placeholder with no real definition anywhere in the tree — HandleKey's
+ * two call sites now use the real, already-integrated TrackPiece::SetZoom
+ * (0x40D170, game/TrackPiece.h) directly on the retyped
+ * enter_zoom_child/escape_zoom_child members instead). */

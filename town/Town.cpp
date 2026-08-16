@@ -108,13 +108,12 @@ bool   UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
  * against the inherited Entity::Draw instead of this stub. See
  * shared/stubs_impl.cpp's own updated comment for the same resolution. */
 
-/* UIPANEL_Surface construction is the real UIPANEL_Surface() constructor
- * (graphics/LOCOBITMAP.h/.cpp, 0x42A110). This file can't include
- * graphics/LOCOBITMAP.h directly (see UIPANEL_Surface's forward-decl
- * comment in Town.h -- it collides with ui/PostcardAlbum.h's own,
- * unrelated `PostcardAlbum` class), so it goes through the factory
- * function declared for exactly this case instead of `new` directly. */
-UIPANEL_Surface* UIPANEL_Surface_New();
+/* UIPANEL_Surface_New/UIPANEL_CreateSurface/UIPANEL_Surface_Size — no
+ * longer declared here. All were solely for Town::handle_tile_click, now
+ * moved to GameView::handle_tile_click (core/GameView.cpp), which carries
+ * its own local declarations of the same real symbols (graphics/
+ * LOCOBITMAP.cpp, 0x42A110). See that file's identical doc comment for
+ * the extern "C" landmine history this avoided. */
 
 /* UIPANEL_EndPaintEx — real def: ui/UIPANEL.cpp:0x426B90, C++ linkage (not
  * extern "C"), void(void* self, int hdc, int unlock_param, uint8_t
@@ -131,9 +130,22 @@ UIPANEL_Surface* UIPANEL_Surface_New();
 void   UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
                           uint8_t unlock_flag, RECT* restrict_rect);  /* 0x426B90 */
 
+/* RESDATA_CreateChildSprite — no longer declared here; was solely for
+ * Town::handle_tile_click, now moved to GameView::handle_tile_click
+ * (core/GameView.cpp), which calls the inherited Panel::CreateChildSprite
+ * (game/Panel.h/.cpp) directly instead of this free-function shape. */
+
+/* Sprite_Destroy's real definition (ui/ButtonSprite.h/.cpp) is plain C++
+ * linkage, not extern "C" — declaring it inside the extern "C" block below
+ * would conflict with that declaration once both are visible, and (per
+ * this exact ODR-mismatch landmine class documented repeatedly elsewhere
+ * in this tree) risks silently binding this file's calls to the wrong
+ * symbol if a C-linkage stub of the same bare name ever exists. Declared
+ * here matching the real signature exactly instead. */
+void __fastcall Sprite_Destroy(void* buttonSprite);                     /* 0x454BC0 */
+
 extern "C" {
     /* Resource management */
-    void*  RESDATA_CreateChildSprite(void* parent, void* res, int x, int y); /* 0x4546D0 */
     void   Sprite_Init(void* sprite);                                /* 0x454BF0 */
     void   Sprite_SetState(void* sprite, int state, int* unk);      /* 0x454C30 */
 
@@ -149,8 +161,8 @@ extern "C" {
                                int x, int y, int nWidth, int nHeight,
                                void* hMenu, void* hIcon, UINT classStyle); /* 0x425B70 */
 
-    /* UIPANEL_Blit, UIPANEL_CreateSurface, and UIPANEL_EndPaintEx declared
-     * above, outside this extern "C" block (C++ linkage). */
+    /* UIPANEL_Blit and UIPANEL_EndPaintEx declared above, outside this
+     * extern "C" block (C++ linkage). */
 
     /* Tile map */
     void   TileMap_InvalidateRect(void* tilemap, int left, int top,
@@ -218,7 +230,10 @@ extern "C" {
 }
 
 /* C++ linkage — these have C++ mangled symbol definitions */
-void   DDRAW_SelectBuilding(void* ddraw, void* building);       /* 0x459180 */
+/* DDRAW_SelectBuilding(void*, void*) — no longer declared here; was
+ * solely for postcard_command_handler, now moved to GameView::HitTestChild
+ * (core/GameView.cpp), which calls the already-typed g_ddraw_building->
+ * SelectBuilding(Building*) instead of this free-function shape. */
 char   RESDATA_HitTestChildren(void* self, int x, int y);        /* 0x44B200 */
 /* RESDATA_IsBuildingTile — was wrongly declared inside the extern "C"
  * block above with a mismatched void* param and a bogus address
@@ -348,50 +363,22 @@ extern void* g_postcard;              /* 0x4FD384 — PostcardAlbum object (was
 
 namespace {
 
-/* Panel-like objects dispatch a resource load at vtable slot 6 (byte
- * offset 0x18); used by handle_tile_click (0x42CEDA / 0x42CEF6). */
-char panel_load_resource(void* obj, int res_id, int a, int b)
-{
-    using LoadResourceFn = char (*)(void*, int, int, int);
-    void** vtable = *reinterpret_cast<void***>(obj);
-    return reinterpret_cast<LoadResourceFn>(vtable[6])(obj, res_id, a, b);
-}
+/* panel_load_resource (vtable slot 6 raw dispatch) removed — was solely
+ * for Town::handle_tile_click, now moved to GameView::handle_tile_click
+ * (core/GameView.cpp), which issues real typed virtual calls
+ * (`this->Init(...)` / `game_object_sub.InitBase(...)`) instead of a
+ * manual vtable dispatch. */
 
-/* UIPANEL_Surface (canonical definition: graphics/LOCOBITMAP.h) mirrored
- * here with only the fields Town.cpp actually touches — not included
- * directly, see the forward-declaration comment on Town.h's
- * `overlay_panel` field for why. */
-struct UIPANEL_SurfaceView {
-    void*   vtable;       // +0x00
-    int32_t mode;          // +0x04
-    int32_t width;          // +0x08
-    int32_t height;         // +0x0C
-    uint8_t has_palette;   // +0x10
-    uint8_t flags;          // +0x11
-    uint8_t _pad_12[2];
-    uint16_t* palette_ptr; // +0x14
-    uint8_t*  pixels;       // +0x18
-    void*     ddraw_surf;   // +0x1C
-};
-
-UIPANEL_SurfaceView* view(UIPANEL_Surface* surface)
-{
-    return reinterpret_cast<UIPANEL_SurfaceView*>(surface);
-}
-
-/* `Town::panel_graphics`'s concrete class is unidentified (see Town.h's
- * field comment) — mirrors only the two Ghidra-confirmed fields. */
-struct PanelGraphicsView {
-    uint8_t          _pad_00[0x10];
-    UIPANEL_Surface* surface;      // +0x10
-    uint8_t          _pad_14[0x0C];
-    void*            anim_table;   // +0x20 — array of 0x18-byte entries
-};
-
-PanelGraphicsView* panel_graphics_view(void* panel_graphics)
-{
-    return reinterpret_cast<PanelGraphicsView*>(panel_graphics);
-}
+/* resdata_get_surface (RESDATA vtable slot 1 raw dispatch) removed by a
+ * separate, unrelated cleanup — zero remaining callers in this file.
+ *
+ * UIPANEL_SurfaceView/view() and PanelGraphicsView/panel_graphics_view()
+ * removed here — both mirrors were solely for Town::handle_tile_click's
+ * own +0x124 `panel_graphics` field (itself removed from Town.h — see
+ * that header's field-list note: it was `game_object_sub.resource` on
+ * GameView, not a real Town field). See core/GameView.cpp's own,
+ * still-live copies of these two mirrors for the surviving
+ * GameView::handle_tile_click. */
 
 /* RESDATA child resource — released via vtable[2] (Destroy/Release).
  * Used for overlay/background/button-strip/send-confirm resources. */
@@ -822,72 +809,15 @@ bool Town::init_sprites(HWND hParent)
     return (result != 0);
 }
 
-/* ================================================================== */
-/* Town::handle_tile_click — Create placement cursor sprites (MISNAMED) */
-/* Address: 0x42CE10                                                   */
-/*                                                                     */
-/* Creates 3 TrackPiece child sprites (valid=0x3807 -> +0x170/+0xD8,   */
-/* invalid=0x3808 -> +0x174/+0xDC, hover=0x3806 -> +0x178), loads      */
-/* animation resources 0x3805 (self) + 0x3804 (child_panel) via        */
-/* vtable[6], creates the overlay UIPANEL surface at +0x17C and        */
-/* initializes the backup rect at +0x180. Returns 1 on success.        */
-/* ================================================================== */
-char Town::handle_tile_click()
-{
-    void* res = ResourceManager_GetById(&g_resmgr, 0x3807);
-    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
-        TrackPiece* sprite = static_cast<TrackPiece*>(RESDATA_CreateChildSprite(this, res, 0, 0));
-        this->cursor_valid_sprite = sprite;          /* +0x170 */
-        this->cursor_valid_dup = sprite;             /* +0xD8 */
-    }
-
-    res = ResourceManager_GetById(&g_resmgr, 0x3808);
-    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
-        TrackPiece* sprite = static_cast<TrackPiece*>(RESDATA_CreateChildSprite(this, res, 0, 0));
-        this->cursor_invalid_sprite = sprite;        /* +0x174 */
-        this->cursor_invalid_dup = sprite;           /* +0xDC */
-    }
-
-    res = ResourceManager_GetById(&g_resmgr, 0x3806);
-    if (res && UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(res)))) {
-        this->track_piece =                          /* +0x178 */
-            static_cast<TrackPiece*>(RESDATA_CreateChildSprite(this, res, 0, 0));
-    }
-
-    /* Load animation resources 0x3805 (self) / 0x3804 (child_panel) via
-     * vtable slot 6 (byte offset 0x18). Faithful to the binary — the
-     * slot is the inherited create_full_window entry, called here with
-     * a resource-id argument set (original source quirk). */
-    char loaded = panel_load_resource(this, 0x3805, -1, 0);
-    if (loaded) {
-        loaded = panel_load_resource(this->child_panel, 0x3804, -1, 0);
-        if (loaded) {
-            this->overlay_panel = UIPANEL_Surface_New();
-
-            if (this->overlay_panel) {
-                UIPANEL_Surface* pgfx_surface =
-                    panel_graphics_view(this->panel_graphics)->surface;
-                UIPANEL_InitSurface(this->overlay_panel,
-                                    view(pgfx_surface)->width,
-                                    view(pgfx_surface)->height,
-                                    1, 0, 0);
-
-                SetRect(reinterpret_cast<RECT*>(&this->backup_surface), 0, 0,
-                        view(this->overlay_panel)->width,
-                        view(this->overlay_panel)->height);
-            }
-            return 1;
-        }
-    }
-    return 0;
-}
-
-/* is_valid_placement/select_building/track_building/deselect_building/
- * update_selection/render_selection (0x42CF90/0x42D040/0x42D1A0/0x42D280/
- * 0x42D3A0/0x42D400) moved to core/GameView.cpp — see town/Town.h's
- * "Building selection and tracking" field-list note for the evidence
- * (every call site loads ECX with the bare immediate 0x4852A0, not a
- * Town pointer-variable dereference). */
+/* handle_tile_click (0x42CE10) moved to GameView::handle_tile_click
+ * (core/GameView.cpp) — its sole caller, GameLoop_PostSetupBootstrap
+ * (0x45DF32), loads ECX with the bare immediate 0x4852A0 before calling
+ * it, the same GameView-global-instance receiver evidence as every other
+ * method already moved off this class. is_valid_placement/select_building/
+ * track_building/deselect_building/update_selection/render_selection
+ * (0x42CF90/0x42D040/0x42D1A0/0x42D280/0x42D3A0/0x42D400) moved there
+ * earlier for the same reason — see town/Town.h's "Building selection and
+ * tracking" field-list note for the full evidence. */
 
 /* ================================================================== */
 /* Town::postcard_init_list — Initialize postcard dialog (vtable[8])   */
@@ -1288,54 +1218,16 @@ char Town::postcard_click_handler(int x, int y)
     return RESDATA_HitTestChildren(this, x, y);
 }
 
-/* ================================================================== */
-/* Town::postcard_command_handler — WM_COMMAND for postcard controls   */
-/* Address: 0x42D6B0                                                   */
-/* ================================================================== */
-int Town::postcard_command_handler(TrackPiece* control, uint32_t wParam,
-                                   uint32_t lParam)
-{
-    if (control == nullptr || control->render_enabled == 0) {    /* +0x56 */
-        return 0;
-    }
-
-    /* vtable slot 2 = GameObject::PtInRect (BOOL(int x, int y)), inherited
-     * unmodified by every class in this hierarchy — see e.g.
-     * core/GameObject.h's own vtable doc. wParam/lParam are used as the
-     * x/y point here, matching the original call site's own param names. */
-    BOOL handled = control->PtInRect(static_cast<int>(wParam),
-                                     static_cast<int>(lParam));
-    if (handled == 0) {
-        return 0;
-    }
-
-    /* control->resource (+0x44) -> resource_id (+4). */
-    int res_id = control->resource->resource_id;
-    short timer_val;
-
-    if (res_id == 0x3806) {
-        timer_val = control->zoom_level;                         /* +0x48 */
-        if (timer_val == 1) {
-            control->SetZoom(2);
-            control->prev_frame = 6;                             /* +0x54 */
-        }
-    } else if (res_id == 0x3807) {
-        if (control->zoom_level == 1) {
-            DDRAW_SelectBuilding(&g_ddraw_building, this->selected_building);
-            return 1;
-        }
-        DDRAW_SelectBuilding(&g_ddraw_building, nullptr);
-        return 1;
-    } else if (res_id == 0x3808) {
-        timer_val = control->zoom_level;
-        if (timer_val == 1) {
-            control->SetZoom(2);
-            control->prev_frame = 6;
-        }
-    }
-
-    return 1;
-}
+/* postcard_command_handler (0x42D6B0) moved to GameView::HitTestChild
+ * (core/GameView.cpp) — its sole xref in the entire binary is the DATA
+ * reference at GameView's own vtable slot [17] (0x477D74), stronger
+ * receiver evidence than any of the other methods already moved off this
+ * class (it has zero direct call sites of its own at all). The name was
+ * doubly wrong: it is not a WM_COMMAND handler and has nothing to do with
+ * postcards — it is Panel::HitTestChild's per-child hit-test/zoom
+ * override, dispatched from Panel::HitTestChildren's own +0xD0 child
+ * loop (game/Panel.cpp), itself reached from postcard_click_handler
+ * above via RESDATA_HitTestChildren. */
 
 /* Town::send_postcard (0x42D770) moved to GameView::update_cursor_child —
  * see town/Town.h's "Building selection and tracking" note. */

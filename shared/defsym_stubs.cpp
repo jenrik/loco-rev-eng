@@ -301,18 +301,20 @@ void UIPANEL_LockSurface(void*) { /* host no-op */ }
  * type_flag)`) with 41 real xrefs (Town_HandleTileClick,
  * RESDATA_ScriptedObject_Start, UIPANEL_ScrollPanel_InitSprites,
  * DDRAW_InitBuildingSprites, ...). This C++ overload's declared callers
- * (ui/UIPANEL.cpp: tab_sprites[]/content_bg_sprite/list_bg_sprite/
+ * were ui/UIPANEL.cpp (tab_sprites[]/content_bg_sprite/list_bg_sprite/
  * list_text_sprite/sound_btn_sprite/item_sprites[], all via
- * UIPANEL::InitSprites; town/Town.cpp: cursor sprites via
- * Town::handle_tile_click) all expect a `void*` back — this stub used to
- * return `void`, so every caller stored whatever garbage happened to be
- * in the return register into a sprite-pointer field.
+ * UIPANEL::InitSprites) and town/Town.cpp's Town::handle_tile_click,
+ * which all expected a `void*` back — this stub used to return `void`,
+ * so every caller stored whatever garbage happened to be in the return
+ * register into a sprite-pointer field.
  *
- * Verified unreachable today: `grep`-confirmed zero C++ callers of both
- * UIPANEL::InitSprites() and Town::handle_tile_click() anywhere in this
- * tree (matches PROGRESS.md's 2026-08-05 finding for the latter, arrived
- * at independently here). Kept loud rather than silently "fixed" to
- * return nullptr, per this file's own precedent one entry up
+ * Town::handle_tile_click has since moved to GameView::handle_tile_click
+ * (core/GameView.h/.cpp) and no longer calls this free-function shape at
+ * all — it now uses the real, fully-implemented Panel::CreateChildSprite
+ * (game/Panel.cpp) directly. Verified unreachable today: `grep`-confirmed
+ * zero C++ callers of both UIPANEL::InitSprites() and this exact free-
+ * function shape anywhere in this tree. Kept loud rather than silently
+ * "fixed" to return nullptr, per this file's own precedent one entry up
  * (WNDPROC_StreamFromMemory) and CLAUDE.md's stub policy: a future
  * caller must fail loudly, not read a plausible-looking null forever. */
 void* RESDATA_CreateChildSprite(void*, void*, int, int);

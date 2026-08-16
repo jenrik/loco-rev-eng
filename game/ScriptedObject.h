@@ -133,7 +133,11 @@ public:
     /* +0xD0: child_surface (inherited from Panel, repurposed as the head of
      *        this object's own child linked list — walked via each child's
      *        own +0x28 "next" field) */
-    /* +0xDC: child_ptr     (inherited from Panel, repurposed as escape_tool) */
+    /* +0xDC: escape_zoom_child (inherited from Panel, renamed from
+     *        `child_ptr`/`panel_state` — see game/Panel.h's own field doc;
+     *        this comment's "repurposed as escape_tool" claim has no
+     *        actual access site in this file's .cpp today, so it is
+     *        unverified — flagged, not fixed, out of scope here) */
 
     /* ================================================================ */
     /* Embedded Entity sub-object (+0xE0..+0x167, 0x88 bytes)            */

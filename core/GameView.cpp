@@ -26,21 +26,20 @@
 #include "../game/Vehicle.h"
 #include "../game/World.h"
 #include "../graphics/DDRAW_Building.h"
+#include "../ui/UIPANEL_Surface.h"   /* UIPANEL_InitSurface, real C++ linkage */
+/* graphics/LOCOBITMAP.h — real canonical UIPANEL_Surface definition.
+ * town/Town.cpp/.h can't include this directly (LOCOBITMAP.h also
+ * defines a conflicting, differently-shaped `class PostcardAlbum` that
+ * collides with ui/PostcardAlbum.h, which Town.cpp includes), but this
+ * file includes neither ui/PostcardAlbum.h nor anything that pulls it in
+ * — checked before adding this — so the real type is used directly here
+ * instead of Town.cpp's forward-declared-opaque-pointer workaround. */
+#include "../graphics/LOCOBITMAP.h"
 
 #ifndef _WIN32
 #include <cassert>
 #include <cstdio>
 #endif
-
-/* Canonical definition: graphics/LOCOBITMAP.h. NOT included from this
- * file — LOCOBITMAP.h also defines a conflicting, differently-shaped
- * `class PostcardAlbum` that collides with ui/PostcardAlbum.h (see
- * town/Town.h's identical forward-declaration comment on its own
- * `overlay_panel`/`panel_graphics` fields, which describe this exact
- * same global object). Forward-declared as an opaque pointer target;
- * the PanelGraphicsView mirror below reads only the two Ghidra-confirmed
- * offsets rather than dereferencing the real type. */
-struct UIPANEL_Surface;
 
 /* Panel-family helpers — 0x4544E0 (Panel base init) and 0x454630
  * (Panel partial destructor / RESDATA base cleanup). */
@@ -62,6 +61,14 @@ extern void __thiscall TileMap_InvalidateRect(void* tilemap, int left, int top,
  * (0x44BD30). Declared locally to avoid pulling world/tilemap.h's
  * conflicting local Win32/global declarations into this file. */
 extern uint8_t RESDATA_IsBuildingTile(int32_t tile_obj);
+
+/* UIPANEL_CreateSurface — real def graphics/LOCOBITMAP.cpp:0x42A110,
+ * placement-style constructor for UIPANEL_Surface (see town/Town.cpp's
+ * identical declaration/doc comment for the extern-"C" landmine this
+ * avoids — kept as plain C++ linkage here too, matching the real symbol). */
+extern void   UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* 0x42A110 */
+extern size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
+extern void*  operator_new(size_t size);   /* 0x465CE0 */
 
 /* UIPANEL_Blit — real def ui/UIPANEL_Surface.cpp (0x42B050), C++-mangled. */
 extern bool UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
@@ -92,6 +99,15 @@ extern "C" {
 /* Global variables                                                    */
 /* ================================================================== */
 
+extern ResourceManager g_resmgr;        /* 0x4855E8 — object, not a pointer (see
+                                          * town/Town.cpp's identical declaration/
+                                          * doc comment for the historical void*
+                                          * landmine this avoids). Used by
+                                          * handle_tile_click via the real typed
+                                          * ResourceManager::GetById (0x446EA0),
+                                          * not the tree-wide inconsistent
+                                          * `ResourceManager_GetById` free-function
+                                          * shape (see game/Panel.h's own note). */
 extern char    g_game_mode;             /* 0x4852AC — current game mode */
 extern int32_t g_demo_mode;             /* 0x4A9918 — 1 = demo mode */
 extern char    g_ddraw_active;          /* 0x4A9F78 — 1 = DirectDraw building mode active */
@@ -135,18 +151,20 @@ extern int g_client_offset_x;           /* 0x485228 — RECT.right  */
 extern int g_client_offset_y;           /* 0x48522C — RECT.bottom */
 
 /* ================================================================== */
-/* Host-only mirror views for foreign object layouts                   */
+/* Host-only mirror view for foreign object layouts                    */
 /*                                                                      */
-/* Verbatim copies of town/Town.cpp's own UIPANEL_SurfaceView/view()   */
-/* and PanelGraphicsView/panel_graphics_view() helpers (pre-existing,   */
-/* documented technical debt — see Town.h's `overlay_panel` and        */
-/* `panel_graphics` field comments for why the real UIPANEL_Surface    */
-/* type isn't included directly: it collides with graphics/LOCOBITMAP.h*/
-/* over a differently-shaped PostcardAlbum). Both mirrors describe the */
-/* SAME single global object's fields as Town.cpp's copies (this class */
-/* and the still-Town-attributed handle_tile_click share the object),  */
-/* so duplicating rather than sharing a helper across the two          */
-/* independent translation units is the least-risk option here.        */
+/* Originally a verbatim copy of town/Town.cpp's own UIPANEL_SurfaceView/  */
+/* view() helper (pre-existing, documented technical debt). This class's   */
+/* own `overlay_panel` field is `ResourceObject*` (a generic resource-     */
+/* handle type, matching the same idiom used tree-wide for resource-       */
+/* shaped objects — see GameView.h's field doc), not the real              */
+/* UIPANEL_Surface* itself, so this mirror still stands in for that one    */
+/* specific field. The genuinely UIPANEL_Surface*-typed case (sizing the   */
+/* overlay surface handle_tile_click constructs, via PanelGraphicsView's   */
+/* `surface` member below) now uses the real type directly instead of a    */
+/* second mirror overload — this file includes graphics/LOCOBITMAP.h       */
+/* directly (see the include comment above) since, unlike Town.cpp, it     */
+/* doesn't also include the conflicting ui/PostcardAlbum.h.                 */
 /* ================================================================== */
 
 namespace {
@@ -703,12 +721,20 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
              *
              * This branch is also PROVABLY UNREACHABLE on the host today:
              * the only producer of a 0x3806-resource TrackPiece child is
-             * Town::handle_tile_click (town/Town.cpp), which (a) has zero
-             * real callers anywhere in this tree, and (b) even if called,
-             * its RESDATA_CreateChildSprite (0x4546D0) is itself a loud
-             * stub that asserts before returning any child at all — see
-             * shared/stubs_link001_batch3_resource_audio.cpp. So no
-             * TrackPiece with resource_id 0x3806 can exist in this build.
+             * GameView::handle_tile_click (this file — moved here from
+             * town/Town.cpp; see this class's own header doc), whose sole
+             * caller is GameLoop_PostSetupBootstrap (0x45DF32) — which is
+             * itself not yet implemented anywhere in this tree (a tree-wide
+             * grep finds zero definitions/callers of it). handle_tile_click
+             * now goes through the real, fully-implemented
+             * Panel::CreateChildSprite (0x4546D0, game/Panel.cpp) rather
+             * than the loud extern "C" stub in
+             * shared/stubs_link001_batch3_resource_audio.cpp (that stub
+             * shape has zero remaining callers after this move and its own
+             * doc comment should be treated as stale), so the child-
+             * creation path itself is no longer what blocks this branch —
+             * only the missing caller does. So no TrackPiece with
+             * resource_id 0x3806 can exist in this build today.
              *
              * Loud stub rather than the previous raw offset-cast per
              * CLAUDE.md's stub policy: fail loudly if that ever changes,
@@ -726,7 +752,8 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
                     "GameView::selected_building's Building*/VehicleEditor* "
                     "type conflict is not yet resolved (see comment above); "
                     "this path is verified unreachable today via "
-                    "Town::handle_tile_click's zero real callers.\n",
+                    "handle_tile_click's sole caller (GameLoop_PostSetupBootstrap) "
+                    "being unimplemented.\n",
                     __FILE__, __LINE__);
             assert(false &&
                    "GameView::update_cursor_child (0x42D770) res_id 0x3806 "
@@ -751,6 +778,149 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
             child->SetZoom(1);
             this->select_building(nullptr);
             return 1;
+        }
+    }
+
+    return 1;
+}
+
+/**
+ * GameView::handle_tile_click — create placement cursor indicator sprites.
+ * Address: 0x42CE10 (MISNAMED: not a click handler).
+ *
+ * Moved here from town/Town.cpp: its sole caller,
+ * GameLoop_PostSetupBootstrap (0x45DF32), loads ECX with the bare
+ * immediate 0x4852A0 before `CALL 0x0042CE10` — the same receiver
+ * evidence as every other method in this class, and (per a tree-wide
+ * grep) GameLoop_PostSetupBootstrap is itself not implemented anywhere in
+ * this codebase today, so this method has zero real callers on the host
+ * regardless of this move.
+ *
+ * See this class's header doc for the full field/dispatch breakdown.
+ */
+char GameView::handle_tile_click()
+{
+    int32_t res = g_resmgr.GetById(0x3807);
+    if (res != 0 && UI_IsBitmapReady(res)) {
+        TrackPiece* sprite = static_cast<TrackPiece*>(this->CreateChildSprite(res, 0, 0));
+        this->cursor_valid_sprite = sprite;   /* +0x170 */
+        this->enter_zoom_child = sprite;      /* +0xD8, inherited Panel field —
+                                                * consumed by Panel::HandleKey's
+                                                * Enter (0x0D) shortcut */
+    }
+
+    res = g_resmgr.GetById(0x3808);
+    if (res != 0 && UI_IsBitmapReady(res)) {
+        TrackPiece* sprite = static_cast<TrackPiece*>(this->CreateChildSprite(res, 0, 0));
+        this->cursor_invalid_sprite = sprite; /* +0x174 */
+        this->escape_zoom_child = sprite;     /* +0xDC, inherited Panel field —
+                                                * consumed by Panel::HandleKey's
+                                                * Escape (0x1B) shortcut */
+    }
+
+    res = g_resmgr.GetById(0x3806);
+    if (res != 0 && UI_IsBitmapReady(res)) {
+        this->track_piece =                   /* +0x178 */
+            static_cast<TrackPiece*>(this->CreateChildSprite(res, 0, 0));
+    }
+
+    /* Load animation resources: 0x3805 on `this` (Panel::Init, vtable[6]),
+     * 0x3804 on the embedded game_object_sub (Entity::InitBase, its own
+     * vtable[6]). The original disassembly confirms the second call is a
+     * genuine virtual dispatch on the embedded sub-object, not a pointer-
+     * field dereference: `LEA ECX,[this+0xE4]` (the sub-object's own
+     * address, used as the receiver) paired with `MOV EDX,[this+0xE4]`
+     * (its vtable pointer, one dereference) — the same embedded-object
+     * idiom already established by center_on_point/cleanup for
+     * game_object_sub elsewhere in this class. */
+    bool loaded = this->Init(0x3805, -1, false) != 0;
+    if (loaded) {
+        loaded = this->game_object_sub.InitBase(0x3804, -1, false) != 0;
+    }
+    if (!loaded) {
+        return 0;
+    }
+
+    /* Placement-construct the selection-overlay UIPANEL_Surface. Real
+     * sizeof(UIPANEL_Surface) via UIPANEL_Surface_Size() (the original
+     * x86 size, 0x20, is irrelevant on this host's layout). Cast the raw
+     * allocation to each needed pointer type from `void*` directly
+     * (rather than between UIPANEL_Surface* and ResourceObject*
+     * themselves) so this stays two ordinary void*-sourced static_casts,
+     * matching the ABI-boundary mirror technique this file's `view()`/
+     * `PanelGraphicsView` helpers already use for the same object. */
+    void* raw_surface = operator_new(UIPANEL_Surface_Size());
+    if (raw_surface != nullptr) {
+        UIPANEL_CreateSurface(static_cast<UIPANEL_Surface*>(raw_surface));
+    }
+    this->overlay_panel = static_cast<ResourceObject*>(raw_surface);  /* +0x17C */
+
+    if (this->overlay_panel != nullptr) {
+        UIPANEL_Surface* pgfx_surface =
+            panel_graphics_view(this->game_object_sub.resource)->surface;
+        UIPANEL_InitSurface(this->overlay_panel,
+                             pgfx_surface->width,
+                             pgfx_surface->height,
+                             1, 0, 0);
+
+        /* Backup rect — see GameView.h's field doc for why these four
+         * fields (despite their "surface"-shaped names, inherited as-is
+         * from the earlier Town.h attribution) are really a RECT
+         * {left, top, right, bottom} shared with deselect_building's own
+         * UIPANEL_Blit calls. Written field-by-field (matching this
+         * class's own established idiom elsewhere) rather than through a
+         * RECT* reinterpret_cast over the four members. */
+        this->backup_surface = 0;                                /* +0x180 left   */
+        this->backup_x       = 0;                                /* +0x184 top    */
+        this->backup_y       = view(this->overlay_panel)->width;  /* +0x188 right  */
+        this->backup_width   = view(this->overlay_panel)->height; /* +0x18C bottom */
+    }
+
+    return 1;
+}
+
+/**
+ * GameView::HitTestChild — per-child hit-test/zoom callback.
+ * Address: 0x42D6B0 (vtable[17], +0x44). Overrides Panel::HitTestChild.
+ *
+ * Moved here from town/Town.cpp ("postcard_command_handler" — a doubly
+ * wrong name: no postcards, no WM_COMMAND). This function's sole xref in
+ * the entire binary is the DATA reference at this class's own vtable
+ * slot [17] (0x477D74) — it has zero direct call sites of its own,
+ * proving it is dispatched purely through Panel::HitTestChildren's
+ * (game/Panel.cpp) per-child loop, which calls `this->HitTestChild(child,
+ * x, y)` for every child in the +0xD0 list. `x`/`y` (formerly transcribed
+ * as `wParam`/`lParam`, a WM_COMMAND-shaped misnomer) are screen
+ * coordinates, matching `control->PtInRect(x, y)` below.
+ */
+uint8_t GameView::HitTestChild(TrackPiece* control, int x, int y)
+{
+    if (control == nullptr || control->render_enabled == 0) {   /* +0x56 */
+        return 0;
+    }
+
+    if (!control->PtInRect(x, y)) {
+        return 0;
+    }
+
+    int res_id = control->resource->resource_id;                /* +0x44 -> +4 */
+
+    if (res_id == 0x3806) {
+        if (control->zoom_level == 1) {                          /* +0x48 */
+            control->SetZoom(2);
+            control->prev_frame = 6;                             /* +0x54 */
+        }
+    } else if (res_id == 0x3807) {
+        if (control->zoom_level == 1) {
+            g_ddraw_building->SelectBuilding(this->selected_building);
+        } else {
+            g_ddraw_building->SelectBuilding(nullptr);
+        }
+        return 1;
+    } else if (res_id == 0x3808) {
+        if (control->zoom_level == 1) {
+            control->SetZoom(2);
+            control->prev_frame = 6;
         }
     }
 

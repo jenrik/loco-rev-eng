@@ -30,19 +30,6 @@ struct ChildLinkFields {
     void* next;
 };
 
-struct ChildSpriteFields {
-    void** vtable;
-    uint8_t prefix_04_27[0x24];
-    ChildSpriteFields* next;
-};
-
-struct TrackChildStateFields {
-    uint8_t prefix_00_47[0x48];
-    int16_t type;
-    uint8_t prefix_4a_53[0x0A];
-    int16_t state;
-};
-
 } // namespace
 /* ================================================================== */
 /* External references                                                 */
@@ -69,7 +56,7 @@ extern int  __thiscall GameObject_GetRelPos(void* self, int* out,
 /* UI helpers */
 extern void __thiscall UI_DestroyTooltip(void* mgr, int handle);           /* 0x423D20 */
 /* UIPANEL_UnlockSurface — declared in Panel.h (0x42A3D0) */
-extern int  __thiscall UI_IsBitmapReady(int handle);                        /* 0x424C30 */
+extern int  __thiscall UI_IsBitmapReady(int handle);                        /* 0x4255F0 */
 
 /* Win32 */
 extern void __stdcall SetRect(void* rect, int left, int top,
@@ -135,51 +122,65 @@ RESDATA* ResourceFromHandle(int res_handle)
 /* ================================================================== */
 /* Panel::UpdateResourceByState                                         */
 /* Address: 0x453FB0                                                    */
-/* Vtable slot: [7] (+0x1C)                                             */
 /*                                                                      */
-/* Called by: unnamed code at 0x453F63                                  */
+/* NOT a vtable slot (see Panel.h's own doc comment on this method —    */
+/* Panel's real vtable slot [7] is Entity::StopSound, unmodified).      */
+/* Called by: unnamed code at 0x453F63 (no function boundary defined    */
+/* in Ghidra today; receiver class unresolved — see Panel.h).           */
 /*                                                                      */
-/* Selects a resource type (0, 2, 4, 6, 8, 10, 12, 14) based on       */
-/* the combined state of panel_state (+0xD8) and panel_substate        */
-/* (+0xD4). If the currently loaded resource at +0x28 does not         */
-/* match, dispatches the SetResource virtual to change it.             */
+/* Selects a resource type (0, 2, 4, 6, 8, 10, 12, 14) based on a       */
+/* decision table over panel_substate (+0xD4) and a second sign-        */
+/* compared int historically read from +0xD8. That slot is now typed    */
+/* `TrackPiece* enter_zoom_child` (see Panel.h) since nothing in the     */
+/* reconstructed tree ever assigns it a plain int and HandleKey below    */
+/* proves it's a pointer there; a real (non-null) pointer is never       */
+/* sign-negative, so the three-way sign test collapses to a two-way      */
+/* null/non-null test with no behavior change UNDER THAT MODEL. This is  */
+/* a grep-based finding over the current source tree, not the original   */
+/* binary: this method's own caller (address ~0x453F00) has no resolved  */
+/* receiver class, so it is not proven that its own +0xD8 use is the     */
+/* same pointer role GameView/HandleKey establish elsewhere — the "< 0"  */
+/* branches below (target types 10/12/14) are dropped as unreachable     */
+/* under that unverified-for-this-caller model, not a closed finding.    */
+/* If the currently loaded resource type (+0x28, anim_index) doesn't    */
+/* match, dispatches Entity::StopSound (vtable[7] — a generic "state     */
+/* changed" notification here, not audio, matching                      */
+/* GameView::center_on_point's identical reuse of the same slot) with   */
+/* the new type. FIXED: previously mistranscribed as                    */
+/* `this->UpdateResourceByState()` (unconditional self-recursion) —     */
+/* the original disassembly's `(**(code**)(*this + 0x1c))(target_type)` */
+/* is a slot-[7] dispatch with an argument, i.e. StopSound(target_type), */
+/* not a no-arg recursive call into this same method.                   */
 /* ================================================================== */
 void Panel::UpdateResourceByState()
 {
-    int substate = this->panel_substate;  /* +0xD4 */
-    int state = this->panel_state;        /* +0xD8 */
-    int current_type = this->anim_index;  /* +0x28 */
+    int substate = this->panel_substate;                    /* +0xD4 */
+    bool state_populated = (this->enter_zoom_child != nullptr); /* +0xD8 */
+    int current_type = this->anim_index;                    /* +0x28 */
     int target_type;
 
-    /* Decision table: (substate, state) -> target_type */
+    /* Decision table: (substate, state_populated) -> target_type. The
+     * original's "state < 0" branches (target 10/12/14) are dead today —
+     * see this method's doc comment — since enter_zoom_child is never a
+     * raw negative sentinel, only nullptr or a real (non-negative) pointer. */
     if (substate > 0) {
-        if (state > 0) {
-            target_type = 6;
-        } else if (state == 0) {
-            target_type = 8;
-        } else { /* state < 0 */
-            target_type = 10;
-        }
+        target_type = state_populated ? 6 : 8;
     } else if (substate == 0) {
-        if (state > 0) {
+        if (state_populated) {
             target_type = 4;
-        } else if (state == 0) {
+        } else {
             /* No change needed when both state and substate are zero */
             return;
-        } else { /* state < 0 */
-            target_type = 12;
         }
     } else { /* substate < 0 */
-        if (state > 0) {
+        if (state_populated) {
             target_type = 2;
-        } else if (state == 0) {
+        } else {
             /* Only dispatch if current type isn't already 0 */
             if (current_type == 0) {
                 return;
             }
             target_type = 0;
-        } else { /* state < 0 */
-            target_type = 14;
         }
     }
 
@@ -188,8 +189,10 @@ void Panel::UpdateResourceByState()
         return;
     }
 
-    /* Dispatch the SetResource virtual method (vtable slot 7) */
-    this->UpdateResourceByState();
+    /* Dispatch Entity::StopSound (vtable[7]) with the new resource type —
+     * see this method's doc comment for why this is StopSound(target_type)
+     * and not a recursive call into this same method. */
+    this->StopSound(target_type);
 }
 
 /* ================================================================== */
@@ -508,12 +511,27 @@ void Panel::Draw(RECT clip_bounds, int enable_scroll, uint32_t extra_flags)
 /* Panel::HitTestChildren                                               */
 /* Address: 0x4549E0                                                   */
 /*                                                                     */
-/* Tests if the point (param_1, param_2) hits any child sprite in the  */
-/* linked list starting from child_surface (+0xD0).                    */
-/* First calls vtable[2] (PtInRect) for quick rejection.               */
-/* Then iterates child linked list (next pointer at +0x28), calling    */
-/* vtable[0x11] (vtable[17] at +0x44) on each child for hit-test.     */
-/* Skips the "selected child" at +0x9C.                                */
+/* Tests if the point (x, y) hits any child sprite in the linked list   */
+/* starting from child_surface (+0xD0).                                */
+/* First calls PtInRect (vtable[2]) for quick rejection.                */
+/* Then iterates the child linked list (next pointer at +0x28), calling */
+/* HitTestChild (vtable[17]) ON `this` for each child. FIXED: previously*/
+/* mistranscribed as a manual vtable call THROUGH the child's own vtable*/
+/* (`child->vtable[0x11](child, x, y)`) — the disassembly shows ECX is  */
+/* never reloaded from the child (`MOV ECX,ESI` before `CALL           */
+/* [EAX+0x44]`, ESI = HitTestChildren's own `this`), and the child is    */
+/* pushed as the first STACK argument, not the vtable-owning receiver.  */
+/* Skips the "selected child" at +0x9C.                                 */
+/*                                                                      */
+/* NOTE: Panel::CreateChildSprite (0x4546D0, below) creates either a    */
+/* TrackPiece (0x58 bytes) or a SoundObject (0x68 bytes) into this same  */
+/* +0xD0 list depending on its `sound_res` argument, so the list is      */
+/* genuinely heterogeneous. This loop (and the original binary, which    */
+/* did the identical untyped vtable/offset walk) treats every node as    */
+/* TrackPiece-shaped at +0x28 (next)/+0x48 (zoom_level, via              */
+/* HitTestChild)/+0x54 (prev_frame) regardless of its real dynamic type  */
+/* — a pre-existing behavior this reconstruction preserves exactly, not  */
+/* a new assumption introduced here.                                     */
 /* ================================================================== */
 char Panel::HitTestChildren(int x, int y)
 {
@@ -530,23 +548,28 @@ char Panel::HitTestChildren(int x, int y)
     int rel_x = rel_pos[0];
     int rel_y = rel_pos[1];
 
-    /* Iterate child linked list (next pointer at +0x28) */
-    /* NOTE: +0x9C is a "selected child" pointer that is SKIPPED during hit-testing */
-    for (ChildSpriteFields* child = reinterpret_cast<ChildSpriteFields*>(this->child_surface);
-         child != nullptr; child = child->next) {
+    /* Iterate child linked list. Chained via TrackPiece::sub_resource
+     * (+0x28) — the same "next" pointer this codebase already established
+     * as a real linked-list link despite its declared int32_t type (see
+     * core/GameView.cpp's track_building/center_on_point, which walk this
+     * exact +0xD0 list the same way). Dispatches HitTestChild (vtable[17])
+     * ON `this` (the panel, confirmed via disassembly: `MOV ECX,ESI` before
+     * `CALL [EAX+0x44]`, receiver unchanged from HitTestChildren's own
+     * `this`) with the child passed as the first argument — NOT a manual
+     * vtable call through the child's own vtable, which the prior
+     * transcription here got backwards. */
+    for (TrackPiece* child = static_cast<TrackPiece*>(this->child_surface);
+         child != nullptr;
+         child = reinterpret_cast<TrackPiece*>(
+             static_cast<uintptr_t>(static_cast<uint32_t>(child->sub_resource)))) {
 
-        if (child == reinterpret_cast<ChildSpriteFields*>(this->field_9C)) {
+        if (child == reinterpret_cast<TrackPiece*>(
+                static_cast<uintptr_t>(static_cast<uint32_t>(this->field_9C)))) {
             /* Skip the currently selected child */
             continue;
         }
 
-        /* Call vtable[0x11] (slot 17 at +0x44) for hit-test on child */
-        using ChildHitTestFunc = char (__thiscall*)(void* self, int x, int y);
-        ChildHitTestFunc child_test = reinterpret_cast<ChildHitTestFunc>(
-            child->vtable[0x11]);
-        char hit = child_test(child, rel_x, rel_y);
-
-        if (hit) {
+        if (this->HitTestChild(child, rel_x, rel_y)) {
             hit_any = 1;
         }
     }
@@ -559,33 +582,32 @@ char Panel::HitTestChildren(int x, int y)
 /* Address: 0x454AE0                                                   */
 /*                                                                     */
 /* Handles keyboard events for scripted objects on the panel.          */
-/* Enter (0x0D) — if +0xD8 child has type byte == 1 at +0x48,         */
-/*                calls CGWND_TrackPiece_SetZoom(2) and sets +0x54 = 6.*/
-/* Escape (0x1B) — if +0xDC child has type byte == 1 at +0x48,        */
-/*                 calls CGWND_TrackPiece_SetZoom(2) and sets +0x54=6. */
-/*                                                                                                                                                                                                                                                    * Returns 1 if handled, 0 if unhandled key.                                                                                                                                                                                                          */
+/* Enter (0x0D)  — if enter_zoom_child (+0xD8) has zoom_level == 1,    */
+/*                 calls SetZoom(2) and sets prev_frame = 6.           */
+/* Escape (0x1B) — if escape_zoom_child (+0xDC) has zoom_level == 1,   */
+/*                 calls SetZoom(2) and sets prev_frame = 6.           */
+/*                                                                     */
+/* Returns 1 if handled, 0 if unhandled key.                           */
 /* ================================================================== */
 uint Panel::HandleKey(int key_code)
 {
     switch (key_code) {
     case 0x0D:  /* Enter/Return */
     {
-        void* child = reinterpret_cast<void*>(static_cast<uintptr_t>(this->panel_state));
-        TrackChildStateFields* child_state = reinterpret_cast<TrackChildStateFields*>(child);
-        if (child != nullptr && child_state->type == 1) {
-            CGWND_TrackPiece_SetZoom(child, 2);
-            child_state->state = 6;
+        TrackPiece* child = this->enter_zoom_child;
+        if (child != nullptr && child->zoom_level == 1) {
+            child->SetZoom(2);
+            child->prev_frame = 6;
         }
         return 1;
     }
 
     case 0x1B:  /* Escape */
     {
-        void* child = this->child_ptr;
-        TrackChildStateFields* child_state = reinterpret_cast<TrackChildStateFields*>(child);
-        if (child != nullptr && child_state->type == 1) {
-            CGWND_TrackPiece_SetZoom(child, 2);
-            child_state->state = 6;
+        TrackPiece* child = this->escape_zoom_child;
+        if (child != nullptr && child->zoom_level == 1) {
+            child->SetZoom(2);
+            child->prev_frame = 6;
             return 1;
         }
         return 1;  /* Always returns 1 for Escape even if no child */
@@ -599,11 +621,14 @@ uint Panel::HandleKey(int key_code)
 /* ================================================================== */
 /* Panel::HitTestChild — vtable slot 17                                */
 /*                                                                      */
-/* In the binary, this is a pure virtual: the vtable entry at 0x467E90 */
+/* In the binary, base Panel's own vtable entry for this slot (0x467E90)*/
 /* pushes 0x19 and calls __amsg_exit (the MSVC _purecall handler that   */
-/* terminates the program). Subclasses (UIPANEL, BuildingPanel, etc.)   */
-/* override this slot with real hit-testing.                            */
+/* terminates the program) — a genuine "must be overridden" trap, not a */
+/* real implementation. GameView (core/GameView.cpp) is the confirmed    */
+/* override (0x42D6B0); other Panel subclasses may override it too, but */
+/* none are confirmed in this pass.                                     */
 /*                                                                      */
-/* We return 0 ("not hit") as a safe default for the base class.        */
+/* We return 0 ("not hit") as a safe host default for the base class    */
+/* rather than reproducing the original's process-terminating trap.     */
 /* ================================================================== */
-int Panel::HitTestChild(int x, int y) { return 0; }
+uint8_t Panel::HitTestChild(TrackPiece* /*child*/, int /*x*/, int /*y*/) { return 0; }

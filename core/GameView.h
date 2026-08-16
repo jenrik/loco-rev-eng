@@ -33,7 +33,13 @@
  *               Entity::MoveTo's slot [3] — see method doc for why every
  *               reposition of `this` inside it uses a hardcoded, explicitly
  *               scoped Entity::MoveTo call instead of virtual dispatch)
- *   [4]  +0x10: GameView-family slot        (0x42D670, not covered here)
+ *   [4]  +0x10: GameView-family slot        (0x42D670, not covered here —
+ *               overrides Panel::HitTestChildren (its base-class slot [4]);
+ *               gates on selection_active/postcard_click_flag then calls
+ *               Panel::HitTestChildren directly (non-virtually), whose own
+ *               per-child loop dispatches slot [17] below. Currently still
+ *               misattributed to Town::postcard_click_handler — flagged as
+ *               a further follow-up, out of scope for this pass.)
  *   [5]  +0x14: Panel slot                  (0x454A60, inherited)
  *   [6]  +0x18: Panel::Init                 (0x454680, inherited)
  *   [7]  +0x1C: Entity::StopSound           (0x405A20, inherited)
@@ -48,10 +54,13 @@
  *   [14] +0x38: Entity::SetAnimState        (0x405A50, inherited)
  *   [15] +0x3C: GameView::cleanup           (0x42CDD0)
  *   [16] +0x40: Panel::HandleKey            (0x454AE0, inherited)
- *   [17] +0x44: GameView-family slot        (0x42D6B0, not covered here —
- *               formerly misattributed to Town::postcard_command_handler;
- *               its only xref is this vtable slot, so it is GameView's own
- *               method, deferred to a follow-up pass)
+ *   [17] +0x44: HitTestChild                  (0x42D6B0 — per-child hit-test/
+ *               zoom callback, overriding Panel::HitTestChild; dispatched
+ *               ONLY from Panel::HitTestChildren's own +0xD0 child loop
+ *               (game/Panel.cpp) — confirmed via its sole xref being this
+ *               DATA vtable slot, with zero direct call sites of its own.
+ *               Formerly misattributed to Town::postcard_command_handler
+ *               (a doubly wrong name: no postcards, no WM_COMMAND))
  *   [18] +0x48: GameView-family slot        (0x44EF00, not covered here)
  *   [19] +0x4C: GameView-family slot        (0x42D760, not covered here)
  *   [20] +0x50: update_cursor_child            (0x42D770 — per-child cursor-
@@ -65,12 +74,16 @@
  * "Draw 0x42F900" and "method_13 0x42D840" — none of those addresses
  * are referenced anywhere; the verified layout above replaces them.
  *
- * town/Town.h documents its own (independently-evidenced, narrower) field
- * model for +0x88..+0x1B8 for the methods that stay on Town this pass
- * (handle_tile_click, postcard_command_handler) — those methods show the
- * SAME "ECX = bare immediate 0x4852A0" receiver evidence as this class
- * and are very likely GameView's own methods too, but are deliberately
- * left on Town as a documented follow-up (see town/Town.h's own note).
+ * handle_tile_click (0x42CE10) and HitTestChild (0x42D6B0, formerly
+ * "Town::postcard_command_handler") were moved here from town/Town.h in a
+ * later pass: handle_tile_click's sole caller (GameLoop_PostSetupBootstrap,
+ * 0x45DF32) loads ECX with the bare immediate 0x4852A0 before calling it,
+ * and HitTestChild's sole xref is the DATA reference at this class's own
+ * vtable slot [17] (0x477D74) — stronger evidence still, since it has no
+ * direct call sites of its own at all. town/Town.h's own field model for
+ * +0x88..+0x1B8 was built from these same two functions under the wrong-
+ * class assumption and has been corrected here; see town/Town.h's note on
+ * what remains there.
  */
 
 #pragma once
@@ -95,8 +108,8 @@ public:
     /*   selected_building   +0xE0                                       */
     /*   embedded Entity     +0xE4..+0x16B (constructed by 0x405790)     */
     /*   selected_building_type +0x16C                                   */
-    /*   +0x170..+0x177     unmodeled tail (not touched by this pass's   */
-    /*                      methods — see handle_tile_click, deferred)   */
+    /*   cursor_valid_sprite   +0x170  (handle_tile_click, res 0x3807)   */
+    /*   cursor_invalid_sprite +0x174  (handle_tile_click, res 0x3808)   */
     /*   track_piece         +0x178                                      */
     /*   overlay_panel       +0x17C                                      */
     /*   backup_surface/x/y/width +0x180..+0x18C                        */
@@ -125,8 +138,14 @@ public:
 
     uint16_t selected_building_type; /* +0x16C  tile type of selected_building */
 
-    /* +0x170..+0x177: unmodeled (handle_tile_click's cursor sprites,
-       deferred — see class doc comment). */
+    /* Placement cursor indicator sprites, created by handle_tile_click
+     * (0x42CE10). Also duplicated into the inherited Panel members
+     * enter_zoom_child/escape_zoom_child (+0xD8/+0xDC, game/Panel.h) for
+     * Panel::HandleKey's Enter/Escape keyboard shortcuts — same TrackPiece
+     * objects, two independent consumers (mouse-driven HitTestChild here,
+     * keyboard-driven HandleKey there). */
+    TrackPiece* cursor_valid_sprite;    /* +0x170  valid-placement cursor (res 0x3807) */
+    TrackPiece* cursor_invalid_sprite;  /* +0x174  invalid-placement cursor (res 0x3808) */
 
     TrackPiece* track_piece;         /* +0x178  cursor/zoom control for the
                                          selected building (set_building) */
@@ -136,12 +155,11 @@ public:
      * it to UIPANEL_Blit), but kept as ResourceObject* to match the
      * already-integrated cleanup() below and the same generic
      * resource-handle idiom used throughout this codebase for
-     * resource-shaped objects (see resources/ResourceManager.cpp).
-     * Cast at the two Blit-shaped use sites via the same
-     * UIPANEL_SurfaceView mirror town/Town.cpp already uses for this
-     * exact field on this exact object (pre-existing, documented
-     * LOCOBITMAP.h PostcardAlbum-conflict workaround -- see Town.h's
-     * overlay_panel comment). */
+     * resource-shaped objects (see resources/ResourceManager.cpp). Cast
+     * at each Blit-shaped/construction use site via this file's own
+     * UIPANEL_SurfaceView mirror (pre-existing, documented LOCOBITMAP.h
+     * PostcardAlbum-conflict workaround — see the forward-declaration
+     * comment on core/GameView.cpp's own `struct UIPANEL_Surface;`). */
     ResourceObject* overlay_panel;   /* +0x17C, released by cleanup() */
 
     /* Backup surface data — background restore on deselect. */
@@ -324,6 +342,55 @@ public:
      * Counts down child->prev_frame and fires zoom/deselect transitions.
      */
     uint8_t update_cursor_child(TrackPiece* child);
+
+    /**
+     * handle_tile_click — Create placement cursor indicator sprites.
+     * Address: 0x42CE10 (MISNAMED: not a click handler).
+     *
+     * Creates 3 TrackPiece child sprites via the inherited
+     * Panel::CreateChildSprite (0x4546D0): valid=res 0x3807
+     * (-> cursor_valid_sprite +0x170, duplicated into enter_zoom_child
+     * +0xD8), invalid=res 0x3808 (-> cursor_invalid_sprite +0x174,
+     * duplicated into escape_zoom_child +0xDC), hover=res 0x3806
+     * (-> track_piece +0x178, no duplicate). Loads animation resource
+     * 0x3805 on `this` via the inherited Panel::Init (vtable[6]) and 0x3804
+     * on the embedded game_object_sub via Entity::InitBase (its own
+     * vtable[6] — confirmed embedded-object idiom: the original disassembly
+     * loads ECX with `LEA ECX,[this+0xE4]`, the sub-object's own address,
+     * and EDX with `MOV EDX,[this+0xE4]`, its vtable pointer — a normal
+     * virtual call on the embedded Entity, not a pointer-field dereference).
+     * Creates the overlay UIPANEL_Surface at overlay_panel (+0x17C) sized
+     * from game_object_sub.resource's own UIPANEL_Surface (+0x124, i.e.
+     * game_object_sub's Entity::resource) and initializes the backup rect
+     * (+0x180) from it. Returns 1 on success, 0 if any resource/animation
+     * load fails.
+     *
+     * Called by: GameLoop_PostSetupBootstrap (0x45DF32), ECX = bare
+     * immediate 0x4852A0 — its sole xref, and currently unimplemented in
+     * this tree (see core/GameView.cpp's own note on why this makes the
+     * function's real-world callers zero today).
+     */
+    char handle_tile_click();
+
+    /**
+     * HitTestChild — vtable[17] (+0x44). Address: 0x42D6B0. Overrides
+     * Panel::HitTestChild.
+     *
+     * Per-child hit-test/zoom callback dispatched from
+     * Panel::HitTestChildren's own +0xD0 child loop (game/Panel.cpp),
+     * itself reached (non-virtually) from this class's own vtable[4]
+     * override (0x42D670, not yet reconstructed). Tests `child->PtInRect
+     * (x, y)`; if hit, dispatches on child->resource->resource_id: 0x3806
+     * (hover) and 0x3808 (invalid) share the same "zoom 1 -> SetZoom(2),
+     * prev_frame=6" transition; 0x3807 (valid) instead toggles the DDraw
+     * building selection (DDRAW_Building::SelectBuilding) based on
+     * child->zoom_level, bypassing the zoom transition entirely. Returns 0
+     * if `control` is null, not render_enabled (+0x56), or not hit; 1
+     * otherwise. Formerly misattributed to Town::postcard_command_handler
+     * — wrong on both halves of that name (no postcards, no WM_COMMAND;
+     * wParam/lParam are screen x/y, not message params).
+     */
+    uint8_t HitTestChild(TrackPiece* control, int x, int y) override;
 };
 
 /* ================================================================== */

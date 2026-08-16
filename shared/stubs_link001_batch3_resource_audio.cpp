@@ -78,22 +78,24 @@ void RESDATA_Unlock(void* ptr)
 /* RESDATA_CreateChildSprite (extern "C" shape)                        */
 /* Address: 0x4546D0                                                   */
 /*                                                                     */
-/* town/Town.cpp declares this INSIDE an `extern "C" { ... }` block     */
-/* (town/Town.cpp:115-117), needing the plain unmangled symbol          */
-/* "RESDATA_CreateChildSprite" (confirmed via `nm build/lego_loco.p/    */
-/* town_Town.cpp.o` -> `U RESDATA_CreateChildSprite`, no mangling).      */
+/* Originally added for town/Town.cpp's own `extern "C"`-block          */
+/* declaration, needing the plain unmangled symbol                      */
+/* "RESDATA_CreateChildSprite" (confirmed via `nm` — no mangling).       */
 /* shared/defsym_stubs.cpp already stubs a C++-*mangled* overload of    */
 /* this same name/shape (`_Z25RESDATA_CreateChildSpritePvS_ii`) — a      */
-/* DIFFERENT linker symbol, so it does not satisfy Town.cpp's need;      */
-/* this is not a duplicate.                                             */
+/* DIFFERENT linker symbol; this is not a duplicate.                    */
 /*                                                                       */
-/* That existing C++ overload's doc comment independently verified zero */
-/* real callers of Town::handle_tile_click() anywhere in the tree; a     */
-/* fresh grep here confirms the same for the extern "C" shape (the only */
-/* two hits for "handle_tile_click" outside town/Town.cpp itself are     */
-/* comments in ui/UI_ChildWindow.cpp and shared/defsym_stubs.cpp, no     */
-/* actual call site). Mirrors that file's own precedent: loud stub,      */
-/* assert(0), not a silent nullptr — a future caller must fail loudly.   */
+/* Town::handle_tile_click (the sole reason this extern "C" declaration */
+/* existed) has since been moved to GameView::handle_tile_click          */
+/* (core/GameView.h/.cpp), which routes through the real, fully-         */
+/* implemented Panel::CreateChildSprite (game/Panel.cpp) instead of this */
+/* free-function shape entirely. A tree-wide grep confirms zero          */
+/* remaining callers of this exact extern "C" symbol shape anywhere —    */
+/* even stronger than the previous "Town::handle_tile_click has zero     */
+/* callers" justification. Kept as a loud stub (not removed) since        */
+/* symbol-level dead code isn't proof no other TU still declares/links    */
+/* against this exact shape; assert(0), not a silent nullptr, so a        */
+/* future caller fails loudly rather than reading garbage.                */
 /* ================================================================== */
 extern "C" void* RESDATA_CreateChildSprite(void* parent, void* res, int x, int y)
 {
@@ -103,11 +105,13 @@ extern "C" void* RESDATA_CreateChildSprite(void* parent, void* res, int x, int y
     (void)y;
     std::fprintf(stderr,
         "STUB: RESDATA_CreateChildSprite(void*, void*, int, int) [extern \"C\" shape] "
-        "reached at %s:%d — 0x4546D0, verified unreachable today (Town::handle_tile_click "
-        "has zero callers in this tree), but must not silently return garbage if that "
-        "changes.\n", __FILE__, __LINE__);
+        "reached at %s:%d — 0x4546D0, verified unreachable today (its only historical "
+        "caller, Town::handle_tile_click, moved to GameView::handle_tile_click and now "
+        "uses the real Panel::CreateChildSprite instead), but must not silently return "
+        "garbage if that changes.\n", __FILE__, __LINE__);
     assert(0 && "stub reached — RESDATA_CreateChildSprite (extern \"C\" shape), 0x4546D0, "
-                "verified unreachable via Town::handle_tile_click");
+                "verified unreachable: its only historical caller moved to "
+                "GameView::handle_tile_click / Panel::CreateChildSprite");
     return nullptr;
 }
 
