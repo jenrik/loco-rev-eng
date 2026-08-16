@@ -22,7 +22,6 @@ void   __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 void*  __cdecl operator_new(size_t size);                     /* 0x465CE0 */
 void*  __thiscall ResourceManager_GetById(void* mgr, int32_t resId); /* 0x446EA0 */
 
-void*  CRT_wcsstr(const void* haystack, const void* needle);
 void   WNDPROC_EnterCriticalSection(void* cs);
 void   WNDPROC_LeaveCriticalSection(void* cs);
 void   WNDPROC_StreamSeekForward(void* stream, void* buf, int32_t size, int ch);
@@ -38,6 +37,42 @@ void*  CRT_fabs(void* stream, void* outBuf);
 /* GetResourceType has plain C++ linkage (resources/ResourceManager.h) —
  * declared outside the extern "C" block above, not inside it. */
 extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
+
+/* CRT_wcsstr — real address 0x471480, Ghidra's stale auto-name (it is NOT
+ * a wide-string search: disassembly shows a byte-wise, uppercase-
+ * normalizing compare loop terminating on NUL/mismatch, i.e. the genuine
+ * CRT `_stricmp`/`strcasecmp`, returning 0 for "equal, case-insensitively"
+ * and nonzero otherwise). Confirmed directly against ChildWindow::Render's
+ * own disassembly (0x424E00): every call site here is `CALL 0x471480;
+ * TEST EAX,EAX; J[N]Z ...`, taking the "matched keyword" path precisely
+ * when EAX == 0 (e.g. 0x424E43-0x424E4D for the terminator check,
+ * 0x424E6D-0x424E77 for "button").
+ *
+ * FIXED 2026-08-16 (live call-0 landmine): this was previously declared
+ * `void* CRT_wcsstr(const void*, const void*)` INSIDE the extern "C" block
+ * above. C linkage discards parameter/return types from the link-time
+ * symbol name, so that declaration collapsed onto the bare, unmangled
+ * `CRT_wcsstr` symbol — which resolves to shared/defsym_stubs.cpp's
+ * zero-argument, void-returning inert filler stub
+ * (`extern "C" void CRT_wcsstr() { }`), not any real string-compare body.
+ * Every one of this function's ~16 call sites below was therefore calling
+ * a mismatched-arity C function through a stale prototype: both real
+ * arguments were silently dropped and the "return value" tested afterward
+ * was uninitialized/garbage in EAX — i.e. this entire `.dat`/descriptor
+ * line-directive parser was undefined-behavior-driven, not merely
+ * degraded, before this fix.
+ *
+ * The correct real implementation (case-fold 3-way compare via
+ * `strcasecmp`, matching 0x471480's semantics) is defined in shared/
+ * stubs_link001_batch1_crt_win32.cpp under PLAIN C++ linkage with this
+ * exact `(uint8_t*, uint8_t*)` signature — matching that signature exactly
+ * here (rather than reintroducing a differently-shaped overload) is what
+ * makes this declaration bind to that real body instead of either the
+ * defsym_stubs.cpp no-op or shared/stubs_impl.cpp's own differently-typed
+ * (and separately known-broken, substring-only) `CRT_wcsstr(const char*,
+ * const char*)` overload (see PROGRESS.md's tracked "wrong semantic"
+ * item) — neither of those is the target here. */
+uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
 /* ResourceManager_GetStringById/RESMGR_LoadSoundResource/
  * RESMGR_ReleaseSoundResource: same extern-"C"-linkage landmine as
@@ -183,6 +218,27 @@ uint8_t childwindow_stream_flags(void* stream)
     int32_t slot1  = *reinterpret_cast<int32_t*>(static_cast<intptr_t>(vtable) + 4);
     return *reinterpret_cast<uint8_t*>(
         static_cast<intptr_t>(slot1) + 8 + reinterpret_cast<intptr_t>(stream));
+}
+
+/* Case-fold 3-way keyword compare used by Render()'s directive loop below.
+ * Thin wrapper around the real CRT_wcsstr (0x471480 == _stricmp; see the
+ * declaration's doc comment above) — its verified real signature takes raw
+ * `uint8_t*` (non-const) byte pointers rather than the `const char*` this
+ * file's own line buffer/keyword literals naturally are, so the pointer
+ * cast is centralized here instead of being repeated at all ~16 call
+ * sites below. Returns 0 for "line equals keyword, case-insensitively",
+ * nonzero otherwise — the exact same real-function contract, just
+ * correctly typed/linked; no directional change from the original
+ * `== nullptr` / `!= nullptr` idiom this file used before the fix. */
+int ChildWindow_KeywordCompare(const char* line, const char* keyword)
+{
+    // ABI_BOUNDARY: CRT_wcsstr (0x471480) is a raw CRT byte-string compare
+    // entry point matching the original MSVC CRT's non-const uint8_t*
+    // prototype; the real implementation only ever reads through both
+    // pointers, never writes.
+    return static_cast<int>(CRT_wcsstr(
+        reinterpret_cast<uint8_t*>(const_cast<char*>(line)),
+        reinterpret_cast<uint8_t*>(const_cast<char*>(keyword))));
 }
 
 } // namespace
@@ -435,18 +491,18 @@ uint8_t ChildWindow::Render(void* stream)
     /* Main directive loop: continues while the current line is NOT the
      * terminator ("-9" — CRT_wcsstr's inverted-match convention, already
      * documented in input/BuildingDescriptorEditor.cpp and
-     * game/TrainStation.cpp: a MATCH returns NULL) and the stream's own
+     * game/TrainStation.cpp: a MATCH returns 0) and the stream's own
      * "ended" bit (0x1) is not set. */
-    while (CRT_wcsstr(lineBuf, s_terminator) != nullptr &&
+    while (ChildWindow_KeywordCompare(lineBuf, s_terminator) != 0 &&
            (childwindow_stream_flags(stream) & 0x1) == 0) {
-        if (CRT_wcsstr(lineBuf, s_button) == nullptr) {
+        if (ChildWindow_KeywordCompare(lineBuf, s_button) == 0) {
             void* const s1 = WNDPROC_StreamReadLine(stream, &buttonParam1);
             void* const s2 = WNDPROC_StreamReadLine(s1, &buttonParam2);
             WNDPROC_StreamPrintf(s2, &frameCount);
             if (frameCount == 0) {
                 frameCount = 3;
             }
-        } else if (CRT_wcsstr(lineBuf, s_Name) == nullptr) {
+        } else if (ChildWindow_KeywordCompare(lineBuf, s_Name) == 0) {
             readLineRaw();
             /* Source is lineBuf+1, not lineBuf+0 — matches the original's
              * `_strncpy(this+0x14D, local_21b, 10)`, where local_21b is
@@ -468,36 +524,36 @@ uint8_t ChildWindow::Render(void* stream)
                     name[len - 1] = '\0';
                 }
             }
-        } else if (CRT_wcsstr(lineBuf, s_hotspot) == nullptr) {
+        } else if (ChildWindow_KeywordCompare(lineBuf, s_hotspot) == 0) {
             WNDPROC_StreamReadLine(stream, &hotspotX);
             WNDPROC_StreamReadLine(stream, &hotspotY);
-        } else if (CRT_wcsstr(lineBuf, s_ShadowId) == nullptr) {
+        } else if (ChildWindow_KeywordCompare(lineBuf, s_ShadowId) == 0) {
             WNDPROC_StreamWrite(stream, &shadowId);
-        } else if (CRT_wcsstr(lineBuf, s_ShadowOffset) == nullptr) {
+        } else if (ChildWindow_KeywordCompare(lineBuf, s_ShadowOffset) == 0) {
             WNDPROC_StreamWrite(stream, &shadowOffsetX);
             WNDPROC_StreamWrite(stream, &shadowOffsetY);
-        } else if (CRT_wcsstr(lineBuf, s_animation) != nullptr) {
+        } else if (ChildWindow_KeywordCompare(lineBuf, s_animation) != 0) {
             /* NOTE: inverted polarity vs every other keyword check in this
              * function — preserved verbatim from disassembly. "animation"
              * itself is a recognized-but-otherwise-inert section marker;
              * every keyword below is only checked on lines that are NOT
              * literally "animation" (i.e. this whole nested cascade is
              * skipped for a bare "animation" line). */
-            if (CRT_wcsstr(lineBuf, s_semi_transparent) == nullptr) {
+            if (ChildWindow_KeywordCompare(lineBuf, s_semi_transparent) == 0) {
                 animFlags |= 0x400;
-            } else if (CRT_wcsstr(lineBuf, s_shadows) == nullptr) {
+            } else if (ChildWindow_KeywordCompare(lineBuf, s_shadows) == 0) {
                 animFlags |= 2;
-            } else if (CRT_wcsstr(lineBuf, s_must_cant_have) == nullptr) {
+            } else if (ChildWindow_KeywordCompare(lineBuf, s_must_cant_have) == 0) {
                 void* const s1 = WNDPROC_StreamWrite(stream, &depResourceId1);
                 WNDPROC_StreamWrite(s1, &depResourceId2);
-            } else if (CRT_wcsstr(lineBuf, s_MaxInstances) == nullptr) {
+            } else if (ChildWindow_KeywordCompare(lineBuf, s_MaxInstances) == 0) {
                 CRT_fabs(stream, &maxInstances);
-            } else if (CRT_wcsstr(lineBuf, s_total_number_of_frames) == nullptr) {
+            } else if (ChildWindow_KeywordCompare(lineBuf, s_total_number_of_frames) == 0) {
                 WNDPROC_StreamPrintf(stream, &totalFrameCount);
                 if (totalFrameCount == 0) {
                     totalFrameCount = 1;
                 }
-            } else if (CRT_wcsstr(lineBuf, s_number_of_frame_sets) == nullptr) {
+            } else if (ChildWindow_KeywordCompare(lineBuf, s_number_of_frame_sets) == 0) {
                 WNDPROC_StreamPrintf(stream, &frameSetCount);
                 if (frameSetCount != 0) {
                     void* const alloc = operator_new(static_cast<size_t>(frameSetCount) * 0x18);
@@ -511,9 +567,9 @@ uint8_t ChildWindow::Render(void* stream)
                 }
             } else {
                 const bool matchesCursorFrameSet =
-                    CRT_wcsstr(lineBuf, s_cursor_frame_set) == nullptr;
+                    ChildWindow_KeywordCompare(lineBuf, s_cursor_frame_set) == 0;
                 const bool matchesDefaultFrameSet =
-                    CRT_wcsstr(lineBuf, s_cursor_default_frame_set) == nullptr;
+                    ChildWindow_KeywordCompare(lineBuf, s_cursor_default_frame_set) == 0;
                 if (!matchesCursorFrameSet && !matchesDefaultFrameSet) {
                     /* Neither "cursor_frame_set" nor
                      * "cursor/default_frame_set" matched — this line is
@@ -597,7 +653,7 @@ uint8_t ChildWindow::Render(void* stream)
      * the stream-ended bit rather than a genuine terminator match — mark
      * as failure (matches every sibling Render override's identical
      * post-loop check). */
-    if (CRT_wcsstr(lineBuf, s_terminator) != nullptr) {
+    if (ChildWindow_KeywordCompare(lineBuf, s_terminator) != 0) {
         result = 0;
     }
 

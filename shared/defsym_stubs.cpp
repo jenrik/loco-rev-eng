@@ -183,8 +183,17 @@ void Panel_DtorBody() { /* host no-op */ }
 /* CRT_localtime(): this 0-arg landmine collided with shared/link_stubs.cpp's
  * real (unsigned int*) -> void* body (LINK-001); removed — link_stubs.cpp's
  * survives. */
-void CRT_wcsstr();
-void CRT_wcsstr() { /* host no-op */ }
+/* CRT_wcsstr() (0-arg, extern "C") removed 2026-08-16: this exact same
+ * call-0 landmine collided with every extern "C" CRT_wcsstr declaration
+ * across the tree (game/Building.cpp, game/TrainStation.cpp,
+ * ui/UI_ChildWindow.cpp, input/BuildingDescriptorEditor.cpp — all fixed
+ * this session, see PROGRESS.md's 2026-08-16 CRT_wcsstr entry), silently
+ * dropping both real arguments and returning garbage at every one of
+ * their ~44 combined call sites. Those four files now declare it with
+ * plain (non-extern "C") C++ linkage matching the real implementation in
+ * shared/stubs_link001_batch1_crt_win32.cpp, so this bare-symbol filler
+ * is no longer needed and removing it prevents a future extern "C"
+ * redeclaration from silently re-arming the same trap. */
 void GameObject_GetBoundingRect();
 void GameObject_GetBoundingRect() { /* host no-op */ }
 void TileMap_GetObjectAt();

@@ -73,7 +73,6 @@ extern "C" {
     void  WNDPROC_EnterCriticalSection(void* cs);
     void  WNDPROC_LeaveCriticalSection(void* cs);
     void* _CrtDbg_report_fmt_helper(void* buf, const void* fmt); /* sscanf-shaped; identity unresolved, see TODO above */
-    void* CRT_wcsstr(const void* haystack, const void* needle);
     int   CRT_mbstowcs_s(void* buf, const void* dst, int n);     /* TODO: identity unresolved — see .h comment on field_28 */
     void  CRT_fmod(void* stream, void* outByte);                 /* TODO: identity unresolved — likely misdecompiled */
     void* CRT_fabs(void* a, void* b);                            /* TODO: identity unresolved — likely misdecompiled */
@@ -95,6 +94,29 @@ extern void WNDPROC_CriticalSectionLock(int* stream, char* buf);
 void* WNDPROC_StreamPrintf(void* stream, void* outBuf);
 void  WNDPROC_StreamReadLine(void* stream, void* outBuf);
 void* WNDPROC_StreamWrite(void* stream, void* outBuf);
+
+/* CRT_wcsstr (0x471480) — LINK-001 fix. This file's previous declaration
+ * (`void* CRT_wcsstr(const void*, const void*);`) lived INSIDE the extern
+ * "C" block above. C linkage does not encode parameter types in the link
+ * symbol, so it collapsed onto the bare `CRT_wcsstr` symbol — which
+ * shared/defsym_stubs.cpp binds to a zero-argument, void-returning inert
+ * no-op stub (`void CRT_wcsstr() { }`), intended as filler for unrelated
+ * dead symbols. Every one of this file's ~16 call sites below was
+ * therefore silently dropping both real arguments and testing garbage in
+ * the return register against nullptr — this parser was non-functional /
+ * UB-driven on this build before this fix.
+ *
+ * The real function at 0x471480 is a byte-wise, case-folding compare
+ * loop terminating on NUL or first mismatch, returning 0 for "equal"
+ * (case-insensitive), nonzero otherwise — real CRT `_stricmp`/
+ * `strcasecmp` semantics, despite the misleading Ghidra-assigned
+ * "wcsstr" name (it is not a substring search and does not operate on
+ * wide characters). shared/stubs_link001_batch1_crt_win32.cpp already
+ * provides the correct, plain (non-extern "C") C++-linkage body for
+ * this exact (uint8_t*, uint8_t*) overload — declared here with the
+ * identical (non-extern "C") signature so this file's calls bind to
+ * that real implementation instead of the dead-symbol stub. */
+extern uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
 /* WIN32_MemoryStream_Size() (resources/Win32StreamMem.h, included above)
  * is used below to size the WNDPROC_StreamFromMemory allocation — x86
@@ -341,6 +363,22 @@ bool dat_stream_state_ok(void* stream)
     return (flags & 7) == 0;
 }
 
+/* Adapts this file's char* line buffer / keyword string literals to the
+ * real CRT_wcsstr(0x471480)'s uint8_t* byte-string signature, and its
+ * real _stricmp-style 3-way return (0 == equal, case-insensitive) to a
+ * plain bool "is this keyword" test — matching every one of this
+ * function's decompiled `CRT_wcsstr(line, keyword) == 0` branches
+ * (see shared/stubs_link001_batch1_crt_win32.cpp's doc comment on this
+ * same real function for the verified semantics).
+ * ABI_BOUNDARY: byte-string CRT comparison over plain char buffers, not
+ * a game-object cast — ordinary case-insensitive keyword matching. */
+bool line_is_keyword(const char* line, const char* keyword)
+{
+    return CRT_wcsstr(
+        reinterpret_cast<uint8_t*>(const_cast<char*>(line)),
+        reinterpret_cast<uint8_t*>(const_cast<char*>(keyword))) == 0;
+}
+
 } // namespace
 
 uint8_t BuildingDescriptorEditor::Render(void* stream)
@@ -358,9 +396,9 @@ uint8_t BuildingDescriptorEditor::Render(void* stream)
      * marker string, which would make the wcsstr test tautologically
      * true) so only the identified stream-state check is preserved. */
     while (dat_stream_state_ok(stream)) {
-        if (CRT_wcsstr(lineBuf, s_physical_occupancy) == nullptr) {
+        if (line_is_keyword(lineBuf, s_physical_occupancy)) {
             draw_border_grid(stream);
-        } else if (CRT_wcsstr(lineBuf, s_bitmap_occupancy) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_bitmap_occupancy)) {
             uint16_t tmpW = 0, tmpH = 0;
             void* p = WNDPROC_StreamPrintf(stream, &tmpW);
             WNDPROC_StreamPrintf(p, &tmpH);
@@ -383,13 +421,13 @@ uint8_t BuildingDescriptorEditor::Render(void* stream)
                     cell = cell + 1;
                 }
             }
-        } else if (CRT_wcsstr(lineBuf, s_entry_exit) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_entry_exit)) {
             paint_edit_regions(stream);
-        } else if (CRT_wcsstr(lineBuf, s_RMBSeq) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_RMBSeq)) {
             WNDPROC_StreamReadLine(stream, &this->rmb_seq);
-        } else if (CRT_wcsstr(lineBuf, s_ClosedFS) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_ClosedFS)) {
             WNDPROC_StreamReadLine(stream, &this->closed_fs);
-        } else if (CRT_wcsstr(lineBuf, s_EEReplayDelay) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_EEReplayDelay)) {
             WNDPROC_StreamWrite(stream, &this->ee_replay_delay_data);
         } else if (CRT_mbstowcs_s(lineBuf, nullptr, 4) == 0) {
             uint16_t v = 0;
@@ -398,18 +436,18 @@ uint8_t BuildingDescriptorEditor::Render(void* stream)
             if (this->ee_replay_delay > 5) {
                 this->ee_replay_delay = 5;
             }
-        } else if (CRT_wcsstr(lineBuf, s_LeisureDestination) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_LeisureDestination)) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
             this->leisure_destination = static_cast<uint8_t>(v);
-        } else if (CRT_wcsstr(lineBuf, s_MaxEmployees) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_MaxEmployees)) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
             this->max_employees = static_cast<uint8_t>(v);
             if (this->max_employees > 5) {
                 this->max_employees = 5;
             }
-        } else if (CRT_wcsstr(lineBuf, s_PossibleEmployees) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_PossibleEmployees)) {
             for (int i = 0; i < 5; ++i) {
                 WNDPROC_StreamReadLine(stream, &this->possible_employees[i]);
                 UINT type = GetResourceType(static_cast<UINT>(this->possible_employees[i]));
@@ -421,7 +459,7 @@ uint8_t BuildingDescriptorEditor::Render(void* stream)
                     }
                 }
             }
-        } else if (CRT_wcsstr(lineBuf, s_PossibleMinifigs) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_PossibleMinifigs)) {
             minifigsFound = 0;
             for (int i = 0; i < 5; ++i) {
                 WNDPROC_StreamReadLine(stream, &this->possible_minifigs[i]);
@@ -435,19 +473,19 @@ uint8_t BuildingDescriptorEditor::Render(void* stream)
                     ++minifigsFound;
                 }
             }
-        } else if (CRT_wcsstr(lineBuf, s_shifts) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_shifts)) {
             /* Reads 4 longs for logging/validation only — the decompiled
              * body never stores them into `this`. */
             WNDPROC_EnterCriticalSection(stream);
             WNDPROC_StreamSeekForward(stream, lineBuf, 0x104, 10);
             WNDPROC_LeaveCriticalSection(stream);
             _CrtDbg_report_fmt_helper(lineBuf, "%ld %ld %ld %ld");
-        } else if (CRT_wcsstr(lineBuf, s_FreeToRoam) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_FreeToRoam)) {
             WNDPROC_StreamWrite(stream, &this->free_to_roam_rect.left);
             WNDPROC_StreamWrite(stream, &this->free_to_roam_rect.top);
             WNDPROC_StreamWrite(stream, &this->free_to_roam_rect.right);
             WNDPROC_StreamWrite(stream, &this->free_to_roam_rect.bottom);
-        } else if (CRT_wcsstr(lineBuf, s_ButtonVisible) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_ButtonVisible)) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
             /* ButtonVisible writes to the same offset ChildWindow's `ready`
@@ -455,11 +493,11 @@ uint8_t BuildingDescriptorEditor::Render(void* stream)
              * it; the .dat directive and the inherited flag are the same
              * storage. */
             this->ready = static_cast<uint8_t>(v);
-        } else if (CRT_wcsstr(lineBuf, s_InsertSeq) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_InsertSeq)) {
             edit_key_handler_parse(stream, &this->insert_seq);
-        } else if (CRT_wcsstr(lineBuf, s_MobileSeq) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_MobileSeq)) {
             edit_key_handler_parse(stream, &this->mobile_seq);
-        } else if (CRT_wcsstr(lineBuf, s_TotalVisits) == nullptr) {
+        } else if (line_is_keyword(lineBuf, s_TotalVisits)) {
             edit_key_handler_parse(stream, &this->total_visits);
         } else {
             keepProcessing = false;
