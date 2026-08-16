@@ -96,8 +96,30 @@ saves `g_primary_surface` into `cursorBackSurface`, not the reverse;
 independently re-verified (not the "false lead" some had worried about)
 via full ESP-relative disassembly of its `EndPaintEx` call site. See
 PROGRESS.md's 2026-08-16 `endpaintex-render-integration` entry for the
-full writeup. `world/tilemap.cpp` also has raw vtable dispatch on
-`g_primary_surface`, not yet examined at all.
+full writeup.
+
+**Resolved (2026-08-16, later still)**: `input/Cursor.h`'s field-overlay
+accessors were audited for pointer-overrun bugs surfaced by the above
+(several alias 8-byte pointer types over base storage that was only ever
+4 bytes on the 32-bit original) — six genuine overruns found and fixed
+with independent `Cursor`-only storage. See PROGRESS.md's 2026-08-16
+`cursor-overlay-accessor-overrun-survey` entry.
+
+**Resolved (2026-08-16, later still)**: `world/tilemap.cpp`'s raw vtable
+dispatch on `g_primary_surface` (`TileMap_LockPrimarySurface`/
+`TileMap_UnlockPrimarySurface`) converted to typed `IDirectDrawSurface4::
+Lock`/`Unlock` calls — the file's own `TODO(integration)` note. See
+PROGRESS.md's 2026-08-16 `tilemap-lock-unlock-typed-dispatch` entry.
+
+**Current status of this whole cluster**: every raw vtable-slot-literal
+dispatch site on `g_primary_surface`/`g_backbuffer` tracked in this
+document is now converted to typed calls. The **only remaining blocker**
+is the original one: `g_primary_surface`/`g_backbuffer` themselves are
+still unwired (null), and `Sdl3DirectDrawSurface::GetDC` is still a
+permanent no-op — a real GDI device-context implementation (or a
+different, non-fatal path for `BeginPaint`'s callers) is still required
+before wiring those globals. That is real, separately-scoped GDI work,
+not a mechanical follow-up like everything above.
 
 ## Stale, do-not-merge-as-is branches (fetched, not integrated)
 
@@ -163,13 +185,14 @@ work to merge. Confirm with the user before reviving any of them.
 1. Real `GetDC` implementation (or a non-fatal path for
    `UI_WindowBase::BeginPaint`'s callers) — required before wiring
    `g_primary_surface`/`g_backbuffer`. This is real, separately-scoped GDI
-   work; do not shortcut it by wiring the globals anyway.
-2. `EndPaintEx`/`Render`'s `this+0x48` field-identity conflict is resolved
-   (see above, 2026-08-16) — remaining follow-up is `world/tilemap.cpp`'s
-   raw vtable dispatch on `g_primary_surface`, not yet examined.
-3. Leave the branches above alone unless the user specifically asks to
+   work; do not shortcut it by wiring the globals anyway. This is now the
+   **only** remaining item in this cluster — every raw vtable-dispatch
+   site this document tracked (`BeginPaint`/`EndPaintEx`/`Render`/
+   `world/tilemap.cpp`'s Lock/Unlock) is converted to typed calls as of
+   2026-08-16.
+2. Leave the branches above alone unless the user specifically asks to
    revive one — confirm which problem they're meant to solve first, since
    the codebase has moved substantially since they were written.
-4. If reviving any of the `pi-fabric` work, first update `devbox/main` to
+3. If reviving any of the `pi-fabric` work, first update `devbox/main` to
    the merged tip (with user confirmation, since it's a push) so future
    parallel sessions don't re-diverge from the stale `5526b16`.
