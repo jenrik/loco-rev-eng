@@ -191,6 +191,17 @@
 #define VTBL_PIXELDATA_CACHE           0x004773E8  /* PixelDataCache vtable        */
 
 /* ================================================================== */
+/* SaveSprite — savegame/backdrop file-list entry (ui/SaveSprite.h)     */
+/* Root class, single-slot vtable (destructor only). Immediately        */
+/* precedes VTBL_UIPANEL_Surface below in the .rdata section -- the two */
+/* are unrelated, adjacent single-entry vtables, NOT one multi-slot     */
+/* table (confirmed by decompiling the dwords following 0x477D24: they  */
+/* belong to UIPANEL_Surface/GameView/GameObject, not SaveSprite).      */
+/* ================================================================== */
+#define VTBL_SAVESPRITE                0x00477D24  /* SaveSprite vtable
+    [0] +0x00: ~SaveSprite (scalar deleting dtor, 0x429830)               */
+
+/* ================================================================== */
 /* UIPANEL_Surface — Embedded offscreen DDraw surface wrapper           */
 /* ================================================================== */
 #define VTBL_UIPANEL_Surface           0x00477D28  /* UIPANEL_Surface vtable      */

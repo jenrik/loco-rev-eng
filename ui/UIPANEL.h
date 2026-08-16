@@ -44,6 +44,7 @@
 
 #include "../game/Panel.h"
 #include "../graphics/LOCOBITMAP.h"   /* for UIPANEL_Surface struct */
+#include "SaveSprite.h"
 
 // Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
@@ -56,15 +57,37 @@ public:
     /* --- Panel / GameObject inherited fields (0x00..0xE3) --- */
     /* See Panel.h and GameObject.h for offsets 0x00-0xD3 */
 
-    /* byte at +0xE0: string/path buffer start (zeroed in ctor) */
-    uint8_t  _pad_E0[0x310];    /* +0xE0..+0x3EF (gap + path buffer) */
+    /* byte at +0xE0: string/path buffer start (zeroed in ctor). +0x1E5
+     * (within this span) stores the backdrop filename set by
+     * UIPANEL::Hide (0x429EF0); not carved out here (out of this pass's
+     * scope). */
+    uint8_t  _pad_E0[0x20A];    /* +0xE0..+0x2E9 */
+
+    /* +0x2EA: save/backdrop full-path scratch buffer (MAX_PATH, 260
+     * bytes), confirmed via disassembly of UIPANEL::InitSprite
+     * (0x429A10, `LEA EBX,[EBP+0x2ea]`), UIPANEL::BlitSprite (0x429B20)
+     * and UIPANEL::BlitSpriteEx (0x429DD0) — all three compose the
+     * final "<install><prefix><name>.bmp" save path into this MEMBER
+     * buffer, not a stack local (only BlitSprite's separate, earlier
+     * directory-existence probe uses a genuine stack buffer). */
+    char     save_path_buf[0x104];           /* +0x2EA..+0x3ED */
+
+    uint8_t  _pad_3EE[2];                     /* +0x3EE..+0x3EF */
 
     /* --- UIPANEL-specific embedded sub-objects --- */
     GameObject        child_sprites;         /* +0x3F0  embedded GameObject acting as sprite manager */
     UIPANEL_Surface   surface_buf;           /* +0x478  embedded offscreen DDraw surface (0x20 bytes) */
 
     /* --- UIPANEL-specific fields --- */
-    int32_t   _field_498;                    /* +0x498  (zeroed in ctor) */
+    /* +0x498: pointer to the RESDATA embedded in the currently-displayed
+     * SaveSprite's `data` member (i.e. `&sprite->data`, NOT the
+     * SaveSprite itself) — set by DrawBorder (0x428400) to
+     * `resource_ptr->data` and compared against `entity->target->data`
+     * in DrawRadioButton (0x428F90). Confirmed by disassembly: DrawBorder
+     * adds +0x50 to its resource_ptr (a SaveSprite*) before both storing
+     * it here and reading +0xB2/+0xB4/+0x1C4 off the stored value (all
+     * real RESDATA/SaveRegion offsets — see shared/types.h). */
+    RESDATA*  save_header;                   /* +0x498  (zeroed in ctor) */
     uint16_t  mode;                          /* +0x49C  tab selection: 0=reset,1=init,2..5=tab index */
 
     /* Sprite pointers — tab buttons and decorations */
@@ -78,12 +101,22 @@ public:
     void*     list_text_sprite;              /* +0x4B8  scrollbar thumb / list text sprite */
     void*     sound_btn_sprite;              /* +0x4BC  sound toggle button sprite */
 
-    /* Content item sprite slots (6 entries) */
+    /* Content item sprite slots (6 entries). Each slot's own +0x30 field
+     * (on that CGWND/TrackPiece-family entity's, as-yet-unmodeled, class
+     * — see UIPANEL::CreateSprite/DrawRadioButton) stores a SaveSprite*
+     * pointing at the file entry currently bound to that slot; typed at
+     * the two touch points that read it (DrawRadioButton, DrawBorder)
+     * without redefining that entity's own class in this pass. */
     void*     item_sprites[6];               /* +0x4C0..+0x4D7  sprites for content list items */
 
-    /* Linked list management */
-    void*     sprite_list_head;               /* +0x4D8  head of file/system sprite linked list */
-    void*     sprite_list_tail;               /* +0x4DC  tail of file/system sprite linked list */
+    /* Linked list management. +0x4DC is not a "tail" in the usual sense
+     * — UIPANEL::CreateSprite (0x429850) stores its own `list_entry`
+     * argument there, i.e. it tracks the anchor/first-displayed node of
+     * the CURRENT 6-item scroll window, not the true list tail. Kept the
+     * existing name (sprite_list_tail) for continuity; see CreateSprite/
+     * BlitSprite for the real usage. */
+    SaveSprite* sprite_list_head;             /* +0x4D8  head of file/system sprite linked list */
+    SaveSprite* sprite_list_tail;             /* +0x4DC  current scroll-window anchor node */
 
     /* ================================================================ */
     /* Constructor / Destructor                                         */

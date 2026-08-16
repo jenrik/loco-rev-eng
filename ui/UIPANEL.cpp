@@ -83,7 +83,7 @@ extern HDC __fastcall UIPANEL_BeginPaint(void* self);
  * note below and PROGRESS.md's 2026-08-16 entry) — not declared here since
  * this file has no callers of its own. */
 extern void __fastcall UIPANEL_CreateSurface(void* surface);                 /* 0x42A110 */
-extern void* __thiscall UIPANEL_CreateSprite(void* panel, void* entry);           /* creates a sprite from file entry */
+extern void __thiscall UIPANEL_CreateSprite(UIPANEL* panel, SaveSprite* entry);   /* 0x429850 -- real return type is void, not void* (fixed: was a call-0-shaped landmine) */
 extern void __fastcall UIPANEL_LockSurface(void* surface);                   /* 0x42A370 */
 /* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
  * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
@@ -109,7 +109,7 @@ extern void __thiscall RESDATA_SoundObject_Init(void* sprite, const char* str); 
 
 /* External functions referenced from UIPANEL drawing */
 class InputMgr;
-extern void __fastcall UIPANEL_DrawEditField(int param_1);                  /* 0x429490 */
+extern uint32_t __fastcall UIPANEL_DrawEditField(UIPANEL* self);            /* 0x429490 */
 extern void INPUT_SaveCurrentWorld(InputMgr* input, const char* name); /* 0x41D9B0 */
 extern void __thiscall RESDATA_GameObject_UpdateAnimation(void* obj);        /* 0x44B810 */
 extern void __fastcall PlaySound(int sound_id);                              /* 0x44A290 */
@@ -182,8 +182,8 @@ UIPANEL::UIPANEL()
 
     /* Step 8: Zero misc fields */
     *(uint8_t*)((intptr_t)this + 0xE0) = 0;     /* +0xE0 -- byte flag / string start */
-    *(uint8_t*)((intptr_t)this + 0x2EA) = 0;    /* +0x2EA -- byte */
-    this->_field_498 = 0;                       /* +0x498 */
+    this->save_path_buf[0] = 0;                 /* +0x2EA -- byte */
+    this->save_header = NULL;                   /* +0x498 */
 }
 
 /* ================================================================== */
@@ -202,19 +202,11 @@ UIPANEL::~UIPANEL()
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Walk the linked list at +0x4D8 and destroy every sprite */
-    void* current = this->sprite_list_head;          /* +0x4D8 */
+    SaveSprite* current = this->sprite_list_head;    /* +0x4D8 */
     while (current != NULL) {
-        void* next = *(void**)((intptr_t)current + 0x22C);  /* linked list next ptr */
+        SaveSprite* next = current->next;            /* +0x22C */
         this->sprite_list_head = next;                /* +0x4D8 */
-
-        if (current != NULL) {
-            /* Call vtable[0] (scalar deleting destructor) with flags=1 */
-            using DtorFunc = void* (__thiscall*)(void* self, byte flags);
-            void** vt = *(void***)current;
-            DtorFunc dtor = (DtorFunc)vt[0];
-            dtor(current, 1);
-        }
-
+        delete current;
         current = this->sprite_list_head;
     }
 
@@ -248,18 +240,11 @@ UIPANEL::~UIPANEL()
 void UIPANEL::ClearChildren()
 {
     /* Walk the linked list at +0x4D8 and destroy every sprite */
-    void* current = this->sprite_list_head;          /* +0x4D8 */
+    SaveSprite* current = this->sprite_list_head;    /* +0x4D8 */
     while (current != NULL) {
-        void* next = *(void**)((intptr_t)current + 0x22C);  /* linked list next ptr */
+        SaveSprite* next = current->next;            /* +0x22C */
         this->sprite_list_head = next;                /* +0x4D8 */
-
-        if (current != NULL) {
-            using DtorFunc = void* (__thiscall*)(void* self, byte flags);
-            void** vt = *(void***)current;
-            DtorFunc dtor = (DtorFunc)vt[0];
-            dtor(current, 1);
-        }
-
+        delete current;
         current = this->sprite_list_head;
     }
 
@@ -535,7 +520,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         if (this->sound_btn_sprite) *(uint8_t*)((intptr_t)this->sound_btn_sprite + 0x56) = 0;
 
         /* Draw edit field and save current world */
-        UIPANEL_DrawEditField((intptr_t)this);
+        UIPANEL_DrawEditField(this);
         INPUT_SaveCurrentWorld(&g_input_mgr, "curr");
         break;
 
@@ -577,7 +562,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with stack buffer (original: CRT_strncat_s on +0xE0 then stack-var) */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -595,27 +580,32 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             char* first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
-            /* Forward scroll: if selection > first visible, scroll forward */
+            /* cmp = StrCmp2Byte(cur_state, first_state) computes strcmp(first_state,
+             * cur_state) (its early-return branch returns the SIGN OF (str2-str1),
+             * i.e. args are effectively swapped) -- so cmp>0 means the first visible
+             * item's name sorts AFTER the current selection: scroll toward EARLIER
+             * entries via ->prev (+0x228). cmp<0 means scroll toward LATER entries
+             * via ->next (+0x22C). Confirmed against ui/SaveSprite.h's independently
+             * derived next/prev direction (see its doc comment). */
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);    /* sprite_list_tail */
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);    /* next link */
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
             }
 
-            /* Backward scroll: if selection < first visible, scroll backward */
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);    /* sprite_list_tail */
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);    /* prev link */
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -661,7 +651,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with stack buffer (original: CRT_strncat_s on +0xE0 then stack-var) */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -680,11 +670,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -693,11 +683,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -743,7 +733,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with empty string (case 4 uses g_empty_string directly) */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -762,11 +752,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -775,11 +765,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -825,10 +815,10 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Draw edit field (scenery/signals has backdrop file picker) */
-        UIPANEL_DrawEditField((intptr_t)this);
+        UIPANEL_DrawEditField(this);
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with empty string */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -847,11 +837,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -860,11 +850,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
