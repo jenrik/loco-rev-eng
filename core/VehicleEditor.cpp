@@ -8,7 +8,6 @@
  */
 
 #include "VehicleEditor.h"
-#include "../game/Building.h"
 #include "../game/GameVehicle.h"
 #include "../game/Vehicle.h"
 #include "../network/DPlayManager.h"
@@ -214,7 +213,13 @@ VehicleEditor::~VehicleEditor()
     }
 
     if (this->target_building != nullptr) {
-        if (static_cast<Building*>(this->target_building)->occupation_level == 0) {
+        /* target_building is a Vehicle* backref (see core/VehicleEditor.h);
+         * a prior pass wrongly cast this to Building* and read
+         * occupation_level, which happens to alias the same +0x88 offset
+         * as Vehicle::init_flag on the real x86 layout — see disassembly
+         * at 0x40D6E4 (`CMP byte[EAX+0x88], 0`) and game/Vehicle.h's
+         * init_flag doc comment (0 = locally-created vehicle). */
+        if (this->target_building->init_flag == 0) {
             TileMap_InvalidateRect(
                 &g_tilemap,
                 this->screen_rect.left,

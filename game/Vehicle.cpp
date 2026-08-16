@@ -359,11 +359,11 @@ bool Vehicle::AddHostNetworkRoute(const DPlayManager& session)
 /* ================================================================== */
 Vehicle::~Vehicle()
 {
-    CleanupChildren(reinterpret_cast<int32_t*>(this));
+    CleanupChildren();
 }
 
 /* ================================================================== */
-/* Vehicle::CleanupChildren — Static cleanup helper                     */
+/* Vehicle::CleanupChildren                                            */
 /* Address: 0x44C0D0                                                    */
 /*                                                                      */
 /* Called by: scalar deleting destructor                                 */
@@ -371,32 +371,35 @@ Vehicle::~Vehicle()
 /* Resets vtable, sends NETMAN ack if not initialized, destroys all     */
 /* VehicleEditor children, destroys editor state sub-object.            */
 /* ================================================================== */
-void __fastcall Vehicle::CleanupChildren(int32_t* object)
+void Vehicle::CleanupChildren()
 {
-    Vehicle* vehicle = reinterpret_cast<Vehicle*>(object);
-    if (g_netman != nullptr && vehicle->init_flag == 0) {
-        NETMAN_ReceiveAck(g_netman, vehicle->player_id,
-                          vehicle->color_r, vehicle->color_g);
+    if (g_netman != nullptr && this->init_flag == 0) {
+        NETMAN_ReceiveAck(g_netman, this->player_id,
+                          this->color_r, this->color_g);
     }
-    const uint16_t count = vehicle->editor_count < 4
-        ? static_cast<uint16_t>(vehicle->editor_count) : 3;
+    const uint16_t count = this->editor_count < 4
+        ? static_cast<uint16_t>(this->editor_count) : 3;
     for (uint16_t index = 0; index <= count; ++index) {
-        VehicleEditor* editor = vehicle->editors[index];
+        VehicleEditor* editor = this->editors[index];
         if (editor == nullptr) continue;
-        // Network-only editors use target_building as their Vehicle backref;
-        // it is not a Building and must not enter Building teardown logic.
-#ifndef _WIN32
-        editor->target_building = nullptr;
-#endif
+        /* target_building (Vehicle* backref, core/VehicleEditor.h) is left
+         * as-is here, matching the original (0x44C0D0 calls the editor's
+         * destructor directly with no field reset first) -- a prior pass
+         * nulled it out here under _WIN32 only, as a workaround for
+         * ~VehicleEditor() wrongly casting this field to Building*. Now
+         * that the destructor reads the real Vehicle::init_flag field
+         * through the correct type (see ~VehicleEditor), that workaround
+         * would just diverge host behavior from the original for no
+         * reason, so it's removed. */
         editor->~VehicleEditor();
         GLOBAL_free(editor);
-        vehicle->editors[index] = nullptr;
+        this->editors[index] = nullptr;
     }
-    vehicle->editor_count = 0;
-    if (vehicle->editor_state != nullptr) {
-        vehicle->editor_state->~EditorState();
-        GLOBAL_free(vehicle->editor_state);
-        vehicle->editor_state = nullptr;
+    this->editor_count = 0;
+    if (this->editor_state != nullptr) {
+        this->editor_state->~EditorState();
+        GLOBAL_free(this->editor_state);
+        this->editor_state = nullptr;
     }
 }
 

@@ -131,7 +131,16 @@ public:
     int32_t   edge_dir_b;         // +0x444  edge direction for end B (0=forward, 1=backward, 2..5=edit edges)
     uint16_t  bound_check_flag;   // +0x448  flag for bound-checking (0/1)
     uint8_t   _pad_44A[2];        // +0x44A
-    void*     target_building;    // +0x44C  building being built/modified (or NULL)
+    /* +0x44C  Backref to the owning Vehicle (or NULL). Written by
+     * Vehicle::Vehicle (0x44BF6D: `MOV [ECX+0x44C], ESI` with ECX = this
+     * editor, ESI = the Vehicle under construction) and Vehicle::InitRoute
+     * (0x44C2C1, identical instruction pattern) whenever the newly
+     * constructed editor's `initialized` flag is set — see game/Vehicle.cpp.
+     * A prior pass mistyped this `void*` and cast it to `Building*` in the
+     * destructor (see ~VehicleEditor below); Building::occupation_level
+     * happens to sit at the same +0x88 offset as Vehicle::init_flag, so
+     * that bug silently read the wrong field instead of crashing. */
+    Vehicle*  target_building;    // +0x44C
 
     /* ================================================================ */
     /* Constructor / Destructor                                          */
@@ -153,6 +162,11 @@ public:
     /**
      * Destructor — releases EditorState objects and DPLAY data.
      * Address: 0x40D680 (body), 0x40D660 (scalar deleting wrapper, vtable[0])
+     *
+     * Also checks the owning Vehicle's init_flag (0x40D6E4:
+     * `CMP byte[EAX+0x88], 0`, EAX = target_building) and invalidates the
+     * editor's screen rect when it is 0 (locally-created vehicle, not a
+     * remote/deferred one — see game/Vehicle.h's init_flag doc comment).
      */
     virtual ~VehicleEditor();
 

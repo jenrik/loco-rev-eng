@@ -197,10 +197,8 @@ public:
      *
      * Resets vtable, sends NETMAN ack if not initialized, destroys all
      * VehicleEditor children, destroys editor state object.
-     *
-     * @param param_1  int* — the Vehicle as int32_t* (used internally by dtor)
      */
-    static void __fastcall CleanupChildren(int32_t* param_1);
+    void CleanupChildren();
 
     /* ================================================================ */
     /* Movement and route management                                      */

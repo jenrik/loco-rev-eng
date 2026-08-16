@@ -760,10 +760,11 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
              *    backref to the owning vehicle — written by
              *    `Vehicle::Vehicle` at 0x44BF6D (`MOV [ECX+0x44C], ESI`,
              *    ECX = editors[0], ESI = the Vehicle being constructed)
-             *    and by `Vehicle::InitRoute` at 0x44C2C1. (The field is
-             *    currently misdeclared `void* target_building` in
-             *    core/VehicleEditor.h as if it held a Building — that
-             *    label is wrong; see report/PROGRESS.md, not fixed here.)
+             *    and by `Vehicle::InitRoute` at 0x44C2C1. (The field was
+             *    previously misdeclared `void* target_building` in
+             *    core/VehicleEditor.h as if it held a Building — retyped
+             *    to `Vehicle*` in a later pass; see that header and
+             *    ~VehicleEditor's fixed destructor.)
              *    This is confirmed independently by every consumer below:
              *    ESI->+0x78/+0x7A match Vehicle::slot_index/network_id
              *    (game/Vehicle.h), and the calls are World_GetObjectAt/
@@ -800,20 +801,19 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
              *       `static_cast<VehicleEditor*>(this->selected_building)`
              *       a legal same-base downcast instead of a cross-cast.
              *   (b) VehicleEditor::target_building retyped void* ->
-             *       Vehicle* (core/VehicleEditor.h) — a separate,
-             *       multi-file landmine sweep: game/Vehicle.cpp has 7
-             *       write sites already relying on the "Vehicle* backref"
-             *       meaning (e.g. its own comment on the assignment
-             *       `editor->target_building = this;`, annotated "backref"),
-             *       while core/VehicleEditor.cpp's
-             *       destructor (~VehicleEditor, body 0x40D680) already
-             *       casts the SAME field to `Building*` and reads
-             *       `occupation_level` — confirmed wrong against
-             *       0x40D6E4 (`CMP byte[EAX+0x88],0`, EAX = target_building
-             *       = a Vehicle*, so +0x88 is Vehicle::init_flag/
-             *       process_delay per game/Vehicle.h, not
-             *       Building::occupation_level). Not fixed here; reported
-             *       separately.
+             *       Vehicle* (core/VehicleEditor.h) — DONE in a later
+             *       pass: all 7 write sites in game/Vehicle.cpp already
+             *       relied on the "Vehicle* backref" meaning (e.g. its own
+             *       comment on `editor->target_building = this;`, annotated
+             *       "backref"); core/VehicleEditor.cpp's destructor
+             *       (~VehicleEditor, body 0x40D680) previously cast the
+             *       SAME field to `Building*` and read `occupation_level`
+             *       — confirmed wrong against 0x40D6E4
+             *       (`CMP byte[EAX+0x88],0`, EAX = target_building = a
+             *       Vehicle*, so +0x88 is Vehicle::init_flag/process_delay
+             *       per game/Vehicle.h, not Building::occupation_level) —
+             *       now reads target_building->init_flag through the
+             *       correct type. Only (a) still blocks this branch.
              *
              * Still true, but now secondary: handle_tile_click's sole
              * caller GameLoop_PostSetupBootstrap (0x45DF32) is unimplemented
@@ -824,9 +824,9 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
             fprintf(stderr,
                     "STUB: GameView::update_cursor_child (0x42D770) res_id "
                     "0x3806 zoom-complete branch reached at %s:%d — blocked on "
-                    "two prerequisite model fixes in other subsystems "
-                    "(GameView::selected_building retyped Entity*, "
-                    "VehicleEditor::target_building retyped Vehicle*; see "
+                    "one remaining prerequisite model fix in another subsystem "
+                    "(GameView::selected_building retyped Entity* — "
+                    "VehicleEditor::target_building is already Vehicle*; see "
                     "comment above for full evidence and the exact call "
                     "sequence to implement). Not an original-binary bug and "
                     "not unreachable-by-design: this path is only unreachable "
@@ -835,9 +835,9 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
                     __FILE__, __LINE__);
             assert(false &&
                    "GameView::update_cursor_child (0x42D770) res_id 0x3806 "
-                   "branch: blocked on selected_building/Entity* and "
-                   "VehicleEditor::target_building/Vehicle* retypes in other "
-                   "subsystems; see core/GameView.cpp's comment");
+                   "branch: blocked on selected_building/Entity* retype in "
+                   "another subsystem (VehicleEditor::target_building/Vehicle* "
+                   "is already done); see core/GameView.cpp's comment");
 #endif
         }
     } else if (res_id == 0x3807) {
