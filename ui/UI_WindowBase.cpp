@@ -57,16 +57,29 @@ extern "C" {
 /* UI module function declarations */
 extern void  __cdecl DDRAW_UnlockPrimary(void);             /* 0x45B940 */
 extern void  __fastcall Cursor_SetupSurface(int this_ptr);  /* 0x425DC0 */
-extern void  __fastcall UIPANEL_Render(void* panel, byte flag);  /* 0x426EB0 */
 extern void  __thiscall FormatResourceString(void* resmgr, int string_id,
                                              char* out_buf, int max_len);  /* 0x447330 */
 extern void  WIN32_FatalError(void);
 extern void  ExitProcess(UINT);
 extern void  Sleep(DWORD);
 
+/* Real def: ui/UIPANEL_Surface.cpp, 105+ callers across the tree — see
+ * that file's own doc comment for why this scalar-argument view is
+ * correct despite the original's by-value-RECT-shaped stack layout. */
+extern bool __thiscall UIPANEL_Blit(void* renderer, uint32_t src_x, uint32_t src_y,
+    int32_t dest_x, uint32_t dest_y, void* dest_surface, uint32_t clip_x, uint32_t clip_y,
+    int32_t clip_w, uint32_t clip_h, uint32_t flags);                        /* 0x42B050 */
+
+/* CRT/Windows RECT helpers (stubs/windows.h) */
+extern "C" {
+BOOL IntersectRect(RECT*, const RECT*, const RECT*);
+BOOL UnionRect(RECT*, const RECT*, const RECT*);
+}
+
 /* DirectDraw globals — void* to avoid IDirectDraw4 dependency at the
  * declaration site (established pattern, see ui/UIPANEL.cpp). */
 extern void* g_primary_surface;                      /* 0x4FD3C4 */
+extern void* g_backbuffer;                           /* 0x4FD3C0 */
 
 /* ================================================================== */
 /* Global state                                                        */
@@ -120,29 +133,26 @@ UI_WindowBase::UI_WindowBase(HINSTANCE hInstance, UINT resId)
     /* Zero all working fields */
     this->hWnd         = NULL;                          /* +0x08 */
     this->hWndParent   = NULL;                          /* +0x0C */
-    this->cursorRefCount = 0;                           /* +0x48 */
+    this->cursorBackSurface = nullptr;                  /* +0x48 */
     this->childCount1  = 0;                             /* +0x68 */
     this->childCount0  = 0;                             /* +0x60 */
     this->childObj2    = NULL;                          /* +0x74 */
     this->captureFlag  = 0;                             /* +0x3C */
-    this->field_14     = 0;                             /* +0x14 */
-    this->field_20     = 0;                             /* +0x20 */
-    this->field_18     = 0;                             /* +0x18 */
-    this->field_1C     = 0;                             /* +0x1C */
-    this->field_24     = 0;                             /* +0x24 */
+    this->renderSurface = nullptr;                      /* +0x14 */
+    this->frameCount   = 0;                             /* +0x20 */
+    this->tileWidth    = 0;                             /* +0x18 */
+    this->tileHeight   = 0;                             /* +0x1C */
+    this->currentFrame = 0;                             /* +0x24 */
     this->field_3D     = 0;                             /* +0x3D */
     this->field_40     = 0;                             /* +0x40 */
     this->timerId      = 0;                             /* +0x28 */
-    this->field_2C     = 0;                             /* +0x2C */
-    this->field_30     = 0;                             /* +0x30 */
+    this->originX      = 0;                             /* +0x2C */
+    this->originY      = 0;                             /* +0x30 */
     this->windowCreated = 0;                            /* +0xAB */
 
     this->resourceId   = resId;                         /* +0x10 */
 
-    this->field_50     = 0;                             /* +0x50 */
-    this->field_58     = 0;                             /* +0x58 */
-    this->field_54     = 0;                             /* +0x54 */
-    this->field_5C     = 0;                             /* +0x5C */
+    this->dirtyRect    = RECT{0, 0, 0, 0};               /* +0x50..+0x5C */
 
     /* Load window title from string resources */
     FormatResourceString(&g_resmgr, resId, this->title, sizeof(this->title));  /* +0x78, 50 bytes */
@@ -200,15 +210,17 @@ void UI_WindowBase::base_destructor()
         this->childCount2  = 0;                          /* +0x70 */
     }
 
-    /* Decrement global cursor backbuffer refcount */
-    if (this->cursorRefCount != 0) {                     /* +0x48 */
+    /* If this window holds a reference to the shared cursor backbuffer,
+     * decrement the (separate) global refcount and free the shared
+     * surface once the last owner releases it. */
+    if (this->cursorBackSurface != nullptr) {            /* +0x48 */
         g_cursor_refcount--;
         if (g_cursor_refcount == 0 && g_cursor_back != NULL) {
             release_child_object(g_cursor_back);
             g_cursor_back    = NULL;
             g_cursor_refcount = 0;
         }
-        this->cursorRefCount = 0;                        /* +0x48 */
+        this->cursorBackSurface = nullptr;                /* +0x48 */
     }
 
     this->visible = 0;                                   /* +0xE4 */
@@ -273,7 +285,7 @@ void UI_WindowBase::show()
     DDRAW_UnlockPrimary();
     std::fprintf(stderr, "[TRACE] UI_WindowBase::show: render panel\n");
 #ifdef _WIN32
-    UIPANEL_Render(this, 1);
+    this->Render(true);
 #else
     // The SDL compositor receives the decoded EditWindow sprites directly;
     // do not reinterpret this 64-bit UI_WindowBase as the x86 UIPANEL layout.
@@ -338,50 +350,60 @@ void UI_WindowBase::set_render_surface(UIPANEL_Surface* surface, uint32_t frame_
     (void)force_redraw;
     return;
 #else
-    const int32_t surface_address = static_cast<int32_t>(reinterpret_cast<uintptr_t>(surface));
-    if (this->field_14 == surface_address) {
+    if (this->renderSurface == surface) {
         if (surface == nullptr) return;
     } else {
-        this->field_14 = surface_address;
-        this->field_20 = static_cast<int32_t>(frame_divisor);
-        this->field_24 = 0;
+        this->renderSurface = surface;
+        this->frameCount = static_cast<int32_t>(frame_divisor);
+        this->currentFrame = 0;
         if (origin == nullptr) {
-            this->field_2C = 0;
-            this->field_30 = 0;
+            this->originX = 0;
+            this->originY = 0;
         } else {
-            this->field_2C = origin->x;
-            this->field_30 = origin->y;
+            this->originX = origin->x;
+            this->originY = origin->y;
         }
 
         if (surface == nullptr) {
-            this->field_18 = 0;
-            this->field_1C = 0;
+            this->tileWidth = 0;
+            this->tileHeight = 0;
         } else if (frame_divisor == 0) {
-            this->field_18 = surface->width;
-            this->field_1C = surface->height;
+            this->tileWidth = surface->width;
+            this->tileHeight = surface->height;
         } else {
             // 0x426079 uses DIV (unsigned), so retain unsigned division.
-            this->field_18 = static_cast<int32_t>(
+            this->tileWidth = static_cast<int32_t>(
                 static_cast<uint32_t>(surface->width) / frame_divisor);
-            this->field_1C = surface->height;
+            this->tileHeight = surface->height;
         }
     }
 
     if (reset_dirty_rect != 0) {
-        this->field_50 = 0;
-        this->field_54 = 0;
-        this->field_58 = 0;
-        this->field_5C = 0;
+        this->dirtyRect = RECT{0, 0, 0, 0};
     }
     if (force_redraw != 0 && this->captureFlag == 0) {
         DDRAW_UnlockPrimary();
-        UIPANEL_Render(this, reset_dirty_rect == 0);
+        this->Render(reset_dirty_rect == 0);
         DDRAW_UnlockPrimary();
     }
 
-    if (this->field_14 != 0) {
+    if (this->renderSurface != nullptr) {
         KillTimer(this->hWnd, this->timerId);
-        const UINT interval = this->field_14 == this->childCount2 ? 0x32 : 0x78;
+        // Original: `this->field_14 == this->childCount2 ? 0x32 : 0x78` —
+        // comparing renderSurface's raw pointer value against childCount2
+        // (an unrelated small int/flag at the same base-class offset used
+        // by subclasses that store a THIRD child object pair there instead
+        // of calling set_render_surface). A real heap-allocated surface
+        // pointer can never numerically equal a tiny counter value (this
+        // block is only reached with renderSurface != nullptr, so the
+        // comparison could only be true if a live heap pointer's value
+        // happened to equal childCount2's small int — never happens in
+        // practice, on the original 32-bit binary either). Confirmed-dead:
+        // the 0x32 branch is REMOVED here, not merely "simplified" — this
+        // always evaluates to the 0x78 (120ms) arm (CLAUDE.md: "simplify
+        // assembly-shaped expressions whenever behavioral equivalence is
+        // proven").
+        const UINT interval = 0x78;
         this->timerId = reinterpret_cast<UINT_PTR>(SetTimer(this->hWnd, 0x43, interval, NULL));
     }
 #endif
@@ -578,21 +600,21 @@ void UI_WindowBase::on_noop()
  *     returns 0 immediately after the render, without dispatching).
  *
  *   WM_TIMER (0x113): a fast path runs BEFORE on_timer() when wParam == 0x43
- *     (the periodic UI tick started by show()) AND field_14 != 0 (a render
- *     surface is configured) AND captureFlag == 0 (not mid-drag) AND
- *     field_3D == 0 (idle animation not yet expired). The fast path samples
- *     GetCursorPos, advances the field_24 animation-tick counter (wrapping
- *     at field_20, decrementing the field_40 idle-cycle countdown on each
- *     wrap and latching field_3D once field_40 reaches 0), and re-renders
- *     the panel (bracketed by DDRAW_UnlockPrimary()) if the cursor has not
- *     moved since the last tick (lastCursorX/lastCursorY), then always
- *     updates lastCursorX/lastCursorY and returns 0 WITHOUT dispatching to
- *     on_timer(). If the fast-path condition is false, falls through to the
- *     normal on_timer() virtual dispatch.
+ *     (the periodic UI tick started by show()) AND renderSurface != nullptr
+ *     (a render surface is configured) AND captureFlag == 0 (not mid-drag)
+ *     AND field_3D == 0 (idle animation not yet expired). The fast path
+ *     samples GetCursorPos, advances the currentFrame animation-tick counter
+ *     (wrapping at frameCount, decrementing the field_40 idle-cycle
+ *     countdown on each wrap and latching field_3D once field_40 reaches 0),
+ *     and re-renders the panel (bracketed by DDRAW_UnlockPrimary()) if the
+ *     cursor has not moved since the last tick (lastCursorX/lastCursorY),
+ *     then always updates lastCursorX/lastCursorY and returns 0 WITHOUT
+ *     dispatching to on_timer(). If the fast-path condition is false, falls
+ *     through to the normal on_timer() virtual dispatch.
  *
  *   WM_CAPTURECHANGED (0x215): NOT in the virtual-dispatch table at all —
- *     always returns 0 directly. No-ops when field_14 == 0 (no surface
- *     configured), when lParam already equals this window's own HWND (we
+ *     always returns 0 directly. No-ops when renderSurface == nullptr (no
+ *     surface configured), when lParam already equals this window's own HWND (we
  *     are the window gaining capture), or when lParam == 0. Otherwise
  *     another window is taking capture away from us: marks captureFlag = 1,
  *     releases capture, restores the OS cursor (spin-loop), and re-renders
@@ -653,19 +675,19 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
     case 0x111: return on_command(hWnd, msg, wParam, lParam);
 
     case 0x113: {  // WM_TIMER — fast idle-hover-animation path, else on_timer() [12]
-        if (wParam == 0x43 && this->field_14 != 0 &&
+        if (wParam == 0x43 && this->renderSurface != nullptr &&
             this->captureFlag == 0 && this->field_3D == 0) {
             POINT cursorPos;
             GetCursorPos(&cursorPos);
 
-            if (this->field_20 < 2) {
+            if (this->frameCount < 2) {
                 return 0;
             }
 
-            int32_t tickCounter = this->field_24;
-            this->field_24 = tickCounter + 1;
-            if (this->field_20 <= tickCounter + 1) {
-                this->field_24 = 0;
+            int32_t tickCounter = this->currentFrame;
+            this->currentFrame = tickCounter + 1;
+            if (this->frameCount <= tickCounter + 1) {
+                this->currentFrame = 0;
                 if (this->field_40 != 0) {
                     this->field_40 -= 1;
                     if (this->field_40 == 0) {
@@ -676,7 +698,7 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
 
             if (cursorPos.x == this->lastCursorX && cursorPos.y == this->lastCursorY) {
                 DDRAW_UnlockPrimary();
-                UIPANEL_Render(this, 1);
+                this->Render(true);
                 DDRAW_UnlockPrimary();
             }
             this->lastCursorX = cursorPos.x;
@@ -707,7 +729,7 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                     cursorVis = ShowCursor(TRUE);
                 }
                 DDRAW_UnlockPrimary();
-                UIPANEL_Render(this, 1);
+                this->Render(true);
                 DDRAW_UnlockPrimary();
                 return 0;
             }
@@ -726,7 +748,7 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
                 cursorVis = ShowCursor(FALSE);
             }
             DDRAW_UnlockPrimary();
-            UIPANEL_Render(this, 1);
+            this->Render(true);
             DDRAW_UnlockPrimary();
         }
         return on_mouse_move(hWnd, msg, wParam, lParam);
@@ -758,13 +780,13 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             }
         }
         DDRAW_UnlockPrimary();
-        UIPANEL_Render(this, 1);
+        this->Render(true);
         DDRAW_UnlockPrimary();
         return hitResult;
     }
 
     case 0x215: {  // WM_CAPTURECHANGED — not a virtual slot, always returns 0
-        if (this->field_14 == 0) {
+        if (this->renderSurface == nullptr) {
             return 0;
         }
         if (reinterpret_cast<HWND>(static_cast<uintptr_t>(static_cast<uint32_t>(lParam))) == this->hWnd) {
@@ -780,7 +802,7 @@ LRESULT UI_WindowBase::dispatch_message(HWND hWnd, UINT msg, WPARAM wParam, LPAR
             cursorVis = ShowCursor(TRUE);
         }
         DDRAW_UnlockPrimary();
-        UIPANEL_Render(this, 1);
+        this->Render(true);
         DDRAW_UnlockPrimary();
         return 0;
     }
@@ -857,7 +879,7 @@ LRESULT UI_WindowBase::on_mouse_move(HWND hWnd, UINT msg, WPARAM wParam, LPARAM 
 {
     if (hWnd == this->hWnd) {
         DDRAW_UnlockPrimary();
-        UIPANEL_Render(this, 1);
+        this->Render(true);
         DDRAW_UnlockPrimary();
     }
     DefWindowProcA(hWnd, msg, wParam, lParam);
@@ -1036,10 +1058,10 @@ void SetWindowVisibleImpl(UI_WindowBase* self, bool visible)
 
     DDRAW_UnlockPrimary();
 #ifdef _WIN32
-    UIPANEL_Render(self, 1);
+    self->Render(true);
 #else
-    // UIPANEL_Render (0x426EB0) follows the packed x86 UIPANEL layout,
-    // which does not apply to this widened UI_WindowBase object; the SDL
+    // Render() follows the packed x86 UIPANEL layout via renderSurface,
+    // which is never wired to a real surface on the host build; the SDL
     // compositor presents the already-composed primary surface instead.
     SDL3_PresentPrimarySurface();
 #endif
@@ -1142,4 +1164,385 @@ HDC UI_WindowBase::BeginPaint()
 HDC __fastcall UIPANEL_BeginPaint(void* self)
 {
     return static_cast<UI_WindowBase*>(self)->BeginPaint();
+}
+
+/* ================================================================== */
+/* UI_WindowBase::EndPaintEx                                           */
+/* Address: 0x426B90 — see the doc comment in UI_WindowBase.h for the   */
+/* full evidence trail (ReleaseDC slot, backwards-Blt correction, field  */
+/* identities). Integrated 2026-08-16 from a stale "UIPANEL_EndPaintEx" */
+/* free-function transcription in ui/UIPANEL.cpp.                       */
+/* ================================================================== */
+void UI_WindowBase::EndPaintEx(HDC hdc, bool unlockOnly, RECT* restrictRect)
+{
+    if (hdc != nullptr) {
+        static_cast<IDirectDrawSurface4*>(g_primary_surface)->ReleaseDC(hdc);
+    }
+
+    if (unlockOnly) {
+        DDRAW_UnlockPrimary();
+        return;
+    }
+
+    DDRAW_UnlockPrimary();
+
+    // Path A: no active render surface, mid-drag, or (host-safety addition,
+    // not part of the original's own branch condition) no cursor backbuffer
+    // wired up — plain present. cursorBackSurface is permanently nullptr on
+    // the host build today (Cursor_SetupSurface never runs there — see that
+    // field's doc comment), so this third clause is what actually fires on
+    // host; the first two reproduce the original's real decision exactly.
+    // NOTE: Path B (below) is the only place lastCursorX/lastCursorY get
+    // updated. Folding the host-only cursorBackSurface==nullptr check into
+    // this branch means those two fields are never refreshed while it's
+    // null — harmless today since renderSurface is also always null on
+    // host (Path A already fires from the first clause alone), but worth
+    // flagging for whoever eventually wires a real cursorBackSurface: at
+    // that point this folded clause would start mattering on its own.
+    if (this->renderSurface == nullptr || this->captureFlag != 0 ||
+        this->cursorBackSurface == nullptr) {
+        RECT* presentRect = (restrictRect != nullptr) ? restrictRect : &this->workRect;
+        DDRAW_PresentRect(presentRect, this->hWnd, nullptr, 1);
+        DDRAW_UnlockPrimary();
+        return;
+    }
+
+    // Path B: cursor-relative tile-content present.
+    POINT cursor;
+    GetCursorPos(&cursor);
+    this->lastCursorX = cursor.x;
+    this->lastCursorY = cursor.y;
+
+    const int cursorRelX = cursor.x - this->originX;
+    const int cursorRelY = cursor.y - this->originY;
+
+    int tileW = this->tileWidth;
+    int tileH = this->tileHeight;
+
+    RECT dirty;
+    dirty.left   = cursorRelX;
+    dirty.top    = cursorRelY;
+    dirty.right  = tileW + cursorRelX;
+    dirty.bottom = tileH + cursorRelY;
+
+    int dx = 0;
+    int dy = 0;
+    if (dirty.right > this->workRect.right) {
+        tileW = this->workRect.right - cursorRelX;
+        dirty.right = this->workRect.right;
+    }
+    if (dirty.bottom > this->workRect.bottom) {
+        tileH = this->workRect.bottom - cursorRelY;
+        dirty.bottom = this->workRect.bottom;
+    }
+    if (cursorRelY < this->workRect.top) {
+        dy = this->workRect.top - cursorRelY;
+        tileH = dirty.bottom - this->workRect.top;
+        dirty.top = this->workRect.top;
+    }
+    if (cursorRelX < this->workRect.left) {
+        dx = this->workRect.left - cursorRelX;
+        tileW = dirty.right - this->workRect.left;
+        dirty.left = this->workRect.left;
+    }
+
+    int scrollOffset = 0;
+    if (this->frameCount >= 2) {
+        if (this->currentFrame >= this->frameCount) {
+            this->currentFrame = 0;
+        }
+        scrollOffset = this->tileWidth * this->currentFrame;
+    }
+
+    // restrictRect handling: if neither the current dirty rect nor the
+    // previously-cached one (still holding LAST frame's value at this
+    // point — this->dirtyRect is not overwritten until after this block)
+    // intersects restrictRect, just present restrictRect directly and
+    // skip the tile-content pipeline entirely.
+    RECT unionForPresent{};
+    bool hasUnionForPresent = false;
+    if (restrictRect != nullptr) {
+        RECT tmp;
+        const bool intersectsDirty  = IntersectRect(&tmp, restrictRect, &dirty) != 0;
+        const bool intersectsCached = IntersectRect(&tmp, restrictRect, &this->dirtyRect) != 0;
+        if (!intersectsDirty && !intersectsCached) {
+            DDRAW_PresentRect(restrictRect, this->hWnd, nullptr, 1);
+            DDRAW_UnlockPrimary();
+            return;
+        }
+
+        UnionRect(&unionForPresent, &dirty, restrictRect);
+        // Original additionally unions that result with the OLD cached
+        // this->dirtyRect when one existed (0x426D7D-D91), before this
+        // function overwrites it below. Reproduced only for that
+        // well-defined case (a previous cached rect existed); when none
+        // existed, the original's present-rect computation reads
+        // uninitialized stack memory in this exact narrow combination —
+        // not reproduced (unionForPresent above is a safe, well-defined
+        // superset instead). Both this expression and the original's
+        // uninitialized-read case are unreachable on host today
+        // (cursorBackSurface is always nullptr, see the Path A check
+        // above), so this is a documentation-only distinction.
+        if (this->dirtyRect.right != 0) {
+            RECT withCached = unionForPresent;
+            UnionRect(&unionForPresent, &withCached, &this->dirtyRect);
+        }
+        hasUnionForPresent = true;
+    }
+
+    this->dirtyRect = dirty;
+
+    // Save the primary's pixels under the dirty rect into cursorBackSurface
+    // before drawing tile content. Confirmed via disassembly: the receiver
+    // is cursorBackSurface and the source is g_primary_surface — the prior
+    // transcription had this backwards ("copy background from offscreen to
+    // primary"); it is actually "save background into offscreen."
+    RECT saveDestRect{0, 0, tileW, tileH};
+    this->cursorBackSurface->Blt(&saveDestRect,
+                                  static_cast<IDirectDrawSurface4*>(g_primary_surface),
+                                  &dirty, DDBLT_WAIT, nullptr);
+
+    UIPANEL_Blit(this->renderSurface, dirty.left, dirty.top, dirty.right, dirty.bottom,
+                 g_primary_surface,
+                 scrollOffset + dx, dy,
+                 tileW + scrollOffset + dx, tileH + dy,
+                 0);
+
+    if (!hasUnionForPresent) {
+        DDRAW_PresentRect(&this->workRect, this->hWnd, nullptr, 1);
+    } else {
+        DDRAW_PresentRect(&unionForPresent, this->hWnd, nullptr, 1);
+    }
+
+    // Restore: copy cursorBackSurface's saved pixels back onto the primary,
+    // erasing the tile content just presented so the next frame's
+    // save/draw/present cycle starts from a clean background.
+    static_cast<IDirectDrawSurface4*>(g_primary_surface)->Blt(
+        &dirty, this->cursorBackSurface, &saveDestRect, DDBLT_WAIT, nullptr);
+
+    DDRAW_UnlockPrimary();
+}
+
+/* ================================================================== */
+/* UI_WindowBase::EndPaint                                             */
+/* Address: 0x426B70                                                    */
+/* ================================================================== */
+void UI_WindowBase::EndPaint()
+{
+    // BUG (original): the original UIPANEL_EndPaint wrapper passes the
+    // address of an uninitialized stack RECT as restrictRect, whose
+    // contents are undefined-behavior garbage (not a reproducible value).
+    //
+    // Correction 2026-08-16 (advisor review caught this): EndPaintEx's
+    // Path A branches on `restrictRect != nullptr`, choosing `restrictRect`
+    // itself over `&this->workRect` whenever it is non-null:
+    //   RECT* presentRect = (restrictRect != nullptr) ? restrictRect
+    //                                                  : &this->workRect;
+    // An earlier pass here substituted a *zeroed* local RECT for the
+    // original's uninitialized one — but a zeroed, non-null RECT is still
+    // non-null, so it took the SAME branch as the original (present
+    // `*restrictRect`, not workRect) and turned "presents undefined
+    // garbage" into "deterministically presents an empty 0x0 rect" —
+    // a different observable outcome (a no-op present) from either the
+    // original's garbage-driven present *or* from presenting the window's
+    // real work area.
+    //
+    // Passing nullptr instead makes Path A select `&this->workRect` — a
+    // well-defined, reproducible full-window present. This is a deliberate
+    // deviation from the original's undefined behavior (there is no
+    // "correct" garbage value to reproduce), on the reasoning that a plain
+    // EndPaint() call (as opposed to callers that pass a real, meaningful
+    // restrictRect to EndPaintEx() directly) most plausibly intends "repaint
+    // whatever's dirty," for which workRect is the sane default — matching
+    // every other EndPaintEx() caller in this codebase that omits a
+    // restrictRect. Every real EndPaint() caller (as opposed to EndPaintEx()
+    // directly) does so specifically when no render surface is configured,
+    // so this only affects Path A's DDRAW_PresentRect argument, not any
+    // tile-content logic.
+    this->EndPaintEx(nullptr, false, nullptr);
+}
+
+/* ================================================================== */
+/* UI_WindowBase::Render                                               */
+/* Address: 0x426EB0 — see the doc comment in UI_WindowBase.h for the   */
+/* full evidence trail. Integrated 2026-08-16 from a stale               */
+/* "UIPANEL_Render" free-function transcription in ui/UIPANEL.cpp.      */
+/* ================================================================== */
+void UI_WindowBase::Render(bool enableTileMap)
+{
+    if (this->activeFlag == 0) {
+        return;
+    }
+
+    POINT cursor;
+    GetCursorPos(&cursor);
+    const int cursorX = cursor.x - this->originX;
+    const int cursorY = cursor.y - this->originY;
+
+    int tileW = this->tileWidth;
+    int tileH = this->tileHeight;
+
+    RECT dirty;
+    dirty.left   = cursorX;
+    dirty.top    = cursorY;
+    dirty.right  = tileW + cursorX;
+    dirty.bottom = tileH + cursorY;
+
+    int dx = 0;
+    int dy = 0;
+    if (dirty.right > this->workRect.right) {
+        tileW = this->workRect.right - cursorX;
+        dirty.right = this->workRect.right;
+    }
+    if (dirty.bottom > this->workRect.bottom) {
+        tileH = this->workRect.bottom - cursorY;
+        dirty.bottom = this->workRect.bottom;
+    }
+    if (cursorY < this->workRect.top) {
+        dy = this->workRect.top - cursorY;
+        tileH = dirty.bottom - this->workRect.top;
+        dirty.top = this->workRect.top;
+    }
+    if (cursorX < this->workRect.left) {
+        dx = this->workRect.left - cursorX;
+        tileW = dirty.right - this->workRect.left;
+        dirty.left = this->workRect.left;
+    }
+
+    const bool hadCachedDirtyRect = (this->dirtyRect.right != 0);
+    bool inflate = false;
+    RECT inflated{};
+    if (this->renderSurface != nullptr && hadCachedDirtyRect && enableTileMap &&
+        this->captureFlag == 0) {
+        RECT unioned;
+        UnionRect(&unioned, &this->dirtyRect, &dirty);
+        if ((unioned.right - unioned.left) < 0x100 && (unioned.bottom - unioned.top) < 0x100) {
+            inflate = true;
+            inflated = unioned;
+            inflated.left   -= 4;
+            inflated.top    -= 4;
+            inflated.right  += 4;
+            inflated.bottom += 4;
+            if (inflated.right  > this->workRect.right)  inflated.right  = this->workRect.right;
+            if (inflated.bottom > this->workRect.bottom) inflated.bottom = this->workRect.bottom;
+            if (inflated.top    < this->workRect.top)    inflated.top    = this->workRect.top;
+            if (inflated.left   < this->workRect.left)   inflated.left   = this->workRect.left;
+        }
+    }
+
+    if (hadCachedDirtyRect && enableTileMap && !inflate) {
+        // Save the primary's pixels for the cached dirty rect into
+        // g_backbuffer. Confirmed via disassembly: receiver is
+        // g_backbuffer, source is g_primary_surface — the prior
+        // transcription had this backwards ("restore background from
+        // backbuffer"); it is actually "save background into backbuffer."
+        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
+            &this->dirtyRect, static_cast<IDirectDrawSurface4*>(g_primary_surface),
+            &this->dirtyRect, DDBLT_WAIT, nullptr);
+    }
+
+    this->lastCursorX = -1;
+    this->lastCursorY = -1;
+
+    if (this->renderSurface == nullptr || this->captureFlag != 0) {
+        return;
+    }
+
+    this->dirtyRect = dirty;
+
+    if (this->cursorBackSurface == nullptr) {
+        // Host-safety fallback (not part of the original's own branch
+        // condition): cursorBackSurface is permanently nullptr on the host
+        // build today (Cursor_SetupSurface never runs there — see that
+        // field's doc comment) — skip the tile-content blit rather than
+        // dereference a null surface.
+        return;
+    }
+
+    int scrollOffset = 0;
+    if (this->frameCount >= 2) {
+        if (this->currentFrame >= this->frameCount) {
+            this->currentFrame = 0;
+        }
+        scrollOffset = this->currentFrame * this->tileWidth;
+    }
+
+    if (inflate) {
+        // Path A: inflated dirty rect (smooth-cursor small-region case).
+        const int width  = inflated.right  - inflated.left;
+        const int height = inflated.bottom - inflated.top;
+        RECT saveDestRect{0, 0, width, height};
+        this->cursorBackSurface->Blt(&saveDestRect,
+                                      static_cast<IDirectDrawSurface4*>(g_primary_surface),
+                                      &inflated, DDBLT_WAIT, nullptr);
+
+        const int srcX = dirty.left - inflated.left;
+        const int srcY = dirty.top  - inflated.top;
+        UIPANEL_Blit(this->renderSurface, srcX, srcY, srcX + tileW, srcY + tileH,
+                     this->cursorBackSurface, scrollOffset + dx, dy,
+                     scrollOffset + dx + tileW, dy + tileH, 0);
+
+        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
+            &this->dirtyRect, this->cursorBackSurface, &saveDestRect, DDBLT_WAIT, nullptr);
+    } else {
+        // Path B: standard (no inflate). Confirmed via full ESP-relative
+        // disassembly (0x4271FA-0x4272B9): unlike Path A, the source/dest
+        // region passed to UIPANEL_Blit here is NOT derived from `dirty` at
+        // all — it is the literal {0, 0, tileW, tileH} rect (the freshly
+        // saved surface region always starts at its own origin). An earlier
+        // pass wrongly copied Path A's dirty-relative shape here; corrected
+        // 2026-08-16 after re-deriving every register (EAX/ECX/EDX/EDI) from
+        // 0x427230 through the CALL at 0x4272B9 by hand, since the
+        // decompiler's own output for this function is corrupted by
+        // unaff_EBX/unaff_EDI register-allocation artifacts.
+        RECT saveDestRect{0, 0, tileW, tileH};
+        this->cursorBackSurface->Blt(&saveDestRect,
+                                      static_cast<IDirectDrawSurface4*>(g_primary_surface),
+                                      &dirty, DDBLT_WAIT, nullptr);
+
+        UIPANEL_Blit(this->renderSurface, /*src_x=*/0, /*src_y=*/0,
+                     /*dest_x=*/tileW, /*dest_y=*/tileH,
+                     this->cursorBackSurface, scrollOffset + dx, dy,
+                     tileW + scrollOffset + dx, tileH + dy, 0);
+
+        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
+            &this->dirtyRect, this->cursorBackSurface, &saveDestRect, DDBLT_WAIT, nullptr);
+    }
+}
+
+/* ==================================================================== */
+/* Legacy free-function compatibility shims for EndPaintEx()/EndPaint(). */
+/*                                                                       */
+/* Blast radius is far larger than the original ~9-file estimate: ~50    */
+/* call sites across 15+ files (game/BuildingPanel.cpp, town/Town.cpp,   */
+/* ui/GameSetupPanel.cpp, ui/GameSetupPanel_network.cpp,                 */
+/* ui/NameEntryPanel.cpp, network/Netman.cpp, network/DPlayManager.cpp,  */
+/* network/NetworkPlayerList.cpp, native/NETMAN_SessionSettings.c,       */
+/* native/NETMAN_NetworkUI.c, graphics/LOCOBITMAP.cpp, and several       */
+/* shared/stubs_link001_batch*.cpp files), all already consistently      */
+/* declaring/calling the SAME real signature:                            */
+/*   void UIPANEL_EndPaintEx(void* self, int32_t hdc, int32_t            */
+/*                           unlockParam, uint8_t unlockFlag,            */
+/*                           RECT* restrictRect);                        */
+/* with the 2nd positional arg always a `static_cast<int32_t>(            */
+/* reinterpret_cast<intptr_t>(this->hWnd))` (the dead value — matches     */
+/* this method's dropped first parameter) and the 3rd positional arg      */
+/* always the real HDC (0 when none). Kept as thin shims here rather      */
+/* than touching every call site, per this task's explicit "leave a thin  */
+/* compatibility shim if the blast radius is too large" guidance —        */
+/* mirrors UIPANEL_BeginPaint's precedent above.                          */
+/* ==================================================================== */
+void UIPANEL_EndPaintEx(void* self, int32_t /* deadHwnd */, int32_t hdc,
+                        uint8_t unlockFlag, RECT* restrictRect)
+{
+    // ABI_BOUNDARY: opaque OS HDC round-tripped through the original
+    // function's int parameter (matches the established pattern at every
+    // real call site above for HWND).
+    HDC realHdc = reinterpret_cast<HDC>(static_cast<intptr_t>(hdc));
+    static_cast<UI_WindowBase*>(self)->EndPaintEx(realHdc, unlockFlag != 0, restrictRect);
+}
+
+void UIPANEL_EndPaint(void* self)
+{
+    static_cast<UI_WindowBase*>(self)->EndPaint();
 }

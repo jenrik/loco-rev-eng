@@ -76,20 +76,28 @@ remaining gap (`game/BuildingPanel.cpp` calls the shim despite
 `BuildingPanel` not itself inheriting `UI_WindowBase` — a separate,
 pre-existing modeling gap, documented but not fixed).
 
-`ui/UIPANEL.cpp` still has `EndPaint`/`EndPaintEx`/`Render` as free
-functions (also really `UI_WindowBase` members, per the same evidence) with
-8 raw vtable-slot dispatch sites (`ReleaseDC`×1 — NOT `Unlock` as previously
-documented here, corrected 2026-08-16 — in `EndPaintEx`, `Blt`×7 split 2/5
-across `EndPaintEx`/`Render`). A dedicated reverse-engineer pass attempted
-to migrate these into `UI_WindowBase` and correctly blocked: `this+0x48` is
-disputed between "offscreen surface pointer" (what the transcription
-assumes) and `UI_WindowBase::cursorRefCount` (already documented at that
-offset) — live vtable dispatch through it conflicts with the plain-refcount
-reading, and needs its own resolution before implementation. This is a
-materially bigger task than "convert the vtable dispatch" — 132 real callers
-across 7+ subclasses, not a single leaf class — tracked as its own item in
-PROGRESS.md's Priority 1. `world/tilemap.cpp` also has raw vtable dispatch
-on `g_primary_surface`, not yet examined at all.
+**Resolved (2026-08-16, later same day)**: `EndPaint`/`EndPaintEx`/`Render`
+are now real `UI_WindowBase` methods (`ui/UI_WindowBase.h`/`.cpp`), not
+free functions. `this+0x14`/`this+0x48` were the field-identity blocker
+noted above — resolved by fresh disassembly: `+0x14` is a real
+`UIPANEL_Surface*` (`renderSurface`, confirmed live `__thiscall` receiver
+for `UIPANEL_Blit`), and `+0x48` is a real `IDirectDrawSurface4*`
+(`cursorBackSurface`, confirmed live `Blt` dispatch through its own
+vtable) — a non-owning alias to `g_cursor_back`, separate from the
+already-correct `g_cursor_refcount` global. Both fields are permanently
+null on host today (`Cursor_SetupSurface`, the sole writer, only runs
+under `#ifdef _WIN32`), so both methods' tile-content paths are gated on
+a host-safety null check and never execute on host — no live behavioral
+risk from this change. Two backwards-`Blt` bugs fixed in the process (both
+prior transcription's src/dst were swapped: `EndPaintEx`'s first `Blt`
+saves `g_primary_surface` into `cursorBackSurface`, not the reverse;
+`Render`'s cached-dirty-rect `Blt` saves into `g_backbuffer`, not
+"restores from" it). `UIPANEL_Blit`'s 11-scalar declaration was
+independently re-verified (not the "false lead" some had worried about)
+via full ESP-relative disassembly of its `EndPaintEx` call site. See
+PROGRESS.md's 2026-08-16 `endpaintex-render-integration` entry for the
+full writeup. `world/tilemap.cpp` also has raw vtable dispatch on
+`g_primary_surface`, not yet examined at all.
 
 ## Stale, do-not-merge-as-is branches (fetched, not integrated)
 
@@ -156,14 +164,9 @@ work to merge. Confirm with the user before reviving any of them.
    `UI_WindowBase::BeginPaint`'s callers) — required before wiring
    `g_primary_surface`/`g_backbuffer`. This is real, separately-scoped GDI
    work; do not shortcut it by wiring the globals anyway.
-2. Resolve `UI_WindowBase`'s `this+0x48` field-identity conflict
-   (offscreen-surface pointer vs. the already-documented `cursorRefCount`)
-   — the hard prerequisite for migrating `EndPaintEx`/`Render` off their
-   free-function transcription in `ui/UIPANEL.cpp`. Once resolved, convert
-   the file's remaining raw-dispatch sites (`ReleaseDC`×1, `Blt`×7)
-   together, plus examine `world/tilemap.cpp`'s raw vtable dispatch on
-   `g_primary_surface`. See PROGRESS.md's Priority-1 item for the full
-   scope (132 real callers across 7+ `UI_WindowBase` subclasses).
+2. `EndPaintEx`/`Render`'s `this+0x48` field-identity conflict is resolved
+   (see above, 2026-08-16) — remaining follow-up is `world/tilemap.cpp`'s
+   raw vtable dispatch on `g_primary_surface`, not yet examined.
 3. Leave the branches above alone unless the user specifically asks to
    revive one — confirm which problem they're meant to solve first, since
    the codebase has moved substantially since they were written.

@@ -23,7 +23,8 @@
  * Cursor-specific reinterpretations. Field access uses inline accessor
  * methods that return references to the base class storage cast to
  * the Cursor-specific type. For example, cursor_state() overlays
- * field_14, primary_surface() overlays lastCursorY (base offset +0x38), etc.
+ * UI_WindowBase::renderSurface (base offset +0x14), primary_surface()
+ * overlays lastCursorY (base offset +0x38), etc.
  *
  * Vtable layout (verified against the raw PE bytes at 0x477930; the
  * Cursor vtable ends at slot [37] with a NULL terminator at 0x4779C4 —
@@ -135,17 +136,27 @@ public:
     /* +0x10: resource_id aliases resourceId */
     UINT&       resource_id()    { return this->resourceId; }
 
-    /* +0x14: cursor_state / cursor_sprite_surface aliases field_14 */
-    int32_t&    cursor_state()   { return this->field_14; }
-    void*&      cursor_sprite_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_14)->value; }
+    /* +0x14: cursor_state / cursor_sprite_surface alias UI_WindowBase::renderSurface.
+     * renderSurface was retyped from a plain int32_t to a real
+     * UIPANEL_Surface* 2026-08-16 (EndPaintEx/Render integration pass —
+     * confirmed a live __thiscall dispatch through this offset in both
+     * functions). cursor_state()'s int32_t view of the same storage is
+     * preserved via the same CursorOverlayValue aliasing technique already
+     * used throughout this class (may_alias-tagged, representation-
+     * preserving) rather than the plain reference this used when the base
+     * field was itself int32_t. */
+    int32_t&    cursor_state()   { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->renderSurface)->value; }
+    void*&      cursor_sprite_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->renderSurface)->value; }
 
-    /* +0x18..+0x24: viewport clip rectangle (four base int32 fields) */
-    RECT*       clip_rect()      { return reinterpret_cast<RECT*>(&this->field_18); }
-    const RECT* clip_rect() const { return reinterpret_cast<const RECT*>(&this->field_18); }
-    int32_t&    clip_rect_left()   { return this->field_18; }
-    int32_t&    clip_rect_top()    { return this->field_1C; }
-    int32_t&    clip_rect_right()  { return this->field_20; }
-    int32_t&    clip_rect_bottom() { return this->field_24; }
+    /* +0x18..+0x24: viewport clip rectangle (four base int32 fields, now
+     * named tileWidth/tileHeight/frameCount/currentFrame in the base class
+     * — renamed 2026-08-16, see UI_WindowBase.h). */
+    RECT*       clip_rect()      { return reinterpret_cast<RECT*>(&this->tileWidth); }
+    const RECT* clip_rect() const { return reinterpret_cast<const RECT*>(&this->tileWidth); }
+    int32_t&    clip_rect_left()   { return this->tileWidth; }
+    int32_t&    clip_rect_top()    { return this->tileHeight; }
+    int32_t&    clip_rect_right()  { return this->frameCount; }
+    int32_t&    clip_rect_bottom() { return this->currentFrame; }
 
     /* +0x28: timer_id aliases timerId */
     UINT_PTR&   timer_id()       { return this->timerId; }
@@ -171,20 +182,106 @@ public:
     /* +0x44: anim_resdata (RESDATA*) overlays activeFlag + _pad_45 (4 bytes) */
     RESDATA*&   anim_resdata()   { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(&this->activeFlag)->value; }
 
-    /* +0x48: anim_frame aliases cursorRefCount */
-    int32_t&    anim_frame()     { return this->cursorRefCount; }
+    /* +0x48: anim_frame — ORIGINAL x86 binary reused the same 4-byte slot
+     * at +0x48 for both this animation-frame counter and the base class's
+     * shared-cursor-backbuffer bookkeeping (now UI_WindowBase::
+     * cursorBackSurface, a real IDirectDrawSurface4* — see that field's
+     * doc comment in UI_WindowBase.h). On this 64-bit host a real pointer
+     * is 8 bytes, so continuing to alias a 4-byte int32_t counter over it
+     * would either not compile or silently corrupt cursorBackSurface's
+     * upper bytes. Given a dedicated investigation confirmed neither
+     * Cursor::render() (the only writer of cursorBackSurface's aliased
+     * slot in the original) nor this class's own render path that would
+     * conflict are live on host today, this class now gets its own,
+     * independently-stored counter — the correct, safer host modeling
+     * (exact byte-for-byte x86 layout parity is explicitly a non-goal for
+     * host builds; see CLAUDE.md's "Host deviations" section), not a
+     * guess. Zero-initialized in-class (matches the base ctor's implicit
+     * zero-init of the original shared slot). */
+    int32_t&    anim_frame()     { return this->animFrameCounter; }
+    int32_t     animFrameCounter = 0;  // +0x48 in the original binary (see above)
 
-    /* +0x50: dirty_rect_left aliases field_50 */
-    int32_t&    dirty_rect_left()  { return this->field_50; }
+    /* +0x50..+0x5C: originally four base int32 fields merged into a real
+     * UI_WindowBase::dirtyRect RECT 2026-08-16 (EndPaintEx/Render
+     * integration pass — confirmed live IntersectRect/UnionRect/Blt use as
+     * a unit; was field_50/54/58/5C). capture_flag() and backbuffer() do
+     * NOT alias dirtyRect.right/.bottom on host: see each accessor's own
+     * doc comment for why (unrelated-concept slot reuse / undersized-
+     * pointer overrun, respectively — both real hazards once this class's
+     * fields backing them became live writes). dirty_rect_left()/
+     * dirty_rect_top() below DO remain aliased to dirtyRect.left/.top —
+     * confirmed correct, not merely inferred: `Cursor::update_dirty_rect`
+     * (0x414FB0) writes -1 to this+0x50/this+0x54 directly at
+     * 0x4151CB/0x4151CE in the original binary, the exact same physical
+     * slot Render()'s own UnionRect/inflate logic reads as the cached
+     * dirty rect's left/top. This -1 write-only sentinel is a genuine,
+     * confirmed original cross-field interaction (not a bug): Render()'s
+     * clamp-to-workRect step (`if (inflated.left < workRect.left)
+     * inflated.left = workRect.left;`, same for .top) unconditionally
+     * neutralizes any -1 the union propagates, since workRect's origin is
+     * never negative — so sharing this slot is both faithful to the
+     * original and harmless. */
+    int32_t&    dirty_rect_left()  { return this->dirtyRect.left; }
 
-    /* +0x54: dirty_rect_top aliases field_54 */
-    int32_t&    dirty_rect_top()   { return this->field_54; }
+    /* +0x54: dirty_rect_top aliases dirtyRect.top — see dirty_rect_left()
+     * above for the confirming evidence. */
+    int32_t&    dirty_rect_top()   { return this->dirtyRect.top; }
 
-    /* +0x58: capture_flag (uint8_t) overlays field_58 */
-    uint8_t&    capture_flag()   { return reinterpret_cast<CursorOverlayValue<uint8_t>*>(&this->field_58)->value; }
+    /* +0x58: capture_flag — in the original x86 layout this uint8_t overlays
+     * the SAME 4-byte slot as UI_WindowBase::dirtyRect.right (this+0x58).
+     * Unlike dirty_rect_left()/dirty_rect_top() above (which alias fields
+     * that hold the *same* concept — a cached dirty rect — in both the
+     * base and derived views), capture_flag() is a genuinely unrelated
+     * concept: a mouse-capture boolean, read/written at 10+ sites in
+     * Cursor_impls.cpp/Cursor_Render.cpp, completely independent of any
+     * rect coordinate. Confirmed dual-purposed in the original, not
+     * inferred: `Cursor::update_dirty_rect` (0x414FB0) reads this+0x58 as
+     * exactly this boolean gate at 0x4151DB (`MOV CL,[ESI+0x58]; TEST
+     * CL,CL; JNZ <skip>`, immediately after writing -1/-1 into this+0x50/
+     * +0x54 — see dirty_rect_left()'s doc comment), while
+     * UI_WindowBase::Render reads the identical byte as part of a 4-byte
+     * rect coordinate (`dirtyRect.right`) a few instructions later in its
+     * own control flow. The original binary genuinely let these two
+     * meanings collide in one physical byte; unlike the left/top sentinel
+     * above, this collision is NOT neutralized downstream (a capture-flag
+     * write of 1 would make Render()'s `dirtyRect.right != 0` check see a
+     * "valid cached rect" that isn't one) — a real hazard, not a faithful-
+     * but-harmless quirk, so this one gets independent storage.
+     *
+     * This reuse became a live hazard 2026-08-16 when UI_WindowBase::Render
+     * was integrated as a real method: Render() unconditionally executes
+     * `this->dirtyRect = dirty;` (updating .right, i.e. this+0x58) whenever
+     * `renderSurface != nullptr && captureFlag(+0x3C) == 0` — and
+     * Cursor::handle_locomotive_select (0x41A360) does call
+     * `set_render_surface()` with a real, non-null surface (the selected
+     * toolbar ButtonSprite), so a live Cursor instance's renderSurface can
+     * genuinely be non-null on host. Once that's true, a subsequent
+     * Render() call would silently clobber this flag's original x86 slot
+     * with a rect coordinate — corrupting real mouse-capture state.
+     *
+     * Per CLAUDE.md ("exact byte-for-byte x86 layout parity is explicitly
+     * a non-goal for host builds"), this class gets its own independent
+     * storage rather than reproducing that original-slot collision. */
+    uint8_t&    capture_flag()   { return this->mouseCaptureFlag; }
+    uint8_t     mouseCaptureFlag = 0;  // +0x58 in the original binary (see above)
 
-    /* +0x5C: backbuffer aliases field_5C */
-    void*&      backbuffer()     { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->field_5C)->value; }
+    /* +0x5C: backbuffer aliases dirtyRect.bottom.
+     *
+     * PRE-EXISTING BUG, NOT introduced by the 2026-08-16 EndPaintEx/Render
+     * pass (the prior `field_5C` version had the identical problem — this
+     * merely preserves it under the new field path, unchanged in effect):
+     * `dirtyRect.bottom` is a lone 4-byte `int32_t`, immediately followed
+     * in memory by `childCount0` (also 4 bytes). Aliasing an 8-byte `void*`
+     * over it means every real read/write of `backbuffer()` (actively used
+     * — see `Cursor.cpp`'s `this->backbuffer() = _g_cursor_back;` and
+     * `Cursor_impls.cpp`/`Cursor_Render.cpp`'s ~14 call sites) touches 4
+     * bytes past the end of `dirtyRect.bottom`, corrupting/misreading
+     * `childCount0`. This needs its own dedicated investigation and fix
+     * (giving `backbuffer` real, non-overlapping storage — likely
+     * requiring `Cursor`'s downstream field offsets to shift) and is
+     * explicitly out of scope for the EndPaintEx/Render pass that
+     * surfaced it; flagged here so it isn't missed. */
+    void*&      backbuffer()     { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->dirtyRect.bottom)->value; }
 
     /* +0x60: child_obj_60 aliases childCount0 */
     void*&      child_obj_60()   { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->childCount0)->value; }

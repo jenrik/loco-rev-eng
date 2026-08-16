@@ -720,8 +720,15 @@ void EditWindow::HandleClick()
 /* ================================================================== */
 int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    /* If not yet initialized, delegate to UIPANEL_WindowProc */
-    if (this->field_14 == 0) {  /* pInitGuard at +0x14 */
+    /* If not yet initialized, delegate to UIPANEL_WindowProc.
+     * this->field_14 (an int32_t "pInitGuard") was renamed/retyped to
+     * UI_WindowBase::renderSurface (a UIPANEL_Surface*) 2026-08-16 — see
+     * that field's doc comment in ui/UI_WindowBase.h. The `== 0` (i.e.
+     * `== nullptr`) comparison is unchanged and still valid for a pointer;
+     * EditWindow never configures a real render surface via
+     * set_render_surface(), so this guard's practical meaning ("has this
+     * window's render surface ever been set") is unaffected. */
+    if (this->renderSurface == nullptr) {  /* pInitGuard at +0x14 */
         // 0x422D9D passes the EditWindow instance in ECX before the four
         // WndProc stack arguments.  The prior four-argument declaration
         // dropped that required receiver.
