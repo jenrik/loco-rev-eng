@@ -35,10 +35,12 @@
  * — checked before adding this — so the real type is used directly here
  * instead of Town.cpp's forward-declared-opaque-pointer workaround. */
 #include "../graphics/LOCOBITMAP.h"
+#include "../platform/ddraw_interfaces.h"   /* real IDirectDrawSurface4::Blt */
 
 #ifndef _WIN32
 #include <cassert>
 #include <cstdio>
+#include <unordered_set>
 #endif
 
 /* Panel-family helpers — 0x4544E0 (Panel base init) and 0x454630
@@ -568,21 +570,52 @@ void GameView::deselect_building(int32_t /*unused1*/, int32_t /*unused2*/,
     viewport_rect.bottom = g_viewport_rect_bottom;
     IntersectRect(&clip_rect, &clip_rect, &viewport_rect);
 
-    /* overlay_panel's own ddraw_surf field (no extra dereference). */
-    void* backing_surface = view(this->overlay_panel)->ddraw_surf;
+#ifndef _WIN32
+    /* The original (0x42D280) never null-checks overlay_panel here: on
+     * Windows, nothing reaches deselect_building() before handle_tile_click
+     * has already run at least once and set it. On this host build,
+     * handle_tile_click's only caller (GameLoop_PostSetupBootstrap) has no
+     * definition anywhere in the tree yet, so overlay_panel is always null
+     * — guard rather than dereference a null resource pointer, matching
+     * the same host-reachable-but-uninitialized idiom already established
+     * elsewhere (core/GameObject.cpp's Entity::Update null-resource guard). */
+    if (this->overlay_panel == nullptr) {
+        static std::unordered_set<const void*> warned_null;
+        if (warned_null.insert(this).second) {
+            std::fprintf(stderr,
+                "[HOST] GameView::deselect_building: skipping overlay "
+                "restore for %p -- overlay_panel is null (handle_tile_click "
+                "never ran; see PROGRESS.md)\n",
+                static_cast<void*>(this));
+            std::fflush(stderr);
+        }
+        return;
+    }
+#endif
 
-    /* backing_surface vtable slot 5 (IDirectDrawSurface4::Blt, standard
-     * COM order): (surface, &backup, primary, rect, 0x1000000, 0) —
-     * restore the cached background. */
-    using BltFn = void (*)(void*, uint32_t, void*, RECT*, uint32_t, int);
-    // ABI_BOUNDARY: IDirectDrawSurface4 COM vtable slot 5 (Blt) — opaque DirectDraw interface.
-    reinterpret_cast<BltFn>((*reinterpret_cast<void***>(backing_surface))[5])(
-        backing_surface,
-        this->backup_surface,
-        g_primary_surface,
+    /* overlay_panel's own ddraw_surf field (no extra dereference). */
+    IDirectDrawSurface4* backing_surface =
+        static_cast<IDirectDrawSurface4*>(view(this->overlay_panel)->ddraw_surf);
+
+    /* Restore the cached background. Real disassembly (0x42D280) confirms
+     * the dest-rect argument is `puVar1 = (uint*)(param_1 + 0x180)` — the
+     * ADDRESS of the four backup_* fields treated as one RECT{left, top,
+     * right, bottom} (same layout `handle_tile_click`'s own `SetRect`
+     * call already establishes for these fields) — not their value. The
+     * previous transcription here passed `this->backup_surface` (the
+     * value, always 0 per `handle_tile_click`'s own zero-init), which
+     * would hand `Blt` a null dest_rect instead of the real backup
+     * region — a real, live bug, fixed alongside converting this call
+     * from raw vtable-slot-5 dispatch to the typed interface (the same
+     * conversion already applied to this exact COM slot elsewhere:
+     * `ui/UIPANEL_Surface.cpp`, `world/tilemap.cpp`,
+     * `graphics/LOCOBITMAP.cpp`). */
+    backing_surface->Blt(
+        reinterpret_cast<RECT*>(&this->backup_surface),  // ABI_BOUNDARY: real x86 layout reinterpreted as RECT{left,top,right,bottom}
+        static_cast<IDirectDrawSurface4*>(g_primary_surface),
         &clip_rect,
         0x1000000,
-        0);
+        nullptr);
 
     /* Panel anim-table flag at +0x20 + index*0x18 + 0x16; the index is
      * Entity::anim_index (+0x28), INHERITED DIRECTLY on `this` via
