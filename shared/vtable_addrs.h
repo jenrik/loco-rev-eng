@@ -583,9 +583,68 @@
     [3] +0x0C: Render        (0x41E9F0 — own override, Ghidra label
                                "INPUT_EditWndProc"; a cascading .dat-directive
                                keyword parser, substantially decompiled)
-    [4] +0x10: ctor body     (0x41E570, Ghidra label "INPUT_ExitGame" — a
-                               misnomer; this is the real constructor)
-    [5] +0x14: reserved/NULL                                                */
+    [4] +0x10: handle_edit_message (0x41E6E0, Ghidra label
+                               "INPUT_HandleEditMessage" — occupies the same
+                               slot position as ChildWindow's own "ctor init
+                               body" slot; modeled as a non-virtual member in
+                               input/BuildingDescriptorEditor.h per that
+                               header's own precedent, not a real declared
+                               C++ virtual). CORRECTED 2026-08-16: this entry
+                               previously read "0x41E570 — ctor body", which
+                               was wrong on two counts — 0x41E570 is BDE's own
+                               *constructor* address (never itself a vtable
+                               slot value), and raw `read_bytes` at
+                               0x4779E0+0x10 shows 0x0041E6E0, not 0x41E570.
+    Table ends here — 5 slots total (0x14 bytes), matching ChildWindow's own
+    5-slot layout, NOT 6. CORRECTED 2026-08-16: this entry previously listed
+    a spurious "[5] +0x14: reserved/NULL" slot. Direct `read_bytes` at
+    0x4779E0+0x14 shows 0x0041F4B0 (non-null!) — but `get_xrefs_to` on that
+    address (0x4779F4) shows it is independently installed as a vtable
+    pointer by 3 *different* functions (INPUT_EditKillFocus 0x41F48E,
+    InputEventList::Ctor 0x41F4D0, and one more at 0x41F4B9) — i.e. it is
+    the START of `InputEventList`'s own, entirely unrelated vtable, placed
+    immediately adjacent in .rdata, not BDE's own slot [5]. Found while
+    verifying input/TrackTileDescriptor.h's vtable-boundary evidence (see
+    VTBL_TRACK_TILE_DESCRIPTOR below) — the same adjacent-table-in-.rdata
+    pattern that class's own vtable (0x478358) exhibits at ITS boundary. */
+
+/* ================================================================== */
+/* TrackTileDescriptor : public BuildingDescriptorEditor — scripted-      */
+/* object child descriptor with track-tile classification (see           */
+/* input/TrackTileDescriptor.h for the full evidence trail — no original  */
+/* symbol names it; "RESDATA_ScriptedObject_AddChild" is a Ghidra          */
+/* misnomer, since ECX is the child object, not a ScriptedObject).        */
+/* ================================================================== */
+#define VTBL_TRACK_TILE_DESCRIPTOR      0x00478358  /* TrackTileDescriptor vtable, size 0x63C
+    [0] +0x00: ~TrackTileDescriptor (own scalar-deleting-dtor, "RESDATA_
+                               ScriptedObject_DtorChain" 0x44B200; body
+                               "RESDATA_ScriptedObject_RemoveChild" 0x44B220,
+                               chains to BuildingDescriptorEditor's own
+                               destructor body 0x41E620 directly)
+    [1] +0x04: OnMouseMove   (0x425670 — INHERITED verbatim from ChildWindow,
+                               confirmed via direct vtable-slot check)
+    [2] +0x08: OnMouseLeave  (0x4257F0 — INHERITED verbatim from ChildWindow)
+    [3] +0x0C: Render        (0x44B4F0, "RESDATA_ScriptedObject_
+                               ClassifyTileType" — own override, classifies
+                               a tunnel/depot/bridge/points/switch/
+                               crosstrack/levelcrossing/station keyword
+                               section into tile_type, +0x63A)
+    [4] +0x10: HandleEvent   (0x44B290, "RESDATA_ScriptedObject_HandleEvent"
+                               — occupies the same slot position as
+                               BuildingDescriptorEditor's own
+                               handle_edit_message; modeled non-virtual per
+                               that established precedent)
+    Table ends here — 5 slots total (0x14 bytes), same as ChildWindow/
+    BuildingDescriptorEditor. Confirmed via `get_xrefs_to` on every
+    dword-aligned offset from 0x478358 up to 0x478378: the next address
+    anything installs as a vtable pointer is 0x47836C, exactly 5 slots
+    later — a wholly different, unidentified 3rd class (installed by
+    RESDATA_ScriptedObject_CleanupChildren/Vehicle_Ctor, receiver has small
+    offsets +0x10..+0x20/+0x7A/+0x88, matching neither this class nor
+    ScriptedObject's own VTBL_SCRIPTED_OBJECT above) — deliberately NOT
+    modeled here, out of scope for this class. Immediately after that:
+    CollisionData's own vtable at 0x478370, then ScriptEngine's own at
+    0x478378 — all adjacent, unrelated tables in the same .rdata region. */
 
 /* ================================================================== */
 /* UI Manager — UI component manager singleton                           */

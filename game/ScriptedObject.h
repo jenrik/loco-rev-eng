@@ -120,14 +120,36 @@ public:
     uint8_t  _pad_2E9[0x347];               // +0x2E9..+0x62F
 
     /* ================================================================ */
-    /* Child/Script fields (+0x630..+0x73F)                              */
+    /* +0x630..+0x73F: UNRESOLVED — previously misattributed              */
     /* ================================================================ */
-
-    void*    child_script_ptr;              // +0x630  child ScriptedObject pointer
-    uint8_t  _pad_634[6];                   // +0x634..+0x639
-    uint8_t  unk_flag;                      // +0x63A
-    char     script_bitmap_path[0x104];     // +0x63B  generated scene-relative BMP path
-    uint8_t  _pad_73F;                       // +0x73F
+    /* This range used to be documented here as `child_script_ptr` (+0x630),
+     * `unk_flag` (+0x63A), and `script_bitmap_path` (+0x63B), with
+     * matching AddChild/RemoveChild/HandleEvent methods below. That was
+     * wrong: those fields and methods actually describe a completely
+     * different, DERIVED object — `TrackTileDescriptor`
+     * (input/TrackTileDescriptor.h), a `BuildingDescriptorEditor` subclass
+     * constructed by `ResourceManager::AddString`'s "type 3" resource
+     * dispatch, not a member of ScriptedObject itself. The evidence:
+     * RESDATA_ScriptedObject_AddChild (0x44B190) is `__thiscall` on ECX
+     * with a direct (non-virtual) call to BuildingDescriptorEditor's own
+     * constructor (0x41E570) on that same ECX, and RemoveChild's body
+     * (0x44B220) ends with a direct call to BuildingDescriptorEditor's own
+     * destructor body (0x41E620) on that same receiver — neither is
+     * reachable evidence for ScriptedObject's own layout. See
+     * TrackTileDescriptor.h for the full trail.
+     *
+     * ScriptedObject's OWN real content in this 0x110-byte range is not
+     * established by this pass. Separately, `RESDATA_ScriptedObject_
+     * CleanupChildren` (0x44C0D0) and `RESDATA_ScriptedObject_DtorList`
+     * (0x44C0B0) DO appear to operate on a ScriptedObject-shaped receiver
+     * (small offsets: a child array at +0x10..+0x1C, a tail pointer at
+     * +0x20, a byte at +0x22, related fields near +0x1E/+0x1F/+0x7A) and
+     * install a distinct vtable at 0x47836C — but that relationship
+     * (including whether it is this same receiver, and how it relates to
+     * this class's own vtable 0x4782A8) is unresolved and out of scope for
+     * this pass. TODO: establish ScriptedObject's real +0x630..+0x73F
+     * layout and the 0x47836C vtable relationship in a follow-up pass. */
+    uint8_t  unknown_0x630[0x110];          // +0x630..+0x73F
 
     /* ================================================================ */
     /* Mode / trailing fields (+0x740..+0x74B)                           */
@@ -200,21 +222,17 @@ public:
     /** InitSubObjects — Tear down all sub-objects. Address: 0x4494E0 */
     void InitSubObjects();
 
-    /** HandleEvent — Load and parse a .dat script file. Address: 0x44B290 */
-    void HandleEvent(uint32_t resource_id, const char* name_suffix);
-
-    /** LoadFromStream — Init from parsed script stream. */
-    virtual char LoadFromStream(void* stream);
-
-    /** AddChild — Construct child ScriptedObject. Address: 0x44B190 */
-    ScriptedObject* AddChild(uint32_t resource_id, const char* name_suffix);
-
-    /** RemoveChild — Destroy child ScriptedObject. Address: 0x44B220 */
-    void RemoveChild();
+    /* HandleEvent/LoadFromStream/AddChild/RemoveChild were removed from
+     * here — they were a misattribution of TrackTileDescriptor's own
+     * methods (0x44B290/0x44B190/0x44B220; TrackTileDescriptor is a
+     * BuildingDescriptorEditor subclass, not a ScriptedObject method
+     * family). See input/TrackTileDescriptor.h and the +0x630 field
+     * comment above for the full evidence trail. `LoadFromStream` in
+     * particular never had a decompiled address of its own — it was
+     * invented to stand in for TrackTileDescriptor's virtual self-dispatch
+     * `Render()` call (vtable slot [3]), which this pass identified via
+     * disassembly (0x44B290's `CALL [this+0xC]`). */
 
     /** EnterBuildMode — Enter/exit build mode. Address: 0x44A9D0 */
     void EnterBuildMode(uint8_t enter);
 };
-
-/* External global at 0x479190 */
-extern int g_stream_open_flags;

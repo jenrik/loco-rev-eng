@@ -289,6 +289,19 @@ void  Stream_BeginEnum(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__,
 void  Stream_BeginRead(void*, int, int);
 void  Stream_BeginRead(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
+/* WNDPROC_Stream::ExtractInt (0x4646C0) — real C++-mangled method,
+ * operator>>(int32_t*) on the stream (decompiled, see
+ * input/TrackTileDescriptor.cpp's doc comment for the full body: calls
+ * WNDPROC_Stream_InputPrefix + StreamBuf_ReadString + a CRT numeric-parse
+ * call Ghidra mislabeled "_rand_wrapper", handles ERANGE, releases two
+ * nested critical sections). Not yet implemented for real — those three
+ * callees are themselves unresolved (same class of gap as
+ * WNDPROC_StreamReadLine above); stubbed loud rather than silently
+ * returning success. TODO: implement for real once InputPrefix/
+ * StreamBuf_ReadString/the numeric-parse callee are decompiled. */
+extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*);
+extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+
 /* Math/CRT stubs — signatures inferred from usage, likely misidentified by decompiler */
 void* CRT_fabs(void*, void*);
 void* CRT_fabs(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }

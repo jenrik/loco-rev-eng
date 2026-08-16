@@ -387,7 +387,9 @@ public:
      * (bits 10+ of resource_id). Types dispatch to:
      *   0,1,4,9,10,11,13,14: UI_CreateChildWindow (0x168 bytes)
      *   2,12:                INPUT_ExitGame (0x630 bytes)
-     *   3:                   RESDATA_ScriptedObject_AddChild (0x63C bytes)
+     *   3:                   TrackTileDescriptor_Ctor (0x63C bytes — Ghidra
+     *                        label "RESDATA_ScriptedObject_AddChild" was a
+     *                        misnomer; see input/TrackTileDescriptor.h)
      *   6:                   CGWND_CursorEditWindow_Ctor (0x7AC bytes)
      *   7,8:                 TrainStation_Ctor (0x178 bytes)
      *

@@ -12,18 +12,21 @@
 #include "../game/TrackPiece.h"
 #include "../core/Entity.h"
 #include "../town/Town.h"
-#include "../resources/Win32Stream.h"
-#include "../resources/Win32StreamMem.h"
+#include "../stubs/windows.h"
 
 /* ================================================================== */
 /* Win32 API imports — C linkage only                                  */
 /* ================================================================== */
 /* ClientToScreen/SetCursorPos: declared by stubs/windows.h (canonical
- * POINT*-typed signature) — transitively included below via
- * resources/Win32Stream.h. This file's own former duplicate declaration
- * of ClientToScreen used a looser `void* point` parameter, which
- * conflicted once both headers landed in the same TU (same fix as
- * ui/HelpWnd.cpp's GetClientRect/SetRect/etc. cleanup). */
+ * POINT*-typed signature), included directly above. Previously
+ * transitively included via resources/Win32Stream.h — that include was
+ * removed 2026-08-16 (the HandleEvent code it supported moved to
+ * input/TrackTileDescriptor.cpp), so this file needs its own direct
+ * include now; MoveTo()'s ClientToScreen/SetCursorPos calls further
+ * below are otherwise unrelated to that move. This file's own former
+ * duplicate declaration of ClientToScreen used a looser `void* point`
+ * parameter, which conflicted once both headers landed in the same TU
+ * (same fix as ui/HelpWnd.cpp's GetClientRect/SetRect/etc. cleanup). */
 
 /* ================================================================== */
 /* CRT helpers — C++ linkage                                            */
@@ -31,26 +34,12 @@
 void  __cdecl CRT_free(void* ptr);                            /* 0x466C70 */
 int   __cdecl CRT_sprintf_buf(void* buf, const char* fmt, ...); /* 0x466D60 */
 
-/* ================================================================== */
-/* Win32 stream I/O — C++ linkage                                       */
-/*                                                                       */
-/* stream_obj/parsed_stream below use WIN32_MemoryStream (resources/     */
-/* Win32StreamMem.h, included above) — WNDPROC_StreamFromMemory's real   */
-/* declaration/size helper come from that header, not redeclared here.   */
-/* ================================================================== */
-void* AssetMgr_LoadFile(void* mgr, const char* name,
-                        int* out_size);                        /* 0x45CD00 */
-
-/* ================================================================== */
-/* UI / Input helpers — C++ linkage                                     */
-/* ================================================================== */
-char  ScriptedObject_ParseStream(void* stream);                /* 0x41E9F0 */
-void  ScriptedObject_InitBase(uint32_t resource_id, int zero);  /* 0x4203E0 */
-/* UI_ChildWindow_Render's real definition (ui/UI_ChildWindow.cpp:796) is
- * inside an `extern "C" { }` block (matching ui/UI_ChildWindow.h:339-376) —
- * this declaration must match that linkage, not default C++ linkage,
- * or this call binds to nothing (LINK-001 landmine). */
-extern "C" char UI_ChildWindow_Render(void* obj, void* stream);           /* 0x424E00 */
+/* AssetMgr_LoadFile/ScriptedObject_ParseStream/ScriptedObject_InitBase/
+ * UI_ChildWindow_Render/WIN32_MemoryStream_Size/WNDPROC_StreamFromMemory/
+ * g_asset_mgr/g_stream_open_flags/g_scene_name declarations removed from
+ * here — they were only used by the HandleEvent/AddChild/RemoveChild code
+ * that has moved to input/TrackTileDescriptor.cpp (see that file and the
+ * removed-HandleEvent note near MoveTo below for the full trail). */
 
 /* Panel helpers declared in Panel.h */
 extern void Panel_DtorBody(void* obj);                         /* 0x4545A0 */
@@ -112,7 +101,6 @@ extern void Entity_Ctor(void* obj, int a, int b, int c, int d);/* 0x405790 */
 /* ================================================================== */
 
 extern InputMgr g_input_mgr;        /* 0x4A9990 — static InputMgr object */
-extern void*    g_asset_mgr;             /* 0x485600 */
 extern void*    g_audio_mgr;             /* 0x4FD38C */
 extern void*    g_audio;                 /* 0x4FD3BC */
 extern void*    g_netman;                /* 0x4FD3AC */
@@ -151,8 +139,6 @@ extern char     g_allow_building_placement; /* 0x4FD3DC */
 extern char     g_in_build_mode;         /* 0x4FD199 */
 extern uint32_t g_last_cursor_pos;       /* 0x485558 */
 extern void*    g_active_panel;          /* 0x4FD224 */
-extern int      g_stream_open_flags;     /* 0x479190 */
-extern char     g_scene_name[];          /* 0x4A99C8 */
 
 /* ================================================================== */
 /* Inline helpers for embedded object vtable dispatch                   */
@@ -324,130 +310,25 @@ void ScriptedObject::Shutdown()
 }
 
 /* ================================================================== */
-/* HandleEvent — Load and parse a .dat script file                      */
-/* Address: 0x44B290                                                    */
+/* HandleEvent/LoadFromStream/AddChild/RemoveChild removed from here     */
+/*                                                                       */
+/* This entire block used to transcribe 0x44B290/0x44B190/0x44B220 as    */
+/* ScriptedObject's own methods (using field names child_script_ptr/     */
+/* unk_flag/script_bitmap_path that likewise no longer exist on this     */
+/* class). That attribution was wrong: 0x44B190's disassembly shows a    */
+/* direct (non-virtual) call to BuildingDescriptorEditor's own           */
+/* constructor (0x41E570) on the SAME receiver, and 0x44B220's body ends  */
+/* with a direct call to BuildingDescriptorEditor's own destructor body   */
+/* (0x41E620) on that same receiver — neither is reachable evidence for   */
+/* ScriptedObject's own layout. The real class is `TrackTileDescriptor`   */
+/* (input/TrackTileDescriptor.h/.cpp), a BuildingDescriptorEditor          */
+/* subclass constructed by ResourceManager::AddString's "type 3" resource */
+/* dispatch — the stream-handling substance of this removed code (real    */
+/* WIN32_Stream RAII, real state_bits/kBadBit checks) was already correct */
+/* and has been ported there verbatim with the field/call corrections     */
+/* documented in that header, rather than re-derived from scratch.        */
+/* See game/ScriptedObject.h's +0x630 field comment for the full trail.   */
 /* ================================================================== */
-
-void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
-{
-    char dat_path[260];
-    char asset_path[260];
-    int  loaded_size;
-    /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
-     * original's WIN32_StreamOpen(&buf,1) construction and paired
-     * WIN32_StreamDestroy(&buf)+WNDPROC_StreamCleanup(&buf) destruction;
-     * see StreamObject::~StreamObject()'s doc comment for the full
-     * evidence trail. Also fixes a pre-existing stack buffer-overflow
-     * bug: the previous `int stream_handle[2]` (8 bytes) was smaller
-     * than sizeof(WIN32_Stream) even on the original x86 (0x5C bytes),
-     * let alone this host's wider pointer fields. */
-    WIN32_Stream stream_handle;
-
-    this->sub_entity[0x82] = 0;                              /* loaded_flag at +0x162 = Entity::name[6] */
-    this->unk_flag    = 0;                                   /* +0x63A */
-
-    /* stream_handle's destructor runs automatically here (real C++ RAII)
-     * on every path, including this early return. */
-    if (name_suffix == nullptr) {
-        return;
-    }
-
-    /* Build path strings:
-       dat_path = g_scene_name + name_suffix + ".dat"
-       audio_channel (at +0x48) = g_scene_name + name_suffix + ".bmp" */
-    CRT_sprintf_buf(dat_path, "%s%s.dat", g_scene_name, name_suffix);
-    CRT_sprintf_buf(this->script_bitmap_path, "%s%s.bmp", g_scene_name, name_suffix);
-
-    /* Try loading from RFD archive (asset manager) first */
-    if (g_asset_mgr != nullptr) {
-        char* file_data;
-        void* stream_obj;
-        WNDPROC_Stream* parsed_stream;
-
-        CRT_sprintf_buf(asset_path, "%s.dat", name_suffix);
-        file_data = static_cast<char*>(AssetMgr_LoadFile(
-            g_asset_mgr, asset_path, &loaded_size));        /* 0x45CD00 */
-
-        if (file_data != NULL) {
-            /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use the
-             * real host size (see resources/Win32StreamMem.h). */
-            stream_obj = operator_new(WIN32_MemoryStream_Size());
-            if (stream_obj != NULL) {
-                parsed_stream = WNDPROC_StreamFromMemory(
-                    stream_obj, file_data, loaded_size, 1);   /* 0x464490 */
-
-                if (parsed_stream != NULL) {
-                    /* Check stream error flag: real state_bits/kBadBit
-                     * check (matches the fallback branch below, replacing
-                     * the former raw vtable[1]+offset-8 read of the same
-                     * field). */
-                    if ((parsed_stream->state_bits & StreamObject::kBadBit) == 0) {
-                        char loaded;
-
-                        /* Step 1: Parse script via ScriptedObject_ParseStream */
-                        loaded = ScriptedObject_ParseStream(parsed_stream); /* 0x41E9F0 */
-                        this->sub_entity[0x82] = loaded;
-
-                        /* Step 2: Render child window */
-                        if (loaded != 0) {
-                            loaded = UI_ChildWindow_Render(this, parsed_stream); /* 0x424E00 */
-                        }
-                        this->sub_entity[0x82] = loaded;
-
-                        /* Step 3: Init from stream */
-                        if (loaded != 0) {
-                            loaded = this->LoadFromStream(parsed_stream);
-                        }
-                        this->sub_entity[0x82] = loaded;
-
-                        /* Destroy the temporary stream: real C++ `delete`
-                         * through WNDPROC_Stream* dispatches to
-                         * WIN32_MemoryStream's scalar deleting destructor
-                         * via StreamObject's virtual ~StreamObject() —
-                         * replaces the former raw vtable[0] dispatch. */
-                        delete parsed_stream;
-                    }
-                }
-            }
-            CRT_free(file_data);                             /* 0x466C70 */
-        }
-    }
-
-    /* Fall back to disk file I/O if archive load didn't succeed */
-    if (this->sub_entity[0x82] == 0) {
-        stream_handle.OpenPath(dat_path, 0x20, g_stream_open_flags); /* 0x463AA0 */
-
-        /* Check stream error flag: real state_bits/kBadBit check,
-         * replacing the original's vbtable-relative raw read of the
-         * same field (`*(rdbuf-independent StreamObject::state_bits) &
-         * kBadBit`, confirmed via disassembly at 0x44B290). */
-        if ((stream_handle.state_bits & StreamObject::kBadBit) == 0) {
-            char loaded;
-
-            loaded = ScriptedObject_ParseStream(&stream_handle);      /* 0x41E9F0 */
-            this->sub_entity[0x82] = loaded;
-
-            if (loaded != 0) {
-                loaded = UI_ChildWindow_Render(this, &stream_handle); /* 0x424E00 */
-            }
-            this->sub_entity[0x82] = loaded;
-
-            if (loaded != 0) {
-                loaded = this->LoadFromStream(&stream_handle);
-            }
-            this->sub_entity[0x82] = loaded;
-        }
-
-        /* Matches the original's WIN32_StreamDestroyImmediate — NOT the
-         * object's own destructor, which still runs once at scope exit
-         * below. */
-        stream_handle.CloseNow();                             /* 0x463B10 */
-    }
-
-    /* stream_handle's destructor runs automatically here (real C++
-     * RAII) — replaces the original's WIN32_StreamDestroy+
-     * WNDPROC_StreamCleanup pair. */
-}
 
 /* ================================================================== */
 /* MoveTo — Move ScriptedObject to (x, y) with boundary clamping       */
@@ -608,41 +489,10 @@ void ScriptedObject::MoveTo(int x, int y)
     }
 }
 
-/* ================================================================== */
-/* RemoveChild — Destroy child ScriptedObject                           */
-/* Address: 0x44B220                                                    */
-/* ================================================================== */
-
-void ScriptedObject::RemoveChild()
-{
-    /* Free child script pointer if non-null */
-    if (this->child_script_ptr != nullptr) {
-        GLOBAL_free(this->child_script_ptr);                 /* 0x465CD0 */
-        this->child_script_ptr = nullptr;
-    }
-
-    /* Call base destructor (ScriptedObject_InitBase with 0,0) */
-    ScriptedObject_InitBase(0, 0);                               /* 0x4203E0 */
-}
-
-/* ================================================================== */
-/* AddChild — Construct child ScriptedObject                            */
-/* Address: 0x44B190                                                    */
-/* ================================================================== */
-
-ScriptedObject* ScriptedObject::AddChild(uint32_t resource_id, const char* name_suffix)
-{
-    /* Initialize base via ExitGame */
-    ScriptedObject_InitBase(resource_id, 0);                     /* 0x4203E0 */
-
-    /* Clear child script pointer */
-    this->child_script_ptr = nullptr;
-
-    /* Load script via HandleEvent */
-    this->HandleEvent(resource_id, name_suffix);
-
-    return this;
-}
+/* RemoveChild/AddChild removed from here — see the removed-HandleEvent
+ * note above this file's MoveTo implementation for the full trail. Both
+ * describe TrackTileDescriptor (input/TrackTileDescriptor.h/.cpp), not
+ * ScriptedObject. */
 
 /* ================================================================== */
 /* UpdateToolState — Per-frame tool zoom update (vtable[19])           */
@@ -892,8 +742,8 @@ bool ScriptedObject::CheckClick(int x, int y)
     return false;
 }
 
-char ScriptedObject::LoadFromStream(void* stream)
-{
-    /* TODO: decompile — called from HandleEvent */
-    return 0;
-}
+/* LoadFromStream removed — it never had a real decompiled address of its
+ * own on ScriptedObject; it was invented to stand in for
+ * TrackTileDescriptor's virtual self-dispatch Render() call (vtable slot
+ * [3]), identified via 0x44B290's disassembly (`CALL [this+0xC]`). See
+ * input/TrackTileDescriptor.h/.cpp. */

@@ -24,7 +24,26 @@
  *
  * Global singleton: g_scripted_object at 0x4A99E0
  *
- * Child ScriptedObject (vtable 0x478358):
+ * CORRECTION (2026-08-16): "Child ScriptedObject (vtable 0x478358)" below,
+ * and this class's own `AddChild`/`DtorChain`/`RemoveChild`/`HandleEvent`
+ * members (0x44B190/0x44B200/0x44B220/0x44B290), are a mis-attribution —
+ * confirmed via direct disassembly that ECX at 0x44B190 is a fresh
+ * BuildingDescriptorEditor-shaped allocation, not this class's own `this`
+ * (its ctor call and destructor-chain call both target
+ * BuildingDescriptorEditor's real constructor/destructor body directly,
+ * neither of which this class derives from). The real class is
+ * `TrackTileDescriptor` (input/TrackTileDescriptor.h/.cpp — a genuine
+ * `BuildingDescriptorEditor` subclass with a real 5-slot vtable). This
+ * file's own duplicate `AddChild`/`DtorChain`/`RemoveChild`/`HandleEvent`
+ * method bodies (world/scriptengine.cpp) are left as-is rather than
+ * rewritten here — this file appears to be an independent, parallel,
+ * `Status: TRANSCRIBED` reconstruction of the same class as
+ * `game/ScriptedObject.h`/`.cpp` (same vtable 0x4782A8, same ~0x74C size,
+ * same method address list throughout) that was never reconciled with it;
+ * resolving which of the two is canonical is a separate, larger task, not
+ * attempted here (see PROGRESS.md's Remaining work).
+ *
+ * Child ScriptedObject (vtable 0x478358) — see the correction above:
  *   Used for .dat script child objects created via AddChild.
  *   DtorChain = 0x44B200 (scalar-deleting dtor that calls RemoveChild)
  */
@@ -138,23 +157,37 @@ public:
 };
 
 /* ================================================================== */
-/* ScriptedObjectChild — Child ScriptedObject (0x63C bytes)            */
-/* Created by AddChild; child ScriptedObject table is at 0x478358.    */
-/* Lighter than the main ScriptedObject: no embedded GameObject,       */
-/* ScriptEngine, or ScrollPanel sub-objects.                           */
-/* ================================================================== */
-struct ScriptedObjectChild {
-    uint8_t   _pad_00[0x48];       /* +0x00..+0x47  RESDATA base */
-    char      path_buf[264];       /* +0x48  path buffer for .dat/.bmp loading */
-    uint8_t   _pad_150[0x12];      /* +0x150..+0x161 */
-    uint8_t   parse_success;       /* +0x162  byte: 1 = parse/render succeeded */
-    uint8_t   _pad_163[0x4CD];     /* +0x163..+0x62F */
-    void*     child_ptr;           /* +0x630  child data pointer (freed in RemoveChild) */
-    uint8_t   _pad_634[6];         /* +0x634..+0x639 */
-    uint8_t   stream_status;       /* +0x63A  byte: stream processing status */
-    uint8_t   _pad_63B[1];         /* +0x63B */
-    /* Total size: 0x63C bytes */
-};
+/* ScriptedObjectChild struct removed (2026-08-16)                     */
+/*                                                                       */
+/* This was a raw partial-layout struct (no inheritance, no methods, no  */
+/* vtable) duplicating the exact 0x63C-byte object at vtable 0x478358    */
+/* this same comment names — confirmed zero uses anywhere in this file   */
+/* or elsewhere in the tree (dead documentation, not a live cast target).*/
+/* The real, fully-modeled class is `TrackTileDescriptor` (input/         */
+/* TrackTileDescriptor.h/.cpp): a genuine `BuildingDescriptorEditor`      */
+/* subclass with real inheritance, a real 5-slot vtable, and named        */
+/* fields for every offset this struct only inventoried as `_pad_*`       */
+/* (its `path_buf`/`parse_success`/`child_ptr`/`stream_status` are        */
+/* `ChildWindow::bmpPath`/`loaded` — inherited, not local — and            */
+/* `TrackTileDescriptor::tile_type_entries`/`tile_type` respectively).     */
+/*                                                                        */
+/* NOTE — separate, larger, NOT resolved by this pass: this file's own    */
+/* `RESDATA_ScriptedObject` class (below) independently declares/defines  */
+/* (world/scriptengine.cpp) `AddChild`/`DtorChain`/`RemoveChild`/          */
+/* `HandleEvent` at these exact same addresses (0x44B190/0x44B200/        */
+/* 0x44B220/0x44B290) as ITS OWN methods — the identical mis-attribution  */
+/* this session fixed in `game/ScriptedObject.h`/`.cpp`, in a SEPARATE,   */
+/* parallel, also-`Status: TRANSCRIBED` file that appears to duplicate    */
+/* `game/ScriptedObject`'s entire class (same vtable 0x4782A8, same       */
+/* ~0x74C size, same method addresses throughout — `Ctor`/`Dtor`/         */
+/* `Update`/`MoveTo`/`HitTest`/etc.). Neither `ScriptedObject` nor         */
+/* `RESDATA_ScriptedObject` appears to be constructed anywhere in the     */
+/* current tree (no `new`/global instance of either found) — this looks   */
+/* like two independent, competing reconstructions of the same original   */
+/* class that were never reconciled, not a live conflict, but resolving   */
+/* which one is canonical (and retiring/merging the other) is a separate, */
+/* substantial task, out of scope for this pass — tracked in              */
+/* PROGRESS.md's Remaining work. */
 
 /* ================================================================== */
 /* RESDATA_ScriptedObject class                                        */

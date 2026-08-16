@@ -35,6 +35,7 @@
 #include "../ui/CursorEditWindow.h"
 #include "../game/TrainStation.h"
 #include "../input/BuildingDescriptorEditor.h"
+#include "../input/TrackTileDescriptor.h"
 #include "../audio/GameAudio.h"
 
 /* ================================================================== */
@@ -134,9 +135,13 @@ int32_t Config_GetIniInt(void* config, const char* section,
  * AddString and cites the same "INPUT_ExitGame" Ghidra misnomer) —
  * these call sites just hadn't been updated to use it. */
 extern "C" {
-    void* RESDATA_ScriptedObject_AddChild(void* obj, int32_t resId, int32_t strPtr); /* @ 0x0044B190 */
     void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr);        /* @ 0x0040E600 */
 }
+/* TrackTileDescriptor_Ctor (@ 0x0044B190, Ghidra label
+ * "RESDATA_ScriptedObject_AddChild" — misnomer) has real C++ linkage,
+ * declared in input/TrackTileDescriptor.h (included above) — it is a
+ * BuildingDescriptorEditor subclass constructor bridge, not a
+ * ScriptedObject method, and is no longer declared extern "C" here. */
 
 void Town_CopyTiles8bpp_Transparent(
     void* surface, int32_t srcX, int32_t srcY,
@@ -732,18 +737,15 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
                     result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
                 }
             } else {
-                /* 0x63C is the original x86 sizeof of RESDATA_ScriptedObject_
-                 * AddChild's target object (0x44B190, still undecompiled —
-                 * see shared/stubs_link001_batch3_resource_audio.cpp's TODO;
-                 * no reconstructed C++ class exists yet to take a sizeof()
-                 * from). Currently safe: that stub returns nullptr without
-                 * writing through `newObj`, so this buffer is never touched
-                 * at its real size. Revisit this literal (widen to the real
-                 * class's sizeof) the moment 0x44B190 is decompiled — until
-                 * then this is provably not a live overflow, only a leak. */
-                newObj = operator_new(0x63C);
+                /* 0x63C was the original x86 sizeof of TrackTileDescriptor
+                 * (input/TrackTileDescriptor.h — a BuildingDescriptorEditor
+                 * subclass, 0x630 base + 0xC own fields); now decompiled and
+                 * reconstructed, so this allocates the real host sizeof()
+                 * instead of the stale x86 literal, matching the sibling
+                 * BuildingDescriptorEditor/TrainStation branches above. */
+                newObj = operator_new(sizeof(TrackTileDescriptor));
                 if (newObj != nullptr) {
-                    result = RESDATA_ScriptedObject_AddChild(newObj, resId, strPtr);
+                    result = TrackTileDescriptor_Ctor(newObj, resId, strPtr);
                 }
             }
             break;
