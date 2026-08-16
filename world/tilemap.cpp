@@ -15,6 +15,7 @@
  */
 
 #include "tilemap.h"
+#include "../game/ScriptedObject.h"
 #include "../core/CGWND.h"
 #include "../ui/UIPANEL_Surface.h"
 #include "../platform/ddraw_interfaces.h"   /* IDirectDrawSurface4 — for primary-surface Lock/Unlock */
@@ -97,7 +98,7 @@ class ResourceManager;
 extern ResourceManager g_resmgr;         /* 0x4855E8 — object, not a pointer (was void*,
                                            * a widespread cross-TU landmine — see
                                            * PROGRESS.md's g_resmgr sweep) */
-extern void*    g_scripted_object;       /* 0x4AA5B8 */
+extern ScriptedObject* g_scripted_object;   /* 0x4AA5B8 — game/ScriptedObject.h */
 extern void*    g_building_mgr;          /* 0x485448 */
 /* g_tilemap declared canonically in tilemap.h (TileMap* singleton) */
 extern void*    g_game;                  /* 0x4854C8 */
@@ -124,11 +125,10 @@ extern int      DDRAW_SelectBuilding(void* ddraw_building, int building);
 extern void     CGWND_SetMode(int mode);
 /* Town_RenderSelection/DeselectBuilding/UpdateSelection, Game_ResetCursor,
  * Game_SetCursorByResourceId, UI_SetTooltipText/Pos, UI_UpdateTooltip,
- * BuildingMgr_DispatchAll, World_InvalidateRect,
- * RESDATA_ScriptedObject_Dispatch, DDRAW_DispatchToSubObjects: declared in
- * tilemap.h (included above), implemented beside the class each wraps
- * (Town.cpp, Game.cpp, UI_Utils.cpp, BuildingMgr.cpp, World.cpp,
- * scriptengine.cpp, DDRAW.cpp) rather than here, since including every one
+ * BuildingMgr_DispatchAll, World_InvalidateRect, DDRAW_DispatchToSubObjects:
+ * declared in tilemap.h (included above), implemented beside the class
+ * each wraps (Town.cpp, Game.cpp, UI_Utils.cpp, BuildingMgr.cpp, World.cpp,
+ * DDRAW.cpp) rather than here, since including every one
  * of those subsystem headers into this file conflicts with their own
  * pre-existing, differently-typed declarations of the shared g_* globals
  * this file already declares locally above. */
@@ -2235,7 +2235,7 @@ void TileMap::ProcessRect(int left, int top, int right, int bottom)
                                           pixel_x + 16, pixel_y + 16);
                         UI_UpdateTooltip(pixel_x, pixel_y,
                                          pixel_x + 16, pixel_y + 16, 1);
-                        RESDATA_ScriptedObject_Dispatch(pixel_x, pixel_y,
+                        g_scripted_object->Dispatch(pixel_x, pixel_y,
                                                         pixel_x + 16, pixel_y + 16, 1);
                         DDRAW_DispatchToSubObjects(pixel_x, pixel_y,
                                                    pixel_x + 16, pixel_y + 16,

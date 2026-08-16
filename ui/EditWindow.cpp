@@ -7,6 +7,7 @@
  */
 
 #include "EditWindow.h"
+#include "../game/ScriptedObject.h"
 #include "UIPANEL_Surface.h"
 #include "UI_Utils.h"
 #include "NameEntryPanel.h"
@@ -191,7 +192,7 @@ void*   UIPANEL_DestroySurface(UIPANEL_Surface* surface, uint8_t flags); /* 0x42
 /* ================================================================== */
 
 extern void*   g_primary_surface;       /* 0x4FD3C4 */
-extern void*   g_scripted_object;       /* 0x4AA5B8 */
+extern ScriptedObject* g_scripted_object;   /* 0x4AA5B8 — game/ScriptedObject.h */
 extern PlayerConfig* g_player_config;   /* 0x485160 */
 extern void*   g_config_ini;            /* 0x485484 */
 class ResourceManager;

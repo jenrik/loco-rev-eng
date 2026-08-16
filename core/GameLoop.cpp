@@ -16,6 +16,7 @@
 #include "CGWND.h"
 #include "Game.h"
 #include "../game/PlayerConfig.h"
+#include "../game/ScriptedObject.h"
 #include "../network/NetworkPlayerList.h"
 #include "../shared/types.h"
 #include "../world/tilemap.h"
@@ -41,9 +42,9 @@ void* operator_new(size_t size);
 
 /* Subsystem constructors (C++ linkage) */
 /* Narrow factory pair for a full-sized ScriptEngine (world/scriptengine.
- * cpp) -- declared narrowly rather than #include-ing scriptengine.h,
- * which would pull in that header's own, separately-tracked
- * g_scripted_object redeclaration conflict. */
+ * cpp) -- declared narrowly rather than #include-ing scriptengine.h (which
+ * this file doesn't otherwise need; game/ScriptedObject.h, included above,
+ * now supplies g_scripted_object). */
 size_t ScriptEngine_HostSize();
 void*  ScriptEngine_HostConstruct(void* mem);
 void* GameConfig_constructor(void* mem);         /* 0x440C60 */
@@ -62,7 +63,6 @@ void  NETMAN_Update(void* netman);               /* 0x43F0C0 */
 void  RESMGR_VehicleAnimationTick(void*);        /* 0x448120 */
 void  World_UpdateTick(void* world);             /* 0x44E020 */
 void  UI_HideTooltip(void* mgr);                 /* 0x423D70 */
-void  RESDATA_ScriptedObject_Update(void* obj);  /* 0x4497A0 */
 void  Town_TrackBuilding(void* view);            /* 0x42D1A0 */
 void  DDRAW_UpdateBuilding(void* ddraw);         /* 0x459DA0 */
 void  BuildingMgr_UpdateAll(void* mgr);          /* 0x434720 */
@@ -100,7 +100,9 @@ class ResourceManager;
 extern ResourceManager g_resmgr;     /* 0x4855E8 — object, not a pointer (was void*,
                                        * a widespread cross-TU landmine — see
                                        * PROGRESS.md's g_resmgr sweep) */
-extern void*    g_scripted_object;   /* 0x4AA9B0 */
+/* g_scripted_object: canonically declared (ScriptedObject*, 0x4AA5B8) by
+ * game/ScriptedObject.h, included above. This file's own former
+ * redeclaration (`void*`, address 0x4AA9B0) was both mistyped and stale. */
 extern void*    g_town_view;         /* 0x4852A0 — real address (see
                                        * core/GameView.h). The prior comment
                                        * here, 0x4AA818, is a real, heavily-
@@ -443,8 +445,13 @@ extern "C" void GameLoop_FrameUpdate(void)
     /* Step 8: Game update (input, animation, selection) */
     ((Game*)g_game)->Update();
 
-    /* Step 9: Scripted object update */
-    RESDATA_ScriptedObject_Update(g_scripted_object);
+    /* Step 9: Scripted object update. Previously called a free function
+       `RESDATA_ScriptedObject_Update(void*)` — a distinct mangled symbol
+       from `ScriptedObject::Update()` that silently bound to
+       shared/stubs_impl.cpp's no-op stub, so this update never actually
+       ran on the host despite matching the original's per-frame call
+       (0x45C4BA -> 0x4497A0). Call the real typed method directly. */
+    g_scripted_object->Update();
 
     /* Step 10: Town mode updates */
     if (game_mode == 3 || game_mode == 9) {

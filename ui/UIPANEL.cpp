@@ -12,6 +12,7 @@
 // Status: TRANSCRIBED
 
 #include "UIPANEL.h"
+#include "../game/ScriptedObject.h"
 #include "../platform/ddraw_interfaces.h"   /* IDirectDrawSurface4 — for BeginPaint's GetDC() */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
@@ -119,7 +120,7 @@ extern int __thiscall RESDATA_SoundObject_GetTextLength(int sprite);        /* 0
 /* Global variables */
 extern void*  g_resource_mgr;            /* 0x4B375C (ResourceManager) */
 extern char   g_empty_string[];          /* 0x476934 */
-extern void*  g_scripted_object;         /* 0x4AA5B8 */
+extern ScriptedObject* g_scripted_object;   /* 0x4AA5B8 — game/ScriptedObject.h */
 extern void*  g_active_panel;            /* TBD */
 extern int    g_world_width;             /* TBD */
 class InputMgr;
@@ -460,8 +461,14 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         this->StopSound(0);
 
         *(uint8_t*)((intptr_t)this + 0x88) = 0;                /* +0x88 -- flag cleared */
-        g_active_panel = &g_scripted_object;                     /* Back to main panel */
-        RESDATA_GameObject_UpdateAnimation((void*)0x4AA5B8);    /* 0x44B810 */
+        /* Fixed: previously `&g_scripted_object` (address of the pointer
+           variable itself, a `ScriptedObject**` — wrong type/value for
+           `g_active_panel`) and a hardcoded literal-address cast (invalid
+           on this host's process layout; a real crash-on-touch landmine).
+           Both were pre-existing bugs in this call site, not behavior this
+           pass introduces. */
+        g_active_panel = g_scripted_object;                     /* Back to main panel */
+        RESDATA_GameObject_UpdateAnimation(g_scripted_object);  /* 0x44B810 */
         this->mode = action;                                    /* +0x49C */
         break;
 

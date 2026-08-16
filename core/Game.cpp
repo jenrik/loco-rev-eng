@@ -95,7 +95,9 @@ extern int32_t  g_object_count;        /* 0x004A99A0 object array count */
 extern void**   g_object_array;        /* 0x004A9998 object array */
 
 /* Subsystem singletons (g_player_color is declared in world/tilemap.h) */
-/* g_scripted_object is canonically declared in world/scriptengine.h */
+/* g_scripted_object is canonically declared in game/ScriptedObject.h
+ * (included above); the calls below (GetDragOffset/IsDragging/CheckClick/
+ * HitTest) are ScriptedObject's real, typed virtual methods. */
 extern BuildingMgr*    g_building_mgr;     /* 0x00485448 — host-constructed singleton */
 extern World*          g_world;            /* 0x004A98B0 — host-constructed singleton */
 

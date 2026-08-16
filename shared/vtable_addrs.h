@@ -441,32 +441,43 @@
    Extends Panel -> GameObject. Has at least 23 vtable slots (indices 0-22).
    Slots 0-14 match GameObject base; slots 15-22 are ScriptedObject-specific. */
 #define VTBL_SCRIPTED_OBJECT            0x004782A8  /* ScriptedObject vtable
-    [0]  +0x00: scalar deleting destructor (RESDATA_ScriptedObject_Dtor,       0x4494C0)
-    [1]  +0x04: UpdateChild/InvalidateRect  (RESDATA_UpdateChild,             0x454890)
-    [2]  +0x08: IsDragging / PtInRect       (RESDATA_ScriptedObject_IsDragging,0x449CE0)
-    [3]  +0x0C: MoveTo                       (RESDATA_ScriptedObject_MoveTo,   0x449DC0)
-    [4]  +0x10: HitTest                      (RESDATA_ScriptedObject_HitTest,  0x44A0C0)
+   CORRECTED 2026-08-16: every slot from [8] onward below was off by one
+   (each row showed the address that actually belongs to the FOLLOWING
+   slot) -- re-derived directly from the raw vtable bytes at 0x4782A8.
+    [0]  +0x00: scalar deleting destructor (ScriptedObject::~ScriptedObject, 0x4494C0)
+    [1]  +0x04: OnUpdateChild               (Panel::UpdateChild,              0x454890)
+    [2]  +0x08: IsDragging / PtInRect       (ScriptedObject::IsDragging,      0x449CE0)
+    [3]  +0x0C: MoveTo                       (ScriptedObject::MoveTo,          0x449DC0)
+    [4]  +0x10: HitTest                      (ScriptedObject::HitTest,         0x44A0C0)
     [5]  +0x14: (unknown)                    (0x454A60)
-    [6]  +0x18: Init/InitBase                (Panel_Init,                      0x454680)
-    [7]  +0x1C: StopSound                    (GameObject_StopSound,            0x405A20)
-    [8]  +0x20: SetPause/callback            (CGWND_SetPause,                  0x4061B0)
-    [9]  +0x24: Update callback              (RESDATA_ScriptedObject_Update,   0x4497A0)
-    [10] +0x28: Draw (override)              (Panel::Draw,                     0x454900)
-    [11] +0x2C: DrawConnected                (GameObject_DrawConnected,        0x405FD0)
-    [12] +0x30: SetName                      (GameObject_SetName,              0x405E20)
-    [13] +0x34: SetAnimState                 (GameObject_SetAnimState,         0x405A50)
-    [14] +0x38: Shutdown/cleanup             (RESDATA_ScriptedObject_Shutdown, 0x4495B0)
-    [15] +0x3C: InitState                    (RESDATA_GameVehicle_InitState,   0x44ADF0)
-    [16] +0x40: HandleToolClick              (RESDATA_ScriptedObject_HandleToolClick, 0x44A250)
-    [17] +0x44: (unknown, shared by [18])    (0x44EF00)
-    [18] +0x48: (unknown, shared by [17])    (0x44EF00)
-    [19] +0x4C: UpdateToolState              (RESDATA_ScriptedObject_UpdateToolState, 0x44AC20)
-    [20] +0x50: GetDragOffset                (RESDATA_ScriptedObject_GetDragOffset,   0x449D80)
-    [21] +0x54: CheckClick                   (RESDATA_ScriptedObject_CheckClick,      0x449D00)
-    [22] +0x58: (unknown)                                                                   */
+    [6]  +0x18: Init/InitBase                (Panel::Init,                     0x454680)
+    [7]  +0x1C: StopSound                    (Entity::StopSound,               0x405A20)
+    [8]  +0x20: SetFrame                     (Entity::SetFrame,                0x405DE0)
+    [9]  +0x24: SetVisible                   (Entity::SetVisible,              0x4061B0)
+    [10] +0x28: Update (override)            (ScriptedObject::Update,          0x4497A0)
+    [11] +0x2C: Draw (override)              (Panel::Draw,                     0x454900)
+    [12] +0x30: DrawConnected                (Entity::DrawConnected,           0x405FD0)
+    [13] +0x34: SetName                      (Entity::SetName,                 0x405E20)
+    [14] +0x38: SetAnimState                 (Entity::SetAnimState,            0x405A50)
+    [15] +0x3C: Shutdown                     (ScriptedObject::Shutdown,        0x4495B0)
+    [16] +0x40: InitState                    (ScriptedObject::InitState,       0x44ADF0)
+    [17] +0x44: HandleToolClick              (ScriptedObject::HandleToolClick, 0x44A250)
+    [18] +0x48: (unknown, shared by [19])    (0x44EF00)
+    [19] +0x4C: (unknown, shared by [18])    (0x44EF00)
+    [20] +0x50: UpdateToolState              (ScriptedObject::UpdateToolState, 0x44AC20)
+    [21] +0x54: GetDragOffset                (ScriptedObject::GetDragOffset,   0x449D80)
+    [22] +0x58: CheckClick                   (ScriptedObject::CheckClick,      0x449D00)
+   NOTE: Dispatch (0x449C00, 5-arg Draw/blit entry point) is NOT in this
+   vtable at all -- confirmed via get_xrefs_to: its one caller (TileMap::
+   ProcessRect, 0x456A40) reaches it via a direct UNCONDITIONAL_CALL, not
+   indirect/vtable dispatch. Canonical class: game/ScriptedObject.h. */
 
-#define VTBL_SCRIPTED_OBJECT_CHILD      0x00478358  /* Child ScriptedObject vtable
-    [0]  +0x00: scalar deleting destructor (RESDATA_ScriptedObject_DtorChain, 0x44B200) */
+/* VTBL_SCRIPTED_OBJECT_CHILD removed (2026-08-16): a stale one-line
+ * duplicate of the same address (0x478358), unused anywhere in the tree.
+ * The real, fully-documented entry for this vtable is
+ * VTBL_TRACK_TILE_DESCRIPTOR below (see input/TrackTileDescriptor.h for
+ * the full evidence trail — this is TrackTileDescriptor's vtable, not a
+ * "child ScriptedObject"). */
 
 /* ================================================================== */
 /* Vehicle — Road vehicle class (0x94-byte standalone, ScriptedObject-like) */

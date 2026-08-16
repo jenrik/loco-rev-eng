@@ -269,7 +269,14 @@ void* CGWND_GameSetup_DrawGrid_Thunk = nullptr;
 } /* end extern "C" */
 
 /* C++-linkage stubs */
-void* g_scripted_object = nullptr;
+/* Real type is ScriptedObject* (game/ScriptedObject.h, 0x4AA5B8) — this
+ * definition previously typed it `void*`, an ODR/type mismatch against
+ * every real TU's `extern ScriptedObject* g_scripted_object;` declaration
+ * (2026-08-16 ScriptedObject/RESDATA_ScriptedObject reconciliation).
+ * Forward-declared rather than including the full header: only the
+ * pointer type is needed to null-initialize it here. */
+class ScriptedObject;
+ScriptedObject* g_scripted_object = nullptr;
 void RESDATA_GameObject_UpdateAnimation(void*);
 void RESDATA_GameObject_UpdateAnimation(void*) { /* host no-op */ }
 void RESDATA_SoundObject_GetState(int);
