@@ -91,7 +91,13 @@ extern "C" {
 
     /* String/utility */
     int32_t __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...);
-    uint32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);
+    /* CRT_wcsstr (0x471480) was declared here with extern "C" linkage but
+     * has no extern "C" definition anywhere in the tree (its real body,
+     * shared/stubs_link001_batch1_crt_win32.cpp, is plain C++ linkage,
+     * matching every real caller — game/Building.cpp et al.); this
+     * declaration had zero call sites in this file and was itself the
+     * documented reason game/Building.cpp avoids including this header
+     * (see AssetMgr_ReadPairValue's comment below). Removed 2026-08-16. */
 
     /* Huffman */
     uint32_t __cdecl Huf_GetUncompressedSize(uint32_t* data);
@@ -303,7 +309,7 @@ uint8_t* __thiscall AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t
 /* Free-function compatibility shims.                                  */
 /*                                                                     */
 /* Each external caller below deliberately does not include this       */
-/* header (documented `operator_new`/`GLOBAL_free`/`CRT_wcsstr`         */
+/* header (documented `operator_new`/`GLOBAL_free`                     */
 /* extern-"C"-vs-C++-linkage conflicts — same shape as the              */
 /* AssetMgr_ReadPairValue shim above) and calls across that boundary as */
 /* a free function with the object passed explicitly. These forward     */
@@ -500,8 +506,8 @@ int32_t AssetMgr_WriteFile(int32_t* param_1, int32_t param_2, int32_t param_3,
  *
  * game/Building.cpp deliberately does not include this header (it
  * conflicts with that file's own operator_new/GLOBAL_free extern "C"
- * declarations and a differently-shaped CRT_wcsstr — see Building.cpp's
- * top-of-file comment) and instead forward-declares `struct AssetMgr` and
+ * declarations — see Building.cpp's top-of-file comment) and instead
+ * forward-declares `struct AssetMgr` and
  * calls the free function below, matching the original opaque-handle
  * boundary that file already uses for g_asset_mgr. This wrapper is the
  * only caller-visible surface across that boundary; it forwards straight

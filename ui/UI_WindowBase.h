@@ -114,6 +114,7 @@ struct UIAnimationOrigin {
 };
 
 struct UIPANEL_Surface;
+struct IDirectDrawSurface4;
 
 /* ================================================================== */
 /* UI_WindowBase class                                                  */
@@ -130,24 +131,42 @@ public:
     HWND       hWndParent;             // +0x0C  parent window HWND (stored during creation)
     UINT       resourceId;             // +0x10  window/dialog resource ID
 
-    /* Zeroed by constructor, usage varies by subclass */
-    int32_t    field_14;               // +0x14  set by set_render_surface() to the active surface
-                                        //         address/identity; dispatch_message's WM_TIMER
-                                        //         (0x113) and WM_CAPTURECHANGED (0x215) handlers
-                                        //         gate on `field_14 != 0` ("a render surface is
-                                        //         configured"). See 0x426140.
-    int32_t    field_18;               // +0x18  (unknown, zeroed by ctor)
-    int32_t    field_1C;               // +0x1C  (unknown, zeroed by ctor)
-    int32_t    field_20;               // +0x20  frame divisor / animation-tick threshold, set by
-                                        //         set_render_surface(); compared against field_24
-                                        //         in dispatch_message's WM_TIMER fast path (0x426140)
-    int32_t    field_24;               // +0x24  animation-tick counter, wraps at field_20, reset by
-                                        //         set_render_surface(); incremented by dispatch_message's
-                                        //         WM_TIMER fast path (0x426140)
+    /* Zeroed by constructor, usage varies by subclass.
+     *
+     * +0x14/+0x18/+0x1C/+0x20/+0x24 renamed 2026-08-16 (EndPaintEx/Render
+     * integration pass): confirmed via fresh disassembly of both
+     * EndPaintEx (0x426B90) and Render (0x426EB0), which dispatch
+     * `renderSurface` as a live __thiscall receiver into UIPANEL_Blit
+     * (0x42B050) and read tileWidth/tileHeight/frameCount/currentFrame as
+     * the horizontal-sprite-strip frame-selection state (a real, live
+     * surface pointer — not merely an "address identity" int32, as the
+     * prior pass's docs assumed before this evidence existed). */
+    UIPANEL_Surface* renderSurface;    // +0x14  active render surface, set by set_render_surface().
+                                        //         __thiscall receiver for UIPANEL_Blit in EndPaintEx/
+                                        //         Render. dispatch_message's WM_TIMER (0x113) and
+                                        //         WM_CAPTURECHANGED (0x215) handlers gate on
+                                        //         `renderSurface != nullptr`. See 0x426140.
+    int32_t    tileWidth;              // +0x18  per-frame tile width (surface->width / frame_divisor,
+                                        //         set by set_render_surface()); horizontal sprite-strip
+                                        //         stride used with currentFrame to compute scroll offset.
+    int32_t    tileHeight;             // +0x1C  per-frame tile height (surface->height), set by
+                                        //         set_render_surface().
+    int32_t    frameCount;             // +0x20  frame divisor / total horizontal sprite-strip frame
+                                        //         count, set by set_render_surface(); compared against
+                                        //         currentFrame in dispatch_message's WM_TIMER fast path
+                                        //         (0x426140) and in EndPaintEx/Render's frame-select logic.
+    int32_t    currentFrame;           // +0x24  current animation frame index, wraps at frameCount,
+                                        //         reset by set_render_surface(); incremented by
+                                        //         dispatch_message's WM_TIMER fast path (0x426140);
+                                        //         used by EndPaintEx/Render to compute the sprite-strip
+                                        //         scroll offset (tileWidth * currentFrame).
 
     UINT_PTR   timerId;                // +0x28  window timer ID (set by Show via SetTimer)
-    int32_t    field_2C;               // +0x2C  (unknown, zeroed by ctor)
-    int32_t    field_30;               // +0x30  (unknown, zeroed by ctor)
+    int32_t    originX;                // +0x2C  screen-space X anchor of the render surface, set by
+                                        //         set_render_surface() from origin->x. EndPaintEx/Render
+                                        //         subtract this from the absolute cursor position to get
+                                        //         a surface-relative cursor X (was field_2C).
+    int32_t    originY;                // +0x30  screen-space Y anchor (origin->y). (was field_30)
 
     /** Last observed cursor position (screen coords), used by dispatch_message's
      *  WM_TIMER (0x113) fast path to detect "cursor has not moved since the
@@ -170,24 +189,37 @@ public:
                                         //         the WM_TIMER fast path is skipped entirely (0x426140).
     uint8_t    _pad_3E[2];             // +0x3E  padding
     int32_t    field_40;               // +0x40  idle-animation cycle countdown, zeroed by ctor;
-                                        //         decremented once per field_20 animation-tick wrap by
+                                        //         decremented once per frameCount animation-tick wrap by
                                         //         dispatch_message's WM_TIMER fast path (0x426140); at 0
                                         //         it sets field_3D and stops decrementing further.
 
     uint8_t    activeFlag;             // +0x44  active/hidden flag (byte, cleared by Hide)
     uint8_t    _pad_45[3];             // +0x45  padding
 
-    int32_t    cursorRefCount;         // +0x48  shared cursor backbuffer reference count
-                                       //         Incremented by init_sprites, decremented by base dtor.
-                                       //         When all owners release, the global cursor backbuffer
-                                       //         (_g_cursor_back @ 0x4FD3CC) is freed.
+    /* +0x48 retyped 2026-08-16 (EndPaintEx/Render integration pass): fresh
+     * disassembly of both functions shows `MOV EAX,[ESI+0x48]; MOV
+     * ECX,[EAX]; CALL [ECX+0x14]` — a live IDirectDrawSurface4::Blt
+     * dispatch through this offset's OWN vtable, not a plain int refcount
+     * read. This is a NON-OWNING, cached alias to the shared cursor
+     * backbuffer (`g_cursor_back` @ 0x4FD3CC below) used as the Blt
+     * destination/source when saving/restoring the primary surface's
+     * pixels under the cursor overlay. The refcount role previously
+     * documented here is real too, but belongs to the separate global
+     * `g_cursor_refcount` (0x4FD3D0) — base_destructor decrements that
+     * global directly and merely gates on this pointer being non-null
+     * (see base_destructor()). Sole write site: Cursor_SetupSurface
+     * (0x425DC0, declared but not yet defined anywhere in the tree),
+     * called from create_full_window() only under #ifdef _WIN32 — this
+     * field is therefore permanently nullptr on the host build today. */
+    IDirectDrawSurface4* cursorBackSurface;  // +0x48  non-owning alias to g_cursor_back (below)
 
     int32_t    field_4C;               // +0x4C  (unknown, NOT zeroed by ctor — set by subclass)
 
-    int32_t    field_50;               // +0x50  (unknown, zeroed by ctor)
-    int32_t    field_54;               // +0x54  (unknown, zeroed by ctor)
-    int32_t    field_58;               // +0x58  (unknown, zeroed by ctor)
-    int32_t    field_5C;               // +0x5C  (unknown, zeroed by ctor)
+    /** Cached dirty rect from the last EndPaintEx/Render present pass —
+     *  the cursor-overlay region that was last blitted, used on the next
+     *  pass to restore the background before drawing at the new cursor
+     *  position. (was field_50/field_54/field_58/field_5C) */
+    RECT       dirtyRect;              // +0x50..+0x5C {left, top, right, bottom}
 
     /** Three child sub-objects, released by the base destructor.
      *  Each pair consists of: count/flag at the first offset, and the
@@ -263,9 +295,9 @@ public:
      *   1. Resets vtable to VTBL_UI_WINDOWBASE (in the binary; compiler-managed here)
      *   2. Releases three child sub-objects via vtable[2] if non-null
      *      (pairs at +0x60/+0x64, +0x68/+0x6C, +0x70/+0x74)
-     *   3. Decrements global cursor backbuffer refcount (+0x48).
-     *      If refcount reaches 0, releases the global cursor backbuffer
-     *      (_g_cursor_back @ 0x4FD3CC) via vtable[2]
+     *   3. If cursorBackSurface (+0x48) is non-null, decrements the global
+     *      g_cursor_refcount. If that reaches 0, releases the global
+     *      cursor backbuffer (_g_cursor_back @ 0x4FD3CC) via vtable[2]
      *   4. Clears visible flag (+0xE4)
      */
     void base_destructor();
@@ -275,7 +307,7 @@ public:
      * Address: 0x4259C0 (vtable[2])
      *
      * Creates a 120ms timer (ID 0x43), captures mouse input,
-     * hides the OS cursor, renders the window via UIPANEL_Render,
+     * hides the OS cursor, renders the window via Render(),
      * disables the window (EnableWindow(FALSE)), and calls
      * ShowWindow(SW_SHOW). Sets visible flag.
      */
@@ -286,7 +318,7 @@ public:
      * Address: 0x4259C0 (vtable[2])
      *
      * Creates a 120ms timer (ID 0x43), captures mouse input,
-     * hides the OS cursor, renders the window via UIPANEL_Render,
+     * hides the OS cursor, renders the window via Render(),
      * disables the window (EnableWindow(FALSE)), and calls
      * ShowWindow(SW_SHOW). Sets visible flag.
      */
@@ -538,6 +570,190 @@ public:
      * Default: 0x422EA0 (UI_DefWndProc passthrough).
      */
     virtual LRESULT on_activate_app(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /* ================================================================ */
+    /* Non-virtual paint-pipeline helpers (0x426B00-0x426EB0)             */
+    /*                                                                    */
+    /* Moved here 2026-08-16 from a stale "UIPANEL_*"-prefixed             */
+    /* transcription in ui/UIPANEL.cpp: get_xrefs_to on every one of      */
+    /* these shows real callers exclusively in GameSetupPanel, Cursor,     */
+    /* NameEntryPanel, BuildingPanel, PostcardAlbum, Town, DPlayManager,   */
+    /* and NETMAN_* — never a UIPANEL instance — and a Ghidra              */
+    /* function-address-range listing confirms they sit in the same       */
+    /* contiguous MSVC method block as SetMode (0x425FD0)/                */
+    /* SetRenderSurface (0x426020)/dispatch_message (0x426140), ending     */
+    /* right before UIPANEL's own real ctor begins a new block at         */
+    /* 0x427370. None of these four are vtable slots (not in the 37-slot  */
+    /* layout above) — subclasses call them directly.                     */
+    /* ================================================================ */
+
+    /**
+     * BeginPaint — start buffered GDI-style painting to the primary surface.
+     * Address: 0x426B00
+     *
+     * Unlocks the primary surface, then calls IDirectDrawSurface4::GetDC()
+     * on the primary surface (original vtable+0x44, confirmed to match
+     * GetDC's real COM ABI slot 17). Retries up to 1000 times with 10ms
+     * delay while GetDC keeps failing, then calls
+     * WIN32_FatalError()+ExitProcess(1) — a genuine original fatal path,
+     * not something to soften. Every real caller pushes this->hWnd as a
+     * second argument, but it is provably dead (DDRAW_UnlockPrimary,
+     * 0x45B940, is void(void) and never reads it) and is not part of this
+     * method's signature. See ui/UI_WindowBase.cpp for the full evidence
+     * trail, including why g_primary_surface being wired to a real surface
+     * today would make this retry loop always exhaust and self-destruct
+     * the process (Sdl3DirectDrawSurface::GetDC is a permanent no-op).
+     *
+     * @return  HDC from the primary surface
+     */
+    HDC BeginPaint();
+
+    /**
+     * EndPaintEx — end buffered GDI-style painting and present the frame.
+     * Address: 0x426B90
+     *
+     * Integrated 2026-08-16 from a stale "UIPANEL_EndPaintEx" free-function
+     * transcription in ui/UIPANEL.cpp (see PROGRESS.md's 2026-08-16 entry
+     * for the full get_xrefs_to/address-block evidence establishing this
+     * as a UI_WindowBase member). Re-disassembled fresh for this pass; two
+     * findings from an earlier, unverified pass are corrected here:
+     *   - vtable+0x68 (dispatched through `hdc`'s surface) is
+     *     IDirectDrawSurface4::ReleaseDC, not Unlock as previously
+     *     commented — it pairs with BeginPaint()'s GetDC().
+     *   - The first Blt's receiver/source were backwards in the prior
+     *     transcription: the real call is
+     *     `cursorBackSurface->Blt(destRect={0,0,tileW,tileH},
+     *     g_primary_surface, srcRect=dirty, ...)` — i.e. it SAVES the
+     *     primary's pixels under the dirty rect into cursorBackSurface,
+     *     not "copies background from offscreen to primary."
+     *
+     * The original's first stack parameter is a dead `this->hWnd` value
+     * spilled across the DDRAW_UnlockPrimary() call (same dead-argument
+     * pattern as BeginPaint()'s hWnd; DDRAW_UnlockPrimary is void(void)
+     * and never reads it) — dropped here, matching BeginPaint's
+     * established precedent of not exposing dead original stack args in
+     * the reconstructed C++ signature. The free-function compatibility
+     * shim (UIPANEL_EndPaintEx, ~50 call sites across the tree) still
+     * accepts and discards it.
+     *
+     * Control flow:
+     *   1. If hdc != nullptr, release it via the primary surface's
+     *      ReleaseDC.
+     *   2. If unlockOnly, just DDRAW_UnlockPrimary() and return.
+     *   3. DDRAW_UnlockPrimary().
+     *   4. Path A: renderSurface == nullptr, or captureFlag != 0 (mid-
+     *      drag) — plain DDRAW_PresentRect of restrictRect (or workRect).
+     *   5. Path B: renderSurface != nullptr and not mid-drag — compute a
+     *      cursor-relative dirty rect clipped to workRect, save the
+     *      primary's pixels under it into cursorBackSurface, blit tile
+     *      content via UIPANEL_Blit, present, then restore from
+     *      cursorBackSurface. Gated on cursorBackSurface != nullptr as a
+     *      host-safety fallback (see the field's own doc comment above:
+     *      it is permanently nullptr on host today since Cursor_SetupSurface
+     *      never runs there) — when null, falls back to Path A's plain
+     *      present rather than dereferencing a null surface.
+     *
+     * @param hdc          HDC obtained from a prior BeginPaint() call, or
+     *                     nullptr. Released via ReleaseDC when non-null.
+     * @param unlockOnly   if true, only release `hdc` (if any) and return.
+     * @param restrictRect optional sub-rect restricting the present/dirty
+     *                     region; nullptr uses the whole workRect.
+     */
+    void EndPaintEx(HDC hdc, bool unlockOnly, RECT* restrictRect);
+
+    /**
+     * EndPaint — simple wrapper: EndPaintEx(nullptr, false, restrictRect).
+     * Address: 0x426B70
+     *
+     * BUG (original): the original UIPANEL_EndPaint wrapper passes the
+     * address of an UNINITIALIZED stack RECT as restrictRect — a genuine
+     * original read-of-uninitialized-memory hazard, not a transcription
+     * error. This matters in BOTH of EndPaintEx's paths, not just Path B:
+     * Path A branches on `restrictRect != nullptr` to choose between
+     * `restrictRect` and `&this->workRect` as the present rect; Path B
+     * feeds it into the IntersectRect/UnionRect present-rect selection.
+     *
+     * Since there is no reproducible "correct" garbage value, this is
+     * implemented by passing `nullptr` (not a zeroed local RECT — a
+     * zeroed-but-non-null RECT would still select Path A's `restrictRect`
+     * branch, deterministically presenting an empty 0x0 rect instead of
+     * `workRect`, a different observable outcome from either the
+     * original's garbage-driven present or a real full-window present).
+     * `nullptr` makes Path A select `&this->workRect` — the well-defined,
+     * reproducible "repaint the window" default that every other real
+     * EndPaintEx() caller in this codebase gets when it omits a
+     * restrictRect. Every real EndPaint() caller (as opposed to
+     * EndPaintEx() directly) does so specifically when no render surface
+     * is configured, so this only affects Path A's present-rect argument,
+     * never any tile-content logic.
+     */
+    void EndPaint();
+
+    /**
+     * Render — per-frame foreground render with cursor overlay.
+     * Address: 0x426EB0
+     *
+     * Integrated 2026-08-16 from a stale "UIPANEL_Render" free-function
+     * transcription in ui/UIPANEL.cpp (see PROGRESS.md's 2026-08-16 entry).
+     * Re-disassembled fresh; corrects the same class of backwards-Blt bug
+     * found in EndPaintEx: the cached-dirty-rect "restore" Blt is actually
+     * `g_backbuffer->Blt(destRect=&dirtyRect, g_primary_surface,
+     * srcRect=&dirtyRect, ...)` — i.e. it SAVES the primary's pixels into
+     * g_backbuffer, not "restores background from backbuffer" as the
+     * prior transcription's comment claimed.
+     *
+     * Control flow:
+     *   1. If !activeFlag, return (window not visible).
+     *   2. Compute a cursor-relative dirty rect from the current cursor
+     *      position, clipped to workRect (same shape as EndPaintEx).
+     *   3. If renderSurface, a previous cached dirtyRect, enableTileMap,
+     *      and !captureFlag all hold: union the cached and current dirty
+     *      rects; if the union is smaller than 256x256, inflate it by 4px
+     *      on each side (clipped to workRect) for smoother cursor motion
+     *      ("inflate_flag" path below).
+     *   4. If there was previous cached content, enableTileMap, and NOT
+     *      inflating: save the primary's pixels for the cached dirtyRect
+     *      into g_backbuffer (mislabeled "restore" in the prior pass).
+     *   5. Reset lastCursorX/lastCursorY to -1 (sentinel: "invalidate").
+     *   6. If renderSurface == nullptr or captureFlag != 0, return (no
+     *      tile content to draw).
+     *   7. Save the current dirty rect into `dirtyRect` (for next frame).
+     *   8. Path A (inflate_flag set) / Path B (not set): save the
+     *      primary's pixels under the (inflated or plain) dirty rect into
+     *      cursorBackSurface, blit tile content via UIPANEL_Blit, then
+     *      save cursorBackSurface's content back into g_backbuffer.
+     *      Both paths are gated on cursorBackSurface != nullptr as a
+     *      host-safety fallback (see that field's doc comment) — when
+     *      null, the tile-content blit is skipped entirely (steps 1-7
+     *      above, which touch no DirectDraw surface through
+     *      cursorBackSurface, still run).
+     *
+     * NOTE: Path A/B's exact UIPANEL_Blit scalar arguments involve heavy
+     * MSVC register/stack-slot reuse (EAX/ECX/EDX/EDI/EBX all get reused
+     * for different logical values within a few instructions of each
+     * other, and Ghidra's own decompiler output for this function is
+     * corrupted — `unaff_EBX`/`unaff_EDI` register-allocation artifacts —
+     * so the decompilation could not be trusted for this part). Both paths
+     * were independently re-derived 2026-08-16 by hand-tracing every
+     * instruction's ESP-relative stack slot from the CALL site backward
+     * (Path A: 0x427195-0x4271CB; Path B: 0x427268-0x4272B9), confirming:
+     *   - Path A: src_x/src_y = dirty.left/top minus inflated.left/top;
+     *     dest_x/dest_y = src_x+tileW / src_y+tileH.
+     *   - Path B: src_x/src_y/dest_x/dest_y are NOT dirty-relative at all —
+     *     they are the literal {0, 0, tileW, tileH} (an earlier pass wrongly
+     *     copied Path A's dirty-relative shape into Path B; fixed).
+     *   - Both paths: clip_x/clip_y/clip_w/clip_h = scrollOffset+dx / dy /
+     *     tileW+scrollOffset+dx / dy+tileH, flags=0.
+     * This is unreachable on host today regardless (renderSurface and
+     * cursorBackSurface are both permanently nullptr — see their own doc
+     * comments), so it carried no live behavioral risk even before this
+     * correction, but the derivation is now fully confirmed rather than
+     * modeled-by-analogy.
+     *
+     * @param enableTileMap  if true and a render surface + tile content
+     *                       exist, draw tile content into the dirty area.
+     */
+    void Render(bool enableTileMap);
 };
 
 /* ================================================================== */
@@ -545,7 +761,7 @@ public:
 /* ================================================================== */
 
 /* Global cursor backbuffer surface — shared among all UI windows.
-   Released when the last cursorRefCount holder calls base_destructor. */
+   Released when the last cursorBackSurface holder calls base_destructor. */
 extern void* g_cursor_back;     /* 0x4FD3CC */
 extern int   g_cursor_refcount;  /* 0x4FD3D0 */
 

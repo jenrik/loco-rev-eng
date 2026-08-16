@@ -18,12 +18,15 @@
 
 /* resources/AssetMgr.h is deliberately NOT included: it re-declares
  * operator_new/GLOBAL_free as extern "C" (this file needs the ordinary
- * C++-linkage forms already declared below) and re-declares CRT_wcsstr
- * with yet another incompatible shape (uint32_t(uint8_t*,uint8_t*) —
- * one more entry in this tree's already-tracked CRT_wcsstr landmine
- * cluster, out of scope to fully resolve here). Only what's needed —
- * the AssetMgr type name and AssetMgr_ReadPairValue's real signature —
- * is forward-declared locally instead. */
+ * C++-linkage forms already declared below), which a single translation
+ * unit cannot redeclare under both linkages. (AssetMgr.h previously also
+ * re-declared CRT_wcsstr as extern "C" with a conflicting linkage vs.
+ * this file's own plain-C++-linkage declaration below; that dormant,
+ * zero-call-site declaration was removed from AssetMgr.h 2026-08-16, so
+ * CRT_wcsstr is no longer part of this include boundary — only the
+ * operator_new/GLOBAL_free conflict remains.) Only what's needed — the
+ * AssetMgr type name and AssetMgr_ReadPairValue's real signature — is
+ * forward-declared locally instead. */
 struct AssetMgr;
 
 /* ================================================================== */
@@ -33,8 +36,50 @@ struct AssetMgr;
 /* CRT imports — C linkage */
 extern "C" {
     uint32_t     CRT_rand(void);                                         /* 0x466150 */
-    const wchar_t* CRT_wcsstr(const wchar_t* a, const wchar_t* b);      /* 0x471480 */
     int          LoadStringA(HINSTANCE hInst, UINT id, char* buf, int maxLen);
+}
+
+/* CRT_wcsstr(uint8_t*, uint8_t*) -> real target 0x471480.
+ *
+ * LINKAGE FIX (2026-08-16): this file previously declared CRT_wcsstr as
+ * `extern "C" const wchar_t* CRT_wcsstr(const wchar_t*, const wchar_t*)`.
+ * Because extern "C" linkage does not encode parameter types into the
+ * linker symbol, that declaration collapsed onto the bare symbol
+ * `CRT_wcsstr`, which was satisfied at link time by shared/
+ * defsym_stubs.cpp's unrelated zero-argument, void-returning call-0 filler
+ * stub — silently dropping both real arguments and returning garbage into
+ * an `== nullptr` comparison on every call (undefined behavior, not just
+ * wrong logic).
+ *
+ * Ground truth confirmed via disassembly (0x471480, plus its two callers
+ * in this file, Building_BaseCtor/0x433A20 and Building_SetCustomName aka
+ * Building::SetName/0x4344A0): this is NOT a substring search and does NOT
+ * operate on wide characters despite the "wcsstr"/"wcs" naming — it is a
+ * byte-wise, case-folding compare loop returning 0 for "equal (case-
+ * insensitive)", nonzero otherwise, i.e. the real CRT `_stricmp`/
+ * `strcasecmp`. Both call sites in this file: `PUSH 0x47e4fc (PARTY_STRING);
+ * PUSH <name>; CALL 0x471480; TEST EAX,EAX; JNZ <skip>` — the party-mode
+ * block is only entered when EAX==0 (names equal), not on a NULL "not
+ * found" result.
+ *
+ * The correct real implementation (matching this exact non-extern-"C",
+ * (uint8_t*,uint8_t*) overload, already linked and reachable from
+ * native/assetmgr_loadfile.c's identical declaration) lives in
+ * shared/stubs_link001_batch1_crt_win32.cpp; declaring the identical
+ * signature here with plain C++ linkage binds to that same real body
+ * instead of colliding with the extern "C" filler stub. */
+extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);                 /* 0x471480 */
+
+/* CRT_wcsstr's real signature takes non-const uint8_t* on both sides (see
+ * above); the two call sites in this file only ever read through these
+ * pointers (case-fold compare, never writes), so casting away constness
+ * and reinterpreting the narrow-char byte representation as uint8_t* is
+ * safe here. Centralized in one helper so the cast appears exactly once. */
+static inline int PartyNameEquals(const char* name, const char* party)
+{
+    return static_cast<int>(CRT_wcsstr(
+        reinterpret_cast<uint8_t*>(const_cast<char*>(name)),   // ABI_BOUNDARY: real CRT _stricmp-equivalent (0x471480) takes raw byte pointers, not a modeled game object
+        reinterpret_cast<uint8_t*>(const_cast<char*>(party)))); // ABI_BOUNDARY: same
 }
 
 /* ================================================================== */
@@ -119,8 +164,12 @@ extern uint8_t  Math_PointOnLineSegment(int px, int py, int ax, int ay, int bx, 
 extern void*    g_asset_mgr;                                                       /* asset manager singleton */
 extern uint8_t  AssetMgr_ReadPairValue(AssetMgr* self, uint32_t a, uint32_t b);    /* 0x45DD80 */
 
-/* ROM string at 0x47E4FC in .rdata */
-static const wchar_t PARTY_STRING[] = L"PARTY";
+/* ROM string at 0x47E4FC in .rdata — Ghidra confirms this is a narrow
+ * ("string") data item, not a "unicode" (wide-char) one; the real 0x471480
+ * compare walks byte-at-a-time narrow chars despite its "wcs" naming (see
+ * the CRT_wcsstr comment above), so this is `const char[]`, not
+ * `const wchar_t[]` as previously (incorrectly) declared. */
+static const char PARTY_STRING[] = "PARTY";
 
 
 /* ================================================================== */
@@ -310,13 +359,16 @@ void Building::BaseCtor(int resource_id, bool base_only)
                 g_building_mgr->CompactCollections();  /* +0x434870 */
             }
 
-            /* PARTY mode trigger — DECOMPILER NOTE:
-             * The check is inverted: party mode activates when the
-             * resource name does NOT contain "PARTY". This is binary-
-             * correct behavior (confirmed: wcsstr returns NULL → jz
-             * taken → activate party). Party mode appears to be the
-             * default state; naming a building "PARTY" disables it.      */
-            if (CRT_wcsstr(reinterpret_cast<const wchar_t*>(res_name), PARTY_STRING) == nullptr) {
+            /* PARTY mode trigger — CORRECTED (2026-08-16): the real
+             * 0x471480 function is a case-insensitive equality compare
+             * (real CRT _stricmp semantics), not a substring search, and
+             * returns 0 for "equal". Disassembly of this exact call site
+             * (0x433B37: CALL 0x471480; TEST EAX,EAX; JNZ <skip-party>)
+             * confirms the party-activation block runs only when EAX==0,
+             * i.e. when the resource's custom name equals "PARTY"
+             * (case-insensitively) — an Easter-egg trigger, not an
+             * inverted "everything but PARTY" default. */
+            if (PartyNameEquals(res_name, PARTY_STRING) == 0) {
                 g_is_party_mode    = 1;
                 g_party_start_time = g_game_time;
             }
@@ -2153,7 +2205,7 @@ void Building::SetCustomName(const char* name)
 /* Algorithm:                                                           */
 /*   1. Call Entity::SetName(name) at 0x405E20                          */
 /*   2. If sub-type == STATION (7), compact BuildingMgr collections     */
-/*   3. If name does NOT contain "PARTY", activate party mode           */
+/*   3. If name equals "PARTY" (case-insensitively), activate party mode */
 /* ================================================================== */
 void Building::SetName(const char* name)
 {
@@ -2169,11 +2221,13 @@ void Building::SetName(const char* name)
         }
     }
 
-    /* Step 3: PARTY mode trigger — DECOMPILER NOTE:
-     * Party mode activates when the name does NOT contain "PARTY"
-     * (inverted check, binary-correct per Ghidra). Party mode
-     * appears to be the default; naming a building "PARTY" disables it. */
-    if (CRT_wcsstr(reinterpret_cast<const wchar_t*>(name), PARTY_STRING) == nullptr) {
+    /* Step 3: PARTY mode trigger — CORRECTED (2026-08-16), same evidence
+     * as Building_BaseCtor's identical check above: 0x471480 is a
+     * case-insensitive equality compare (real CRT _stricmp semantics),
+     * returning 0 for "equal". Disassembly of this call site (0x4344D0:
+     * CALL 0x471480; TEST EAX,EAX; JNZ <skip-party>) confirms party mode
+     * activates only when the new name equals "PARTY" case-insensitively. */
+    if (PartyNameEquals(name, PARTY_STRING) == 0) {
         g_is_party_mode    = 1;
         g_party_start_time = g_game_time;
     }

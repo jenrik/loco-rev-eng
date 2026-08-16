@@ -114,10 +114,16 @@ int32_t Cursor::destroy_window()
 /* Cursor::wait_for_blit — Poll for blit completion on primary surface */
 /* Address: 0x414BB0                                                    */
 /*                                                                     */
-/* Unlocks primary surface, then polls surface->vtable[0x44] with     */
-/* &this->curs_pos_x() (+0x64) as output. Sleeps 10ms between polls,    */
-/* times out after ~10s (1000 iterations) with FatalError+ExitProcess.*/
-/* Returns the HDC value written to curs_pos_x.                        */
+/* Unlocks primary surface, then polls surface->vtable[0x44]           */
+/* (slot 17 = IDirectDrawSurface::GetDC(HDC*)) with &this->             */
+/* blit_wait_hdc() (+0x64, independent Cursor-only storage — see that   */
+/* accessor's doc comment in Cursor.h for why this no longer aliases    */
+/* UI_WindowBase::childObj0) as the GetDC out-param. The retry loop is  */
+/* the standard DirectDraw idiom: GetDC fails with a nonzero HRESULT    */
+/* (DDERR_SURFACEBUSY/WASSTILLDRAWING) while the blit is still in       */
+/* flight. Sleeps 10ms between polls, times out after ~10s (1000        */
+/* iterations) with FatalError+ExitProcess.                             */
+/* Returns the HDC value written by the successful GetDC call.          */
 /* Called by: HelpWnd_*, Train_DrawTextOverlay                          */
 /* ================================================================== */
 void* Cursor::wait_for_blit(HWND hWnd)
@@ -125,22 +131,21 @@ void* Cursor::wait_for_blit(HWND hWnd)
     /* Unlock primary surface */
     DDRAW_UnlockPrimary();
 
-    /* Poll surface vtable[0x44] (slot 17 = poll blit).
-     * primary_surface is an opaque IDirectDrawSurface4 COM object; the
-     * literal vtable dispatch is the documented DirectDraw ABI. */
-    void** vtbl = *reinterpret_cast<void***>(this->primary_surface()); /* +0x38 */
-    using PollBlit = int (*)(void*, void*);
-    int result = reinterpret_cast<PollBlit>(vtbl[0x44 / 4])(
-        this->primary_surface(), &this->curs_pos_x());                 /* +0x64 */
+    /* Poll IDirectDrawSurface4::GetDC() on the primary surface (real COM
+     * ABI slot 17, confirmed via disassembly — see doc comment above and
+     * the matching BeginPaint()/EndPaintEx() precedent, ui/UI_WindowBase.cpp).
+     * Dispatched via the typed interface rather than a raw vtable-slot
+     * literal, same as every other DirectDraw call site converted this
+     * session. */
+    auto* surface = static_cast<IDirectDrawSurface4*>(this->primary_surface());
+    HRESULT result = surface->GetDC(&this->blit_wait_hdc());
 
     for (int i = 0; i < 1000; i++) {
         if (result == 0) {
-            return reinterpret_cast<void*>(
-                static_cast<intptr_t>(this->curs_pos_x()));             /* +0x64 */
+            return this->blit_wait_hdc();                                /* +0x64 */
         }
         Sleep(10);
-        result = reinterpret_cast<PollBlit>(vtbl[0x44 / 4])(
-            this->primary_surface(), &this->curs_pos_x());
+        result = surface->GetDC(&this->blit_wait_hdc());
     }
 
     WIN32_FatalError();

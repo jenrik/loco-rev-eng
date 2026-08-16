@@ -60,7 +60,16 @@ extern void   __cdecl CRT_0x4681D0(int32_t handle);               /* fclose-like
 extern int32_t __cdecl CRT_0x468610(void* buf, uint32_t size,      /* fread-like read */
                                       uint32_t count, int32_t handle);
 extern void   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...);  /* 0x466D60 */
-extern void   __cdecl CRT_wcsstr(uint8_t* str, uint8_t* substr);  /* 0x471480 */
+/* CRT_wcsstr (0x471480) was declared here as `void __cdecl CRT_wcsstr(...)`
+ * — wrong return type (real function returns int32_t; a genuine _stricmp-
+ * style compare, see game/Building.cpp's top-of-file comment) and unused
+ * in this file (zero call sites). This file is compiled as C++ (meson's
+ * `-x c++` for native/*.c) with no extern "C" block around this
+ * declaration, so it would in practice still link to the real
+ * shared/stubs_link001_batch1_crt_win32.cpp body (return type isn't part
+ * of the Itanium C++ mangled name) — but silently discarding a real
+ * comparison result the moment anyone adds a call is exactly the kind of
+ * trap this sweep is closing. Removed 2026-08-16. */
 
 /* ================================================================== */
 /* ChunkNode struct (16 bytes)                                         */

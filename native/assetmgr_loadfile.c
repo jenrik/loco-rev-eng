@@ -34,7 +34,7 @@
 
 extern void*  __cdecl CRT_malloc_zero(uint32_t size);   /* 0x4673C0 */
 extern void   __cdecl CRT_free(void* ptr);               /* 0x466C70 */
-extern uint32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);   /* 0x471480 */
+extern int32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);   /* 0x471480 */
 extern void   __cdecl CRT_0x468610(char* buf, uint32_t size,       /* fread-like read */
                                     uint32_t count, int32_t handle);
 extern void   __cdecl CRT_0x468790(int32_t handle, int32_t offset,  /* fseek-like seek */
@@ -99,7 +99,7 @@ uint8_t* __thiscall AssetMgr_LoadFile(void* _this,
     if (entry != NULL) {
         do {
             /* wcsstr: check if the wide entry name contains our filename */
-            uint32_t match = CRT_wcsstr(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(entry[0])), filename);
+            int32_t match = CRT_wcsstr(reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(entry[0])), filename);
             if (match == 0) break;
 
             /* Not a match — accumulate THIS entry's size (bytes we are

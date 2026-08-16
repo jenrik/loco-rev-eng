@@ -12,7 +12,8 @@
 // Status: TRANSCRIBED
 
 #include "UIPANEL.h"
-#include "../platform/ddraw_interfaces.h"
+#include "../game/ScriptedObject.h"
+#include "../platform/ddraw_interfaces.h"   /* IDirectDrawSurface4 — for BeginPaint's GetDC() */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 // vtable_addrs.h removed — compiler manages vtables via virtual methods
@@ -28,11 +29,11 @@ void      Sleep(DWORD);
 void      ExitProcess(UINT);
 }
 
-/* DDBLT_WAIT now comes from platform/ddraw_interfaces.h (0x01000000, the
- * real DirectX value) — this file's own copy was wrong (0x00000010 is
- * really DDBLT_ASYNC), found 2026-08-14 while migrating off raw vtable
- * dispatch. Harmless until now: Sdl3DirectDrawSurface::Blt ignores its
- * flags parameter entirely, so neither value changed behavior. */
+/* DDBLT_WAIT previously had a local, wrong-valued (0x10, actually
+ * DDBLT_ASYNC) shadow #define here — removed now that this file includes
+ * platform/ddraw_interfaces.h (for BeginPaint's IDirectDrawSurface4), which
+ * already defines the correct value (0x01000000). Harmless either way per
+ * PROGRESS.md: Sdl3DirectDrawSurface::Blt ignores its flags parameter. */
 
 /* ================================================================== */
 /* External references                                                 */
@@ -65,15 +66,25 @@ extern void DDRAW_SelectBuilding(void* ddraw, void* building); /* 0x459180 */
 extern void __thiscall RESDATA_BaseInit(void* self);                         /* 0x4544E0 */
 extern void __thiscall RESDATA_DtorBase(void* self);                         /* 0x454630 */
 
-/* Free-function WndProc wrappers retain their recovered binary entry points;
- * declare them before their definitions so strict builds see their ABI. */
-extern void __thiscall UIPANEL_WindowProc(void* self, HWND hwnd, UINT msg,
-                                          WPARAM wParam, LPARAM lParam);
-extern LRESULT __fastcall UIPANEL_OnDestroy(void* self);
+/* UIPANEL_WindowProc (0x426900) and UIPANEL_OnDestroy (0x426A90) were
+ * removed 2026-08-16 — they were dead duplicates of the real
+ * UI_WindowBase::on_mouse_move()/on_close() (ui/UI_WindowBase.cpp); see
+ * the correction note further below and PROGRESS.md's 2026-08-16 entry.
+ * UIPANEL_BeginPaint(void*) is a thin compatibility shim over the real
+ * UI_WindowBase::BeginPaint() method (defined in ui/UI_WindowBase.cpp) —
+ * kept as a free function only because ~9 other files in the tree still
+ * declare/call it that way with a mix of mismatched extern signatures
+ * (some correct, some pre-existing call-0-class landmines: wrong return
+ * type, wrong calling convention, wrong parameter type). Fixing those
+ * callers is separately scoped (see docs/landmine-sweep-worklist.md /
+ * PROGRESS.md) and intentionally untouched here. */
 extern HDC __fastcall UIPANEL_BeginPaint(void* self);
-extern void __fastcall UIPANEL_EndPaint(void* self);
+/* UIPANEL_EndPaint/EndPaintEx/Render's compatibility shims moved to
+ * ui/UI_WindowBase.cpp alongside UIPANEL_BeginPaint's (see the correction
+ * note below and PROGRESS.md's 2026-08-16 entry) — not declared here since
+ * this file has no callers of its own. */
 extern void __fastcall UIPANEL_CreateSurface(void* surface);                 /* 0x42A110 */
-extern void* __thiscall UIPANEL_CreateSprite(void* panel, void* entry);           /* creates a sprite from file entry */
+extern void __thiscall UIPANEL_CreateSprite(UIPANEL* panel, SaveSprite* entry);   /* 0x429850 -- real return type is void, not void* (fixed: was a call-0-shaped landmine) */
 extern void __fastcall UIPANEL_LockSurface(void* surface);                   /* 0x42A370 */
 /* Real def: ui/UIPANEL_Surface.cpp, bool(void*,uint32_t,uint32_t,int32_t,
  * uint32_t,void*,uint32_t,uint32_t,int32_t,uint32_t,uint32_t) — was declared
@@ -97,13 +108,9 @@ extern void* __thiscall RESDATA_CreateChildSprite(void* parent,
  * param mangled to a distinct, unlinked symbol — the actual landmine. */
 extern void __thiscall RESDATA_SoundObject_Init(void* sprite, const char* str); /* 0x44CA90 */
 
-/* Forward declarations for functions defined later in this file */
-extern void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map);
-extern void __thiscall UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param, uint8_t unlock_flag, RECT* restrict_rect);
-
 /* External functions referenced from UIPANEL drawing */
 class InputMgr;
-extern void __fastcall UIPANEL_DrawEditField(int param_1);                  /* 0x429490 */
+extern uint32_t __fastcall UIPANEL_DrawEditField(UIPANEL* self);            /* 0x429490 */
 extern void INPUT_SaveCurrentWorld(InputMgr* input, const char* name); /* 0x41D9B0 */
 extern void __thiscall RESDATA_GameObject_UpdateAnimation(void* obj);        /* 0x44B810 */
 extern void __fastcall PlaySound(int sound_id);                              /* 0x44A290 */
@@ -113,7 +120,7 @@ extern int __thiscall RESDATA_SoundObject_GetTextLength(int sprite);        /* 0
 /* Global variables */
 extern void*  g_resource_mgr;            /* 0x4B375C (ResourceManager) */
 extern char   g_empty_string[];          /* 0x476934 */
-extern void*  g_scripted_object;         /* 0x4AA5B8 */
+extern ScriptedObject* g_scripted_object;   /* 0x4AA5B8 — game/ScriptedObject.h */
 extern void*  g_active_panel;            /* TBD */
 extern int    g_world_width;             /* TBD */
 class InputMgr;
@@ -180,8 +187,8 @@ UIPANEL::UIPANEL()
 
     /* Step 8: Zero misc fields */
     *(uint8_t*)((intptr_t)this + 0xE0) = 0;     /* +0xE0 -- byte flag / string start */
-    *(uint8_t*)((intptr_t)this + 0x2EA) = 0;    /* +0x2EA -- byte */
-    this->_field_498 = 0;                       /* +0x498 */
+    this->save_path_buf[0] = 0;                 /* +0x2EA -- byte */
+    this->save_header = NULL;                   /* +0x498 */
 }
 
 /* ================================================================== */
@@ -200,19 +207,11 @@ UIPANEL::~UIPANEL()
 /* In the binary: sets vtable here. Compiler-managed in natural C++. */
 
     /* Walk the linked list at +0x4D8 and destroy every sprite */
-    void* current = this->sprite_list_head;          /* +0x4D8 */
+    SaveSprite* current = this->sprite_list_head;    /* +0x4D8 */
     while (current != NULL) {
-        void* next = *(void**)((intptr_t)current + 0x22C);  /* linked list next ptr */
+        SaveSprite* next = current->next;            /* +0x22C */
         this->sprite_list_head = next;                /* +0x4D8 */
-
-        if (current != NULL) {
-            /* Call vtable[0] (scalar deleting destructor) with flags=1 */
-            using DtorFunc = void* (__thiscall*)(void* self, byte flags);
-            void** vt = *(void***)current;
-            DtorFunc dtor = (DtorFunc)vt[0];
-            dtor(current, 1);
-        }
-
+        delete current;
         current = this->sprite_list_head;
     }
 
@@ -246,18 +245,11 @@ UIPANEL::~UIPANEL()
 void UIPANEL::ClearChildren()
 {
     /* Walk the linked list at +0x4D8 and destroy every sprite */
-    void* current = this->sprite_list_head;          /* +0x4D8 */
+    SaveSprite* current = this->sprite_list_head;    /* +0x4D8 */
     while (current != NULL) {
-        void* next = *(void**)((intptr_t)current + 0x22C);  /* linked list next ptr */
+        SaveSprite* next = current->next;            /* +0x22C */
         this->sprite_list_head = next;                /* +0x4D8 */
-
-        if (current != NULL) {
-            using DtorFunc = void* (__thiscall*)(void* self, byte flags);
-            void** vt = *(void***)current;
-            DtorFunc dtor = (DtorFunc)vt[0];
-            dtor(current, 1);
-        }
-
+        delete current;
         current = this->sprite_list_head;
     }
 
@@ -473,8 +465,14 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         this->StopSound(0);
 
         *(uint8_t*)((intptr_t)this + 0x88) = 0;                /* +0x88 -- flag cleared */
-        g_active_panel = &g_scripted_object;                     /* Back to main panel */
-        RESDATA_GameObject_UpdateAnimation((void*)0x4AA5B8);    /* 0x44B810 */
+        /* Fixed: previously `&g_scripted_object` (address of the pointer
+           variable itself, a `ScriptedObject**` — wrong type/value for
+           `g_active_panel`) and a hardcoded literal-address cast (invalid
+           on this host's process layout; a real crash-on-touch landmine).
+           Both were pre-existing bugs in this call site, not behavior this
+           pass introduces. */
+        g_active_panel = g_scripted_object;                     /* Back to main panel */
+        RESDATA_GameObject_UpdateAnimation(g_scripted_object);  /* 0x44B810 */
         this->mode = action;                                    /* +0x49C */
         break;
 
@@ -533,7 +531,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         if (this->sound_btn_sprite) *(uint8_t*)((intptr_t)this->sound_btn_sprite + 0x56) = 0;
 
         /* Draw edit field and save current world */
-        UIPANEL_DrawEditField((intptr_t)this);
+        UIPANEL_DrawEditField(this);
         INPUT_SaveCurrentWorld(&g_input_mgr, "curr");
         break;
 
@@ -575,7 +573,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with stack buffer (original: CRT_strncat_s on +0xE0 then stack-var) */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -593,27 +591,32 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             char* first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
-            /* Forward scroll: if selection > first visible, scroll forward */
+            /* cmp = StrCmp2Byte(cur_state, first_state) computes strcmp(first_state,
+             * cur_state) (its early-return branch returns the SIGN OF (str2-str1),
+             * i.e. args are effectively swapped) -- so cmp>0 means the first visible
+             * item's name sorts AFTER the current selection: scroll toward EARLIER
+             * entries via ->prev (+0x228). cmp<0 means scroll toward LATER entries
+             * via ->next (+0x22C). Confirmed against ui/SaveSprite.h's independently
+             * derived next/prev direction (see its doc comment). */
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);    /* sprite_list_tail */
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);    /* next link */
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
             }
 
-            /* Backward scroll: if selection < first visible, scroll backward */
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);    /* sprite_list_tail */
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);    /* prev link */
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -659,7 +662,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with stack buffer (original: CRT_strncat_s on +0xE0 then stack-var) */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -678,11 +681,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -691,11 +694,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -741,7 +744,7 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with empty string (case 4 uses g_empty_string directly) */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -760,11 +763,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -773,11 +776,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -823,10 +826,10 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
         }
 
         /* Draw edit field (scenery/signals has backdrop file picker) */
-        UIPANEL_DrawEditField((intptr_t)this);
+        UIPANEL_DrawEditField(this);
 
         /* Populate 6-item viewport from sprite list */
-        UIPANEL_CreateSprite(this, *(void**)((intptr_t)this + 0x4D8));
+        UIPANEL_CreateSprite(this, this->sprite_list_head);
 
         /* Init sound button with empty string */
         RESDATA_SoundObject_Init(this->sound_btn_sprite, g_empty_string);
@@ -845,11 +848,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             int cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
 
             while (cmp > 0) {
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* next = *(void**)((intptr_t)tail + 0x228);
-                if (next == NULL) break;
-                UIPANEL_CreateSprite(this, next);
+                SaveSprite* prev = tail->prev;
+                if (prev == NULL) break;
+                UIPANEL_CreateSprite(this, prev);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -858,11 +861,11 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
             while (cmp < 0) {
                 int text_len = RESDATA_SoundObject_GetTextLength(*(int*)((intptr_t)this + 0x4D4));
                 if (text_len == 0) break;
-                void* tail = *(void**)((intptr_t)this + 0x4DC);
+                SaveSprite* tail = this->sprite_list_tail;
                 if (tail == NULL) break;
-                void* prev = *(void**)((intptr_t)tail + 0x22C);
-                if (prev == NULL) break;
-                UIPANEL_CreateSprite(this, prev);
+                SaveSprite* next = tail->next;
+                if (next == NULL) break;
+                UIPANEL_CreateSprite(this, next);
                 cur_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4BC));
                 first_state = (char*)RESDATA_SoundObject_GetState(*(int*)((intptr_t)this + 0x4C0));
                 cmp = UIPANEL_StrCmp2Byte(cur_state, first_state);
@@ -885,528 +888,33 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
     return 1;
 }
 
-/* ================================================================== */
-/* UIPANEL::WindowProc                                                 */
-/* Address: 0x426900                                                   */
-/*                                                                     */
-/* __thiscall (ECX = this). Checks if hwnd matches this->hwnd (+0x08), */
-/* and if so performs a render cycle: unlocks primary, calls Render(1), */
-/* re-locks primary. Always forwards to DefWindowProcA.                 */
-/*                                                                     */
-/* Note: This is called from the WndProc dispatch table at 0x477C80    */
-/* with `this` already in ECX and the standard 4 WndProc params on     */
-/* the stack. The RET 0x10 at the end indicates __thiscall with 4      */
-/* stack parameters popped by the callee.                              */
-/* ================================================================== */
-void __thiscall UIPANEL_WindowProc(void* self,
-    HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    if (hwnd == *(HWND*)((intptr_t)self + 8)) {
-        DDRAW_UnlockPrimary();
-        UIPANEL_Render(self, 1);
-        DDRAW_UnlockPrimary();
-    }
-    DefWindowProcA(hwnd, msg, wParam, lParam);
-}
 
 /* ================================================================== */
-/* UIPANEL::OnDestroy                                                  */
-/* Address: 0x426A90                                                   */
-/*                                                                     */
-/* Handles panel window destruction. Clears the alive flag (+0xAB),    */
-/* destroys the HWND, and if no child windows remain (+0x0C), posts    */
-/* WM_QUIT. Returns 0.                                                 */
+/* WindowProc (0x426900) / OnDestroy (0x426A90) / BeginPaint (0x426B00) / */
+/* EndPaint (0x426B70) / EndPaintEx (0x426B90) / Render (0x426EB0)        */
+/* were previously (mis-)transcribed here as UIPANEL methods — corrected  */
+/* 2026-08-16: get_xrefs_to on this whole address block (0x426900-        */
+/* 0x426EB0) shows every real caller is GameSetupPanel, Cursor,           */
+/* NameEntryPanel, BuildingPanel, PostcardAlbum, Town, DPlayManager, or    */
+/* NETMAN_* — never a UIPANEL instance — and a Ghidra function-address-   */
+/* range listing confirms these sit in the same contiguous MSVC method    */
+/* block as UI_WindowBase_SetMode (0x425FD0)/SetRenderSurface (0x426020)/ */
+/* dispatch_message (0x426140), ending right before UIPANEL's own real    */
+/* ctor begins a new block at 0x427370. These are UI_WindowBase members;  */
+/* "UIPANEL_" was a stale Ghidra-era prefix. WindowProc/OnDestroy were     */
+/* dead duplicates of the already-real UI_WindowBase::on_mouse_move()/    */
+/* on_close() and were removed entirely (see PROGRESS.md's 2026-08-16     */
+/* entry). BeginPaint moved to UI_WindowBase::BeginPaint() in an earlier   */
+/* pass; EndPaint/EndPaintEx/Render moved to UI_WindowBase::EndPaint()/    */
+/* EndPaintEx()/Render() in this pass (ui/UI_WindowBase.h/.cpp) — see      */
+/* there for the full evidence trail (ReleaseDC slot, backwards-Blt        */
+/* correction, renderSurface/cursorBackSurface field identities). Thin     */
+/* free-function compatibility shims for the ~50 remaining external        */
+/* callers of UIPANEL_EndPaintEx()/UIPANEL_EndPaint() are defined in       */
+/* ui/UI_WindowBase.cpp, next to UIPANEL_BeginPaint's existing shim.       */
+/* UIPANEL_Render() had zero external callers (only used from within       */
+/* UI_WindowBase.cpp itself) and needed no compatibility shim at all —     */
+/* its two internal call sites were converted to typed this->Render()     */
+/* calls directly.                                                        */
 /* ================================================================== */
-LRESULT __fastcall UIPANEL_OnDestroy(void* self)
-{
-    *(uint8_t*)((intptr_t)self + 0xAB) = 0;                /* +0xAB -- alive flag */
-    DestroyWindow(*(HWND*)((intptr_t)self + 8));             /* +0x08 -- hwnd */
-
-    if (*(int*)((intptr_t)self + 0x0C) == 0) {               /* +0x0C -- child count */
-        PostQuitMessage(0);
-    }
-
-    return 0;
-}
-
-/* ================================================================== */
-/* UIPANEL::BeginPaint                                                 */
-/* Address: 0x426B00                                                   */
-/*                                                                     */
-/* Begins buffered painting to the offscreen surface. Unlocks primary,  */
-/* calls GetDC on primary surface (real IDirectDrawSurface4::GetDC,    */
-/* vtable slot 17 / byte offset 0x44). Retries up to 1000 times with   */
-/* 10ms delay on failure, exits on persistent failure via              */
-/* WIN32_FatalError + ExitProcess.                                     */
-/*                                                                     */
-/* Ghidra decompile of 0x426B00 (2026-08-14) confirms the real ABI:    */
-/* GetDC(void** hdc) returns an HRESULT, not the HDC itself — 0 means  */
-/* success, and the actual handle is written through the out-param.   */
-/* The out-param's storage is this object's own +0x4C scratch slot     */
-/* (previously mislabeled a "PAINTSTRUCT"; its only real use tree-wide */
-/* is holding GetDC's out-param). The prior transcription treated the  */
-/* HRESULT return value itself as the HDC (`while (hdc == NULL)`),     */
-/* which misreads a successful 0/S_OK return as failure — with the     */
-/* old permanently-failing GetDC stub this was unobservable, but it     */
-/* would have spun to the 1000-retry ExitProcess(1) path even on a     */
-/* real, working GetDC. `self`'s real class is unresolved — callers    */
-/* pass at least three unrelated pointer types (UIPANEL, Cursor,       */
-/* BuildingPanel), so this stays raw offset access rather than a       */
-/* fabricated named field (see PROGRESS.md).                            */
-/* ================================================================== */
-HDC __fastcall UIPANEL_BeginPaint(void* self)
-{
-    int retry = 0;
-    void** hdc_slot = reinterpret_cast<void**>(reinterpret_cast<intptr_t>(self) + 0x4C);
-
-    DDRAW_UnlockPrimary();
-
-    IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
-    HRESULT hr = primary->GetDC(hdc_slot);
-
-    while (hr != 0) {
-        retry++;
-        if (retry > 1000) {
-            WIN32_FatalError();
-            ExitProcess(1);
-        }
-        Sleep(10);
-        hr = primary->GetDC(hdc_slot);
-    }
-
-    return static_cast<HDC>(*hdc_slot);
-}
-
-/* ================================================================== */
-/* UIPANEL::EndPaint                                                   */
-/* Address: 0x426B70                                                   */
-/*                                                                     */
-/* Simple EndPaint wrapper. Delegates to EndPaintEx with the hwnd      */
-/* (from +0x08) as hdc, 0 for unlock_param, 0 for unlock_flag, and    */
-/* a stack-local RECT as restrict_rect.                                 */
-/* ================================================================== */
-void __fastcall UIPANEL_EndPaint(void* self)
-{
-    RECT stack_rect;
-    UIPANEL_EndPaintEx(self,
-        *(int*)((intptr_t)self + 8),   /* hwnd as hdc */
-        0,                              /* unlock_param = 0 */
-        0,                              /* unlock_flag = 0 */
-        &stack_rect);                   /* stack RECT as restrict_rect */
-}
-
-/* ================================================================== */
-/* UIPANEL::EndPaintEx                                                 */
-/* Address: 0x426B90                                                   */
-/*                                                                     */
-/* Main present pipeline:                                                */
-/*   1. If unlock_param != 0, release the HDC obtained from BeginPaint */
-/*      via IDirectDrawSurface4::ReleaseDC (vtable slot 26 / 0x68)     */
-/*   2. If unlock_flag != 0, just DDRAW_UnlockPrimary and return       */
-/*   3. DDRAW_UnlockPrimary                                            */
-/*   4. Path A: No tile_map or blocking flag set -- simple PresentRect */
-/*   5. Path B: Tile_map present -- cursor-relative blit + bg restore   */
-/*                                                                     */
-/* Parameters: this, hdc (int), unlock_param (int), unlock_flag (byte), */
-/*   restrict_rect (RECT*)                                              */
-/*                                                                     */
-/* unlock_param was previously mislabeled/documented as an "Unlock"    */
-/* call — Ghidra decompile of 0x426B90 (2026-08-14) confirms the value */
-/* reaching slot 0x68 is the raw HDC value real callers obtained from   */
-/* BeginPaint (e.g. input/Cursor_new_impls.cpp's draw_color_bars passes */
-/* its BeginPaint result here with unlock_flag=1), not a RECT* — an HDC */
-/* flowing into this slot is ReleaseDC(HDC), not Unlock(RECT*). Also    */
-/* independently confirmed via input/Cursor_internal.h's own comment on */
-/* the same slot (sourced from Cursor::render, 0x414C28).               */
-/* ================================================================== */
-void __thiscall UIPANEL_EndPaintEx(void* self,
-    int hdc, int unlock_param, uint8_t unlock_flag, RECT* restrict_rect)
-{
-    /* Step 1: release the real HDC (if any) obtained from BeginPaint */
-    if (unlock_param != 0) {
-        IDirectDrawSurface4* primary = static_cast<IDirectDrawSurface4*>(g_primary_surface);
-        primary->ReleaseDC(reinterpret_cast<void*>(static_cast<intptr_t>(unlock_param)));
-    }
-
-    /* Step 2: If unlock_flag is non-zero, just unlock and return */
-    if (unlock_flag != 0) {
-        DDRAW_UnlockPrimary();
-        return;
-    }
-
-    DDRAW_UnlockPrimary();
-
-    /* Step 3: Path A -- No tile map or blocking flag set */
-    void* tile_map = *(void**)((intptr_t)self + 0x14);       /* +0x14 */
-    uint8_t blocking = *(uint8_t*)((intptr_t)self + 0x3C);   /* +0x3C */
-
-    if (tile_map == NULL || blocking != 0) {
-        if (restrict_rect == NULL) {
-            DDRAW_PresentRect(
-                (RECT*)((intptr_t)self + 0xD4),       /* viewport rect at +0xD4 */
-                *(HWND*)((intptr_t)self + 8),          /* hwnd */
-                NULL, 1);
-        } else {
-            DDRAW_PresentRect(
-                restrict_rect,
-                *(HWND*)((intptr_t)self + 8),
-                NULL, 1);
-        }
-        DDRAW_UnlockPrimary();
-        return;
-    }
-
-    /* Step 4: Path B -- Tile map exists, cursor-relative rendering */
-    POINT cursor;
-    GetCursorPos(&cursor);
-
-    /* Store cursor position */
-    *(int*)((intptr_t)self + 0x34) = cursor.x;           /* +0x34 = cursor_x */
-    *(int*)((intptr_t)self + 0x38) = cursor.y;           /* +0x38 = cursor_y */
-
-    /* Convert to panel-relative coords */
-    int win_x = *(int*)((intptr_t)self + 0x2C);          /* +0x2C = window_x */
-    int win_y = *(int*)((intptr_t)self + 0x30);          /* +0x30 = window_y */
-    int cursor_rel_x = cursor.x - win_x;
-    int cursor_rel_y = cursor.y - win_y;
-
-    /* Get tile dimensions -- default to 0 if no tile_map */
-    int tile_w = *(int*)((intptr_t)self + 0x18);          /* +0x18 */
-    int tile_h = *(int*)((intptr_t)self + 0x1C);          /* +0x1C */
-    if (tile_map == NULL) {
-        tile_w = 0;
-        tile_h = 0;
-    }
-
-    /* Compute dirty rect around cursor */
-    RECT dirty_rect;
-    dirty_rect.left   = cursor_rel_x;
-    dirty_rect.top    = cursor_rel_y;
-    dirty_rect.right  = tile_w + cursor_rel_x;
-    dirty_rect.bottom = tile_h + cursor_rel_y;
-
-    /* Clip to viewport (+0xD4..+0xE0) */
-    int vp_left   = *(int*)((intptr_t)self + 0xD4);
-    int vp_top    = *(int*)((intptr_t)self + 0xD8);
-    int vp_right  = *(int*)((intptr_t)self + 0xDC);
-    int vp_bottom = *(int*)((intptr_t)self + 0xE0);
-
-    int dx = 0, dy = 0;
-
-    if (dirty_rect.right > vp_right) {
-        tile_w = vp_right - cursor_rel_x;
-        dirty_rect.right = vp_right;
-    }
-    if (dirty_rect.bottom > vp_bottom) {
-        tile_h = vp_bottom - cursor_rel_y;
-        dirty_rect.bottom = vp_bottom;
-    }
-    if (cursor_rel_y < vp_top) {
-        dy = vp_top - cursor_rel_y;
-        tile_h = dirty_rect.bottom - vp_top;
-        dirty_rect.top = vp_top;
-    }
-    if (cursor_rel_x < vp_left) {
-        dx = vp_left - cursor_rel_x;
-        tile_w = dirty_rect.right - vp_left;
-        dirty_rect.left = vp_left;
-    }
-
-    /* Handle scroll offset when more items exist */
-    int scroll_offset = 0;
-    int item_count = *(int*)((intptr_t)self + 0x20);           /* +0x20 */
-    if (item_count > 1) {
-        if (item_count <= *(int*)((intptr_t)self + 0x24)) {   /* +0x24 = scroll_pos */
-            *(int*)((intptr_t)self + 0x24) = 0;
-        }
-        scroll_offset = *(int*)((intptr_t)self + 0x18) *       /* +0x18 = tile_width */
-                       *(int*)((intptr_t)self + 0x24);        /* +0x24 = scroll_pos */
-    }
-
-    /* Handle restrict_rect: intersect dirty_rect and the cached dirty rect with restrict_rect */
-    if (restrict_rect != NULL) {
-        RECT intersect1, intersect2;
-        BOOL hasI1 = IntersectRect(&intersect1, restrict_rect, &dirty_rect);
-        BOOL hasI2 = IntersectRect(&intersect2, restrict_rect,
-                                   (RECT*)((intptr_t)self + 0x50));
-
-        if (!hasI1 && !hasI2) {
-            DDRAW_PresentRect(restrict_rect,
-                *(HWND*)((intptr_t)self + 8), NULL, 1);
-            DDRAW_UnlockPrimary();
-            return;
-        }
-
-        RECT union_rect;
-        UnionRect(&union_rect, &dirty_rect, restrict_rect);
-        if (*(int*)((intptr_t)self + 0x58) != 0) {             /* cached dirty rect has content */
-            RECT full_union;
-            UnionRect(&full_union, &union_rect, (RECT*)((intptr_t)self + 0x50));
-        }
-    }
-
-    /* Save current dirty rect */
-    *(int*)((intptr_t)self + 0x50) = dirty_rect.left;
-    *(int*)((intptr_t)self + 0x54) = dirty_rect.top;
-    *(int*)((intptr_t)self + 0x58) = dirty_rect.right;
-    *(int*)((intptr_t)self + 0x5C) = dirty_rect.bottom;
-
-    /* Copy background from offscreen surface to primary (prepare dirty area) */
-    {
-        static_cast<IDirectDrawSurface4*>(g_primary_surface)->Blt(
-            nullptr,
-            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)), /* offscreen surface */
-            &dirty_rect,
-            DDBLT_WAIT, nullptr);
-    }
-
-    /* Blit tile content onto primary surface using UIPANEL_Blit */
-    UIPANEL_Blit(tile_map,
-                 cursor_rel_x, tile_h,    /* src_x, src_y */
-                 cursor_rel_x, 0,          /* dest_x, dest_y */
-                 (void*)g_primary_surface,
-                 scroll_offset + dx, 0,    /* clip_left, clip_top */
-                 scroll_offset + dx + (dirty_rect.right - dirty_rect.left),
-                 tile_h,                   /* clip_right, clip_bottom */
-                 0);                       /* flags */
-
-    /* Present the dirty region to the screen */
-    if (restrict_rect == NULL) {
-        DDRAW_PresentRect(
-            (RECT*)((intptr_t)self + 0xD4),   /* viewport */
-            *(HWND*)((intptr_t)self + 8),
-            NULL, 1);
-    } else {
-        RECT present_rect;
-        UnionRect(&present_rect, &dirty_rect, restrict_rect);
-        DDRAW_PresentRect(&present_rect,
-            *(HWND*)((intptr_t)self + 8),
-            NULL, 1);
-    }
-
-    /* Restore background from backbuffer */
-    {
-        static_cast<IDirectDrawSurface4*>(g_primary_surface)->Blt(
-            (RECT*)((intptr_t)self + 0x50),         /* saved dirty rect */
-            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)),
-            &dirty_rect,
-            DDBLT_WAIT, nullptr);
-    }
-
-    DDRAW_UnlockPrimary();
-}
-
-/* ================================================================== */
-/* UIPANEL::Render                                                     */
-/* Address: 0x426EB0                                                   */
-/*                                                                     */
-/* Per-frame foreground render with cursor overlay.                    */
-/*   1. Checks visibility flag (+0x44), returns if hidden              */
-/*   2. Computes dirty rect from cursor position, clips to viewport    */
-/*   3. Inflates dirty rect by 4px when <256x256 for smooth cursor     */
-/*   4. Restores background from backbuffer for cached dirty rect      */
-/*   5. Blits tile content from offscreen surface to primary surface   */
-/*   6. Updates cursor tracking values to -1 (reset)                   */
-/*                                                                     */
-/* @param enable_tile_map  byte -- if non-zero and tile_map exists,    */
-/*                          render tile content into dirty area        */
-/* ================================================================== */
-void __thiscall UIPANEL_Render(void* self, uint8_t enable_tile_map)
-{
-    int dx = 0, dy = 0;
-    uint8_t inflate_flag = 0;
-
-    /* Step 1: Check visibility */
-    if (*(uint8_t*)((intptr_t)self + 0x44) == 0) {     /* +0x44 = visible */
-        return;
-    }
-
-    /* Step 2: Get cursor position, convert to panel-relative */
-    POINT cursor;
-    GetCursorPos(&cursor);
-
-    int win_x = *(int*)((intptr_t)self + 0x2C);         /* +0x2C = window_x */
-    int win_y = *(int*)((intptr_t)self + 0x30);         /* +0x30 = window_y */
-    int cursor_x = cursor.x - win_x;
-    int cursor_y = cursor.y - win_y;
-
-    /* Get tile dimensions */
-    int tile_w = *(int*)((intptr_t)self + 0x18);         /* +0x18 = tile_width */
-    int tile_h = *(int*)((intptr_t)self + 0x1C);         /* +0x1C = tile_height */
-
-    /* Step 3: Compute dirty rect from cursor + tile size */
-    int dirty_left   = cursor_x;
-    int dirty_top    = cursor_y;
-    int dirty_right  = tile_w + cursor_x;
-    int dirty_bottom = tile_h + cursor_y;
-
-    /* Clip to viewport (+0xD4..+0xE0) */
-    int vp_left   = *(int*)((intptr_t)self + 0xD4);
-    int vp_top    = *(int*)((intptr_t)self + 0xD8);
-    int vp_right  = *(int*)((intptr_t)self + 0xDC);
-    int vp_bottom = *(int*)((intptr_t)self + 0xE0);
-
-    if (dirty_right > vp_right) {
-        tile_w = vp_right - cursor_x;
-        dirty_right = vp_right;
-    }
-    if (dirty_bottom > vp_bottom) {
-        tile_h = vp_bottom - cursor_y;
-        dirty_bottom = vp_bottom;
-    }
-    if (cursor_y < vp_top) {
-        dy = vp_top - cursor_y;
-        tile_h = dirty_bottom - vp_top;
-        dirty_top = vp_top;
-    }
-    if (cursor_x < vp_left) {
-        dx = vp_left - cursor_x;
-        tile_w = dirty_right - vp_left;
-        dirty_left = vp_left;
-    }
-
-    /* Step 4: Check if we should inflate the dirty rect (smooth cursor < 256x256) */
-    void* tile_map = *(void**)((intptr_t)self + 0x14);   /* +0x14 */
-    int cached_dirty_right = *(int*)((intptr_t)self + 0x58);  /* +0x58 */
-    uint8_t blocking = *(uint8_t*)((intptr_t)self + 0x3C);    /* +0x3C */
-
-    if (tile_map != NULL &&
-        cached_dirty_right != 0 &&
-        enable_tile_map != 0 &&
-        blocking == 0) {
-
-        /* Union current dirty rect with cached rect from last frame */
-        RECT union_rect;
-        RECT current_rect = { dirty_left, dirty_top, dirty_right, dirty_bottom };
-        UnionRect(&union_rect, (RECT*)((intptr_t)self + 0x50), &current_rect);
-
-        /* Inflate if union is small (< 256x256) */
-        if ((union_rect.right - union_rect.left) < 0x100 &&
-            (union_rect.bottom - union_rect.top) < 0x100) {
-            inflate_flag = 1;
-
-            /* Inflate by 4 pixels on all sides */
-            union_rect.left   -= 4;
-            union_rect.top    -= 4;
-            union_rect.right  += 4;
-            union_rect.bottom += 4;
-
-            /* Re-clip to viewport */
-            if (union_rect.right  > vp_right)  union_rect.right  = vp_right;
-            if (union_rect.bottom > vp_bottom) union_rect.bottom = vp_bottom;
-            if (union_rect.top    < vp_top)    union_rect.top    = vp_top;
-            if (union_rect.left   < vp_left)   union_rect.left   = vp_left;
-        }
-    }
-
-    /* Step 5: Restore background from backbuffer for cached dirty rect */
-    if (cached_dirty_right != 0 && enable_tile_map != 0 && inflate_flag == 0) {
-        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
-            (RECT*)((intptr_t)self + 0x50),     /* cached dirty rect */
-            static_cast<IDirectDrawSurface4*>(g_primary_surface),
-            (RECT*)((intptr_t)self + 0x50),
-            DDBLT_WAIT, nullptr);
-    }
-
-    /* Step 6: Reset cursor tracking */
-    *(int*)((intptr_t)self + 0x34) = -1;            /* +0x34 = cursor_x */
-    *(int*)((intptr_t)self + 0x38) = -1;            /* +0x38 = cursor_y */
-
-    /* Step 7: Skip tile rendering if no tile_map or blocking */
-    if (tile_map == NULL || blocking != 0) {
-        return;
-    }
-
-    /* Step 8: Save the dirty rect to the cached position */
-    *(int*)((intptr_t)self + 0x50) = dirty_left;
-    *(int*)((intptr_t)self + 0x54) = dirty_top;
-    *(int*)((intptr_t)self + 0x58) = dirty_right;
-    *(int*)((intptr_t)self + 0x5C) = dirty_bottom;
-
-    if (inflate_flag != 0) {
-        /* === Path A: Inflated dirty rect (small cursor region) === */
-        RECT blit_rect = { dirty_left, dirty_top, dirty_right, dirty_bottom };
-
-        /* Copy from offscreen surface to primary */
-        static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48))->Blt(
-            &blit_rect,
-            static_cast<IDirectDrawSurface4*>(g_primary_surface),
-            &blit_rect,
-            DDBLT_WAIT, nullptr);
-
-        /* Handle scroll offset */
-        int scroll_offset = 0;
-        int item_count = *(int*)((intptr_t)self + 0x20);
-        if (item_count > 1) {
-            if (item_count <= *(int*)((intptr_t)self + 0x24)) {
-                *(int*)((intptr_t)self + 0x24) = 0;
-            }
-            scroll_offset = *(int*)((intptr_t)self + 0x24) *
-                           *(int*)((intptr_t)self + 0x18);
-        }
-
-        /* Blit tile content to offscreen surface via UIPANEL_Blit */
-        int src_x = *(int*)((intptr_t)self + 0x50) - dx;
-        int src_y = *(int*)((intptr_t)self + 0x54) - dy;
-        int tile_w2 = dirty_right - dirty_left;
-        int tile_h2 = dirty_bottom - dirty_top;
-
-        UIPANEL_Blit(tile_map,
-                     src_x, src_y,
-                     scroll_offset + dx, dy,
-                     *(void**)((intptr_t)self + 0x48),   /* offscreen surface */
-                     scroll_offset + dx, 0,
-                     scroll_offset + dx + tile_w2,
-                     tile_h2,
-                     0);
-
-        /* Copy from offscreen surface back to primary background */
-        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
-            (RECT*)((intptr_t)self + 0x50),
-            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)),
-            (RECT*)&blit_rect,   /* approximate: stack variable reuse */
-            DDBLT_WAIT, nullptr);
-        return;
-    }
-
-    /* === Path B: Standard (no inflate) === */
-    {
-        RECT lock_rect = { 0, 0, 0, 0 };
-
-        /* Lock/copy from primary to offscreen surface */
-        RECT clip = { dirty_left, dirty_top, dirty_right, dirty_bottom };
-        static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48))->Blt(
-            &lock_rect,
-            static_cast<IDirectDrawSurface4*>(g_primary_surface),
-            &clip,
-            DDBLT_WAIT, nullptr);
-
-        /* Handle scroll offset */
-        int scroll_offset = 0;
-        int item_count = *(int*)((intptr_t)self + 0x20);
-        if (item_count > 1) {
-            if (item_count <= *(int*)((intptr_t)self + 0x24)) {
-                *(int*)((intptr_t)self + 0x24) = 0;
-            }
-            scroll_offset = *(int*)((intptr_t)self + 0x24) *
-                           *(int*)((intptr_t)self + 0x18);
-        }
-
-        /* Blit tile content from tile_map to offscreen surface */
-        UIPANEL_Blit(tile_map,
-                     dirty_right, dirty_bottom,
-                     dirty_left, dirty_top,
-                     *(void**)((intptr_t)self + 0x48),
-                     scroll_offset + dx, dy,
-                     dirty_left + dx, 0,
-                     0);    /* last param unused in this path */
-
-        /* Copy offscreen surface back to primary background (backbuffer) */
-        static_cast<IDirectDrawSurface4*>(g_backbuffer)->Blt(
-            (RECT*)((intptr_t)self + 0x50),
-            static_cast<IDirectDrawSurface4*>(*(void**)((intptr_t)self + 0x48)),
-            (RECT*)&tile_h,     /* stack variable reuse */
-            DDBLT_WAIT, nullptr);
-    }
-}
 #pragma GCC diagnostic pop

@@ -47,18 +47,15 @@ void VehicleEditor::CheckVehicleAttach(void*) {
     assert(0 && "stub reached — VehicleEditor::CheckVehicleAttach");
 }
 
-/* =========================================================== */
-/* RESDATA_ScriptedObject — not yet in canonical header        */
-/* =========================================================== */
-class RESDATA_ScriptedObject {
-public:
-    void EnterBuildMode(unsigned char);
-};
-
-void RESDATA_ScriptedObject::EnterBuildMode(unsigned char) {
-    fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__);
-    assert(0 && "stub reached — RESDATA_ScriptedObject::EnterBuildMode");
-}
+/* RESDATA_ScriptedObject stub removed (2026-08-16) — this duplicate
+ * `class RESDATA_ScriptedObject { void EnterBuildMode(unsigned char); };`
+ * with an assert-stub body was an ODR-mismatch landmine: its mangled
+ * symbol (`RESDATA_ScriptedObject::EnterBuildMode(unsigned char)`)
+ * collides with the REAL implementation (now `ScriptedObject::
+ * EnterBuildMode`, game/ScriptedObject.cpp, 0x44A9D0) at link time — an
+ * arbitrary link-order pick between the real method and this assert-stub.
+ * See game/ScriptedObject.h's class doc comment for the reconciliation
+ * this stub predates. */
 
 /* =========================================================== */
 /* Building / TrainEntity — REMOVED (CLASS-001).                */

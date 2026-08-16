@@ -65,8 +65,15 @@ int CRT_strlen(const char* s);
 int CRT_strlen(const char* s) { return s ? static_cast<int>(strlen(s)) : 0; }
 int CRT_memmove(void* d, const void* s, size_t n);
 int CRT_memmove(void* d, const void* s, size_t n) { memmove(d, s, n); return 0; }
-int CRT_wcsstr(const char* a, const char* b);
-int CRT_wcsstr(const char* a, const char* b) { return (a && b && strstr(a, b)) ? 1 : 0; }
+/* CRT_wcsstr(const char*, const char*) here was a distinct, dead
+ * (const char*, const char*)-mangled overload, unreachable from any real
+ * caller (all of which declare (uint8_t*, uint8_t*)) and semantically
+ * wrong regardless — it implemented a substring search returning 1/0,
+ * but the real 0x471480 is a case-insensitive whole-string compare
+ * returning -1/0/1 (see game/Building.cpp's top-of-file comment for the
+ * verified real body). The real, live definition is
+ * shared/stubs_link001_batch1_crt_win32.cpp's `int32_t CRT_wcsstr(uint8_t*,
+ * uint8_t*)`. Removed 2026-08-16. */
 int CRT_sprintf_buf(char* b, const char* f, ...);
 int CRT_sprintf_buf(char* b, const char* f, ...) { return 0; }
 
@@ -296,6 +303,19 @@ void  Stream_BeginEnum(void*);
 void  Stream_BeginEnum(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void  Stream_BeginRead(void*, int, int);
 void  Stream_BeginRead(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+
+/* WNDPROC_Stream::ExtractInt (0x4646C0) — real C++-mangled method,
+ * operator>>(int32_t*) on the stream (decompiled, see
+ * input/TrackTileDescriptor.cpp's doc comment for the full body: calls
+ * WNDPROC_Stream_InputPrefix + StreamBuf_ReadString + a CRT numeric-parse
+ * call Ghidra mislabeled "_rand_wrapper", handles ERANGE, releases two
+ * nested critical sections). Not yet implemented for real — those three
+ * callees are themselves unresolved (same class of gap as
+ * WNDPROC_StreamReadLine above); stubbed loud rather than silently
+ * returning success. TODO: implement for real once InputPrefix/
+ * StreamBuf_ReadString/the numeric-parse callee are decompiled. */
+extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*);
+extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* Math/CRT stubs — signatures inferred from usage, likely misidentified by decompiler */
 void* CRT_fabs(void*, void*);

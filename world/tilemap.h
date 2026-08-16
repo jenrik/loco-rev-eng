@@ -639,7 +639,9 @@ extern void UI_SetTooltipPos(int x, int y, int w, int h, int flag);
 extern void UI_UpdateTooltip(int x, int y, int w, int h, int flag);
 extern void BuildingMgr_DispatchAll(int dispatch_flags, int left, int top, int right, int bottom);
 extern void World_InvalidateRect(int x, int y, int w, int h, short type);
-extern void RESDATA_ScriptedObject_Dispatch(int x, int y, int w, int h, int flag);
+/* RESDATA_ScriptedObject_Dispatch removed 2026-08-16 — its one call site
+ * (TileMap::ProcessRect, tilemap.cpp) now calls g_scripted_object->
+ * Dispatch(...) directly (game/ScriptedObject.h). */
 extern void DDRAW_DispatchToSubObjects(int x, int y, int w, int h, void* flag);
 extern void     Game_DeselectGameObject(int game);  /* 0x411580 */
 extern void     World_Init(void* world);

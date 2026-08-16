@@ -773,6 +773,30 @@ void Entity::Update()
      * every tick given the call frequency, and hold the current frame
      * (already valid from SetAnimState's host branch) instead of guessing
      * at the missing field mapping or crashing. */
+    /* Host deviation: `initialized` only means "constructed" (GameObject's
+     * own base constructor sets it unconditionally, see GameObject::
+     * GameObject() above) -- it is NOT a "has a real resource" guarantee.
+     * The original assembly has no null check here either, because on
+     * Windows nothing ever reaches Update() before InitBase(resource_id>0,
+     * ...) has run at least once. On this host build, ScriptedObject's
+     * singleton (game/ScriptedObject.cpp) is the first entity whose
+     * Update() gets called every frame (GameLoop_FrameUpdate) without ever
+     * being given real .dat content first -- no host code path populates
+     * a scripted-object resource yet (2026-08-16, see PROGRESS.md). Guard
+     * rather than dereference a null resource pointer. */
+    if (resource == nullptr) {
+        static std::unordered_set<const void*> warned_null;
+        if (warned_null.insert(this).second) {
+            std::fprintf(stderr,
+                "[HOST] Entity::Update: skipping animation advance for %p -- "
+                "initialized but resource is null (no .dat content loaded "
+                "yet; see PROGRESS.md)\n",
+                static_cast<void*>(this));
+            std::fflush(stderr);
+        }
+        return;
+    }
+
     if (loco::assets::is_host_sprite_resource(resource)) {
         ++g_entity_update_host_guard_hits;
         static std::unordered_set<const void*> warned;

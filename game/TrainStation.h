@@ -142,10 +142,11 @@ public:
      * directly for this pass).
      *
      * Reads directive lines from the stream via WNDPROC_CriticalSectionLock
-     * until a terminator line is hit (same `CRT_wcsstr(line, sentinel)`
-     * idiom as ChildWindow's sibling parsers — a match is a NULL return,
-     * per the inverted-return convention already documented in
-     * input/BuildingDescriptorEditor.cpp). Recognized directives:
+     * until a terminator line is hit (same `CRT_wcsstr`/`_stricmp(line,
+     * sentinel)` idiom as ChildWindow's sibling parsers — real _stricmp
+     * semantics: a match is a 0 return, confirmed via disassembly of
+     * TrainStation::Render at 0x436750, `CALL 0x471480; TEST EAX,EAX;
+     * JNZ <skip>`). Recognized directives:
      * "walk_speed" (two values -> field_168/field_169), "Employable"
      * (-> removable_flag), "sex" (first char, uppercased, 'M'/'F' ->
      * sex_code), "groundwidth" (-> z_threshold), "SpawnLimit" (->

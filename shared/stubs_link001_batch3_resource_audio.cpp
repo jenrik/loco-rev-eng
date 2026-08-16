@@ -111,45 +111,14 @@ extern "C" void* RESDATA_CreateChildSprite(void* parent, void* res, int x, int y
     return nullptr;
 }
 
-/* ================================================================== */
-/* RESDATA_ScriptedObject_AddChild (extern "C" shape)                  */
-/* Address: 0x44B190                                                   */
-/*                                                                     */
-/* resources/ResourceManager.cpp declares this INSIDE an `extern "C"`  */
-/* block (line ~137-140), needing the plain symbol                     */
-/* "RESDATA_ScriptedObject_AddChild" (confirmed via `nm build/          */
-/* lego_loco.p/resources_ResourceManager.cpp.o` -> `U                  */
-/* RESDATA_ScriptedObject_AddChild`). shared/defsym_stubs.cpp only       */
-/* stubs the C++-mangled overload (`_Z31RESDATA_ScriptedObject_        */
-/* AddChildPvii`) — a different symbol, not a duplicate.                */
-/*                                                                     */
-/* Called from ResourceManager::AddString's resourceType==3, odd-resId */
-/* branch, which is reachable any time a scripted-object resource ID   */
-/* of that class is first requested via ResourceManager::GetById — a   */
-/* live path (GetById is called constantly for resource loading), so   */
-/* this warns once + returns a benign default rather than asserting.   */
-/* The caller already allocates a 0x63C-byte buffer via operator_new   */
-/* before calling this; returning nullptr here just leaves that buffer */
-/* unconstructed (a leak, not a crash) and this specific resource type  */
-/* fails to load — no worse than the pre-existing call-0 in terms of    */
-/* functionality, but no longer a hard fault.                          */
-/* TODO: decompile 0x44B190 (ScriptedObject-derived child constructor). */
-/* ================================================================== */
-extern "C" void* RESDATA_ScriptedObject_AddChild(void* obj, int32_t resId, int32_t strPtr)
-{
-    (void)obj;
-    (void)resId;
-    (void)strPtr;
-    static bool warned = false;
-    if (!warned) {
-        std::fprintf(stderr,
-            "STUB: RESDATA_ScriptedObject_AddChild(void*, int, int) not implemented "
-            "(TODO: decompile 0x44B190) — scripted-object resource load dropped, "
-            "preallocated buffer left unconstructed\n");
-        warned = true;
-    }
-    return nullptr;
-}
+/* RESDATA_ScriptedObject_AddChild (extern "C" shape) stub removed
+ * (2026-08-16): 0x44B190 is now fully decompiled and implemented for real
+ * as `TrackTileDescriptor_Ctor` (input/TrackTileDescriptor.h/.cpp — real
+ * C++ linkage, not extern "C"). resources/ResourceManager.cpp's
+ * extern "C" declaration/call site that needed this stub is gone (it now
+ * includes TrackTileDescriptor.h and calls TrackTileDescriptor_Ctor
+ * directly), and a tree-wide grep confirms zero remaining callers of the
+ * extern "C" shape — this stub is dead, not merely dormant. */
 
 /* ================================================================== */
 /* ResourceManager_GetById (extern "C" shape)                          */

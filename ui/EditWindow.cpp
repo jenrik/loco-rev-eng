@@ -7,6 +7,7 @@
  */
 
 #include "EditWindow.h"
+#include "../game/ScriptedObject.h"
 #include "UIPANEL_Surface.h"
 #include "UI_Utils.h"
 #include "NameEntryPanel.h"
@@ -188,7 +189,7 @@ void    __fastcall Town_BlitElement(void* src, int sx, int sy,
 /* ================================================================== */
 
 extern void*   g_primary_surface;       /* 0x4FD3C4 */
-extern void*   g_scripted_object;       /* 0x4AA5B8 */
+extern ScriptedObject* g_scripted_object;   /* 0x4AA5B8 — game/ScriptedObject.h */
 extern PlayerConfig* g_player_config;   /* 0x485160 */
 extern void*   g_config_ini;            /* 0x485484 */
 class ResourceManager;
@@ -717,8 +718,15 @@ void EditWindow::HandleClick()
 /* ================================================================== */
 int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    /* If not yet initialized, delegate to UIPANEL_WindowProc */
-    if (this->field_14 == 0) {  /* pInitGuard at +0x14 */
+    /* If not yet initialized, delegate to UIPANEL_WindowProc.
+     * this->field_14 (an int32_t "pInitGuard") was renamed/retyped to
+     * UI_WindowBase::renderSurface (a UIPANEL_Surface*) 2026-08-16 — see
+     * that field's doc comment in ui/UI_WindowBase.h. The `== 0` (i.e.
+     * `== nullptr`) comparison is unchanged and still valid for a pointer;
+     * EditWindow never configures a real render surface via
+     * set_render_surface(), so this guard's practical meaning ("has this
+     * window's render surface ever been set") is unaffected. */
+    if (this->renderSurface == nullptr) {  /* pInitGuard at +0x14 */
         // 0x422D9D passes the EditWindow instance in ECX before the four
         // WndProc stack arguments.  The prior four-argument declaration
         // dropped that required receiver.

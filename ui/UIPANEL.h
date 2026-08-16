@@ -44,6 +44,7 @@
 
 #include "../game/Panel.h"
 #include "../graphics/LOCOBITMAP.h"   /* for UIPANEL_Surface struct */
+#include "SaveSprite.h"
 
 // Status: TRANSCRIBED
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
@@ -56,15 +57,37 @@ public:
     /* --- Panel / GameObject inherited fields (0x00..0xE3) --- */
     /* See Panel.h and GameObject.h for offsets 0x00-0xD3 */
 
-    /* byte at +0xE0: string/path buffer start (zeroed in ctor) */
-    uint8_t  _pad_E0[0x310];    /* +0xE0..+0x3EF (gap + path buffer) */
+    /* byte at +0xE0: string/path buffer start (zeroed in ctor). +0x1E5
+     * (within this span) stores the backdrop filename set by
+     * UIPANEL::Hide (0x429EF0); not carved out here (out of this pass's
+     * scope). */
+    uint8_t  _pad_E0[0x20A];    /* +0xE0..+0x2E9 */
+
+    /* +0x2EA: save/backdrop full-path scratch buffer (MAX_PATH, 260
+     * bytes), confirmed via disassembly of UIPANEL::InitSprite
+     * (0x429A10, `LEA EBX,[EBP+0x2ea]`), UIPANEL::BlitSprite (0x429B20)
+     * and UIPANEL::BlitSpriteEx (0x429DD0) — all three compose the
+     * final "<install><prefix><name>.bmp" save path into this MEMBER
+     * buffer, not a stack local (only BlitSprite's separate, earlier
+     * directory-existence probe uses a genuine stack buffer). */
+    char     save_path_buf[0x104];           /* +0x2EA..+0x3ED */
+
+    uint8_t  _pad_3EE[2];                     /* +0x3EE..+0x3EF */
 
     /* --- UIPANEL-specific embedded sub-objects --- */
     GameObject        child_sprites;         /* +0x3F0  embedded GameObject acting as sprite manager */
     UIPANEL_Surface   surface_buf;           /* +0x478  embedded offscreen DDraw surface (0x20 bytes) */
 
     /* --- UIPANEL-specific fields --- */
-    int32_t   _field_498;                    /* +0x498  (zeroed in ctor) */
+    /* +0x498: pointer to the RESDATA embedded in the currently-displayed
+     * SaveSprite's `data` member (i.e. `&sprite->data`, NOT the
+     * SaveSprite itself) — set by DrawBorder (0x428400) to
+     * `resource_ptr->data` and compared against `entity->target->data`
+     * in DrawRadioButton (0x428F90). Confirmed by disassembly: DrawBorder
+     * adds +0x50 to its resource_ptr (a SaveSprite*) before both storing
+     * it here and reading +0xB2/+0xB4/+0x1C4 off the stored value (all
+     * real RESDATA/SaveRegion offsets — see shared/types.h). */
+    RESDATA*  save_header;                   /* +0x498  (zeroed in ctor) */
     uint16_t  mode;                          /* +0x49C  tab selection: 0=reset,1=init,2..5=tab index */
 
     /* Sprite pointers — tab buttons and decorations */
@@ -78,12 +101,22 @@ public:
     void*     list_text_sprite;              /* +0x4B8  scrollbar thumb / list text sprite */
     void*     sound_btn_sprite;              /* +0x4BC  sound toggle button sprite */
 
-    /* Content item sprite slots (6 entries) */
+    /* Content item sprite slots (6 entries). Each slot's own +0x30 field
+     * (on that CGWND/TrackPiece-family entity's, as-yet-unmodeled, class
+     * — see UIPANEL::CreateSprite/DrawRadioButton) stores a SaveSprite*
+     * pointing at the file entry currently bound to that slot; typed at
+     * the two touch points that read it (DrawRadioButton, DrawBorder)
+     * without redefining that entity's own class in this pass. */
     void*     item_sprites[6];               /* +0x4C0..+0x4D7  sprites for content list items */
 
-    /* Linked list management */
-    void*     sprite_list_head;               /* +0x4D8  head of file/system sprite linked list */
-    void*     sprite_list_tail;               /* +0x4DC  tail of file/system sprite linked list */
+    /* Linked list management. +0x4DC is not a "tail" in the usual sense
+     * — UIPANEL::CreateSprite (0x429850) stores its own `list_entry`
+     * argument there, i.e. it tracks the anchor/first-displayed node of
+     * the CURRENT 6-item scroll window, not the true list tail. Kept the
+     * existing name (sprite_list_tail) for continuity; see CreateSprite/
+     * BlitSprite for the real usage. */
+    SaveSprite* sprite_list_head;             /* +0x4D8  head of file/system sprite linked list */
+    SaveSprite* sprite_list_tail;             /* +0x4DC  current scroll-window anchor node */
 
     /* ================================================================ */
     /* Constructor / Destructor                                         */
@@ -185,78 +218,25 @@ public:
      */
     byte HandleDrag(int resource, uint16_t action);
 
-    /**
-     * WindowProc — per-panel window message handler.
-     * Address: 0x426900
-     *
-     * When the message hwnd matches this->hwnd (+0x08): unlocks primary,
-     * renders the panel (UIPANEL_Render), re-locks primary.
-     * Always forwards to DefWindowProcA.
-     */
-    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-    /**
-     * OnDestroy — panel destroy handler.
-     * Address: 0x426A90
-     *
-     * Sets alive flag (+0xAB) to 0, calls DestroyWindow(this->hwnd).
-     * If child_count (+0x0C) is 0, calls PostQuitMessage(0).
-     *
-     * @return  0
-     */
-    LRESULT OnDestroy();
-
-    /**
-     * BeginPaint — start buffered panel rendering.
-     * Address: 0x426B00
-     *
-     * Unlocks primary surface, calls GetDC on primary (vtable[0x44]).
-     * Retries up to 1000 times with 10ms delay on failure, exits on
-     * persistent failure. Returns HDC stored at +0x4C.
-     *
-     * @return  HDC from primary surface
-     */
-    HDC BeginPaint();
-
-    /**
-     * EndPaint — end buffered panel rendering (simple wrapper).
-     * Address: 0x426B70
-     *
-     * Delegates to EndPaintEx(this, this->hwnd, 0, 0, &stack_rect).
-     * Has a WndProc-style calling convention (4 stack args ignored).
-     */
-    void EndPaint();
-
-    /**
-     * EndPaintEx — full present with cursor overlay and dirty rect.
-     * Address: 0x426B90
-     *
-     * Main EndPaint: unlocks primary surface, computes dirty rect from
-     * cursor, blits tile content into the offscreen buffer, presents the
-     * dirty region to the screen, and copies the background back from the
-     * backbuffer. Two paths:
-     *   (A) no tile_map → simple DDRAW_PresentRect
-     *   (B) tile_map active → cursor-relative blit + background restore
-     *
-     * @param hdc            int — HDC from BeginPaint or surface handle
-     * @param unlock_param   int — parameter to unlock surface (0 = skip)
-     * @param unlock_flag    byte — if 0, proceed with rendering; if non-zero, only unlock
-     * @param restrict_rect  RECT* — optional clip rect to restrict present area
-     */
-    void EndPaintEx(int hdc, int unlock_param, byte unlock_flag, RECT* restrict_rect);
-
-    /**
-     * Render — per-frame panel foreground render with cursor overlay.
-     * Address: 0x426EB0
-     *
-     * Computes dirty rect from cursor position, clips to viewport (+0xD4..+0xE0),
-     * inflates by 4 pixels for smooth cursor when <256x256 visible region.
-     * Blits tile content into offscreen buffer via UIPANEL_Blit, then copies
-     * the result to the primary surface. Restores background from backbuffer.
-     *
-     * @param enable_tile_map  byte — if non-zero and tile_map exists, render tile content
-     */
-    void Render(byte enable_tile_map);
+    /* WindowProc/OnDestroy/BeginPaint/EndPaint/EndPaintEx/Render were
+     * declared here (addresses 0x426900-0x426EB0) but do NOT belong to
+     * UIPANEL — corrected 2026-08-16. get_xrefs_to on every one of them
+     * shows callers exclusively from GameSetupPanel, Cursor, NameEntryPanel,
+     * BuildingPanel, PostcardAlbum, Town, DPlayManager, NETMAN_* — never a
+     * UIPANEL instance. A Ghidra function-address-range listing confirms
+     * they sit in the same contiguous MSVC method block as
+     * UI_WindowBase_SetMode (0x425FD0)/SetRenderSurface (0x426020)/
+     * dispatch_message (0x426140), ending right before UIPANEL's own real
+     * ctor (UIPANEL_InitScrollPanel, 0x427370) begins a new block — i.e.
+     * these six are UI_WindowBase members, the "UIPANEL_" Ghidra prefix is
+     * a stale misnomer. WindowProc (0x426900) and OnDestroy (0x426A90) were
+     * dead duplicates of the already-correct UI_WindowBase::on_mouse_move()/
+     * on_close() (ui/UI_WindowBase.cpp) and have been removed entirely.
+     * BeginPaint (0x426B00) has been moved to UI_WindowBase (see its real
+     * declaration/implementation there). EndPaint (0x426B70)/EndPaintEx
+     * (0x426B90)/Render (0x426EB0) remain temporarily in ui/UIPANEL.cpp as
+     * free functions pending a dedicated migration — do not re-declare them
+     * as UIPANEL methods; see PROGRESS.md's 2026-08-16 correction entry. */
 
     /**
      * StopSound — halt panel sound playback (vtable[7], overrides

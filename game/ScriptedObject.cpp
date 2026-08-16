@@ -5,6 +5,48 @@
  * Reverse engineered via Ghidra decompilation.
  *
  * Status: TRANSCRIBED
+ *
+ * RECONCILIATION (2026-08-16): this file absorbs the method bodies that
+ * were previously duplicated (and, in several places, wrongly field-mapped)
+ * in world/scriptengine.cpp's `RESDATA_ScriptedObject` class — see
+ * ScriptedObject.h's class doc comment for the full trail. Every ported
+ * body below was re-derived against the VERIFIED real field offsets in
+ * GameObject.h/Entity.h/Panel.h (not copied from world/scriptengine.cpp's
+ * own field names), because that file's raw-index reads (`param_1[N]` is a
+ * byte offset of N*4, not N) had several latent mis-mappings:
+ *   - `param_1[9]` (byte +0x24) is `Entity::visible`, not "drag_flag".
+ *   - `param_1[0x24]` (byte +0x90) is `Panel::drag_active`, ALSO called
+ *     "drag_flag" there — i.e. two different original fields were
+ *     collapsed into one name.
+ *   - `param_1[0xa]` (byte +0x28) is `Entity::anim_index`, not
+ *     "tooltip_state".
+ *   - `param_1[0x15]` (byte +0x54) is `Entity::frame_index`, not
+ *     "anim_index" (a different field, at +0x28).
+ *   - Every vtable dispatch through slot +0x0C (on `this`, on the embedded
+ *     Entity, or on the tooltip handle) is `MoveTo`, not a fictitious
+ *     virtual "SetPosition" — Panel does have a real, differently-
+ *     addressed non-virtual `SetPosition` (0x454820), but that is not what
+ *     these vtable calls reach.
+ * See ScriptedObject.h for the corresponding field documentation.
+ *
+ * VERIFICATION STATUS per method (2026-08-16 pass) — given the density of
+ * mis-mappings found in the source this file replaces, ported bodies are
+ * NOT uniformly trustworthy; this records exactly how each was checked:
+ *   - Ctor (0x449430), ~Dtor/InitSubObjects (0x4494E0), Update (0x4497A0),
+ *     EnterBuildMode (0x44A9D0), IsDragging (0x449CE0), GetDragOffset
+ *     (0x449D80), CheckClick (0x449D00), HitTest (0x44A0C0), Dispatch
+ *     (0x449C00): re-derived directly from disassemble_function output,
+ *     instruction-by-instruction, cross-checked against GameObject.h/
+ *     Entity.h/Panel.h's canonical vtable slot tables. High confidence.
+ *   - Shutdown, Start, MoveTo, HandleToolClick, UpdateToolState: ported from
+ *     world/scriptengine.cpp's decompilation with field names corrected
+ *     against the canonical headers (see mis-mapping list above) but NOT
+ *     re-verified instruction-by-instruction against fresh disassembly.
+ *     Medium confidence — plausible, not disassembly-proven.
+ *   - OnUpdateChild, InitState: undecompiled stubs (pre-existing gap, not
+ *     introduced by this pass) — see TODO markers at their definitions.
+ * Do not treat "ported" and "disassembly-verified" as equivalent elsewhere
+ * in this file; the tier above is the actual state per method.
  */
 
 #include "ScriptedObject.h"
@@ -12,18 +54,15 @@
 #include "../game/TrackPiece.h"
 #include "../core/Entity.h"
 #include "../town/Town.h"
-#include "../resources/Win32Stream.h"
-#include "../resources/Win32StreamMem.h"
+#include "../resources/ResourceManager.h"
+#include "../core/CGWND.h"
+#include "../stubs/windows.h"
 
 /* ================================================================== */
 /* Win32 API imports — C linkage only                                  */
 /* ================================================================== */
 /* ClientToScreen/SetCursorPos: declared by stubs/windows.h (canonical
- * POINT*-typed signature) — transitively included below via
- * resources/Win32Stream.h. This file's own former duplicate declaration
- * of ClientToScreen used a looser `void* point` parameter, which
- * conflicted once both headers landed in the same TU (same fix as
- * ui/HelpWnd.cpp's GetClientRect/SetRect/etc. cleanup). */
+ * POINT*-typed signature), included directly above. */
 
 /* ================================================================== */
 /* CRT helpers — C++ linkage                                            */
@@ -31,41 +70,20 @@
 void  __cdecl CRT_free(void* ptr);                            /* 0x466C70 */
 int   __cdecl CRT_sprintf_buf(void* buf, const char* fmt, ...); /* 0x466D60 */
 
-/* ================================================================== */
-/* Win32 stream I/O — C++ linkage                                       */
-/*                                                                       */
-/* stream_obj/parsed_stream below use WIN32_MemoryStream (resources/     */
-/* Win32StreamMem.h, included above) — WNDPROC_StreamFromMemory's real   */
-/* declaration/size helper come from that header, not redeclared here.   */
-/* ================================================================== */
-void* AssetMgr_LoadFile(void* mgr, const char* name,
-                        int* out_size);                        /* 0x45CD00 */
-
-/* ================================================================== */
-/* UI / Input helpers — C++ linkage                                     */
-/* ================================================================== */
-char  ScriptedObject_ParseStream(void* stream);                /* 0x41E9F0 */
-void  ScriptedObject_InitBase(uint32_t resource_id, int zero);  /* 0x4203E0 */
-/* UI_ChildWindow_Render's real definition (ui/UI_ChildWindow.cpp:796) is
- * inside an `extern "C" { }` block (matching ui/UI_ChildWindow.h:339-376) —
- * this declaration must match that linkage, not default C++ linkage,
- * or this call binds to nothing (LINK-001 landmine). */
-extern "C" char UI_ChildWindow_Render(void* obj, void* stream);           /* 0x424E00 */
-
 /* Panel helpers declared in Panel.h */
 extern void Panel_DtorBody(void* obj);                         /* 0x4545A0 */
-extern void GameObject_DtorBody(void* obj);                     /* 0x405870 */
 
-/* ScriptEngine helpers */
+/* ScriptEngine helpers (ScriptEngine's own real inheritance/full vtable
+ * shape is unresolved — see ScriptedObject.h's BLOCKER comment on the
+ * embedded script_engine_prefix region. Kept as free-function/opaque
+ * dispatch, matching the pre-existing style in this file.) */
 extern void ScriptEngine_Init(void* obj);                      /* 0x44E8D0 */
 extern void ScriptEngine_Call(void* obj);                      /* 0x44E930 */
 
-/* ScrollPanel helpers */
+/* ScrollPanel helpers (same BLOCKER as ScriptEngine — see header) */
 extern void UIPANEL_InitScrollPanel(void* obj);                /* 0x427370 */
 extern void UIPANEL_ScrollPanel_Dtor(void* obj);               /* 0x427460 */
-
-/* TrackPiece */
-extern void TrackPiece_SetZoom(void* tool, int zoom);          /* 0x40D170 */
+extern void UIPANEL_ScrollPanel_HandleDrag(void* panel, int32_t param, int32_t action); /* 0x4277D0 */
 
 /* Tooltip */
 extern void UI_DestroyTooltip(void* mgr, int handle);          /* 0x423D20 */
@@ -84,95 +102,68 @@ extern void INPUT_LoadWorld(InputMgr* input_mgr, const char* path); /* 0x41D320 
 extern void INPUT_SaveCurrentWorld(InputMgr* input_mgr,
                                    const char* path);          /* 0x41D9B0 */
 extern void CGWND_SetBuildMode(int mode);                      /* 0x4089D0 */
-/* Real def: core/CGWND.cpp, void(int) — was declared void* here,
- * mismatching the real int param (call-0 landmine — silently bound to
- * shared/link_stubs.cpp's void* no-op stub). */
-extern void CGWND_SetMode(int mode);                         /* 0x408130 */
+extern void CGWND_SetMode(int mode);                           /* 0x408130 */
+extern void CGWND_SetPause(void* obj, uint8_t pause);          /* CGWND.cpp */
 extern void Game_CheckScreensaverTimeout(void* game);          /* 0x410A20 */
-extern void CGWND_ToggleFullscreen();                          /* 0x408110 */
 extern void GameAudio_SetMute(void* audio, uint8_t mute);      /* 0x413560 */
-extern void UIPANEL_ScrollPanel_HandleDrag(void* panel, int tool,
-                                           int action);        /* 0x4277D0 */
 extern void TileMap_InvalidateRect(void* tilemap, int l, int t,
                                    int r, int b);              /* 0x45E240 */
-extern void Town_SelectBuilding(void* town, int index);        /* 0x42EC60 */
-/* Unused in this file. Address corrected: 0x458B20 disassembles to
- * DDRAW_CleanupSprites (0x458B00's body), not DDRAW_SelectBuilding;
- * confirmed via Ghidra at 0x459180 (see graphics/DDRAW.cpp for the real
- * definition, which returns uint8_t). */
-extern int  DDRAW_SelectBuilding(void* ddraw, int index);      /* 0x459180 */
-
-/* GameObject helpers — now class methods; kept as extern for transition */
-extern void GameObject_PtInRect(void* obj, int x, int y);      /* 0x436A10 */
-extern void GameObject_Update(void* obj);                      /* 0x405C40 */
-extern void Entity_Ctor(void* obj, int a, int b, int c, int d);/* 0x405790 */
+extern int  Town_SelectBuilding(void* town_view, int building);  /* 0x42EC60 */
+extern int  DDRAW_SelectBuilding(void* ddraw_building, int building); /* 0x459180 */
+extern int  UI_IsBitmapReady(int handle);                       /* 0x424C30 */
 
 /* ================================================================== */
 /* Global variables                                                     */
 /* ================================================================== */
 
 extern InputMgr g_input_mgr;        /* 0x4A9990 — static InputMgr object */
-extern void*    g_asset_mgr;             /* 0x485600 */
-extern void*    g_audio_mgr;             /* 0x4FD38C */
-extern void*    g_audio;                 /* 0x4FD3BC */
-extern void*    g_netman;                /* 0x4FD3AC */
+extern void*    g_audio_mgr;                 /* 0x4FD38C */
+extern void*    g_audio;                     /* 0x4FD3BC */
+extern void*    g_netman;                    /* 0x4FD3AC */
 class UI_Manager;
-extern UI_Manager* g_tooltip_mgr;        /* 0x4FD220 */
-extern void*    g_tilemap;               /* 0x4AAE90 */
-extern void*    g_town_view;             /* 0x4852A0 — real address (see
-                                           * core/GameView.h). The prior
-                                           * comment here, 0x4AAD2C, has real
-                                           * xrefs but they're all from
-                                           * unrelated audio functions
-                                           * (PlaySound, GameAudio_PlayResource(Ex),
-                                           * ResourceManager_AnimateClock,
-                                           * NETMAN_ReceivePlayerName) — none
-                                           * from ScriptedObject-family code —
-                                           * so it was simply a stale/wrong
-                                           * comment for this global, not a
-                                           * fabricated address in general.
-                                           * See PROGRESS.md's g_town_view item. */
-extern void*    g_ddraw_building;        /* 0x4A9EF0 */
-extern void*    g_trainstation_window;   /* 0x485258 */
-extern void*    g_game;                  /* 0x4854C8 — Game singleton */
+extern UI_Manager* g_tooltip_mgr;            /* 0x4FD220 */
+extern void*    g_tilemap;                   /* 0x4AAE90 */
+extern void*    g_town_view;                 /* 0x4852A0 */
+extern uint8_t  g_is_town_mode;               /* 0x485328 — town-mode-active flag byte
+                                               * (confirmed via direct disassembly of
+                                               * 0x4497A0: `MOV AL,[0x485328]; TEST AL,AL`
+                                               * — NOT a pointer null-check; a prior pass
+                                               * here used the wrong address (0x485490)
+                                               * and the wrong void*-nullcheck shape). */
+extern uint8_t  g_ddraw_active_flag;          /* 0x4A9F78 — ddraw-active flag byte (same
+                                               * correction: `MOV AL,[0x4A9F78]`). */
+extern void*    g_ddraw_building;            /* 0x4A9EF0 */
+extern void*    g_trainstation_window;       /* 0x485258 */
+extern void*    g_game;                      /* 0x4854C8 — Game singleton */
 
-extern int      g_world_width;           /* 0x4AAD0C */
-extern int      g_world_height;          /* 0x4AAD10 */
-extern int      g_viewport_x;            /* 0x4AAD24 */
-extern int      g_viewport_y;            /* 0x4AAD28 */
-extern int      g_screen_width;          /* 0x4851D8 */
-extern int      g_drag_start_x;          /* 0x485574 */
-extern int      g_drag_start_y;          /* 0x485578 */
-extern int      g_cursor_world_x;        /* 0x48555C */
-extern int      g_cursor_world_y;        /* 0x485560 */
-extern char     g_disable_input;         /* 0x4855AC */
-extern char     g_is_fullscreen;         /* 0x485210 */
-extern char     g_allow_building_placement; /* 0x4FD3DC */
-extern char     g_in_build_mode;         /* 0x4FD199 */
-extern uint32_t g_last_cursor_pos;       /* 0x485558 */
-extern void*    g_active_panel;          /* 0x4FD224 */
-extern int      g_stream_open_flags;     /* 0x479190 */
-extern char     g_scene_name[];          /* 0x4A99C8 */
+extern int      g_world_width;               /* 0x4AAD0C */
+extern int      g_world_height;              /* 0x4AAD10 */
+extern int      g_viewport_x;                /* 0x4AAD24 */
+extern int      g_viewport_y;                /* 0x4AAD28 */
+extern int      g_screen_width;              /* 0x4851D8 */
+extern int      g_drag_start_x;              /* 0x485574 */
+extern int      g_drag_start_y;              /* 0x485578 */
+extern int      g_cursor_world_x;            /* 0x48555C */
+extern int      g_cursor_world_y;            /* 0x485560 */
+extern char     g_disable_input;             /* 0x4855AC */
+extern char     g_is_fullscreen;             /* 0x485210 */
+extern char     g_allow_building_placement;  /* 0x4FD3DC */
+extern char     g_in_build_mode;             /* 0x4FD199 */
+/* g_demo_mode: canonical declaration is shared/types.h's
+ * `extern int32_t g_demo_mode;` (0x4A9918) -- this file's own former
+ * `extern char g_demo_mode;` was a type mismatch, not a distinct global. */
+extern uint32_t g_last_cursor_pos;           /* 0x485558 */
+extern void*    g_active_panel;              /* 0x4FD224 */
+extern void*    g_main_window;               /* CGWND singleton */
 
 /* ================================================================== */
-/* Inline helpers for embedded object vtable dispatch                   */
-/* These map the binary's literal vtable access to typed operations.   */
+/* Inline helpers for the still-unresolved ScriptEngine/ScrollPanel      */
+/* embedded sub-objects (see ScriptedObject.h's BLOCKER comments).       */
+/* These map the binary's literal vtable access to typed operations     */
+/* for the two sub-objects whose own class hierarchy this pass could    */
+/* not safely re-derive. Extending the pre-existing pattern in this      */
+/* file rather than inventing a new one.                                */
 /* ================================================================== */
-
-/** Call recovered virtual slots on embedded legacy objects. */
-static inline void entity_vmove(ScriptedObject* so, int x, int y)
-{
-    using MoveTo = void (*)(void*, int, int);
-    void** vtable = *reinterpret_cast<void***>(so->sub_entity);
-    reinterpret_cast<MoveTo>(vtable[3])(so->sub_entity, x, y);
-}
-
-static inline void entity_init(ScriptedObject* so, int a, int b, int c)
-{
-    using Init = void (*)(void*, int, int, int);
-    void** vtable = *reinterpret_cast<void***>(so->sub_entity);
-    reinterpret_cast<Init>(vtable[6])(so->sub_entity, a, b, c);
-}
 
 static inline void se_shutdown(ScriptedObject* so)
 {
@@ -195,6 +186,34 @@ static inline void se_vmove(ScriptedObject* so, int x, int y)
     reinterpret_cast<MoveTo>(vtable[3])(so->script_engine_prefix, x, y);
 }
 
+static inline uint8_t se_ptinrect(ScriptedObject* so, int x, int y)
+{
+    using PtInRect = uint8_t (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    return reinterpret_cast<PtInRect>(vtable[2])(so->script_engine_prefix, x, y);
+}
+
+static inline uint8_t se_hittest(ScriptedObject* so, int x, int y)
+{
+    using HitTest = uint8_t (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    return reinterpret_cast<HitTest>(vtable[4])(so->script_engine_prefix, x, y);
+}
+
+static inline void se_update(ScriptedObject* so)
+{
+    using Update = void (*)(void*);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    reinterpret_cast<Update>(vtable[10])(so->script_engine_prefix);
+}
+
+static inline void se_draw(ScriptedObject* so, RECT clip)
+{
+    using Draw = void (*)(void*, RECT, int32_t, uint32_t);
+    void** vtable = *reinterpret_cast<void***>(so->script_engine_prefix);
+    reinterpret_cast<Draw>(vtable[11])(so->script_engine_prefix, clip, 0, 0);
+}
+
 static inline void sp_shutdown(ScriptedObject* so)
 {
     using Shutdown = void (*)(void*);
@@ -209,20 +228,54 @@ static inline void sp_vmove(ScriptedObject* so, int x, int y)
     reinterpret_cast<MoveTo>(vtable[3])(so->scroll_panel_prefix, x, y);
 }
 
+static inline uint8_t sp_ptinrect(ScriptedObject* so, int x, int y)
+{
+    using PtInRect = uint8_t (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    return reinterpret_cast<PtInRect>(vtable[2])(so->scroll_panel_prefix, x, y);
+}
+
+static inline uint8_t sp_hittest(ScriptedObject* so, int x, int y)
+{
+    using HitTest = uint8_t (*)(void*, int, int);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    return reinterpret_cast<HitTest>(vtable[4])(so->scroll_panel_prefix, x, y);
+}
+
+static inline void sp_update(ScriptedObject* so)
+{
+    using Update = void (*)(void*);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    reinterpret_cast<Update>(vtable[10])(so->scroll_panel_prefix);
+}
+
+static inline void sp_draw(ScriptedObject* so, RECT clip)
+{
+    using Draw = void (*)(void*, RECT, int32_t, uint32_t);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    reinterpret_cast<Draw>(vtable[11])(so->scroll_panel_prefix, clip, 0, 0);
+}
+
+static inline uint32_t sp_init(ScriptedObject* so, int32_t a, int32_t b, int32_t c)
+{
+    using Init = uint32_t (*)(void*, int32_t, int32_t, int32_t);
+    void** vtable = *reinterpret_cast<void***>(so->scroll_panel_prefix);
+    return reinterpret_cast<Init>(vtable[6])(so->scroll_panel_prefix, a, b, c);
+}
+
+/* ABI_BOUNDARY: Panel::tooltip_handle is inherited as an int32_t
+   (pre-existing Panel.h field type, not introduced by this pass) rather
+   than a typed Entity* — widening it tree-wide is out of scope here. */
 static inline void tooltip_vmove(int32_t handle, int x, int y)
 {
-    using MoveTo = void (*)(void*, int, int);
-    void* object = reinterpret_cast<void*>(static_cast<intptr_t>(handle));
-    void** vtable = *reinterpret_cast<void***>(object);
-    reinterpret_cast<MoveTo>(vtable[3])(object, x, y);
+    if (handle == 0) return;
+    reinterpret_cast<Entity*>(static_cast<intptr_t>(handle))->MoveTo(x, y);
 }
 
 static inline void tooltip_set_state(int32_t handle, int state)
 {
-    using SetAnimState = void (*)(void*, int);
-    void* object = reinterpret_cast<void*>(static_cast<intptr_t>(handle));
-    void** vtable = *reinterpret_cast<void***>(object);
-    reinterpret_cast<SetAnimState>(vtable[7])(object, state);
+    if (handle == 0) return;
+    reinterpret_cast<Entity*>(static_cast<intptr_t>(handle))->SetAnimState(state);
 }
 
 /* ================================================================== */
@@ -230,26 +283,24 @@ static inline void tooltip_set_state(int32_t handle, int state)
 /* ================================================================== */
 
 ScriptedObject::ScriptedObject()
+    : sub_entity(-1, -1, 0, 0)   /* Entity_Ctor(&sub_entity, -1, -1, 0, 0), 0x405790 */
 {
     /* Step 1: Initialize Panel base fields via PartialDtor.
        In the binary this resets the vtable to Panel and zeros child/tooltip fields. */
     this->PartialDtor();
 
-    /* Step 2: Create embedded Entity at +0xE0 */
-    Entity_Ctor(&sub_entity, -1, -1, 0, 0);                   /* 0x405790 */
-
-    /* Step 3: Initialize ScriptEngine at +0x178 */
+    /* Step 2: Initialize ScriptEngine at +0x178 (see BLOCKER on that field) */
     ScriptEngine_Init(&script_engine_prefix);                        /* 0x44E8D0 */
 
-    /* Step 4: Initialize ScrollPanel at +0x260 */
+    /* Step 3: Initialize ScrollPanel at +0x260 (see BLOCKER on that field) */
     UIPANEL_InitScrollPanel(&scroll_panel_prefix);                   /* 0x427370 */
 
-    /* Step 5: Set type to 10 */
+    /* Step 4: Set type to 10 */
     this->type = 10;
 
-    /* Step 6: Zero out trailing fields */
-    this->field_744 = 0;
-    this->field_748 = 0;
+    /* Step 5: Zero out trailing fields */
+    this->child_sprite1 = nullptr;
+    this->child_sprite2 = nullptr;
 }
 
 
@@ -272,8 +323,10 @@ ScriptedObject::~ScriptedObject()
 
 void ScriptedObject::InitSubObjects()
 {
-    /* Step 1: Stop embedded Entity via Init(0, -1, 0) */
-    entity_init(this, 0, -1, 0);
+    /* Step 1: Stop embedded Entity via InitBase(0, -1, 0) — a real,
+       non-destructive Entity method (distinct from the C++ member
+       lifetime managed automatically by the compiler below). */
+    this->sub_entity.InitBase(0, -1, 0);
 
     /* Step 2: Stop self via Panel::Init */
     this->Init(0, -1, 0);
@@ -293,22 +346,30 @@ void ScriptedObject::InitSubObjects()
     /* Step 7: Stop ScriptEngine */
     ScriptEngine_Call(&script_engine_prefix);                       /* 0x44E930 */
 
-    /* Step 8: Destroy Entity sub-object */
-    GameObject_DtorBody(&sub_entity);                        /* 0x405870 */
-
-    /* Step 9: Destroy Panel base */
+    /* Step 8: Destroy Panel base */
     Panel_DtorBody(this);                                    /* 0x4545A0 */
+
+    /* The original's step 8 (of 9) explicitly ran the embedded Entity's
+       destructor BODY (GameObject_DtorBody(&sub_entity), 0x405870) here,
+       mid-sequence. Now that sub_entity is a real embedded Entity member,
+       the compiler destroys it automatically as part of ~ScriptedObject()
+       (after this function returns) — calling ~Entity() explicitly here
+       too would double-destroy it. This changes sub_entity's teardown
+       from "mid-sequence" to "last, after every other step above", which
+       is safe (the other steps do not depend on sub_entity's post-
+       destruction state) but is a real, intentional simplification: see
+       CLAUDE.md's "let the compiler manage... object destruction". */
 }
 
 /* ================================================================== */
-/* Shutdown — Lightweight teardown (vtable[14])                        */
+/* Shutdown — Lightweight teardown (vtable[15])                        */
 /* Address: 0x4495B0                                                    */
 /* ================================================================== */
 
 void ScriptedObject::Shutdown()
 {
-    /* Stop embedded Entity via Init */
-    entity_init(this, 0, -1, 0);
+    /* Stop embedded Entity via InitBase */
+    this->sub_entity.InitBase(0, -1, 0);
 
     /* Stop self via Panel::Init */
     this->Init(0, -1, 0);
@@ -324,129 +385,194 @@ void ScriptedObject::Shutdown()
 }
 
 /* ================================================================== */
-/* HandleEvent — Load and parse a .dat script file                      */
-/* Address: 0x44B290                                                    */
+/* Start — Activate scripted object                                     */
+/* Address: 0x449600                                                    */
+/* NOTE: zero callers anywhere in the current tree (also true in the     */
+/* pre-merge world/scriptengine.cpp); ported for completeness per        */
+/* CLAUDE.md's no-stub policy, not independently exercised.              */
 /* ================================================================== */
 
-void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
+uint32_t ScriptedObject::Start()
 {
-    char dat_path[260];
-    char asset_path[260];
-    int  loaded_size;
-    /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
-     * original's WIN32_StreamOpen(&buf,1) construction and paired
-     * WIN32_StreamDestroy(&buf)+WNDPROC_StreamCleanup(&buf) destruction;
-     * see StreamObject::~StreamObject()'s doc comment for the full
-     * evidence trail. Also fixes a pre-existing stack buffer-overflow
-     * bug: the previous `int stream_handle[2]` (8 bytes) was smaller
-     * than sizeof(WIN32_Stream) even on the original x86 (0x5C bytes),
-     * let alone this host's wider pointer fields. */
-    WIN32_Stream stream_handle;
+    uint32_t initResult = this->Init(0x2400, -1, 0);
 
-    this->sub_entity[0x82] = 0;                              /* loaded_flag at +0x162 = Entity::name[6] */
-    this->unk_flag    = 0;                                   /* +0x63A */
-
-    /* stream_handle's destructor runs automatically here (real C++ RAII)
-     * on every path, including this early return. */
-    if (name_suffix == nullptr) {
-        return;
+    /* Set sub-object mapping flag on the shared resource (matches the
+       original's own disassembly; not object-specific despite appearances). */
+    if (this->resource != nullptr) {
+        static_cast<RESDATA*>(this->resource)->frame_width = 1;
     }
 
-    /* Build path strings:
-       dat_path = g_scene_name + name_suffix + ".dat"
-       audio_channel (at +0x48) = g_scene_name + name_suffix + ".bmp" */
-    CRT_sprintf_buf(dat_path, "%s%s.dat", g_scene_name, name_suffix);
-    CRT_sprintf_buf(this->script_bitmap_path, "%s%s.bmp", g_scene_name, name_suffix);
+    if (initResult != 0) {
+        initResult = this->sub_entity.InitBase(0x2402, -1, 0);
+        if (initResult != 0) {
+            uint32_t spInit = sp_init(this, 0, -1, 0);
+            if (spInit == 0) {
+                return spInit;
+            }
 
-    /* Try loading from RFD archive (asset manager) first */
-    if (g_asset_mgr != nullptr) {
-        char* file_data;
-        void* stream_obj;
-        WNDPROC_Stream* parsed_stream;
-
-        CRT_sprintf_buf(asset_path, "%s.dat", name_suffix);
-        file_data = static_cast<char*>(AssetMgr_LoadFile(
-            g_asset_mgr, asset_path, &loaded_size));        /* 0x45CD00 */
-
-        if (file_data != NULL) {
-            /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use the
-             * real host size (see resources/Win32StreamMem.h). */
-            stream_obj = operator_new(WIN32_MemoryStream_Size());
-            if (stream_obj != NULL) {
-                parsed_stream = WNDPROC_StreamFromMemory(
-                    stream_obj, file_data, loaded_size, 1);   /* 0x464490 */
-
-                if (parsed_stream != NULL) {
-                    /* Check stream error flag: real state_bits/kBadBit
-                     * check (matches the fallback branch below, replacing
-                     * the former raw vtable[1]+offset-8 read of the same
-                     * field). */
-                    if ((parsed_stream->state_bits & StreamObject::kBadBit) == 0) {
-                        char loaded;
-
-                        /* Step 1: Parse script via ScriptedObject_ParseStream */
-                        loaded = ScriptedObject_ParseStream(parsed_stream); /* 0x41E9F0 */
-                        this->sub_entity[0x82] = loaded;
-
-                        /* Step 2: Render child window */
-                        if (loaded != 0) {
-                            loaded = UI_ChildWindow_Render(this, parsed_stream); /* 0x424E00 */
+            /* Create sprites for resources 0x2400-0x2413 */
+            for (int32_t resId = 0x2400, count = 0; count < 20; resId++, count++) {
+                void* resource = reinterpret_cast<void*>(
+                    static_cast<intptr_t>(g_resmgr.GetById(resId)));
+                if (resource != nullptr) {
+                    if (UI_IsBitmapReady(static_cast<int>(reinterpret_cast<intptr_t>(resource))) != 0) {
+                        int32_t resType = static_cast<RESDATA*>(resource)->resource_id;
+                        if (resType == 0x2406) {
+                            /* Return value intentionally discarded here, matching
+                               the pre-existing transcription this was ported
+                               from -- the created sprite is tracked internally
+                               by CreateChildSprite's own child-list linkage
+                               (Panel::child_surface), not through this field. */
+                            this->CreateChildSprite(
+                                static_cast<int>(reinterpret_cast<intptr_t>(resource)), 0, 0);
+                            this->child_sprite1 = nullptr;
+                        } else if (resType == 0x240C) {
+                            this->CreateChildSprite(
+                                static_cast<int>(reinterpret_cast<intptr_t>(resource)), 0, 0);
+                            this->child_sprite2 = nullptr;
+                        } else {
+                            this->CreateChildSprite(
+                                static_cast<int>(reinterpret_cast<intptr_t>(resource)), 0, 0);
                         }
-                        this->sub_entity[0x82] = loaded;
-
-                        /* Step 3: Init from stream */
-                        if (loaded != 0) {
-                            loaded = this->LoadFromStream(parsed_stream);
-                        }
-                        this->sub_entity[0x82] = loaded;
-
-                        /* Destroy the temporary stream: real C++ `delete`
-                         * through WNDPROC_Stream* dispatches to
-                         * WIN32_MemoryStream's scalar deleting destructor
-                         * via StreamObject's virtual ~StreamObject() —
-                         * replaces the former raw vtable[0] dispatch. */
-                        delete parsed_stream;
                     }
                 }
             }
-            CRT_free(file_data);                             /* 0x466C70 */
+
+            /* Load game mode resource */
+            uint32_t modeResult = this->Init(0x2401, -1, 0);
+
+            if (g_demo_mode == 1) {
+                CGWND_SetPause(this, 0);
+            }
+
+            /* Destroy old tooltip */
+            if (this->tooltip_handle != 0) {
+                UI_DestroyTooltip(g_tooltip_mgr, this->tooltip_handle);
+            }
+
+            /* Create tooltip */
+            if (this->visible != 0) {
+                Entity* tooltip = UI_CreateTooltip(
+                    g_tooltip_mgr, 0x3887, 1,
+                    this->screen_rect.left + 0x32,
+                    this->screen_rect.top + 0x32);
+                this->tooltip_handle = static_cast<int32_t>(reinterpret_cast<intptr_t>(tooltip));
+            }
+
+            if (modeResult != 0) {
+                if (this->resource != nullptr) {
+                    static_cast<RESDATA*>(this->resource)->frame_width = 1;
+                }
+
+                this->mode = 0;                            /* idle */
+                this->blit_flags |= 2;                     /* +0x2C (Entity::blit_flags) */
+                this->update_child_flags = 0;              /* +0x88 */
+                g_active_panel = nullptr;
+
+                this->SetAnimState(0);
+                this->SetPosition(0x32, 10);
+                return 1;
+            }
         }
     }
 
-    /* Fall back to disk file I/O if archive load didn't succeed */
-    if (this->sub_entity[0x82] == 0) {
-        stream_handle.OpenPath(dat_path, 0x20, g_stream_open_flags); /* 0x463AA0 */
+    return initResult & 0xFFFFFF00;
+}
 
-        /* Check stream error flag: real state_bits/kBadBit check,
-         * replacing the original's vbtable-relative raw read of the
-         * same field (`*(rdbuf-independent StreamObject::state_bits) &
-         * kBadBit`, confirmed via disassembly at 0x44B290). */
-        if ((stream_handle.state_bits & StreamObject::kBadBit) == 0) {
-            char loaded;
+/* ================================================================== */
+/* Dispatch (Draw) — NOT a vtable member; see ScriptedObject.h          */
+/* Address: 0x449C00                                                    */
+/* ================================================================== */
 
-            loaded = ScriptedObject_ParseStream(&stream_handle);      /* 0x41E9F0 */
-            this->sub_entity[0x82] = loaded;
+void ScriptedObject::Dispatch(int32_t x1, int32_t y1, int32_t x2, int32_t y2,
+                               int32_t /*flag*/)
+{
+    const RECT clip{x1, y1, x2, y2};
+    this->Entity::Draw(clip, 0, 0);
 
-            if (loaded != 0) {
-                loaded = UI_ChildWindow_Render(this, &stream_handle); /* 0x424E00 */
-            }
-            this->sub_entity[0x82] = loaded;
+    if (this->mode == 3) {
+        this->sub_entity.Draw(clip, 0, 0);
+    }
+    if (this->script_engine_active == 1) {
+        se_draw(this, clip);
+    }
+    if (this->scroll_panel_active == 1) {
+        sp_draw(this, clip);
+    }
+}
 
-            if (loaded != 0) {
-                loaded = this->LoadFromStream(&stream_handle);
-            }
-            this->sub_entity[0x82] = loaded;
+/* ================================================================== */
+/* IsDragging (PtInRect) — vtable[2]                                    */
+/* Address: 0x449CE0                                                    */
+/*                                                                      */
+/* BUG-mode3-input-processing-crashes.md Crash 3: this previously called */
+/* a virtual dispatch through a fabricated vtable view. Ghidra 0x449CE0  */
+/* decompiles to a DIRECT (non-virtual) call: GameObject_PtInRect(this,  */
+/* x, y) — i.e. the original applies GameObject::PtInRect's own field    */
+/* layout (left/top/right/bottom) directly to this object's own base     */
+/* address; not a further virtual call. Reproduce the same half-open     */
+/* interval test directly. */
+/* ================================================================== */
+
+int ScriptedObject::IsDragging(int x, int y)
+{
+    return x >= this->screen_rect.left && x < this->screen_rect.right &&
+           y >= this->screen_rect.top && y < this->screen_rect.bottom;
+}
+
+/* ================================================================== */
+/* CheckClick — vtable[22]                                              */
+/* Address: 0x449D00                                                    */
+/* ================================================================== */
+
+/* Verified against 0x449D00 disassembly (47 instructions): the original
+ * dispatches through its OWN vtable[2] (0x449CE0) first — the same slot
+ * documented as IsDragging above, not the inherited GameObject::PtInRect
+ * at a different slot. Both currently produce identical results (IsDragging's
+ * body duplicates PtInRect's half-open-interval test verbatim per the
+ * Crash-3 fix above), but the call must name the slot-2 override that this
+ * class actually declares, not the unrelated base method, so a future
+ * change to either body doesn't silently desync CheckClick from vtable[2]. */
+bool ScriptedObject::CheckClick(int x, int y)
+{
+    bool hit = false;
+
+    uint8_t result = static_cast<uint8_t>(this->IsDragging(x, y));
+    if (result == 0) {
+        /* Own slot 21 (+0x54) secondary hit-test: reuses the compiler-
+           generated GetDragOffset override at the same vtable position
+           documented for this class. */
+        result = static_cast<uint8_t>(this->GetDragOffset(x, y));
+        if (result == 0 && this->script_engine_active != 0) {
+            result = se_ptinrect(this, x, y);
+            hit = result != 0;
+        } else {
+            hit = result != 0;
         }
-
-        /* Matches the original's WIN32_StreamDestroyImmediate — NOT the
-         * object's own destructor, which still runs once at scope exit
-         * below. */
-        stream_handle.CloseNow();                             /* 0x463B10 */
+    } else {
+        hit = true;
     }
 
-    /* stream_handle's destructor runs automatically here (real C++
-     * RAII) — replaces the original's WIN32_StreamDestroy+
-     * WNDPROC_StreamCleanup pair. */
+    if (!hit && this->scroll_panel_active != 0) {
+        result = sp_ptinrect(this, x, y);
+        hit = result != 0;
+    }
+
+    return hit;
+}
+
+/* ================================================================== */
+/* GetDragOffset — vtable[21]                                           */
+/* Address: 0x449D80                                                    */
+/* ================================================================== */
+
+int ScriptedObject::GetDragOffset(int x, int y)
+{
+    if (this->drag_rect.left <= x && x < this->drag_rect.right &&
+        this->drag_rect.top <= y && y < this->drag_rect.bottom) {
+        return 1;
+    }
+    return 0;
 }
 
 /* ================================================================== */
@@ -456,8 +582,6 @@ void ScriptedObject::HandleEvent(uint32_t resource_id, const char* name_suffix)
 
 void ScriptedObject::MoveTo(int x, int y)
 {
-    int sprite_width;
-
     /* When mode == 1 (entering build mode), skip boundary clamping */
     if (this->mode != 1) {
         if (this->dim_flag == 1) {
@@ -466,10 +590,8 @@ void ScriptedObject::MoveTo(int x, int y)
                 x = 0;
             }
 
-            /* Get sprite frame width from RESDATA (+0x14 = frame_width) */
-            sprite_width = static_cast<const RESDATA*>(this->resource)->frame_width;
+            int sprite_width = static_cast<const RESDATA*>(this->resource)->frame_width;
 
-            /* Check against ScriptEngine right bound */
             if (this->script_engine_active != 0) {
                 int max_x = g_world_width - this->script_engine_offset - sprite_width;
                 if (x > max_x) x = max_x;
@@ -489,7 +611,6 @@ void ScriptedObject::MoveTo(int x, int y)
                 x = 0;
             }
 
-            /* Check left bound for ScriptEngine */
             if (this->script_engine_active != 0 && x < this->script_engine_offset) {
                 x = this->script_engine_offset;
             }
@@ -497,42 +618,48 @@ void ScriptedObject::MoveTo(int x, int y)
                 x = this->scroll_panel_offset;
             }
             else {
-                sprite_width = static_cast<const RESDATA*>(this->resource)->frame_width;
+                int sprite_width = static_cast<const RESDATA*>(this->resource)->frame_width;
                 if (x > g_world_width - sprite_width) {
                     x = g_world_width - sprite_width;
                 }
             }
         }
 
-        /* Y boundary clamping */
+        /* Y boundary clamping. Height bound is Entity::source_rect.bottom
+           (+0x3C) — NOT GameObject::screen_rect.bottom (+0x14), a distinct
+           field; a prior pass here read the wrong one. */
         if (y < 0) {
             y = 0;
         }
         else {
-            int height = this->screen_rect.bottom;     /* +0x3C */
+            int height = this->source_rect.bottom;
             if (y > g_world_height - height) {
                 y = g_world_height - height;
             }
         }
     }
 
-    /* Set position */
-    this->SetPosition(x, y);                                /* 0x454820 */
+    /* Set position via Entity's own MoveTo (real virtual dispatch, not a
+       distinct "SetPosition" method — see this file's header comment). */
+    this->Entity::MoveTo(x, y);
 
-    /* Update sub_entity position with frame offset.
-       frame_data_ptr is at +0x120 (= Entity::resource at sub_entity+0x40).
-       Reads int16_t offsets at frame_data+0x2E and +0x30. */
+    /* Update sub_entity position with frame offset from the resource's
+       per-frame table (raw data blob, not a modeled game object — an
+       ordinary byte-oriented read, matching Entity::resource's own
+       documented FrameData layout in shared/types.h). */
     {
-        void* fdp = *reinterpret_cast<void**>(&this->sub_entity[0x40]); /* +0x120 */
-        const uint8_t* frame_bytes = reinterpret_cast<const uint8_t*>(fdp);
-        int go_x = x + static_cast<int>(*reinterpret_cast<const int16_t*>(frame_bytes + 0x2E));
-        int go_y = y + static_cast<int>(*reinterpret_cast<const int16_t*>(frame_bytes + 0x30));
-        entity_vmove(this, go_x, go_y);
+        const RESDATA* res = static_cast<const RESDATA*>(this->sub_entity.resource);
+        int go_x = x;
+        int go_y = y;
+        if (res != nullptr) {
+            go_x += res->offset_x;
+            go_y += res->offset_y;
+        }
+        this->sub_entity.MoveTo(go_x, go_y);
     }
 
     /* Update ScriptEngine and ScrollPanel child sprite positions */
     if (this->dim_flag == 0) {
-        /* Negative direction: child sprites left of the object */
         if (this->script_engine_active != 0) {
             se_vmove(this, x - this->script_engine_offset, y + 14);
         }
@@ -540,7 +667,7 @@ void ScriptedObject::MoveTo(int x, int y)
             sp_vmove(this, x - this->scroll_panel_offset, y + 14);
         }
     }
-    else {  /* Direction flag == 1 — positive direction */
+    else {
         int sprite_w = static_cast<const RESDATA*>(this->resource)->frame_width;
 
         if (this->script_engine_active != 0) {
@@ -553,7 +680,6 @@ void ScriptedObject::MoveTo(int x, int y)
 
     /* Update drag_rect based on mode */
     if (this->mode == 0) {
-        /* Mode 0 (idle): Set drag rect from screen_rect offsets */
         RECT r;
         SetRect(&r,
             this->screen_rect.left   + 0x18,
@@ -563,33 +689,23 @@ void ScriptedObject::MoveTo(int x, int y)
         this->drag_rect = r;
     }
     else {
-        /* Mode != 0: Copy embedded Entity's screen_rect into drag_rect.
-           sub_entity is at +0xE0, screen_rect (GameObject+0x08) is at +0xE8 */
-        this->drag_rect = *reinterpret_cast<const RECT*>(&this->sub_entity[8]);
+        this->drag_rect = this->sub_entity.screen_rect;
     }
 
     /* Update cursor position if actively dragging */
     {
-        int prev_x = this->callback_1;
-        int prev_y = this->callback_2;
+        int prev_x = this->screen_rect.left;
+        int prev_y = this->screen_rect.top;
         if (this->drag_active != 0 && (x != prev_x || y != prev_y)) {
             int screen_x = (x - g_viewport_x) + this->drag_offset_x;
             int screen_y = (y - g_viewport_y) + this->drag_offset_y;
 
-            /* Convert client → screen coords and move cursor */
-            /* NOTE: This reconstructs the ClientToScreen pattern from the binary.
-               The original passes a stack-based POINT struct. */
-            {
-                POINT pt;
-                pt.x = screen_x;
-                pt.y = screen_y;
-                uintptr_t main_window_base = *reinterpret_cast<const uintptr_t*>(g_main_window);
-                HWND main_hwnd = *reinterpret_cast<HWND*>(main_window_base + 8);
-                ClientToScreen(main_hwnd, &pt);
-                SetCursorPos(pt.x, pt.y);
-            }
+            POINT pt;
+            pt.x = screen_x;
+            pt.y = screen_y;
+            ClientToScreen(reinterpret_cast<CGWND*>(g_main_window)->hWnd, &pt);
+            SetCursorPos(pt.x, pt.y);
 
-            /* Pack cursor position into global for save/restore */
             g_last_cursor_pos =
                 ((static_cast<uint16_t>(y - g_viewport_y) +
                   static_cast<uint16_t>(this->drag_offset_y)) << 16) |
@@ -609,43 +725,147 @@ void ScriptedObject::MoveTo(int x, int y)
 }
 
 /* ================================================================== */
-/* RemoveChild — Destroy child ScriptedObject                           */
-/* Address: 0x44B220                                                    */
+/* HitTest — vtable[4]                                                  */
+/* Address: 0x44A0C0                                                    */
 /* ================================================================== */
 
-void ScriptedObject::RemoveChild()
+int ScriptedObject::HitTest(int x, int y)
 {
-    /* Free child script pointer if non-null */
-    if (this->child_script_ptr != nullptr) {
-        GLOBAL_free(this->child_script_ptr);                 /* 0x465CD0 */
-        this->child_script_ptr = nullptr;
+    int16_t mode = this->mode;
+
+    if (mode == 1 || mode == 2) return 0;
+    if (mode == 3) {
+        if (*(reinterpret_cast<uint8_t*>(g_trainstation_window) + 0x1BC) != 0) return 0;
     }
 
-    /* Call base destructor (ScriptedObject_InitBase with 0,0) */
-    ScriptedObject_InitBase(0, 0);                               /* 0x4203E0 */
+    if (this->drag_active != 0) {
+        this->drag_active = 0;
+        return 1;
+    }
+
+    /* Own slot 21 (+0x54) secondary hit-test (GetDragOffset). */
+    int result = this->GetDragOffset(x, y);
+    if (result != 0 && (mode == 0 || mode == 3)) {
+        this->drag_offset_x = g_drag_start_x - this->screen_rect.left;
+        this->drag_offset_y = g_drag_start_y - this->screen_rect.top;
+        this->drag_active = 1;
+        return 1;
+    }
+
+    if (mode != 0) {
+        if (this->script_engine_active != 0) {
+            if (se_ptinrect(this, x, y) != 0) {
+                /* Verified against 0x44A0C0: script_engine_active is
+                   deliberately re-read AFTER se_hittest returns, not before
+                   — se_hittest's own vtable[4] dispatch can deactivate the
+                   embedded script-engine sub-object as a side effect (e.g.
+                   closing a modal build-tool dialog on this click), and
+                   this->dim_flag is only set when that side effect fired.
+                   Not dead code / not a redundant re-test. */
+                uint8_t hitResult = se_hittest(this, x, y);
+                if (this->script_engine_active != 0) return hitResult;
+                this->dim_flag = 1;
+                return hitResult;
+            }
+        }
+
+        if (this->scroll_panel_active != 0) {
+            if (sp_ptinrect(this, x, y) != 0) {
+                /* Same re-read pattern as above, mirrored for the scroll-
+                   panel sub-object (verified against 0x44A0C0). */
+                uint8_t hitResult = sp_hittest(this, x, y);
+                if (this->scroll_panel_active != 0) return hitResult;
+                this->dim_flag = 1;
+                return hitResult;
+            }
+        }
+
+        /* Children linked list: Panel::HitTestChildren is the real,
+           canonical method for this (0x4549E0), not a raw free function. */
+        return static_cast<int>(this->HitTestChildren(x, y));
+    }
+
+    /* Idle state: try own hit-test -> enter build mode. Verified against
+       0x44A0C0: this dispatches through the object's own vtable[2]
+       (0x449CE0), the same slot documented as IsDragging above — not the
+       inherited GameObject::PtInRect at a different slot (see CheckClick's
+       equivalent fix/comment above 0x449D00). */
+    if (g_disable_input == 0) {
+        if (this->IsDragging(x, y)) {
+            this->EnterBuildMode(1);
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 /* ================================================================== */
-/* AddChild — Construct child ScriptedObject                            */
-/* Address: 0x44B190                                                    */
+/* HandleToolClick — vtable[17]                                         */
+/* Address: 0x44A250                                                    */
 /* ================================================================== */
 
-ScriptedObject* ScriptedObject::AddChild(uint32_t resource_id, const char* name_suffix)
+uint32_t ScriptedObject::HandleToolClick(TrackPiece* toolObj, int x, int y)
 {
-    /* Initialize base via ExitGame */
-    ScriptedObject_InitBase(resource_id, 0);                     /* 0x4203E0 */
+    if (toolObj == nullptr) return 0;
+    if (toolObj->render_enabled == 0) return 0;
 
-    /* Clear child script pointer */
-    this->child_script_ptr = nullptr;
+    if (!toolObj->PtInRect(x, y)) return 0;
 
-    /* Load script via HandleEvent */
-    this->HandleEvent(resource_id, name_suffix);
+    int32_t toolType = toolObj->resource->resource_id;
+    int32_t toolIndex = toolType - 0x2403;
 
-    return this;
+    switch (toolIndex) {
+    case 0:  /* 0x2403 */
+    case 1:  /* 0x2404 */
+        if (toolObj->zoom_level != 1) {
+            toolObj->SetZoom(1);
+            this->dim_flag = 0;
+            se_handle_drag(this, toolObj, 0);
+            return 1;
+        }
+        break;
+
+    case 2:  /* 0x2405 */
+        if (toolObj->zoom_level != 1) {
+            toolObj->SetZoom(1);
+            this->dim_flag = 0;
+            se_handle_drag(this, toolObj, 0);
+            return 1;
+        }
+        break;
+
+    case 3:  /* 0x2406 — Build mode toggle */
+        if (toolObj->zoom_level != 1) {
+            toolObj->SetZoom(1);
+            CGWND_SetBuildMode(0);
+            return 1;
+        }
+        HelpWnd_PlayNarration(g_audio_mgr, 7, 0x2406);
+        toolObj->SetZoom(2);
+        CGWND_SetBuildMode(1);
+        return 1;
+
+    case 6:  /* 0x2409 */
+        if (toolObj->zoom_level != 1) {
+            toolObj->SetZoom(1);
+            this->dim_flag = 0;
+            UIPANEL_ScrollPanel_HandleDrag(
+                this->scroll_panel_prefix,
+                static_cast<int32_t>(reinterpret_cast<uintptr_t>(toolObj)), 0);
+            return 1;
+        }
+        break;
+
+    default:
+        break;
+    }
+
+    return 0;
 }
 
 /* ================================================================== */
-/* UpdateToolState — Per-frame tool zoom update (vtable[19])           */
+/* UpdateToolState — Per-frame tool zoom update (vtable[20])           */
 /* Address: 0x44AC20                                                    */
 /* ================================================================== */
 
@@ -664,7 +884,7 @@ uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
 
     /* Auto-reset zoom to 1 when timer expires and zoom==2 */
     if (timer == 0 && tool->zoom_level == 2) {
-        TrackPiece_SetZoom(tool, 1);                         /* 0x40D170 */
+        tool->SetZoom(1);
     }
 
     /* Dispatch by tool type (resource->resource_id) */
@@ -688,39 +908,38 @@ uint32_t ScriptedObject::UpdateToolState(TrackPiece* tool)
 
     case 0x240B:  /* Building placement toggle */
         if (g_allow_building_placement == 1) {
-            TrackPiece_SetZoom(tool, 2);
+            tool->SetZoom(2);
         } else {
-            TrackPiece_SetZoom(tool, 1);
+            tool->SetZoom(1);
         }
         break;
 
     case 0x240C:  /* Fullscreen toggle */
         if (g_is_fullscreen != 0 && g_world_width <= g_screen_width) {
-            TrackPiece_SetZoom(tool, 2);
+            tool->SetZoom(2);
         } else {
-            TrackPiece_SetZoom(tool, 1);
+            tool->SetZoom(1);
         }
         break;
 
     case 0x240D:  /* Scenario mode indicator */
-        /* g_netman[0x17].scenarioId == 2 => scenario mode */
         if (*reinterpret_cast<const int*>(
                 reinterpret_cast<const uint8_t*>(g_netman) + 0x7C4) == 2) {
-            TrackPiece_SetZoom(tool, 3);
+            tool->SetZoom(3);
         } else if (timer == 0) {
-            TrackPiece_SetZoom(tool, 2);
+            tool->SetZoom(2);
             HelpWnd_PlayNarration(g_audio_mgr, 0, 0);
         } else {
-            TrackPiece_SetZoom(tool, 1);
+            tool->SetZoom(1);
         }
         break;
 
     case 0x240E:  /* Mute toggle */
         if (g_audio != nullptr && *reinterpret_cast<const uint8_t*>(
                 reinterpret_cast<const uint8_t*>(g_audio) + 0xB4) == 0) {
-            TrackPiece_SetZoom(tool, 1);
+            tool->SetZoom(1);
         } else {
-            TrackPiece_SetZoom(tool, 2);
+            tool->SetZoom(2);
         }
         break;
 
@@ -748,58 +967,60 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
     if (enter == 0) {
         /* === EXIT BUILD MODE === */
         if (this->update_child_flags != 0) {
-            /* Close all sub-panels */
             this->OnUpdateChild();
 
-            void* child = this->child_surface;
+            TrackPiece* child = static_cast<TrackPiece*>(this->child_surface);
             this->update_child_flags = 0;
 
-            /* Stop ScriptEngine child surface */
             if (this->script_engine_active != 0) {
                 se_handle_drag(this, child, 0);
             }
 
-            /* Stop ScrollPanel child surface */
             if (this->scroll_panel_offset != 0) {
                 UIPANEL_ScrollPanel_HandleDrag(
-                    &scroll_panel_prefix,
-                    static_cast<int>(reinterpret_cast<intptr_t>(child)), 0);
+                    this->scroll_panel_prefix,
+                    static_cast<int32_t>(reinterpret_cast<intptr_t>(child)), 0);
             }
 
             this->dim_flag = 0;
-            CGWND_SetBuildMode(0);                           /* 0x4089D0 */
+            CGWND_SetBuildMode(0);
 
-            /* Reset all track piece zooms in the linked list */
+            /* Reset all track piece zooms in the linked list, walked via
+               each TrackPiece's own +0x28 field. PRE-EXISTING LANDMINE, not
+               introduced by this pass: TrackPiece.h names this offset
+               `sub_resource` and types it `int32_t` (matching the original
+               x86 layout), but every child-list traversal in both this
+               file and the now-retired world/scriptengine.cpp already read
+               it as a raw pointer -- i.e. a pointer-truncation hazard on
+               this 64-bit host if that field is ever populated by a real
+               64-bit TrackPiece* on this host (unverified either way).
+               Retyping `sub_resource` is a separate, cross-file TrackPiece.h
+               change (used by game/TrackPiece.cpp's own destructor logic
+               too) outside this reconciliation's scope; ported the existing
+               access pattern verbatim rather than silently changing it. */
             while (child != nullptr) {
-                const uint8_t* child_bytes = reinterpret_cast<const uint8_t*>(child);
-                const uintptr_t resource_address = static_cast<uintptr_t>(
-                    *reinterpret_cast<const uint32_t*>(child_bytes + 0x44));
-                int child_type = *reinterpret_cast<const int*>(resource_address + 4);
+                int child_type = child->resource->resource_id;
                 switch (child_type) {
                 case 0x2403: case 0x2404: case 0x2405:
                 case 0x2406: case 0x2409: case 0x240A:
-                    TrackPiece_SetZoom(child, 1);            /* 0x40D170 */
+                    child->SetZoom(1);
                     break;
                 }
-                child = *reinterpret_cast<void* const*>(
-                    child_bytes + 0x28);                       /* linked list: sub_resource */
+                child = *reinterpret_cast<TrackPiece* const*>(
+                    reinterpret_cast<uint8_t*>(child) + 0x28);
             }
 
-            /* Save current world if in build mode */
             if (g_in_build_mode != 0) {
-                INPUT_SaveCurrentWorld(&g_input_mgr, "curr"); /* 0x41D9B0 */
+                INPUT_SaveCurrentWorld(&g_input_mgr, "curr");
             }
 
-            /* Re-init panel */
             this->Init(0x2400, 2, 0);
-            this->mode = 2;
+            this->mode = 2;   /* exiting build mode — see class doc comment */
 
-            /* Update tooltip state */
             if (this->tooltip_handle != 0) {
                 tooltip_set_state(this->tooltip_handle, 2);
             }
 
-            /* Restore audio volume */
             if (g_audio != nullptr) {
                 GameAudio_UpdateVolume(g_audio, 0);
             }
@@ -808,32 +1029,29 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
     else {
         /* === ENTER BUILD MODE === */
         if (this->update_child_flags == 0) {
-            /* Init panel for build mode */
             this->Init(0x2400, 1, 0);
             this->mode = 1;
 
-            /* Reposition with offset */
             this->MoveTo(
                 this->screen_rect.left - 0x31,
                 this->screen_rect.top  - 0x2F);
 
             CGWND_SetMode(4);
 
-            /* Destroy old tooltip if exists */
             if (this->tooltip_handle != 0) {
                 UI_DestroyTooltip(g_tooltip_mgr, this->tooltip_handle);
                 this->tooltip_handle = 0;
             }
 
-            /* Create new tooltip if visible */
-            if (this->initialized != 0) {
+            /* Tooltip creation guard is Entity::visible (+0x24) — a prior
+               pass here mis-read it as GameObject::initialized (+0x18). */
+            if (this->visible != 0) {
                 this->tooltip_handle = static_cast<int32_t>(reinterpret_cast<intptr_t>(
                     UI_CreateTooltip(g_tooltip_mgr, 0x3879, 1,
                     this->screen_rect.left + 0x32,
                     this->screen_rect.top  + 0x32)));
             }
 
-            /* Mute audio */
             if (g_audio != NULL) {
                 GameAudio_UpdateVolume(g_audio, 1);
             }
@@ -842,58 +1060,212 @@ void ScriptedObject::EnterBuildMode(uint8_t enter)
 }
 
 /* ================================================================== */
-/* Stub implementations for methods not yet decompiled                  */
+/* Update — Per-frame update (vtable[10])                                */
+/* Address: 0x4497A0                                                    */
+/* ================================================================== */
+
+void ScriptedObject::Update()
+{
+    int16_t mode = this->mode;
+
+    /* State 1: In-world — clamp to world bounds via recursive MoveTo
+       (the original dispatches through this object's own vtable slot
+       +0x0C, which is MoveTo, not a generic "SetPosition").
+       BLOCKER (2026-08-16, not resolved by this pass): direct disassembly
+       of 0x4497A0 shows each of the four clamp branches below scales its
+       "-1 pixel" overshoot by a genuine floating-point ratio (FILD/FDIVP/
+       FMUL against `this->frame_index` and a field at `resource->
+       anim_table + 0x1A`, then truncated via a real float-to-int call at
+       0x466D30) — NOT a flat "-1", which is what this port (and the
+       prior world/scriptengine.cpp transcription it replaces) both use.
+       Re-deriving the exact formula (what `anim_table+0x1A` represents,
+       and how the ratio is applied) needs a dedicated pass; the plain
+       "-1" fallback below is a bounded approximation of the real
+       behavior, not a verified port. */
+    if (mode == 1) {
+        if (g_is_town_mode != 0) {
+            Town_SelectBuilding(g_town_view, 0);
+        }
+        if (g_ddraw_active_flag != 0) {
+            DDRAW_SelectBuilding(g_ddraw_building, 0);
+        }
+
+        if (this->screen_rect.left < 0) {
+            this->MoveTo(this->screen_rect.left - 1, this->screen_rect.top);
+        }
+        if (g_world_width < this->screen_rect.right) {
+            this->MoveTo(this->screen_rect.right - 1 + this->screen_rect.left,
+                         this->screen_rect.top);
+        }
+        if (this->screen_rect.top < 0) {
+            this->MoveTo(this->screen_rect.left, this->screen_rect.top - 1);
+        }
+        if (g_world_height - this->source_rect.bottom < this->screen_rect.top) {
+            this->MoveTo(this->screen_rect.left,
+                         this->screen_rect.top + this->source_rect.bottom - 1);
+        }
+    }
+
+    /* States 1 or 2: Animation update + tooltip + entity update */
+    if (mode == 1 || mode == 2) {
+        this->Entity::Update();
+
+        if (this->tooltip_handle != 0) {
+            /* ABI_BOUNDARY: Panel::tooltip_handle is inherited as an
+               int32_t (pre-existing Panel.h field type, not introduced by
+               this pass) rather than a typed Entity* — widening it is a
+               tree-wide Panel change out of scope here. */
+            reinterpret_cast<Entity*>(static_cast<intptr_t>(this->tooltip_handle))->Update();
+        }
+
+        this->OnUpdateChild();
+
+        /* Check animation frame completion for state transitions.
+           frame_index (+0x54) is compared to the resource's per-state
+           frame table — NOT anim_index (+0x28), a different field. */
+        int32_t frameIndex = this->frame_index;
+        const RESDATA* frameData = static_cast<const RESDATA*>(this->resource);
+        const uint16_t* animTable = reinterpret_cast<const uint16_t*>(frameData->anim_table);
+        uint16_t startFrame = animTable[0x19];
+
+        if (frameIndex == static_cast<int32_t>(startFrame)) {
+            /* Animation reached start — return to idle */
+            this->Init(0x2401, -1, 0);
+            this->MoveTo(this->screen_rect.left + 0x31, this->screen_rect.top + 0x2F);
+            this->mode = 0;
+
+            if (this->tooltip_handle != 0) {
+                UI_DestroyTooltip(g_tooltip_mgr, this->tooltip_handle);
+            }
+            if (this->visible != 0) {
+                Entity* tooltip = UI_CreateTooltip(
+                    g_tooltip_mgr, 0x3887, 0,
+                    this->screen_rect.left + 0x32,
+                    this->screen_rect.top + 0x32);
+                this->tooltip_handle = static_cast<int32_t>(reinterpret_cast<intptr_t>(tooltip));
+            }
+            g_active_panel = nullptr;
+            CGWND_SetMode(3);
+
+            SetRect(&this->drag_rect,
+                this->screen_rect.left + 0x18,
+                this->screen_rect.top + 3,
+                this->screen_rect.left + 0x2C,
+                this->screen_rect.top + 0x0D);
+            TileMap_InvalidateRect(g_tilemap,
+                this->drag_rect.left, this->drag_rect.top,
+                this->drag_rect.right, this->drag_rect.bottom);
+
+        } else {
+            uint16_t endFrame = animTable[0x1A / 2];
+            if (frameIndex == static_cast<int32_t>(endFrame)) {
+                /* Animation reached end — switch to placed state */
+                this->update_child_flags = 1;
+                this->OnUpdateChild();
+                this->mode = 3;
+
+                g_active_panel = this;
+                this->drag_rect = this->sub_entity.screen_rect;
+                TileMap_InvalidateRect(g_tilemap,
+                    this->sub_entity.screen_rect.left, this->sub_entity.screen_rect.top,
+                    this->sub_entity.screen_rect.right, this->sub_entity.screen_rect.bottom);
+
+                /* Update children via linked list at Panel::child_surface
+                   (+0xD0). Original dispatches through the CHILD's own
+                   vtable slot +0x20 with no arguments — on a TrackPiece
+                   that is Render() (vtable[8], 0x40D340), not SetVisible
+                   (a different slot on the Entity/Panel hierarchy that
+                   TrackPiece does not share, since TrackPiece derives
+                   directly from GameObject, not Entity). */
+                for (TrackPiece* child = static_cast<TrackPiece*>(this->child_surface);
+                     child != nullptr;
+                     child = *reinterpret_cast<TrackPiece* const*>(
+                         reinterpret_cast<uint8_t*>(child) + 0x28)) {
+                    child->Render();
+                }
+
+                if (*reinterpret_cast<const int32_t*>(
+                        reinterpret_cast<const uint8_t*>(g_netman) + 0x7C4) != 2) {
+                    HelpWnd_PlayNarration(g_audio_mgr, 6, 0);
+                }
+            }
+        }
+    }
+
+    /* Dragging: follow cursor. Driven entirely by Panel::drag_active
+       (+0x90) — a field wholly separate from `mode`. */
+    if (this->drag_active == 1) {
+        this->MoveTo(g_cursor_world_x - this->drag_offset_x,
+                    g_cursor_world_y - this->drag_offset_y);
+        return;
+    }
+
+    /* State 0 (idle): hover detection */
+    if (mode == 0) {
+        int hitResult = this->GetDragOffset(g_cursor_world_x, g_cursor_world_y);
+        if (hitResult == 0 && this->drag_active != 1) {
+            if (this->anim_index == 1) {
+                this->StopSound(0);
+            } else {
+                this->Entity::Update();
+            }
+        } else if (this->anim_index != 1) {
+            this->StopSound(1);
+        }
+    }
+
+    /* State 3 (placed): dispatch to sub-objects */
+    if (mode != 3) return;
+
+    int hoverResult = this->GetDragOffset(g_cursor_world_x, g_cursor_world_y);
+    if (hoverResult == 0 && this->drag_active == 0) {
+        if (this->sub_entity.anim_index == 0) {
+            goto update_children;
+        }
+        /* Confirmed via direct disassembly (0x449B48-0x449B79): dispatches
+           through sub_entity's OWN vtable slot 7 (+0x1C) = StopSound, not
+           SetVisible (a different slot on the Entity hierarchy). */
+        this->sub_entity.StopSound(0);
+    } else {
+        if (this->sub_entity.anim_index == 1) {
+            goto update_children;
+        }
+        this->sub_entity.StopSound(1);
+    }
+    TileMap_InvalidateRect(g_tilemap,
+        this->drag_rect.left, this->drag_rect.top,
+        this->drag_rect.right, this->drag_rect.bottom);
+
+update_children:
+    for (TrackPiece* child = static_cast<TrackPiece*>(this->child_surface);
+         child != nullptr;
+         child = *reinterpret_cast<TrackPiece* const*>(
+             reinterpret_cast<uint8_t*>(child) + 0x28)) {
+        this->UpdateToolState(child);
+    }
+
+    if (this->script_engine_active != 0) {
+        se_update(this);
+    }
+
+    if (this->scroll_panel_active != 0) {
+        sp_update(this);
+    }
+}
+
+/* ================================================================== */
+/* Stub — not yet decompiled                                            */
 /* ================================================================== */
 
 void ScriptedObject::OnUpdateChild()
 {
-    /* TODO: decompile 0x454890 — delegates to Panel::UpdateChild */
-}
-
-int ScriptedObject::IsDragging(int x, int y)
-{
-    /* TODO: decompile 0x449CE0 — delegates to GameObject::PtInRect */
-    GameObject_PtInRect(this, x, y);
-    return 0;
-}
-
-int ScriptedObject::HitTest(int x, int y)
-{
-    /* TODO: decompile 0x44A0C0 */
-    return 0;
-}
-
-void ScriptedObject::Update()
-{
-    /* TODO: decompile 0x4497A0 */
+    /* TODO: decompile 0x454890 — delegates to Panel::UpdateChild.
+       Neither this file nor the retired world/scriptengine.cpp ever had
+       a real body for this; a pre-existing gap, not one introduced here. */
 }
 
 int ScriptedObject::InitState()
 {
-    /* TODO: decompile 0x44ADF0 */
-    return 0;
-}
-
-uint32_t ScriptedObject::HandleToolClick(int* tool, int x, int y)
-{
-    /* TODO: decompile 0x44A250 */
-    return 0;
-}
-
-int ScriptedObject::GetDragOffset(int x, int y)
-{
-    /* TODO: decompile 0x449D80 */
-    return 0;
-}
-
-bool ScriptedObject::CheckClick(int x, int y)
-{
-    /* TODO: decompile 0x449D00 */
-    return false;
-}
-
-char ScriptedObject::LoadFromStream(void* stream)
-{
-    /* TODO: decompile — called from HandleEvent */
+    /* TODO: decompile 0x44ADF0 — pre-existing gap (see OnUpdateChild). */
     return 0;
 }

@@ -38,14 +38,50 @@ void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
 /* Format string construction (sprintf wrapper) */
 void __cdecl sprintf_wrapper(char* buffer, const char* format, ...);  /* 0x466D60 */
 
-/* Used only by TrainStation::Render (0x436750) below. CRT_wcsstr has its
- * own separate, pre-existing multi-declaration landmine tree-wide (at
- * least 4 mutually incompatible signatures across shared/stubs_impl.cpp,
- * shared/defsym_stubs.cpp, native/ddraw_filedata.c,
- * native/assetmgr_loadfile.c) — left untouched here, out of scope. */
-void* CRT_wcsstr(const void* haystack, const void* needle);
-
 }  // extern "C"
+
+/* CRT_wcsstr(uint8_t*, uint8_t*) -> TrainStation::Render (0x436750) call sites
+ * below (~9 uses, lines ~274-315).
+ *
+ * Real target 0x471480 is a byte-wise, case-folding compare terminating on
+ * NUL or first mismatch, returning 0 for "equal" and nonzero otherwise — the
+ * real CRT `_stricmp`/`strcasecmp`, despite the misleading "wcsstr" name
+ * (confirmed via disassembly of TrainStation::Render itself: every call site
+ * is `CALL 0x471480; TEST EAX,EAX; JNZ <skip>` — i.e. falls through, taking
+ * the "matched" branch, only when EAX == 0).
+ *
+ * This declaration was PREVIOUSLY inside this file's extern "C" block above,
+ * as `void* CRT_wcsstr(const void*, const void*)`. C linkage does not encode
+ * parameter types into the link symbol, so it collapsed onto the bare
+ * `CRT_wcsstr` symbol — which shared/defsym_stubs.cpp binds to an unrelated,
+ * zero-argument, void-returning inert no-op stub. That silently dropped both
+ * real arguments and read stack/register garbage as a "return value" at
+ * every call site below: this entire directive-line parser (walk_speed,
+ * Employable, sex, groundwidth, SpawnLimit, PickUpSoundId, and the loop
+ * terminator itself) was undefined-behavior-driven prior to this fix.
+ *
+ * Retyped to plain C++ (non-extern "C") linkage with the real (uint8_t*,
+ * uint8_t*) -> int32_t signature, matching the canonical, already-correct
+ * implementation in shared/stubs_link001_batch1_crt_win32.cpp (which defines
+ * this exact overload against real strcasecmp semantics) and the same
+ * uint8_t*-byte-string idiom native/assetmgr_loadfile.c already uses for
+ * this identical real function. This file's OWN comparison direction
+ * (`== 0` / `!= 0` <-> "matched") was already correct per that disassembly;
+ * only the linkage/signature was broken. */
+extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
+
+/* ABI_BOUNDARY: CRT_wcsstr/_stricmp (0x471480) is a byte-oriented CRT string
+ * compare — its real parameters are unsigned-char pointers on both sides,
+ * not modeled game-object storage. This helper narrows the char* line
+ * buffer and const char* keyword literals to that byte-string ABI shape
+ * (matching the identical (uint8_t*,uint8_t*) idiom already used for this
+ * same real function in native/assetmgr_loadfile.c) rather than exposing
+ * raw casts at every call site below. */
+static inline int32_t TrainStation_LineMatches(char* line, const char* keyword)
+{
+    return CRT_wcsstr(reinterpret_cast<uint8_t*>(line),
+                       const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(keyword)));
+}
 
 /* WNDPROC_CriticalSectionLock/StreamPrintf/StreamWrite have C++ mangled
  * linkage in this tree (matches input/BuildingDescriptorEditor.cpp's and
@@ -239,10 +275,10 @@ uint8_t trainstation_stream_flags(void* stream)
 /* pass (create_function + decompile_function against 0x436750).      */
 /*                                                                     */
 /* Reads directive lines via WNDPROC_CriticalSectionLock until a       */
-/* terminator line is hit (same CRT_wcsstr(line, sentinel) idiom as    */
-/* the sibling ChildWindow-family parsers — a MATCH is a NULL return,  */
-/* per the inverted-return convention documented in                    */
-/* input/BuildingDescriptorEditor.cpp). Recognized directives:         */
+/* terminator line is hit (same CRT_wcsstr/_stricmp(line, sentinel)    */
+/* idiom as the sibling ChildWindow-family parsers — a MATCH is a 0    */
+/* return, real _stricmp semantics, per TrainStation_LineMatches above */
+/* and the disassembly at 0x436750). Recognized directives:            */
 /* "walk_speed" (two values -> field_168/field_169), "Employable"      */
 /* (-> removable_flag), "sex" (first char, uppercased, 'M' else 'F'    */
 /* -> sex_code), "groundwidth" (-> z_threshold), "SpawnLimit"          */
@@ -268,22 +304,23 @@ uint8_t TrainStation::Render(void* stream)
 
     WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
 
-    /* Loop while NOT at the terminator line (CRT_wcsstr's inverted
-     * convention: 0/NULL == matched) and the stream's "ended" bit (0x1)
-     * is not set. */
-    while (CRT_wcsstr(lineBuf, s_terminator) != nullptr &&
+    /* Loop while NOT at the terminator line (real _stricmp semantics:
+     * 0 == matched, per the disassembly at 0x436750: every call site is
+     * `CALL 0x471480; TEST EAX,EAX; JNZ <skip>`) and the stream's "ended"
+     * bit (0x1) is not set. */
+    while (TrainStation_LineMatches(lineBuf, s_terminator) != 0 &&
            (trainstation_stream_flags(stream) & 0x1) == 0) {
-        if (CRT_wcsstr(lineBuf, s_walk_speed) == nullptr) {
+        if (TrainStation_LineMatches(lineBuf, s_walk_speed) == 0) {
             uint16_t v0 = 0, v1 = 0;
             WNDPROC_StreamPrintf(stream, &v0);
             this->field_168 = static_cast<uint8_t>(v0);
             WNDPROC_StreamPrintf(stream, &v1);
             this->field_169 = static_cast<uint8_t>(v1);
-        } else if (CRT_wcsstr(lineBuf, s_Employable) == nullptr) {
+        } else if (TrainStation_LineMatches(lineBuf, s_Employable) == 0) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
             this->removable_flag = static_cast<uint8_t>(v);
-        } else if (CRT_wcsstr(lineBuf, s_sex) == nullptr) {
+        } else if (TrainStation_LineMatches(lineBuf, s_sex) == 0) {
             /* Re-reads a line (matches the original: a second
              * WNDPROC_CriticalSectionLock call here, distinct from the
              * loop's own line reads), then takes just the first
@@ -291,15 +328,15 @@ uint8_t TrainStation::Render(void* stream)
             WNDPROC_CriticalSectionLock(reinterpret_cast<int*>(stream), lineBuf);
             int upper = std::toupper(static_cast<unsigned char>(lineBuf[0]));
             this->sex_code = (upper == 'M') ? 0x4D : 0x46;
-        } else if (CRT_wcsstr(lineBuf, s_groundwidth) == nullptr) {
+        } else if (TrainStation_LineMatches(lineBuf, s_groundwidth) == 0) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
             this->z_threshold = static_cast<uint8_t>(v);
-        } else if (CRT_wcsstr(lineBuf, s_SpawnLimit) == nullptr) {
+        } else if (TrainStation_LineMatches(lineBuf, s_SpawnLimit) == 0) {
             uint16_t v = 0;
             WNDPROC_StreamPrintf(stream, &v);
             this->spawn_limit = static_cast<uint8_t>(v);
-        } else if (CRT_wcsstr(lineBuf, s_PickUpSoundId) == nullptr) {
+        } else if (TrainStation_LineMatches(lineBuf, s_PickUpSoundId) == 0) {
             WNDPROC_StreamWrite(stream, &this->sound_string_id);
         }
         /* No matching keyword: fall through and read the next line
@@ -312,7 +349,7 @@ uint8_t TrainStation::Render(void* stream)
     /* If the final line read is NOT the terminator, the loop exited via
      * the stream-ended bit rather than a genuine terminator match —
      * mark as failure. */
-    if (CRT_wcsstr(lineBuf, s_terminator) != nullptr) {
+    if (TrainStation_LineMatches(lineBuf, s_terminator) != 0) {
         result = 0;
     }
 

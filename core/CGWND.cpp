@@ -8,6 +8,7 @@
 // Status: TRANSCRIBED
 
 #include "CGWND.h"
+#include "../game/ScriptedObject.h"
 #include "../platform/ddraw_interfaces.h"
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
 #include <cstring>
@@ -1146,8 +1147,12 @@ void CGWND_Cleanup()
     extern void DDRAW_InvalidateAll(int* ddraw);
     DDRAW_InvalidateAll(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4A9EF0)));
 
-    extern void RESDATA_ScriptedObject_Shutdown(int* obj);
-    RESDATA_ScriptedObject_Shutdown(reinterpret_cast<int*>(static_cast<uintptr_t>(0x4AA5B8)));
+    /* Was a hardcoded-literal-address call to a free-function stub
+       (RESDATA_ScriptedObject_Shutdown(int*), a real crash-on-touch
+       landmine on this host's process layout — reinterpret_cast'ing a
+       literal integer to a pointer is never a valid object address here).
+       Call the real global's real, typed method directly. */
+    g_scripted_object->Shutdown();
 
     extern void UI_FreeMessageBox(int msgbox);
     UI_FreeMessageBox(0x4FD220);

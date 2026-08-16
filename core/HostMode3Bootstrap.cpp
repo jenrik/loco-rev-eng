@@ -31,7 +31,7 @@
 #include "../core/CGWND.h"
 #include "../game/World.h"
 #include "../game/BuildingMgr.h"
-#include "../world/scriptengine.h"
+#include "../game/ScriptedObject.h"
 #include "../world/tilemap.h"
 #include "../audio/GameAudio.h"
 #include "sdl3_town_mode3.h"
@@ -46,8 +46,8 @@ extern void  GLOBAL_free(void* ptr);                 /* 0x465CD0 */
 
 /* Singleton storage (defined in shared/stubs_impl.cpp) — file scope so
  * these bind to the same C++ symbols as every other decompiled TU.
- * g_scripted_object and g_tilemap are canonically declared as pointers by
- * world/scriptengine.h and world/tilemap.h. */
+ * g_scripted_object is canonically declared as a pointer by
+ * game/ScriptedObject.h; g_tilemap by world/tilemap.h. */
 extern void* g_game;             /* 0x4854C8 */
 extern void* g_world;            /* 0x4A98B0 */
 extern void* g_building_mgr;     /* 0x485448 */
@@ -173,15 +173,35 @@ void BootstrapMode3Core()
     }
 
     if (g_scripted_object == nullptr) {
-        void* mem = operator_new(sizeof(RESDATA_ScriptedObject));
+        /* 2026-08-16 reconciliation pass: this block previously skipped
+         * ScriptedObject's constructor and left the allocation raw-zeroed
+         * (including its own and the embedded sub_entity's vtable
+         * pointers), reasoning that "the x86_64 layout does not match the
+         * original binary" and that the main-menu path never exercises
+         * ScriptedObject. Both premises turned out not to hold:
+         *   - The identical x86_64-layout argument applies equally to
+         *     g_game/g_world/g_building_mgr immediately above, which ARE
+         *     placement-constructed with `::new (mem) T` — ScriptedObject
+         *     was the only singleton in this cone singled out for a skip,
+         *     with no distinguishing reason found in its own constructor
+         *     body (PartialDtor() + two no-op-on-host sub-init calls +
+         *     trivial field sets — nothing host-hazardous).
+         *   - core/GameLoop.cpp's per-frame step 9 dispatches a REAL virtual
+         *     call, `g_scripted_object->Update()`, unconditionally once
+         *     BootstrapMode3Core has run (see GameLoop.cpp); that call was
+         *     previously routed to a free-function stub via a call-0
+         *     symbol-linkage landmine and therefore silently never touched
+         *     the object, which is the only reason the null-vtable skip
+         *     hadn't already crashed on frame 1. Restoring the real Update()
+         *     call (a separate, correct fix — see GameLoop.cpp) means a
+         *     raw-zeroed ScriptedObject now crashes deterministically on the
+         *     first frame after the menu transition.
+         * Construct it for real, matching the sibling pattern. */
+        void* mem = operator_new(sizeof(ScriptedObject));
         if (mem != nullptr) {
-            std::memset(mem, 0, sizeof(RESDATA_ScriptedObject));
-            /* Host: skip Ctor() — the x86_64 layout does not match the
-             * original binary.  operator_new zeroes the allocation; the
-             * host main-menu path does not exercise ScriptedObject
-             * behavior. */
-            g_scripted_object = mem;
-            std::fprintf(stderr, "[HOST] BootstrapMode3Core: ScriptedObject raw alloc (%p)\n", g_scripted_object);
+            std::memset(mem, 0, sizeof(ScriptedObject));
+            g_scripted_object = ::new (mem) ScriptedObject();
+            std::fprintf(stderr, "[HOST] BootstrapMode3Core: ScriptedObject constructed (%p)\n", g_scripted_object);
             std::fflush(stderr);
         }
     }

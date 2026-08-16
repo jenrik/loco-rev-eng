@@ -1,5 +1,14 @@
 # call-0 landmine sweep — symbol worklist (2026-08-06)
 
+**2026-08-16 amendment**: `UIPANEL_EndPaintEx`/`UIPANEL_EndPaint`'s real
+definition (referenced below as "`ui/UIPANEL.cpp`") moved to
+`ui/UI_WindowBase.cpp` as thin compatibility shims over the new
+`UI_WindowBase::EndPaintEx()`/`EndPaint()` methods (the real receiver class
+— see PROGRESS.md's 2026-08-16 entry). The `(void*, int, int, uint8_t,
+RECT*)` signature this file already tracks as canonical is unchanged and
+still what every real call site declares/binds to — only the definition's
+file location moved, not the ABI.
+
 Tracked continuation of the `call 0` landmine class documented in PROGRESS.md
 ("~400-site `call 0` landmine sweep", "render-path-landmine-sweep"). This file
 is the durable worklist for the remaining sweep so a future session can resume
