@@ -391,19 +391,34 @@ static void PumpMessages_SDL3(uint8_t filter)
         EditWindow* const menu = active_host_menu();
         if (menu != nullptr) menu->hostRenderFrame();
 
-        /* Presentation cadence: the real WinMain only gates CGWND_Present
-         * on g_present_due (WM_TIMER id 0x47) in its gameplay-phase loop —
-         * the menu-phase (mode 2) blocking GetMessageA loop has no present
-         * call in the evidenced original at all, so mode 2 keeps presenting
-         * every host iteration here (also avoids a blank first-launch menu
-         * screen before mode 1 has ever started the 0x47 timer — it isn't
-         * running yet the very first time mode 2 is shown). Mode 1 (loading
-         * spinner) and every gameplay-adjacent mode share the same real
-         * 0x47 timer, so they're gated the same way. */
+        /* Presentation cadence — corrected 2026-08-16 after re-decompiling
+         * the real WinMain (0x462E90) and FUN_004618c0 (the real WndProc)
+         * directly: g_present_due (DAT_004AA4A4) has exactly 2 real xrefs
+         * in the whole binary (get_xrefs_to-confirmed) — one write (the
+         * WM_TIMER id-0x47 case, only reachable while g_game_mode is 0/1/2)
+         * and one read (WinMain's own gameplay loop: `if (DAT_004aa4a4 !=
+         * 0) CGWND_Present(0);`). Critically, WinMain never resets the flag
+         * back to 0 anywhere — it is a one-time latch, not a per-frame
+         * gate: the first WM_TIMER tick during the mode-1 loading screen
+         * sets it to 1 permanently, and every loop iteration from then on
+         * (including all of gameplay, mode 3+) presents unconditionally,
+         * since nothing ever clears it. This file's previous `g_present_due
+         * = 0;` reset here was a fabricated behavior with no basis in the
+         * original — it silently converted "present every frame forever
+         * once triggered" into "present once per fresh WM_TIMER tick," and
+         * since WM_TIMER(0x47) is never handled once g_game_mode leaves
+         * {0,1,2} (confirmed: FUN_004618c0's gameplay branch has no case
+         * for msg 0x113), that reset made every host build's mode-3+
+         * presentation stop dead the moment mode 3 began — this was the
+         * root cause of the "clicking Accept/OK just visually freezes"
+         * report (see PROGRESS.md). Removed the reset; g_present_due now
+         * behaves as the real one-time latch it is. Mode 2's own
+         * always-present fallback (below) is still needed for the same
+         * reason as before: the blocking GetMessageA loop shown for mode 2
+         * has no present call in the evidenced original at all, and the
+         * 0x47 timer isn't running yet the very first time mode 2 shows. */
         const bool should_present = (g_game_mode == 2) || (g_present_due != 0);
         if (should_present) {
-            g_present_due = 0;
-
             // The primary DirectDraw target is now the sole frame source. The
             // fallback preserves the launch screen until any target exists.
             bool presented = SDL3_PresentPrimarySurface();
