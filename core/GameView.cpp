@@ -726,72 +726,118 @@ uint8_t GameView::update_cursor_child(TrackPiece* child)
         if (child->prev_frame == 0 && child->zoom_level == 2) {
             child->SetZoom(1);
 
-            /* BLOCKED — field-type conflict, not yet modeled:
+            /* BLOCKED — two prerequisite model fixes in OTHER subsystems,
+             * NOT an unresolved mystery about this binary. Re-derived and
+             * fully resolved this session (previous pass's "dual
+             * Building-or-VehicleEditor identity, possibly dead/OOB" framing
+             * was INCOMPLETE and its "+0x44C is VehicleEditor::
+             * target_building, a building" citation was itself wrong — see
+             * below):
              *
-             * The original disassembly at 0x42D839/0x42D83F reads
-             *   EDX = *(this + 0xE0)         ; this->selected_building
-             *   ESI = *(EDX + 0x44C)
-             * +0x44C off a pointer stored in GameView's own +0xE0 slot.
-             * Everywhere else in this file (select_building, deselect_
-             * building, update_selection, and the 0x3807 branch just
-             * below) that same +0xE0 slot is genuinely `Building*`
-             * (sizeof(Building) == 0xF4 — see game/Building.h), and
-             * +0x44C is nowhere inside it.
+             * 1. Re-disassembled 0x42D822..0x42D897 (the real res_id==0x3806
+             *    block; Ghidra's JZ table dispatches 0x3806->0x42D822,
+             *    0x3807->0x42D7DB, 0x3808 falls through at 0x42D7AC — the
+             *    addresses in the old comment, 0x42D839/0x42D83F, were the
+             *    right instructions, just under a wrong theory of what they
+             *    mean). Confirmed:
+             *      0x42D839  MOV EDX, [EDI + 0xE0]   ; EDX = this->selected_building
+             *      0x42D83F  MOV ESI, [EDX + 0x44C]  ; ESI = *(EDX + 0x44C)
+             *    EDI is `this` (GameView) throughout this function (set at
+             *    0x42D776, `MOV EDI, ECX`) — confirmed not some other
+             *    register/object.
              *
-             * +0x44C is, however, exactly VehicleEditor::target_building
-             * (core/VehicleEditor.h:118, "building being built/modified
-             * (or NULL)"). VehicleEditor derives from Entity, not
-             * Building, and is otherwise unrelated in layout. That means
-             * this branch's original author expected `this->selected_
-             * building` to hold a *VehicleEditor*, not a Building*, while
-             * every other branch in this same function expects a real
-             * Building* — i.e. GameView's +0xE0 slot is polymorphic
-             * across game modes (building placement vs. track editing)
-             * and the object model doesn't yet have a way to express
-             * that safely (a raw union/reinterpret_cast would violate
-             * CLAUDE.md's ban on simulating layout across reconstructed
-             * classes).
+             * 2. this->selected_building (+0xE0) is NOT exclusively
+             *    `Building*`. select_building (0x42D0B7) is the only
+             *    instruction that ever writes this slot, but its own
+             *    callers pass at least three distinct runtime types
+             *    (Building* / a Train-collection object / VehicleEditor*)
+             *    — see the full evidence trail on the field's own
+             *    declaration in GameView.h. In THIS branch specifically,
+             *    the value is a VehicleEditor* (0x450 bytes, operator_new
+             *    at 0x44BF05 in Vehicle::Vehicle/0x44BE50): +0x44C is
+             *    genuinely in-bounds there (unlike the old comment's
+             *    "0xF4-byte Building, OOB" theory), and holds a `Vehicle*`
+             *    backref to the owning vehicle — written by
+             *    `Vehicle::Vehicle` at 0x44BF6D (`MOV [ECX+0x44C], ESI`,
+             *    ECX = editors[0], ESI = the Vehicle being constructed)
+             *    and by `Vehicle::InitRoute` at 0x44C2C1. (The field is
+             *    currently misdeclared `void* target_building` in
+             *    core/VehicleEditor.h as if it held a Building — that
+             *    label is wrong; see report/PROGRESS.md, not fixed here.)
+             *    This is confirmed independently by every consumer below:
+             *    ESI->+0x78/+0x7A match Vehicle::slot_index/network_id
+             *    (game/Vehicle.h), and the calls are World_GetObjectAt/
+             *    World_RenderAll/World::SaveToFile — all Vehicle*-typed
+             *    (game/World.h). There is no out-of-bounds read and no
+             *    original-binary defect: this branch is real, reachable
+             *    "vehicle route/track-editor cursor completed, tear down
+             *    the editor and remove the vehicle" logic.
              *
-             * This branch is also PROVABLY UNREACHABLE on the host today:
-             * the only producer of a 0x3806-resource TrackPiece child is
-             * GameView::handle_tile_click (this file — moved here from
-             * town/Town.cpp; see this class's own header doc), whose sole
-             * caller is GameLoop_PostSetupBootstrap (0x45DF32) — which is
-             * itself not yet implemented anywhere in this tree (a tree-wide
-             * grep finds zero definitions/callers of it). handle_tile_click
-             * now goes through the real, fully-implemented
-             * Panel::CreateChildSprite (0x4546D0, game/Panel.cpp) rather
-             * than the loud extern "C" stub in
-             * shared/stubs_link001_batch3_resource_audio.cpp (that stub
-             * shape has zero remaining callers after this move and its own
-             * doc comment should be treated as stale), so the child-
-             * creation path itself is no longer what blocks this branch —
-             * only the missing caller does. So no TrackPiece with
-             * resource_id 0x3806 can exist in this build today.
+             * The real sequence still to implement (captures below happen
+             * BEFORE the World calls because SaveToFile deletes the
+             * vehicle — order matters):
+             *   this->select_building(nullptr);                   0x42D84D
+             *   g_ddraw_building->SelectBuilding(nullptr);         0x42D859
+             *   uint8_t slot_index  = vehicle->slot_index;  /+0x78/ 0x42D85E
+             *   uint16_t network_id = vehicle->network_id;  /+0x7A/ 0x42D861
+             *   World_GetObjectAt(vehicle);                        0x42D86F
+             *   World_RenderAll(vehicle);                          0x42D87A
+             *   g_world->SaveToFile(network_id, <player_id>, 1);   0x42D892
+             * `<player_id>` at 0x42D87F (`MOV ECX,[ESP+0xC]`) is a real
+             * third argument (SaveToFile's char player_id, game/World.h)
+             * — NOT yet re-derived against the intervening push sequence
+             * in THIS pass; do that before implementing the call.
              *
-             * Loud stub rather than the previous raw offset-cast per
-             * CLAUDE.md's stub policy: fail loudly if that ever changes,
-             * instead of quietly reading past a Building's real 0xF4-byte
-             * allocation.
+             * Cannot legally implement any of this without reinterpret_cast
+             * until both of the following land (tracked in PROGRESS.md,
+             * out of scope for this class):
+             *   (a) GameView::selected_building retyped Building* -> Entity*
+             *       (forces a matching retype of
+             *       DDRAW_Building::SelectBuilding(Building*) in
+             *       graphics/DDRAW_Building.h+DDRAW.cpp, since
+             *       select_building unconditionally forwards this same
+             *       value there at 0x42D12C) — only then is
+             *       `static_cast<VehicleEditor*>(this->selected_building)`
+             *       a legal same-base downcast instead of a cross-cast.
+             *   (b) VehicleEditor::target_building retyped void* ->
+             *       Vehicle* (core/VehicleEditor.h) — a separate,
+             *       multi-file landmine sweep: game/Vehicle.cpp has 7
+             *       write sites already relying on the "Vehicle* backref"
+             *       meaning (e.g. its own comment on the assignment
+             *       `editor->target_building = this;`, annotated "backref"),
+             *       while core/VehicleEditor.cpp's
+             *       destructor (~VehicleEditor, body 0x40D680) already
+             *       casts the SAME field to `Building*` and reads
+             *       `occupation_level` — confirmed wrong against
+             *       0x40D6E4 (`CMP byte[EAX+0x88],0`, EAX = target_building
+             *       = a Vehicle*, so +0x88 is Vehicle::init_flag/
+             *       process_delay per game/Vehicle.h, not
+             *       Building::occupation_level). Not fixed here; reported
+             *       separately.
              *
-             * TODO: resolve GameView::selected_building's dual identity
-             * (Building* vs. VehicleEditor*) before re-enabling this
-             * branch; tracked in PROGRESS.md.
+             * Still true, but now secondary: handle_tile_click's sole
+             * caller GameLoop_PostSetupBootstrap (0x45DF32) is unimplemented
+             * in this tree today, so no TrackPiece with resource_id 0x3806
+             * can exist on this host build regardless of the above.
              */
 #ifndef _WIN32
             fprintf(stderr,
                     "STUB: GameView::update_cursor_child (0x42D770) res_id "
-                    "0x3806 zoom-complete branch reached at %s:%d — "
-                    "GameView::selected_building's Building*/VehicleEditor* "
-                    "type conflict is not yet resolved (see comment above); "
-                    "this path is verified unreachable today via "
-                    "handle_tile_click's sole caller (GameLoop_PostSetupBootstrap) "
-                    "being unimplemented.\n",
+                    "0x3806 zoom-complete branch reached at %s:%d — blocked on "
+                    "two prerequisite model fixes in other subsystems "
+                    "(GameView::selected_building retyped Entity*, "
+                    "VehicleEditor::target_building retyped Vehicle*; see "
+                    "comment above for full evidence and the exact call "
+                    "sequence to implement). Not an original-binary bug and "
+                    "not unreachable-by-design: this path is only unreachable "
+                    "on THIS host build today because handle_tile_click's sole "
+                    "caller (GameLoop_PostSetupBootstrap) is unimplemented.\n",
                     __FILE__, __LINE__);
             assert(false &&
                    "GameView::update_cursor_child (0x42D770) res_id 0x3806 "
-                   "branch: selected_building's dual Building*/VehicleEditor* "
-                   "identity is unresolved; see core/GameView.cpp's comment");
+                   "branch: blocked on selected_building/Entity* and "
+                   "VehicleEditor::target_building/Vehicle* retypes in other "
+                   "subsystems; see core/GameView.cpp's comment");
 #endif
         }
     } else if (res_id == 0x3807) {

@@ -129,7 +129,40 @@ public:
     /* Do not conflate the two +0x28-shaped-looking accesses.            */
     /* ================================================================ */
 
-    Building* selected_building;     /* +0xE0  currently selected/tracked building */
+    /* +0xE0. Declared `Building*` here — matching every currently-
+     * INTEGRATED consumer in this class (track_building, deselect_building,
+     * update_selection, select_building's own store, is_valid_placement) —
+     * but this is KNOWN, EVIDENCED TO BE INCOMPLETE, not merely a stylistic
+     * simplification:
+     *
+     * select_building (0x42D0B7, `MOV [ESI+0xe0], EDI`) is the sole
+     * instruction in the whole binary that writes this slot (exhaustive
+     * `search_text` sweep for both `[reg + 0xe0],` and the absolute address
+     * 0x485380 store forms; only GameView_Ctor's null-init and this write
+     * exist). But select_building's own callers pass at least THREE
+     * distinct runtime types through that one write, all validated only by
+     * the shared Entity-level interface is_valid_placement checks
+     * (GameObject::initialized at +0x18, Entity::resource at +0x40 —
+     * see is_valid_placement's own doc below):
+     *   - Building*      — TileMap_HandleClick (0x456051/0x456072)
+     *   - a Train-collection object — BuildingMgr::FindAndNotify's second
+     *     loop (0x434D49; BuildingMgr_FindAndNotify's own decompile plate
+     *     comment: "Search buildings then trains at (world_x, world_y)")
+     *   - VehicleEditor*  — Vehicle::editors[0], pushed directly into this
+     *     call at ~0x45AEB1 (`MOV EDX,[ESI+0x10]; PUSH EDX; MOV ECX,
+     *     0x4852a0; CALL 0x42D040`, ESI = the Vehicle, +0x10 =
+     *     Vehicle::editors[0] per game/Vehicle.h) right after that Vehicle
+     *     calls its own FindPath — i.e. this is a genuine "select the
+     *     route/track-placement editor for the vehicle currently
+     *     following it" entry point, not a mistake.
+     *
+     * The true evidenced type of this field is therefore `Entity*` (the
+     * common base of Building, Train, and VehicleEditor), not `Building*`.
+     * Retyping it is BLOCKED, not merely deferred — see
+     * update_cursor_child's own doc comment below for the specific
+     * prerequisite fixes in other subsystems that a legal (non-
+     * reinterpret_cast) retype depends on, and PROGRESS.md for tracking. */
+    Building* selected_building;      /* +0xE0  see doc above — real type is Entity* */
 
     /* Embedded Entity sub-object — constructed with Entity(-1,-1,0,0)
      * (0x405790) in the binary; modeled as a real typed member so the
@@ -340,6 +373,13 @@ public:
      * the body only recognizes the three handle_tile_click cursor
      * resource IDs (0x3806/0x3807/0x3808), never anything postcard-shaped.
      * Counts down child->prev_frame and fires zoom/deselect transitions.
+     *
+     * The res_id==0x3806 branch's zoom-complete tail is a real, reachable
+     * path in the original binary — NOT dead code and NOT an out-of-bounds
+     * read — but is currently a loud stub blocked on two prerequisite
+     * model fixes in OTHER subsystems (out of this class's scope; see this
+     * method's own .cpp doc comment for the full evidence and the exact
+     * instruction sequence still to be implemented).
      */
     uint8_t update_cursor_child(TrackPiece* child);
 
