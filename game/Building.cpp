@@ -19,15 +19,19 @@
 /* resources/AssetMgr.h is deliberately NOT included: it re-declares
  * operator_new/GLOBAL_free as extern "C" (this file needs the ordinary
  * C++-linkage forms already declared below) and re-declares CRT_wcsstr
- * as `extern "C" uint32_t CRT_wcsstr(uint8_t*, uint8_t*)` — same
+ * as `extern "C" int32_t CRT_wcsstr(uint8_t*, uint8_t*)` — same
  * parameter shape as this file's own (corrected, plain-C++-linkage)
  * declaration below, but incompatible C linkage, which a single
  * translation unit cannot redeclare under both linkages. AssetMgr.h's
- * own extern "C" form is itself still a live call-0 landmine (collapses
- * onto the bare `CRT_wcsstr` symbol satisfied by shared/defsym_stubs.cpp's
- * unrelated 0-arg filler stub) — out of scope to fix here; only Building.cpp
- * is touched by this pass. Only what's needed — the AssetMgr type name and
- * AssetMgr_ReadPairValue's real signature — is forward-declared locally
+ * own extern "C" form has zero real call sites anywhere in the tree
+ * (confirmed 2026-08-16) — dormant, not a live landmine — but it would
+ * now bind to an unresolved symbol rather than a silent no-op if anyone
+ * ever called it, since shared/defsym_stubs.cpp's bare-symbol filler
+ * stub it used to collapse onto was removed the same session (see
+ * PROGRESS.md's residual-cleanup bullet). Out of scope to fix here; only
+ * Building.cpp is touched by this pass. Only what's needed — the
+ * AssetMgr type name and AssetMgr_ReadPairValue's real signature — is
+ * forward-declared locally
  * instead. */
 struct AssetMgr;
 
@@ -70,7 +74,7 @@ extern "C" {
  * shared/stubs_link001_batch1_crt_win32.cpp; declaring the identical
  * signature here with plain C++ linkage binds to that same real body
  * instead of colliding with the extern "C" filler stub. */
-extern uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);                 /* 0x471480 */
+extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);                 /* 0x471480 */
 
 /* CRT_wcsstr's real signature takes non-const uint8_t* on both sides (see
  * above); the two call sites in this file only ever read through these

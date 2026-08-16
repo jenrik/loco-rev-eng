@@ -72,7 +72,7 @@ extern unsigned int GetResourceType(unsigned int resourceId);  /* 0x446030 */
  * (and separately known-broken, substring-only) `CRT_wcsstr(const char*,
  * const char*)` overload (see PROGRESS.md's tracked "wrong semantic"
  * item) — neither of those is the target here. */
-uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
+int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
 /* ResourceManager_GetStringById/RESMGR_LoadSoundResource/
  * RESMGR_ReleaseSoundResource: same extern-"C"-linkage landmine as

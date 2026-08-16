@@ -358,7 +358,7 @@ int CRT_sprintf_buf(void* buf, const char* fmt, ...)
  * Caller (native/assetmgr_loadfile.c:37, compiled as C++ per meson's
  * `-x c++` for native/*.c, and NOT inside any extern "C" block — a plain
  * top-level `extern`, so this is C++-mangled):
- * `extern uint32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);`.
+ * `extern int32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);`.
  *
  * Real target 0x471480 (documented consistently across game/Building.cpp,
  * game/TrainStation.cpp, input/BuildingDescriptorEditor.cpp, tests/
@@ -371,13 +371,20 @@ int CRT_sprintf_buf(void* buf, const char* fmt, ...)
  * "wcs" prefix (it walks byte-at-a-time narrow chars). This matches every
  * caller's own "inverted-match"/"identity unresolved" comments exactly:
  * `if (CRT_wcsstr(line, keyword) == 0)` really means "line equals keyword,
- * case-insensitively". Implemented for real as the genuine CRT wrapper it
- * is (this exact (uint8_t*,uint8_t*) overload has no existing definition
- * anywhere in the tree — checked via grep before adding this). */
-uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub)
+ * case-insensitively". The return type is `int32_t`, not `uint32_t`
+ * (2026-08-16 fix): `strcasecmp` genuinely returns negative/zero/positive,
+ * matching 0x471480's own signed EAX result (`SBB EAX,EAX; SBB EAX,-1`);
+ * every current caller only ever compares against 0 so this made no
+ * observable difference to them, but a `uint32_t` return silently breaks
+ * any future ordering comparison (`< 0`/`> 0`) since a negative `int` cast
+ * to `uint32_t` is never less than 0. Implemented for real as the genuine
+ * CRT wrapper it is (this exact (uint8_t*,uint8_t*) overload has no
+ * existing definition anywhere in the tree — checked via grep before
+ * adding this). */
+int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub)
 {
     if (str == nullptr || sub == nullptr) return 1; /* non-zero = "not equal" */
-    return static_cast<uint32_t>(
+    return static_cast<int32_t>(
         strcasecmp(reinterpret_cast<const char*>(str),
                    reinterpret_cast<const char*>(sub)));
 }

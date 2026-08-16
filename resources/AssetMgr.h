@@ -91,7 +91,7 @@ extern "C" {
 
     /* String/utility */
     int32_t __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...);
-    uint32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);
+    int32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
     /* Huffman */
     uint32_t __cdecl Huf_GetUncompressedSize(uint32_t* data);

@@ -476,16 +476,21 @@ extern "C" int32_t CRT_rand_c_symbol(void) { return crt_rand_impl(); }
  * despite the "wcsstr" name (see shared/stubs_link001_batch1_crt_win32.cpp's
  * doc comment on this same real function for the full evidence trail).
  * game/Building.cpp now declares/calls it with this exact
- * (uint8_t*, uint8_t*) -> uint32_t signature under plain (non-extern "C")
+ * (uint8_t*, uint8_t*) -> int32_t signature under plain (non-extern "C")
  * C++ linkage — matching that signature here exactly is what makes
  * Building.o's real call bind to this fixture instead of failing to link
  * (this file's own "no --unresolved-symbols=ignore-all" policy, see the
- * header comment above). */
-uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
-uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub)
+ * header comment above). The return type is `int32_t`, not `uint32_t`:
+ * strcasecmp genuinely returns negative/zero/positive, and a `uint32_t`
+ * return would silently break any ordering comparison (`< 0`/`> 0`)
+ * since a negative `int` cast to `uint32_t` is never less than 0 — this
+ * fixture matches shared/stubs_link001_batch1_crt_win32.cpp's real
+ * implementation exactly (retyped there for the same reason). */
+int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
+int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub)
 {
     if (str == nullptr || sub == nullptr) return 1; /* non-zero = "not equal" */
-    return static_cast<uint32_t>(
+    return static_cast<int32_t>(
         strcasecmp(reinterpret_cast<const char*>(str),
                    reinterpret_cast<const char*>(sub)));
 }

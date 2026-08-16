@@ -116,7 +116,7 @@ void* WNDPROC_StreamWrite(void* stream, void* outBuf);
  * this exact (uint8_t*, uint8_t*) overload — declared here with the
  * identical (non-extern "C") signature so this file's calls bind to
  * that real implementation instead of the dead-symbol stub. */
-extern uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
+extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
 /* WIN32_MemoryStream_Size() (resources/Win32StreamMem.h, included above)
  * is used below to size the WNDPROC_StreamFromMemory allocation — x86

@@ -61,14 +61,14 @@ void __cdecl sprintf_wrapper(char* buffer, const char* format, ...);  /* 0x466D6
  * terminator itself) was undefined-behavior-driven prior to this fix.
  *
  * Retyped to plain C++ (non-extern "C") linkage with the real (uint8_t*,
- * uint8_t*) -> uint32_t signature, matching the canonical, already-correct
+ * uint8_t*) -> int32_t signature, matching the canonical, already-correct
  * implementation in shared/stubs_link001_batch1_crt_win32.cpp (which defines
  * this exact overload against real strcasecmp semantics) and the same
  * uint8_t*-byte-string idiom native/assetmgr_loadfile.c already uses for
  * this identical real function. This file's OWN comparison direction
  * (`== 0` / `!= 0` <-> "matched") was already correct per that disassembly;
  * only the linkage/signature was broken. */
-extern uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
+extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
 /* ABI_BOUNDARY: CRT_wcsstr/_stricmp (0x471480) is a byte-oriented CRT string
  * compare — its real parameters are unsigned-char pointers on both sides,
@@ -77,7 +77,7 @@ extern uint32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
  * (matching the identical (uint8_t*,uint8_t*) idiom already used for this
  * same real function in native/assetmgr_loadfile.c) rather than exposing
  * raw casts at every call site below. */
-static inline uint32_t TrainStation_LineMatches(char* line, const char* keyword)
+static inline int32_t TrainStation_LineMatches(char* line, const char* keyword)
 {
     return CRT_wcsstr(reinterpret_cast<uint8_t*>(line),
                        const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(keyword)));

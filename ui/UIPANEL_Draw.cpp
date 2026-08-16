@@ -102,8 +102,14 @@ extern "C" {
     /* CRT_wcsstr and the file-enumeration trio below are only real on
      * Windows -- see UIPANEL_DrawEditField's #ifdef _WIN32/#else split
      * for why the host build uses std::filesystem/strcasecmp instead of
-     * these directly. */
-    int    CRT_wcsstr(void* a, void* b);
+     * these directly. Signature matches the canonical real implementation
+     * in shared/stubs_link001_batch1_crt_win32.cpp (real _stricmp/
+     * strcasecmp semantics, int32_t so ordering comparisons like the
+     * `< 0` below work correctly) -- this file previously declared it as
+     * `int CRT_wcsstr(void*, void*)`, matching neither that real
+     * implementation's parameter types nor (before a 2026-08-16 fix) its
+     * signed return type. */
+    int32_t CRT_wcsstr(uint8_t* a, uint8_t* b);
 
     /* File system */
     HANDLE CRT_FindFirstFile(LPCSTR path, void* data);
@@ -622,7 +628,8 @@ static void UIPANEL_InsertSpriteSorted(SaveSprite** sprite_list_ptr,
 
     while (list_node != NULL &&
 #ifdef _WIN32
-           CRT_wcsstr(list_node->name, sprite_mem->name) < 0) {
+           CRT_wcsstr(reinterpret_cast<uint8_t*>(list_node->name),
+                      reinterpret_cast<uint8_t*>(sprite_mem->name)) < 0) {
 #else
            strcasecmp(list_node->name, sprite_mem->name) < 0) {
 #endif
