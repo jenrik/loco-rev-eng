@@ -210,11 +210,21 @@ public:
      * BeginPaint — start buffered panel rendering.
      * Address: 0x426B00
      *
-     * Unlocks primary surface, calls GetDC on primary (vtable[0x44]).
-     * Retries up to 1000 times with 10ms delay on failure, exits on
-     * persistent failure. Returns HDC stored at +0x4C.
+     * Unlocks the primary surface, then calls
+     * IDirectDrawSurface4::GetDC() on the primary surface (original
+     * vtable+0x44, confirmed to match GetDC's real COM ABI slot).
+     * Retries up to 1000 times with 10ms delay while GetDC keeps
+     * failing, then calls WIN32_FatalError()+ExitProcess(1) — a
+     * genuine original fatal path. Every real caller pushes
+     * this->hwnd as a second argument, but it is provably dead
+     * (DDRAW_UnlockPrimary, 0x45B940, is void(void) and never reads
+     * it) and is not part of this method's signature or behavior.
+     * See ui/UIPANEL.cpp for the full evidence trail, including why
+     * g_primary_surface being wired to a real surface today would
+     * make this retry loop always exhaust and self-destruct the
+     * process (Sdl3DirectDrawSurface::GetDC is a permanent no-op).
      *
-     * @return  HDC from primary surface
+     * @return  HDC from the primary surface
      */
     HDC BeginPaint();
 

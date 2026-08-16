@@ -96,7 +96,13 @@ extern char  g_install_path[];          /* 0x4A99C8 */
 extern PlayerConfig* g_player_config;   /* 0x4AA4A8 */
 
 /* UI helpers */
-extern void* __thiscall UIPANEL_BeginPaint(int32_t panel);
+/* Real def: ui/UIPANEL.cpp:0x426B00 (a thin free-function shim over the
+ * real UIPANEL::BeginPaint() method), HDC(void* self). Was declared here
+ * with an `int32_t` 1st param, mangling to a distinct symbol from the real
+ * function (docs/landmine-sweep-worklist.md). Currently unused within this
+ * file (no call sites), so this was a dormant landmine, not a live bug —
+ * fixed anyway for consistency with the canonical signature. */
+extern HDC   UIPANEL_BeginPaint(void* panel);
 /* Real def: ui/UIPANEL.cpp:0x426B90 — the 2nd param is `int hdc`, not
  * `void*`. Was declared here with a void* 2nd param, mangling to a
  * distinct symbol from the real function (same landmine class as

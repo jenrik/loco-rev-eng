@@ -45,12 +45,25 @@ the stale mode3 branches below) wire these globals without addressing this
 first — it would turn a currently-safe no-op into a reproducible crash days
 or weeks later when someone least expects it.
 
-`ui/UIPANEL.cpp` still has 8 more raw vtable-slot dispatch sites beyond the
-blocked `GetDC` one (`Unlock`×1 in `UIPANEL_EndPaintEx`, `Blt`×7 in
-`UIPANEL_Render`) — clean, low-risk, evidenced conversions, deliberately left
-alone so the file doesn't end up half-migrated again. Convert all of them
-together once `GetDC` has a real answer. `world/tilemap.cpp` also has raw
-vtable dispatch on `g_primary_surface`, not yet examined at all.
+**Update (2026-08-16)**: `UIPANEL::BeginPaint` itself is now integrated as a
+real class method (typed `IDirectDrawSurface4::GetDC()` call, real HRESULT/
+out-param handling — see PROGRESS.md's 2026-08-16 entry) — the raw
+vtable-slot dispatch for `GetDC` is gone. This does **not** lift the
+blocker above: `g_primary_surface` is still unwired and
+`Sdl3DirectDrawSurface::GetDC` is still a permanent no-op, so the retry-
+then-`ExitProcess(1)` path is exactly as fatal as before the moment the
+global is wired. A thin free-function shim (`UIPANEL_BeginPaint(void*)`)
+was kept over the new method since ~9 other files still call it as a free
+function; two genuine call-0-class landmines among those callers
+(`game/BuildingPanel.cpp`, `network/NetworkPlayerList.cpp`) were fixed
+alongside it.
+
+`ui/UIPANEL.cpp` still has 8 more raw vtable-slot dispatch sites (`Unlock`×1
+in `UIPANEL_EndPaintEx`, `Blt`×7 in `UIPANEL_Render`) — clean, low-risk,
+evidenced conversions, deliberately left alone so the file doesn't end up
+half-migrated again. Convert all of them together once `GetDC` has a real
+answer. `world/tilemap.cpp` also has raw vtable dispatch on
+`g_primary_surface`, not yet examined at all.
 
 ## Stale, do-not-merge-as-is branches (fetched, not integrated)
 

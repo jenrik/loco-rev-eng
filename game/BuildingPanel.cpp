@@ -101,6 +101,17 @@ size_t UIPANEL_Surface_Size();
 void   UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
                           uint8_t unlock_flag, RECT* restrict_rect);  /* 0x426B90 */
 
+/* UIPANEL_BeginPaint — real def: ui/UIPANEL.cpp:0x426B00 (a thin free-function
+ * shim over the real UIPANEL::BeginPaint() method), C++ linkage (not
+ * extern "C"), HDC(void* self). Was declared inside the extern "C" block
+ * below with an unmangled C symbol and a wrong return type (int) and a
+ * bogus address (0x42B0C0, which is mid-body of an unrelated function) —
+ * extern "C" linkage alone means this never bound to the real mangled
+ * symbol (same landmine class as UIPANEL_EndPaintEx above;
+ * docs/landmine-sweep-worklist.md). Moved out of extern "C" with the
+ * correct return type and address. */
+HDC    UIPANEL_BeginPaint(void* panel);                       /* 0x426B00 */
+
 extern "C" {
     /* Resource management */
     void*  ResourceManager_GetById(void* resmgr, int id);    /* 0x44CB40 */
@@ -108,7 +119,6 @@ extern "C" {
     void   Sprite_SetState(void* sprite, int state, int* unk); /* 0x44AE20 */
 
     /* UIPANEL */
-    int    UIPANEL_BeginPaint(void* panel);                  /* 0x42B0C0 — returns HDC */
     void*  UIPANEL_CreateSurface(void* obj);                  /* 0x42A110 */
 
     /* GDI */
@@ -277,8 +287,7 @@ void BuildingPanel::draw_item(LONG cell_left, int cell_top,
     Sprite_SetState(this->main_sprite, state, nullptr);
 
     /* Step 3: Begin GDI painting */
-    HDC hdc = reinterpret_cast<HDC>(static_cast<uintptr_t>(
-        UIPANEL_BeginPaint(this)));
+    HDC hdc = UIPANEL_BeginPaint(this);
 
     /* Step 4: Set text color to black, background to transparent */
     COLORREF old_color = SetTextColor(hdc, 0);                   /* black */
@@ -507,8 +516,7 @@ void BuildingPanel::draw_occupant_dots(int* cell_rect, int* player_idx)
     int cell_h = static_cast<int>(player_entry->icon_cell_height); /* +0x34 */
 
     /* Begin GDI painting */
-    HDC hdc = reinterpret_cast<HDC>(static_cast<uintptr_t>(
-        UIPANEL_BeginPaint(this)));
+    HDC hdc = UIPANEL_BeginPaint(this);
 
     /* Create black pen for dot outlines */
     HPEN pen = CreatePen(0, 1, 0);                /* PS_SOLID, 1px, black */
