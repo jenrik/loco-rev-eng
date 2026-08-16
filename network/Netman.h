@@ -291,7 +291,13 @@ int32_t PlaySoundFile(const char* path, void* x, void* y, int32_t flags);
 void*   NET_CreateSession(void* dplay, uint8_t param1, uint8_t param2,
                            uint8_t param3, char param4);
 void*   NET_RegisterPlayer(void* dplay, void* playerData, int32_t type, int32_t param);
-void*   NET_ResolveAddress(void* dplay, const char* path);
+/* NET_ResolveAddress(void*, const char*) declaration removed 2026-08-16 —
+ * a transcription artifact (0x444C70's real signature takes exactly one
+ * argument, const char* hostname; the dplay parameter was never real).
+ * The real declaration, DPlayManager* NET_ResolveAddress(const char*),
+ * already lives in network/DPlayManager.h and is implemented for real
+ * there (2026-08-14) — its only remaining 2-arg caller was
+ * network/Netman_ReceiveSignalChange.cpp:299, now fixed to match. */
 /* NET_GetHostName / NET_UpdatePlayerList / NET_DownloadAsset (real bodies in
  * network/NetworkPlayerList.cpp, addresses 0x4446F0/0x445170/0x445A40) and
  * the PostBagFileNode type they share are declared in PostBagFileNode.h —

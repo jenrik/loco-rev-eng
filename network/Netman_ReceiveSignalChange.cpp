@@ -296,7 +296,10 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
         }
 
         /* ---- Resolve address ---- */
-        resolved = NET_ResolveAddress(_g_dplay, routeFilePath);
+        /* Real signature is one argument (network/DPlayManager.h,
+         * implemented 2026-08-14) — _g_dplay was never a real parameter,
+         * confirmed via 0x43E900's own disassembly. */
+        resolved = NET_ResolveAddress(routeFilePath);
         if (resolved == NULL) {
             return NULL;
         }
