@@ -55,7 +55,14 @@ class RESDATA_GameVehicle;
 #define ADDR_g_tilemap                   0x004AAD08  /* TileMap singleton */
 #define ADDR_g_tooltip_mgr               0x004FD220  /* UI/tooltip manager */
 #define ADDR_g_click_on_town             0x0048557C  /* Click-on-town flag */
-#define ADDR_g_selected_building          0x00485380  /* never-written slot read by World::SaveToFile; distinct from the selection global at 0x4855B0 */
+#define ADDR_g_selected_building          0x00485380  /* NOT a World-owned global — this is
+                                                          GameView::selected_building (+0xE0 on
+                                                          the g_town_view singleton at
+                                                          ADDR_g_town_view); World::SaveToFile
+                                                          only reads it through g_town_view.
+                                                          Distinct from the separate 0x4855B0
+                                                          Building/Train/TileMap selection
+                                                          global (world/tilemap.h). */
 #define ADDR_g_game_mode                 0x004851F4  /* Game mode (3=town, 9=network) */
 
 /* ================================================================== */
@@ -165,12 +172,22 @@ public:
      * SaveToFile: Remove/delete a vehicle by resource_id + player_id.
      * Address: 0x44D8A0
      *
-     * Finds matching vehicle, deselects from town/DDRAW views if the
-     * never-written selection slot (0x485380, always 0) equals
-     * editors[0] (branch never fires), notifies the network
-     * manager, then deletes the vehicle via its destructor. Decrements
-     * local_vehicle_count when the vehicle is locally owned
-     * (owner_handle == 0).
+     * Finds matching vehicle, deselects from town/DDRAW views if
+     * GameView::selected_building (+0xE0 on g_town_view, absolute
+     * 0x485380) equals editors[0], notifies the network manager, then
+     * deletes the vehicle via its destructor. Decrements local_vehicle_count
+     * when the vehicle is locally owned (owner_handle == 0).
+     *
+     * This is a real, potentially-live deselect-on-vehicle-delete check —
+     * NOT dead code. An earlier version of this comment (and of World.cpp's
+     * comparison) mistakenly aliased the WRONG global — the unrelated
+     * 0x4855B0 Building/Train/TileMap selection object — under the same
+     * `g_selected_building` name, making the branch look like it compared
+     * against an always-null slot. GameView::select_building (0x42D0B7) is
+     * confirmed to write a VehicleEditor* into the real 0x485380 slot from
+     * Vehicle's own FindPath call site (~0x45AEB1), so this branch can
+     * genuinely fire when the vehicle being deleted owns the currently
+     * selected/tracked editor.
      *
      * @param resource_id  Numeric resource ID of the target vehicle
      * @param player_id    Player identifier byte

@@ -21,6 +21,7 @@
 #include "../shared/types.h"
 #include "../network/Netman.h"
 #include "../core/VehicleEditor.h"
+#include "../core/GameView.h"
 #include "../game/Vehicle.h"
 #include "../game/Building.h"
 #include "../game/GameVehicle.h"
@@ -55,10 +56,13 @@ extern "C" {
     /* CRT / memory management */
     int     __cdecl CRT_sprintf(char* buf, int max_len,
                                 const char* fmt, ...);    /* @ 0x467FF0  sprintf wrapper */
-
-    /* Windows API */
-    int     __stdcall IntersectRect(RECT* dst, RECT* src1, RECT* src2); /* @ 0x47726C via IAT */
 }
+
+/* Plain C++ linkage, matching the canonical declaration in game/Panel.h
+ * (now reachable transitively via core/GameView.h's include above) — a
+ * prior version of this file wrongly wrapped it in the extern "C" block
+ * above, which conflicted once GameView.h became reachable in this TU. */
+int     __stdcall IntersectRect(RECT* dst, RECT* src1, RECT* src2); /* @ 0x47726C via IAT */
 
 /* Game functions (free functions with no typed C++ equivalent yet) */
 class InputMgr;
@@ -101,10 +105,12 @@ extern TileMap*     g_tilemap;                  /* 0x004AAD08 */
 class UI_Manager;
 extern UI_Manager* g_tooltip_mgr;             /* 0x004FD220  UI/tooltip manager */
 extern uint8_t    g_click_on_town;            /* 0x0048557C */
-extern Entity*    g_selected_building;        /* binary slot 0x00485380 — never written in
-                                                 loco.exe (distinct from the town/building
-                                                 selection global at 0x004855B0 used by
-                                                 Building/Train/TileMap) */
+/* NOTE: the old `extern Entity* g_selected_building;` declared here aliased
+ * the WRONG global — it bound to shared/stubs_impl.cpp's 0x004855B0
+ * Building/Train/TileMap selection object (see world/tilemap.h, game/
+ * Building.cpp, game/Train.cpp) under a comment claiming address 0x485380.
+ * SaveToFile below instead reads GameView::selected_building (+0xE0 on the
+ * g_town_view singleton, absolute 0x485380) directly — see its own comment. */
 extern PlayerConfig* g_player_config;         /* 0x004AA4A8 */
 extern void*      g_world_release_a;          /* 0x00485268  released+nulled by World::Init */
 extern void*      g_world_release_b;          /* 0x0048526C  released+nulled by World::Init */
@@ -289,12 +295,35 @@ bool World::SaveToFile(uint resource_id, char player_id, char mp_flag)
     Vehicle*& vehicle_slot = this->vehicles[slot];
     Vehicle* vehicle = vehicle_slot;
 
-    /* Assembly compares the selected-building slot (0x485380, never written
-       in loco.exe — always 0) against editors[0] as raw pointer values:
-       0x44D8FA MOV ECX,[0x00485380] ; 0x44D900 CMP [ESI+0x10],ECX
-       The deselect branch never fires in the shipped binary. The host
-       g_selected_building symbol (Entity*, nullptr) carries the same name. */
-    if (reinterpret_cast<Entity*>(vehicle->editors[0]) == g_selected_building) {
+    /* Assembly reads GameView::selected_building (+0xE0 on the g_town_view
+       singleton at 0x4852A0, absolute address 0x485380 — NOT the unrelated
+       0x4855B0 Building/Train/TileMap selection global that a prior version
+       of this comparison mistakenly aliased) and compares it against
+       editors[0] as raw pointer values:
+         0x44D8FA  MOV ECX,[0x00485380]
+         0x44D900  CMP [ESI+0x10],ECX
+       This is a genuine, reachable deselect-on-vehicle-delete check, not
+       dead code: GameView::select_building (0x42D0B7) is confirmed to store
+       a VehicleEditor* into this same slot when called from Vehicle's own
+       FindPath call site (~0x45AEB1, `MOV EDX,[ESI+0x10]` — editors[0] —
+       `; PUSH EDX; MOV ECX,0x4852a0; CALL 0x42D040`) — i.e. "select the
+       route/track-placement editor for the vehicle currently following it".
+       A second live read of the same slot at 0x462C44 (feeding
+       DDRAW_SelectBuilding(0x4a9ef0, value)) further confirms the global is
+       consumed elsewhere, not an always-zero dead slot.
+
+       GameView::selected_building is currently declared `Building*` in
+       GameView.h even though its evidenced type is `Entity*` (the common
+       base of Building, VehicleEditor, and Train — see GameView.h's own
+       doc comment on that field); retyping it is a separate, deliberately
+       deferred task. Comparing through `Entity*` here is still legal
+       without that retype: Building and VehicleEditor are each single,
+       non-virtual bases of Entity (game/Building.h, core/VehicleEditor.h),
+       so this upcast never dereferences the field and is address-preserving
+       regardless of which of the three sibling types actually occupies it
+       at runtime. */
+    if (static_cast<Entity*>(vehicle->editors[0]) ==
+        static_cast<Entity*>(static_cast<GameView*>(g_town_view)->selected_building)) {
         Town_SelectBuilding(g_town_view, 0);
         DDRAW_SelectBuilding(g_ddraw_building, 0);
     }
