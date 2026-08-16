@@ -15,8 +15,15 @@
  * base window lifecycle (Create/Show/Hide/Destroy) and a shared cursor
  * backbuffer reference-counting mechanism.
  *
- * Size: 0x740 bytes (1856 bytes)
- * Allocated via: operator_new(0x740)
+ * Size: 0x740 bytes on the original x86 binary (1856 bytes). The real
+ * host `sizeof(Cursor)` is larger and grows further after the 2026-08-16
+ * overlay-accessor overrun-fix pass (six new independent-storage members
+ * added below: primarySurfacePtr, animResdataPtr, cursorBackbufferPtr,
+ * childObj60Storage, cursorRectStorage, overlayResdataPtr — see each
+ * accessor's own doc comment) — not a stale literal to preserve, since
+ * every allocation site uses a real `new Cursor(...)` C++ expression
+ * (core/CGWND.cpp), never a raw `operator_new(0x740)` + placement-new
+ * that would need updating by hand.
  * Vtable: 0x477930 (set during Cursor::Cursor())
  *
  * NOTE: Cursor overlays UI_WindowBase fields in +0x00..+0xE7 with
@@ -144,13 +151,33 @@ public:
      * preserved via the same CursorOverlayValue aliasing technique already
      * used throughout this class (may_alias-tagged, representation-
      * preserving) rather than the plain reference this used when the base
-     * field was itself int32_t. */
+     * field was itself int32_t.
+     *
+     * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass): unlike
+     * primary_surface()/anim_resdata()/child_obj_60()/cursor_rect()/
+     * overlay_resdata()/backbuffer() below, this is NOT an overrun —
+     * reading only the low 4 bytes of an 8-byte pointer field never
+     * touches memory outside `renderSurface`. All five real uses
+     * (Cursor_Render.cpp:54, Cursor_impls.cpp:212/265/440/473) are reads
+     * (`cursor_state() != 0` / `== 0`), never writes, so there is no
+     * half-nulled-pointer hazard in the code as it exists today; a
+     * hypothetical future write through this accessor (e.g.
+     * `cursor_state() = 0`) would leave `renderSurface`'s upper 32 bits
+     * untouched, which could leave a `!= nullptr` check seeing a corrupted
+     * non-null pointer — left as-is (no live write site to fix), flagged
+     * here so a future editor adding one doesn't miss it. All five call
+     * sites are themselves inside Cursor::render()/update_dirty_rect()/
+     * render_with_viewport(), confirmed dead on host today — see
+     * primary_surface()'s doc comment for the full reachability trace. */
     int32_t&    cursor_state()   { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->renderSurface)->value; }
     void*&      cursor_sprite_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->renderSurface)->value; }
 
     /* +0x18..+0x24: viewport clip rectangle (four base int32 fields, now
      * named tileWidth/tileHeight/frameCount/currentFrame in the base class
-     * — renamed 2026-08-16, see UI_WindowBase.h). */
+     * — renamed 2026-08-16, see UI_WindowBase.h). Audited 2026-08-16
+     * (Cursor.h overlay-accessor overrun pass): four plain int32_t fields,
+     * 16 bytes total, unaffected by host pointer widening — an exact fit
+     * for the 16-byte RECT view on both x86 and this host. No overrun. */
     RECT*       clip_rect()      { return reinterpret_cast<RECT*>(&this->tileWidth); }
     const RECT* clip_rect() const { return reinterpret_cast<const RECT*>(&this->tileWidth); }
     int32_t&    clip_rect_left()   { return this->tileWidth; }
@@ -161,14 +188,50 @@ public:
     /* +0x28: timer_id aliases timerId */
     UINT_PTR&   timer_id()       { return this->timerId; }
 
-    /* +0x38: primary_surface aliases UI_WindowBase::lastCursorY (was field_38;
-     * renamed in the base class once dispatch_message's WM_TIMER (0x113) fast
-     * path proved that offset's meaning for the base UI_WindowBase codepath —
-     * see ui/UI_WindowBase.h/.cpp. Cursor overlays the same storage with its
-     * own interpretation, as it does throughout this class.) */
-    void*&      primary_surface() { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->lastCursorY)->value; }
+    /* +0x38: primary_surface — ORIGINAL x86 binary aliased UI_WindowBase::
+     * lastCursorY (was field_38; renamed in the base class once
+     * dispatch_message's WM_TIMER (0x113) fast path proved that offset's
+     * meaning for the base UI_WindowBase codepath — see
+     * ui/UI_WindowBase.h/.cpp) with a 4-byte pointer, the original x86
+     * void*'s size. On this 64-bit host a void* is 8 bytes; aliasing one
+     * over lastCursorY (still a plain 4-byte int32_t, unchanged by the
+     * 2026-08-16 EndPaintEx/Render retype pass) is a CERTAIN clobber, not
+     * merely a possible one — the very next base fields are captureFlag
+     * (uint8_t, +0x3C), field_3D (uint8_t, +0x3D) and _pad_3E (2 bytes),
+     * exactly 4 bytes with no alignment room for the compiler to insert
+     * padding before them (align-1 fields), so the extra 4 bytes written
+     * by an 8-byte pointer store land exactly on captureFlag/field_3D/
+     * _pad_3E, not into any gap.
+     *
+     * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass): every
+     * real reader/writer of primary_surface() lives in Cursor::render()
+     * (0x414C20), Cursor::render_with_viewport() (0x415440),
+     * Cursor::wait_for_blit() (0x414BB0), Cursor::create() (0x4169E0) and
+     * Cursor::show() (0x416B80) — none reachable on host today: show()'s
+     * only entry point, the free function Cursor_Show(void*)
+     * (shared/defsym_stubs.cpp), is a permanent host no-op stub; create()
+     * has zero callers outside the `#ifdef _WIN32` branch of
+     * core/CGWND.cpp::InitAllSubsystems; render()/render_with_viewport()/
+     * wait_for_blit() have zero callers anywhere in the tree (confirmed by
+     * grep, not just this class's own uses). Cursor::init() and
+     * Cursor::base_destructor() — the only two Cursor methods that run
+     * unconditionally on host (constructor/destructor) — never touch this
+     * slot. Given this class's established anim_frame()/capture_flag()
+     * precedent of fixing trivial, risk-free overruns even when dead on
+     * host today (independent storage costs nothing and removes the
+     * corruption if/when the render path is later wired up), this gets
+     * its own storage rather than being merely documented. */
+    void*&      primary_surface() { return this->primarySurfacePtr; }
+    void*       primarySurfacePtr = nullptr;  // +0x38 in the original binary (see above)
 
-    /* +0x3C: sprite_width (uint32_t) overlays captureFlag + _pad_3E */
+    /* +0x3C: sprite_width (uint32_t) overlays captureFlag + _pad_3E.
+     * Audited 2026-08-16 (Cursor.h overlay-accessor overrun pass):
+     * captureFlag(1) + field_3D(1) + _pad_3E(2) = 4 bytes exactly, an exact
+     * fit for a 4-byte uint32_t regardless of host pointer width (no
+     * pointer involved here). No overrun. Note this is the same 4-byte
+     * slot primary_surface()'s doc comment (above) shows would be clobbered
+     * by an 8-byte pointer store — this accessor itself is fine, it's
+     * primary_surface() that was the hazard. */
     uint32_t&   sprite_width()   { return reinterpret_cast<CursorOverlayValue<uint32_t>*>(&this->captureFlag)->value; }
 
     /* +0x3D: high byte of the sprite_width dword (+0x3C). Alias of base
@@ -179,8 +242,30 @@ public:
     /* +0x40: sprite_height aliases field_40 */
     int32_t&    sprite_height()  { return this->field_40; }
 
-    /* +0x44: anim_resdata (RESDATA*) overlays activeFlag + _pad_45 (4 bytes) */
-    RESDATA*&   anim_resdata()   { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(&this->activeFlag)->value; }
+    /* +0x44: anim_resdata — ORIGINAL x86 binary aliased a 4-byte RESDATA*
+     * over activeFlag (uint8_t, +0x44) + _pad_45 (3 bytes) — the original
+     * void*'s size. On this 64-bit host a RESDATA* is 8 bytes: `sizeof(T)`
+     * (8) exceeds the 4 bytes of declared storage at this alias site. The
+     * next base field is now `cursorBackSurface` (IDirectDrawSurface4*,
+     * retyped 2026-08-16 EndPaintEx/Render pass — 8 bytes, align-8) —
+     * whether the extra 4 bytes land in compiler alignment padding before
+     * that pointer or in the pointer's own low bytes depends on the host
+     * compiler's actual layout choice for `activeFlag`/`_pad_45` before an
+     * align-8 member; not measurable without building, so this is
+     * PADDING-DEPENDENT, not a certain clobber (unlike primary_surface()/
+     * backbuffer()/cursor_rect()/overlay_resdata() below). The fix removes
+     * the question either way.
+     *
+     * Surveyed 2026-08-16: every real reader/writer of anim_resdata() lives
+     * in Cursor::render() (0x414C20), Cursor::update_dirty_rect() (0x414FB0)
+     * and Cursor::render_with_viewport() (0x415440) — all confirmed to have
+     * zero callers anywhere in the tree (dead on host today; see
+     * primary_surface()'s doc comment above for the fuller reachability
+     * trace of this class's render pipeline). Given independent storage is
+     * trivial and risk-free (same anim_frame()/capture_flag() precedent),
+     * fixed rather than merely documented. */
+    RESDATA*&   anim_resdata()   { return this->animResdataPtr; }
+    RESDATA*    animResdataPtr = nullptr;  // +0x44 in the original binary (see above)
 
     /* +0x48: anim_frame — ORIGINAL x86 binary reused the same 4-byte slot
      * at +0x48 for both this animation-frame counter and the base class's
@@ -248,76 +333,226 @@ public:
      * "valid cached rect" that isn't one) — a real hazard, not a faithful-
      * but-harmless quirk, so this one gets independent storage.
      *
-     * This reuse became a live hazard 2026-08-16 when UI_WindowBase::Render
-     * was integrated as a real method: Render() unconditionally executes
-     * `this->dirtyRect = dirty;` (updating .right, i.e. this+0x58) whenever
-     * `renderSurface != nullptr && captureFlag(+0x3C) == 0` — and
-     * Cursor::handle_locomotive_select (0x41A360) does call
-     * `set_render_surface()` with a real, non-null surface (the selected
-     * toolbar ButtonSprite), so a live Cursor instance's renderSurface can
-     * genuinely be non-null on host. Once that's true, a subsequent
-     * Render() call would silently clobber this flag's original x86 slot
-     * with a rect coordinate — corrupting real mouse-capture state.
+     * This reuse would become a live hazard if UI_WindowBase::Render (a real
+     * method since 2026-08-16) ever ran with `renderSurface != nullptr &&
+     * captureFlag(+0x3C) == 0`: Render() unconditionally executes
+     * `this->dirtyRect = dirty;` (updating .right, i.e. this+0x58) in that
+     * case.
      *
-     * Per CLAUDE.md ("exact byte-for-byte x86 layout parity is explicitly
-     * a non-goal for host builds"), this class gets its own independent
-     * storage rather than reproducing that original-slot collision. */
+     * CORRECTION (2026-08-16, Cursor.h overlay-accessor overrun pass): an
+     * earlier version of this comment cited `Cursor::handle_locomotive_select`
+     * (0x41A360) calling `set_render_surface()` with a real, non-null
+     * surface as evidence this is live on host today. That conflated the
+     * *original x86 binary's* call graph with *host* reachability:
+     * `handle_locomotive_select` has zero callers anywhere in this tree
+     * (confirmed by grep, not just within this class) — its only would-be
+     * caller is inside the same dead render/editor pipeline documented in
+     * primary_surface()'s doc comment above (reached only via
+     * Cursor::show(), whose sole entry point `Cursor_Show(void*)` is a
+     * permanent host no-op stub). So `renderSurface` is not, in fact, known
+     * to go non-null on a live Cursor instance on host today.
+     *
+     * The independent storage below is kept regardless: per CLAUDE.md
+     * ("exact byte-for-byte x86 layout parity is explicitly a non-goal for
+     * host builds") and this class's own anim_frame() precedent, a
+     * genuinely unrelated-concept slot collision like this one gets its own
+     * storage even when currently unreachable — trivial, risk-free, and
+     * correct the moment any of this class's render path is wired up. */
     uint8_t&    capture_flag()   { return this->mouseCaptureFlag; }
     uint8_t     mouseCaptureFlag = 0;  // +0x58 in the original binary (see above)
 
-    /* +0x5C: backbuffer aliases dirtyRect.bottom.
+    /* +0x5C: backbuffer — ORIGINAL x86 binary aliased a 4-byte void* over
+     * `dirtyRect.bottom` (a lone 4-byte int32_t, immediately followed in
+     * memory by `childCount0`, also 4 bytes) — the original void*'s size,
+     * fitting exactly. On this 64-bit host a void* is 8 bytes: a CERTAIN
+     * clobber, since `childCount0` is an int32_t (align-4) with nothing to
+     * pad before it — the extra 4 bytes an 8-byte pointer store writes here
+     * land exactly on `childCount0`, not into any gap.
      *
-     * PRE-EXISTING BUG, NOT introduced by the 2026-08-16 EndPaintEx/Render
-     * pass (the prior `field_5C` version had the identical problem — this
-     * merely preserves it under the new field path, unchanged in effect):
-     * `dirtyRect.bottom` is a lone 4-byte `int32_t`, immediately followed
-     * in memory by `childCount0` (also 4 bytes). Aliasing an 8-byte `void*`
-     * over it means every real read/write of `backbuffer()` (actively used
-     * — see `Cursor.cpp`'s `this->backbuffer() = _g_cursor_back;` and
-     * `Cursor_impls.cpp`/`Cursor_Render.cpp`'s ~14 call sites) touches 4
-     * bytes past the end of `dirtyRect.bottom`, corrupting/misreading
-     * `childCount0`. This needs its own dedicated investigation and fix
-     * (giving `backbuffer` real, non-overlapping storage — likely
-     * requiring `Cursor`'s downstream field offsets to shift) and is
-     * explicitly out of scope for the EndPaintEx/Render pass that
-     * surfaced it; flagged here so it isn't missed. */
-    void*&      backbuffer()     { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->dirtyRect.bottom)->value; }
+     * NOT a NEW bug (the prior `field_5C` version had the identical
+     * problem — this merely preserves it under the new field path,
+     * unchanged in effect); flagged for its own pass in the 2026-08-16
+     * EndPaintEx/Render integration and now resolved here.
+     *
+     * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass): every
+     * real read/write of `backbuffer()` — `Cursor::init_sprites()`'s
+     * `this->backbuffer() = _g_cursor_back;` (Cursor.cpp:574) plus ~14
+     * call sites in `Cursor_impls.cpp`/`Cursor_Render.cpp`'s render(),
+     * render_with_viewport(), update_dirty_rect() — is confirmed dead on
+     * host today: `Cursor::init_sprites()` (0x414130) has exactly one real
+     * x86 caller and that caller chain is entirely `#ifdef _WIN32`-gated
+     * (see PROGRESS.md's 2026-08-14 entry); render()/render_with_viewport()/
+     * update_dirty_rect() have zero callers anywhere in the tree (see
+     * primary_surface()'s doc comment above for the fuller trace).
+     * `base_destructor()` — the one Cursor method besides the constructor
+     * that runs unconditionally on host — never touches this slot either.
+     * Given independent storage is trivial and risk-free, fixed here rather
+     * than left merely documented, matching this class's anim_frame()/
+     * capture_flag() precedent. */
+    void*&      backbuffer()     { return this->cursorBackbufferPtr; }
+    void*       cursorBackbufferPtr = nullptr;  // +0x5C in the original binary (see above)
 
-    /* +0x60: child_obj_60 aliases childCount0 */
-    void*&      child_obj_60()   { return reinterpret_cast<CursorOverlayValue<void*>*>(&this->childCount0)->value; }
+    /* +0x60: child_obj_60 — ORIGINAL x86 binary aliased a 4-byte void* over
+     * `childCount0` (int32_t, +0x60). On this 64-bit host a void* is 8
+     * bytes: `sizeof(T)` (8) exceeds the 4 bytes of declared storage here.
+     * The next base field is `childObj0` (void*, align-8, already a real
+     * pointer in the base class) — whether the extra 4 bytes land in
+     * compiler alignment padding before `childObj0` or clobber its own low
+     * bytes depends on the host compiler's actual layout choice; not
+     * measurable without building, so this is PADDING-DEPENDENT, not a
+     * certain clobber (see anim_resdata()'s doc comment above for the same
+     * distinction). The fix removes the question either way.
+     *
+     * Surveyed 2026-08-16: every real use of `child_obj_60()` is in
+     * Cursor::draw_locomotive_preview() (0x418E20), handle_locomotive_select()
+     * (0x41A360), handle_toolbar_hover() (0x41A460) and
+     * upload_custom_content() (0x419B10) — all confirmed to have zero
+     * callers anywhere in the tree (dead on host today; see
+     * primary_surface()'s doc comment above for the reachability trace of
+     * this class's render/editor pipeline). Fixed anyway (trivial,
+     * risk-free), matching this class's established precedent. */
+    void*&      child_obj_60()   { return this->childObj60Storage; }
+    void*       childObj60Storage = nullptr;  // +0x60 in the original binary (see above)
 
-    /* +0x64: curs_pos_x aliases childObj0 */
+    /* +0x64: curs_pos_x aliases childObj0 (void*, already a real 8-byte
+     * pointer in the base class) as a 4-byte int32_t. This is an UNDER-read
+     * (4 of 8 bytes), not an overrun — no memory outside `childObj0` is
+     * touched, in either direction.
+     *
+     * NOT retyped/renamed in this pass: the only evidenced real use
+     * (Cursor::wait_for_blit(), 0x414BB0, and Cursor_Editor.cpp's polling
+     * loop around it) treats this slot as a pointer-sized HDC out-param —
+     * `wait_for_blit()`'s own doc comment says it "returns the HDC value
+     * written to this->curs_pos_x" — passed as `&this->curs_pos_x()` to a
+     * vtable call and read back via `reinterpret_cast<void*>(static_cast<
+     * intptr_t>(this->curs_pos_x()))` at every other call site
+     * (Cursor_new_impls.cpp:865/1324/1406/1733). That evidence supports
+     * neither the current `int32_t` type (an HDC needs the full pointer
+     * width) nor the name "cursor position x" (nothing observed treats it
+     * as an X coordinate) — but guessing a replacement type/name without
+     * further disassembly evidence would violate this project's
+     * don't-guess-field-purposes rule. Filed as an explicit follow-up
+     * rather than fixed in this pass: re-derive curs_pos_x()'s real
+     * identity from wait_for_blit()'s original disassembly (0x414BB0)
+     * before retyping. All five call sites are themselves inside
+     * Cursor::wait_for_blit()/draw_locomotive_preview()/
+     * handle_locomotive_select()/handle_toolbar_hover()/
+     * upload_custom_content(), confirmed dead on host today (see
+     * primary_surface()'s doc comment above) — so this is a naming/typing
+     * accuracy issue, not a live corruption risk, either way. */
     int32_t&    curs_pos_x()     { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->childObj0)->value; }
 
-    /* +0x68: cursor_rect (RECT) overlays childCount1..childObj2 */
-    RECT&       cursor_rect()    { return reinterpret_cast<CursorOverlayValue<RECT>*>(&this->childCount1)->value; }
-    const RECT& cursor_rect() const {
-        return reinterpret_cast<const CursorOverlayValue<RECT>*>(&this->childCount1)->value;
-    }
+    /* +0x68: cursor_rect — ORIGINAL x86 binary aliased a 16-byte RECT over
+     * `childCount1` (int32_t, +0x68) through `childObj2`'s first 4 bytes
+     * (childCount1 4 + childObj1 4 [x86 void* size] + childCount2 4 + first
+     * 4 of childObj2 4 = 16, fitting exactly on x86). On this 64-bit host
+     * `childObj1` widened to an 8-byte void*: the base layout is now
+     * childCount1(4) + childObj1(8, align-8, so the compiler must insert 4
+     * bytes of padding before it) + childCount2(4) = 16 bytes either way —
+     * a RECT read/write at childCount1 reaches all the way through
+     * childObj1 and into childCount2 on BOTH possible paddings (whether the
+     * 4-byte pad sits before or is absorbed elsewhere, the total distance
+     * to childCount2's end is still 16). This is therefore a CERTAIN
+     * clobber of `childObj1` (a real, vtable-released child object
+     * pointer — see UI_WindowBase.h's child-object doc comment) and
+     * `childCount2`, not merely padding-dependent.
+     *
+     * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass): every
+     * real read/write of `cursor_rect()` is in Cursor::render() (0x414C20),
+     * Cursor::update_dirty_rect() (0x414FB0) and
+     * Cursor::render_with_viewport() (0x415440) — all confirmed to have
+     * zero callers anywhere in the tree (dead on host today; see
+     * primary_surface()'s doc comment above for the reachability trace).
+     * `base_destructor()` — which DOES run unconditionally on host and
+     * unconditionally tests/releases `childObj1` via its own vtable slot
+     * (see UI_WindowBase::base_destructor) — never writes through this
+     * accessor itself, but a corrupted `childObj1` from any future write
+     * through `cursor_rect()` would feed directly into that live release
+     * path (a release-through-a-wild-pointer in a destructor that already
+     * runs today). That is the strongest argument for fixing rather than
+     * merely documenting this one. */
+    RECT&       cursor_rect()    { return this->cursorRectStorage; }
+    const RECT& cursor_rect() const { return this->cursorRectStorage; }
+    RECT        cursorRectStorage = {};  // +0x68 in the original binary (see above)
 
-    /* +0x78: prev_cursor_rect (RECT) overlays title[50] */
+    /* +0x78: prev_cursor_rect (RECT) overlays title[50]. Audited 2026-08-16
+     * (Cursor.h overlay-accessor overrun pass): reads/writes title[0..16),
+     * a 16-byte RECT — `title` is 50 bytes, so this is well within bounds
+     * regardless of host pointer width (RECT is four plain int32_t
+     * fields, unaffected by pointer widening). No overrun. */
     RECT&       prev_cursor_rect() { return reinterpret_cast<CursorOverlayValue<RECT>*>(this->title)->value; }
 
-    /* +0x88: viewport_render_enabled (inside title buffer at +0x10) */
+    /* +0x88: viewport_render_enabled (inside title buffer at +0x10).
+     * Audited 2026-08-16: single-byte access at title[0x10] — within
+     * bounds. No overrun. */
     uint8_t&    viewport_render_enabled() { return reinterpret_cast<CursorOverlayValue<uint8_t>*>(this->title + 0x10)->value; }
 
-    /* +0x90: primary_surface_fmt (inside title buffer at +0x18) */
+    /* +0x90: primary_surface_fmt (inside title buffer at +0x18). Audited
+     * 2026-08-16: 4-byte int32_t at title[0x18..0x1C) — within bounds,
+     * unaffected by host pointer width. No overrun. */
     int32_t&    primary_surface_fmt()  { return reinterpret_cast<CursorOverlayValue<int32_t>*>(this->title + 0x18)->value; }
-    /* +0x94: primary_surface_obj (inside title buffer at +0x1C) */
+    /* +0x94: primary_surface_obj (inside title buffer at +0x1C). Audited
+     * 2026-08-16 (Cursor.h overlay-accessor overrun pass): reads/writes
+     * title[0x1C..0x24), an 8-byte void* — fits within `title`'s 50 bytes
+     * (0x00..0x31 inclusive) on this 64-bit host same as on the original
+     * x86 (where it was 4 bytes at the same offset). No overrun. */
     void*&      primary_surface_obj()  { return reinterpret_cast<CursorOverlayValue<void*>*>(this->title + 0x1C)->value; }
-    /* +0x98: primary_resdata (RESDATA*, inside title buffer at +0x20) */
+    /* +0x98: primary_resdata (RESDATA*, inside title buffer at +0x20).
+     * Audited 2026-08-16: reads/writes title[0x20..0x28) — fits within
+     * `title`'s 50 bytes. No overrun. */
     RESDATA*&   primary_resdata()      { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(this->title + 0x20)->value; }
-    /* +0x9C: overlay_surface_fmt (inside title buffer at +0x24) */
+    /* +0x9C: overlay_surface_fmt (inside title buffer at +0x24). Audited
+     * 2026-08-16: reads/writes title[0x24..0x28), a 4-byte int32_t
+     * (unaffected by host pointer widening). No overrun. */
     int32_t&    overlay_surface_fmt()  { return reinterpret_cast<CursorOverlayValue<int32_t>*>(this->title + 0x24)->value; }
-    /* +0xA0: overlay_surface_obj (inside title buffer at +0x28) */
+    /* +0xA0: overlay_surface_obj (inside title buffer at +0x28). Audited
+     * 2026-08-16: reads/writes title[0x28..0x30) — fits within `title`'s 50
+     * bytes (last valid index 0x31). No overrun. */
     void*&      overlay_surface_obj()  { return reinterpret_cast<CursorOverlayValue<void*>*>(this->title + 0x28)->value; }
-    /* +0xA4: overlay_resdata (RESDATA*, inside title buffer at +0x2C) */
-    RESDATA*&   overlay_resdata()      { return reinterpret_cast<CursorOverlayValue<RESDATA*>*>(this->title + 0x2C)->value; }
 
-    /* +0xDB: wndproc_flag (inside workRect at +0x7) */
+    /* +0xA4: overlay_resdata — ORIGINAL x86 binary aliased a 4-byte
+     * RESDATA* at title+0x2C (title[0x2C..0x30), fitting within `title`'s
+     * 50 bytes on x86). On this 64-bit host a RESDATA* is 8 bytes:
+     * title[0x2C..0x34) — but `title` is only 50 (0x32) bytes, so the last
+     * valid index is 0x31. This reads/writes 2 bytes PAST THE END OF
+     * `title` (indices 0x32 and 0x33), landing on the base class's 1-byte
+     * gap at +0xAA (`title` ends at +0x78+0x32 = +0xAA) and
+     * `UI_WindowBase::windowCreated` at +0xAB — a CERTAIN clobber:
+     * `windowCreated` is a `uint8_t` (align-1), so there is no compiler
+     * padding to absorb the overrun, and this is also a genuine
+     * out-of-bounds array access (not just a neighbor-field clobber like
+     * the others in this file), unlike any other title-buffer accessor
+     * above. `windowCreated` gates `create_full_window()`/`on_size()` — a
+     * corrupted value here would misroute real window-creation state.
+     *
+     * NEW finding, 2026-08-16 (Cursor.h overlay-accessor overrun pass) —
+     * not previously flagged. Every real read/write of `overlay_resdata()`
+     * is in Cursor::render() (0x414C20), Cursor::update_dirty_rect()
+     * (0x414FB0), Cursor::render_with_viewport() (0x415440), and the
+     * confirmed-dead `Cursor::init_sprites()` write site
+     * (`this->overlay_resdata() = resdata;`, Cursor.cpp:525 — see
+     * backbuffer()'s doc comment above for `init_sprites()`'s dead-on-host
+     * evidence: its one real x86 caller chain is entirely
+     * `#ifdef _WIN32`-gated). render()/update_dirty_rect()/
+     * render_with_viewport() are themselves confirmed to have zero callers
+     * anywhere in the tree (see primary_surface()'s doc comment above).
+     * Fixed anyway — independent storage is trivial and risk-free, and
+     * `windowCreated` is live base state read unconditionally by
+     * `on_size()`/`create_full_window()`, so this is worth removing even
+     * while dead, matching this class's established precedent. */
+    RESDATA*&   overlay_resdata()      { return this->overlayResdataPtr; }
+    RESDATA*    overlayResdataPtr = nullptr;  // +0xA4 in the original binary (see above)
+
+    /* +0xDB: wndproc_flag (inside workRect at +0x7). Audited 2026-08-16
+     * (Cursor.h overlay-accessor overrun pass): single-byte access at
+     * byte offset 7 of a 16-byte RECT — within bounds regardless of host
+     * pointer width (RECT is four plain int32_t fields). No overrun. */
     uint8_t&    wndproc_flag()   { return reinterpret_cast<CursorOverlayValue<uint8_t>*>(reinterpret_cast<uint8_t*>(&this->workRect) + 7)->value; }
 
-    /* +0xE4: cached_width (int32_t) overlays visible (uint8_t) + _pad_E5 */
+    /* +0xE4: cached_width (int32_t) overlays visible (uint8_t) + _pad_E5.
+     * Audited 2026-08-16: visible(1) + _pad_E5(3) = 4 bytes exactly, an
+     * exact fit for a 4-byte int32_t (no pointer involved, unaffected by
+     * host pointer width). No overrun. */
     int32_t&    cached_width()   { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->visible)->value; }
 
     /* +0xE8: cached_height — first field beyond base class (0xE8 bytes) */
