@@ -538,6 +538,43 @@ public:
      * Default: 0x422EA0 (UI_DefWndProc passthrough).
      */
     virtual LRESULT on_activate_app(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+    /* ================================================================ */
+    /* Non-virtual paint-pipeline helpers (0x426B00-0x426EB0)             */
+    /*                                                                    */
+    /* Moved here 2026-08-16 from a stale "UIPANEL_*"-prefixed             */
+    /* transcription in ui/UIPANEL.cpp: get_xrefs_to on every one of      */
+    /* these shows real callers exclusively in GameSetupPanel, Cursor,     */
+    /* NameEntryPanel, BuildingPanel, PostcardAlbum, Town, DPlayManager,   */
+    /* and NETMAN_* — never a UIPANEL instance — and a Ghidra              */
+    /* function-address-range listing confirms they sit in the same       */
+    /* contiguous MSVC method block as SetMode (0x425FD0)/                */
+    /* SetRenderSurface (0x426020)/dispatch_message (0x426140), ending     */
+    /* right before UIPANEL's own real ctor begins a new block at         */
+    /* 0x427370. None of these four are vtable slots (not in the 37-slot  */
+    /* layout above) — subclasses call them directly.                     */
+    /* ================================================================ */
+
+    /**
+     * BeginPaint — start buffered GDI-style painting to the primary surface.
+     * Address: 0x426B00
+     *
+     * Unlocks the primary surface, then calls IDirectDrawSurface4::GetDC()
+     * on the primary surface (original vtable+0x44, confirmed to match
+     * GetDC's real COM ABI slot 17). Retries up to 1000 times with 10ms
+     * delay while GetDC keeps failing, then calls
+     * WIN32_FatalError()+ExitProcess(1) — a genuine original fatal path,
+     * not something to soften. Every real caller pushes this->hWnd as a
+     * second argument, but it is provably dead (DDRAW_UnlockPrimary,
+     * 0x45B940, is void(void) and never reads it) and is not part of this
+     * method's signature. See ui/UI_WindowBase.cpp for the full evidence
+     * trail, including why g_primary_surface being wired to a real surface
+     * today would make this retry loop always exhaust and self-destruct
+     * the process (Sdl3DirectDrawSurface::GetDC is a permanent no-op).
+     *
+     * @return  HDC from the primary surface
+     */
+    HDC BeginPaint();
 };
 
 /* ================================================================== */

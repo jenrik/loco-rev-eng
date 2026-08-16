@@ -45,25 +45,51 @@ the stale mode3 branches below) wire these globals without addressing this
 first — it would turn a currently-safe no-op into a reproducible crash days
 or weeks later when someone least expects it.
 
-**Update (2026-08-16)**: `UIPANEL::BeginPaint` itself is now integrated as a
-real class method (typed `IDirectDrawSurface4::GetDC()` call, real HRESULT/
+**Update (2026-08-16)**: `BeginPaint` itself is now integrated as a real
+class method (typed `IDirectDrawSurface4::GetDC()` call, real HRESULT/
 out-param handling — see PROGRESS.md's 2026-08-16 entry) — the raw
 vtable-slot dispatch for `GetDC` is gone. This does **not** lift the
 blocker above: `g_primary_surface` is still unwired and
 `Sdl3DirectDrawSurface::GetDC` is still a permanent no-op, so the retry-
 then-`ExitProcess(1)` path is exactly as fatal as before the moment the
-global is wired. A thin free-function shim (`UIPANEL_BeginPaint(void*)`)
-was kept over the new method since ~9 other files still call it as a free
-function; two genuine call-0-class landmines among those callers
-(`game/BuildingPanel.cpp`, `network/NetworkPlayerList.cpp`) were fixed
-alongside it.
+global is wired.
 
-`ui/UIPANEL.cpp` still has 8 more raw vtable-slot dispatch sites (`Unlock`×1
-in `UIPANEL_EndPaintEx`, `Blt`×7 in `UIPANEL_Render`) — clean, low-risk,
-evidenced conversions, deliberately left alone so the file doesn't end up
-half-migrated again. Convert all of them together once `GetDC` has a real
-answer. `world/tilemap.cpp` also has raw vtable dispatch on
-`g_primary_surface`, not yet examined at all.
+**Correction (2026-08-16, same day)**: the first integration pass wrongly
+attributed `BeginPaint` to `UIPANEL` — `UIPANEL.h` had declared it as a
+`UIPANEL` method, and that was trusted without checking real callers first.
+`get_xrefs_to` on 0x426B00 shows every real caller is `GameSetupPanel`,
+`Cursor`, `NameEntryPanel`, `BuildingPanel`, `PostcardAlbum`, or
+`DPlayManager` — never a `UIPANEL` instance — and a Ghidra
+function-address-range listing confirms 0x426900-0x426EB0 (`WindowProc`,
+`OnDestroy`, `BeginPaint`, `EndPaint`, `EndPaintEx`, `Render`) sit in the
+same contiguous method block as `UI_WindowBase`'s own confirmed methods
+(`SetMode`/`SetRenderSurface`/`dispatch_message`), ending well before
+UIPANEL's own real ctor begins a new block at 0x427370. All six are
+`UI_WindowBase` members; the "`UIPANEL_`" prefix was a stale Ghidra-era
+misnomer. Fixed: `WindowProc`/`OnDestroy` were dead duplicates of the
+already-correct `UI_WindowBase::on_mouse_move()`/`on_close()` and were
+removed entirely; `BeginPaint` moved to `UI_WindowBase::BeginPaint()`
+(`ui/UI_WindowBase.h`/`.cpp`) with its compatibility shim retargeted from
+`UIPANEL*` to `UI_WindowBase*`. See PROGRESS.md's "Correction to the above"
+milestone entry for the full evidence trail, including the one known
+remaining gap (`game/BuildingPanel.cpp` calls the shim despite
+`BuildingPanel` not itself inheriting `UI_WindowBase` — a separate,
+pre-existing modeling gap, documented but not fixed).
+
+`ui/UIPANEL.cpp` still has `EndPaint`/`EndPaintEx`/`Render` as free
+functions (also really `UI_WindowBase` members, per the same evidence) with
+8 raw vtable-slot dispatch sites (`ReleaseDC`×1 — NOT `Unlock` as previously
+documented here, corrected 2026-08-16 — in `EndPaintEx`, `Blt`×7 split 2/5
+across `EndPaintEx`/`Render`). A dedicated reverse-engineer pass attempted
+to migrate these into `UI_WindowBase` and correctly blocked: `this+0x48` is
+disputed between "offscreen surface pointer" (what the transcription
+assumes) and `UI_WindowBase::cursorRefCount` (already documented at that
+offset) — live vtable dispatch through it conflicts with the plain-refcount
+reading, and needs its own resolution before implementation. This is a
+materially bigger task than "convert the vtable dispatch" — 132 real callers
+across 7+ subclasses, not a single leaf class — tracked as its own item in
+PROGRESS.md's Priority 1. `world/tilemap.cpp` also has raw vtable dispatch
+on `g_primary_surface`, not yet examined at all.
 
 ## Stale, do-not-merge-as-is branches (fetched, not integrated)
 
@@ -127,12 +153,17 @@ work to merge. Confirm with the user before reviving any of them.
 ## Suggested next steps, in order
 
 1. Real `GetDC` implementation (or a non-fatal path for
-   `UIPANEL_BeginPaint`'s callers) — required before wiring
+   `UI_WindowBase::BeginPaint`'s callers) — required before wiring
    `g_primary_surface`/`g_backbuffer`. This is real, separately-scoped GDI
    work; do not shortcut it by wiring the globals anyway.
-2. Once `GetDC` has a real answer, convert `ui/UIPANEL.cpp`'s remaining
-   raw-dispatch sites (`Unlock`×1, `Blt`×7) together, plus examine
-   `world/tilemap.cpp`'s raw vtable dispatch on `g_primary_surface`.
+2. Resolve `UI_WindowBase`'s `this+0x48` field-identity conflict
+   (offscreen-surface pointer vs. the already-documented `cursorRefCount`)
+   — the hard prerequisite for migrating `EndPaintEx`/`Render` off their
+   free-function transcription in `ui/UIPANEL.cpp`. Once resolved, convert
+   the file's remaining raw-dispatch sites (`ReleaseDC`×1, `Blt`×7)
+   together, plus examine `world/tilemap.cpp`'s raw vtable dispatch on
+   `g_primary_surface`. See PROGRESS.md's Priority-1 item for the full
+   scope (132 real callers across 7+ `UI_WindowBase` subclasses).
 3. Leave the branches above alone unless the user specifically asks to
    revive one — confirm which problem they're meant to solve first, since
    the codebase has moved substantially since they were written.

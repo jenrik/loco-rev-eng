@@ -185,88 +185,25 @@ public:
      */
     byte HandleDrag(int resource, uint16_t action);
 
-    /**
-     * WindowProc — per-panel window message handler.
-     * Address: 0x426900
-     *
-     * When the message hwnd matches this->hwnd (+0x08): unlocks primary,
-     * renders the panel (UIPANEL_Render), re-locks primary.
-     * Always forwards to DefWindowProcA.
-     */
-    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-    /**
-     * OnDestroy — panel destroy handler.
-     * Address: 0x426A90
-     *
-     * Sets alive flag (+0xAB) to 0, calls DestroyWindow(this->hwnd).
-     * If child_count (+0x0C) is 0, calls PostQuitMessage(0).
-     *
-     * @return  0
-     */
-    LRESULT OnDestroy();
-
-    /**
-     * BeginPaint — start buffered panel rendering.
-     * Address: 0x426B00
-     *
-     * Unlocks the primary surface, then calls
-     * IDirectDrawSurface4::GetDC() on the primary surface (original
-     * vtable+0x44, confirmed to match GetDC's real COM ABI slot).
-     * Retries up to 1000 times with 10ms delay while GetDC keeps
-     * failing, then calls WIN32_FatalError()+ExitProcess(1) — a
-     * genuine original fatal path. Every real caller pushes
-     * this->hwnd as a second argument, but it is provably dead
-     * (DDRAW_UnlockPrimary, 0x45B940, is void(void) and never reads
-     * it) and is not part of this method's signature or behavior.
-     * See ui/UIPANEL.cpp for the full evidence trail, including why
-     * g_primary_surface being wired to a real surface today would
-     * make this retry loop always exhaust and self-destruct the
-     * process (Sdl3DirectDrawSurface::GetDC is a permanent no-op).
-     *
-     * @return  HDC from the primary surface
-     */
-    HDC BeginPaint();
-
-    /**
-     * EndPaint — end buffered panel rendering (simple wrapper).
-     * Address: 0x426B70
-     *
-     * Delegates to EndPaintEx(this, this->hwnd, 0, 0, &stack_rect).
-     * Has a WndProc-style calling convention (4 stack args ignored).
-     */
-    void EndPaint();
-
-    /**
-     * EndPaintEx — full present with cursor overlay and dirty rect.
-     * Address: 0x426B90
-     *
-     * Main EndPaint: unlocks primary surface, computes dirty rect from
-     * cursor, blits tile content into the offscreen buffer, presents the
-     * dirty region to the screen, and copies the background back from the
-     * backbuffer. Two paths:
-     *   (A) no tile_map → simple DDRAW_PresentRect
-     *   (B) tile_map active → cursor-relative blit + background restore
-     *
-     * @param hdc            int — HDC from BeginPaint or surface handle
-     * @param unlock_param   int — parameter to unlock surface (0 = skip)
-     * @param unlock_flag    byte — if 0, proceed with rendering; if non-zero, only unlock
-     * @param restrict_rect  RECT* — optional clip rect to restrict present area
-     */
-    void EndPaintEx(int hdc, int unlock_param, byte unlock_flag, RECT* restrict_rect);
-
-    /**
-     * Render — per-frame panel foreground render with cursor overlay.
-     * Address: 0x426EB0
-     *
-     * Computes dirty rect from cursor position, clips to viewport (+0xD4..+0xE0),
-     * inflates by 4 pixels for smooth cursor when <256x256 visible region.
-     * Blits tile content into offscreen buffer via UIPANEL_Blit, then copies
-     * the result to the primary surface. Restores background from backbuffer.
-     *
-     * @param enable_tile_map  byte — if non-zero and tile_map exists, render tile content
-     */
-    void Render(byte enable_tile_map);
+    /* WindowProc/OnDestroy/BeginPaint/EndPaint/EndPaintEx/Render were
+     * declared here (addresses 0x426900-0x426EB0) but do NOT belong to
+     * UIPANEL — corrected 2026-08-16. get_xrefs_to on every one of them
+     * shows callers exclusively from GameSetupPanel, Cursor, NameEntryPanel,
+     * BuildingPanel, PostcardAlbum, Town, DPlayManager, NETMAN_* — never a
+     * UIPANEL instance. A Ghidra function-address-range listing confirms
+     * they sit in the same contiguous MSVC method block as
+     * UI_WindowBase_SetMode (0x425FD0)/SetRenderSurface (0x426020)/
+     * dispatch_message (0x426140), ending right before UIPANEL's own real
+     * ctor (UIPANEL_InitScrollPanel, 0x427370) begins a new block — i.e.
+     * these six are UI_WindowBase members, the "UIPANEL_" Ghidra prefix is
+     * a stale misnomer. WindowProc (0x426900) and OnDestroy (0x426A90) were
+     * dead duplicates of the already-correct UI_WindowBase::on_mouse_move()/
+     * on_close() (ui/UI_WindowBase.cpp) and have been removed entirely.
+     * BeginPaint (0x426B00) has been moved to UI_WindowBase (see its real
+     * declaration/implementation there). EndPaint (0x426B70)/EndPaintEx
+     * (0x426B90)/Render (0x426EB0) remain temporarily in ui/UIPANEL.cpp as
+     * free functions pending a dedicated migration — do not re-declare them
+     * as UIPANEL methods; see PROGRESS.md's 2026-08-16 correction entry. */
 
     /**
      * StopSound — halt panel sound playback (vtable[7], overrides

@@ -9,6 +9,7 @@
 
 #include "UI_WindowBase.h"
 #include "../graphics/LOCOBITMAP.h"
+#include "../platform/ddraw_interfaces.h"   /* IDirectDrawSurface4 — for BeginPaint's GetDC() */
 #ifndef _WIN32
 #include "sdl3_ddraw.h"
 #endif
@@ -59,6 +60,13 @@ extern void  __fastcall Cursor_SetupSurface(int this_ptr);  /* 0x425DC0 */
 extern void  __fastcall UIPANEL_Render(void* panel, byte flag);  /* 0x426EB0 */
 extern void  __thiscall FormatResourceString(void* resmgr, int string_id,
                                              char* out_buf, int max_len);  /* 0x447330 */
+extern void  WIN32_FatalError(void);
+extern void  ExitProcess(UINT);
+extern void  Sleep(DWORD);
+
+/* DirectDraw globals — void* to avoid IDirectDraw4 dependency at the
+ * declaration site (established pattern, see ui/UIPANEL.cpp). */
+extern void* g_primary_surface;                      /* 0x4FD3C4 */
 
 /* ================================================================== */
 /* Global state                                                        */
@@ -1042,4 +1050,96 @@ void SetWindowVisibleImpl(UI_WindowBase* self, bool visible)
 void UI_SetWindowVisible(void* self, char visible)
 {
     SetWindowVisibleImpl(static_cast<UI_WindowBase*>(self), visible != 0);
+}
+
+/* ================================================================== */
+/* UI_WindowBase::BeginPaint                                           */
+/* Address: 0x426B00                                                   */
+/*                                                                     */
+/* Moved here 2026-08-16 from a stale "UIPANEL_BeginPaint" transcription */
+/* in ui/UIPANEL.cpp (see the correction note in that file and           */
+/* PROGRESS.md's 2026-08-16 entry for the full get_xrefs_to/address-      */
+/* block evidence that this is a UI_WindowBase member, not UIPANEL's).   */
+/* The implementation logic below is unchanged from that prior,          */
+/* already-verified integration pass:                                    */
+/*                                                                       */
+/* Begins buffered painting to the primary surface: unlocks the primary  */
+/* surface, then calls IDirectDrawSurface4::GetDC() to obtain a GDI      */
+/* device context for the sprites/text drawn by callers such as          */
+/* BuildingPanel::draw_item, GameSetupPanel::drawGrid/drawTitle/          */
+/* drawLayoutList, Cursor's color-bar/scroll-button drawing, and         */
+/* NameEntryPanel::on_timer. Retries up to 1000 times at 10ms apiece      */
+/* while GetDC keeps failing, then calls WIN32_FatalError()+             */
+/* ExitProcess(1) — a deliberate original fatal path, not something to   */
+/* soften.                                                                */
+/*                                                                       */
+/* Evidence for the vtable slot: the original x86 dispatches through     */
+/* vtable+0x44 (slot 17), which matches IDirectDrawSurface4::GetDC's     */
+/* real COM ABI position (IUnknown's 3 slots, then                       */
+/* AddAttachedSurface/AddOverlayDirtyRect/Blt/BltBatch/BltFast/           */
+/* DeleteAttachedSurface/EnumAttachedSurfaces/EnumOverlayZOrders/Flip/    */
+/* GetAttachedSurface/GetBltStatus/GetCaps/GetClipper/GetColorKey/GetDC   */
+/* = slot 17 = byte offset 0x44). platform/ddraw_interfaces.h's own       */
+/* C++ declaration order is NOT ABI-accurate (it's grouped by topic, not  */
+/* COM slot order) — but that no longer matters here, since this method   */
+/* dispatches via an ordinary typed virtual call (surface->GetDC(&hdc)),  */
+/* which the compiler slots however it likes for this rebuild.            */
+/*                                                                       */
+/* The original also spills a stack argument (this->hWnd, pushed by every */
+/* caller) across the DDRAW_UnlockPrimary() call for register             */
+/* preservation, then discards it — confirmed dead by decompiling         */
+/* DDRAW_UnlockPrimary (0x45B940): it is void(void) and never reads any   */
+/* incoming parameter. Not reproduced here.                               */
+/*                                                                       */
+/* The original also reuses a raw x86 scratch slot at this+0x4C (this     */
+/* Entity-derived object's world_x storage — see core/GameObject.h) as    */
+/* the GetDC() out-parameter buffer. That storage has moved in the host   */
+/* layout (world_x is no longer at +0x4C here), so a plain local variable */
+/* is used instead; this is a scratch-buffer implementation detail, not   */
+/* part of BeginPaint's observable behavior.                             */
+/*                                                                       */
+/* NOTE: g_primary_surface is still unwired (null) and                   */
+/* Sdl3DirectDrawSurface::GetDC is a permanent no-op returning failure    */
+/* (see platform/ddraw_interfaces.h's Phase 3 note and PROGRESS.md's      */
+/* 2026-08-14 DirectDraw-shim entry) — so this retry-then-ExitProcess(1)  */
+/* path is a live self-destruct hazard the moment g_primary_surface is    */
+/* wired to a real surface, independent of this integration pass. Wiring  */
+/* g_primary_surface and implementing a real GetDC are explicitly out of  */
+/* scope for this change.                                                 */
+/* ================================================================== */
+HDC UI_WindowBase::BeginPaint()
+{
+    DDRAW_UnlockPrimary();
+
+    auto* surface = static_cast<IDirectDrawSurface4*>(g_primary_surface);
+
+    HDC hdc = nullptr;
+    HRESULT hr = surface->GetDC(&hdc);
+
+    int retry = 0;
+    while (hr != 0) {
+        ++retry;
+        if (retry > 1000) {
+            WIN32_FatalError();
+            ExitProcess(1);
+        }
+        Sleep(10);
+        hr = surface->GetDC(&hdc);
+    }
+
+    return hdc;
+}
+
+/* Legacy free-function compatibility shim — ~9 files in the tree still
+ * call this as a free function with a mix of extern signatures (some
+ * correct, some pre-existing call-0-class landmines fixed separately —
+ * see docs/landmine-sweep-worklist.md). Retargeted 2026-08-16 to
+ * UI_WindowBase pointer (was incorrectly UIPANEL pointer — every real
+ * caller passes a GameSetupPanel, Cursor, NameEntryPanel, BuildingPanel,
+ * etc. receiver, never a UIPANEL instance, so the prior cast was UB that
+ * happened not to crash only because the method body never touched
+ * "this"). */
+HDC __fastcall UIPANEL_BeginPaint(void* self)
+{
+    return static_cast<UI_WindowBase*>(self)->BeginPaint();
 }

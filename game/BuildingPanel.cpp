@@ -101,15 +101,24 @@ size_t UIPANEL_Surface_Size();
 void   UIPANEL_EndPaintEx(void* self, int hdc, int unlock_param,
                           uint8_t unlock_flag, RECT* restrict_rect);  /* 0x426B90 */
 
-/* UIPANEL_BeginPaint — real def: ui/UIPANEL.cpp:0x426B00 (a thin free-function
- * shim over the real UIPANEL::BeginPaint() method), C++ linkage (not
- * extern "C"), HDC(void* self). Was declared inside the extern "C" block
- * below with an unmangled C symbol and a wrong return type (int) and a
- * bogus address (0x42B0C0, which is mid-body of an unrelated function) —
- * extern "C" linkage alone means this never bound to the real mangled
- * symbol (same landmine class as UIPANEL_EndPaintEx above;
- * docs/landmine-sweep-worklist.md). Moved out of extern "C" with the
- * correct return type and address. */
+/* UIPANEL_BeginPaint — real def: ui/UI_WindowBase.cpp:0x426B00 (a thin
+ * free-function shim over the real UI_WindowBase::BeginPaint() method —
+ * moved 2026-08-16 from a stale UIPANEL attribution, see PROGRESS.md's
+ * 2026-08-16 entry), C++ linkage (not extern "C"), HDC(void* self). Was
+ * declared inside the extern "C" block below with an unmangled C symbol
+ * and a wrong return type (int) and a bogus address (0x42B0C0, which is
+ * mid-body of an unrelated function) — extern "C" linkage alone means
+ * this never bound to the real mangled symbol (same landmine class as
+ * UIPANEL_EndPaintEx above; docs/landmine-sweep-worklist.md). Moved out
+ * of extern "C" with the correct return type and address.
+ *
+ * KNOWN GAP (2026-08-16, not fixed here): BuildingPanel does not inherit
+ * UI_WindowBase (`class BuildingPanel {` — no base class), yet is a real
+ * caller of this shim, which casts `self` to UI_WindowBase*. This is
+ * technically an unrelated-class downcast, safe in practice only because
+ * BeginPaint's body never dereferences `this`. Retyping BuildingPanel to
+ * derive from UI_WindowBase would shift every field offset in its
+ * ~0x2A0+ struct — a separate, dedicated task, not a quick follow-up. */
 HDC    UIPANEL_BeginPaint(void* panel);                       /* 0x426B00 */
 
 extern "C" {

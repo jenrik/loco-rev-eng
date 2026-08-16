@@ -65,19 +65,18 @@ extern void DDRAW_SelectBuilding(void* ddraw, void* building); /* 0x459180 */
 extern void __thiscall RESDATA_BaseInit(void* self);                         /* 0x4544E0 */
 extern void __thiscall RESDATA_DtorBase(void* self);                         /* 0x454630 */
 
-/* Free-function WndProc wrappers retain their recovered binary entry points;
- * declare them before their definitions so strict builds see their ABI. */
-extern void __thiscall UIPANEL_WindowProc(void* self, HWND hwnd, UINT msg,
-                                          WPARAM wParam, LPARAM lParam);
-extern LRESULT __fastcall UIPANEL_OnDestroy(void* self);
-/* UIPANEL_BeginPaint(void*) is now a thin compatibility shim over the real
- * UIPANEL::BeginPaint() method (see below) — kept only because ~9 other
- * files in the tree still declare/call it as a free function with a mix of
- * mismatched extern signatures (some correct, some pre-existing call-0-class
- * landmines: wrong return type, wrong calling convention, wrong parameter
- * type). Fixing those callers is separately scoped (see
- * docs/landmine-sweep-worklist.md / PROGRESS.md) and intentionally untouched
- * here. */
+/* UIPANEL_WindowProc (0x426900) and UIPANEL_OnDestroy (0x426A90) were
+ * removed 2026-08-16 — they were dead duplicates of the real
+ * UI_WindowBase::on_mouse_move()/on_close() (ui/UI_WindowBase.cpp); see
+ * the correction note further below and PROGRESS.md's 2026-08-16 entry.
+ * UIPANEL_BeginPaint(void*) is a thin compatibility shim over the real
+ * UI_WindowBase::BeginPaint() method (defined in ui/UI_WindowBase.cpp) —
+ * kept as a free function only because ~9 other files in the tree still
+ * declare/call it that way with a mix of mismatched extern signatures
+ * (some correct, some pre-existing call-0-class landmines: wrong return
+ * type, wrong calling convention, wrong parameter type). Fixing those
+ * callers is separately scoped (see docs/landmine-sweep-worklist.md /
+ * PROGRESS.md) and intentionally untouched here. */
 extern HDC __fastcall UIPANEL_BeginPaint(void* self);
 extern void __fastcall UIPANEL_EndPaint(void* self);
 extern void __fastcall UIPANEL_CreateSurface(void* surface);                 /* 0x42A110 */
@@ -890,134 +889,37 @@ byte UIPANEL::HandleDrag(int resource, uint16_t action)
 }
 
 /* ================================================================== */
-/* UIPANEL::WindowProc                                                 */
-/* Address: 0x426900                                                   */
-/*                                                                     */
-/* __thiscall (ECX = this). Checks if hwnd matches this->hwnd (+0x08), */
-/* and if so performs a render cycle: unlocks primary, calls Render(1), */
-/* re-locks primary. Always forwards to DefWindowProcA.                 */
-/*                                                                     */
-/* Note: This is called from the WndProc dispatch table at 0x477C80    */
-/* with `this` already in ECX and the standard 4 WndProc params on     */
-/* the stack. The RET 0x10 at the end indicates __thiscall with 4      */
-/* stack parameters popped by the callee.                              */
+/* WindowProc (0x426900) / OnDestroy (0x426A90) / BeginPaint (0x426B00) */
+/* were previously (mis-)transcribed here as UIPANEL methods —          */
+/* corrected 2026-08-16: get_xrefs_to on this whole address block       */
+/* (0x426900-0x426EB0) shows every real caller is GameSetupPanel,       */
+/* Cursor, NameEntryPanel, BuildingPanel, PostcardAlbum, Town,           */
+/* DPlayManager, or NETMAN_* — never a UIPANEL instance — and a Ghidra   */
+/* function-address-range listing confirms these sit in the same        */
+/* contiguous MSVC method block as UI_WindowBase_SetMode (0x425FD0)/    */
+/* SetRenderSurface (0x426020)/dispatch_message (0x426140), ending       */
+/* right before UIPANEL's own real ctor begins a new block at 0x427370.  */
+/* These are UI_WindowBase members; "UIPANEL_" was a stale Ghidra-era    */
+/* prefix. WindowProc/OnDestroy were dead duplicates of the already-real */
+/* UI_WindowBase::on_mouse_move()/on_close() (ui/UI_WindowBase.cpp) and   */
+/* have been removed entirely. BeginPaint has moved to                  */
+/* UI_WindowBase::BeginPaint() (ui/UI_WindowBase.h/.cpp) — see there for  */
+/* its full evidence trail (GetDC HRESULT/out-param fix, dead-hwnd-arg    */
+/* finding, retry/ExitProcess(1) fatal path). See PROGRESS.md's           */
+/* 2026-08-16 correction entry for the full finding.                     */
 /* ================================================================== */
-void __thiscall UIPANEL_WindowProc(void* self,
-    HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    if (hwnd == *(HWND*)((intptr_t)self + 8)) {
-        DDRAW_UnlockPrimary();
-        UIPANEL_Render(self, 1);
-        DDRAW_UnlockPrimary();
-    }
-    DefWindowProcA(hwnd, msg, wParam, lParam);
-}
 
 /* ================================================================== */
-/* UIPANEL::OnDestroy                                                  */
-/* Address: 0x426A90                                                   */
-/*                                                                     */
-/* Handles panel window destruction. Clears the alive flag (+0xAB),    */
-/* destroys the HWND, and if no child windows remain (+0x0C), posts    */
-/* WM_QUIT. Returns 0.                                                 */
-/* ================================================================== */
-LRESULT __fastcall UIPANEL_OnDestroy(void* self)
-{
-    *(uint8_t*)((intptr_t)self + 0xAB) = 0;                /* +0xAB -- alive flag */
-    DestroyWindow(*(HWND*)((intptr_t)self + 8));             /* +0x08 -- hwnd */
-
-    if (*(int*)((intptr_t)self + 0x0C) == 0) {               /* +0x0C -- child count */
-        PostQuitMessage(0);
-    }
-
-    return 0;
-}
-
-/* ================================================================== */
-/* UIPANEL::BeginPaint                                                 */
-/* Address: 0x426B00                                                   */
-/*                                                                     */
-/* Begins buffered painting to the offscreen surface: unlocks the       */
-/* primary surface, then calls IDirectDrawSurface4::GetDC() on          */
-/* g_primary_surface to obtain a GDI device context for the sprites/    */
-/* text drawn by callers such as BuildingPanel::draw_item,               */
-/* GameSetupPanel::drawGrid/drawTitle/drawLayoutList, Cursor's color-    */
-/* bar/scroll-button drawing, and NameEntryPanel::on_timer. Retries up   */
-/* to 1000 times at 10ms apiece while GetDC keeps failing, then calls    */
-/* WIN32_FatalError()+ExitProcess(1) — a deliberate original fatal path, */
-/* not something to soften.                                             */
-/*                                                                       */
-/* Evidence for the vtable slot: the original x86 dispatches through     */
-/* vtable+0x44 (slot 17), which matches IDirectDrawSurface4::GetDC's     */
-/* real COM ABI position (IUnknown's 3 slots, then                       */
-/* AddAttachedSurface/AddOverlayDirtyRect/Blt/BltBatch/BltFast/           */
-/* DeleteAttachedSurface/EnumAttachedSurfaces/EnumOverlayZOrders/Flip/    */
-/* GetAttachedSurface/GetBltStatus/GetCaps/GetClipper/GetColorKey/GetDC   */
-/* = slot 17 = byte offset 0x44). platform/ddraw_interfaces.h's own       */
-/* C++ declaration order is NOT ABI-accurate (it's grouped by topic, not  */
-/* COM slot order) — but that no longer matters here, since this method   */
-/* dispatches via an ordinary typed virtual call (surface->GetDC(&hdc)),  */
-/* which the compiler slots however it likes for this rebuild.            */
-/*                                                                       */
-/* The original also spills a stack argument (this->hwnd, pushed by every */
-/* caller) across the DDRAW_UnlockPrimary() call for register             */
-/* preservation, then discards it — confirmed dead by decompiling         */
-/* DDRAW_UnlockPrimary (0x45B940): it is void(void) and never reads any   */
-/* incoming parameter. Not reproduced here.                               */
-/*                                                                       */
-/* The original also reuses this object's raw x86 +0x4C scratch slot      */
-/* (this UIPANEL's Entity-derived world_x storage — see                  */
-/* core/GameObject.h) as the GetDC() out-parameter buffer. That storage   */
-/* has moved in the host layout (world_x is no longer at +0x4C here), so  */
-/* a plain local variable is used instead; this is a scratch-buffer       */
-/* implementation detail, not part of BeginPaint's observable behavior.   */
-/*                                                                       */
-/* NOTE: g_primary_surface is still unwired (null) and                   */
-/* Sdl3DirectDrawSurface::GetDC is a permanent no-op returning failure    */
-/* (see platform/ddraw_interfaces.h's Phase 3 note and PROGRESS.md's      */
-/* 2026-08-14 DirectDraw-shim entry) — so this retry-then-ExitProcess(1)  */
-/* path is a live self-destruct hazard the moment g_primary_surface is    */
-/* wired to a real surface, independent of this integration pass. Wiring  */
-/* g_primary_surface and implementing a real GetDC are explicitly out of  */
-/* scope for this change.                                                 */
-/* ================================================================== */
-HDC UIPANEL::BeginPaint()
-{
-    DDRAW_UnlockPrimary();
-
-    auto* surface = static_cast<IDirectDrawSurface4*>(g_primary_surface);
-
-    HDC hdc = nullptr;
-    HRESULT hr = surface->GetDC(&hdc);
-
-    int retry = 0;
-    while (hr != 0) {
-        ++retry;
-        if (retry > 1000) {
-            WIN32_FatalError();
-            ExitProcess(1);
-        }
-        Sleep(10);
-        hr = surface->GetDC(&hdc);
-    }
-
-    return hdc;
-}
-
-/* Legacy free-function compatibility shim — see the extern declaration's
- * comment above. Delegates to the real UIPANEL::BeginPaint() method. */
-HDC __fastcall UIPANEL_BeginPaint(void* self)
-{
-    return static_cast<UIPANEL*>(self)->BeginPaint();
-}
-
-/* ================================================================== */
-/* UIPANEL::EndPaint                                                   */
+/* UI_WindowBase::EndPaint                                             */
 /* Address: 0x426B70                                                   */
 /*                                                                     */
 /* Simple EndPaint wrapper. Delegates to EndPaintEx with the hwnd      */
 /* (from +0x08) as hdc, 0 for unlock_param, 0 for unlock_flag, and    */
 /* a stack-local RECT as restrict_rect.                                 */
+/*                                                                     */
+/* NOTE (2026-08-16): like EndPaintEx/Render below, this is a           */
+/* UI_WindowBase member (see the correction note above), not UIPANEL —  */
+/* left here as a free function pending a dedicated migration.          */
 /* ================================================================== */
 void __fastcall UIPANEL_EndPaint(void* self)
 {
@@ -1030,8 +932,22 @@ void __fastcall UIPANEL_EndPaint(void* self)
 }
 
 /* ================================================================== */
-/* UIPANEL::EndPaintEx                                                 */
+/* UI_WindowBase::EndPaintEx (corrected 2026-08-16 — see the note above  */
+/* WindowProc/OnDestroy/BeginPaint; still a free function here pending   */
+/* migration, real receiver class is NOT UIPANEL)                        */
 /* Address: 0x426B90                                                   */
+/*                                                                     */
+/* NOT YET RE-VERIFIED against the corrected UI_WindowBase model — a     */
+/* dedicated reverse-engineer pass on this function found the raw        */
+/* offsets below likely correspond to already-named UI_WindowBase fields */
+/* (e.g. this+0x48 may be cursorRefCount, not an "offscreen surface"      */
+/* pointer — live vtable dispatch through it conflicts with that field's */
+/* documented meaning and needs its own resolution) and this+0xD4..+0xE0  */
+/* is very likely UI_WindowBase::workRect (a real RECT), not four        */
+/* independent viewport ints. See PROGRESS.md's 2026-08-16 entry for the  */
+/* full findings (vtable slot 0x68 = ReleaseDC not Unlock, Blt = slot 5,  */
+/* UIPANEL_Blit's real by-value-RECT signature). Do not trust the         */
+/* comments/field names below without re-deriving them.                  */
 /*                                                                     */
 /* Main present pipeline:                                                */
 /*   1. If unlock_param != 0, unlock primary surface via vtable[0x68]  */
@@ -1227,7 +1143,12 @@ void __thiscall UIPANEL_EndPaintEx(void* self,
 }
 
 /* ================================================================== */
-/* UIPANEL::Render                                                     */
+/* UI_WindowBase::Render (corrected 2026-08-16 — real receiver class is  */
+/* NOT UIPANEL; see the note above WindowProc/OnDestroy/BeginPaint and    */
+/* EndPaintEx's comment immediately above for the same +0x48/+0xD4..+0xE0 */
+/* field-identity caveats, which apply identically here since both       */
+/* functions read the same field set. Still a free function here        */
+/* pending migration.)                                                    */
 /* Address: 0x426EB0                                                   */
 /*                                                                     */
 /* Per-frame foreground render with cursor overlay.                    */
