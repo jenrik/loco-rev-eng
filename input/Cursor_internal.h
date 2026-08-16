@@ -95,7 +95,12 @@ void DDRAW_UnlockPrimary(void);
 int DDRAW_SetSurfaceFormat(void*, int);
 int DDRAW_RestoreSurfaces(void*, void*);
 void DDRAW_GetSurfaceWidthHeight(void* surface, uint16_t* out_h, uint16_t* out_w);
-void* CRT_wcsstr(const uint8_t*, const uint16_t*);
+/* CRT_wcsstr was declared here as `void* CRT_wcsstr(const uint8_t*, const
+ * uint16_t*)` — neither its extern "C" linkage nor its signature match the
+ * real function (0x471480, `int32_t CRT_wcsstr(uint8_t*, uint8_t*)`, plain
+ * C++ linkage — see game/Building.cpp's top-of-file comment); it also had
+ * zero call sites in this file. Not a "genuine C-linkage symbol from the
+ * binary" like its neighbors above; removed 2026-08-16. */
 void Sprite_Destroy(void*);  /* declared extern "C" in ButtonSprite.h */
 
 /* The following were previously declared with default C++ linkage below,

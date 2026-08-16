@@ -65,8 +65,15 @@ int CRT_strlen(const char* s);
 int CRT_strlen(const char* s) { return s ? static_cast<int>(strlen(s)) : 0; }
 int CRT_memmove(void* d, const void* s, size_t n);
 int CRT_memmove(void* d, const void* s, size_t n) { memmove(d, s, n); return 0; }
-int CRT_wcsstr(const char* a, const char* b);
-int CRT_wcsstr(const char* a, const char* b) { return (a && b && strstr(a, b)) ? 1 : 0; }
+/* CRT_wcsstr(const char*, const char*) here was a distinct, dead
+ * (const char*, const char*)-mangled overload, unreachable from any real
+ * caller (all of which declare (uint8_t*, uint8_t*)) and semantically
+ * wrong regardless — it implemented a substring search returning 1/0,
+ * but the real 0x471480 is a case-insensitive whole-string compare
+ * returning -1/0/1 (see game/Building.cpp's top-of-file comment for the
+ * verified real body). The real, live definition is
+ * shared/stubs_link001_batch1_crt_win32.cpp's `int32_t CRT_wcsstr(uint8_t*,
+ * uint8_t*)`. Removed 2026-08-16. */
 int CRT_sprintf_buf(char* b, const char* f, ...);
 int CRT_sprintf_buf(char* b, const char* f, ...) { return 0; }
 

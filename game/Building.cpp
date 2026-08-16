@@ -18,21 +18,15 @@
 
 /* resources/AssetMgr.h is deliberately NOT included: it re-declares
  * operator_new/GLOBAL_free as extern "C" (this file needs the ordinary
- * C++-linkage forms already declared below) and re-declares CRT_wcsstr
- * as `extern "C" int32_t CRT_wcsstr(uint8_t*, uint8_t*)` — same
- * parameter shape as this file's own (corrected, plain-C++-linkage)
- * declaration below, but incompatible C linkage, which a single
- * translation unit cannot redeclare under both linkages. AssetMgr.h's
- * own extern "C" form has zero real call sites anywhere in the tree
- * (confirmed 2026-08-16) — dormant, not a live landmine — but it would
- * now bind to an unresolved symbol rather than a silent no-op if anyone
- * ever called it, since shared/defsym_stubs.cpp's bare-symbol filler
- * stub it used to collapse onto was removed the same session (see
- * PROGRESS.md's residual-cleanup bullet). Out of scope to fix here; only
- * Building.cpp is touched by this pass. Only what's needed — the
+ * C++-linkage forms already declared below), which a single translation
+ * unit cannot redeclare under both linkages. (AssetMgr.h previously also
+ * re-declared CRT_wcsstr as extern "C" with a conflicting linkage vs.
+ * this file's own plain-C++-linkage declaration below; that dormant,
+ * zero-call-site declaration was removed from AssetMgr.h 2026-08-16, so
+ * CRT_wcsstr is no longer part of this include boundary — only the
+ * operator_new/GLOBAL_free conflict remains.) Only what's needed — the
  * AssetMgr type name and AssetMgr_ReadPairValue's real signature — is
- * forward-declared locally
- * instead. */
+ * forward-declared locally instead. */
 struct AssetMgr;
 
 /* ================================================================== */
