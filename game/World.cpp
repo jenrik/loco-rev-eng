@@ -317,11 +317,28 @@ bool World::SaveToFile(uint resource_id, char player_id, char mp_flag)
        base of Building, VehicleEditor, and Train — see GameView.h's own
        doc comment on that field); retyping it is a separate, deliberately
        deferred task. Comparing through `Entity*` here is still legal
-       without that retype: Building and VehicleEditor are each single,
-       non-virtual bases of Entity (game/Building.h, core/VehicleEditor.h),
-       so this upcast never dereferences the field and is address-preserving
-       regardless of which of the three sibling types actually occupies it
-       at runtime. */
+       without that retype ONLY because both runtime types this field can
+       hold have their Entity subobject at offset 0: confirmed directly —
+       `class Building : public Entity` (game/Building.h:64) and
+       `class VehicleEditor : public Entity` (core/VehicleEditor.h:99) are
+       each Entity's sole, first, non-virtual base (no multiple/virtual
+       inheritance anywhere in either chain up through GameObject) — so
+       `static_cast<Entity*>` applies a compile-time-fixed +0 adjustment
+       for both, the comparison is address-preserving (including the
+       both-null case, matching the original's raw-dword compare) for
+       every value this field can actually hold, and does NOT depend on
+       which of the two the field holds at runtime. If either class ever
+       gained a second/virtual base, this cast would need re-deriving.
+
+       g_town_view (extern void*, declared above) is safe to dereference
+       here without a null guard: every currently-reachable path to this
+       line goes through World::UpdateTick, itself only ever called from
+       the real per-frame gameplay loop (core/GameLoop.cpp), which is
+       gated by GameLoop_Setup's unconditional `Mode3FrameDependenciesReady()`
+       check (aborts if g_town_view/g_ddraw_building aren't constructed)
+       before that loop ever starts — unlike GameView::deselect_building's
+       own null guard elsewhere in this session, no reachable path calls
+       World::SaveToFile before g_town_view is guaranteed non-null. */
     if (static_cast<Entity*>(vehicle->editors[0]) ==
         static_cast<Entity*>(static_cast<GameView*>(g_town_view)->selected_building)) {
         Town_SelectBuilding(g_town_view, 0);
