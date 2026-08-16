@@ -17,10 +17,10 @@
  *
  * Size: 0x740 bytes on the original x86 binary (1856 bytes). The real
  * host `sizeof(Cursor)` is larger and grows further after the 2026-08-16
- * overlay-accessor overrun-fix pass (six new independent-storage members
- * added below: primarySurfacePtr, animResdataPtr, cursorBackbufferPtr,
- * childObj60Storage, cursorRectStorage, overlayResdataPtr — see each
- * accessor's own doc comment) — not a stale literal to preserve, since
+ * overlay-accessor overrun-fix pass (independent-storage members added
+ * below: primarySurfacePtr, animResdataPtr, cursorBackbufferPtr,
+ * cursorRectStorage, overlayResdataPtr, blitWaitHdc — see each accessor's
+ * own doc comment) — not a stale literal to preserve, since
  * every allocation site uses a real `new Cursor(...)` C++ expression
  * (core/CGWND.cpp), never a raw `operator_new(0x740)` + placement-new
  * that would need updating by hand.
@@ -154,7 +154,7 @@ public:
      * field was itself int32_t.
      *
      * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass): unlike
-     * primary_surface()/anim_resdata()/child_obj_60()/cursor_rect()/
+     * primary_surface()/anim_resdata()/cursor_rect()/
      * overlay_resdata()/backbuffer() below, this is NOT an overrun —
      * reading only the low 4 bytes of an 8-byte pointer field never
      * touches memory outside `renderSurface`. All five real uses
@@ -392,55 +392,57 @@ public:
     void*&      backbuffer()     { return this->cursorBackbufferPtr; }
     void*       cursorBackbufferPtr = nullptr;  // +0x5C in the original binary (see above)
 
-    /* +0x60: child_obj_60 — ORIGINAL x86 binary aliased a 4-byte void* over
-     * `childCount0` (int32_t, +0x60). On this 64-bit host a void* is 8
-     * bytes: `sizeof(T)` (8) exceeds the 4 bytes of declared storage here.
-     * The next base field is `childObj0` (void*, align-8, already a real
-     * pointer in the base class) — whether the extra 4 bytes land in
-     * compiler alignment padding before `childObj0` or clobber its own low
-     * bytes depends on the host compiler's actual layout choice; not
-     * measurable without building, so this is PADDING-DEPENDENT, not a
-     * certain clobber (see anim_resdata()'s doc comment above for the same
-     * distinction). The fix removes the question either way.
+    /* +0x60/+0x64: RESOLVED 2026-08-16 (curs_pos_x() identity pass).
+     * child_obj_60()/curs_pos_x() are RETIRED: both were wrong casts over
+     * UI_WindowBase's own real, already-correctly-typed fields
+     * `childCount0` (int32_t, +0x60) and `childObj0` (void*, +0x64) — the
+     * first of three ref-counted owned-child-object pairs, released via
+     * vtable[2] in UI_WindowBase::base_destructor (see ui/UI_WindowBase.h).
      *
-     * Surveyed 2026-08-16: every real use of `child_obj_60()` is in
-     * Cursor::draw_locomotive_preview() (0x418E20), handle_locomotive_select()
-     * (0x41A360), handle_toolbar_hover() (0x41A460) and
-     * upload_custom_content() (0x419B10) — all confirmed to have zero
-     * callers anywhere in the tree (dead on host today; see
-     * primary_surface()'s doc comment above for the reachability trace of
-     * this class's render/editor pipeline). Fixed anyway (trivial,
-     * risk-free), matching this class's established precedent. */
-    void*&      child_obj_60()   { return this->childObj60Storage; }
-    void*       childObj60Storage = nullptr;  // +0x60 in the original binary (see above)
+     * Evidence: all four real readers of this pair (Cursor::
+     * draw_locomotive_preview 0x418E20, handle_locomotive_select 0x41A360,
+     * handle_toolbar_hover 0x41A460, upload_custom_content 0x419B10) forward
+     * the raw (childCount0, childObj0) values, unmodified, into
+     * UI_WindowBase::set_mode(int32_t surface_address, void*
+     * animation_metadata, ...) — the exact same shape as the sibling
+     * childObj2 pair already in the tree (Cursor_new_impls.cpp:1298,
+     * `this->set_mode(this->childCount2, this->childObj2, 0, 1)`).
+     * set_mode's own body (ui/UI_WindowBase.cpp) dereferences
+     * `animation_metadata` as a `UIAnimationMetadata*`
+     * (hotspot_x@+0x32/hotspot_y@+0x34/frame_count@+0x160) — a shape
+     * nothing HDC-shaped could satisfy. So for these 4 call sites the pair
+     * is genuinely just `childCount0`/`childObj0`, and they now read those
+     * base fields directly instead of going through a Cursor-specific
+     * accessor. See blit_wait_hdc() below for the field's OTHER, unrelated
+     * identity (confirmed via wait_for_blit()'s disassembly). */
 
-    /* +0x64: curs_pos_x aliases childObj0 (void*, already a real 8-byte
-     * pointer in the base class) as a 4-byte int32_t. This is an UNDER-read
-     * (4 of 8 bytes), not an overrun — no memory outside `childObj0` is
-     * touched, in either direction.
+    /* +0x64: blit_wait_hdc — ORIGINAL x86 binary reused UI_WindowBase::
+     * childObj0 (see above: a real, generic ref-counted owned-child-object
+     * pointer, unrelated to this use) as scratch storage for
+     * Cursor::wait_for_blit()'s IDirectDrawSurface::GetDC(HDC*) out-param.
      *
-     * NOT retyped/renamed in this pass: the only evidenced real use
-     * (Cursor::wait_for_blit(), 0x414BB0, and Cursor_Editor.cpp's polling
-     * loop around it) treats this slot as a pointer-sized HDC out-param —
-     * `wait_for_blit()`'s own doc comment says it "returns the HDC value
-     * written to this->curs_pos_x" — passed as `&this->curs_pos_x()` to a
-     * vtable call and read back via `reinterpret_cast<void*>(static_cast<
-     * intptr_t>(this->curs_pos_x()))` at every other call site
-     * (Cursor_new_impls.cpp:865/1324/1406/1733). That evidence supports
-     * neither the current `int32_t` type (an HDC needs the full pointer
-     * width) nor the name "cursor position x" (nothing observed treats it
-     * as an X coordinate) — but guessing a replacement type/name without
-     * further disassembly evidence would violate this project's
-     * don't-guess-field-purposes rule. Filed as an explicit follow-up
-     * rather than fixed in this pass: re-derive curs_pos_x()'s real
-     * identity from wait_for_blit()'s original disassembly (0x414BB0)
-     * before retyping. All five call sites are themselves inside
-     * Cursor::wait_for_blit()/draw_locomotive_preview()/
-     * handle_locomotive_select()/handle_toolbar_hover()/
-     * upload_custom_content(), confirmed dead on host today (see
-     * primary_surface()'s doc comment above) — so this is a naming/typing
-     * accuracy issue, not a live corruption risk, either way. */
-    int32_t&    curs_pos_x()     { return reinterpret_cast<CursorOverlayValue<int32_t>*>(&this->childObj0)->value; }
+     * CONFIRMED via disassembly of wait_for_blit (0x414BB0): `LEA EBX,
+     * [ESI+0x64]` computes `&this->childObj0`, pushed as the sole explicit
+     * argument to a call through `primary_surface->vtable[0x44]` (slot 17
+     * = 0x44/4). Slot 17 in the standard IDirectDrawSurface(4) vtable
+     * (3 IUnknown slots, then AddAttachedSurface..Blt..GetDC in declared
+     * order) is `GetDC(HDC* lphDC)`; the HRESULT return is polled in a
+     * retry loop (10ms Sleep between attempts, 1000-iteration timeout ->
+     * FatalError+ExitProcess) — the canonical DirectDraw "wait for the blit
+     * to finish, then get a GDI DC on the surface" idiom. wait_for_blit()
+     * then returns the HDC value written there.
+     *
+     * This is a GENUINELY UNRELATED concept from childObj0's real identity
+     * (confirmed by the 4 set_mode-forwarding readers described above,
+     * which are incompatible with an HDC). Given independent storage is
+     * trivial, risk-free, and removes a genuine original-binary hazard (a
+     * stale HDC left in childObj0 by wait_for_blit being mistaken for an
+     * owned COM child object and Release()'d by base_destructor — the same
+     * class of hazard as capture_flag()'s dirtyRect.right collision above),
+     * this gets its own storage rather than continuing to alias
+     * UI_WindowBase::childObj0. */
+    HDC&        blit_wait_hdc()  { return this->blitWaitHdc; }
+    HDC         blitWaitHdc = nullptr;  // +0x64 in the original binary (see above)
 
     /* +0x68: cursor_rect — ORIGINAL x86 binary aliased a 16-byte RECT over
      * `childCount1` (int32_t, +0x68) through `childObj2`'s first 4 bytes
@@ -912,13 +914,16 @@ public:
      * Poll for blit completion on the primary surface.
      * Address: 0x414BB0
      *
-     * Unlocks the primary surface, then polls primary_surface->vtable[0x44]
-     * (at byte offset 0x44, slot 17) with &this->curs_pos_x (+0x64) as
-     * output parameter. Sleeps 10ms between polls, times out after ~10
-     * seconds (1000 iterations) with WIN32_FatalError + ExitProcess(1).
+     * Unlocks the primary surface, then polls
+     * primary_surface->vtable[0x44] (slot 17 = IDirectDrawSurface::GetDC)
+     * with &this->blit_wait_hdc() (+0x64, independent storage — see that
+     * accessor's doc comment for why this no longer aliases
+     * UI_WindowBase::childObj0) as the GetDC out-param. Sleeps 10ms between
+     * polls, times out after ~10 seconds (1000 iterations) with
+     * WIN32_FatalError + ExitProcess(1).
      *
-     * Returns the HDC value written to this->curs_pos_x (+0x64) by the
-     * successful poll.
+     * Returns the HDC value written to blit_wait_hdc() by the successful
+     * GetDC call.
      *
      * Called by: HelpWnd_UpdateScroll, HelpWnd_MeasureTextHeight,
      *            HelpWnd_UpdateButtonStates, HelpWnd_RenderPage,
@@ -926,7 +931,8 @@ public:
      *            Train_DrawTextOverlay (9 callers total)
      *
      * @param hWnd  HWND - forwarded to DDRAW_UnlockPrimary
-     * @return      void* - the HDC value at this->curs_pos_x
+     * @return      void* - the HDC value from blit_wait_hdc() (HDC and
+     *              void* are the same underlying type, see shared/types.h)
      */
     void* wait_for_blit(HWND hWnd);
 

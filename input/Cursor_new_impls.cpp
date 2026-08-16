@@ -859,11 +859,13 @@ void Cursor::draw_locomotive_preview(uint8_t direction)
 
             /* Dispatch set_mode through vtable slot [3] (resolves to the
              * inherited UI_WindowBase::set_mode, 0x425FD0 — the Cursor
-             * vtable does NOT contain the GameWindow 0x414340 variant). */
-            this->set_mode(
-                static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
-                reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
-                0, 1);
+             * vtable does NOT contain the GameWindow 0x414340 variant).
+             * (childCount0, childObj0) is base child pair 0 — same shape
+             * as the childCount2/childObj2 pair used at
+             * Cursor_new_impls.cpp:1298; see Cursor.h's
+             * blit_wait_hdc()/childObj0 doc comments for why this is no
+             * longer routed through curs_pos_x()/child_obj_60(). */
+            this->set_mode(this->childCount0, this->childObj0, 0, 1);
 
             /* Per-frame delay: the binary sleeps 2ms for steps inside the
              * first band (stepCount/6) and 1ms for steps before stepCount/2
@@ -1319,10 +1321,9 @@ void Cursor::handle_locomotive_select(uint32_t index)
             this->sprite_width_hi() = 0;                       /* +0x3D */
             this->sprite_height() = 0;                         /* +0x40 */
             Sprite_SetState(this->sprite_2E0, 0, nullptr);     /* +0x2E0 */
-            this->set_mode(
-                static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
-                reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
-                0, 1);
+            /* (childCount0, childObj0) — base child pair 0, see Cursor.h's
+             * blit_wait_hdc() doc comment. */
+            this->set_mode(this->childCount0, this->childObj0, 0, 1);
             UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         }
 
@@ -1401,10 +1402,9 @@ void Cursor::handle_toolbar_hover(LONG x, LONG y)
     this->sprite_width_hi() = 0;                          /* +0x3D */
     this->sprite_height() = 0;                            /* +0x40 */
     Sprite_SetState(this->sprite_2E0, 0, nullptr);        /* +0x2E0 */
-    this->set_mode(
-        static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
-        reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
-        0, 1);
+    /* (childCount0, childObj0) — base child pair 0, see Cursor.h's
+     * blit_wait_hdc() doc comment. */
+    this->set_mode(this->childCount0, this->childObj0, 0, 1);
     UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 
     this->handle_tab_change();
@@ -1727,11 +1727,10 @@ void Cursor::upload_custom_content()
     /* Reset dialog background sprite */
     Sprite_SetState(this->sprite_2E0, 0, nullptr);
 
-    /* Dispatch set_mode through vtable slot [3] (inherited base 0x425FD0) */
-    this->set_mode(
-        static_cast<int32_t>(reinterpret_cast<intptr_t>(this->child_obj_60())),
-        reinterpret_cast<void*>(static_cast<intptr_t>(this->curs_pos_x())),
-        0, 1);
+    /* Dispatch set_mode through vtable slot [3] (inherited base 0x425FD0).
+     * (childCount0, childObj0) — base child pair 0, see Cursor.h's
+     * blit_wait_hdc() doc comment. */
+    this->set_mode(this->childCount0, this->childObj0, 0, 1);
 
     UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
 }
