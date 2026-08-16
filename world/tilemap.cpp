@@ -17,6 +17,7 @@
 #include "tilemap.h"
 #include "../core/CGWND.h"
 #include "../ui/UIPANEL_Surface.h"
+#include "../platform/ddraw_interfaces.h"   /* IDirectDrawSurface4 — for primary-surface Lock/Unlock */
 
 #include "../core/Entity.h"
 #include "../input/InputMgr.h"
@@ -210,25 +211,30 @@ static DirtyRectNode* TileMap_AllocRectNode()
 }
 
 /* ================================================================== */
-/* Primary-surface Lock/Unlock dispatch (DirectDraw surface vtable).   */
+/* Primary-surface Lock/Unlock dispatch (DirectDraw surface).          */
 /*                                                                     */
-/* g_primary_surface (0x4FD3C4) is the DirectDraw primary; slots 25    */
-/* (Lock) and 32 (Unlock) of the standard IDirectDrawSurface4 ABI are  */
-/* called with the ddsurfacedesc buffer at TileMap +0x52494.           */
-/* TODO(integration): type g_primary_surface via sdl3_shims/sdl3_ddraw */
-/* and call Lock/Unlock directly.                                      */
+/* g_primary_surface (0x4FD3C4) is the DirectDraw primary, called with */
+/* the ddsurfacedesc buffer at TileMap +0x52494. Slot mapping verified */
+/* 2026-08-16 against the real disassembly of                          */
+/* TileMap::InvalidateDirtyRects (0x456150), which inlines the same    */
+/* two calls: `CALL dword ptr [ECX+0x64]` (byte offset 0x64 = slot 25) */
+/* is pushed (hEvent=0, flags=0, desc, rect=0, this) -- exactly         */
+/* IDirectDrawSurface4::Lock(RECT*, DDSURFACEDESC*, DWORD, void*);     */
+/* `CALL dword ptr [ECX+0x80]` (byte offset 0x80 = slot 32) is pushed  */
+/* (rect=0, this) -- exactly IDirectDrawSurface4::Unlock(RECT*). Both  */
+/* are now dispatched through the typed interface                     */
+/* (platform/ddraw_interfaces.h), the same pattern already established */
+/* for UI_WindowBase::BeginPaint/EndPaintEx/Render                     */
+/* (ui/UI_WindowBase.cpp) -- see that header's own scope note: this is */
+/* an API-compatible shim, not a slot-accurate vtable replica, so no   */
+/* raw vtable indexing may remain once a call site is migrated to it.  */
 /* ================================================================== */
-typedef int (__thiscall* DDrawSurfaceLockFn)(void* self, void* rect,
-                                              void* desc, unsigned int flags,
-                                              void* handle);
-typedef int (__thiscall* DDrawSurfaceUnlockFn)(void* self, void* rect);
-
-static int TileMap_LockPrimarySurface(void* desc)
+static HRESULT TileMap_LockPrimarySurface(void* desc)
 {
 #ifndef _WIN32
     /* Host deviation: g_primary_surface is never assigned a real
      * DirectDraw surface on this build (DirectDraw is never
-     * initialized) -- dereferencing its vtable here would be a
+     * initialized) -- dispatching through it here would be a
      * guaranteed null-pointer read. Report failure exactly like a real
      * DDraw Lock() failure would (surface_locked stays 0), rather than
      * crash; the caller already tolerates a failed lock. */
@@ -236,21 +242,28 @@ static int TileMap_LockPrimarySurface(void* desc)
         return -1;
     }
 #endif
-    void** vtable = *reinterpret_cast<void***>(g_primary_surface);
-    return (*(reinterpret_cast<DDrawSurfaceLockFn>(vtable[25])))(
-        g_primary_surface, NULL, desc, 0, nullptr);
+    return static_cast<IDirectDrawSurface4*>(g_primary_surface)->Lock(
+        nullptr,
+        // ABI_BOUNDARY: ddsurfacedesc_buf (TileMap +0x52494) is a raw
+        // 0x7C-byte legacy buffer that still mirrors the original x86
+        // DDSURFACEDESC layout byte-for-byte (see TileMap::TileMap's
+        // dwSize=0x7C zero-init and the raw uint32_t* pokes at its call
+        // sites) -- it has not yet been migrated to the real (API- but
+        // not ABI-compatible) DDSURFACEDESC struct declared in
+        // platform/ddraw_interfaces.h, so it crosses this call boundary
+        // as raw bytes rather than through a typed member.
+        reinterpret_cast<DDSURFACEDESC*>(desc),
+        0, nullptr);
 }
 
-static int TileMap_UnlockPrimarySurface()
+static HRESULT TileMap_UnlockPrimarySurface()
 {
 #ifndef _WIN32
     if (g_primary_surface == nullptr) {
         return -1;
     }
 #endif
-    void** vtable = *reinterpret_cast<void***>(g_primary_surface);
-    return (*(reinterpret_cast<DDrawSurfaceUnlockFn>(vtable[32])))(
-        g_primary_surface, NULL);
+    return static_cast<IDirectDrawSurface4*>(g_primary_surface)->Unlock(nullptr);
 }
 
 /* ================================================================== */
