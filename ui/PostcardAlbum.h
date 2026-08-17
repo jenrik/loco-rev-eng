@@ -1,9 +1,29 @@
-// Status: INTEGRATED
+// Status: TRANSCRIBED
 /**
  * PostcardAlbum.h — Postcard collection album window
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
+ *
+ * *** BLOCKED — DO NOT ADD ui/PostcardAlbum.cpp UNTIL THIS IS RESOLVED ***
+ * `graphics/LOCOBITMAP.h`/`.cpp` already define a SECOND, competing
+ * global-scope `class PostcardAlbum` (different base-class claim, different
+ * field names — tile_offset/tile_shown_count/tile_text_buf/tile_left/
+ * paint_inited/BlitToSurface — and it is the one CURRENTLY linked/compiled
+ * into build/lego_loco, per meson.build's per-directory `*.cpp` glob).
+ * `nm -C build/lego_loco.p/graphics_LOCOBITMAP.cpp.o | grep 'PostcardAlbum::'`
+ * shows every method this header declares (HitTest, BlitElement,
+ * UpdateSprite, RenderAllTiles, RenderTileName, InitWindow, InitSprites,
+ * InitWindowSurface, FreeSprites, FreeAllSprites, InitFromResource,
+ * CreateFromResource, DestroyFromResource, PaintWindow, DestroyWindow,
+ * the constructor) already defined as strong (T) symbols there. Defining
+ * any of them again in a new ui/PostcardAlbum.cpp is a guaranteed
+ * duplicate-symbol link failure — the link is green today ONLY because no
+ * ui/PostcardAlbum.cpp exists yet, not because this header's model is
+ * unused. Before writing an implementation against this header: decide
+ * which of the two class definitions is canonical, delete/rename the
+ * other, and reconcile every consumer of graphics/LOCOBITMAP.h. See
+ * PROGRESS.md's dated entry on this collision.
  *
  * PostcardAlbum is the postcard collection album window where players view
  * received postcard images, browse tile screenshots by name, scroll through
@@ -72,6 +92,8 @@
 #include "../ui/UI_WindowBase.h"
 #include "../ui/ButtonSprite.h"
 
+class DPlayManager;   /* network/DPlayManager.h — real type of selected_postcard_player, see below */
+
 /* ================================================================== */
 /* PostcardAlbum — postcard collection album window                     */
 /* ================================================================== */
@@ -111,11 +133,29 @@ public:
     int32_t    scroll_wheel_pos;        // +0x128  scrollwheel position counter
     uint8_t    scroll_wheel_enabled;    // +0x12C  1 = scrollwheel navigation enabled
     uint8_t    _pad_12D[3];             // +0x12D..+0x12F
-    void*      tile_preview_sprite;     // +0x130  lazily-created sprite object, created outside
-                                        //         this class's decompiled set (likely the
-                                        //         selected-tile preview), freed by show() and
-                                        //         FreeAllSprites via scalar-deleting dtor.
-                                        //         NULL unless a tile selection created it.
+    /* RESOLVED 2026-08-17 (was `void* tile_preview_sprite`, guessed as "likely
+     * a sprite"): real type is DPlayManager*, not a sprite. Evidence:
+     * PixelDataCache::LookupAsset (0x401C10, graphics/PixelDataCache.h)
+     * returns NET_ResolveAddress's result verbatim; NET_ResolveAddress is
+     * declared `DPlayManager* NET_ResolveAddress(const char*)`
+     * (network/DPlayManager.h:523); RenderTileName (0x4048E0) vtable[0]-
+     * deletes the same LookupAsset result; matches the established
+     * `Town::postcard_data`/`selected_player` DPlayManager* precedent
+     * (town/Town.h:194-195). Set by the vtable[14] click dispatcher
+     * (0x404F60) cases 8/10 via LookupAsset; from there it has three
+     * possible fates, all inside 0x404F60:
+     *   - TRANSFERRED to g_cursor->obj_184 via g_cursor->show(selected_postcard_player)
+     *     (0x4054A3 and 0x405027 blocks) — cleared to null WITHOUT deleting
+     *     afterward; Cursor::show()/base_destructor() takes ownership and
+     *     deletes it later. This is correct, not a leak.
+     *   - RETAINED unchanged after NetworkPlayerList::RegisterPlayer (0x4053E3 block).
+     *   - DELETED via vtable[0] only when PixelDataCache::RemoveByAsset
+     *     returns true, otherwise retained (0x40542E block).
+     * No leak was found in PostcardAlbum::show() (0x402590): it deletes
+     * this field before clearing it, and both transfer sites above null
+     * it immediately after handing it to Cursor::show(), so a later show()
+     * never sees a stale non-null value. */
+    DPlayManager* selected_postcard_player; // +0x130 (was tile_preview_sprite)
     int32_t    is_high_res;             // +0x134  0=800x600 mode, 1=1024x768+ mode
                                         //          Determines resource 0x3C0A vs 0x3C0B
     void*      album_bg_resource;       // +0x138  album background resource (0x3C0A/0x3C0B)

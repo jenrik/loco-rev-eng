@@ -169,20 +169,45 @@ void* Cursor::wait_for_blit(HWND hWnd)
 /*      or call init_network_player() if null                         */
 /*   8. update_network_names(), start 50ms timer 0x53 at +0x19C       */
 /*                                                                     */
-/* REACHABILITY (2026-08-14): unreached on the host build today — its  */
-/* only real caller, the free function Cursor_Show(void*), is still a  */
-/* no-op stub (shared/defsym_stubs.cpp). Of this function's 4 real x86 */
-/* callers (get_xrefs_to 0x416B80), only CGWND_SetMode's mode-7 case   */
-/* passes a literal NULL; the other 2 push field values (ESI+0x60C,    */
-/* ESI+0x130) from code Ghidra has never bounded as a function, so     */
-/* their producer/allocation is untraced. The `playerData != nullptr`  */
-/* branch below now does `this->obj_184 = static_cast<DPlayManager*>(  */
-/* playerData)` and later `delete`s it — dispatching a REAL virtual    */
-/* destructor through playerData's vptr. Whoever wires Cursor_Show for */
-/* real must first confirm those 2 untraced call sites' `playerData`   */
-/* is a real, placement-new-constructed DPlayManager (same protocol as */
-/* init_network_player/Train_network.cpp), not raw operator_new(0x39C) */
-/* storage — the latter would make this `delete` read a garbage vptr.  */
+/* REACHABILITY (RESOLVED 2026-08-17): this function has 4 real x86      */
+/* callers (get_xrefs_to 0x416B80). The fake `Cursor_Show(void*)` free-  */
+/* function facade (shared/defsym_stubs.cpp) — which took the RECEIVER   */
+/* g_cursor as its argument instead of playerData — has been removed;    */
+/* both call sites that route through it directly call                   */
+/* `g_cursor->show(...)` now:                                             */
+/*   - CGWND::SetMode mode-7 case (0x408244-0x40824C, core/CGWND.cpp):    */
+/*     `g_cursor->show(nullptr)` — literal NULL playerData (local/        */
+/*     offline mode).                                                     */
+/*   - Town::on_lbutton_down case 4 (0x43045B-0x430468,                  */
+/*     town/Town.cpp): `g_cursor->show(this->postcard_data)` — a real,   */
+/*     placement-new-constructed DPlayManager* (Town.h:195), matching    */
+/*     the init_network_player()/Train_network.cpp CreatePlayer()        */
+/*     protocol, so the `delete` below reads a real vptr, not garbage.   */
+/* The remaining 2 real x86 callers (0x4054BF, 0x405058) both push        */
+/* [ESI+0x130] and both live inside FUN_00404f60 (0x404F60-0x4054EE) —    */
+/* the PostcardAlbum click-dispatch function, which Ghidra's own analysis */
+/* has since bounded into a single real function (confirmed via           */
+/* disassemble_function 2026-08-17 — both pushes read the SAME field of   */
+/* one object, not two different classes as an earlier pass suspected).   */
+/* `ui/PostcardAlbum.cpp` does not exist in this tree yet; wiring those    */
+/* two call sites is separate, in-flight work (see PROGRESS.md), not      */
+/* resolved by this pass.                                                 */
+/*                                                                        */
+/* HOST SAFETY (2026-08-17): now that this function is reachable, step 6  */
+/* above (`g_ddraw->CreateSurface`) dereferences `g_ddraw` with no null   */
+/* check — same unchecked pattern already used by ui/GameWindow.cpp.     */
+/* `g_ddraw` is lazily set the first time any DDRAW draw/present call     */
+/* runs (`SDL3_EnsurePrimarySurface`, graphics/sdl3_ddraw.cpp); mode 7 is  */
+/* only reachable from active gameplay (ui/HelpWnd.cpp's mode-3-return    */
+/* path, world/tilemap.cpp's about-tile click), i.e. only after the game  */
+/* is already presenting frames, so `g_ddraw` is non-null in practice by  */
+/* the time this runs. Separately, `formatStorage = desc - 0x8C` below    */
+/* (a pre-existing, documented stack-underflow pointer) is passed to      */
+/* `DDRAW_SetSurfaceFormat(void*, int)` (shared/stubs_impl.cpp, empty     */
+/* body) and `DDRAW_RestoreSurfaces(IDirectDrawSurface4*, void*)`         */
+/* (graphics/sdl3_ddraw.cpp, ignores its `desc` argument) — neither host  */
+/* implementation dereferences it, so that landmine stays inert even now  */
+/* that this call path is live.                                          */
 /* ================================================================== */
 void Cursor::show(void* playerData)
 {

@@ -53,6 +53,7 @@
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
 #include "../resources/ResourceObject.h"
+#include "../input/Cursor.h"
 /* ui/UI_ChildWindow.h removed: this file has zero references to any
  * UI_ChildWindow* symbol (confirmed via grep) and it conflicts on
  * UI_IsBitmapReady's linkage (extern "C" there vs. C++ linkage in
@@ -352,7 +353,6 @@ extern void  NETMAN_CheckTimeout(void* netman, int32_t timeoutVal);  /* 0x440820
 
 /* Window-proc helpers used by the postcard window procs: */
 extern void  CGWND_SetMode(int mode);                                 /* 0x408130 */
-extern void  Cursor_Show(void* c);                                    /* 0x4164F0 */
 extern void* g_cursor;                /* 0x4FD380 — Cursor object (was
                                         * miscommented 0x4FD384, confirmed via
                                         * get_xrefs_to 2026-08-14) */
@@ -1613,7 +1613,18 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         this->postcard_dlg_proc(4);
         UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
         Sleep(0x96);
-        Cursor_Show(g_cursor);
+        /* g_cursor->show(postcard_data) — Cursor::show, 0x416B80.
+         * Real x86 call site (0x43045B-0x430468):
+         * MOV EAX,[ESI+0x60C] (this->postcard_data); MOV ECX,[0x4FD380]
+         * (g_cursor); PUSH EAX; CALL 0x416B80 — receiver is g_cursor,
+         * argument is the still-valid postcard_data (nulled a few lines
+         * below, after this call). Cursor::show() takes ownership: it
+         * stores playerData in obj_184 and later `delete`s it in
+         * Cursor::base_destructor() (input/Cursor.cpp:112-115) — safe
+         * here since postcard_data is a real DPlayManager* (Town.h:195),
+         * matching the established `delete (DPlayManager*)selected_player`
+         * precedent elsewhere in this file. */
+        static_cast<Cursor*>(g_cursor)->show(this->postcard_data);
         if (this->postcard_data) {
             this->postcard_data = nullptr;
             this->selected_player = nullptr;

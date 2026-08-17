@@ -119,19 +119,72 @@ public:
         Vehicle* network_next;
         Vehicle* next;
     };                              // +0x70  inbound-list link (x86 pointer)
-    uint16_t  tunnel_angle;        // +0x74  inbound tunnel direction/timeout
-    uint16_t  field_76;            // +0x76  inbound metadata
+    /* +0x74..+0x86: TrainSubsystem-specific network/movement tail fields.
+     * Reused across game/Train_network.cpp's AddTrainCar (0x43B8C0),
+     * UpdateTrainMovement (0x43BB00), RouteTrainAtEdge (0x43C160),
+     * MoveToNeighborTown (0x43AE20) and Netman::SendChatMessage
+     * (0x43E1D0) — none of these are road-vehicle (GameVehicle) code
+     * paths, so these fields never collide with the general-purpose
+     * `direction` (+0x60) or `occupancy` (+0x64) state above, which are
+     * a completely separate concept for the non-train Vehicle use case.
+     * Field names below are NOT renamed to their train-specific meaning
+     * (e.g. "heading") despite that meaning now being resolved by
+     * evidence, because `tunnel_angle`/`field_76`/`field_7E`/`field_80`/
+     * `field_82`/`field_84`/`field_86` are already referenced by name
+     * from game/Vehicle.cpp, game/GameVehicle.cpp, town/Town.cpp,
+     * network/Netman.cpp and network/NetmanTypes.h's InboundTrainNode
+     * doc block — renaming here without updating every one of those
+     * sites would silently desync the two docs or break a build; see
+     * CLAUDE.md's guidance to prefer a stale-but-shared name over an
+     * unsynchronized rename across translation units. */
+    uint16_t  tunnel_angle;        // +0x74  Heading (0/0x5A/0xB4/0x10E degrees)
+                                    //   applied when this car is parked
+                                    //   (sprite_list_2) or being handed off
+                                    //   to a neighbor town — mirrored
+                                    //   relative to field_76's live heading
+                                    //   (MirrorTrainHeading in
+                                    //   Train_network.cpp). Consumed by
+                                    //   Netman::SendChatMessage (0x43E1D0)
+                                    //   to pick the tunnel exit direction
+                                    //   when the car arrives.
+    uint16_t  field_76;            // +0x76  Live travel heading while this
+                                    //   car is actively navigating the grid
+                                    //   in sprite_list_1/sprite_list_3
+                                    //   (0=+Y decrement/"up", 0x5A=+X/
+                                    //   "right", 0xB4=+Y increment/"down",
+                                    //   0x10E=-X/"left" — verified against
+                                    //   UpdateTrainMovement's steering at
+                                    //   0x43BB84-0x43BDFF and
+                                    //   Netman::CheckTrackConnection's
+                                    //   angle/0x28 mapping).
     union { uint8_t color_r; uint8_t slot_index; }; // +0x78
     uint8_t   _pad_79;             // +0x79
     union { uint16_t player_id; uint16_t network_id; }; // +0x7A
-    union { uint8_t color_g; uint8_t peer_index; }; // +0x7C
+    union { uint8_t color_g; uint8_t peer_index; }; // +0x7C  index into
+                                    //   Netman::m_slots[] for the town that
+                                    //   currently owns this train car.
     uint8_t   _pad_7D;             // +0x7D
-    uint16_t  field_7E;            // +0x7E
-    uint16_t  field_80;            // +0x80
-    uint8_t   field_82;            // +0x82
+    int16_t   field_7E;            // +0x7E  Current grid-tile X (column),
+                                    //   TrainSubsystem-specific — distinct
+                                    //   from the generic `tile_x` (+0x2E).
+                                    //   Read/written signed (MOVSX at
+                                    //   0x43BB63/0x43BB5C). Paired with
+                                    //   field_84 (last-visited X).
+    int16_t   field_80;            // +0x80  Current grid-tile Y (row).
+                                    //   Paired with field_86.
+    uint8_t   field_82;            // +0x82  Stuck-tile step counter:
+                                    //   increments on each successful move;
+                                    //   compared against a randomized
+                                    //   threshold to force a new random
+                                    //   heading (UpdateTrainMovement,
+                                    //   0x43BEBC-0x43BF24).
     uint8_t   _pad_83;             // +0x83
-    uint16_t  field_84;            // +0x84
-    uint16_t  field_86;            // +0x86
+    int16_t   field_84;            // +0x84  Last-recorded grid X (0xFFFF
+                                    //   sentinel = "unset"), compared
+                                    //   against field_7E for stuck-loop
+                                    //   detection.
+    int16_t   field_86;            // +0x86  Last-recorded grid Y, paired
+                                    //   with field_84.
     union { uint8_t init_flag; uint8_t process_delay; }; // +0x88
     union { uint8_t flag_89; uint8_t ack_counter; }; // +0x89
     uint8_t   flag_8A;             // +0x8A  unknown flag

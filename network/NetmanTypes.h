@@ -39,16 +39,32 @@
  *   +0x00: vtable            — compiler-managed vtable pointer
  *   +0x04: vehicle_data[0x6C] — Vehicle fields (offset 0x04-0x6F)
  *   +0x70: next              — linked-list next pointer
- *   +0x74: tunnel_angle      — tunnel exit angle (uint16_t)
- *   +0x76: field_76          — unknown uint16_t
+ *   +0x74: tunnel_angle      — heading (0/0x5A/0xB4/0x10E) to apply when
+ *                              parked/handed off; mirrored relative to
+ *                              field_76's live heading. Consumed by
+ *                              Netman::SendChatMessage (0x43E1D0) to pick
+ *                              the tunnel exit direction on arrival; set
+ *                              by TrainSubsystem::AddTrainCar/
+ *                              UpdateTrainMovement/MoveToNeighborTown
+ *                              (game/Train_network.cpp).
+ *   +0x76: field_76          — live travel heading while actively
+ *                              navigating the grid in sprite_list_1/
+ *                              sprite_list_3 (same 4-value convention as
+ *                              tunnel_angle; see Vehicle.h's field doc).
  *   +0x78: slot_index        — source slot index (uint8_t)
  *   +0x7A: network_id        — network-assigned ID (uint16_t)
- *   +0x7C: peer_index        — peer routing index (uint8_t)
- *   +0x7E: field_7E          — unknown uint16_t
- *   +0x80: field_80          — unknown uint16_t
- *   +0x82: field_82          — unknown uint8_t
- *   +0x84: field_84          — unknown uint16_t
- *   +0x86: field_86          — unknown uint16_t
+ *   +0x7C: peer_index        — index into Netman::m_slots[] for the town
+ *                              that currently owns this car (uint8_t)
+ *   +0x7E: field_7E          — current grid-tile X (column), signed
+ *                              int16_t; TrainSubsystem-specific, distinct
+ *                              from Vehicle's generic tile_x (+0x2E)
+ *   +0x80: field_80          — current grid-tile Y (row), signed int16_t
+ *   +0x82: field_82          — stuck-tile step counter (uint8_t)
+ *   +0x84: field_84          — last-recorded grid X, signed int16_t
+ *                              (0xFFFF sentinel = unset); paired with
+ *                              field_7E for stuck-loop detection
+ *   +0x86: field_86          — last-recorded grid Y, signed int16_t;
+ *                              paired with field_80
  *   +0x88: process_delay     — process delay counter (uint8_t)
  *   +0x89: ack_counter       — ack countdown (uint8_t)
  *

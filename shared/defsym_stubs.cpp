@@ -864,8 +864,10 @@ void BuildingMgr_DestroyAll(void*, int) { /* host no-op */ }
  * ui/UI_Utils.cpp, routing to UI_Manager::resetTooltips. */
 void World_Reset(void*, int);
 void World_Reset(void*, int) { /* host no-op */ }
-void Cursor_Show(void*);
-void Cursor_Show(void*) { /* host no-op */ }
+/* Cursor_Show(void*) removed 2026-08-17 — was a fake free-function facade
+ * around the real Cursor::show(void* playerData) (input/Cursor.h/.cpp,
+ * 0x416B80). Both real call sites (core/CGWND.cpp, town/Town.cpp) now
+ * call g_cursor->show(...) directly. */
 void NETMAN_SendMapData(void*, int);
 void NETMAN_SendMapData(void*, int) { /* host no-op */ }
 /* CGWND_AudioChannel_IsActive(unsigned int) removed 2026-08-14 — same
@@ -899,8 +901,10 @@ void UI_ResetTooltips();
 void UI_ResetTooltips() { /* host no-op */ }
 void World_Reset();
 void World_Reset() { /* host no-op */ }
-void Cursor_Show();
-void Cursor_Show() { /* host no-op */ }
+/* Cursor_Show() (zero-arg overload) removed 2026-08-17 — this was a
+ * second, unrelated fake symbol that happened to share the name with the
+ * void*-arg facade above; a dead landmine, never called anywhere. See the
+ * removal note above for the real void*-arg facade's replacement. */
 void NETMAN_SendMapData();
 void NETMAN_SendMapData() { /* host no-op */ }
 void CGWND_AudioChannel_Release();

@@ -203,14 +203,18 @@ public:
      * by an 8-byte pointer store land exactly on captureFlag/field_3D/
      * _pad_3E, not into any gap.
      *
-     * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass): every
-     * real reader/writer of primary_surface() lives in Cursor::render()
-     * (0x414C20), Cursor::render_with_viewport() (0x415440),
-     * Cursor::wait_for_blit() (0x414BB0), Cursor::create() (0x4169E0) and
-     * Cursor::show() (0x416B80) — none reachable on host today: show()'s
-     * only entry point, the free function Cursor_Show(void*)
-     * (shared/defsym_stubs.cpp), is a permanent host no-op stub; create()
-     * has zero callers outside the `#ifdef _WIN32` branch of
+     * Surveyed 2026-08-16 (Cursor.h overlay-accessor overrun pass); UPDATED
+     * 2026-08-17: every real reader/writer of primary_surface() lives in
+     * Cursor::render() (0x414C20), Cursor::render_with_viewport()
+     * (0x415440), Cursor::wait_for_blit() (0x414BB0), Cursor::create()
+     * (0x4169E0) and Cursor::show() (0x416B80). Of these, Cursor::show()
+     * itself is now reachable on host (its call sites in core/CGWND.cpp
+     * and town/Town.cpp were wired to call `g_cursor->show(...)` directly,
+     * replacing the removed `Cursor_Show(void*)` facade — see show()'s own
+     * doc comment in Cursor_Editor.cpp), but show()'s body never touches
+     * primary_surface() directly — only render()/render_with_viewport()/
+     * wait_for_blit()/create() do, and those remain dead: create() has
+     * zero callers outside the `#ifdef _WIN32` branch of
      * core/CGWND.cpp::InitAllSubsystems; render()/render_with_viewport()/
      * wait_for_blit() have zero callers anywhere in the tree (confirmed by
      * grep, not just this class's own uses). Cursor::init() and
@@ -339,18 +343,21 @@ public:
      * `this->dirtyRect = dirty;` (updating .right, i.e. this+0x58) in that
      * case.
      *
-     * CORRECTION (2026-08-16, Cursor.h overlay-accessor overrun pass): an
-     * earlier version of this comment cited `Cursor::handle_locomotive_select`
-     * (0x41A360) calling `set_render_surface()` with a real, non-null
-     * surface as evidence this is live on host today. That conflated the
-     * *original x86 binary's* call graph with *host* reachability:
-     * `handle_locomotive_select` has zero callers anywhere in this tree
-     * (confirmed by grep, not just within this class) — its only would-be
-     * caller is inside the same dead render/editor pipeline documented in
-     * primary_surface()'s doc comment above (reached only via
-     * Cursor::show(), whose sole entry point `Cursor_Show(void*)` is a
-     * permanent host no-op stub). So `renderSurface` is not, in fact, known
-     * to go non-null on a live Cursor instance on host today.
+     * CORRECTION (2026-08-16, Cursor.h overlay-accessor overrun pass;
+     * reachability note UPDATED 2026-08-17): an earlier version of this
+     * comment cited `Cursor::handle_locomotive_select` (0x41A360) calling
+     * `set_render_surface()` with a real, non-null surface as evidence
+     * this is live on host today. That conflated the *original x86
+     * binary's* call graph with *host* reachability: `handle_locomotive_
+     * select` still has zero callers anywhere in this tree (confirmed by
+     * grep, not just within this class) — it is a toolbar-hover/selection
+     * handler, not something `Cursor::show()`'s body or its callees
+     * (init_editor_sprites/on_create) invoke, so `Cursor::show()` becoming
+     * reachable on host (its `Cursor_Show(void*)` facade was removed and
+     * both real call sites now call `g_cursor->show(...)` directly — see
+     * show()'s doc comment in Cursor_Editor.cpp) does not make this
+     * reachable too. So `renderSurface` is not, in fact, known to go
+     * non-null on a live Cursor instance on host today.
      *
      * The independent storage below is kept regardless: per CLAUDE.md
      * ("exact byte-for-byte x86 layout parity is explicitly a non-goal for

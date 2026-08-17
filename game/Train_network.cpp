@@ -32,6 +32,8 @@
  * comment for why that split exists and why the full header is unsafe here. */
 #include "../network/NetmanTypes.h"
 #include "Vehicle.h"
+#include "../core/VehicleEditor.h"
+#include "../input/InputMgr.h"
 #include "../world/scriptengine.h"
 #include <new>
 #ifndef _WIN32
@@ -164,11 +166,17 @@ int    __thiscall Config_GetIniInt(void* config, const char* section, const char
 void*  __thiscall Config_GetIniString(void* config, const char* section, const char* key,
                                        const char* default_val, char* out, int out_size); /* 0x00414030 */
 
-/* Input helpers */
-void*  __thiscall INPUT_DirToOffset_Left(void* param);   /* 0x0041CF90 */
-void*  __thiscall INPUT_DirToOffset_Right(void* param);  /* 0x0041CFB0 */
-void*  __thiscall INPUT_DirToOffset_Up(void* param);     /* 0x0041CFD0 */
-void*  __thiscall INPUT_DirToOffset_Down(void* param);   /* 0x0041CFF0 */
+/* Input helpers — INPUT_DirToOffset_{Up,Left,Down,Right} are declared in
+ * input/InputMgr.h (included above transitively is NOT guaranteed, so
+ * included directly below this extern "C" block); this file used to
+ * redeclare them locally with the wrong addresses (0x41CF90-0x41CFF0
+ * instead of the real 0x41D8F0-0x41D980) and the wrong __thiscall/void*
+ * signature (they are plain int32_t*(int32_t*) functions — see
+ * InputMgr.h's own ABI note). Symbol-name linking made the wrong address
+ * comment harmless, but AddTrainCar (0x43B8C0) genuinely calls these to
+ * compute a newly-added multiplayer car's initial grid position — using
+ * InputMgr.h's real declarations instead of a hand-rolled dx/dy table
+ * closes that gap. */
 
 /* Internal train functions referenced from ProcessMessages */
 /* Train_ConnectToServer is __thiscall (ECX=subsystem, one stack arg),
@@ -277,6 +285,79 @@ NetworkMsg* AllocateNetworkMessage()
 {
     void* storage = operator_new(sizeof(NetworkMsg));
     return storage == nullptr ? nullptr : ::new (storage) NetworkMsg{};
+}
+
+/* MirrorTrainHeading — 180-degree flip of a train grid heading (degrees):
+ * 0<->0xB4, 0x5A<->0x10E. Values outside that 4-element set pass through
+ * unchanged, matching every one of the binary's mirror-table fall-through
+ * branches (e.g. 0x43B8F9-0x43B92D, 0x43AE64-0x43AECD, 0x43C079-0x43C0B4).
+ * Shared by TrainSubsystem::AddTrainCar/UpdateTrainMovement/
+ * MoveToNeighborTown. */
+uint16_t MirrorTrainHeading(uint16_t heading)
+{
+    switch (heading) {
+    case 0:     return 0xB4;
+    case 0x5A:  return 0x10E;
+    case 0xB4:  return 0;
+    case 0x10E: return 0x5A;
+    default:    return heading;
+    }
+}
+
+/* AppendToVehicleList — append `car` to the tail of the singly-linked
+ * Vehicle list rooted at `head` (car->next always cleared first, matching
+ * every one of the binary's "append to sprite_list_2/sprite_list_3 tail"
+ * blocks, e.g. 0x43B931-0x43B96F, 0x43AED1-0x43AEFF, 0x43B0A3-0x43B12F). */
+void AppendToVehicleList(Vehicle*& head, Vehicle* car)
+{
+    car->next = nullptr;
+    if (head == nullptr) {
+        head = car;
+        return;
+    }
+    Vehicle* tail = head;
+    while (tail->next != nullptr) tail = tail->next;
+    tail->next = car;
+}
+
+/* NotifyAndDrainDeadList — process every node reachable from
+ * `self->sprite_list_2`: send a type-0x11 "car removed" notification for
+ * each, mark it initialized-cleared, and unlink it. Matches two
+ * byte-identical inlined copies in the binary (0x43C0E0-0x43C144 inside
+ * UpdateTrainMovement's dead-owner purge, and 0x43B138-0x43B19E inside
+ * MoveToNeighborTown's remote-send-failure path) — including the fact
+ * that the loop clears `car->next` to nullptr *before* reading it back
+ * into `self->sprite_list_2`. Re-verified directly on raw instruction
+ * bytes (not decompiler pseudocode) for both copies:
+ *   0x43C123 MOV [EAX+0x70],EBP(0)   <- clear car->next, THEN
+ *   0x43C12D MOV EDX,[EDI+0x18]      <- reload car (same node, list head
+ *                                       untouched since the clear)
+ *   0x43C130 MOV EAX,[EDX+0x70]      <- read car->next: always 0
+ *   0x43C133 MOV [EDI+0x18],EAX      <- sprite_list_2 = 0
+ * and identically at 0x43B17B/0x43B185/0x43B188/0x43B18B. The list is
+ * therefore always left empty after this call regardless of how many
+ * nodes it originally held. That is the binary's own behavior, not a
+ * transcription artifact — do not "fix" it into a proper list-drain
+ * without re-checking both call sites' surrounding assembly first. */
+void NotifyAndDrainDeadList(TrainSubsystem* self, uint8_t local_slot_index)
+{
+    while (self->sprite_list_2 != nullptr) {
+        Vehicle* car = self->sprite_list_2;
+
+        NetworkMsg* msg = AllocateNetworkMessage();
+        if (msg) {
+            msg->type = 0x11;
+            msg->data = car;
+        }
+
+        car->init_flag = 0;
+        car->peer_index = local_slot_index;
+        car->next = nullptr;
+        car->init_flag = 0; /* 0x43C10A and 0x43C126 both clear this byte */
+        self->sprite_list_2 = car->next; /* always nullptr — see comment above */
+
+        NETMAN_QueueMessage(msg);
+    }
 }
 
 } // namespace
@@ -2145,9 +2226,10 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
 /* TrainSubsystem::AddTrainCar                                         */
 /* Address: 0x43B8C0                                                    */
 /* ================================================================== */
-void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
+void TrainSubsystem::AddTrainCar(Vehicle* car, int direction, int player_index)
 {
-    /* Check if player exists at target index */
+    /* Check if player exists at target index (same "is this town
+     * populated" proxy as RouteTrainAtEdge/UpdateTrainMovement). */
     PlayerSlot* player_slot = NULL;
     if (player_index >= 0) {
         player_slot = &g_netman->m_slots[player_index];
@@ -2156,26 +2238,32 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
     if (player_slot && player_slot->pixel_buffer != nullptr) {
         /* === Multiplayer path: prepend to sprite_list_3, broadcast 0x3F3 === */
 
-        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C)) = static_cast<uint8_t>(player_index);
-        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = this->sprite_list_3;
+        car->peer_index = static_cast<uint8_t>(player_index);
+        /* Unconditional prepend (0x43B980-0x43B986) — unlike sprite_list_2's
+         * append-to-tail idiom used below, sprite_list_3's insertion here is
+         * always a plain head-prepend regardless of prior contents. */
+        car->next = this->sprite_list_3;
         this->sprite_list_3 = car;
 
-        /* Set movement direction in +0x76 */
+        /* Set live heading in field_76 (only the 4 canonical values are
+         * ever written; anything else leaves field_76 untouched). */
         if (direction < 0x5B) {
-            if (direction == 0x5A)      *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0x5A;
-            else if (direction == 0)    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0;
+            if (direction == 0x5A)      car->field_76 = 0x5A;
+            else if (direction == 0)    car->field_76 = 0;
         } else {
-            if (direction == 0xB4)      *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0xB4;
-            else if (direction == 0x10E) *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76)) = 0x10E;
+            if (direction == 0xB4)      car->field_76 = 0xB4;
+            else if (direction == 0x10E) car->field_76 = 0x10E;
         }
 
-        /* Broadcast MSG_CTRL_INIT (0x3F3) */
+        /* Broadcast MSG_CTRL_INIT (0x3F3). Fixed-size raw network message
+         * buffer (explicit byte offsets), not a C++ object.
+         * ABI_BOUNDARY: wire-format layout for MSG_CTRL_INIT. */
         uint16_t* ctrl_init = reinterpret_cast<uint16_t*>(operator_new(10));
         if (ctrl_init) {
             ctrl_init[0] = 0x3F3;
-            ctrl_init[2] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x7A));
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 6)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x78));
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 7)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C));
+            ctrl_init[2] = car->network_id;
+            *reinterpret_cast<uint8_t*>(ctrl_init + 3) = car->slot_index;
+            *(reinterpret_cast<uint8_t*>(ctrl_init) + 7) = car->peer_index;
             ctrl_init[4] = static_cast<uint16_t>(direction);
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
 
@@ -2185,47 +2273,64 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
             GLOBAL_free(ctrl_init);
         }
 
-        /* Compute tile offset from direction */
-        int dx = 0, dy = 0;
-        uint16_t move_dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x76));
-
-        if (move_dir == 0x5A) { dx = 1; dy = 0; }
-        else if (move_dir == 0) { dx = 0; dy = -1; }
-        else if (move_dir == 0xB4) { dx = 0; dy = 1; }
-        else if (move_dir == 0x10E) { dx = -1; dy = 0; }
-
-        *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(car) + 0x7E)) = static_cast<int16_t>((dx + 1));
-        *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(car) + 0x80)) = static_cast<int16_t>((dy + (move_dir == 0x5A ? 1 : move_dir == 0 ? -1 : move_dir == 0xB4 ? 1 : 1)));
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x84)) = 0xFFFF;
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x86)) = 0xFFFF;
-        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x82)) = 0;
+        /* Compute the car's initial grid position from the real
+         * INPUT_DirToOffset_{Up,Left,Down,Right} helpers, matching
+         * 0x43BA15-0x43BAE8 exactly (NOT a hand-rolled dx/dy table). Each
+         * reads a globals-derived packed (Y<<16)|X offset and applies its
+         * own +-1 adjustment.
+         *
+         * The heading==0 branch calls INPUT_DirToOffset_Down (0x41D950,
+         * confirmed via the real CALL target at 0x43BA38) even though
+         * heading 0 means "up" per field_76's own convention (matches
+         * UpdateTrainMovement's steering and RouteTrainAtEdge's TOP-edge
+         * angle 0). This is not a mismatch: a car whose live heading is
+         * "up" (0) got there by exiting the SOURCE town's TOP edge and is
+         * now entering the TARGET town — i.e. through the target town's
+         * BOTTOM/"down" edge, continuing to travel up from there. The
+         * helper name describes which edge of the target town the car
+         * enters through, not the direction of travel; the same relation
+         * holds for the other three (0x5A/right heading enters via the
+         * target's Left edge, 0xB4/down heading via Right, 0x10E/left
+         * heading via Up) — all four CALL targets were independently
+         * re-verified against input/InputMgr.h's documented addresses. */
+        uint16_t heading = car->field_76;
+        int32_t off = 0;
+        int16_t new_x = 0, new_y = 0;
+        if (heading == 0) {            /* entering via target's "Down" edge */
+            off = *INPUT_DirToOffset_Down(&off);
+            new_x = static_cast<int16_t>(off) + 1;
+            new_y = static_cast<int16_t>(off >> 16) - 1;
+        } else if (heading == 0x5A) {   /* entering via target's "Left" edge */
+            off = *INPUT_DirToOffset_Left(&off);
+            new_x = static_cast<int16_t>(off) + 1;
+            new_y = static_cast<int16_t>(off >> 16) + 1;
+        } else if (heading == 0xB4) {   /* entering via target's "Right" edge */
+            off = *INPUT_DirToOffset_Right(&off);
+            new_x = static_cast<int16_t>(off) + 1;
+            new_y = static_cast<int16_t>(off >> 16) + 1;
+        } else if (heading == 0x10E) {  /* entering via target's "Up" edge */
+            off = *INPUT_DirToOffset_Up(&off);
+            new_x = static_cast<int16_t>(off) - 1;
+            new_y = static_cast<int16_t>(off >> 16) + 1;
+        }
+        car->field_7E = new_x;
+        car->field_80 = new_y;
+        car->field_84 = -1; /* 0xFFFF sentinel */
+        car->field_86 = -1;
+        car->field_82 = 0;
         return;
     }
 
-    /* === Single-player path: reverse direction, append to sprite_list_2 === */
-
-    /* Mirror direction */
-    if (direction < 0x5B) {
-        if (direction == 0x5A)      direction = 0x10E;
-        else if (direction == 0)    direction = 0xB4;
-    } else {
-        if (direction == 0xB4)      direction = 0;
-        else if (direction == 0x10E) direction = 0x5A;
-    }
-    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = static_cast<uint16_t>(direction);
-
-    /* Append to sprite_list_2 */
-    if (this->sprite_list_2 == NULL) {
-        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-        this->sprite_list_2 = car;
-    } else {
-        uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-        while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) {
-            tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-        }
-        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-        *reinterpret_cast<void**>((tail + 0x70)) = car;
-    }
+    /* === Single-player path: mirror heading once, append to sprite_list_2 ===
+     * 0x43B8F1-0x43B92D stores the raw `direction` first (dead store,
+     * immediately overwritten) then the mirrored value — net effect is a
+     * single mirror for both the 4 canonical headings AND any other value
+     * (ECX==EAX going into the compare chain per 0x43B8FC, and
+     * MirrorTrainHeading's default case also returns its input unchanged),
+     * so the collapse below is exact in every case, not just the 4
+     * canonical ones. */
+    car->tunnel_angle = MirrorTrainHeading(static_cast<uint16_t>(direction));
+    AppendToVehicleList(this->sprite_list_2, car);
     Train_RemoveAllTracks(this);
 }
 
@@ -2237,75 +2342,51 @@ void TrainSubsystem::AddTrainCar(void* car, int direction, int player_index)
 /* ================================================================== */
 void TrainSubsystem::UpdateTrainMovement()
 {
-    void*  prev = NULL;
-    void*  node = this->sprite_list_3;
+    Vehicle* prev = nullptr;
+    Vehicle* node = this->sprite_list_3;
 
-    while (node != NULL) {
-        void* next_node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+    while (node != nullptr) {
+        Vehicle* next_node = node->next;
 
         /* Check if player at node's town is still connected */
-        uint8_t owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+        uint8_t owner = node->peer_index;
         PlayerSlot* player_slot = &g_netman->m_slots[owner];
 
         if (player_slot->pixel_buffer == nullptr || player_slot->dpId != 0) {
             /* Owner disconnected — move from sprite_list_3 to sprite_list_2 */
-            if (prev == NULL) {
+            if (prev == nullptr) {
                 this->sprite_list_3 = next_node;
             } else {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = next_node;
+                prev->next = next_node;
             }
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70)) = NULL;
+            node->next = nullptr;
 
-            /* Mirror direction */
-            uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74));
-            if (dir < 0x5B) {
-                if (dir == 0x5A)      dir = 0x10E;
-                else if (dir == 0)    dir = 0xB4;
-            } else {
-                if (dir == 0xB4)      dir = 0;
-                else if (dir == 0x10E) dir = 0x5A;
-            }
-            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74)) = dir;
+            /* Mirror this car's parked heading once (0x43C079-0x43C0B4). */
+            node->tunnel_angle = MirrorTrainHeading(node->tunnel_angle);
 
-            /* Append to sprite_list_2 */
-            if (this->sprite_list_2 == NULL) {
-                this->sprite_list_2 = node;
-            } else {
-                uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-                while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-                *reinterpret_cast<void**>((tail + 0x70)) = node;
-            }
+            AppendToVehicleList(this->sprite_list_2, node);
+            NotifyAndDrainDeadList(this, static_cast<uint8_t>(g_netman->m_mySlotIndex));
 
-            /* Re-notify all cars in sprite_list_2 */
-            uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            while (car != nullptr) {
-                NetworkMsg* msg = AllocateNetworkMessage();
-                if (msg) { msg->data = NULL; msg->next = NULL;
-                           msg->type = 0x11;
-                           msg->data = this->sprite_list_2; }
-                (reinterpret_cast<Building*>(this->sprite_list_2))->occupation_level = 0;
-
-                uint8_t* cur = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
-                *reinterpret_cast<void**>((cur + 0x70)) = NULL;
-                *reinterpret_cast<uint8_t*>((cur + 0x88)) = 0;
-                this->sprite_list_2 = *reinterpret_cast<void**>((cur + 0x70));
-
-                NETMAN_QueueMessage(msg);
-                car = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            }
-
-            node = this->sprite_list_3;
+            /* Continue scanning sprite_list_3 from the successor captured
+             * above (0x43C075: EBX is set to next_node before the notify
+             * loop runs and is never touched by it; 0x43C146 branches back
+             * to the loop top with that same EBX). `prev` is deliberately
+             * left unchanged here, matching the binary (nothing in
+             * 0x43C04F-0x43C144 writes [ESP+0x14]/`prev`) — a prior
+             * transcription restarted the scan from sprite_list_3's head
+             * instead, which would reprocess already-visited nodes
+             * whenever a dead node was found deeper than the list head. */
+            node = next_node;
             continue;
         }
 
         /* === Check map edge routing === */
-        int pos_x = *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E));
-        int pos_y = *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80));
+        int pos_x = node->field_7E;
+        int pos_y = node->field_80;
         int map_width  = static_cast<int>(static_cast<int16_t>(player_slot->pixel_width));
         int map_height = static_cast<int>(static_cast<int16_t>(player_slot->pixel_height));
 
-        uint8_t routed = this->RouteTrainAtEdge(
+        bool routed = this->RouteTrainAtEdge(
             prev, node, pos_x, pos_y, map_width, map_height);
 
         if (routed) {
@@ -2315,7 +2396,7 @@ void TrainSubsystem::UpdateTrainMovement()
         }
 
         /* === Movement-steering: advance one tile === */
-        uint16_t move_dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76));
+        uint16_t move_dir = node->field_76;
         int new_x = pos_x;
         int new_y = pos_y;
         int tile_row_size = map_width;
@@ -2336,7 +2417,7 @@ void TrainSubsystem::UpdateTrainMovement()
                     } else if (*reinterpret_cast<uint8_t*>((tile_row_size * (pos_y - 1) + pos_x + tile_data_base)) == 0x05 && pos_y >= 1) {
                         new_y = pos_y - 1;
                     } else if (new_y < map_height && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + tile_data_base)) == 0x05) {
-                        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0xB4;
+                        node->field_76 = 0xB4;
                     } else {
                         new_y = pos_y;
                     }
@@ -2355,7 +2436,7 @@ void TrainSubsystem::UpdateTrainMovement()
                     new_x = pos_x - 1; new_y = pos_y;
                 } else if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x + 1 + tile_data_base)) == 0x05 && pos_x < map_width - 1) {
                     new_x = pos_x + 1; new_y = pos_y;
-                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x5A;
+                    node->field_76 = 0x5A;
                 } else { new_y = pos_y; }
             }
         } else if (move_dir == 0xB4) {
@@ -2371,7 +2452,7 @@ void TrainSubsystem::UpdateTrainMovement()
                     new_x = pos_x - 1; new_y = pos_y;
                 } else if (*reinterpret_cast<uint8_t*>((tile_row_size * pos_y + pos_x + 1 + tile_data_base)) == 0x05 && pos_x < map_width - 1) {
                     new_x = pos_x + 1; new_y = pos_y;
-                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x10E;
+                    node->field_76 = 0x10E;
                 } else { new_y = pos_y; }
             }
         } else if (move_dir == 0x10E) {
@@ -2389,7 +2470,7 @@ void TrainSubsystem::UpdateTrainMovement()
                     } else if (*reinterpret_cast<uint8_t*>((tile_row_size * (pos_y - 1) + pos_x + tile_data_base)) == 0x05 && pos_y >= 1) {
                         new_y = pos_y - 1;
                     } else if (new_y < map_height && *reinterpret_cast<uint8_t*>((tile_row_size * new_y + pos_x + tile_data_base)) == 0x05) {
-                        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0;
+                        node->field_76 = 0;
                     } else { new_y = pos_y; }
                 }
             }
@@ -2400,57 +2481,62 @@ void TrainSubsystem::UpdateTrainMovement()
             uint32_t rand_val = CRT_rand();
             int r = static_cast<int>((rand_val / 0x1FFF));
             switch (r % 4) {
-            case 0: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x5A;  break;
-            case 1: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x10E; break;
-            case 2: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0;     break;
-            case 3: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0xB4;  break;
+            case 0: node->field_76 = 0x5A;  break;
+            case 1: node->field_76 = 0x10E; break;
+            case 2: node->field_76 = 0;     break;
+            case 3: node->field_76 = 0xB4;  break;
             }
-            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) = 0xFFFF;
-            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x86)) = 0xFFFF;
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) = 0;
+            node->field_84 = -1; /* 0xFFFF sentinel */
+            node->field_86 = -1;
+            node->field_82 = 0;
         } else {
             /* Update position */
-            *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E)) = static_cast<int16_t>(new_x);
-            *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80)) = static_cast<int16_t>(new_y);
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) += 1;
+            node->field_7E = static_cast<int16_t>(new_x);
+            node->field_80 = static_cast<int16_t>(new_y);
+            node->field_82 += 1;
 
             /* Check stuck counter loop */
             uint32_t rand_val = CRT_rand();
             int threshold = static_cast<int>((rand_val / 0x1999)) + 3;
-            if (threshold < static_cast<int>(*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)))) {
-                if (*reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E)) == *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) &&
-                    *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x80)) == *reinterpret_cast<int16_t*>((reinterpret_cast<uint8_t*>(node) + 0x86))) {
+            if (threshold < static_cast<int>(node->field_82)) {
+                if (node->field_7E == node->field_84 && node->field_80 == node->field_86) {
                     uint32_t rv = CRT_rand();
                     int rr = static_cast<int>((rv / 0x1FFF));
                     switch (rr % 4) {
-                    case 0: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x5A;  break;
-                    case 1: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0x10E; break;
-                    case 2: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0;     break;
-                    case 3: *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x76)) = 0xB4;  break;
+                    case 0: node->field_76 = 0x5A;  break;
+                    case 1: node->field_76 = 0x10E; break;
+                    case 2: node->field_76 = 0;     break;
+                    case 3: node->field_76 = 0xB4;  break;
                     }
-                    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) = 0;
-                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) = 0xFFFF;
-                    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x86)) = 0xFFFF;
+                    node->field_82 = 0;
+                    node->field_84 = -1;
+                    node->field_86 = -1;
                 }
-                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x82)) = 0;
-                *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(node) + 0x84)) = *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(node) + 0x7E));
+                node->field_82 = 0;
+                /* 0x43BF3C-0x43BF46: copies the dword-aligned pair
+                 * (field_7E, field_80) into (field_84, field_86) in one
+                 * 32-bit move — equivalent to the two int16_t assignments
+                 * below since both pairs are adjacent and same-endian. */
+                node->field_84 = node->field_7E;
+                node->field_86 = node->field_80;
             }
 
             /* === Build and send type-0x3F6 position update message === */
             {
                 /* Allocate message buffer. Fixed-size raw network message
                  * buffer (explicit byte offsets below), not a C++ object —
-                 * safe as-is on any host. */
+                 * safe as-is on any host.
+                 * ABI_BOUNDARY: wire-format layout for MSG_TRAIN_POS (0x3F6). */
                 uint16_t* buf = reinterpret_cast<uint16_t*>(operator_new(0x2000));
                 if (buf) {
                     buf[0] = 0x3F6;
-                    *reinterpret_cast<uint8_t*>((buf + 1)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+                    *reinterpret_cast<uint8_t*>((buf + 1)) = node->peer_index;
                     *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(buf) + 4)) = 0;
                     *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(buf) + 6)) = 1;
-                    uint8_t c1 = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x78));
-                    uint8_t c2 = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
+                    uint8_t c1 = node->slot_index;
+                    uint8_t c2 = node->peer_index;
                     *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(buf) + 9)) =
-                        (static_cast<uint32_t>(new_x) << 16) | *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7A));
+                        (static_cast<uint32_t>(new_x) << 16) | node->network_id;
                     *reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(buf) + 0x0D)) =
                         (c2 << 24) | (c1 << 16) | static_cast<uint16_t>(new_y);
 
@@ -2494,23 +2580,42 @@ void TrainSubsystem::UpdateTrainMovement()
 /* TrainSubsystem::RouteTrainAtEdge                                    */
 /* Address: 0x43C160                                                    */
 /* ================================================================== */
-uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
-                                           int pos_x, int pos_y,
-                                           int map_width, int map_height)
+bool TrainSubsystem::RouteTrainAtEdge(Vehicle* prev_node, Vehicle* train,
+                                       int pos_x, int pos_y,
+                                       int map_width, int map_height)
 {
-    uint8_t owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(train) + 0x7C));
+    uint8_t owner = train->peer_index;
 
-    /* RIGHT edge (pos_x >= map_width - 1) */
-    if (pos_x >= map_width - 1) {
+    /* NOTE ON A FIXED BUG: an earlier pass of this function gated these
+     * four blocks on the wrong axis (pos_x/map_width where pos_y/map_height
+     * belonged, and vice versa) while each block's own body (angle
+     * constant, neighbor arithmetic, dpId checks) was already correct —
+     * a systematic 90-degree rotation. Re-derived and fixed against the
+     * complete raw disassembly of 0x43C160-0x43C40A. The real structure's
+     * OUTERMOST test is `pos_y >= map_height - 1` (BOTTOM) — it must stay
+     * first in this if/else-if chain, not just "some" order: at a
+     * bottom-left corner tile (pos_x<1 AND pos_y>=map_height-1
+     * simultaneously) the real binary takes BOTTOM unconditionally
+     * (0x43C170-0x43C178 branches straight there without ever evaluating
+     * pos_x), so BOTTOM must short-circuit TOP/LEFT/RIGHT exactly as
+     * written below, not merely appear somewhere in the chain. */
+
+    /* BOTTOM edge (pos_y >= map_height - 1): 0x43C178-0x43C214 (the
+     * function's outermost fallthrough, taken whenever NOT `pos_y <
+     * map_height - 1`). Angle 0xB4 ("down", matches Vehicle.h's field_76
+     * convention). Neighbor = owner + g_netman[+0xC] (0x43C1BF ADD). This
+     * is the only edge with a second gate on top of dpId!=0 —
+     * `is_connected` (0x43C1DC) — verified against 0x43C1D8-0x43C1DF.
+     * Bounce (no track) sets field_76 = 0 ("up", 0x43C210). */
+    if (pos_y >= map_height - 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0xB4, owner);
         if (static_cast<char>(conn) != 0) {
-            /* Track connection to neighbor exists — route the train */
-            if (prev_node == NULL) {
-                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+            if (prev_node == nullptr) {
+                this->sprite_list_3 = train->next;
             } else {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+                prev_node->next = train->next;
             }
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
+            train->next = nullptr;
 
             /* g_netman->m_playerRows: see the loud TODO in the identically-
              * shaped block in HandleFileTransfer above — this is the field
@@ -2523,23 +2628,27 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
             }
             if (player_slot && player_slot->dpId != 0 &&
                 player_slot->is_connected != 0) {
-                return this->MoveToNeighborTown(player_slot->dpId, train, 0xB4);
+                this->MoveToNeighborTown(player_slot->dpId, train, 0xB4);
+                return true;
             }
             this->AddTrainCar(train, 0xB4, target_town);
-            return 1;
+            return true;
         }
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0; /* Bounce left */
+        train->field_76 = 0;
     }
-    /* LEFT edge (pos_x <= 0) */
-    else if (pos_x < 1) {
+    /* TOP edge (pos_y < 1): 0x43C219-0x43C2AA (only reachable once BOTTOM
+     * above is ruled out). Angle 0 ("up"). Neighbor = owner -
+     * g_netman[+0xC] (0x43C264 SUB, not ADD — verified). Bounce sets
+     * field_76 = 0xB4 ("down", 0x43C2A4). */
+    else if (pos_y < 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0, owner);
         if (static_cast<char>(conn) != 0) {
-            if (prev_node == NULL) {
-                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+            if (prev_node == nullptr) {
+                this->sprite_list_3 = train->next;
             } else {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+                prev_node->next = train->next;
             }
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
+            train->next = nullptr;
 
             int target_town = static_cast<int>(owner) - g_netman->m_playerRows;
             PlayerSlot* player_slot = NULL;
@@ -2547,23 +2656,28 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
                 player_slot = &g_netman->m_slots[target_town];
             }
             if (player_slot && player_slot->dpId != 0) {
-                return this->MoveToNeighborTown(player_slot->dpId, train, 0);
+                this->MoveToNeighborTown(player_slot->dpId, train, 0);
+                return true;
             }
             this->AddTrainCar(train, 0, target_town);
-            return 1;
+            return true;
         }
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0xB4; /* Bounce right */
+        train->field_76 = 0xB4;
     }
-    /* TOP edge (pos_y <= 0) */
-    else if (pos_y < 1) {
+    /* LEFT edge (pos_x < 1): 0x43C2AF-0x43C34C (only reachable once
+     * BOTTOM and TOP above are ruled out). Angle 0x10E ("left"). Neighbor
+     * = owner - 1 (simple decrement, 0x43C2F7 DEC — NOT the
+     * g_netman[+0xC] stride; that stride only applies to the Y-axis
+     * TOP/BOTTOM edges). Bounce sets field_76 = 0x5A ("right", 0x43C346). */
+    else if (pos_x < 1) {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0x10E, owner);
         if (static_cast<char>(conn) != 0) {
-            if (prev_node == NULL) {
-                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+            if (prev_node == nullptr) {
+                this->sprite_list_3 = train->next;
             } else {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+                prev_node->next = train->next;
             }
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
+            train->next = nullptr;
 
             int target_town = static_cast<int>(owner) - 1;
             PlayerSlot* player_slot = NULL;
@@ -2571,42 +2685,49 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
                 player_slot = &g_netman->m_slots[target_town];
             }
             if (player_slot && player_slot->dpId != 0) {
-                return this->MoveToNeighborTown(player_slot->dpId, train, 0x10E);
+                this->MoveToNeighborTown(player_slot->dpId, train, 0x10E);
+                return true;
             }
             this->AddTrainCar(train, 0x10E, target_town);
-            return 1;
+            return true;
         }
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0x5A; /* Bounce down */
+        train->field_76 = 0x5A;
     }
-    /* BOTTOM edge (pos_y >= map_height - 1) */
-    else if (pos_y >= map_height - 1) {
+    /* Not at the Y-axis (top/bottom) edge or the left edge: 0x43C358 JL
+     * 0x43C405 returns false unconditionally here — this is the ONLY path
+     * that continues normal per-tile movement this tick. */
+    else if (pos_x < map_width - 1) {
+        return false;
+    }
+    /* RIGHT edge (pos_x >= map_width - 1): 0x43C351-0x43C3DD. Angle 0x5A
+     * ("right"). Neighbor = owner + 1 (0x43C397 INC). Bounce sets
+     * field_76 = 0x10E ("left", 0x43C3E0). */
+    else {
         int conn = NETMAN_CheckTrackConnection(g_netman, 0x5A, owner);
         if (static_cast<char>(conn) != 0) {
-            if (prev_node == NULL) {
-                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+            if (prev_node == nullptr) {
+                this->sprite_list_3 = train->next;
             } else {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev_node) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70));
+                prev_node->next = train->next;
             }
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(train) + 0x70)) = NULL;
+            train->next = nullptr;
 
             PlayerSlot* player_ptr = &g_netman->m_slots[owner + 1];
             if (player_ptr->dpId != 0) {
-                return this->MoveToNeighborTown(player_ptr->dpId, train, 0x5A);
+                this->MoveToNeighborTown(player_ptr->dpId, train, 0x5A);
+                return true;
             }
             this->AddTrainCar(train, 0x5A, owner + 1);
-            return 1;
+            return true;
         }
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x76)) = 0x10E; /* Bounce up */
-    } else {
-        /* Not at any edge — continue normal movement */
-        return 0;
+        train->field_76 = 0x10E;
     }
 
     /* Bounce (no track connection): clear stuck counter */
-    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(train) + 0x82)) = 0;
-    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x84)) = 0xFFFF;
-    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(train) + 0x86)) = 0xFFFF;
-    return 0xFFFFFF01u;
+    train->field_82 = 0;
+    train->field_84 = -1; /* 0xFFFF sentinel */
+    train->field_86 = -1;
+    return true;
 }
 
 
@@ -2615,171 +2736,129 @@ uint32_t TrainSubsystem::RouteTrainAtEdge(void* prev_node, void* train,
 /* Address: 0x43AE20                                                    */
 /* Size: 1016 bytes                                                     */
 /* ================================================================== */
-uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, void* car, int direction)
+uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, Vehicle* car, int direction)
 {
     int self_slot_index = g_netman->m_mySlotIndex;
     int target_idx = NETMAN_FindPlayerIndex(g_netman, to_player);
 
     if (self_slot_index == target_idx) {
-        /* === Local player: mirror direction, append to sprite_list_2 === */
-
-        /* Mirror direction */
-        if (direction < 0x5B) {
-            if (direction == 0x5A)      direction = 0x10E;
-            else if (direction == 0)    direction = 0xB4;
-        } else {
-            if (direction == 0xB4)      direction = 0;
-            else if (direction == 0x10E) direction = 0x5A;
-        }
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = static_cast<uint16_t>(direction);
-
-        /* Append to sprite_list_2 */
-        if (this->sprite_list_2 == NULL) {
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            this->sprite_list_2 = car;
-        } else {
-            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            *reinterpret_cast<void**>((tail + 0x70)) = car;
-        }
+        /* === Local player === (0x43AE58-0x43AF09)
+         * The binary mirrors `direction` twice back-to-back into
+         * car->tunnel_angle (0x43AE9E then 0x43AECD) — mirroring is an
+         * involution over the 4 canonical headings (and a no-op on any
+         * other value), so the net effect is car->tunnel_angle==direction
+         * unchanged. Collapsed to the single assignment below; the
+         * intermediate mirrored value is never read back in between. */
+        car->tunnel_angle = static_cast<uint16_t>(direction);
+        AppendToVehicleList(this->sprite_list_2, car);
         Train_RemoveAllTracks(this);
         return 1;
     }
 
     /* === Remote player: serialize into 0xB1C-byte MSG_CONN_SETUP ===
      * Fixed-size raw network message buffer (memset + explicit byte
-     * offsets below), not a C++ object — safe as-is on any host. */
+     * offsets below), not a C++ object — safe as-is on any host.
+     * ABI_BOUNDARY: wire-format layout for MSG_CONN_SETUP (0x3F2). */
     uint8_t* buf = reinterpret_cast<uint8_t*>(operator_new(0xB1C));
     if (buf == NULL) return 0;
 
     memset(buf, 0, 0xB1C);
 
-    *reinterpret_cast<uint16_t*>(buf) = 0x3F2;                        /* message type */
-    *reinterpret_cast<uint16_t*>((buf + 4)) = static_cast<uint16_t>(direction);     /* direction */
-    *reinterpret_cast<uint16_t*>((buf + 6)) = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x7A));  /* resource ID */
-    *reinterpret_cast<uint8_t*>((buf + 10)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x78));   /* type */
-    *reinterpret_cast<uint16_t*>((buf + 8)) = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x58));  /* speed parameter */
+    *reinterpret_cast<uint16_t*>(buf) = 0x3F2;                                    /* message type */
+    *reinterpret_cast<uint16_t*>(buf + 4) = static_cast<uint16_t>(direction);     /* direction */
+    *reinterpret_cast<uint16_t*>(buf + 6) = car->network_id;                      /* +0x7A */
+    *reinterpret_cast<uint8_t*>(buf + 10) = car->slot_index;                      /* +0x78 */
+    *reinterpret_cast<uint16_t*>(buf + 8) = static_cast<uint16_t>(car->max_steps);/* +0x58 speed */
+    *reinterpret_cast<int32_t*>(buf + 0x0C) = car->active_editor;                 /* +0x08 */
 
-    /* Copy parent data */
-    *reinterpret_cast<int32_t*>((buf + 0x0C)) = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 8));
-
-    /* Copy player name (up to 10 bytes from +0x7C) */
+    /* Copy the primary editor's Entity::name (0x43AF98-0x43AFA9: the name
+     * lives on car->editors[0], NOT on `car` itself — car+0x7C is
+     * peer_index, a completely different field). Bounded to 10 chars;
+     * Entity::name is char[11], so this can never truncate.
+     *
+     * No null guard on editors[0] here, matching the binary exactly: the
+     * real code (0x43AF98 `MOV EDI,[EBX+0x10]`; 0x43AF9E `ADD EDI,0x7C`;
+     * 0x43AFA3 `SCASB`) dereferences it completely unconditionally, with
+     * no `TEST`/branch on EDI anywhere in that range. This is safe because
+     * every Vehicle allocates editors[0] in its constructor (Vehicle.h's
+     * ctor doc: "initial VehicleEditor sub-object") and, unlike
+     * editors[1..3], slot 0 is never nulled by RemoveEditor or read past
+     * (GetOccupantCount/DetachAll deliberately skip index 0 rather than
+     * treating it as removable) — so a Vehicle reaching this call always
+     * has a non-null editors[0]. */
     {
-        const char* name_src = reinterpret_cast<const char*>((reinterpret_cast<uint8_t*>(car) + 0x7C));
-        char* name_dst = reinterpret_cast<char*>((buf + 0xB10));
+        const char* name_src = car->editors[0]->name;
+        char* name_dst = reinterpret_cast<char*>(buf + 0xB10);
         for (int i = 0; i < 10 && name_src[i] != 0; i++) {
             name_dst[i] = name_src[i];
         }
     }
 
-    /* Process carriages */
+    /* Serialize additional carriages: editors[1..editor_count]
+     * (0x43AFCA-0x43B063). Vehicle::InitRoute (0x44C220) bounds
+     * editor_count to 0-3 before ever writing a new editor slot, so this
+     * loop can never read past editors[3]. Each record is 0x3A8 bytes
+     * starting at buf+0x18 (0x18 + N*0x3A8 for N in 0..2 — matching the
+     * CRT_memset_pattern(buf+0x18, 0x3A8, 3, ...) placement-construction
+     * of exactly 3 slots at the top of this function, and the buffer's
+     * own 0xB1C size: 0x18 + 3*0x3A8 + 10-byte name + 2 pad == 0xB1C).
+     * The decompiler's "* 0xEA + 6" pseudocode is wrong — verified
+     * against the real LEA/MOV sequence at 0x43AFEB-0x43AFF4
+     * (ECX*0x75*8 + 0x18 == carriage_count*0x3A8 + 0x18). */
     uint8_t carriage_count = 0;
-    if (*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(car) + 0x0C) != 0) {
-        int* carriage_ptr = reinterpret_cast<int*>((reinterpret_cast<uint8_t*>(car) + 0x14));
-        for (int i = 0; i < *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x0C)); i++) {
-            if (carriage_ptr[i] == 0) continue;
+    for (int i = 1; i <= car->editor_count; i++) {
+        VehicleEditor* editor = car->editors[i];
+        if (editor == nullptr) continue;
 
-            int res_id = VehicleEditor_GetResourceId(reinterpret_cast<void*>(static_cast<uintptr_t>(carriage_ptr[i])));
-            *reinterpret_cast<int32_t*>((buf + 6 + carriage_count * 0xEA)) = res_id;
-            *reinterpret_cast<int32_t*>((buf + 6 + carriage_count * 0xEA + 4)) =
-                *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(carriage_ptr[i])) + 0x42C));
+        uint8_t* record = buf + 0x18 + carriage_count * 0x3A8;
+        *reinterpret_cast<int32_t*>(record) = VehicleEditor_GetResourceId(editor);
+        *reinterpret_cast<int32_t*>(record + 4) = editor->res_id_2;
 
-            void* dplay_data = VehicleEditor_GetDPlayData(reinterpret_cast<void*>(static_cast<uintptr_t>(carriage_ptr[i])));
-            if (dplay_data) {
-                *reinterpret_cast<uint8_t*>((buf + 6 + carriage_count * 0xEA + 8)) = 1;
-                memcpy(buf + 6 + carriage_count * 0xEA + 9, dplay_data, 0x39C);
-                /* 0x39C = 0xE7 * 4 bytes */
-            } else {
-                *reinterpret_cast<uint8_t*>((buf + 6 + carriage_count * 0xEA + 8)) = 0;
-            }
-            carriage_count++;
+        void* dplay_data = VehicleEditor_GetDPlayData(editor);
+        if (dplay_data) {
+            record[8] = 1;
+            /* ABI_BOUNDARY: raw DPlayManager wire copy (0x39C = 0xE7 dwords). */
+            memcpy(record + 0x0C, dplay_data, 0x39C);
+        } else {
+            record[8] = 0;
         }
+        carriage_count++;
     }
-    *reinterpret_cast<uint8_t*>((buf + 0x14)) = carriage_count;
+    buf[0x14] = carriage_count;
 
     /* Send the message */
     int send_result = WIN32_SendNetworkData(g_dplay_peer, to_player, buf, 0xB1C, 1);
 
     if (send_result == 0) {
-        /* Send failed — take local control instead */
+        /* Send failed (0x43B0A3 onward) — keep the car locally: mirror its
+         * current parked heading once and re-queue+notify on
+         * sprite_list_2 (byte-identical to UpdateTrainMovement's dead-
+         * owner purge loop — see NotifyAndDrainDeadList). */
         GLOBAL_free(buf);
-
-        /* Mirror direction */
-        uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74));
-        if (dir < 0x5B) {
-            if (dir == 0x5A)      dir = 0x10E;
-            else if (dir == 0)    dir = 0xB4;
-        } else {
-            if (dir == 0xB4)      dir = 0;
-            else if (dir == 0x10E) dir = 0x5A;
-        }
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = dir;
-
-        /* Append to sprite_list_2 */
-        if (this->sprite_list_2 == NULL) {
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            this->sprite_list_2 = car;
-        } else {
-            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            *reinterpret_cast<void**>((tail + 0x70)) = car;
-        }
-
-        /* Notify UI for all cars in sprite_list_2 */
-        {
-            uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            while (c != nullptr) {
-                NetworkMsg* msg = AllocateNetworkMessage();
-                if (msg) { msg->data = NULL; msg->next = NULL;
-                           msg->type = 0x11;
-                           msg->data = this->sprite_list_2; }
-                (reinterpret_cast<Building*>(this->sprite_list_2))->occupation_level = 0;
-
-                uint8_t* cur = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-                *reinterpret_cast<uint8_t*>((cur + 0x7C)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
-                *reinterpret_cast<void**>((cur + 0x70)) = NULL;
-                *reinterpret_cast<uint8_t*>((cur + 0x88)) = 0;
-                this->sprite_list_2 = *reinterpret_cast<void**>((cur + 0x70));
-
-                NETMAN_QueueMessage(msg);
-                c = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            }
-        }
+        car->tunnel_angle = MirrorTrainHeading(car->tunnel_angle);
+        AppendToVehicleList(this->sprite_list_2, car);
+        NotifyAndDrainDeadList(this, static_cast<uint8_t>(g_netman->m_mySlotIndex));
     } else {
-        /* Send succeeded — car transferred to remote player */
-
-        /* Mirror direction for local tracking */
-        {
-            uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74));
-            if (dir < 0x5B) {
-                if (dir == 0x5A)      dir = 0x10E;
-                else if (dir == 0)    dir = 0xB4;
-            } else {
-                if (dir == 0xB4)      dir = 0;
-                else if (dir == 0x10E) dir = 0x5A;
-            }
-            *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = dir;
-        }
-
-        /* Set owner to target player */
-        int target_idx2 = NETMAN_FindPlayerIndex(g_netman, to_player);
-        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x7C)) = static_cast<uint8_t>(target_idx2);
-        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(car) + 0x8A)) = 0;
-
-        /* Append to sprite_list_2 with owner tracking */
-        if (this->sprite_list_2 == NULL) {
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            this->sprite_list_2 = car;
-        } else {
-            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            *reinterpret_cast<void**>((tail + 0x70)) = car;
-        }
-
+        /* Send succeeded (0x43B1A0-0x43B201) — ownership transfers to the
+         * remote player. This branch does NOT touch tunnel_angle and does
+         * NOT append to sprite_list_2 (the previous transcription did
+         * both, incorrectly — verified against 0x43B1C2-0x43B201). */
         GLOBAL_free(buf);
+        car->peer_index = static_cast<uint8_t>(NETMAN_FindPlayerIndex(g_netman, to_player));
+        car->flag_8A = 0;
+        if (car->owner_handle == 0) {
+            /* Prototype/template car (0x43B1DF-0x43B1EC): keep it locally
+             * on the active controller list. */
+            car->next = this->sprite_list_1;
+            this->sprite_list_1 = car;
+        } else {
+            /* Instance car (0x43B1EE-0x43B1FF): the remote peer now owns
+             * the authoritative copy — destroy the local one. `init_flag`
+             * must be set before delete, matching the binary's own
+             * ordering (0x43B1F0 precedes the vtable[0](1) call). */
+            car->init_flag = 1;
+            delete car;
+        }
     }
 
     return 1;
@@ -3019,13 +3098,16 @@ void TrainSubsystem::RemoveAllCars()
             msg->next = NULL;
         }
 
-        /* 0x43CC0B writes through msg unconditionally, matching the binary. */
+        /* 0x43CC0B writes through msg unconditionally, matching the binary
+         * (a real null-deref if AllocateNetworkMessage failed — see
+         * network/TrainMessage.h; not introduced by this rewrite).
+         * BUG: no null check on `msg` here, matching 0x43CC03. */
         msg->type = 0x0F;
-        msg->data = this->sprite_list_1;
-        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
-        this->sprite_list_1 =
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
-        *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(msg->data) + 0x70)) = NULL;
+        Vehicle* car = this->sprite_list_1;
+        msg->data = car;
+        car->init_flag = 0;
+        this->sprite_list_1 = car->next;
+        car->next = nullptr;
         NETMAN_QueueMessage(msg);
     }
 }

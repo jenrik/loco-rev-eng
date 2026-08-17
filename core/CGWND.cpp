@@ -706,8 +706,12 @@ void CGWND_SetMode(int new_mode)
             } else if (new_mode == 6) {
                 screen_obj = g_postcard;
             } else if (new_mode == 7) {
-                extern void Cursor_Show(void* c);
-                Cursor_Show(g_cursor);
+                /* g_cursor->show(playerData) — Cursor::show, 0x416B80.
+                 * Real x86 call site (mode-7 case, 0x408244-0x40824C):
+                 * MOV ECX,[0x4FD380] (g_cursor); PUSH 0; CALL 0x416B80 —
+                 * receiver is g_cursor, argument is a literal NULL
+                 * playerData (local/offline mode). */
+                static_cast<Cursor*>(g_cursor)->show(nullptr);
             } else if (new_mode == 9) {
                 if (old_mode == 4) {
                     extern void NETMAN_SendMapData(void* net, int flags);
