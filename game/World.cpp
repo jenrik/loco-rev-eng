@@ -1427,3 +1427,16 @@ void World_Unlock(void* world)
 {
     static_cast<World*>(world)->Unlock();
 }
+
+/* World_UpdateTick — same shape as World_Lock/World_Unlock above: the
+ * free function GameLoop.cpp's per-frame loop calls (0x44E020) IS
+ * World::UpdateTick, just addressed through a plain-function symbol.
+ * Was a permanent no-op stub in shared/stubs_impl.cpp (removed), which
+ * made World::UpdateTick's entire body — vehicle movement, SaveToFile,
+ * network sync — dead on host; see PROGRESS.md's call-0 landmine entry. */
+void World_UpdateTick(void* world);
+
+void World_UpdateTick(void* world)
+{
+    static_cast<World*>(world)->UpdateTick();
+}

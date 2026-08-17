@@ -847,8 +847,9 @@ void  NETMAN_Update(void* self);
 void  NETMAN_Update(void* self) { (void)self; }
 void  RESMGR_VehicleAnimationTick(void* self);
 void  RESMGR_VehicleAnimationTick(void* self) { (void)self; }
-void  World_UpdateTick(void* self);
-void  World_UpdateTick(void* self) { (void)self; }
+/* World_UpdateTick(void*) — removed no-op stub. Real definition now in
+ * game/World.cpp, forwarding to World::UpdateTick() (0x44E020), same
+ * pattern as World_Lock/World_Unlock in that file. */
 /* UI_HideTooltip(void*): removed — real definition now in
  * ui/UI_Utils.cpp, routing to UI_Manager::hideTooltip. */
 void  RESDATA_ScriptedObject_Update(void* self);
