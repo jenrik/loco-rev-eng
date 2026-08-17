@@ -58,48 +58,7 @@
 class WNDPROC_Stream;
 
 /* ================================================================== */
-/* 1. WIN32_StreamOpenPath(void*, const char*, int, int)                */
-/*    0x463AA0 (WIN32_Stream::OpenPath's original address).             */
-/*    Callers (verified in this worktree, NOT inside extern "C", so      */
-/*    C++-mangled): game/ScriptedObject.cpp (HandleEvent); ui/           */
-/*    UIPANEL_Surface.cpp (UIPANEL_StretchBlit); ui/AboutDialog.cpp      */
-/*    (extra unlisted caller with the identical shape — harmless to      */
-/*    also satisfy).                                                     */
-/*                                                                        */
-/*    Every verified real caller passes a raw, never-placement-          */
-/*    constructed stack buffer as `stream` — ScriptedObject::HandleEvent's*/
-/*    `int stream_handle[2]` is only 8 bytes, nowhere near large enough   */
-/*    for a real stream object even if one existed at this commit — so    */
-/*    this cannot safely attempt real construction/open logic without     */
-/*    risking a stack overflow, independent of whether Win32Stream.h      */
-/*    exists. All verified callers discard the return value. REPLACE      */
-/*    ONCE MERGED: once a real WIN32_Stream exists AND the raw-buffer     */
-/*    callers are fixed to pass a real heap-allocated object (a separate, */
-/*    already-tracked caller-unification pass — see WndProcStream.cpp's   */
-/*    WNDPROC_CriticalSectionLock postmortem for the identical problem     */
-/*    shape), this should forward to WIN32_Stream::OpenPath.              */
-/* ================================================================== */
-int WIN32_StreamOpenPath(void* stream, const char* path, int flags, int unk);
-int WIN32_StreamOpenPath(void* stream, const char* path, int flags, int unk)
-{
-    (void)stream;
-    (void)unk;
-    static bool warned = false;
-    if (!warned) {
-        fprintf(stderr,
-                "STUB: WIN32_StreamOpenPath(void*, const char*, int, int) not "
-                "implemented (0x463AA0; TODO: forward to WIN32_Stream::OpenPath "
-                "once resources/Win32Stream.{h,cpp} exist in this worktree AND "
-                "callers stop passing raw undersized stack buffers) — "
-                "path='%s' flags=0x%x, stream left unopened\n",
-                path ? path : "(null)", flags);
-        warned = true;
-    }
-    return 0;
-}
-
-/* ================================================================== */
-/* 2. WIN32_StreamOpenPath(void*, const char*, int, const char*)        */
+/* WIN32_StreamOpenPath(void*, const char*, int, const char*)           */
 /*    0x463AA0. Caller (verified): native/wave_io.c's Game_LoadWaveFile  */
 /*    (a function-local `extern` declaration, not wrapped in             */
 /*    extern "C" — wave_io.c compiles as C++ but this declaration isn't   */

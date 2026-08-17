@@ -55,6 +55,7 @@
  * header's extern "C" Win32 block and mislinked free-function decls (see
  * NetmanTypes.h's header comment for why that split exists). */
 #include "NetmanTypes.h"
+#include "../resources/AssetArchive.h"
 
 /* ================================================================== */
 /* Standalone network helper functions (C++ linkage)                    */
@@ -232,7 +233,8 @@ extern int32_t  g_player_color;       /* 0x4AAD48 — host-declared 32-bit for
                                           *   uniformity (16-bit storage + 16-bit
                                           *   loads in the binary) */
 extern TileMap* g_tilemap;            /* 0x4AAD08 — tilemap object     */
-extern void*    g_asset_mgr;          /* 0x485600 — asset manager ptr  */
+/* g_asset_mgr (0x485600) is the real AssetArchive VALUE object (not a
+ * pointer) — see resources/AssetArchive.h, included below. */
 extern void*    g_ui_main;            /* 0x4A8860 — main UI window ptr */
 extern void*    g_listener_x;         /* 0x486BBC — listener position x */
 extern void*    g_listener_y;         /* 0x486BC0 — listener position y */
@@ -393,7 +395,12 @@ void* WIN32_StreamOpenFile(void* stream, const char* path,
 void  WIN32_StreamRead(void* stream, void* buf, int32_t size);
 
 /* -- Asset manager -- */
-uint8_t* AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t* out_size);
+/* AssetMgr_LoadFile(AssetMgr*, uint8_t*, int32_t*) declaration removed —
+ * that signature (a pointer to resources/AssetMgr.h's UNRELATED 4-ary-tree
+ * `AssetMgr` class) never matched the real function's receiver at all (see
+ * resources/AssetArchive.h's header comment on the naming collision). Real
+ * access is g_asset_mgr.LoadFile(...) (resources/AssetArchive.h, included
+ * above). */
 
 /* -- NET class helpers -- */
 /* NET_ComputeColor — Ghidra-confirmed name (0x4441C0). Formerly declared

@@ -28,9 +28,12 @@
 #include "../ui/GameSetupPanel.h"
 // The host menu bootstrap intentionally stops after EditWindow. The remaining
 // original startup chain is retained for the Windows/binary-faithful build.
-#ifdef _WIN32
-#include "../graphics/LOCOBITMAP.h"
-#endif
+// (graphics/LOCOBITMAP.h used to be included here under _WIN32 only, for its
+// now-deleted flat, competing `class PostcardAlbum` -- that class collided
+// with the real one below, a duplicate-symbol / silent-misbind hazard now
+// resolved by deleting the flat class. LOCOBITMAP.h is no longer needed by
+// this file at all: its only other declaration this file used,
+// DDRAW_PresentRect, is re-declared directly below for both build shapes.)
 
 /* Typed subsystem headers — needed by CGWND_EnterMode3 (0x4086F0) and
  * CGWND_SetMode (0x408130) for typed virtual-method dispatch. Included
@@ -256,7 +259,11 @@ extern TileMap*   g_tilemap;              /* 0x4AAD08 */
 extern void*    g_building_mgr;         /* 0x485448 */
 extern World*   g_world;                /* 0x4A98B0 */
 extern uint8_t  g_in_build_mode;
-extern uint8_t  g_asset_mgr;
+/* g_asset_mgr (0x485600) was extern-declared here as `uint8_t` but never
+ * used anywhere in this file — a stray, unused, wrong-type redeclaration
+ * left over from an earlier transcription pass (see the g_asset_mgr
+ * extern-global-type-mismatch cleanup, resources/AssetArchive.h). Removed
+ * rather than corrected in place since nothing in this file references it. */
 
 /* ROM strings */
 extern const char s_WINDOW_ATTRIBUTES_0047e1a0[];
@@ -1405,12 +1412,14 @@ BOOL CGWND::RegisterWindowClass()
 /* ================================================================== */
 
 /* DDRAW_PresentRect (0x401280) — canonically declared in graphics/
- * LOCOBITMAP.h, already included above under _WIN32 (see this file's own
- * host-menu-bootstrap include guard higher up), so only the host (#else)
- * shape needs re-declaring here. A _WIN32-guarded copy of the other shape
- * would be a pure duplicate of LOCOBITMAP.h's own declaration — harmless
- * today but a needless second place for the signature to drift. */
-#ifndef _WIN32
+ * LOCOBITMAP.h (this file no longer includes that header at all -- see
+ * this file's own host-menu-bootstrap comment higher up), so both build
+ * shapes are re-declared directly here, matching LOCOBITMAP.h's own
+ * per-shape declarations exactly. */
+#ifdef _WIN32
+extern void __cdecl DDRAW_PresentRect(const RECT* rect, HWND hWnd,
+                                      int32_t offset_xy[2], uint8_t use_color_key);
+#else
 extern void DDRAW_PresentRect(void* rect, void* hwnd, int* scroll, int force);
 #endif
 

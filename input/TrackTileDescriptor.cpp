@@ -9,6 +9,7 @@
  */
 
 #include "TrackTileDescriptor.h"
+#include "../resources/AssetArchive.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamMem.h"
 #include "../resources/StreamObject.h"
@@ -22,15 +23,17 @@
  * input/BuildingDescriptorEditor.cpp). */
 extern void GLOBAL_free(void* ptr);                     /* 0x465CD0 */
 
-/* g_scene_name / g_asset_mgr — already-established globals from
- * game/ScriptedObject.cpp (this file's HandleEvent logic used to live
- * there, misattributed; the globals move with it). */
+/* g_scene_name — already-established global from game/ScriptedObject.cpp
+ * (this file's HandleEvent logic used to live there, misattributed; the
+ * global moves with it). g_asset_mgr is the real AssetArchive value object
+ * (resources/AssetArchive.h, included below) — was previously declared
+ * `void*` here and passed BY VALUE (not by address) to AssetMgr_LoadFile,
+ * which only happened to "work" because the old global storage really was
+ * a `void*`; now that it's the real value object, call sites use
+ * g_asset_mgr.LoadFile(...) directly. */
 extern char  g_scene_name[];                            /* 0x4A99C8 */
-extern void* g_asset_mgr;
 extern int   g_stream_open_flags;                       /* 0x479190 */
 
-void* AssetMgr_LoadFile(void* mgr, const char* path, int* outSize); /* 0x45CD00, C++ linkage — matches
-                                                                       * game/ScriptedObject.cpp's declaration */
 extern "C" {
     void CRT_free(void* ptr);                                          /* 0x466C70 */
 }
@@ -348,18 +351,24 @@ void TrackTileDescriptor::HandleEvent(uint32_t resId, const char* name_suffix)
     CRT_sprintf_buf(this->bmpPath, "%s%s.bmp", g_scene_name, name_suffix);
 
     /* Try loading from RFD archive (asset manager) first */
-    if (g_asset_mgr != nullptr) {
-        char* file_data;
+    if (g_asset_mgr.archive_file != 0) {
+        uint8_t* file_data;     /* AssetArchive::LoadFile's real return type */
         void* stream_obj;
         WNDPROC_Stream* parsed_stream;
 
         CRT_sprintf_buf(asset_path, "%s.dat", name_suffix);
-        file_data = static_cast<char*>(AssetMgr_LoadFile(g_asset_mgr, asset_path, &loaded_size));
+        file_data = g_asset_mgr.LoadFile(
+            reinterpret_cast<uint8_t*>(asset_path), &loaded_size);
 
         if (file_data != nullptr) {
             stream_obj = ::operator new(WIN32_MemoryStream_Size(), std::nothrow);
             if (stream_obj != nullptr) {
-                parsed_stream = WNDPROC_StreamFromMemory(stream_obj, file_data, loaded_size, 1);
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is
+                // this codebase's older byte-buffer convention; file_data is the
+                // same raw bytes under AssetArchive::LoadFile's real `uint8_t*`
+                // return type.
+                parsed_stream = WNDPROC_StreamFromMemory(
+                    stream_obj, reinterpret_cast<char*>(file_data), loaded_size, 1);
 
                 if (parsed_stream != nullptr) {
                     if ((parsed_stream->state_bits & StreamObject::kBadBit) == 0) {

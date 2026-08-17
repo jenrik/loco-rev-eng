@@ -71,10 +71,6 @@ int32_t CreateDirectoryA(LPCSTR,void*); int32_t DeleteFileA(LPCSTR);
 int32_t CreateDirectoryA(LPCSTR,void*){return 1;}int32_t DeleteFileA(LPCSTR){return 1;}
 DWORD GetFileAttributesA(LPCSTR);
 DWORD GetFileAttributesA(LPCSTR){return static_cast<DWORD>(-1);}
-void*FindFirstFileA(LPCSTR,void*); int32_t FindNextFileA(void*,void*);
-void*FindFirstFileA(LPCSTR,void*){return nullptr;}int32_t FindNextFileA(void*,void*){return 0;}
-int32_t FindClose(void*);
-int32_t FindClose(void*){return 0;}
 int32_t ReadFile(HANDLE h,void*b,DWORD n,DWORD*r,void*);
 int32_t ReadFile(HANDLE h,void*b,DWORD n,DWORD*r,void*){
 #ifndef _WIN32
@@ -93,14 +89,10 @@ int32_t WriteFile(HANDLE h,const void*b,DWORD n,DWORD*w,void*){
  static_cast<void>(h);static_cast<void>(b);static_cast<void>(n);static_cast<void>(w);return 0;
 #endif
 }
-int32_t GetModuleFileNameA(HINSTANCE,char*,DWORD);
-int32_t GetModuleFileNameA(HINSTANCE,char*,DWORD){return 0;}
 int32_t SystemParametersInfoA(UINT,UINT,void*,UINT);
 int32_t SystemParametersInfoA(UINT,UINT,void*,UINT){return 0;}
 HANDLE HeapAlloc(HANDLE,DWORD,size_t);
 HANDLE HeapAlloc(HANDLE,DWORD,size_t){return malloc(1);}
-HANDLE GlobalAlloc(UINT,size_t); void*GlobalLock(HANDLE h);
-HANDLE GlobalAlloc(UINT,size_t){return malloc(1);}void*GlobalLock(HANDLE h){return h;}
 int32_t GlobalUnlock(HANDLE); HANDLE GlobalHandle(void*p);
 int32_t GlobalUnlock(HANDLE){return 1;}HANDLE GlobalHandle(void*p){return reinterpret_cast<HANDLE>(p);}
 int32_t GlobalFree(HANDLE h); void timeBeginPeriod(unsigned int);
@@ -131,8 +123,6 @@ int32_t SetCursorPos(int32_t,int32_t);
 int32_t SetCursorPos(int32_t,int32_t){return 1;}
 int32_t GetWindowTextA(HWND,char*,int32_t);
 int32_t GetWindowTextA(HWND,char*,int32_t){return 0;}
-HWND GetCapture(void);
-HWND GetCapture(void){return nullptr;}
 /* ReleaseCapture — real provider for core/Game.cpp::SetScreenMode and
  * ui/GameWindow.cpp (both declare `extern BOOL ReleaseCapture(void);` and
  * rely on this symbol). A first LINK-001 pass deleted this outright,
@@ -196,8 +186,6 @@ int32_t IsRectEmpty(const RECT*);
 int32_t IsRectEmpty(const RECT*){return 1;}
 int32_t Ellipse(HDC,int32_t,int32_t,int32_t,int32_t); int32_t SetPixel(HDC,int32_t,int32_t,DWORD);
 int32_t Ellipse(HDC,int32_t,int32_t,int32_t,int32_t){return 1;}int32_t SetPixel(HDC,int32_t,int32_t,DWORD){return 1;}
-int32_t GetDeviceCaps(HDC,int32_t);
-int32_t GetDeviceCaps(HDC,int32_t){return 1;}
 
 /* CRT */
 int32_t*CRT_errno(void);
@@ -216,39 +204,8 @@ void CRT_sprintf(char*,const char*,...);
 void CRT_sprintf(char*,const char*,...){}
 int32_t CRT_sprintf_buf(char*,const char*,...);
 int32_t CRT_sprintf_buf(char*,const char*,...){return 0;}
-int32_t CRT_rand(void); void CRT_srand(unsigned int s);
-int32_t CRT_rand(void){return rand();}void CRT_srand(unsigned int s){srand(s);}
-unsigned int CRT_time(unsigned int*t);
-unsigned int CRT_time(unsigned int*t){return static_cast<unsigned int>(::time(reinterpret_cast<time_t*>(t)));}
-void*CRT_memset(void*d,int32_t c,size_t n);
-void*CRT_memset(void*d,int32_t c,size_t n){return memset(d,c,n);}
-void*CRT_memcpy(void*d,const void*s,size_t n);
-void*CRT_memcpy(void*d,const void*s,size_t n){return memcpy(d,s,n);}
-char*CRT_strtok(char*,const char*);
-char*CRT_strtok(char*,const char*){return nullptr;}
-int32_t CRT_toupper(int32_t c);
-int32_t CRT_toupper(int32_t c){return(c>='a'&&c<='z')?c-32:c;}
-char*CRT_itoa(int32_t v,char*buf,int32_t radix);
-char*CRT_itoa(int32_t v,char*buf,int32_t radix){if(buf)snprintf(buf,32,"%d",v);return buf;}
-void*CRT_localtime(unsigned int*);
-void*CRT_localtime(unsigned int*){static int32_t t=0;return&t;}
-int32_t CRT_exit(const char**,const char**); int32_t CRT_mkdir(const char*);
-int32_t CRT_exit(const char**,const char**){exit(0);return 0;}int32_t CRT_mkdir(const char*){return 0;}
-void CRT_memset_pattern(void*,int32_t,int32_t,void*,void*);
-void CRT_memset_pattern(void*,int32_t,int32_t,void*,void*){}
-void CRT_free_pattern(void*,int32_t,int32_t,void*);
-void CRT_free_pattern(void*,int32_t,int32_t,void*){}
-void CRT_0x470650(void);
-void CRT_0x470650(void){}
-/* CRT_strncpy (0x466EA0) was a no-op stub, but the address is not really
- * strncpy: decompilation shows an overlap-aware memmove (no NUL check, no
- * NUL padding) — renamed to CRT_memmove in the Ghidra DB. Kept under the
- * original (misleading) symbol name here because ui/UI_ScrollBar.cpp
- * already links against it; implemented for real via memmove so both that
- * caller and any future one get correct behavior instead of silent no-op
- * data loss. */
-void CRT_strncpy(void*dst,void*src,int32_t n);
-void CRT_strncpy(void*dst,void*src,int32_t n){if(dst&&src&&n>0)memmove(dst,src,static_cast<size_t>(n));}
+int32_t CRT_rand(void);
+int32_t CRT_rand(void){return rand();}
 void _strncpy(char*d,const char*s,size_t n);
 void _strncpy(char*d,const char*s,size_t n){if(d&&s)strncpy(d,s,n);}
 void InitializeCriticalSection(void*); void EnterCriticalSection(void*);
@@ -261,14 +218,6 @@ void GLOBAL_free(void*ptr);
 void GLOBAL_free(void*ptr){free(ptr);}
 
 /* Non-overloaded game stubs (C-linkage, one definition each) */
-void DDRAW_DestroyAudio(void);
-void DDRAW_DestroyAudio(void){}
-void*DDRAW_GetSurface(void);
-void*DDRAW_GetSurface(void){return nullptr;}
-void DDRAW_LoadFile(int32_t*,const char*);
-void DDRAW_LoadFile(int32_t*,const char*){}
-void DDRAW_ReleaseSurfaces(void);
-void DDRAW_ReleaseSurfaces(void){}
 void DDRAW_GetSurfaceWidthHeight(void*,uint16_t*,uint16_t*);
 void DDRAW_GetSurfaceWidthHeight(void*,uint16_t*,uint16_t*){}
 /* Was declared/defined with zero params (a stale --defsym-era shape); its
@@ -285,13 +234,9 @@ void* DDRAW_GetDdrawErrorString(int){ fprintf(stderr, "STUB: %s at %s:%d\n", __f
  * this pass (shared/defsym_stubs.cpp); zero callers use extern "C"
  * linkage for this name anywhere in the tree, confirmed via full-tree
  * grep, so it was already dead, not a live landmine. */
-void DPLAY_CleanupPlayer(void*);
-void DPLAY_CleanupPlayer(void*){}
 /* DPLAY_CreatePlayer(void*) [extern "C"] removed 2026-08-14 — zero real
  * call sites tree-wide; its one former caller (Cursor::init_network_player)
  * now constructs a real DPlayManager directly (input/Cursor_impls.cpp). */
-void DPLAY_InitPlayer(void*,void*,int32_t);
-void DPLAY_InitPlayer(void*,void*,int32_t){}
 /* Confirmed via 0x443440: __thiscall, ECX = this, zero pushed stack args —
  * loops surface_cache[256] releasing each cached surface. Was previously
  * (void*, int32_t), which never matched any real caller declaration. */
@@ -299,10 +244,6 @@ void DPLAY_LeaveSession(void*);
 void DPLAY_LeaveSession(void*){}
 void Sprite_Destroy(void*);
 void Sprite_Destroy(void*){}
-void Sprite_Shutdown(int32_t);
-void Sprite_Shutdown(int32_t){}
-void Sprite_UnlockAll(int32_t);
-void Sprite_UnlockAll(int32_t){}
 /* RESMGR_PlaySound(int32_t) [extern "C"] removed 2026-08-15 — a
  * fabricated symbol name (the original binary calls the real PlaySound
  * directly, under its real name, at every one of its 66 real call
@@ -310,12 +251,6 @@ void Sprite_UnlockAll(int32_t){}
  * graphics/LOCOBITMAP.cpp and ui/AboutDialog.cpp were the two files
  * still routing through this name; both now call the real
  * PlaySound(UINT) directly. */
-void RESMGR_GetResourceType(void*,uint32_t);
-void RESMGR_GetResourceType(void*,uint32_t){}
-void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t);
-void RESMGR_AllocResourceEntry(ResourceEntry*,int32_t,int32_t){}
-void RESMGR_SelectScreensaver(char*);
-void RESMGR_SelectScreensaver(char*){}
 /* ResourceManager_GetStringById(void*,uint32_t) removed 2026-08-15 — this
  * declaration sat inside this file's outer extern "C" block (line 27),
  * giving it bare C linkage regardless of its C++-looking signature. That
@@ -325,26 +260,16 @@ void RESMGR_SelectScreensaver(char*){}
  * (shared/stubs_link001_batch3_resource_audio.cpp, plain C++ linkage,
  * `int id`). Both callers moved to ordinary C++-mangled declarations
  * matching the real facade; see PROGRESS.md. */
-void Train_QueueMessage(void*,void*);
-void Train_QueueMessage(void*,void*){}
 void Train_HandleTrackBuild(void*,void*,int32_t);
 void Train_HandleTrackBuild(void*,void*,int32_t){}
 void Train_SendPlayerInfo(void*,int32_t);
 void Train_SendPlayerInfo(void*,int32_t){}
-void Train_StartMultiplayer(void*,int32_t);
-void Train_StartMultiplayer(void*,int32_t){}
-void Train_StopMultiplayer(void*,void*);
-void Train_StopMultiplayer(void*,void*){}
 void TrackPiece_SetZoom(void*,int16_t);
 void TrackPiece_SetZoom(void*,int16_t){}
-void WIN32_FatalError(const char*);
-void WIN32_FatalError(const char*){fprintf(stderr,"FATAL\n");exit(1);}
 void*WIN32_GetThreadResult(void*);
 void*WIN32_GetThreadResult(void*){return nullptr;}
 /* WIN32_QueueAsyncTask: real implementation now in
  * network/WIN32Thread.cpp (host path: core/HostMode3Bootstrap.cpp). */
-void WIN32_Sleep(uint32_t);
-void WIN32_Sleep(uint32_t){}
 /* WIN32_PeekMessageLoop (0x460F10) / WIN32_SendNetworkData (0x460FD0):
  * these extern "C" names (see game/Train_network.cpp's declarations,
  * both __thiscall/unmangled) are DISTINCT linker symbols from the
@@ -390,10 +315,6 @@ int WIN32_SendNetworkData(void*, int, void*, int, int) {
  * else in the tree calls the free function by this name. The real
  * address, 0x464620, is StreamObject::~StreamObject() (real destructor,
  * resources/StreamObject.h/.cpp). */
-void WIN32_CloseHandle(void*);
-void WIN32_CloseHandle(void*){}
-void WIN32_timeEndPeriod(uint32_t); void WIN32_timeKillEvent(uint32_t);
-void WIN32_timeEndPeriod(uint32_t){}void WIN32_timeKillEvent(uint32_t){}
 /* DirectPlay_Close/ConnectToSession/CreatePeer/DestroyPeer/EnumConnections/
  * HostSession/QueryConnection decoy stubs removed 2026-08-10: their
  * extern "C" signatures matched nothing anywhere in the tree even before
@@ -405,8 +326,6 @@ void WIN32_timeEndPeriod(uint32_t){}void WIN32_timeKillEvent(uint32_t){}
  * NetworkPlayerList::NetworkPlayerList_ctor, unrelated to DirectPlay. */
 int32_t NET_CheckAssetExists(void*,int32_t);
 int32_t NET_CheckAssetExists(void*,int32_t){return 0;}
-int32_t NET_FindArchivedAsset(int32_t);
-int32_t NET_FindArchivedAsset(int32_t){return 0;}
 /* NET_FindPlayer moved to shared/stubs_impl.cpp as a loud stub with the
  * real (int, int) C++-linkage signature — this (void*, int32_t) shape had
  * no real caller (see docs/landmine-sweep-worklist.md "Cursor family"). */
@@ -433,8 +352,6 @@ int32_t NET_RegisterPlayer(int32_t){return 0;}
  * mismatches at link time), making every real caller always get null.
  * Real implementation now at network/DPlayManager.h/.cpp:
  * DPlayManager* NET_ResolveAddress(const char* hostname). */
-void NETMAN_QueueMessage(void*,int32_t,void*);
-void NETMAN_QueueMessage(void*,int32_t,void*){}
 void NETMAN_CheckTrackConnection(void*,int32_t,int32_t);
 void NETMAN_CheckTrackConnection(void*,int32_t,int32_t){}
 int32_t NETMAN_FindPlayerIndex(void*,int32_t);
@@ -447,105 +364,37 @@ void NETMAN_ReceivePing(void*,int32_t,void*);
 void NETMAN_ReceivePing(void*,int32_t,void*){}
 void NETMAN_SendBuildingData(void*,int32_t,void*);
 void NETMAN_SendBuildingData(void*,int32_t,void*){}
-void GAMESTATE_EditorState_Copy(void*,void*);
-void GAMESTATE_EditorState_Copy(void*,void*){}
-void GAMESTATE_EditorState_Ctor(void*,char);
-void GAMESTATE_EditorState_Ctor(void*,char){}
-void GAMESTATE_InitTrackAtPosition(void*,int32_t,int32_t);
-void GAMESTATE_InitTrackAtPosition(void*,int32_t,int32_t){}
-void GAMESTATE_UpdateVehiclePlacement(void*,int32_t,void*);
-void GAMESTATE_UpdateVehiclePlacement(void*,int32_t,void*){}
-void Cursor_CleanupEditorSprites(void*,int32_t);
-void Cursor_CleanupEditorSprites(void*,int32_t){}
-void Cursor_InitEditorSprites(void*,int32_t,void*);
-void Cursor_InitEditorSprites(void*,int32_t,void*){}
-void Cursor_InitNetworkPlayer(void*,int32_t);
-void Cursor_InitNetworkPlayer(void*,int32_t){}
 void UI_CreateFullWindow(void*,int32_t,void*,int32_t,int32_t,int32_t,int32_t,void*,void*,uint32_t);
 void UI_CreateFullWindow(void*,int32_t,void*,int32_t,int32_t,int32_t,int32_t,void*,void*,uint32_t){}
-void UIPANEL_EndPaint(void*);
-void UIPANEL_EndPaint(void*){}
-int32_t UIPANEL_UnlockSurface(void*,uint32_t);
-int32_t UIPANEL_UnlockSurface(void*,uint32_t){return 0;}
-void UI_WindowBase_Hide(void*);
-void UI_WindowBase_Hide(void*){}
-void UI_WindowBase_Show(void*);
-void UI_WindowBase_Show(void*){}
 void Vehicle_CalcSpeed(void*,void*);
 void Vehicle_CalcSpeed(void*,void*){}
 void*Vehicle_Ctor(void*,int32_t,int32_t,char,char);
 void*Vehicle_Ctor(void*,int32_t,int32_t,char,char){return nullptr;}
 void Vehicle_InitRoute(void*,int32_t,uint32_t,char);
 void Vehicle_InitRoute(void*,int32_t,uint32_t,char){}
-void VehicleEditor_CheckBounds(void*,void*,int32_t);
-void VehicleEditor_CheckBounds(void*,void*,int32_t){}
-void VehicleEditor_CheckBounds2(void*,void*,int32_t);
-void VehicleEditor_CheckBounds2(void*,void*,int32_t){}
 void VehicleEditor_Ctor(void*,void*);
 void VehicleEditor_Ctor(void*,void*){}
 void VehicleEditor_GetDPlayData(void*,void*);
 void VehicleEditor_GetDPlayData(void*,void*){}
 int32_t VehicleEditor_GetResourceId(int32_t);
 int32_t VehicleEditor_GetResourceId(int32_t){return 0;}
-void VehicleEditor_InitTracks(void*,void*);
-void VehicleEditor_InitTracks(void*,void*){}
 void VehicleEditor_SetDPlayData(void*,void*);
 void VehicleEditor_SetDPlayData(void*,void*){}
-void VehicleEditor_TriggerSound(void*,int32_t);
-void VehicleEditor_TriggerSound(void*,int32_t){}
-void VehicleEditor_UpdateEditMode(void*,int32_t,void*);
-void VehicleEditor_UpdateEditMode(void*,int32_t,void*){}
-void GameVehicle_AddDestination(void*,void*,int32_t);
-void GameVehicle_AddDestination(void*,void*,int32_t){}
-void AssetMgr_LoadFile(void*,const char*,int32_t*);
-void AssetMgr_LoadFile(void*,const char*,int32_t*){}
-void*RESDATA_CreateSpriteObject(void*,int32_t,int32_t);
-void*RESDATA_CreateSpriteObject(void*,int32_t,int32_t){return nullptr;}
-void*DPLAY_CreatePlayer__strstr(void*,const char*,const char*);
-void*DPLAY_CreatePlayer__strstr(void*,const char*,const char*){return nullptr;}
+/* AssetMgr_LoadFile(void*, const char*, int32_t*) no-op stub removed
+ * 2026-08-17 — see shared/core_stubs.cpp's matching removal note; the
+ * g_asset_mgr extern-global-type-mismatch cleanup
+ * (resources/AssetArchive.h) left every real call site using
+ * `g_asset_mgr.LoadFile(...)` directly. */
 /* DPLAY_RenderPlayer stub removed 2026-08-17 — nothing calls this
  * free-function facade anymore; all 3 real call sites now use
  * NetworkPlayerList::RenderPlayer directly (see its own doc comment for
  * the resolved 9-arg object model). */
-long double __ftol(double d);
-long double __ftol(double d){return static_cast<long double>(d);}
-
-/* AudioChannel — C-linkage versions */
-void AudioChannel_Pause_C(int32_t x);
-void AudioChannel_Pause_C(int32_t x){}
-void AudioChannel_Play_C(int32_t x);
-void AudioChannel_Play_C(int32_t x){}
-
-/* PlaySound */
-void PlaySound__i(int32_t);
-void PlaySound__i(int32_t){}
-
-/* Ordinals */
-void Ordinal_1__iPv(int32_t,void*);
-void Ordinal_1__iPv(int32_t,void*){}
-void Ordinal_1__PvS_S_S_(void*,void*,void*,void*);
-void Ordinal_1__PvS_S_S_(void*,void*,void*,void*){}
-void Ordinal_2(void*);
-void Ordinal_2(void*){}
-void Ordinal_4(void*,void**,void*,void*,void*);
-void Ordinal_4(void*,void**,void*,void*,void*){}
-
 } /* end extern "C" */
 
 /* =========================================================== */
 /* B. C++-linkage overloaded stubs (native C++ overloading)     */
 /*    Same function names, different params = correct mangling  */
 /* =========================================================== */
-
-/* AudioChannel — C++ overloads */
-void AudioChannel_Pause();
-void AudioChannel_Pause(){}         /* _Z19AudioChannel_Pausev */
-void AudioChannel_Pause(int32_t);
-void AudioChannel_Pause(int32_t){}  /* _Z19AudioChannel_Pausei */
-void AudioChannel_Play();
-void AudioChannel_Play(){}          /* _Z19AudioChannel_Playv */
-void AudioChannel_Play(int32_t);
-void AudioChannel_Play(int32_t){}   /* _Z19AudioChannel_Playi */
 
 /* CGWND_SetMode(void*) removed (2026-08-06, cross-validation session): all
  * 6 callers that used to declare/call this void*-mode overload
@@ -615,19 +464,11 @@ void RESMGR_ReleaseSoundResource(int32_t){}                /* _Z27RESMGR_Release
 void RESMGR_ReleaseSoundResource(void*);
 void RESMGR_ReleaseSoundResource(void*){}                  /* _Z27RESMGR_ReleaseSoundResourcePv */
 
-/* Sprite_Init — C++ overloads */
-void Sprite_Init(void*,int32_t);
-void Sprite_Init(void*,int32_t){}                          /* _Z11Sprite_InitPvi */
-void Sprite_Init(void*,int32_t,void*);
-void Sprite_Init(void*,int32_t,void*){}                    /* _Z11Sprite_InitPviS_ */
-
 /* Sprite_SetState(void*,int32_t) — no real caller found (every real
  * call site passes a 3rd arg, matching the (void*,int32_t,void*)
  * overload below); duplicated stubs_impl.cpp's loud version of the
  * same 2-arg overload (LINK-001) — stubs_impl.cpp's survives per
  * CLAUDE.md's stub policy. */
-void Sprite_SetState(void*,int32_t,void*);
-void Sprite_SetState(void*,int32_t,void*){}                /* _Z15Sprite_SetStatePviS_ */
 
 /* TileMap_InvalidateRect — C++ overloads */
 void TileMap_InvalidateRect(void*,int32_t,int32_t,int32_t,int32_t);
@@ -638,8 +479,6 @@ void TileMap_InvalidateRect(TileMap*,int32_t,int32_t,int32_t,int32_t){} /* _Z22T
 /* UIPANEL_BeginPaint(void*) — real implementation is ui/UIPANEL.cpp's
  * UIPANEL_BeginPaint (0x?, __fastcall); this no-op copy (and the one in
  * stubs_impl.cpp) were dead weight (LINK-001). */
-void UIPANEL_BeginPaint(int32_t);
-void UIPANEL_BeginPaint(int32_t){}       /* _Z18UIPANEL_BeginPainti */
 
 /* UIPANEL_Blit — these three all-`int` no-op overloads used to silently
  * satisfy every mismatched caller declaration in ui/AboutDialog.cpp,
@@ -672,8 +511,6 @@ void UIPANEL_BeginPaint(int32_t){}       /* _Z18UIPANEL_BeginPainti */
 /* UI_CreateMessageBox — C++ overloads */
 void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,int32_t);
 void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,int32_t){return nullptr;} /* _Z19UI_CreateMessageBoxPviiciii */
-void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,char);
-void*UI_CreateMessageBox(void*,int32_t,int32_t,char,int32_t,int32_t,char){return nullptr;} /* _Z19UI_CreateMessageBoxPviiciic */
 void*UI_CreateMessageBox(void*,int32_t,int16_t,char,int32_t,int32_t,char);
 void*UI_CreateMessageBox(void*,int32_t,int16_t,char,int32_t,int32_t,char){return nullptr;} /* _Z19UI_CreateMessageBoxPvisciic */
 
@@ -685,22 +522,7 @@ void*UI_CreateMessageBox(void*,int32_t,int16_t,char,int32_t,int32_t,char){return
  * duplicated (silent no-op here vs loud stub in stubs_impl.cpp);
  * stubs_impl.cpp's loud versions survive per CLAUDE.md's stub policy
  * (LINK-001). */
-void UI_WindowBase_BaseDtor(UI_WindowBase*);
-void UI_WindowBase_BaseDtor(UI_WindowBase*){}   /* _Z22UI_WindowBase_BaseDtorP13UI_WindowBase */
-void UI_WindowBase_Ctor(UI_WindowBase*,void*,uint32_t);
-void UI_WindowBase_Ctor(UI_WindowBase*,void*,uint32_t){}  /* _Z18UI_WindowBase_CtorP13UI_WindowBaseS_j */
 
-/* Vehicle_FindPath — C++ overloads */
-void Vehicle_FindPath(void*,int32_t*,char);
-void Vehicle_FindPath(void*,int32_t*,char){}     /* _Z16Vehicle_FindPathPvPic */
-void Vehicle_FindPath(void*,void*,uint8_t);
-void Vehicle_FindPath(void*,void*,uint8_t){}     /* _Z16Vehicle_FindPathPvS_h */
-
-/* VehicleEditor_CheckEditBounds1 — C++ overloads */
-void VehicleEditor_CheckEditBounds1(void*,void*);
-void VehicleEditor_CheckEditBounds1(void*,void*){}            /* _Z31VehicleEditor_CheckEditBounds1PvS_ */
-void VehicleEditor_CheckEditBounds1(VehicleEditor*,void*);
-void VehicleEditor_CheckEditBounds1(VehicleEditor*,void*){}   /* _ZN13VehicleEditor16CheckEditBounds1EPv */
 
 /* WIN32_StreamOpen/OpenFile/OpenPath/Read/DestroyImmediate/Destroy — real
  * implementations now in resources/Win32Stream.h/.cpp (0x463810-0x463B6B
@@ -761,57 +583,6 @@ uint8_t Resource_IsValidTrackIndex(void* resource, int16_t idx)
     }
     return 0;
 }
-
-/* ButtonSprite_Ctor — C++ version */
-void ButtonSprite_Ctor(void*,int32_t);
-void ButtonSprite_Ctor(void*,int32_t){}  /* _Z17ButtonSprite_CtorPvi */
-
-/* =========================================================== */
-/* C. Member function stubs (Class::method syntax)               */
-/*    These produce correct mangled names for class methods     */
-/* =========================================================== */
-
-/* Building::Building(int) */
-void Building_Building(Building*,int32_t);
-void Building_Building(Building*,int32_t){}  /* won't match _ZN8BuildingC1Ei */
-
-/* TrainEntity::TrainEntity(int) */
-void TrainEntity_TrainEntity(TrainEntity*,int32_t);
-void TrainEntity_TrainEntity(TrainEntity*,int32_t){}  /* won't match _ZN11TrainEntityC1Ei */
-
-/* GameSetupPanel methods */
-void GameSetupPanel_HandleMapClick(GameSetupPanel*,int32_t,int32_t);
-void GameSetupPanel_HandleMapClick(GameSetupPanel*,int32_t,int32_t){}
-void GameSetupPanel_SelectLayoutEntry(GameSetupPanel*,int32_t);
-void GameSetupPanel_SelectLayoutEntry(GameSetupPanel*,int32_t){}
-void GameSetupPanel_SendScenarioSelect(GameSetupPanel*,int32_t);
-void GameSetupPanel_SendScenarioSelect(GameSetupPanel*,int32_t){}
-void GameSetupPanel_ConnectToNetworkGame(GameSetupPanel*,int32_t);
-void GameSetupPanel_ConnectToNetworkGame(GameSetupPanel*,int32_t){}
-
-/* HelpWnd methods */
-void HelpWnd_render_page(HelpWnd*,int32_t*);
-void HelpWnd_render_page(HelpWnd*,int32_t*){}
-void HelpWnd_render_scroll_down(HelpWnd*,int32_t*);
-void HelpWnd_render_scroll_down(HelpWnd*,int32_t*){}
-void HelpWnd_render_scroll_up(HelpWnd*,int32_t*);
-void HelpWnd_render_scroll_up(HelpWnd*,int32_t*){}
-void HelpWnd_update_anim_sprite(HelpWnd*,int32_t);
-void HelpWnd_update_anim_sprite(HelpWnd*,int32_t){}
-
-/* VehicleEditor methods */
-void VehicleEditor_CheckEdgeBounds(VehicleEditor*,void*);
-void VehicleEditor_CheckEdgeBounds(VehicleEditor*,void*){}
-void VehicleEditor_CheckEditBounds2(VehicleEditor*,void*);
-void VehicleEditor_CheckEditBounds2(VehicleEditor*,void*){}
-void VehicleEditor_CheckVehicleAttach(VehicleEditor*,void*);
-void VehicleEditor_CheckVehicleAttach(VehicleEditor*,void*){}
-void VehicleEditor_CalcAngle(VehicleEditor*);
-void VehicleEditor_CalcAngle(VehicleEditor*){}
-
-/* RESDATA_ScriptedObject::EnterBuildMode */
-void RESDATA_ScriptedObject_EnterBuildMode(RESDATA_ScriptedObject*,uint8_t);
-void RESDATA_ScriptedObject_EnterBuildMode(RESDATA_ScriptedObject*,uint8_t){}
 
 /* =========================================================== */
 /* D. VTABLE / TYPEINFO (via proper class definitions)          */

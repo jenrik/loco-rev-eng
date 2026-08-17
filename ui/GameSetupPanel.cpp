@@ -32,10 +32,10 @@
 #include "sdl3_game_audio.h"
 #endif
 
-/* AssetMgr forward-declared (struct matches AssetMgr.h layout);
-   AssetMgr_LoadFile declared in Netman.h */
-/* TODO: include AssetMgr.h directly once OutputDebugStringA conflict is resolved */
-struct AssetMgr;
+/* g_asset_mgr is the real AssetArchive value object (resources/
+ * AssetArchive.h, included via Netman.h). The previous `struct AssetMgr;`
+ * forward declaration here was for the UNRELATED resources/AssetMgr.h
+ * 4-ary-tree class — never actually g_asset_mgr's real type. */
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 
 /* ================================================================== */
@@ -139,7 +139,8 @@ extern GameConfig* _g_netman_data;      /* 0x4FD3A8 — GameConfig singleton (ga
 extern void* _g_train;                   /* 0x4FD3A4 — TrainSubsystem */
 #endif
 /* g_resmgr now declared in ResourceManager.h (included above) */
-/* g_asset_mgr declared as AssetMgr* in Netman.h; typed access available */
+/* g_asset_mgr — real AssetArchive value object, declared in Netman.h
+ * (transitively resources/AssetArchive.h); typed access available */
 extern void* g_font_normal;           /* 0x4855F0 — normal UI font handle */
 extern void* g_font_small;            /* 0x4855F4 — small UI font handle */
 extern void* g_title_font;            /* 0x4855FC — title display font handle */
@@ -929,8 +930,8 @@ void GameSetupPanel::loadLayouts(bool connectToNetwork)
     int* streamResult = NULL; /* local_1c / stream result pointer */
 
     /* Step 3: Try AssetMgr first */
-    if (g_asset_mgr != NULL) {
-        pData = AssetMgr_LoadFile(g_asset_mgr, (uint8_t*)filePath, &dataSize);
+    if (g_asset_mgr.archive_file != 0) {
+        pData = g_asset_mgr.LoadFile((uint8_t*)filePath, &dataSize);
         if (pData != NULL) {
             /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use the
              * real host size (see resources/Win32StreamMem.h). */

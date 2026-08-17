@@ -324,14 +324,14 @@ void Cursor::init()
     /* Fixed-size raw file-read buffer, not a C++ object — safe as-is. */
     void* readBuffer = operator_new(0x2000);
     int* streamObj = nullptr;
-    int* memBuffer = nullptr;
+    uint8_t* memBuffer = nullptr;   /* AssetArchive::LoadFile's real return type */
     int fileSize = 0;
     uint8_t* streamBytes = nullptr;
     uint8_t* streamHeader = nullptr;
 
     /* Try Asset Manager first */
-    if (g_asset_mgr != nullptr) {
-        memBuffer = AssetMgr_LoadFile(&g_asset_mgr,
+    if (g_asset_mgr.archive_file != 0) {
+        memBuffer = g_asset_mgr.LoadFile(
                                       reinterpret_cast<uint8_t*>(filePath),
                                       &fileSize);
         if (memBuffer != nullptr) {
@@ -352,7 +352,10 @@ void Cursor::init()
             if (stream != nullptr) {
                 // ABI_BOUNDARY: WNDPROC_Stream* -> this file's own legacy
                 // opaque int* view — see the comment above on why the
-                // complete type can't be used in this TU.
+                // complete type can't be used in this TU. WNDPROC_StreamFromMemory's
+                // `char* data` param is this codebase's older byte-buffer convention;
+                // memBuffer is the same raw bytes under AssetArchive::LoadFile's
+                // real `uint8_t*` return type.
                 streamObj = reinterpret_cast<int*>(
                     WNDPROC_StreamFromMemory(stream, reinterpret_cast<char*>(memBuffer), fileSize, 1));
             }

@@ -64,7 +64,7 @@ extern "C" {
  *
  * The correct real implementation (matching this exact non-extern-"C",
  * (uint8_t*,uint8_t*) overload, already linked and reachable from
- * native/assetmgr_loadfile.c's identical declaration) lives in
+ * resources/AssetArchive.cpp's identical declaration) lives in
  * shared/stubs_link001_batch1_crt_win32.cpp; declaring the identical
  * signature here with plain C++ linkage binds to that same real body
  * instead of colliding with the extern "C" filler stub. */
@@ -146,22 +146,43 @@ extern void* g_game;
 extern int      Math_DistSquared(int x1, int y1, int x2, int y2);                     /* 0x45C7A0 */
 extern uint8_t  Math_PointOnLineSegment(int px, int py, int ax, int ay, int bx, int by); /* 0x45C7C0 */
 
-/* Asset manager — used by StepToward, FindNearestConnectionNode.
- * g_asset_mgr is declared void* almost everywhere in this tree (matching
- * the original C-style opaque handle); AssetMgr_ReadPairValue takes a
- * typed AssetMgr* first arg, so callers here static_cast at the call site
- * rather than widen the global's declared type. Building.cpp previously
- * declared this extern with a `void*` first param — a landmine (worklist
- * "AssetMgr_ReadPairValue", callers Building::StepToward /
- * Building::FindNearestConnectionNode): the real symbol takes AssetMgr*,
- * so every call here was silently unresolved (call 0).
+/* Connection-graph AssetMgr pointer — used by StepToward's
+ * AssetMgr_ReadPairValue call only (FindNearestConnectionNode instead
+ * takes its own AssetMgr*-shaped `node_set` parameter directly, see
+ * below).
  *
- * 2026-08-09: the real implementation is now AssetMgr::ReadPairValue (a
- * genuine __thiscall method, resources/AssetMgr.h/.cpp); the declaration
- * below is a free-function compatibility shim over it, kept specifically
- * so this file doesn't have to include resources/AssetMgr.h (see that
- * header's own comment on the shim for why). */
-extern void*    g_asset_mgr;                                                       /* asset manager singleton */
+ * CORRECTED 2026-08-17: this was previously (wrongly) declared/used as
+ * `g_asset_mgr` (0x485600) — the unrelated file-archive singleton, see
+ * resources/AssetArchive.h — static_cast to AssetMgr* at the call site.
+ * Ghidra disassembly of Building_StepToward (0x432AE0) proves this is
+ * wrong: the `this` pointer for every AssetMgr_ReadPairValue call in that
+ * function is loaded from a DIFFERENT global —
+ *
+ *   MOV ECX, dword ptr [0x004FD190]
+ *   CALL 0x0045DD80                  ; AssetMgr::ReadPairValue
+ *
+ * — at 6 call sites (0x432C94, 0x432DD5, 0x432E00, 0x432E2F, 0x432EC9,
+ * 0x432EE1/0x432EF6), none of which touch 0x485600 at all. The two
+ * globals only coincidentally "worked" together before because both
+ * g_asset_mgr's old `void*` declaration and this pointer's real
+ * AssetMgr* type erased to the same static_cast<AssetMgr*>(void*) shape
+ * at the call site. Like g_asset_mgr, 0x4FD190 has zero WRITE xrefs
+ * anywhere in the binary (confirmed via Ghidra get_xrefs_to), so it is
+ * also always null in the shipped retail game — this file's StepToward
+ * AssetMgr_ReadPairValue branch is dead code in practice, same as every
+ * g_asset_mgr-gated LoadFile call site elsewhere in the tree. Full
+ * identity/initializer resolution for 0x4FD190 is out of scope for this
+ * pass (fixing the g_asset_mgr extern-global-type-mismatch landmine, not
+ * surveying every raw global address in Building_StepToward); storage is
+ * defined alongside the other similarly-unresolved always-null globals in
+ * shared/stubs_impl.cpp.
+ *
+ * The real implementation is AssetMgr::ReadPairValue (a genuine
+ * __thiscall method, resources/AssetMgr.h/.cpp); the declaration below is
+ * a free-function compatibility shim over it, kept specifically so this
+ * file doesn't have to include resources/AssetMgr.h (see that header's
+ * own comment on the shim for why). */
+extern AssetMgr* g_tile_adjacency_mgr;                                             /* 0x4FD190 */
 extern uint8_t  AssetMgr_ReadPairValue(AssetMgr* self, uint32_t a, uint32_t b);    /* 0x45DD80 */
 
 /* ROM string at 0x47E4FC in .rdata — Ghidra confirms this is a narrow
@@ -1733,7 +1754,7 @@ void Building::StepToward(int x, int y)
             if (conn != nullptr) {
                 uint32_t peer_node = static_cast<uint32_t>(conn->occupancy_more);
                 uint8_t dir = AssetMgr_ReadPairValue(
-                    static_cast<AssetMgr*>(g_asset_mgr), peer_node, this->track_node_id);
+                    g_tile_adjacency_mgr, peer_node, this->track_node_id);
 
                 int conn_x = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x4C);
                 int conn_y = *reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(conn) + 0x50);

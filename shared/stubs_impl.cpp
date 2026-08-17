@@ -47,8 +47,6 @@ void* operator_new(size_t size) {
 }
 void GLOBAL_free(void* ptr);
 void GLOBAL_free(void* ptr) { free(ptr); }
-void* CRT_malloc_zero(size_t size);
-void* CRT_malloc_zero(size_t size) { return operator_new(size); }
 void CRT_free(void* ptr);
 void CRT_free(void* ptr) { free(ptr); }
 
@@ -61,10 +59,6 @@ void OutputDebugStringA(const char* s);
 void OutputDebugStringA(const char* s) { if (s) fprintf(stderr, "DEBUG: %s\n", s); }
 
 /* ---- String ---- */
-int CRT_strlen(const char* s);
-int CRT_strlen(const char* s) { return s ? static_cast<int>(strlen(s)) : 0; }
-int CRT_memmove(void* d, const void* s, size_t n);
-int CRT_memmove(void* d, const void* s, size_t n) { memmove(d, s, n); return 0; }
 /* CRT_wcsstr(const char*, const char*) here was a distinct, dead
  * (const char*, const char*)-mangled overload, unreachable from any real
  * caller (all of which declare (uint8_t*, uint8_t*)) and semantically
@@ -80,10 +74,6 @@ int CRT_sprintf_buf(char* b, const char* f, ...) { return 0; }
 /* ---- Time ---- */
 unsigned int CRT_timeGetTime(void);
 unsigned int CRT_timeGetTime(void) { return 0; }
-unsigned int CRT_time(unsigned int* t);
-unsigned int CRT_time(unsigned int* t) {
-    return static_cast<unsigned int>(time(reinterpret_cast<time_t*>(t)));
-}
 
 /* ---- Game globals ---- */
 uint32_t g_game_time = 0;
@@ -140,8 +130,26 @@ void*    g_netman = nullptr;
  * g_resmgr/g_tilemap: same pattern — canonical typed objects/pointers are
  * `ResourceManager g_resmgr;` (resources/ResourceManager.cpp, 0x4855E8)
  * and `void* g_tilemap;` (graphics/DDRAW.cpp, 0x4AAD08); these void*
- * placeholders were a real type mismatch masked by LINK-001. */
-void*    g_asset_mgr = nullptr;
+ * placeholders were a real type mismatch masked by LINK-001.
+ * g_asset_mgr: same pattern again — canonical typed object is
+ * `AssetArchive g_asset_mgr;` (resources/AssetArchive.cpp, 0x485600); the
+ * `void*` placeholder that used to live here was one of ~6 mutually
+ * incompatible per-file declared types for this global (void*, AssetMgr*,
+ * int32_t, uint8_t) that caused AssetMgr_LoadFile call sites to bind to the
+ * wrong overload (mostly empty no-op stubs) instead of the real
+ * implementation. */
+class AssetMgr;
+/* g_tile_adjacency_mgr (0x4FD190) — a distinct, previously-unnamed global
+ * discovered while fixing g_asset_mgr above: game/Building.cpp's
+ * Building::StepToward reads this address directly as the `this` pointer
+ * for AssetMgr::ReadPairValue calls (confirmed via disassembly of
+ * 0x432AE0 — see Building.cpp's own doc comment for the full evidence).
+ * It is unrelated to g_asset_mgr/AssetArchive despite a previous version
+ * of Building.cpp accidentally conflating the two. Zero WRITE xrefs
+ * anywhere in the binary (same as g_asset_mgr), so always null in the
+ * shipped retail game; full identity/initializer resolution is tracked as
+ * a separate, not-yet-investigated landmine instance. */
+AssetMgr* g_tile_adjacency_mgr = nullptr;
 void*    g_audio = nullptr;
 void*    g_cursor = nullptr;
 void*    g_town = nullptr;
@@ -156,12 +164,8 @@ BOOL (*g_PtInRect)(const RECT*, int, int) = nullptr;
 BOOL (*g_OffsetRect)(RECT*, int, int) = nullptr;
 
 /* ---- Helper stubs ---- */
-void Timer_Resize(void*, unsigned int);
-void Timer_Resize(void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Timer_Resize(void*, int);
 void Timer_Resize(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Collection_Sort(void*);
-void Collection_Sort(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /* RESMGR_PlaySound(int) removed 2026-08-15 — a fabricated symbol name;
  * the original binary always calls the real PlaySound(UINT) directly.
  * ui/AboutDialog.cpp (this stub's only caller) now calls it directly. */
@@ -221,16 +225,8 @@ void UI_CenterWindow(int* outer, int* inner)
 }
 void Sprite_Destroy(void*);
 void Sprite_Destroy(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void* ButtonSprite_Ctor(void*, int, int, int);
-void* ButtonSprite_Ctor(void*, int, int, int) { return nullptr; }
-void NETMAN_QueueMessage(void*, int, void*);
-void NETMAN_QueueMessage(void*, int, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void Sprite_SetState(void*, int);
-void Sprite_SetState(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void CopyRect(RECT* d, const RECT* s);
 void CopyRect(RECT* d, const RECT* s) { if(d&&s) *d=*s; }
-void OffsetRect(RECT* r, int dx, int dy);
-void OffsetRect(RECT* r, int dx, int dy) { if(r){r->left+=dx;r->top+=dy;r->right+=dx;r->bottom+=dy;} }
 int  IsRectEmpty(const RECT* r);
 int  IsRectEmpty(const RECT* r) { return !r || r->left>=r->right || r->top>=r->bottom; }
 
@@ -278,8 +274,6 @@ int wsprintfA(char* buf, const char* fmt, ...) {
 
 int CRT_atoi(const char* s);
 int CRT_atoi(const char* s) { return s ? atoi(s) : 0; }
-    void CRT_sprintf(char* buf, const char* fmt, ...);
-    void CRT_sprintf(char* buf, const char* fmt, ...) {}
 
 void Cursor_Render(void*, int, int, char);
 void Cursor_Render(void*, int, int, char) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
@@ -297,12 +291,6 @@ void  WNDPROC_StreamReadLine(void*, void*);
 void  WNDPROC_StreamReadLine(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void* WNDPROC_StreamWrite(void*, void*);
 void* WNDPROC_StreamWrite(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-int   WNDPROC_StreamSeekForward(void*, int, int, int);
-int   WNDPROC_StreamSeekForward(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  Stream_BeginEnum(void*);
-void  Stream_BeginEnum(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  Stream_BeginRead(void*, int, int);
-void  Stream_BeginRead(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* WNDPROC_Stream::ExtractInt (0x4646C0) — real C++-mangled method,
  * operator>>(int32_t*) on the stream (decompiled, see
@@ -317,26 +305,12 @@ void  Stream_BeginRead(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n",
 extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*);
 extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
-/* Math/CRT stubs — signatures inferred from usage, likely misidentified by decompiler */
-void* CRT_fabs(void*, void*);
-void* CRT_fabs(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void  CRT_fmod(void*, void*);
-void  CRT_fmod(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-
 int  Config_GetIniInt(void*, const char*, const char*, int def);
 int  Config_GetIniInt(void*, const char*, const char*, int def) { return def; }
 
 /* Win32 stubs */
-void* GetProcessHeap(void);
-void* GetProcessHeap(void) {
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
-}
-int   CloseHandle(void*);
-int   CloseHandle(void*) { return 1; }
 void  Sleep(unsigned int ms);
 void  Sleep(unsigned int ms) { usleep(ms * 1000); }
-void  SetPixel(void*, int, int, unsigned int);
-void  SetPixel(void*, int, int, unsigned int) {}
 
 
 /* ---- Bulk stubs for remaining symbols ---- */
@@ -427,43 +401,15 @@ int DAT_00481194 = 0;
 int s_AW_Blit_failure_reported_0047e0d8 = 0;
 
 /* Win32 stubs */
-void GetWindowTextA(void*, char*, int);
-void GetWindowTextA(void*, char*, int) {}
 int GetLastError(void);
 int GetLastError(void) { return 0; }
-int FormatMessageA(int, void*, int, int, char*, int, void*);
-int FormatMessageA(int, void*, int, int, char*, int, void*) { return 0; }
 void* LocalFree(void*);
 void* LocalFree(void*) { return nullptr; }
-void* FindFirstFileA(const char*, void*);
-void* FindFirstFileA(const char*, void*) { return nullptr; }
-int FindNextFileA(void*, void*);
-int FindNextFileA(void*, void*) { return 0; }
-int FindClose(void*);
-int FindClose(void*) { return 0; }
-int CreateDirectoryA(const char*, void*);
-int CreateDirectoryA(const char*, void*) { return 0; }
-int DeleteFileA(const char*);
-int DeleteFileA(const char*) { return 0; }
-int GetFileAttributesA(const char*);
-int GetFileAttributesA(const char*) { return -1; }
-int ClientToScreen(void*, void*);
-int ClientToScreen(void*, void*) { return 0; }
-int SetCursorPos(int, int);
-int SetCursorPos(int, int) { return 0; }
 
 /* Critical section stubs */
 void InitializeCriticalSection(void*) {}
-void EnterCriticalSection(void*);
-void EnterCriticalSection(void*) {}
-void LeaveCriticalSection(void*);
-void LeaveCriticalSection(void*) {}
-void DeleteCriticalSection(void*);
-void DeleteCriticalSection(void*) {}
 
 /* CRT stubs */
-void CRT_strncpy(void*, void*, int);
-void CRT_strncpy(void*, void*, int) {}
 void CRT_0x4681D0(int);
 void CRT_0x4681D0(int) {}
 void CRT_0x468480(char*, void*);
@@ -481,20 +427,12 @@ void* vtable_for_Collection = nullptr;
 int growth_factor = 2;
 
 /* DDRAW stubs */
-void Cursor_SetCapture(void*, unsigned char);
-void Cursor_SetCapture(void*, unsigned char) {}
 void DDRAW_UnlockPrimary();
 void DDRAW_UnlockPrimary() {}
-void Cursor_InitSprites(void*);
-void Cursor_InitSprites(void*) {}
-void Cursor_UnlockAllSurfaces(void*);
-void Cursor_UnlockAllSurfaces(void*) {}
 /* DDRAW_GetSurfaceWidthHeight/DDRAW_RestoreSurfaces: real, Ghidra-verified
  * implementations now canonical in native/DDRAW_GetSurfaceWidthHeight.c
  * (0x4014E0, see PROGRESS.md raw-073) and native/ddraw_surface_ops.c;
  * these no-op duplicates removed (LINK-001). */
-void DDRAW_SetSurfaceFormat(void*, int);
-void DDRAW_SetSurfaceFormat(void*, int) {}
 /* DDRAW_SpriteDataCtor/Dtor(void*, int) no-op stubs removed — real
  * implementation now AssetMgr::AssetMgr/~AssetMgr (resources/AssetMgr.h/
  * .cpp; previously misattributed as SpriteData::SpriteData/~SpriteData in
@@ -650,8 +588,6 @@ uint32_t RESDATA_GetTileCategory(void* ptr, int16_t a, uint16_t b)
  * (void*, int32_t, int32_t, int32_t) declaration of this same overload.
  * Already loud (unlike the sibling overload was) and already
  * unreachable today (RESDATA_ScriptedObject::Start has zero callers). */
-void* RESDATA_CreateChildSprite(void*, int, int, int);
-void* RESDATA_CreateChildSprite(void*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 void RESDATA_HitTestChildren(void*, int, int);
 void RESDATA_HitTestChildren(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void Panel_DtorBody(void*);
@@ -679,22 +615,14 @@ uint16_t NET_UploadAsset(int, char*);
 uint16_t NET_UploadAsset(int, char*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); return 0; }
 void PlaySoundFile(char*, int, int, int);
 void PlaySoundFile(char*, int, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached (upload_custom_content should be unreachable on host)"); }
-void Game_CheckScreensaverTimeout(int*);
-void Game_CheckScreensaverTimeout(int*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 /** Game_DeselectGameObject — Host no-op (no selection state to clear).
  *  Binary sets selected building to null. */
 void Game_DeselectGameObject(int);
 void Game_DeselectGameObject(int) { /* host no-op */ }
 void Game_SelectGameObject(void*, void*);
 void Game_SelectGameObject(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_StopSound(void*, int);
-void GameObject_StopSound(void*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_Update(void*);
 void GameObject_Update(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_Draw(void*);
-void GameObject_Draw(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void GameObject_PtInRect(void*, int, int);
-void GameObject_PtInRect(void*, int, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_DtorBody(void*);
 void GameObject_DtorBody(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void GameObject_BaseCtor(void*, int, int, int, int);
@@ -703,12 +631,8 @@ void Entity_GetSubObjectPosition(void*, int*, int);
 void Entity_GetSubObjectPosition(void*, int*, int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
 /* UI stubs */
-void UI_WindowBase_Ctor(void*, void*, unsigned int);
-void UI_WindowBase_Ctor(void*, void*, unsigned int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UI_WindowBase_BaseDtor(void*);
 void UI_WindowBase_BaseDtor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
-void UI_WindowBase_Hide(void*);
-void UI_WindowBase_Hide(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int);
 void UI_CreateFullWindow(void*, int, void*, int, int, int, int, void*, void*, unsigned int) { /* host no-op */ }
 void UI_CreateChildWindow(void*, int, int);
@@ -731,8 +655,6 @@ void UI_IsBitmapReady(int) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __
  * already resolved by an earlier pass. UI_Utils.cpp's hideTooltip() now
  * calls the typed method directly; this free-function facade has zero
  * remaining callers. */
-void UIEntity_Ctor(void);
-void UIEntity_Ctor(void) { /* host no-op */ }
 /* UIPANEL_Blit(void*,int...int) and UIPANEL_BeginPaint(void*): duplicates
  * of shared/link_stubs.cpp / ui/UIPANEL.cpp (LINK-001); removed here. */
 /* UIPANEL_EndPaintEx(void*, void*, int, unsigned char, RECT*) — this wrong
@@ -766,8 +688,6 @@ void Sprite_Init(void* self);
 void Sprite_Init(void* self) { (void)self; }
 void Sprite_SetState(void*, int, int*);
 void Sprite_SetState(void*, int, int*) { /* host no-op */ }
-void Sprite_Destroy(void);
-void Sprite_Destroy(void) { }
 /* ButtonSprite_Ctor(void*,int) / TileMap_InvalidateRect(void*,int,int,int,int) /
  * CGWND_SetMode(void*): duplicates of shared/link_stubs.cpp (LINK-001);
  * removed here. */
@@ -792,24 +712,10 @@ void CGWND_SetBuildMode(int i);
 void CGWND_SetBuildMode(int i) { (void)i; }
 void World_Init(void* self);
 void World_Init(void* self) { (void)self; /* host no-op */ }
-void PixelDataCache_LookupAsset(void* self, int a, int b);
-void PixelDataCache_LookupAsset(void* self, int a, int b) { (void)self; (void)a; (void)b; }
-void PixelDataCache_GetEntryCount(void* self);
-void PixelDataCache_GetEntryCount(void* self) { (void)self; }
-void PixelDataCache_Unlock(void* self, int i);
-void PixelDataCache_Unlock(void* self, int i) { (void)self; (void)i; }
 /* DPLAY_RenderPlayer stub removed 2026-08-17 — see shared/link_stubs.cpp's
  * matching removal note. */
 void PlaySoundAt(int, int, int, int);
 void PlaySoundAt(int, int, int, int) { /* host no-op */ }
-void Collection_Resize(int);
-void Collection_Resize(int) { /* host no-op */ }
-void Collection_GetAt(int);
-void Collection_GetAt(int) { /* host no-op */ }
-void SortedCollection_Compare(void*, void*);
-void SortedCollection_Compare(void*, void*) { /* host no-op */ }
-void SortedCollection_SortRange(int, int);
-void SortedCollection_SortRange(int, int) { /* host no-op */ }
 
 /* ================================================================== */
 /* GameLoop.cpp dependency stubs (added 2026-07-25)                    */
@@ -838,10 +744,6 @@ void* GameConfig_constructor(void* memory)
     g_netSettings = config;
     return config;
 }
-void* NETMAN_constructor(void*);
-void* NETMAN_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
-void* PlayerRecord_constructor(void*);
-void* PlayerRecord_constructor(void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); return nullptr; }
 /* Subsystem init */
 /* DDRAW_Init — real implementation is native/ddraw_init.c (0x45C8A0);
  * this and link_stubs.cpp's no-op copy were the flagship LINK-001
@@ -859,8 +761,6 @@ void  RESMGR_VehicleAnimationTick(void* self) { (void)self; }
  * pattern as World_Lock/World_Unlock in that file. */
 /* UI_HideTooltip(void*): removed — real definition now in
  * ui/UI_Utils.cpp, routing to UI_Manager::hideTooltip. */
-void  RESDATA_ScriptedObject_Update(void* self);
-void  RESDATA_ScriptedObject_Update(void* self) { (void)self; }
 /* Town_TrackBuilding (0x42D1A0) and DDRAW_UpdateBuilding (0x459DA0) are
  * implemented in src/sdl3_shims/sdl3_town_mode3.cpp for the host build.
  * The Win32 build links the original binary implementations. */

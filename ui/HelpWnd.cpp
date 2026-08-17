@@ -31,6 +31,7 @@
 
 #include "HelpWnd.h"
 #include "../audio/AudioChannel.h"
+#include "../resources/AssetArchive.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamMem.h"
 #include "../game/PlayerConfig.h"
@@ -75,8 +76,12 @@ extern "C" {
      * rather than kept side by side once Win32Stream.h's real include of
      * windows.h made the mismatch a hard conflicting-declaration error. */
 
-    /* Game functions (C-linkage) */
-    extern void*  AssetMgr_LoadFile(void* mgr, const char* path, int* outSize);
+    /* AssetMgr_LoadFile(void*, const char*, int*) declaration removed from
+     * here — it was inside this extern "C" block, but the real function is
+     * plain C++ linkage, so this declaration could never have bound to it
+     * regardless of its void* vs AssetMgr* parameter-type confusion (a
+     * distinct landmine on top of the one tracked in
+     * resources/AssetArchive.h). Real access is g_asset_mgr.LoadFile(...). */
 
     /* Config_GetIniString/Config_ReadInt are the recovered C-ABI INI
      * helpers in game/ConfigIni.cpp (extern "C"). Without matching
@@ -201,7 +206,13 @@ extern NetMan*  g_netman;              /* NetMan singleton */
 /* g_demo_mode — declared in shared/types.h */
 extern PlayerConfig* g_player_config;  /* 0x4AA4A8 — PlayerConfig singleton */
 /* g_config_ini — declared in shared/types.h, not redeclared here */
-extern AssetMgr* g_asset_mgr;          /* asset manager */
+/* g_asset_mgr — real AssetArchive VALUE object, not a pointer (see
+ * resources/AssetArchive.h, included below). Previously declared here as
+ * `AssetMgr*` (the UNRELATED resources/AssetMgr.h 4-ary-tree class) and
+ * passed BY VALUE below instead of by address — the one call site in this
+ * tree that actually matched its own (wrong) declared type, which is
+ * exactly why it looked "correct" relative to every other file's `void*`
+ * declaration; it wasn't, relative to the real global. */
 extern char     g_install_path[];      /* game install path string */
 
 /**
@@ -1052,7 +1063,7 @@ char HelpWnd::reset_pages()
      * &object->StreamObject_subobject (this+0xC in the original layout) —
      * the wrong-offset problem documented in Win32Stream.h. */
     WIN32_Stream stream;
-    int* loadedData = NULL;
+    uint8_t* loadedData = NULL;  /* AssetArchive::LoadFile's real return type */
 
     /* Reset all page indices */
     this->currentPageIdx = -1;
@@ -1081,9 +1092,9 @@ char HelpWnd::reset_pages()
     }
 
     /* Try loading from asset manager first */
-    if (g_asset_mgr != NULL) {
+    if (g_asset_mgr.archive_file != 0) {
         int fileSize = 0;
-        loadedData = (int*)AssetMgr_LoadFile(g_asset_mgr, fileBuf, &fileSize);
+        loadedData = g_asset_mgr.LoadFile(reinterpret_cast<uint8_t*>(fileBuf), &fileSize);
 
         if (loadedData != NULL) {
             /* Create memory stream from loaded data. 0x5C was the original
@@ -1091,7 +1102,11 @@ char HelpWnd::reset_pages()
              * resources/Win32StreamMem.h). */
             void* memStream = operator_new(WIN32_MemoryStream_Size());
             if (memStream != NULL) {
-                WNDPROC_Stream* streamObj = WNDPROC_StreamFromMemory(memStream, (char*)loadedData, fileSize, 1);
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is
+                // this codebase's older byte-buffer convention; loadedData is
+                // the same raw bytes under AssetArchive::LoadFile's real
+                // `uint8_t*` return type.
+                WNDPROC_Stream* streamObj = WNDPROC_StreamFromMemory(memStream, reinterpret_cast<char*>(loadedData), fileSize, 1);
                 if (streamObj != NULL) {
                     result = (char)this->load_help_data(streamObj);
                     /* Release stream: real C++ `delete` through

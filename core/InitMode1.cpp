@@ -33,7 +33,7 @@ namespace loco { namespace host { void HostLoadingSequence(void* param); } }
 #include "../ui/EditWindow.h"
 #include "../town/Town.h"
 #include "../ui/PostcardPreviewWindow.h"
-#include "../graphics/LOCOBITMAP.h"
+#include "../ui/PostcardAlbum.h"
 #include "../input/Cursor.h"
 #include "../network/Netman.h"
 #include "CGWND.h"

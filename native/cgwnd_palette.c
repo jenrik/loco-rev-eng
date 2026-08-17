@@ -14,6 +14,7 @@
 
 #include "../shared/types.h"
 #include "../resources/Win32StreamMem.h"
+#include "../resources/AssetArchive.h"
 
 /* ================================================================== */
 /* External references                                                */
@@ -22,9 +23,16 @@
 extern void*  __cdecl operator_new(size_t size);                    /* 0x465CE0 */
 extern void   __cdecl CRT_free(void* ptr);                          /* 0x466C70 */
 extern void   __cdecl CRT_sprintf_buf(char* buf, const char* fmt);  /* 0x466D60 */
-extern void*  g_asset_mgr;                                          /* 0x485600 — global asset manager */
 extern char   g_install_path[];                                     /* 0x4A99C8 — install directory path */
-extern int*   __stdcall AssetMgr_LoadFile(int* mgr, byte* path, int* outSize);   /* 0x45CD00 */
+/* g_asset_mgr (0x485600) is the real AssetArchive value object
+ * (resources/AssetArchive.h, included above). This file calls it via the
+ * C-linkage AssetArchive_IsOpen()/AssetArchive_LoadFile() bridge rather
+ * than the C++ method directly, since it was previously declared and
+ * treated as a `void*` here; the bridge keeps this file's shape close to
+ * its prior form. Was previously declared `int* __stdcall
+ * AssetMgr_LoadFile(int* mgr, byte* path, int* outSize)` — a THIRD
+ * incompatible signature for the same real function on top of the
+ * void* vs AssetMgr* confusion tracked elsewhere. */
 /* WNDPROC_StreamFromMemory / WIN32_MemoryStream_Size() come from
  * resources/Win32StreamMem.h (included above), not redeclared here. */
 extern void*  __thiscall WIN32_StreamOpenFile(void* stream, char* path,
@@ -122,7 +130,7 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
     CRT_sprintf_buf(filePath, "%s/%s/%s");
 
     /* Step 3: Try loading from asset manager first */
-    if (g_asset_mgr != NULL) {
+    if (AssetArchive_IsOpen()) {
         /* Compute relative path offset within sprintf'd buffer */
         pathLen = -1;
         {
@@ -136,19 +144,27 @@ byte __fastcall CGWND_ValidatePaletteData(void* obj)
         int relOffset = ~pathLen;  /* strlen(g_install_path) */
 
         int initialSize = 0x800;
-        loadedData = AssetMgr_LoadFile(reinterpret_cast<int*>(&g_asset_mgr),
-                                        reinterpret_cast<byte*>(filePath + relOffset - 1),
-                                        &initialSize);  /* initial size = 2048 */
+        // ABI_BOUNDARY: loadedData is kept as this function's own pre-existing
+        // `int*` buffer-arithmetic view (see `*(loadedData - 1)` below, which
+        // this function already depended on as int-stride pointer math before
+        // this change) rather than retyped to AssetArchive::LoadFile's real
+        // `uint8_t*` return — retyping would silently change that pre-existing
+        // arithmetic's byte offset (4-byte int stride -> 1-byte stride), and
+        // this whole branch is unreachable dead code today (see below), so
+        // there is no live behavior to verify a retype against.
+        loadedData = reinterpret_cast<int*>(AssetArchive_LoadFile(
+                                        reinterpret_cast<uint8_t*>(filePath + relOffset - 1),
+                                        &initialSize));  /* initial size = 2048 */
         if (loadedData != NULL) {
             /* WNDPROC_StreamFromMemory constructs a WIN32_MemoryStream
              * (resources/Win32StreamMem.h) — use its real *_Size() helper
              * instead of the original x86's literal 0x5C. Verified dead on
-             * host, not a live undersized allocation: `g_asset_mgr` has
-             * exactly one definition in the tree (`shared/stubs_impl.cpp`,
-             * `nullptr`) and is never assigned anywhere else, so this
-             * whole `if (g_asset_mgr != NULL)` branch never executes —
-             * confirmed by grepping every `.cpp`/`.c` file for an
-             * assignment to it. */
+             * host, not a live undersized allocation: `g_asset_mgr`
+             * (resources/AssetArchive.cpp) has archive_file == 0 and is
+             * never written anywhere in the whole binary (confirmed via
+             * Ghidra xref analysis — zero WRITE xrefs to 0x485600), so this
+             * whole `if (AssetArchive_IsOpen())` branch never executes in
+             * the shipped retail game. */
             streamMem = operator_new(WIN32_MemoryStream_Size());
             if (streamMem != NULL) {
                 streamObj = WNDPROC_StreamFromMemory(streamMem, reinterpret_cast<char*>(loadedData),

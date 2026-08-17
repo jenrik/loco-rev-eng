@@ -100,13 +100,14 @@
 class Building;
 class DPlayManager;
 /* Canonical definition: graphics/LOCOBITMAP.h. NOT included from this
- * header/Town.cpp — LOCOBITMAP.h also defines a conflicting, differently
- * shaped `class PostcardAlbum` ("concept A" per its own header comment)
- * that collides with this file's ui/PostcardAlbum.h (a separate,
- * pre-existing landmine, out of scope here). Forward-declared as an
- * opaque pointer target; Town.cpp mirrors the confirmed field offsets
- * locally (see UIPANEL_SurfaceView there) rather than dereferencing the
- * real type. */
+ * header/Town.cpp -- kept as an opaque forward-declared pointer target
+ * purely to avoid pulling LOCOBITMAP.h's dependency weight into every
+ * Town.h consumer; Town.cpp does not dereference the real type today.
+ * (graphics/LOCOBITMAP.h used to also define a second, competing, flat
+ * `class PostcardAlbum` that collided with ui/PostcardAlbum.h's real one
+ * -- that flat class has since been deleted, so LOCOBITMAP.h no longer
+ * defines PostcardAlbum at all; ui/PostcardAlbum.h, included directly by
+ * Town.cpp, is the sole PostcardAlbum definition.) */
 struct UIPANEL_Surface;
 
 /* ================================================================== */

@@ -56,6 +56,7 @@
 
 #include "../shared/types.h"
 #include "ResourceManager.h"
+#include "AssetArchive.h"
 /* Win32_MemoryStream's complete type is only needed by this file's own
  * _WIN32-only branch below (dead code on this host; exercised by the
  * MinGW typecheck build) for real `delete` through WNDPROC_Stream*.
@@ -79,7 +80,6 @@
 
 extern void* operator_new(size_t size);              /* 0x465CE0 */
 extern void  GLOBAL_free(void* ptr);                 /* 0x465CD0 */
-extern void* g_asset_mgr;                            /* 0x485600 */
 extern char  g_install_path[];                       /* 0x4A99C8 */
 
 /* Strict sane preview cap (16 MiB) shared by the host load/write
@@ -92,9 +92,11 @@ static constexpr size_t kHostMaxPreviewBytes = 16u * 1024u * 1024u;
 #ifndef _WIN32
 /* The original checks [0x485600] (g_asset_mgr) and, when present, loads
  * the file through AssetMgr_LoadFile (0x45CD00) + a memory stream.  On
- * the host g_asset_mgr stays nullptr (stubs_impl.cpp), exactly like the
- * original BSS state before GameLoop_Setup wires it — so the file-stream
- * fallback below is the path the original takes in that state too. */
+ * the host g_asset_mgr.archive_file stays 0 (resources/AssetArchive.cpp),
+ * exactly like the original BSS state — nothing anywhere in the binary
+ * ever writes this global (confirmed via Ghidra xref analysis), so the
+ * file-stream fallback below is the path the original takes in that
+ * state too. */
 #else
 /* Win32 stream layer (native/win32_stream.c — original ABI). */
 /* Read-stream ctor 0x463970 constructs a WIN32_Stream (Win32Stream.h,
@@ -124,7 +126,9 @@ class WNDPROC_Stream;
 extern WNDPROC_Stream* WNDPROC_StreamFromMemory(void* stream, char* data,
                                                  int32_t size, int32_t mode); /* 0x464490 */
 extern size_t WIN32_MemoryStream_Size(); /* resources/Win32StreamMem.cpp */
-extern int32_t AssetMgr_LoadFile(void* mgr, const char* path, int32_t* size); /* 0x45CD00 */
+/* AssetMgr_LoadFile(void*, const char*, int32_t*) declaration removed —
+ * real access is g_asset_mgr.LoadFile(...) (resources/AssetArchive.h,
+ * included above). */
 extern size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 extern size_t WIN32_OStream_Size(); /* resources/Win32OStream.cpp — real sizeof(WIN32_OStream) */
 /* The preview writer uses the tilemap overlay (0x457080) on g_tilemap
@@ -561,17 +565,19 @@ int8_t RESMGR_LoadResource(RESDATA* resdata, const char* filename)
     /* ---- Original control flow (Win32 streams) ---- */
     RESMGR_RemoveResource(resdata);
 
-    if (g_asset_mgr != nullptr) {
+    if (g_asset_mgr.archive_file != 0) {
         /* Original (0x447BE1..0x447C0F): AssetMgr_LoadFile is called
          * with "filename + strlen(g_install_path)" — the binary adds the
          * res-dir length to the filename POINTER instead of prefixing a
          * concatenated buffer (an original pointer bug; the path is only
          * correct when g_install_path is empty).  Reproduced exactly. */
         int32_t asset_size = 0;
-        void* asset_data = reinterpret_cast<void*>(
-            AssetMgr_LoadFile(g_asset_mgr,
-                              filename + std::strlen(g_install_path),
-                              &asset_size));
+        /* resdata->asset_data (RESDATA::asset_data, shared/types.h +0x1D0) is
+         * genuinely `void*` in the canonical class model — AssetArchive::LoadFile's
+         * `uint8_t*` return converts to it implicitly, no cast needed. */
+        void* asset_data = g_asset_mgr.LoadFile(
+            reinterpret_cast<const uint8_t*>(filename + std::strlen(g_install_path)),
+            &asset_size);
         resdata->asset_data = asset_data;
         if (asset_data != nullptr) {
             /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use

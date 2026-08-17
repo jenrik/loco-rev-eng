@@ -86,7 +86,9 @@
 #include "TrainMessage.h"
 #include "../resources/ResourceManager.h"
 #include "../game/Vehicle.h"
-class AssetMgr;  /* forward declaration for g_asset_mgr */
+/* `class AssetMgr;` forward declaration removed — g_asset_mgr is the real
+ * AssetArchive value object (resources/AssetArchive.h), unrelated to the
+ * resources/AssetMgr.h `AssetMgr` class. */
 
 /* ================================================================== */
 /* Packet type constants used by the network subsystem                 */

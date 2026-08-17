@@ -64,12 +64,19 @@ extern void __thiscall TileMap_InvalidateRect(void* tilemap, int left, int top,
  * conflicting local Win32/global declarations into this file. */
 extern uint8_t RESDATA_IsBuildingTile(int32_t tile_obj);
 
-/* UIPANEL_CreateSurface — real def graphics/LOCOBITMAP.cpp:0x42A110,
- * placement-style constructor for UIPANEL_Surface (see town/Town.cpp's
- * identical declaration/doc comment for the extern-"C" landmine this
- * avoids — kept as plain C++ linkage here too, matching the real symbol). */
+/* UIPANEL_CreateSurface/UIPANEL_Surface_Size — PRE-EXISTING LANDMINE, found
+ * but not fixed by the 2026-08-17 PostcardAlbum-collision pass (out of
+ * scope for that pass; flagged here rather than left silently pointing at
+ * a file that no longer has any bearing on it): despite the "real def
+ * graphics/LOCOBITMAP.cpp:0x42A110" comment this used to carry, neither
+ * symbol has ever had a real definition anywhere in this tree (grepped
+ * tree-wide, both before and after this pass's edits to LOCOBITMAP.cpp —
+ * that file never defined either, at any point). This is a call-0 landmine
+ * on `handle_tile_click`'s selection-overlay path below (kept plain C++
+ * linkage, matching town/Town.cpp's identical declaration, so it doesn't
+ * silently rebind to a wrong-linkage stub — but it is still unresolved). */
 extern void   UIPANEL_CreateSurface(UIPANEL_Surface* surface);   /* 0x42A110 */
-extern size_t UIPANEL_Surface_Size();  /* graphics/LOCOBITMAP.cpp — real sizeof(UIPANEL_Surface) */
+extern size_t UIPANEL_Surface_Size();  /* real sizeof(UIPANEL_Surface); no definition exists tree-wide */
 extern void*  operator_new(size_t size);   /* 0x465CE0 */
 
 /* UIPANEL_Blit — real def ui/UIPANEL_Surface.cpp (0x42B050), C++-mangled. */

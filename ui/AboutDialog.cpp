@@ -62,8 +62,10 @@ extern int   __cdecl CRT_sprintf_buf(char* buf, const char* format, ...);    /* 
 /* Resource manager */
 extern void* __thiscall ResourceManager_GetById(void* resmgr, int resId);    /* 0x446EA0 */
 extern void  __cdecl    PlaySound(UINT soundId);                             /* 0x447930 */
-extern void* __thiscall AssetMgr_LoadFile(void* assetMgr,                    /* 0x45CD00 */
-                                           const char* path, int* sizeOut);
+/* AssetMgr_LoadFile(void*, const char*, int*) declaration removed — no live
+ * call site in this file (LoadCredits() is still documentation-only, see
+ * below); real access is g_asset_mgr.LoadFile(...) via
+ * resources/AssetArchive.h when LoadCredits is implemented for real. */
 
 /* WIN32 stream I/O.
  *
@@ -142,7 +144,11 @@ class ResourceManager;
 extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
                                       * a widespread cross-TU landmine — see
                                       * PROGRESS.md's g_resmgr sweep) */
-extern void* g_asset_mgr;           /* 0x485600 — global asset manager */
+/* g_asset_mgr (0x485600) was extern-declared here as `void*` but never
+ * actually referenced anywhere in this file (LoadCredits is still
+ * documentation-only) — a stray, unused, wrong-type redeclaration. See
+ * resources/AssetArchive.h for the canonical `AssetArchive g_asset_mgr`
+ * value-object declaration if LoadCredits is implemented for real. */
 extern char  g_install_path[];      /* 0x4A99C8 — installation path string */
 extern void* g_font_small;          /* 0x4855F4 — small font handle (used for credits text) */
 extern char  g_empty_string;        /* 0x4851D0 — empty string constant */

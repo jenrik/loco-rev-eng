@@ -40,11 +40,16 @@ struct WNDPROC_Stream;
  * referrers via `nm --print-file-name build/lego_loco.p/*.o | grep
  * _Z12UIPANEL_BlitPvjjijPPijjijj`. See docs/landmine-sweep-worklist.md. */
 
-/* AssetMgr_LoadFile — two overloads */
-void AssetMgr_LoadFile(int*, unsigned char*, int*);
-void AssetMgr_LoadFile(int*, unsigned char*, int*) {}
-void AssetMgr_LoadFile(void*, char const*, int*);
-void AssetMgr_LoadFile(void*, char const*, int*) {}
+/* AssetMgr_LoadFile(int*, unsigned char*, int*) / (void*, char const*, int*)
+ * no-op stub overloads removed 2026-08-17 — the g_asset_mgr
+ * extern-global-type-mismatch cleanup (resources/AssetArchive.h) gave
+ * every real call site a single canonical, correctly-typed
+ * `g_asset_mgr.LoadFile(...)` method call, so no caller-side declaration
+ * can bind to these anymore (confirmed via grep across the whole tree:
+ * zero remaining `AssetMgr_LoadFile(` call expressions). These were the
+ * silent no-op landmines that call sites were accidentally binding to
+ * instead of the real implementation (native/assetmgr_loadfile.c, now
+ * resources/AssetArchive.cpp). */
 
 /* GameWindow_Create — two overloads */
 void GameWindow_Create(void*, int, void*, int, int, int, int, void*, void*, unsigned int, int, int, unsigned char);
@@ -86,9 +91,7 @@ void Building_CheckPlacement(Building*, int, int) {}
 void CGWND_AudioChannel_Play(void*);
 void CGWND_AudioChannel_Play(void*) {}
 
-/* GameAudio_PlayResourceEx — two overloads, Address: 0x4131C0 */
-void GameAudio_PlayResourceEx(void*, int, unsigned int*);
-void GameAudio_PlayResourceEx(void*, int, unsigned int*) {}
+/* GameAudio_PlayResourceEx — Address: 0x4131C0 */
 void GameAudio_PlayResourceEx(void*, unsigned int, int*);
 void GameAudio_PlayResourceEx(void*, unsigned int, int*) {}
 
@@ -283,12 +286,4 @@ struct IDirectDrawSurface4_Stub {
 /* C. Explicit member function definitions                      */
 /*   (for symbols that need free-function-style mangling)       */
 /* =========================================================== */
-
-/* Collection::GetAt — separate from Collection_Stub vtable */
-void* Collection_GetAt(void*, int32_t);
-void* Collection_GetAt(void*, int32_t) { return nullptr; }
-
-/* Building::Building(int) — separate from Building_Stub */
-void Building_Building(void*, int32_t);
-void Building_Building(void*, int32_t) {}
 

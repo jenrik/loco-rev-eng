@@ -51,18 +51,24 @@
  *   Value 0x80 = valid unset, 0xFF = invalid/cleared, 0-3 = direction
  *
  * === Functions ===
- * Every function in this class except AssetMgr_LoadFile and the two
- * genuine free helpers (AssetMgr_TreeFreeNode, AssetMgr_WriteFile — they
- * operate on a raw tree node, never touch `this`) is a real __thiscall
- * method in the original binary (ECX = AssetMgr*, confirmed via Ghidra
- * disassembly, 2026-08-09) and is declared as an AssetMgr member function
- * above. AssetMgr_LoadFile (0x45CD00) is excluded from this pass: it has
- * 3 conflicting first-param types across the tree (see
- * docs/landmine-sweep-worklist.md line 251) that need resolving before a
- * safe method conversion.
+ * Every function in this class except the two genuine free helpers
+ * (AssetMgr_TreeFreeNode, AssetMgr_WriteFile — they operate on a raw tree
+ * node, never touch `this`) is a real __thiscall method in the original
+ * binary (ECX = AssetMgr*, confirmed via Ghidra disassembly, 2026-08-09)
+ * and is declared as an AssetMgr member function above.
+ *
+ * NOTE (2026-08-17): "AssetMgr_LoadFile" (0x45CD00) was previously listed
+ * here as excluded pending resolution of 3 conflicting first-param types
+ * across the tree (docs/landmine-sweep-worklist.md line 251). That
+ * function turned out to be a COMPLETELY DIFFERENT, unrelated class —
+ * its receiver's +0x00/+0x04 fields are a CRT file handle and a
+ * directory-entry linked-list head, not this class's entry_count/
+ * pair_matrix. It has been resolved as `AssetArchive::LoadFile`
+ * (resources/AssetArchive.h/.cpp) and never belonged in this header at
+ * all; the name collision was a Ghidra auto-naming artifact, not a real
+ * relationship between the two classes.
  *
  * References:
- *   - AssetMgr_LoadFile: in native/assetmgr_loadfile.c
  *   - Remaining free functions/shims below: in resources/AssetMgr.cpp
  */
 
@@ -212,26 +218,14 @@ struct AssetMgr {
 };
 
 /* ================================================================== */
-/* AssetMgr — File loading (address 0x45CD00)                         */
+/* NOTE: "AssetMgr_LoadFile" (address 0x45CD00) does NOT belong to this  */
+/* class — see the class-level doc comment above. It is                */
+/* AssetArchive::LoadFile, declared in resources/AssetArchive.h and     */
+/* implemented in resources/AssetArchive.cpp. Removed from here         */
+/* 2026-08-17 (was previously declared as `AssetMgr_LoadFile(AssetMgr*,  */
+/* uint8_t*, int32_t*)`, which no real call site could ever bind to,    */
+/* since the actual receiver's layout is entirely different).          */
 /* ================================================================== */
-
-/**
- * AssetMgr_LoadFile — Load a file from asset tree, optionally decode.
- * Address: 0x45CD00, __thiscall
- *
- * Searches the asset directory tree linked list for a file matching
- * 'filename'. Sums entry sizes for seeking, allocates buffer, reads raw
- * data, and optionally Huffman-decompresses. Returns allocated buffer.
- *
- * Called by: UIPANEL_StretchBlit, RESMGR_OpenResourceFile, Game_LoadWaveFile,
- *            Cursor_Init, HelpWnd_ResetPages, TrainStation_Init, and 13 others.
- *
- * @param this     Asset manager instance
- * @param filename ASCII/byte filename to search for
- * @param out_size Receives final data size (decompressed if compressed)
- * @return         Pointer to allocated data buffer, or NULL on failure
- */
-uint8_t* __thiscall AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t* out_size);
 
 /* ================================================================== */
 /* AssetMgr — Tree clearing, adjacency (re)construction, and category  */

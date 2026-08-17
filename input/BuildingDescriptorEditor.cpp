@@ -22,12 +22,18 @@ extern void GLOBAL_free(void* ptr);                     /* 0x465CD0 */
 
 /* GetResourceType also has plain C++ linkage (resources/ResourceManager.h). */
 #include "../resources/ResourceManager.h"
+/* g_asset_mgr — real AssetArchive value object, plain C++ linkage. Was
+ * previously declared here inside the extern "C" block below as
+ * `int AssetMgr_LoadFile(void*, const char*, int*)` — a THIRD landmine on
+ * top of the void* vs AssetMgr* signature confusion tracked elsewhere: real
+ * C++ (non-"C") linkage means an extern "C" declaration of the same name
+ * can never bind to it regardless of parameter types. */
+#include "../resources/AssetArchive.h"
 
 /* ================================================================== */
 /* External helpers (extern "C" — original Win32/CRT/internal ABI)     */
 /* ================================================================== */
 extern "C" {
-    int   AssetMgr_LoadFile(void* mgr, const char* path, int* outSize); /* 0x45CD00 */
     void  CRT_free(void* ptr);
     int   CRT_sprintf_buf(void* buf, const void* fmt); /* chained sprintf-family helper, exact
                                                           * shape unresolved — matches other files'
@@ -249,15 +255,18 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
     CRT_sprintf_buf(bmpPathBuf, "%s%s.bmp");
 
     bool loadedFromArchive = false;
-    extern void* g_asset_mgr;
-    if (g_asset_mgr != nullptr) {
+    if (g_asset_mgr.archive_file != 0) {
         int fileSize = 0;
         char archivePath[264];
         CRT_sprintf_buf(archivePath, "%s.dat");
-        int* fileData = reinterpret_cast<int*>(AssetMgr_LoadFile(&g_asset_mgr, archivePath, &fileSize));
+        uint8_t* fileData = g_asset_mgr.LoadFile(
+            reinterpret_cast<uint8_t*>(archivePath), &fileSize);
         if (fileData != nullptr) {
             void* streamMem = ::operator new(WIN32_MemoryStream_Size(), std::nothrow);
             if (streamMem != nullptr) {
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is this
+                // codebase's older byte-buffer convention; fileData is the same raw
+                // bytes under AssetArchive::LoadFile's real `uint8_t*` return type.
                 WNDPROC_Stream* stream = WNDPROC_StreamFromMemory(
                     streamMem, reinterpret_cast<char*>(fileData), fileSize, 1);
                 if (stream != nullptr) {

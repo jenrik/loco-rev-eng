@@ -1,28 +1,36 @@
 /**
- * stubs_link001_batch6_asset_huf.cpp — LINK-001 batch 6: asset-loader /
- * Huffman-codec call-0 landmine cluster.
+ * stubs_link001_batch6_asset_huf.cpp — LINK-001 batch 6: Huffman-codec
+ * call-0 landmine.
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * Fixes three call-0 landmines (main binary links with
+ * Fixes two call-0 landmines (main binary links with
  * -Wl,--unresolved-symbols=ignore-all, so any undefined reference silently
  * binds to address 0 instead of failing the link):
  *
  *   1. Huf_GetUncompressedSize(uint32_t*)   — real implementation, 0x45C820
  *   2. Huf_Decode(int32_t*, uint8_t*, int32_t*) — real implementation, 0x45C830
- *   3. AssetMgr_LoadFile(AssetMgr*, unsigned char*, int*) — thunk, see below
+ *
+ * (A third item, an AssetMgr_LoadFile(AssetMgr*, ...) thunk, previously
+ * lived here — see the g_asset_mgr extern-global-type-mismatch cleanup,
+ * dated 2026-08-17: the receiver is now a real, correctly-identified
+ * `AssetArchive` value type (resources/AssetArchive.h/.cpp), every call
+ * site uses `g_asset_mgr.LoadFile(...)` directly, and this thunk — along
+ * with the wrong-signature no-op stubs it was bridging around in
+ * shared/core_stubs.cpp/link_stubs.cpp — has been removed as orphaned.)
  *
  * === Huf_GetUncompressedSize / Huf_Decode ===
  *
  * Both are genuine internal game logic (a small custom Huffman decoder used
  * to decompress asset-tree entries), not OS/hardware wrappers, and are
- * called from native/assetmgr_loadfile.c's AssetMgr_LoadFile (0x45CD00) —
- * that file only forward-declares them as `extern`, it does not define them,
- * which is exactly what left them unresolved. Ghidra decompiles of both are
- * small and unambiguous, so they are implemented here for real rather than
- * stubbed, transcribed instruction-for-instruction against the decompiler
- * output (verified against the disassembly's bit/shift/mask widths):
+ * called from resources/AssetArchive.cpp's AssetArchive::LoadFile
+ * (0x45CD00) — that file only forward-declares them as `extern`, it does
+ * not define them, which is exactly what left them unresolved. Ghidra
+ * decompiles of both are small and unambiguous, so they are implemented
+ * here for real rather than stubbed, transcribed instruction-for-instruction
+ * against the decompiler output (verified against the disassembly's
+ * bit/shift/mask widths):
  *
  *   - Huf_GetUncompressedSize (0x45C820): the compressed block's header
  *     stores the uncompressed size as its first native (little-endian)
@@ -39,41 +47,6 @@
  *     consumed. Writes the total decompressed size to *out_size at the end
  *     (mirrors *param_3 = *param_1 in the decompile — the original header
  *     size field, unchanged by the decode loop).
- *
- * === AssetMgr_LoadFile(AssetMgr*, unsigned char*, int*) ===
- *
- * network/Netman.cpp's Netman::LoadScenario (0x43D820) and
- * ui/GameSetupPanel.cpp's GameSetupPanel::loadLayouts (0x409E70) both call
- * AssetMgr_LoadFile through network/Netman.h:353's declaration:
- *     uint8_t* AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t* out_size);
- * That first-param type (AssetMgr*) differs from the *real* implementation's
- * own signature in native/assetmgr_loadfile.c:
- *     uint8_t* __thiscall AssetMgr_LoadFile(void* _this, uint8_t* filename, int32_t* out_size);
- * In C++ these mangle to different symbols
- * (_Z16AssetMgr_LoadFileP8AssetMgrPhPi vs. _Z16AssetMgr_LoadFilePvPhPi), so
- * the AssetMgr*-typed call sites never bind to the real, already-decompiled
- * 0x45CD00 body — hence the call-0. Per assetmgr_loadfile.c's own header
- * comment, the object actually walked by that function (this+0x00 = open
- * CRT file handle, this+0x04 = linked-list-of-directory-entries head) is
- * NOT the resources/AssetMgr.h `AssetMgr` struct (whose +0x00/+0x04 are
- * entry_count/pair_matrix) — so Netman.h:353's `AssetMgr*` parameter type
- * is itself the wrong declaration for this call (this cluster already has
- * 3 mutually-incompatible first-param types across the tree, tracked at
- * docs/landmine-sweep-worklist.md line 251). The actual global passed at
- * both call sites, g_asset_mgr, is declared `void*` everywhere except in
- * Netman.h/HelpWnd.cpp — matching the real implementation, not the
- * caller-side declaration used here.
- *
- * Per this session's constraints, the caller declaration in Netman.h is not
- * editable from this file. This is therefore a thunk, not a fix at the
- * root: it reproduces the exact (AssetMgr*, uint8_t*, int32_t*) mangled
- * signature the call sites need, and forwards to the real void*-typed
- * implementation via a same-representation pointer reinterpretation (both
- * are plain data pointers to the same runtime object; only the static C++
- * type differs). This makes the call sites resolve to the real,
- * already-decompiled logic instead of silently binding to address 0, without
- * picking a side in the still-open, separately-tracked multi-signature
- * cluster. See SHOULD_BE_FIXED_AT below for the actual root-cause location.
  */
 
 #include <cstdint>
@@ -151,22 +124,4 @@ void Huf_Decode(int32_t* src, uint8_t* dst, int32_t* out_size)
     } while (remaining != 0);
 
     *out_size = src[0];
-}
-
-/* ================================================================== */
-/* AssetMgr_LoadFile(AssetMgr*, unsigned char*, int*) — call-site thunk */
-/*                                                                       */
-/* Forwards to the real, already-decompiled implementation in           */
-/* native/assetmgr_loadfile.c (0x45CD00), whose first parameter is       */
-/* `void*` (see rationale in the file header above). `AssetMgr` is only  */
-/* forward-declared — never defined here — because this thunk never      */
-/* touches the object's fields, only passes the pointer through.        */
-/* ================================================================== */
-class AssetMgr;
-
-extern uint8_t* AssetMgr_LoadFile(void* _this, uint8_t* filename, int32_t* out_size);
-
-uint8_t* AssetMgr_LoadFile(AssetMgr* self, uint8_t* filename, int32_t* out_size)
-{
-    return AssetMgr_LoadFile(reinterpret_cast<void*>(self), filename, out_size);
 }

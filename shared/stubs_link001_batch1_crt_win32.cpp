@@ -354,11 +354,12 @@ int CRT_sprintf_buf(void* buf, const char* fmt, ...)
 }
 
 /* ----------------------------------------------------------- */
-/* CRT_wcsstr(unsigned char*, unsigned char*) -> AssetMgr_LoadFile
- * Caller (native/assetmgr_loadfile.c:37, compiled as C++ per meson's
- * `-x c++` for native/*.c, and NOT inside any extern "C" block — a plain
- * top-level `extern`, so this is C++-mangled):
- * `extern int32_t __cdecl CRT_wcsstr(uint8_t* str, uint8_t* sub);`.
+/* CRT_wcsstr(unsigned char*, unsigned char*) -> AssetArchive::LoadFile
+ * Caller (resources/AssetArchive.cpp, plain C++ linkage — a plain
+ * top-level `extern`, so this is C++-mangled; formerly
+ * native/assetmgr_loadfile.c:37 before that file was folded into
+ * resources/AssetArchive.cpp, 2026-08-17):
+ * `extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);`.
  *
  * Real target 0x471480 (documented consistently across game/Building.cpp,
  * game/TrainStation.cpp, input/BuildingDescriptorEditor.cpp, tests/
@@ -390,10 +391,10 @@ int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub)
 }
 
 /* ----------------------------------------------------------- */
-/* CRT_0x468790(int, int, unsigned int) -> AssetMgr_LoadFile
- * Caller (native/assetmgr_loadfile.c:40, plain C++, same rationale as
- * CRT_wcsstr above): `extern void __cdecl CRT_0x468790(int32_t handle,
- * int32_t offset, uint32_t origin);`.
+/* CRT_0x468790(int, int, unsigned int) -> AssetArchive::LoadFile
+ * Caller (resources/AssetArchive.cpp, plain C++, same rationale as
+ * CRT_wcsstr above; formerly native/assetmgr_loadfile.c:40):
+ * `extern void CRT_0x468790(int32_t handle, int32_t offset, uint32_t origin);`.
  *
  * Real target 0x468790: Ghidra's OWN symbol table names the decompiled
  * function at this address "_fseek" directly (`int __cdecl _fseek(FILE*
@@ -413,10 +414,10 @@ void CRT_0x468790(int32_t handle, int32_t offset, uint32_t origin)
 }
 
 /* ----------------------------------------------------------- */
-/* CRT_0x468610(char*, unsigned int, unsigned int, int) -> AssetMgr_LoadFile
- * Caller (native/assetmgr_loadfile.c:38-39, plain C++, same rationale):
- * `extern void __cdecl CRT_0x468610(char* buf, uint32_t size,
- * uint32_t count, int32_t handle);`.
+/* CRT_0x468610(char*, unsigned int, unsigned int, int) -> AssetArchive::LoadFile
+ * Caller (resources/AssetArchive.cpp, plain C++, same rationale; formerly
+ * native/assetmgr_loadfile.c:38-39): `extern void CRT_0x468610(char* buf,
+ * uint32_t size, uint32_t count, int32_t handle);`.
  *
  * Real target 0x468610: Ghidra's symbol table names it "_wcsnlen_locked"
  * (a stale FID-database match — a 4-param (ptr,uint,uint,FILE*) locked

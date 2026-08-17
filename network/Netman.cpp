@@ -685,10 +685,10 @@ void Netman::LoadScenario(const char* layoutName)
     std::vector<uint8_t> contents;
     int32_t asset_size = 0;
     uint8_t* asset_data = nullptr;
-    if (g_asset_mgr != nullptr) {
+    if (g_asset_mgr.archive_file != 0) {
         const std::size_t prefix = std::strlen(g_install_path);
-        asset_data = AssetMgr_LoadFile(
-            g_asset_mgr, reinterpret_cast<uint8_t*>(path + prefix), &asset_size);
+        asset_data = g_asset_mgr.LoadFile(
+            reinterpret_cast<uint8_t*>(path + prefix), &asset_size);
         if (asset_data != nullptr && asset_size > 0)
             contents.assign(asset_data, asset_data + asset_size);
     }

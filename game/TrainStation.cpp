@@ -10,6 +10,7 @@
  */
 
 #include "TrainStation.h"
+#include "../resources/AssetArchive.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamFile.h"
 #include "../resources/Win32StreamMem.h"
@@ -32,8 +33,8 @@ void* __cdecl operator_new(size_t size);               /* 0x465CE0 */
 void  __cdecl GLOBAL_free(void* ptr);                  /* 0x465CD0 */
 void  __cdecl CRT_free(void* ptr);                     /* 0x466C70 */
 
-/* Asset manager */
-void* __thiscall AssetMgr_LoadFile(void* asset_mgr, void* path, int* out_size);
+/* Asset manager — real access is g_asset_mgr.LoadFile(...)
+ * (resources/AssetArchive.h, included above). */
 
 /* Format string construction (sprintf wrapper) */
 void __cdecl sprintf_wrapper(char* buffer, const char* format, ...);  /* 0x466D60 */
@@ -64,7 +65,7 @@ void __cdecl sprintf_wrapper(char* buffer, const char* format, ...);  /* 0x466D6
  * uint8_t*) -> int32_t signature, matching the canonical, already-correct
  * implementation in shared/stubs_link001_batch1_crt_win32.cpp (which defines
  * this exact overload against real strcasecmp semantics) and the same
- * uint8_t*-byte-string idiom native/assetmgr_loadfile.c already uses for
+ * uint8_t*-byte-string idiom resources/AssetArchive.cpp already uses for
  * this identical real function. This file's OWN comparison direction
  * (`== 0` / `!= 0` <-> "matched") was already correct per that disassembly;
  * only the linkage/signature was broken. */
@@ -75,7 +76,7 @@ extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
  * not modeled game-object storage. This helper narrows the char* line
  * buffer and const char* keyword literals to that byte-string ABI shape
  * (matching the identical (uint8_t*,uint8_t*) idiom already used for this
- * same real function in native/assetmgr_loadfile.c) rather than exposing
+ * same real function in resources/AssetArchive.cpp) rather than exposing
  * raw casts at every call site below. */
 static inline int32_t TrainStation_LineMatches(char* line, const char* keyword)
 {
@@ -134,7 +135,9 @@ class ResourceManager;
 extern ResourceManager g_resmgr;    /* 0x4855E8 — object, not a pointer (was void*,
                                       * a widespread cross-TU landmine — see
                                       * PROGRESS.md's g_resmgr sweep) */
-extern void* g_asset_mgr;                           /* 0x485600 */
+/* g_asset_mgr — real AssetArchive value object (resources/AssetArchive.h,
+ * included above); same "object, not a pointer" landmine pattern as
+ * g_resmgr above. */
 extern char g_install_path[];                       /* 0x4A99C8 — install directory path */
 
 /* Directive-keyword string literals used only by TrainStation::Render
@@ -395,7 +398,7 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     char    dat_filename[264];      /* .dat filename buffer */
     char    bmp_filename[264];      /* .bmp filename buffer */
     int     file_size;
-    void*   file_data;
+    uint8_t* file_data;     /* AssetArchive::LoadFile's real return type */
     void*   mem_stream;
     int16_t sub_window_count;
     int16_t i;
@@ -450,16 +453,20 @@ void TrainStation::Init(int32_t param1, int32_t param2)
                     reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
 
     /* Step 4a: Load .dat file via AssetMgr (using short archive-relative name) */
-    if (g_asset_mgr != nullptr) {
-        file_data = AssetMgr_LoadFile(&g_asset_mgr, short_dat_name, &file_size);
+    if (g_asset_mgr.archive_file != 0) {
+        file_data = g_asset_mgr.LoadFile(
+            reinterpret_cast<const uint8_t*>(short_dat_name), &file_size);
         if (file_data != nullptr) {
             /* Create sub-stream from the loaded data. 0x5C was the
              * original x86 sizeof(WIN32_MemoryStream) (see
              * resources/Win32StreamMem.h); use the real host size. */
             mem_stream = operator_new(WIN32_MemoryStream_Size());
             if (mem_stream != nullptr) {
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is this
+                // codebase's older byte-buffer convention; file_data is the same raw
+                // bytes under AssetArchive::LoadFile's real `uint8_t*` return type.
                 WNDPROC_Stream* render_stream = WNDPROC_StreamFromMemory(
-                    mem_stream, static_cast<char*>(file_data), file_size, 1);
+                    mem_stream, reinterpret_cast<char*>(file_data), file_size, 1);
 
                 if (render_stream != nullptr) {
                     /* Call virtual Render method */

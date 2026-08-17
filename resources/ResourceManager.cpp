@@ -192,7 +192,11 @@ void CRT_FindClose(void* handle);                          /* @ 0x00468370 */
 extern int32_t g_game_mode;                          /* @ 0x004851F4 */
 /* g_config_ini declared in shared/types.h */
 extern int32_t g_demo_mode;                          /* @ 0x004A9918 */
-extern int32_t g_asset_mgr;                          /* @ 0x004A9EEC — AssetMgr instance ptr */
+/* g_asset_mgr was extern-declared here as `int32_t` at a bogus address
+ * (0x004A9EEC, unrelated to the real global at 0x485600) and never used
+ * anywhere in this file — a stray, unused, wrong-type/wrong-address
+ * redeclaration. Removed rather than corrected in place; see
+ * resources/AssetArchive.h for the canonical declaration. */
 extern char g_install_path[];                        /* @ 0x004A99C8 */
 
 /* Global sound cache — separate from ResourceManager, shared by PlaySound/PlaySoundAt */

@@ -27,6 +27,7 @@
 
 #include "UIPANEL.h"
 #include "UIPANEL_Surface.h"
+#include "../resources/AssetArchive.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamFile.h"
 #include "../resources/Win32StreamMem.h"
@@ -101,7 +102,10 @@ extern "C" {
     extern void* g_ddraw;               /* 0x485440 */
     extern void* g_primary_surface;     /* 0x4FD3C4 */
     extern void* g_backbuffer;          /* 0x4FD3C0 */
-    extern void*              g_asset_mgr;           /* 0x4FD3CC */
+    /* g_asset_mgr was declared `void*` here at 0x4FD3CC — a bogus address
+     * (the real global is at 0x485600, a value-typed AssetArchive object;
+     * see resources/AssetArchive.h, included above via the file's own
+     * includes). */
     extern char               g_surface_lost;         /* 0x4FD218 */
 
     /* Pixel format globals */
@@ -148,7 +152,9 @@ extern "C" {
     extern "C" void WIN32_StreamRead(void* stream, void* buf, int32_t size);
     constexpr void (*ReadStreamBytesC)(void*, void*, int32_t) = WIN32_StreamRead;
     void Stream_BeginRead(void* stream, uint32_t offset, int mode);
-    void* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
+    /* AssetMgr_LoadFile(void*, const char*, int*) declaration removed —
+     * real access is g_asset_mgr.LoadFile(...) (resources/AssetArchive.h,
+     * included above). */
     /* Real def: graphics/sdl3_ddraw.cpp (host path, guarded #ifndef _WIN32);
      * first param is the same IDirectDrawSurface4* typed elsewhere in this
      * file (g_backbuffer/g_primary_surface), not int*. */
@@ -353,7 +359,7 @@ extern "C" {
      * (rather than computing &stream_buf->StreamObject_subobject),
      * reading and branching on essentially arbitrary bytes. */
     WIN32_Stream stream_buf;
-    void* asset_data = NULL;
+    uint8_t* asset_data = NULL;  /* AssetArchive::LoadFile's real return type */
     int asset_size = 0;
     void* mem_stream = NULL;
     WNDPROC_Stream* stream = nullptr;
@@ -366,13 +372,13 @@ extern "C" {
     }
 
     /* Try loading from asset manager first */
-    if (g_asset_mgr != NULL) {
+    if (g_asset_mgr.archive_file != 0) {
         int path_len = strlen(file_path);
         int install_len = strlen((LPCSTR)0x4852B8);  /* g_install_path */
         LPCSTR rel_path = file_path + install_len;
         if (*rel_path == '\\') rel_path++;
 
-        asset_data = AssetMgr_LoadFile(g_asset_mgr, rel_path, &asset_size);
+        asset_data = g_asset_mgr.LoadFile(reinterpret_cast<const uint8_t*>(rel_path), &asset_size);
         if (asset_data != NULL) {
             /* WNDPROC_StreamFromMemory placement-constructs a
              * WIN32_MemoryStream here (see resources/Win32StreamMem.cpp);
@@ -381,7 +387,11 @@ extern "C" {
              * fields (rdbuf, tied) widen the class on this 64-bit host. */
             mem_stream = operator_new(WIN32_MemoryStream_Size());
             if (mem_stream != NULL) {
-                stream = WNDPROC_StreamFromMemory(mem_stream, (char*)asset_data, asset_size, 1);
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is
+                // this codebase's older byte-buffer convention; asset_data is
+                // the same raw bytes under AssetArchive::LoadFile's real
+                // `uint8_t*` return type.
+                stream = WNDPROC_StreamFromMemory(mem_stream, reinterpret_cast<char*>(asset_data), asset_size, 1);
             }
         }
     }

@@ -19,6 +19,7 @@
  */
 
 #include <stdint.h>
+#include "../resources/AssetArchive.h"
 
 /* Stream object (WNDPROC stream) */
 typedef struct WNDPROC_Stream {
@@ -158,12 +159,16 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf);
  */
 int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
 {
-    extern void* g_asset_mgr;       /* 0x485600 — asset manager */
+    /* g_asset_mgr (0x485600) is the real AssetArchive value object
+     * (resources/AssetArchive.h, included above); accessed here via the
+     * C-linkage AssetArchive_IsOpen()/AssetArchive_LoadFile() bridge.
+     * Previously declared `int* AssetMgr_LoadFile(void* mgr, const char*,
+     * int*)` — one of ~6 mutually incompatible per-file signatures for the
+     * same real function tracked across this cleanup. */
     extern char  g_install_path[];  /* 0x4A99C8 */
     extern void* __cdecl operator_new(size_t size);
     extern void  __cdecl CRT_free(void* ptr);
     extern void  __cdecl CRT_exit(void* stack, const char* msg);
-    extern int* AssetMgr_LoadFile(void* mgr, const char* path, int* out_size);
     /* Canonical signature: resources/Win32StreamMem.h. `char*` (not
      * `const char*`) matches the real definition's mangled name — this
      * file's own local `struct WNDPROC_Stream` (an opaque handle type,
@@ -186,14 +191,14 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
     extern void* __cdecl CRT_malloc(size_t size);
 
     WNDPROC_Stream* stream = NULL;
-    int*   asset_data = NULL;
+    uint8_t* asset_data = NULL;    /* AssetArchive::LoadFile's real return type */
     int    data_size = 0;
     int    stream_result;
     RiffChunkHeader chunk_hdr;
     uint32_t fmt_chunk_size;
 
     /* Step 1: Try asset manager first */
-    if (g_asset_mgr != NULL) {
+    if (AssetArchive_IsOpen()) {
         /* Adjust path to strip install path prefix.
          * Binary computes: path + (strlen - 1). The -1 skips the
          * trailing separator, yielding the relative path within. */
@@ -201,20 +206,24 @@ int __cdecl Game_LoadWaveFile(const char* path, void* out_buf)
         while (g_install_path[prefix_len]) { prefix_len++; }
         const char* rel_path = path + prefix_len;
 
-        asset_data = AssetMgr_LoadFile(&g_asset_mgr, rel_path, &data_size);
+        asset_data = AssetArchive_LoadFile(
+            reinterpret_cast<const uint8_t*>(rel_path), &data_size);
 
         if (asset_data != NULL) {
             /* WNDPROC_StreamFromMemory constructs a WIN32_MemoryStream
              * (resources/Win32StreamMem.h) — use its real *_Size() helper
              * instead of the original x86's literal 0x5C. Verified dead on
-             * host, not a live undersized allocation: `g_asset_mgr` has
-             * exactly one definition in the tree (`shared/stubs_impl.cpp`,
-             * `nullptr`) and is never assigned anywhere else, so this
-             * whole `if (g_asset_mgr != NULL)` branch never executes —
-             * confirmed by grepping every `.cpp`/`.c` file for an
-             * assignment to it. */
+             * host, not a live undersized allocation: `g_asset_mgr`
+             * (resources/AssetArchive.cpp) has archive_file == 0 and is
+             * never written anywhere in the whole binary (confirmed via
+             * Ghidra xref analysis — zero WRITE xrefs to 0x485600), so this
+             * whole `if (AssetArchive_IsOpen())` branch never executes in
+             * the shipped retail game. */
             WNDPROC_Stream* stream_mem = static_cast<WNDPROC_Stream*>(operator_new(WIN32_MemoryStream_Size()));
             if (stream_mem != NULL) {
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is this
+                // codebase's older byte-buffer convention; asset_data is the same raw
+                // bytes under AssetArchive::LoadFile's real `uint8_t*` return type.
                 stream = WNDPROC_StreamFromMemory(stream_mem, reinterpret_cast<char*>(asset_data), data_size, 1);
             }
         }

@@ -143,12 +143,15 @@ extern void* g_netman;      /* 0x4FD3AC — NetMan singleton (raw-offset view; s
 extern uint32_t g_game_time; /* 0x4A99B4 */
 
 #ifdef _WIN32
-extern void* g_asset_mgr;   /* 0x485600 — Asset manager singleton */
-/* Only referenced from the faithful x86-offset bodies below; neither is
- * implemented anywhere else in this codebase yet (a separate, pre-
- * existing gap — not introduced by this file), so these are declaration-
- * only. The MinGW typecheck build compiles _WIN32 code but does not link
- * it, so this is sufficient for that build's purpose. */
+/* g_asset_mgr (0x485600) was extern-declared here as `void*` but never
+ * actually referenced anywhere in this file — a stray, unused, wrong-type
+ * redeclaration (see resources/AssetArchive.h for the canonical
+ * `AssetArchive g_asset_mgr` value-object declaration). Removed rather
+ * than corrected in place since nothing here uses it. The bodies below are
+ * declaration-only; neither is implemented anywhere else in this codebase
+ * yet (a separate, pre-existing gap — not introduced by this file). The
+ * MinGW typecheck build compiles _WIN32 code but does not link it, so this
+ * is sufficient for that build's purpose. */
 extern "C" {
 void __thiscall INPUT_EditScrollHandler(void* obj, uint32_t resId);
 void __thiscall ResourceManager_AnimateClock(void* mgr, uint32_t gameTime);

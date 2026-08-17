@@ -4,6 +4,7 @@
 
 #include "Cursor.h"
 #include "../resources/ResourceObject.h"
+#include "../resources/AssetArchive.h"
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* Win32 API declarations.
  * NOTE: Most of these are also in stubs/windows.h. The _WIN32 block
@@ -168,7 +169,9 @@ void INPUT_SwitchToLocomotiveTab(void*, int);
 void PlaySoundAt(int, int, int, int);
 void PlaySoundFile(char*, int, int, int);
 int HelpWnd_PlayNarration(void*, int, int);
-int* AssetMgr_LoadFile(void*, uint8_t*, int*);
+/* AssetMgr_LoadFile(void*, uint8_t*, int*) removed — g_asset_mgr is a real
+ * AssetArchive value object (resources/AssetArchive.h); call sites now use
+ * g_asset_mgr.LoadFile(...) directly. */
 /* WIN32_StreamOpenFile/WIN32_StreamRead moved to the extern "C" block above
  * — their only real definitions are extern "C". */
 /* Game_SetScreenMode's real (and only) definition is the loud stub at
@@ -221,7 +224,8 @@ size_t WIN32_MemoryStream_Size();
 /* Globals — typed where types are known */
 extern Cursor* g_cursor;
 extern void*   g_resmgr;        /* ResourceManager* */
-extern void*   g_asset_mgr;     /* AssetMgr* */
+/* g_asset_mgr — real AssetArchive value object, declared in
+ * resources/AssetArchive.h (included above). */
 extern char    g_install_path[];
 extern void*   g_ddraw;         /* IDirectDraw4* — COM platform object */
 extern void*   _g_backbuffer;   /* IDirectDrawSurface4* — COM platform object */

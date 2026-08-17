@@ -4,10 +4,12 @@
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * The Asset Manager manages a 4-ary tree of game resource files loaded
- * from the game data archive. Functions here handle file loading (already
- * in native/assetmgr_loadfile.c), tree traversal, adjacency computation,
- * and packed pair matrix access.
+ * The Asset Manager manages a 4-ary tile-adjacency tree — NOT the file
+ * archive loader (that turned out to be a completely different,
+ * unrelated class colliding only on a Ghidra auto-generated name; see
+ * resources/AssetArchive.h/.cpp, formerly native/assetmgr_loadfile.c).
+ * Functions here handle tree traversal, adjacency computation, and packed
+ * pair matrix access.
  *
  * Struct layout (partial, see AssetMgr.h for the canonical/evidenced copy):
  *   AssetMgr:

@@ -32,8 +32,6 @@ void AudioChannel_Pause();
 void AudioChannel_Pause() { /* host no-op */ }
 void AudioChannel_Play();
 void AudioChannel_Play() { /* host no-op */ }
-void ButtonSprite_Ctor();
-void ButtonSprite_Ctor() { /* host no-op */ }
 /* CGWND_SetMode() (0-arg extern "C") removed (2026-08-06, cross-validation
  * session): was the wrong stub graphics/LOCOBITMAP.cpp silently bound to
  * (its own correctly-typed CGWND_SetMode(int) declaration was inside an
@@ -44,9 +42,7 @@ void ButtonSprite_Ctor() { /* host no-op */ }
  * collided with game/ConfigIni.cpp's real 6-arg extern "C" body
  * (LINK-001 — extern "C" doesn't mangle by arg count/type, so both are
  * literally the same symbol). Removed; no evidence any real caller
- * wants a 0-arg shape. ButtonSprite_Ctor() above is the same 0-arg-landmine
- * pattern but doesn't currently collide with anything (untouched — out of
- * LINK-001's scope; tracked separately in docs/landmine-sweep-worklist.md). */
+ * wants a 0-arg shape. */
 void DDRAW_RestoreSurfaces();
 void DDRAW_RestoreSurfaces() { /* host no-op */ }
 void DDRAW_SetSurfaceFormat();
@@ -85,16 +81,8 @@ uint32_t GetUserNameA(char* buffer, uint32_t* size)
     return 0;
 #endif
 }
-void NETMAN_SendPacket();
-void NETMAN_SendPacket() { /* host no-op */ }
 void PlaySound();
 void PlaySound() { /* host no-op */ }
-void PlaySoundAt();
-void PlaySoundAt() { /* host no-op */ }
-void RESMGR_LoadSoundResource();
-void RESMGR_LoadSoundResource() { /* host no-op */ }
-void RESMGR_ReleaseSoundResource();
-void RESMGR_ReleaseSoundResource() { /* host no-op */ }
 void Sprite_Init();
 void Sprite_Init() { /* host no-op */ }
 void Sprite_SetState();
@@ -105,8 +93,6 @@ void UIEntity_Ctor();
 void UIEntity_Ctor() { /* host no-op */ }
 void UI_MainMenu_SetState();
 void UI_MainMenu_SetState() { /* host no-op */ }
-void UIPANEL_BeginPaint();
-void UIPANEL_BeginPaint() { /* host no-op */ }
 /* UIPANEL_Blit() (zero-arg, extern "C") removed: this is the unrelated
  * wrong stub town/Town.cpp used to silently bind to before the
  * town-tilerender-merge session fixed its declaration (2026-08-06), and
@@ -126,12 +112,6 @@ void UIPANEL_BeginPaint() { /* host no-op */ }
  * this name collided here regardless of its params). Fixed by moving
  * both declarations out of extern "C" (docs/landmine-sweep-worklist.md);
  * confirmed zero referrers left via nm before removing this stub. */
-void UI_WindowBase_BaseDtor();
-void UI_WindowBase_BaseDtor() { /* host no-op */ }
-void UI_WindowBase_Ctor();
-void UI_WindowBase_Ctor() { /* host no-op */ }
-void VehicleEditor_CheckEditBounds1();
-void VehicleEditor_CheckEditBounds1() { /* host no-op */ }
 /* WIN32_StreamOpen()/WIN32_StreamOpenFile() extern "C" no-ops removed:
  * both are now real implementations in resources/Win32Stream.h/.cpp, with
  * plain C++ (mangled) linkage matching the majority of existing .cpp
@@ -159,28 +139,8 @@ void WNDPROC_DeleteCriticalSection() { /* host no-op — single-threaded */ }
  * — every one of those callers has been moved out of its extern "C" block
  * to restore the intended C++ linkage; zero remaining references to the
  * bare unmangled symbol anywhere in the tree (confirmed via `nm`). */
-void RESDATA_DtorBase();
-void RESDATA_DtorBase() { /* host no-op */ }
-void ScriptEngine_Init();
-void ScriptEngine_Init() { /* host no-op */ }
-void UIPANEL_InitScrollPanel();
-void UIPANEL_InitScrollPanel() { /* host no-op */ }
-void UIPANEL_ScrollPanel_Dtor();
-void UIPANEL_ScrollPanel_Dtor() { /* host no-op */ }
-void ScriptEngine_Call();
-void ScriptEngine_Call() { /* host no-op */ }
-void RESDATA_SetPosition();
-void RESDATA_SetPosition() { /* host no-op */ }
 void HelpWnd_PlayNarration();
 void HelpWnd_PlayNarration() { /* host no-op */ }
-void CGWND_SetBuildMode();
-void CGWND_SetBuildMode() { /* host no-op */ }
-void GameAudio_UpdateVolume();
-void GameAudio_UpdateVolume() { /* host no-op */ }
-void UIPANEL_ScrollPanel_HandleDrag();
-void UIPANEL_ScrollPanel_HandleDrag() { /* host no-op */ }
-void Panel_DtorBody();
-void Panel_DtorBody() { /* host no-op */ }
 /* CRT_localtime(): this 0-arg landmine collided with shared/link_stubs.cpp's
  * real (unsigned int*) -> void* body (LINK-001); removed — link_stubs.cpp's
  * survives. */
@@ -195,14 +155,8 @@ void Panel_DtorBody() { /* host no-op */ }
  * shared/stubs_link001_batch1_crt_win32.cpp, so this bare-symbol filler
  * is no longer needed and removing it prevents a future extern "C"
  * redeclaration from silently re-arming the same trap. */
-void GameObject_GetBoundingRect();
-void GameObject_GetBoundingRect() { /* host no-op */ }
 void TileMap_GetObjectAt();
 void TileMap_GetObjectAt() { /* host no-op */ }
-void UI_MainMenu_SetState_void();
-void UI_MainMenu_SetState_void() { /* host no-op */ }
-void Vehicle_GetOccupantCount();
-void Vehicle_GetOccupantCount() { /* host no-op */ }
 void* DAT_00479190 = nullptr;
 void* DAT_004A9908 = nullptr;
 void* DAT_004fd19c = nullptr;
@@ -239,29 +193,15 @@ void* s_VolumeLow_0047f164 = nullptr;
 void* s_VolumeMed_0047f158 = nullptr;
 void* __imp_SystemParametersInfoA = nullptr;
 void* g_scene_name = nullptr;
-void Cursor_BlitEditPreview();
-void Cursor_BlitEditPreview() { /* host no-op */ }
-void Cursor_UpdateScrollButtons();
-void Cursor_UpdateScrollButtons() { /* host no-op */ }
-void Cursor_DrawColorPalette();
-void Cursor_DrawColorPalette() { /* host no-op */ }
-void Cursor_HandleTabChange();
-void Cursor_HandleTabChange() { /* host no-op */ }
 /* GetOpenFileNameA(): this 0-arg landmine collided with graphics/
  * sdl3_window.cpp's real (void* lpofn) -> BOOL body (LINK-001); removed —
  * sdl3_window.cpp's survives. */
-void NET_GetOrCreateSurface();
-void NET_GetOrCreateSurface() { /* host no-op */ }
 /* NET_UploadAsset and PlaySoundFile moved to shared/stubs_impl.cpp as loud
  * stubs with their real (int, char*)/(char*, int, int, int) signatures —
  * these 0-arg shapes had no real caller (see
  * docs/landmine-sweep-worklist.md "Cursor family"). */
-void TileMap_CreateOverlay();
-void TileMap_CreateOverlay() { /* host no-op */ }
 void FMT_LAYOUT_PATH();
 void FMT_LAYOUT_PATH() { /* host no-op */ }
-void GAMESTATE_StartGameTimer();
-void GAMESTATE_StartGameTimer() { /* host no-op */ }
 void* _g_netman = nullptr;
 } /* extern "C" */
 void CGWND_PumpMessages(char);
@@ -278,8 +218,6 @@ class GameConfig;
 GameConfig* _g_netman_data = nullptr;
 extern "C" {
 void* STR_LEGO_LOCO = nullptr;
-void CGWND_QuitToMenu();
-void CGWND_QuitToMenu() { /* host no-op */ }
 void* MessageBeep = nullptr;
 void IsWindowVisible();
 void IsWindowVisible() { /* host no-op */ }
@@ -304,8 +242,6 @@ void RESDATA_SoundObject_GetState(int);
 void RESDATA_SoundObject_GetState(int) { /* host no-op */ }
 void RESDATA_SoundObject_GetTextLength(int);
 void RESDATA_SoundObject_GetTextLength(int) { /* host no-op */ }
-void NETMAN_SendAck(void*);
-void NETMAN_SendAck(void*) { /* host no-op */ }
 /* UI_CreateTooltip(void*, int, short, int, int): removed — the one
  * canonical UI_CreateTooltip is now declared/defined for real in
  * ui/UI_Utils.cpp, wired to UI_Manager::createTooltip (2026-08-14). */
@@ -366,18 +302,8 @@ void Cursor_WaitForBlit(void*) { /* host no-op */ }
  * declaration (return type isn't part of C++ mangling); its one real
  * caller (ui/HelpWnd.cpp) now calls the real AudioChannel::IsActive()
  * typed method directly instead. */
-void GAMESTATE_ConnectToNetworkGame(void*);
-void GAMESTATE_ConnectToNetworkGame(void*) { /* host no-op */ }
-void GameWindow_BaseDtor(void*);
-void GameWindow_BaseDtor(void*) { /* host no-op */ }
 void CGWND_SetFullscreenMode(char);
 void CGWND_SetFullscreenMode(char) { /* host no-op */ }
-void GameWindow_SetPosition(void*, int, int);
-void GameWindow_SetPosition(void*, int, int) { /* host no-op */ }
-void GameWindow_Show(void*);
-void GameWindow_Show(void*) { /* host no-op */ }
-void GameWindow_Hide(void*);
-void GameWindow_Hide(void*) { /* host no-op */ }
 /* ResourceManager_GetStringById(void*, unsigned int) removed 2026-08-15 —
  * a dead facade this signature ("UINT id") never matched: the real facade
  * is (void*, int) (shared/stubs_link001_batch3_resource_audio.cpp). This
@@ -388,8 +314,6 @@ void* TrainSubsystem_Ctor = nullptr;
 /* WIN32_CreateThread / WIN32_QueueAsyncTask: real implementations now
  * live in network/WIN32Thread.cpp (WIN32_QueueAsyncTask's host path is
  * core/HostMode3Bootstrap.cpp's pending-async-task pump). */
-void Train_ProcessMessages(void*);
-void Train_ProcessMessages(void*) { /* host no-op */ }
 /* WIN32_GetSystemMetrics(void*) / WIN32_RecvNetworkData(void*,uint32_t,
  * const char*) — C++-mangled overloads network/DirectPlay.cpp declares
  * (deliberately outside its extern "C" block) for its own join/host-
@@ -433,8 +357,6 @@ uint32_t WIN32_RecvNetworkData(void*, uint32_t, const char*) {
  * "quit-message post dropped" framing mischaracterized what the original
  * function does. See core/CGWND.cpp's WIN32_PostQuit for the real body
  * and PROGRESS.md for this correction's date-stamped entry. */
-void EditWindow_render(void*);
-void EditWindow_render(void*) { /* host no-op */ }
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int);
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
 void CRT_exit(char const**, char const**);
@@ -444,20 +366,8 @@ void CRT_exit(char const**, char const**) { /* host no-op */ }
  * `_g_netman_data` (GameConfig*, game/GameConfig.h) singleton instead. */
 void WIN32_ResumeThread(void*, int);
 void WIN32_ResumeThread(void*, int) { /* host no-op */ }
-void UI_WindowBase_OnCreate(void*);
-void UI_WindowBase_OnCreate(void*) { /* host no-op */ }
-void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int);
-void UIPANEL_WindowProc(void*, unsigned int, unsigned int, int) { /* host no-op */ }
-void PlayerConfig_SetName(void*, char const*);
-void PlayerConfig_SetName(void*, char const*) { /* host no-op */ }
-void PlayerConfig_Save(void*);
-void PlayerConfig_Save(void*) { /* host no-op */ }
-void NETMAN_SendPacket(void*);
-void NETMAN_SendPacket(void*) { /* host no-op */ }
 void* CreateHatchBrush = nullptr;
 void* g_editwindow_ptr = nullptr;
-void EditWindow_cleanupSprites(void*);
-void EditWindow_cleanupSprites(void*) { /* host no-op */ }
 /* RESDATA_FreeWindow removed: its only caller (ui/EditWindow.cpp) now calls
  * the real PopupWindow::DestroyMCIChild() (0x4544A0) instead — see
  * PROGRESS.md. This stub was orphaned dead code, not a live no-op. */
@@ -468,25 +378,13 @@ void EditWindow_cleanupSprites(void*) { /* host no-op */ }
  * used `void** mgr` (and cited a wrong address, 0x460AA0, which is
  * actually inside WIN32_PeekMessageLoop) — fixed in EditWindow.cpp; see
  * PROGRESS.md. */
-void NameEntryPanel_Ctor(void*, void*, unsigned int);
-void NameEntryPanel_Ctor(void*, void*, unsigned int) { /* host no-op */ }
-void NameEntryPanel_CreateWindow(void*, void*);
-void NameEntryPanel_CreateWindow(void*, void*) { /* host no-op */ }
-void CGWND_GameSetup_Ctor(void*, void*, unsigned int);
-void CGWND_GameSetup_Ctor(void*, void*, unsigned int) { /* host no-op */ }
-void CGWND_GameSetup_Create(void*, void*);
-void CGWND_GameSetup_Create(void*, void*) { /* host no-op */ }
 /* NETMAN_CreateSession(void*) — removed. ui/EditWindow.cpp's own
  * `NETMAN_CreateSession` declaration was retyped from `void*` to the real
  * `NameEntryPanel*` (native/NETMAN_NetworkUI.c, 0x4419C0), so this
  * mismatched-signature stub is now dead: EditWindow::show()'s call binds
  * to the real function instead (guarded internally against
  * `_g_netman_data` being null on the host — see that file's comment). */
-void UI_WindowBase_Show(void*);
-void UI_WindowBase_Show(void*) { /* host no-op */ }
 void* BringWindowToTop = nullptr;
-void TrackPiece_Dtor(void*);
-void TrackPiece_Dtor(void*) { /* host no-op */ }
 void __ftol(double);
 void __ftol(double) { /* host no-op */ }
 /* WIN32_StreamDestroy(void*)/WIN32_StreamDestroyImmediate(void*) silent
@@ -545,10 +443,6 @@ void* GAMESTATE_LoadExistingGame = nullptr;
 void* World_SerializeObject = nullptr;
 void* STR_REMOVED = nullptr;
 void* DPLAY_InitPlayerSlot = nullptr;
-void NETMAN_ReceiveFileTransfer(int);
-void NETMAN_ReceiveFileTransfer(int) { /* host no-op */ }
-void NETMAN_SendAck(int);
-void NETMAN_SendAck(int) { /* host no-op */ }
 void* GAMESTATE_SetDifficulty = nullptr;
 /* DPLAY_EnumeratePlayers dead data-symbol stub removed 2026-08-17 — see
  * network/Netman.h's matching removal comment. */
@@ -559,8 +453,6 @@ void* GAMESTATE_SetDifficulty = nullptr;
  * core/GameLoop.cpp etc. declare `int`) — collided with shared/
  * stubs_impl.cpp's correctly-typed `int Vehicle_SetState(void*, int)`
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
-void NETMAN_ReceiveLayoutSelect(int);
-void NETMAN_ReceiveLayoutSelect(int) { /* host no-op */ }
 /* PlayerConfig_SaveToFile(void*) removed 2026-08-15 — declared `char*`-
  * returning at its one real caller (network/DPlayManager.cpp's
  * DPlayManager::SetPlayerData) but defined `void`-returning here
@@ -577,18 +469,6 @@ void ResourceManager_Shutdown(int);
 void ResourceManager_Shutdown(int) { /* host no-op */ }
 void DDRAW_FileData_Dtor(void*);
 void DDRAW_FileData_Dtor(void*) { /* host no-op */ }
-void GAMESTATE_HandleNetworkGame();
-void GAMESTATE_HandleNetworkGame() { /* host no-op */ }
-void VehicleEditor_GetResourceId(int);
-void VehicleEditor_GetResourceId(int) { /* host no-op */ }
-void VehicleEditor_RemoveVehicle(void*, int);
-void VehicleEditor_RemoveVehicle(void*, int) { /* host no-op */ }
-void GameVehicle_RemoveDestination(void*, unsigned int, char);
-void GameVehicle_RemoveDestination(void*, unsigned int, char) { /* host no-op */ }
-void GAMESTATE_EditorState_Detach(int);
-void GAMESTATE_EditorState_Detach(int) { /* host no-op */ }
-void CRT_memset_pattern(void*, int, int, void*, void*);
-void CRT_memset_pattern(void*, int, int, void*, void*) { /* host no-op */ }
 void CRT_free_pattern(void*, int, int, void*);
 void CRT_free_pattern(void*, int, int, void*) { /* host no-op */ }
 void RESDATA_DtorBody(void*);
@@ -605,10 +485,6 @@ void RESDATA_DtorBody(void*) { /* host no-op */ }
  * (matching game/Train_network.cpp's existing extern "C" declarations for
  * the sibling WIN32_SendNetworkData/WIN32_PeekMessageLoop), so nothing
  * requests these mangled symbols anymore. */
-void Ordinal_4(void*, void**, void*, void*, void*);
-void Ordinal_4(void*, void**, void*, void*, void*) { /* host no-op */ }
-void CRT_memcpy(void*, void const*, unsigned long);
-void CRT_memcpy(void*, void const*, unsigned long) { /* host no-op */ }
 void CRT_malloc(unsigned long);
 void CRT_malloc(unsigned long) { /* host no-op */ }
 void CRT_sprintf_buf(char*, char const*);
@@ -625,40 +501,16 @@ void CRT_FindNextFile(void*, void*);
 void CRT_FindNextFile(void*, void*) { /* host no-op */ }
 void RESDATA_UpdateChild(void*);
 void RESDATA_UpdateChild(void*) { /* host no-op */ }
-void Game_IsPositionBetween(int, int, int);
-void Game_IsPositionBetween(int, int, int) { /* host no-op */ }
-void PlayerConfig_GetName(void*, char*, int);
-void PlayerConfig_GetName(void*, char*, int) { /* host no-op */ }
-void CRT_memset(void*, int, unsigned long);
-void CRT_memset(void*, int, unsigned long) { /* host no-op */ }
 void World_CheckActive(void*);
 void World_CheckActive(void*) { /* host no-op */ }
 void TrackPiece_SetZoom(void*, short);
 void TrackPiece_SetZoom(void*, short) { /* host no-op */ }
-void Town_BlitViewport(void*,int,int,int,int,int,int);
-void Town_BlitViewport(void*,int,int,int,int,int,int) { /* host no-op */ }
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int);
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, unsigned int) { /* host no-op */ }
 void* g_game_instance = nullptr;
 int32_t g_OutputDebugStringA = 0;
-void VehicleEditor_Update(void*);
-void VehicleEditor_Update(void*) { /* host no-op */ }
-void VehicleEditor_IsInBounds(void*, short, short, short);
-void VehicleEditor_IsInBounds(void*, short, short, short) { /* host no-op */ }
-void VehicleEditor_BlitBackground(void*, int, int);
-void VehicleEditor_BlitBackground(void*, int, int) { /* host no-op */ }
 
 
-void Vehicle_InitRoute(void*, int, unsigned int, char);
-void Vehicle_InitRoute(void*, int, unsigned int, char) { /* host no-op */ }
-void Vehicle_Ctor(void*, int, int, char, char);
-void Vehicle_Ctor(void*, int, int, char, char) { /* host no-op */ }
-void Vehicle_UpdatePosition(void*, char);
-void Vehicle_UpdatePosition(void*, char) { /* host no-op */ }
-void Building_RemoveOccupant(int*);
-void Building_RemoveOccupant(int*) { /* host no-op */ }
-void TrackPiece_Ctor(void*, int, int, unsigned short);
-void TrackPiece_Ctor(void*, int, int, unsigned short) { /* host no-op */ }
 void GameObject_SetWorldPos(void*, int, int);
 void GameObject_SetWorldPos(void*, int, int) { /* host no-op */ }
 void GameObject_InvalidateRect(void*);
@@ -705,8 +557,6 @@ void LOCOBITMAP_ColorKeyBlit_thunk(void*) { /* host no-op */ }
  * silently resolved to instead of the (previously nonexistent) real
  * function; keeping both would now be a duplicate-definition/ODR
  * violation since C++ mangling does not encode return type. */
-void Town_CheckOccupied(void*, int, int, int, int);
-void Town_CheckOccupied(void*, int, int, int, int) { /* host no-op */ }
 /* Town_SelectBuilding(void*, void*) — real implementation now in
  * town/Town.cpp (calls GameView::select_building with a real Building*).
  * Removed the no-op stub here per CLAUDE.md's "no --defsym-style
@@ -717,18 +567,6 @@ void UIPANEL_BlitSurface(void*, int, int, void*, int, int) { /* host no-op */ }
 void DDRAW_SelectBuilding(void*, void*);
 void DDRAW_SelectBuilding(void*, void*) { /* host no-op */ }
 /* WIN32_PostQuit: real implementation now in core/CGWND.cpp (0x463670). */
-void RESDATA_GameVehicle_Ctor(void*, int);
-void RESDATA_GameVehicle_Ctor(void*, int) { /* host no-op */ }
-void RESDATA_GameVehicle_BaseDtor(void*);
-void RESDATA_GameVehicle_BaseDtor(void*) { /* host no-op */ }
-void Vehicle_InitOccupant(void*, int);
-void Vehicle_InitOccupant(void*, int) { /* host no-op */ }
-void Vehicle_IsMoving(void*);
-void Vehicle_IsMoving(void*) { /* host no-op */ }
-void Vehicle_Stop(void*, int, unsigned char);
-void Vehicle_Stop(void*, int, unsigned char) { /* host no-op */ }
-void Entity_StopSound(void*, int);
-void Entity_StopSound(void*, int) { /* host no-op */ }
 void GameObject_InitBase(void*, int, int, unsigned char);
 void GameObject_InitBase(void*, int, int, unsigned char) { /* host no-op */ }
 void UIPANEL_UnlockSurface(void*);
@@ -736,54 +574,18 @@ void UIPANEL_UnlockSurface(void*) { /* host no-op */ }
 void* DAT_00485270 = nullptr;
 void NETMAN_SetGameMode(void*, int);
 void NETMAN_SetGameMode(void*, int) { /* host no-op */ }
-void GAMESTATE_FindAdjacentTrack(void*);
-void GAMESTATE_FindAdjacentTrack(void*) { /* host no-op */ }
-void RESDATA_IsValidTrackIndex(void*, short);
-void RESDATA_IsValidTrackIndex(void*, short) { /* host no-op */ }
-void Vehicle_GetNearestTrack(int);
-void Vehicle_GetNearestTrack(int) { /* host no-op */ }
-void GAMESTATE_FindTrackPosition(void*, int, int);
-void GAMESTATE_FindTrackPosition(void*, int, int) { /* host no-op */ }
 /* DPLAY_CreatePlayer(void*) removed 2026-08-14 — zero real call sites
  * tree-wide; its one former caller (Cursor::init_network_player) now
  * constructs a real DPlayManager directly (input/Cursor_impls.cpp). */
-void GAMESTATE_EditorState_Ctor(void*, char);
-void GAMESTATE_EditorState_Ctor(void*, char) { /* host no-op */ }
-void DPLAY_CleanupPlayer(void*);
-void DPLAY_CleanupPlayer(void*) { /* host no-op */ }
-void GAMESTATE_InitTrackAtPosition(void*, int, int);
-void GAMESTATE_InitTrackAtPosition(void*, int, int) { /* host no-op */ }
 void GameObject_HitTest(void*, int, int);
 void GameObject_HitTest(void*, int, int) { /* host no-op */ }
 void Vehicle_DetachAll(int);
 void Vehicle_DetachAll(int) { /* host no-op */ }
-void CGWND_InitAllSubsystems(void*);
-void CGWND_InitAllSubsystems(void*) { /* host no-op */ }
-void timeBeginPeriod(unsigned int);
-void timeBeginPeriod(unsigned int) { /* host no-op */ }
 /* CGWND_PumpMessages(void*,unsigned char) — now in CGWND_sdl3.cpp */
 void CGWND_AudioChannel_UpdatePosition(void*, int, int);
 void CGWND_AudioChannel_UpdatePosition(void*, int, int) { /* host no-op */ }
 void CGWND_AudioChannel_Stop(void*);
 void CGWND_AudioChannel_Stop(void*) { /* host no-op */ }
-void NETMAN_ResetNetworkState(void*);
-void NETMAN_ResetNetworkState(void*) { /* host no-op */ }
-void NETMAN_StopSession(void*);
-void NETMAN_StopSession(void*) { /* host no-op */ }
-void NETMAN_StartClientSession(void*);
-void NETMAN_StartClientSession(void*) { /* host no-op */ }
-void Train_QueueMessage(void*, void*);
-void Train_QueueMessage(void*, void*) { /* host no-op */ }
-void NETMAN_Init(void*, unsigned char);
-void NETMAN_Init(void*, unsigned char) { /* host no-op */ }
-void GameSetupPanel_loadLayouts(void*, unsigned char);
-void GameSetupPanel_loadLayouts(void*, unsigned char) { /* host no-op */ }
-void GameSetupPanel_updateTitle(void*);
-void GameSetupPanel_updateTitle(void*) { /* host no-op */ }
-void GameSetupPanel_drawGrid(void*);
-void GameSetupPanel_drawGrid(void*) { /* host no-op */ }
-void Game_Shutdown(int*);
-void Game_Shutdown(int*) { /* host no-op */ }
 /* RESMGR_Shutdown(int) removed 2026-08-15 — its one caller
  * (core/CGWND.cpp's CGWND_Cleanup) always passed the literal address
  * 0x4855E8 (confirmed via Ghidra disassembly of 0x407AD2: `MOV ECX,
@@ -796,47 +598,11 @@ void Game_Shutdown(int*) { /* host no-op */ }
  * below, which network/NetHelpers.cpp's PoolAllocator::Shutdown()
  * still calls with a different, as-yet-unresolved receiver — see
  * PROGRESS.md. */
-void CRT_0x470650();
-void CRT_0x470650() { /* host no-op */ }
-void* UI_MainMenu_Ctor(void* mem, void*, unsigned int);
-void* UI_MainMenu_Ctor(void* mem, void*, unsigned int) { return mem; }
-void UI_MainMenu_Create(void*, void*);
-void UI_MainMenu_Create(void*, void*) { /* host no-op */ }
-void* Town_Ctor(void* mem, void*, unsigned int);
-void* Town_Ctor(void* mem, void*, unsigned int) { return mem; }
-void Town_InitSprites(void*, void*);
-void Town_InitSprites(void*, void*) { /* host no-op */ }
-void* PostcardPreviewWindow_Ctor(void* mem, void*, unsigned int);
-void* PostcardPreviewWindow_Ctor(void* mem, void*, unsigned int) { return mem; }
-void LOCOBITMAP_InitWindow(void*, void*);
-void LOCOBITMAP_InitWindow(void*, void*) { /* host no-op */ }
-void* TrainStationWindow_Ctor(void* mem, void*, unsigned int);
-void* TrainStationWindow_Ctor(void* mem, void*, unsigned int) { return mem; }
-void TrainStationWindow_Create(void*, void*);
-void TrainStationWindow_Create(void*, void*) { /* host no-op */ }
-void* LOCOBITMAP_CreateFromResource(void* mem, void*, unsigned int);
-void* LOCOBITMAP_CreateFromResource(void* mem, void*, unsigned int) { return mem; }
-void* Cursor_Ctor(void* mem, void*, unsigned int);
-void* Cursor_Ctor(void* mem, void*, unsigned int) { return mem; }
-void Cursor_Create(void*, void*);
-void Cursor_Create(void*, void*) { /* host no-op */ }
-void* AudioMgr_Ctor(void* mem, void*, unsigned int);
-void* AudioMgr_Ctor(void* mem, void*, unsigned int) { return mem; }
-void HelpWnd_Create(void*, void*);
-void HelpWnd_Create(void*, void*) { /* host no-op */ }
-void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int);
-void* CGWND_AboutDialog_Ctor(void* mem, void*, unsigned int) { return mem; }
-void CGWND_AboutDialog_Create(void*, void*);
-void CGWND_AboutDialog_Create(void*, void*) { /* host no-op */ }
-void CGWND_RegisterWindowClass(void*);
-void CGWND_RegisterWindowClass(void*) { /* host no-op */ }
 /* NETMAN_constructor(void*): silent no-op returning void, but
  * core/GameLoop.cpp's caller (`g_netman = NETMAN_constructor(mem)`)
  * expects and uses a void* return — collided with shared/stubs_impl.cpp's
  * correctly-typed, loud `void* NETMAN_constructor(void*)` stub
  * (LINK-001). Removed; stubs_impl.cpp's survives. */
-void DirectPlay_constructor(void*);
-void DirectPlay_constructor(void*) { /* host no-op */ }
 /* PixelDataCache_Ctor/PixelDataCache_Load removed (2026-08-08): both were
  * a duplicate ABI-bridge reimplementation of the already-real, already-
  * correct PixelDataCache::Create/Load (graphics/PixelDataCache.h/.cpp,
@@ -844,8 +610,6 @@ void DirectPlay_constructor(void*) { /* host no-op */ }
  * PixelDataCache::Create field-for-field, and PixelDataCache::Load has a
  * real implementation (this stub's Load was a no-op). The one caller
  * (core/GameLoop.cpp) now calls PixelDataCache::Create directly. */
-void GameAudio_StopFinished(void*);
-void GameAudio_StopFinished(void*) { /* host no-op */ }
 void DDRAW_GetDsoundErrorString(int);
 void DDRAW_GetDsoundErrorString(int) { /* host no-op */ }
 void Ordinal_2(void*);
@@ -877,64 +641,8 @@ void NETMAN_SendMapData(void*, int) { /* host no-op */ }
  * directly instead of through this free-function facade. */
 void CGWND_AudioChannel_Release(void*);
 void CGWND_AudioChannel_Release(void*) { /* host no-op */ }
-void WIN32_CloseHandle(void*);
-void WIN32_CloseHandle(void*) { /* host no-op */ }
-void WIN32_timeKillEvent(unsigned int);
-void WIN32_timeKillEvent(unsigned int) { /* host no-op */ }
-void GameAudio_StopFinished();
-void GameAudio_StopFinished() { /* host no-op */ }
-void DDRAW_GetDsoundErrorString();
-void DDRAW_GetDsoundErrorString() { /* host no-op */ }
-void Ordinal_2();
-void Ordinal_2() { /* host no-op */ }
-void RESMGR_GetById();
-void RESMGR_GetById() { /* host no-op */ }
-void CGWND_AudioChannel_Play();
-void CGWND_AudioChannel_Play() { /* host no-op */ }
-void CGWND_AudioChannel_Pause();
-void CGWND_AudioChannel_Pause() { /* host no-op */ }
-void Game_SetScreenMode();
-void Game_SetScreenMode() { /* host no-op */ }
-void BuildingMgr_DestroyAll();
-void BuildingMgr_DestroyAll() { /* host no-op */ }
-void UI_ResetTooltips();
-void UI_ResetTooltips() { /* host no-op */ }
-void World_Reset();
-void World_Reset() { /* host no-op */ }
 /* Cursor_Show() (zero-arg overload) removed 2026-08-17 — this was a
  * second, unrelated fake symbol that happened to share the name with the
  * void*-arg facade above; a dead landmine, never called anywhere. See the
  * removal note above for the real void*-arg facade's replacement. */
-void NETMAN_SendMapData();
-void NETMAN_SendMapData() { /* host no-op */ }
-void CGWND_AudioChannel_Release();
-void CGWND_AudioChannel_Release() { /* host no-op */ }
-void WIN32_CloseHandle();
-void WIN32_CloseHandle() { /* host no-op */ }
-void WIN32_timeKillEvent();
-void WIN32_timeKillEvent() { /* host no-op */ }
-int WIN32_GetThreadResult(void*);
-int WIN32_GetThreadResult(void*) { return 0; }
-void World_Shutdown(int);
-void World_Shutdown(int) { /* host no-op */ }
-void Train_FlushMessages(void*);
-void Train_FlushMessages(void*) { /* host no-op */ }
-void WIN32_Sleep(unsigned int);
-void WIN32_Sleep(unsigned int) { /* host no-op */ }
-void Sprite_UnlockAll(int);
-void Sprite_UnlockAll(int) { /* host no-op */ }
-void UIPANEL_FreeAllSurfaces();
-void UIPANEL_FreeAllSurfaces() { /* host no-op */ }
-void WIN32_timeEndPeriod(unsigned int);
-void WIN32_timeEndPeriod(unsigned int) { /* host no-op */ }
-void Sprite_Shutdown(int);
-void Sprite_Shutdown(int) { /* host no-op */ }
-void Town_GameView_Cleanup(int*);
-void Town_GameView_Cleanup(int*) { /* host no-op */ }
-void DDRAW_InvalidateAll(int*);
-void DDRAW_InvalidateAll(int*) { /* host no-op */ }
-void RESDATA_ScriptedObject_Shutdown(int*);
-void RESDATA_ScriptedObject_Shutdown(int*) { /* host no-op */ }
-void UI_FreeMessageBox(int);
-void UI_FreeMessageBox(int) { /* host no-op */ }
 

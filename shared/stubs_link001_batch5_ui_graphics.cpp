@@ -648,27 +648,3 @@ void GameObject_GetSubObjectWorldPos(void* obj, int32_t* out_packed)
     *out_packed = (static_cast<int32_t>(hi16) << 16) | static_cast<int32_t>(lo16);
 }
 
-/* ===================================================================
- * SYMBOL: TrackPiece_SetZoom(void*, int)
- * CALLERS: ScriptedObject::UpdateToolState(TrackPiece*);
- *          ScriptedObject::EnterBuildMode(unsigned char)
- *          [game/ScriptedObject.cpp:64, many call sites]
- * ACTION: real-implementation. ADDRESS: 0x40D170 (same address the
- * caller's own comment already cites).
- *
- * Confirmed genuinely distinct from BOTH existing stubs by Itanium
- * mangling: shared/link_stubs.cpp:320 is `extern "C"` (unmangled), and
- * shared/defsym_stubs.cpp:532 is C++-linkage but takes `short`/int16_t
- * (mangles with 's'), not `int`/int32_t (mangles with 'i') -- this
- * caller's `(void* tool, int zoom)` is a third, distinct symbol needing
- * its own definition. The real target is TrackPiece::SetZoom(short)
- * (game/TrackPiece.cpp:266), a public, already-fully-decompiled method
- * at the exact same address. Every call site passes a small literal
- * (1-3), safe to narrow to int16_t.
- * =================================================================== */
-void TrackPiece_SetZoom(void* tool, int zoom)
-{
-    if (tool != nullptr) {
-        static_cast<TrackPiece*>(tool)->SetZoom(static_cast<int16_t>(zoom));
-    }
-}

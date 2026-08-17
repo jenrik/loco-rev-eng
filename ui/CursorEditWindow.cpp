@@ -13,6 +13,7 @@
 // Status: INTEGRATED
 
 #include "CursorEditWindow.h"
+#include "../resources/AssetArchive.h"
 #include "../resources/Win32Stream.h"
 #include "../resources/Win32StreamFile.h"
 #include "../resources/Win32StreamMem.h"
@@ -67,15 +68,18 @@ extern void*  __thiscall WNDPROC_StreamPrintf(void* stream, void* outVal); /* 0x
 extern void*  __thiscall WNDPROC_StreamWrite(void* stream, void* outVal);  /* 0x4646C0 — operator>>(int32_t*) */
 extern uint8_t __fastcall CGWND_ValidatePaletteData(int classPtr);        /* 0x40E950 */
 
-/* Asset manager */
-extern int*   __thiscall AssetMgr_LoadFile(void* mgr, const char* path,
-                                            int* outSize);                 /* 0x45CD00 */
+/* Asset manager — g_asset_mgr is the real AssetArchive value object
+ * (resources/AssetArchive.h, included above); call sites use
+ * g_asset_mgr.LoadFile(...) directly rather than a local free-function
+ * declaration (this file previously declared
+ * `int* __thiscall AssetMgr_LoadFile(void*, const char*, int*)` — one of
+ * ~6 mutually incompatible per-file signatures for the same real function
+ * tracked across this cleanup). */
 
 /* ================================================================== */
 /* Global variables                                                    */
 /* ================================================================== */
 
-extern void* g_asset_mgr;             /* 0x485600 — asset manager */
 extern char  g_install_path[];        /* 0x4A99C8 — install directory path */
 
 /* ================================================================== */
@@ -246,7 +250,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
      * not this+0xC — the wrong-offset bug documented in Win32Stream.h. */
     WIN32_Stream localStream;
 
-    int* pLoadedData = nullptr;  /* AssetMgr loaded data pointer */
+    uint8_t* pLoadedData = nullptr;  /* AssetArchive::LoadFile's real return type */
     int  dataSize = 0;
 
     /* Clear cursor-specific state fields */
@@ -272,17 +276,22 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, cursorName);  /* +0x48 */
 
     /* --- Attempt 1: Load from AssetMgr (game archive) --- */
-    if (g_asset_mgr != nullptr) {
+    if (g_asset_mgr.archive_file != 0) {
         char shortPath[264];  /* local buffer for just "<name>.dat" */
         CRT_sprintf_buf(shortPath, "%s.dat", cursorName);
 
-        pLoadedData = AssetMgr_LoadFile(&g_asset_mgr, shortPath, &dataSize);
+        pLoadedData = g_asset_mgr.LoadFile(
+            reinterpret_cast<uint8_t*>(shortPath), &dataSize);
         if (pLoadedData != nullptr) {
             /* Create memory stream from loaded data. 0x5C was the original
              * x86 sizeof(WIN32_MemoryStream); use the real host size (see
              * resources/Win32StreamMem.h). */
             void* streamAlloc = operator_new(WIN32_MemoryStream_Size());
             if (streamAlloc != nullptr) {
+                // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data` param is
+                // this codebase's older byte-buffer convention; pLoadedData is
+                // the same raw bytes under AssetArchive::LoadFile's real
+                // `uint8_t*` return type.
                 WNDPROC_Stream* streamResult = WNDPROC_StreamFromMemory(
                     streamAlloc, reinterpret_cast<char*>(pLoadedData),
                     dataSize, 1);

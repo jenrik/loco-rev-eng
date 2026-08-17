@@ -48,6 +48,7 @@
 #include "network/Netman.h"
 #include "world/tilemap.h"
 #include "resources/ResourceManager.h"
+#include "resources/AssetArchive.h"
 #include "game/PlayerConfig.h"
 
 /* ---- Fail-loud macro ---- */
@@ -91,7 +92,29 @@ void*    g_world = nullptr;               /* 0x4A98B0 */
 void*    g_netman = nullptr;              /* 0x4FD3AC */
 class UI_Manager;
 UI_Manager* g_tooltip_mgr = nullptr;      /* 0x4FD220 */
-void*    g_asset_mgr = nullptr;           /* 0x485600 */
+/* g_asset_mgr (0x485600) is a VALUE object (AssetArchive), not a pointer —
+ * see resources/AssetArchive.h. archive_file == 0 (never opened, matching
+ * production: no code anywhere in the binary ever writes this global), so
+ * every real call site's own `archive_file != 0` guard means
+ * AssetArchive::LoadFile itself is never actually invoked at runtime in
+ * this test. The out-of-class definition below still needs to exist to
+ * satisfy the linker (Building.o calls it unconditionally in source, even
+ * though the guard around the call site prevents it from executing) — it
+ * implements the real first-line guard (`archive_file == 0 -> nullptr`,
+ * matching resources/AssetArchive.cpp exactly) and only fails loud past
+ * that point, since anything reaching the Huffman-decode path would mean
+ * the archive got opened, which should never happen in this fixture set. */
+AssetArchive g_asset_mgr = { 0, nullptr };
+uint8_t* AssetArchive::LoadFile(const uint8_t*, int32_t*)
+{
+    if (archive_file == 0) {
+        return nullptr;  /* real behavior — matches resources/AssetArchive.cpp */
+    }
+    std::fprintf(stderr, "FAIL: AssetArchive::LoadFile fixture reached with an "
+                          "OPEN archive (archive_file != 0) — this test never "
+                          "expects g_asset_mgr to be opened\n");
+    std::abort();
+}
 void*    g_audio = nullptr;               /* 0x4FD3BC */
 void*    g_building_mgr = nullptr;        /* 0x485448 */
 void*    g_config_ini = nullptr;          /* 0x485484 — global config INI handle;
@@ -433,6 +456,13 @@ LOUD_FIXTURE(AssetMgr_ReadPairValue)
 uint8_t AssetMgr_ReadPairValue(AssetMgr*, uint32_t, uint32_t);
 uint8_t AssetMgr_ReadPairValue(AssetMgr*, uint32_t, uint32_t)
 { fixture_reached_AssetMgr_ReadPairValue(); return 0xFF; }
+
+/* g_tile_adjacency_mgr (0x4FD190) — Building::StepToward's `this` pointer
+ * for the AssetMgr_ReadPairValue call above (see game/Building.cpp's doc
+ * comment: a distinct global from g_asset_mgr, discovered while fixing
+ * the g_asset_mgr extern-global-type-mismatch cleanup). Zero WRITE xrefs
+ * anywhere in the binary, so always null — matches this fixture. */
+AssetMgr* g_tile_adjacency_mgr = nullptr;
 
 /* Host resource bridge: no resources are loaded in the persistence
  * tests, so GetById returns nullptr (a fresh host manager).

@@ -132,43 +132,6 @@ void HelpWnd::set_mode(void* countPtr, void* dataPtr, int modeA, int modeB)
 }
 
 /* ===================================================================
- * ScriptedObject_ParseStream(void*) / ScriptedObject_InitBase(uint32_t,int)
- * CALLER: game/ScriptedObject.cpp (own local declarations, lines 47-48)
- * ADDRESS: unknown -- the caller's own cited addresses (0x41E9F0, 0x4203E0)
- * decompile to unrelated functions (BuildingDescriptorEditor's .dat parser
- * and EditWindow's base destructor respectively), i.e. both comments are
- * stale/wrong, same class of defect found elsewhere in this pass
- * (CGWND_ValidatePaletteData, Cursor_UpdateDirtyRect). Real addresses need
- * re-deriving from ScriptedObject's own xrefs in a follow-up RE session.
- * =================================================================== */
-char ScriptedObject_ParseStream(void* stream)
-{
-    (void)stream;
-    static bool warned = false;
-    if (!warned) {
-        std::fprintf(stderr,
-            "STUB: ScriptedObject_ParseStream not implemented (TODO: "
-            "re-derive real address -- caller's cited 0x41E9F0 is unrelated) "
-            "-- script parse dropped, reporting failure\n");
-        warned = true;
-    }
-    return 0;
-}
-
-void ScriptedObject_InitBase(uint32_t resource_id, int zero)
-{
-    (void)resource_id; (void)zero;
-    static bool warned = false;
-    if (!warned) {
-        std::fprintf(stderr,
-            "STUB: ScriptedObject_InitBase not implemented (TODO: re-derive "
-            "real address -- caller's cited 0x4203E0 is unrelated) -- base "
-            "init dropped\n");
-        warned = true;
-    }
-}
-
-/* ===================================================================
  * SetTimer(void*, unsigned long, unsigned int, TIMERPROC)
  * CALLER: EditorState_StartGameTimer (shared/stubs_link001_batch4_network_world.cpp)
  *
