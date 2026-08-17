@@ -575,12 +575,30 @@ public:
      * Address: 0x43AE20
      * Size: 1016 bytes
      *
+     * Three outcomes, all confirmed against disassembly:
+     *   1. Target town == local town (0x43AE58-0x43AF09): re-queue `car`
+     *      on sprite_list_2 under this town, call Train_RemoveAllTracks.
+     *   2. Remote send fails (0x43B09D branch not taken, i.e. EAX==0 at
+     *      0x43B09B): free the serialize buffer, mirror `car`'s current
+     *      tunnel_angle once (0x43B0C9-0x43B106), re-queue on
+     *      sprite_list_2, and drain+notify sprite_list_2 (0x43B138-
+     *      0x43B19E, matching UpdateTrainMovement's identical loop at
+     *      0x43C0E0-0x43C144).
+     *   3. Remote send succeeds (0x43B09D taken): free the buffer, set
+     *      `car->peer_index` to the target town's slot index, clear
+     *      `car->flag_8A`, then (0x43B1D1-0x43B1FF) either prepend `car`
+     *      to sprite_list_1 when `car->owner_handle == 0`, or set
+     *      `car->init_flag = 1` and delete `car` — ownership has fully
+     *      transferred to the remote peer.
+     * Always returns 1 (0x43B208: `MOV AL,1` on every path out).
+     *
      * @param to_player  Target player's DirectPlay ID
-     * @param car        Train car (ScriptedObject) to transfer
-     * @param direction  Movement direction
-     * @return           1 on success, 0 on failure
+     * @param car        Train car (Vehicle) to transfer
+     * @param direction  Movement direction (0/0x5A/0xB4/0x10E)
+     * @return           Always 1 — see above; callers should not treat
+     *                    this as a real success/failure signal.
      */
-    uint32_t MoveToNeighborTown(int to_player, void* car, int direction);
+    uint32_t MoveToNeighborTown(int to_player, Vehicle* car, int direction);
 
     /**
      * HandleConnectionSetup — Receive MSG_CONN_SETUP (0x3F2) message.
@@ -615,11 +633,23 @@ public:
      * AddTrainCar — Add a train car to the controller's lists.
      * Address: 0x43B8C0
      *
-     * @param car            Train car data (ScriptedObject/Vehicle)
-     * @param direction      Movement direction
+     * Two paths (0x43B8CB-0x43B8EB tests Netman::m_slots[player_index]
+     * .pixel_buffer != nullptr, same "is this town populated" proxy used
+     * by RouteTrainAtEdge/UpdateTrainMovement):
+     *   - Multiplayer (target town populated): prepend to sprite_list_3,
+     *     broadcast MSG_CTRL_INIT (0x3F3), then compute the car's initial
+     *     grid position from the real INPUT_DirToOffset_{Up,Left,Down,
+     *     Right} helpers (0x43BA15-0x43BAE8) — NOT a hand-rolled offset
+     *     table.
+     *   - Single-player (target town absent): mirror `direction` once via
+     *     MirrorTrainHeading, append to sprite_list_2, call
+     *     Train_RemoveAllTracks.
+     *
+     * @param car            Train car (Vehicle) to add
+     * @param direction      Movement direction (0/0x5A/0xB4/0x10E)
      * @param player_index   Target player index
      */
-    void AddTrainCar(void* car, int direction, int player_index);
+    void AddTrainCar(Vehicle* car, int direction, int player_index);
 
     /**
      * UpdateTrainMovement — Main train physics update tick.
@@ -633,20 +663,32 @@ public:
      * Address: 0x43C160
      *
      * Checks track connections to neighbor towns. Routes via
-     * MoveToNeighborTown or AddTrainCar. Reverses direction if no
-     * connection (bounce).
+     * MoveToNeighborTown or AddTrainCar. Reverses `train`'s live heading
+     * (field_76) if no connection (bounce).
      *
-     * @param prev_node   Previous node in train list (for unlink)
-     * @param train       Train car to route
-     * @param pos_x       Current tile X position
-     * @param pos_y       Current tile Y position
-     * @param map_width   Map width in tiles
-     * @param map_height  Map height in tiles
-     * @return            1 if routed, 0xFFFFFF01 if bounced
+     * Return contract (verified against disassembly, not the decompiler's
+     * `undefined4`/`0xFFFFFF01` noise): every routed or bounced path ends
+     * in `MOV AL,1` (0x43C1F0/0x43C206/0x43C289/0x43C29C/0x43C3FD); only
+     * the interior "not at any edge" path returns 0 (0x43C407). The sole
+     * caller (UpdateTrainMovement, 0x43BB7A `TEST AL,AL`) only checks
+     * zero/non-zero: nonzero means this train's tick is finished (routed
+     * away or bounced in place), zero means fall through to normal
+     * movement-steering for this train.
+     *
+     * @param prev_node   Previous node in sprite_list_3 (for unlink), or
+     *                    nullptr if `train` is the list head.
+     * @param train       Train car to route.
+     * @param pos_x       Current tile X position (train->field_7E).
+     * @param pos_y       Current tile Y position (train->field_80).
+     * @param map_width   Map width in tiles.
+     * @param map_height  Map height in tiles.
+     * @return            true if this train's tick is finished (routed to
+     *                    a neighbor town or bounced), false to continue
+     *                    with normal movement-steering.
      */
-    uint32_t RouteTrainAtEdge(void* prev_node, void* train,
-                              int pos_x, int pos_y,
-                              int map_width, int map_height);
+    bool RouteTrainAtEdge(Vehicle* prev_node, Vehicle* train,
+                          int pos_x, int pos_y,
+                          int map_width, int map_height);
 
     /**
      * HandleJoinMultiplayer — Handle a join-multiplayer message.
