@@ -3,6 +3,7 @@
 #include "Cursor_internal.h"
 #include "../platform/ddraw_interfaces.h"
 #include "../network/DPlayManager.h"
+#include "../network/NetworkPlayerList.h"
 #include "../ui/ButtonSprite.h"
 #include "../graphics/LOCOBITMAP.h"
 
@@ -522,29 +523,27 @@ void Cursor::blit_edit_preview()
         dstLeft, dstTop, static_cast<int>(dstRight), dstBottom,
         1);
 
-    /* Render player cursor overlay if player record exists */
+    /* Render player cursor overlay if player record exists.
+     *
+     * The real call site at 0x418A9C pushes 9 stack args to
+     * NetworkPlayerList::RenderPlayer (0x4437C0, RET 0x24) — see that
+     * method's own doc comment for the full object-model resolution.
+     * arg1 ("highlighted") is `ui_active`'s low byte, packed together
+     * with obj_184's upper bits in the original x86 code purely as an
+     * ABI/register-reuse artifact (the callee only ever reads the low
+     * byte); arg9 is `&this->player_row_highlight_rect` (+0x138), not
+     * `&edit_preview_rect` as a prior approximation used. */
     if (this->obj_184 != nullptr) {
-        /* HDC-like handle: (obj_184 >> 8) with the low byte replaced by
-         * the ui_active byte (+0x188). */
-        int hdcVal =
-            (static_cast<int>(reinterpret_cast<intptr_t>(this->obj_184)) >> 8) &
-            0xFFFFFF;
-        hdcVal = (hdcVal << 8) | this->ui_active;
-
-        /* The binary call site at 0x418A9C pushes nine stack args to
-         * NetworkPlayerList::RenderPlayer (0x4437C0, RET 0x24): (hdc,
-         * player, surface, left, top, right, bottom, hWnd, this+0x138).
-         * The shared host stub ABI and the other reconstructed call
-         * sites use the 8-argument form below (see Cursor_internal.h). */
-        DPLAY_RenderPlayer(
-            _g_dplay,
-            reinterpret_cast<void*>(static_cast<intptr_t>(hdcVal)),
-            static_cast<int32_t>(reinterpret_cast<intptr_t>(this->obj_184)),
-            _g_primary_surface,
+        g_dplay->RenderPlayer(
+            this->ui_active != 0,
+            this->obj_184,
+            static_cast<IDirectDrawSurface4*>(_g_primary_surface),
             this->edit_preview_rect.left,
             this->edit_preview_rect.top,
-            static_cast<uint32_t>(this->edit_preview_rect.right),
-            &this->edit_preview_rect);
+            this->edit_preview_rect.right,
+            this->edit_preview_rect.bottom,
+            this->hWnd,
+            &this->player_row_highlight_rect);
     }
 }
 

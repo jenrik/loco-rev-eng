@@ -11,6 +11,9 @@
 #include "ButtonSprite.h"
 #include "../network/DPlayManager.h"
 #include "../network/Netman.h"
+#include "../network/DirectPlay.h"       /* DirectPlayConnectionNode (GameConfig::m_providerList) */
+#include "../game/GameConfig.h"          /* GameConfig singleton, _g_netman_data */
+#include "../resources/ResourceObject.h" /* ResourceObject::Lock/Unlock (spriteTerminator) */
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -42,7 +45,27 @@ extern "C" {
     extern int32_t __stdcall CopyRect(RECT* lprcDst, const RECT* lprcSrc);
     extern int32_t __stdcall OffsetRect(RECT* lprc, int32_t dx, int32_t dy);
     extern int32_t __stdcall IntersectRect(RECT* out, RECT* a, RECT* b);
+    extern int32_t __stdcall PtInRect(const RECT* lprc, POINT pt);
 }
+
+/* Moved here 2026-08-17 from native/NETMAN_NetworkUI.c / native/NETMAN_SessionSettings.c
+ * (hide()/show()/on_update()/on_lbutton_down()/on_key_down()/applyProviderModes()/
+ * enumerateSessions()/getSessionInfo() below): real def resources/ResourceManager.h
+ * (0x448D60), matching every other in-tree caller's `(int32_t resId)` shape
+ * (ui/EditWindow.cpp, ui/HelpWnd.cpp, ui/TrainStationWindow.cpp, game/TrainStation.cpp,
+ * core/Game.cpp) rather than network/Netman.h's own unreferenced/never-defined
+ * `ResourceManager_LoadSoundResource` rename attempt. */
+extern void  __cdecl    RESMGR_LoadSoundResource(int32_t resId);        /* 0x448D60 */
+
+/* g_font_small — shared small UI font, canonical name/type from
+ * network/NetworkPlayerList.cpp (real definition: shared/stubs_impl.cpp). */
+extern void* g_font_small;                                              /* 0x4855F8 */
+
+/* EDIT-control subclass WndProc (0x4417E0, not yet decompiled) — real
+ * def: native/NETMAN_NetworkUI.c. Registered by enumerateSessions() via
+ * SetWindowLongA. C++ linkage (native/*.c is compiled as C++, not C). */
+extern LRESULT __stdcall NETMAN_EditControlSubclassProc(void* hWnd, uint32_t msg,
+                                                          uint32_t wParam, uint32_t lParam);
 
 /* Matches ui/UI_WindowBase.cpp's declaration for the same real function. */
 extern void   WIN32_PostQuit(void);                        /* 0x463670 */
@@ -111,7 +134,7 @@ NameEntryPanel::NameEntryPanel(HINSTANCE hInstance, UINT resId)
 void NameEntryPanel::init()
 {
     /* Zero fields */
-    this->field_EC = 0;             /* +0xEC */
+    this->animationTimerId = 0;     /* +0xEC */
     this->field_E8 = 0;             /* +0xE8 (byte) */
     this->gameMode = 3;             /* +0x140 — default max players */
     this->textBuffer[0] = 0;        /* +0xF0 (null-terminate; buffer is 64 bytes) */
@@ -277,11 +300,11 @@ bool NameEntryPanel::create_window(HWND hWndParent)
 /* 800x600 window rect (centered on workRect), the child-surface       */
 /* blit scroll offsets (a second centering pass of a copy of workRect  */
 /* within a {0,0,width,height} rect sized from the resource pointed to */
-/* by spriteTerminator — repurposed by NETMAN_JoinSession as a         */
-/* background-bitmap resource pointer before this runs), the 7         */
-/* ButtonSprites' destination rects (each sprite's x/y/sourceX/sourceY */
-/* dual-used as a RECT), panelRect, panelClickRect, and                */
-/* editControlRect. Ends by calling NETMAN_EnumerateSessions(this).    */
+/* by spriteTerminator — repurposed by show() as a background-bitmap   */
+/* resource pointer before this runs), the 7 ButtonSprites' destination*/
+/* rects (each sprite's x/y/sourceX/sourceY dual-used as a RECT),      */
+/* panelRect, panelClickRect, and editControlRect. Ends by calling     */
+/* enumerateSessions().                                                */
 /* ================================================================== */
 void NameEntryPanel::on_create()
 {
@@ -307,10 +330,29 @@ void NameEntryPanel::on_create()
     RECT scrolledWorkRect = this->workRect;
     RECT* scrollBlock = reinterpret_cast<RECT*>(&this->scrollOffsetX2);
     auto* bgResource = static_cast<RESDATA*>(this->spriteTerminator);
+    /* The original (0x441360) dereferences spriteTerminator unconditionally
+     * here, matching show()'s (0x441870) own unconditional Lock() dispatch
+     * on the same resource pointer -- the original game assumes resource
+     * 0x439 always resolves and never null-checks it. show() was
+     * unreachable from any live NameEntryPanel vtable dispatch until this
+     * 2026-08-17 pass wired it in as a real override, so this path is now
+     * exercised by real GUI flows for the first time. Host resource lookup
+     * (resources/resource_manager_sdl3.cpp) is not guaranteed to have
+     * every original resource ID loadable in every test/tool configuration
+     * the way the original install always did -- degrade to a zero-size
+     * background rect instead of dereferencing null, rather than preserving
+     * a crash the original binary would only have hit under equally-total
+     * asset corruption. */
+    uint16_t bgWidth = 0;
+    uint16_t bgHeight = 0;
+    if (bgResource != nullptr) {
+        bgWidth = bgResource->frame_width;
+        bgHeight = bgResource->frame_height;
+    }
     scrollBlock->left  = 0;
-    scrollBlock->right  = bgResource->frame_width;
+    scrollBlock->right  = bgWidth;
     scrollBlock->top   = 0;
-    scrollBlock->bottom = bgResource->frame_height;
+    scrollBlock->bottom = bgHeight;
     UI_CenterWindow(scrollBlock, &scrolledWorkRect);
     scrollBlock->left   = scrolledWorkRect.left;
     scrollBlock->top    = scrolledWorkRect.top;
@@ -424,7 +466,7 @@ void NameEntryPanel::on_create()
         this->sprite3->sourceY = sprite3Rect.bottom;
     }
 
-    NETMAN_EnumerateSessions(this);
+    this->enumerateSessions();
 }
 
 /* ================================================================== */
@@ -555,5 +597,451 @@ LRESULT NameEntryPanel::on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         RenderConnectionPanel(this);
     }
     UIPANEL_EndPaint(this);
+    return 0;
+}
+
+/* ================================================================== */
+/* NameEntryPanel::applyProviderModes                                  */
+/* Address: 0x4419C0 (formerly "NETMAN_CreateSession")                 */
+/*                                                                     */
+/* Set supportsTwoPlayerMode/supportsFourPlayerMode from the network   */
+/* provider list. Not a vtable slot — an ordinary public method,       */
+/* called from show() and directly by EditWindow::show()               */
+/* (ui/EditWindow.cpp).                                                */
+/* ================================================================== */
+void NameEntryPanel::applyProviderModes()
+{
+#ifndef _WIN32
+    /* Host-only: _g_netman_data is constructed unconditionally by
+     * GameLoop_Setup on both platforms today, but any narrowly-linked
+     * test/tool binary that doesn't run it still sees a null singleton
+     * here — this guard keeps that configuration safe. On Windows this
+     * branch cannot be taken. */
+    if (_g_netman_data == nullptr) {
+        return;
+    }
+#endif
+    for (DirectPlayConnectionNode* provider = _g_netman_data->m_providerList;
+         provider != nullptr; provider = provider->next) {
+        if (provider->type == 2) {
+            this->supportsFourPlayerMode = 1;
+        } else if (provider->type == 4) {
+            this->supportsTwoPlayerMode = 1;
+        }
+    }
+}
+
+/* ================================================================== */
+/* NameEntryPanel::enumerateSessions (private)                         */
+/* Address: 0x441720 (formerly "NETMAN_EnumerateSessions")             */
+/*                                                                     */
+/* Create the session-name EDIT child control. Called by on_create()   */
+/* only.                                                                */
+/* ================================================================== */
+void NameEntryPanel::enumerateSessions()
+{
+    if (this->sessionNameEditHwnd != nullptr) return;  /* Already created */
+
+    void* hWnd = CreateWindowExA(
+        0x200,                          /* WS_EX_CLIENTEDGE */
+        "EDIT",                         /* 0x47E464 — "EDIT" window class name */
+        &g_empty_string,
+        0x40000080,                     /* WS_CHILD | WS_VISIBLE */
+        this->editControlRect.left,
+        this->editControlRect.top,
+        this->editControlRect.right - this->editControlRect.left,   /* width */
+        this->editControlRect.bottom - this->editControlRect.top,   /* height */
+        this->hWnd,                      /* parent HWND — this panel's own window,
+                                          * of which the edit control is a child */
+        reinterpret_cast<void*>(static_cast<uintptr_t>(0x41F)),  /* HMENU = control ID */
+        this->hInstance,
+        nullptr
+    );
+
+    this->sessionNameEditHwnd = hWnd;
+
+    if (hWnd != nullptr) {
+        PostMessageA(hWnd, 0x30 /* WM_SETFONT */,
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_font_small)), 1);
+        PostMessageA(hWnd, 0xC5 /* EM_LIMITTEXT */, 0x40, 0);
+
+        GameConfig* const config = _g_netman_data;
+#ifndef _WIN32
+        if (config != nullptr)
+#endif
+        {
+            SetWindowTextA(hWnd, config->m_sessionName);
+        }
+
+        /* Subclass the edit control */
+        void* oldWndProc = SetWindowLongA(hWnd, -4 /* GWL_WNDPROC */,
+                                           reinterpret_cast<void*>(&NETMAN_EditControlSubclassProc));  // ABI_BOUNDARY: function pointer marshaled through SetWindowLongA's void* WNDPROC parameter, a genuine Win32 callback-registration boundary
+        this->originalEditWndProc = oldWndProc;
+    }
+}
+
+/* ================================================================== */
+/* NameEntryPanel::getSessionInfo (private)                            */
+/* Address: 0x441B40 (formerly "NETMAN_GetSessionInfo")                */
+/*                                                                     */
+/* Refresh sprite visibility based on session mode flags. Called by    */
+/* on_update() and on_lbutton_down() (after toggling a player-count    */
+/* mode).                                                               */
+/* ================================================================== */
+void NameEntryPanel::getSessionInfo()
+{
+    GameConfig* const config = _g_netman_data;
+
+    this->sprite6->setState(0, nullptr);
+
+#ifndef _WIN32
+    if (config == nullptr) {
+        return;  /* Host-only: see applyProviderModes()'s comment above. */
+    }
+#endif
+
+    if (config->m_hostMode == 0) {
+        /* Host mode */
+        if (this->supportsTwoPlayerMode != 0) {
+            if (config->m_hostPlayerCount == 4) {
+                this->sprite2->setState(1, nullptr);
+                ShowWindow(this->sessionNameEditHwnd, 0);
+            } else {
+                this->sprite2->setState(0, nullptr);
+            }
+        }
+        if (this->supportsFourPlayerMode == 0) return;
+
+        /* 4-player mode */
+        if (config->m_hostPlayerCount == 2) {
+            this->sprite4->setState(0, nullptr);
+            this->sprite3->setState(1, nullptr);
+            ShowWindow(this->sessionNameEditHwnd, 5);  /* SW_SHOW */
+            SetFocus(this->sessionNameEditHwnd);
+            return;
+        }
+        ShowWindow(this->sessionNameEditHwnd, 0);
+    } else {
+        /* Client mode */
+        ShowWindow(this->sessionNameEditHwnd, 0);
+        if (this->supportsTwoPlayerMode != 0) {
+            this->sprite2->setState(
+                static_cast<int32_t>(config->m_clientPlayerCount == 4), nullptr);
+        }
+        if (this->supportsFourPlayerMode == 0) return;
+        if (config->m_clientPlayerCount == 2) {
+            this->sprite3->setState(1, nullptr);
+            return;
+        }
+    }
+    this->sprite3->setState(0, nullptr);
+}
+
+/* ================================================================== */
+/* NameEntryPanel::hide (vtable[1])                                    */
+/* Address: 0x441A00 (formerly "NETMAN_LeaveSession")                  */
+/*                                                                     */
+/* Kill the animation timer, destroy the 7 sprites and unlock the      */
+/* child-surface resource, then chain to the inherited                 */
+/* UI_WindowBase::hide().                                              */
+/* ================================================================== */
+void NameEntryPanel::hide()
+{
+    /* animationTimerId (+0xEC), NOT the inherited UI_WindowBase::timerId
+     * (+0x28, UI_WindowBase::show()'s own separate 120ms timer) — see
+     * animationTimerId's header doc comment for the ×4-scaled-offset
+     * evidence distinguishing the two. */
+    KillTimer(this->hWnd, this->animationTimerId);
+
+    if (this->hasSprites) {
+        /* res->Unlock() (ResourceObject vtable slot 2 — Lock() is slot 1,
+         * confirmed via show()'s own Lock() call on this same resource
+         * pointer). Ghidra shows this called with no explicit arguments
+         * (unlike show()'s Lock() call, which does pass explicit (0, 0)
+         * args per ui/AboutDialog.cpp's convention). */
+        if (this->spriteTerminator != nullptr) {
+            static_cast<ResourceObject*>(this->spriteTerminator)->Unlock();
+        }
+
+        this->sprite0->destroy();
+        this->sprite1->destroy();
+        this->sprite2->destroy();
+        this->sprite3->destroy();
+        this->sprite4->destroy();
+        this->sprite5->destroy();
+        this->sprite6->destroy();
+        this->hasSprites = 0;
+    }
+
+    /* The original calls UI_WindowBase_Hide directly (not through the
+     * vtable) — this function IS the vtable[1] override, so this is a
+     * non-virtual base-class chain-up, not a virtual re-dispatch. */
+    UI_WindowBase::hide();
+}
+
+/* ================================================================== */
+/* NameEntryPanel::show (vtable[2])                                    */
+/* Address: 0x441870 (formerly "NETMAN_JoinSession")                   */
+/*                                                                     */
+/* Initialize and show the join-session UI panel.                      */
+/* ================================================================== */
+void NameEntryPanel::show()
+{
+    /* Mark paint-ready flag as false initially. */
+    this->paintReadyFlag = 0;
+
+    if (!this->hasSprites) {
+        /* Allocate and initialize 7 sprites, plus a resource-backed child
+         * surface (unrelated to the 7 ButtonSprites). spriteTerminator/
+         * childSurface are repurposed here per their header documentation. */
+        void* res = ResourceManager_GetById(&g_resmgr, 0x439);
+        this->spriteTerminator = res;
+
+        /* Real ResourceObject::Lock(0, 0) virtual dispatch, matching
+         * ui/AboutDialog.cpp's identical pattern for the same
+         * ResourceManager_GetById-sourced resource. */
+        if (res != nullptr) {
+            this->childSurface = static_cast<ResourceObject*>(res)->Lock(0, 0);
+        }
+
+        this->sprite0->init();
+        this->sprite1->init();
+        this->sprite2->init();
+        this->sprite3->init();
+        this->sprite4->init();
+        this->sprite5->init();
+        this->sprite6->init();
+
+        this->hasSprites = 1;
+    }
+
+    /* vtable slot [7]: on_create() — a real, genuinely-overridable virtual
+     * call. */
+    this->on_create();
+
+    /* Set 2-player/4-player mode-availability flags from the provider
+     * list (the original inlines an identical copy of this loop here;
+     * folded into the one shared applyProviderModes() implementation). */
+    this->applyProviderModes();
+
+    /* The original calls UI_WindowBase_Show directly (not through the
+     * vtable) — same non-virtual base-class chain-up as hide() above. */
+    UI_WindowBase::show();
+    SetFocus(this->hWnd);
+
+    /* vtable slot [3]: set_mode() — a real, genuinely-overridable virtual
+     * call, inherited from UI_WindowBase. */
+    this->set_mode(this->childCount0, this->childObj0, 0, 1);
+
+    /* Load and play sound resource */
+    {
+        int32_t soundId = ResourceManager_GetStringById(&g_resmgr, 0x5015);
+        if (soundId != 0) {
+            RESMGR_LoadSoundResource(soundId);
+        }
+    }
+
+    /* Start animation timer (50ms interval). Stored in animationTimerId
+     * (+0xEC), NOT the inherited UI_WindowBase::timerId (+0x28) which
+     * UI_WindowBase::show() (called above) already set to its own,
+     * separate 120ms timer (id 0x43) — overwriting timerId here would
+     * make hide()'s KillTimer(timerId) kill the wrong timer twice and
+     * leak UI_WindowBase::show()'s own. See animationTimerId's header
+     * doc comment for the ×4-scaled-offset evidence. */
+    this->animationTimerId = static_cast<UINT_PTR>(reinterpret_cast<uintptr_t>(
+        SetTimer(this->hWnd, 0x50, 0x32, nullptr)));
+    this->gameMode = 2;  /* initial marquee-scroll state */
+
+    FormatResourceString(&g_resmgr, 0x79, this->textBuffer, sizeof(this->textBuffer));
+    RenderConnectionPanel(this);
+}
+
+/* ================================================================== */
+/* NameEntryPanel::on_update (vtable[8])                                */
+/* Address: 0x441A90 (formerly "NETMAN_UpdateSessionInfo")             */
+/*                                                                     */
+/* Blit child surface, update sprite states, refresh session info, end */
+/* paint.                                                               */
+/* ================================================================== */
+void NameEntryPanel::on_update(int32_t /*param*/)
+{
+    UIPANEL_Blit(
+        this->childSurface,
+        static_cast<uint32_t>(this->workRect.left),    /* srcX */
+        static_cast<uint32_t>(this->workRect.top),      /* srcY */
+        this->workRect.right,                            /* srcW */
+        static_cast<uint32_t>(this->workRect.bottom),   /* srcH */
+        g_primary_surface,
+        static_cast<uint32_t>(this->scrollOffsetX2),     /* dstX */
+        static_cast<uint32_t>(this->scrollOffsetY2),     /* dstY */
+        this->blitDestWidth,                              /* dstW */
+        static_cast<uint32_t>(this->blitDestHeight),     /* dstH */
+        1
+    );
+
+    this->sprite6->setState(0, nullptr);
+    this->sprite0->setState(0, nullptr);
+    this->sprite1->setState(0, nullptr);
+
+    this->getSessionInfo();
+
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);
+    this->paintReadyFlag = 1;
+}
+
+/* ================================================================== */
+/* NameEntryPanel::on_lbutton_down (vtable[14])                        */
+/* Address: 0x441C80 (formerly "NETMAN_SetSessionInfo")                */
+/*                                                                     */
+/* Handle UI click/hit-test on session panel sprites.                  */
+/* ================================================================== */
+LRESULT NameEntryPanel::on_lbutton_down(HWND /*hWnd*/, UINT /*msg*/, WPARAM /*wParam*/,
+                                         LPARAM lParam)
+{
+    if (this->paintReadyFlag == 0) return 0;
+
+    POINT pt;
+    pt.x = static_cast<int32_t>(lParam & 0xFFFF);
+    pt.y = static_cast<int32_t>(lParam >> 16);
+
+    RECT sprite0Rect{ this->sprite0->x, this->sprite0->y,
+                       this->sprite0->sourceX, this->sprite0->sourceY };
+    if (PtInRect(&sprite0Rect, pt)) {
+        /* Hit-test sprite0 (btn_back/cancel) */
+        this->sprite0->setState(1, nullptr);
+        PlaySound(0x5015);
+        this->EndPaint();
+        Sleep(0x96);
+        this->set_render_surface(nullptr, 0, nullptr, 0, 1);
+
+        GameConfig* const config = _g_netman_data;
+#ifndef _WIN32
+        if (config != nullptr)
+#endif
+        {
+            GetWindowTextA(this->sessionNameEditHwnd, config->m_sessionName,
+                            sizeof(config->m_sessionName));
+            if (config->m_hostMode == 0) {
+                config->m_clientAutoFlag = 1;
+            } else {
+                config->m_hostFlagAuto = 1;
+            }
+            NETMAN_SendPacket(config);
+        }
+        UI_MainMenu_SetState(g_ui_main, 3);
+        return 0;
+    }
+
+    RECT sprite1Rect{ this->sprite1->x, this->sprite1->y,
+                       this->sprite1->sourceX, this->sprite1->sourceY };
+    if (PtInRect(&sprite1Rect, pt)) {
+        /* Hit-test sprite1 (btn_join/ok) */
+        this->sprite1->setState(1, nullptr);
+        PlaySound(0x5015);
+        this->EndPaint();
+        Sleep(0x96);
+        this->set_render_surface(nullptr, 0, nullptr, 0, 1);
+        UI_MainMenu_SetState(g_ui_main, 7);
+        return 0;
+    }
+
+    RECT sprite2Rect{ this->sprite2->x, this->sprite2->y,
+                       this->sprite2->sourceX, this->sprite2->sourceY };
+    if (PtInRect(&sprite2Rect, pt) && this->supportsTwoPlayerMode != 0) {
+        /* Hit-test sprite2 (2-player button) */
+        GameConfig* const config = _g_netman_data;
+#ifndef _WIN32
+        if (config != nullptr)
+#endif
+        {
+            if (config->m_hostMode == 0) {
+                config->m_hostPlayerCount = 4;
+            } else {
+                config->m_clientPlayerCount = 4;
+            }
+        }
+        this->getSessionInfo();
+        PlaySound(0x5015);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);
+        return 0;
+    }
+
+    RECT sprite3Rect{ this->sprite3->x, this->sprite3->y,
+                       this->sprite3->sourceX, this->sprite3->sourceY };
+    if (PtInRect(&sprite3Rect, pt) && this->supportsFourPlayerMode != 0) {
+        /* Hit-test sprite3 (4-player button) */
+        GameConfig* const config = _g_netman_data;
+#ifndef _WIN32
+        if (config != nullptr)
+#endif
+        {
+            if (config->m_hostMode == 0) {
+                config->m_hostPlayerCount = 2;
+            } else {
+                config->m_clientPlayerCount = 2;
+            }
+        }
+        this->getSessionInfo();
+        PlaySound(0x5015);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);
+        return 0;
+    }
+
+    /* Hit-test panel background (panelClickRect) for random ambience sound */
+    if (PtInRect(&this->panelClickRect, pt)) {
+        int32_t rnd = CRT_rand();
+        PlaySoundAt(rnd / 0x1FFF + 0x500F, pt.x, pt.y, 4);
+    }
+
+    return 0;
+}
+
+/* ================================================================== */
+/* NameEntryPanel::on_key_down (vtable[21])                             */
+/* Address: 0x441F80 (formerly "NETMAN_DestroySession",                */
+/* native/NETMAN_SessionSettings.c)                                     */
+/*                                                                     */
+/* Handle ENTER (confirm/join) and ESC (cancel) key presses.           */
+/* ================================================================== */
+LRESULT NameEntryPanel::on_key_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (this->paintReadyFlag == 0) {
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+
+    if (wParam != 0x0D && wParam != 0x1B) {   /* VK_RETURN / VK_ESCAPE */
+        return DefWindowProcA(hWnd, msg, wParam, lParam);
+    }
+
+    if (wParam == 0x1B) {
+        /* ESC pressed — cancel/back */
+        this->sprite1->setState(1, nullptr);
+        UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
+        Sleep(0x96);
+        this->set_render_surface(nullptr, 0, nullptr, 0, 1);
+        UI_MainMenu_SetState(g_ui_main, 7);
+        return 0;
+    }
+
+    /* wParam == 0x0D: ENTER pressed — confirm/join */
+    this->sprite0->setState(1, nullptr);
+    UIPANEL_EndPaintEx(this, static_cast<int32_t>(reinterpret_cast<intptr_t>(this->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
+    Sleep(0x96);
+    this->set_render_surface(nullptr, 0, nullptr, 0, 1);
+
+    GameConfig* const config = _g_netman_data;
+#ifndef _WIN32
+    if (config != nullptr)
+#endif
+    {
+        GetWindowTextA(this->sessionNameEditHwnd, config->m_sessionName, sizeof(config->m_sessionName));
+        if (config->m_hostMode == 0) {
+            config->m_clientAutoFlag = 1;
+        } else {
+            config->m_hostFlagAuto = 1;
+        }
+        NETMAN_SendPacket(config);
+    }
+    UI_MainMenu_SetState(g_ui_main, 3);
     return 0;
 }

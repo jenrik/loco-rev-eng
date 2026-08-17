@@ -676,10 +676,11 @@ bool PixelDataCache::RemoveByAsset(void* asset_desc)
 /* RET 0x8.                                                            */
 /*                                                                     */
 /* Iterates entries from start_index, checking each via                 */
-/* NET_CheckAssetExists/NET_ResolveAddress. Returns first valid        */
-/* address or NULL.                                                    */
+/* NET_CheckAssetExists/NET_ResolveAddress. Returns the first resolved  */
+/* DPlayManager record or NULL — return type resolved 2026-08-17, see   */
+/* PixelDataCache.h's doc comment on this method.                       */
 /* ================================================================== */
-void* PixelDataCache::LookupAsset(int32_t start_index, int32_t album_index)
+DPlayManager* PixelDataCache::LookupAsset(int32_t start_index, int32_t album_index)
 {
     this->Load(album_index);
 
@@ -691,7 +692,7 @@ void* PixelDataCache::LookupAsset(int32_t start_index, int32_t album_index)
     for (int32_t i = start_index; i < this->buffer_size / static_cast<int32_t>(sizeof(PixelFormatEntry)); i++) {
         char addr_buffer[1284];
         NET_CheckAssetExists(this->pixel_buffer[i].value, 0, addr_buffer);
-        void* result = NET_ResolveAddress(addr_buffer);
+        DPlayManager* result = NET_ResolveAddress(addr_buffer);
         if (result != nullptr) {
             return result;
         }

@@ -22,6 +22,7 @@
 #include "../network/TrainMessage.h"
 #include "../network/DPlayManager.h"
 #include "../network/DirectPlay.h"
+#include "GameConfig.h"
 /* NetmanTypes.h (not the full Netman.h) — gets the complete Netman/
  * PlayerSlot types for named-field access (g_netman->m_gameMode, etc.)
  * without pulling in Netman.h's extern "C" Win32 block or its ~13
@@ -239,7 +240,9 @@ extern Netman*  g_netman;          /* 0x004FD3AC — matches the extern Netman*
                                      * etc.) — harmless, since a global's extern
                                      * type annotation isn't part of the linker
                                      * symbol. */
-extern void*    g_netSettings;     /* 0x004FD3A8 */
+extern GameConfig* g_netSettings;  /* 0x004FD3A8 — same singleton as
+                                     * network/Netman.cpp's canonical
+                                     * `_g_netman_data` (game/GameConfig.h) */
 extern void*    g_main_window;     /* 0x004AA4A0 */
 /* g_resmgr: declared by resources/ResourceManager.h (pulled in transitively
  * via NetmanTypes.h above) as `extern ResourceManager g_resmgr;` — the
@@ -305,12 +308,14 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
     if (g_demo_mode != 1) {
         this->InitNetwork();
 
-        /* Reverse EnumConnections's list into g_netSettings+0x10. Real typed
-         * pointers throughout now (DirectPlaySession::EnumConnections
-         * returns a genuine DirectPlayConnectionNode* list) — the previous
+        /* Reverse EnumConnections's list into GameConfig::m_providerList.
+         * Real typed pointers throughout now (DirectPlaySession::
+         * EnumConnections returns a genuine DirectPlayConnectionNode* list,
+         * and GameConfig::m_providerList is itself typed
+         * DirectPlayConnectionNode* — game/GameConfig.h) — the previous
          * int32_t-truncating-pointer TODO here no longer applies, since
-         * nothing here round-trips a pointer through a narrower integer
-         * anymore. */
+         * nothing here round-trips a pointer through a narrower integer,
+         * or through a raw byte offset, anymore. */
         DirectPlayConnectionNode* reversed = nullptr;
         for (DirectPlayConnectionNode* item = g_dplay_peer->EnumConnections();
              item != nullptr;
@@ -320,11 +325,16 @@ TrainSubsystem::TrainSubsystem(int context_a, int context_b)
             copy->type = item->type;
             reversed = copy;
         }
-        *reinterpret_cast<void**>(static_cast<uint8_t*>(g_netSettings) + 0x10) = reversed;
+        g_netSettings->m_providerList = reversed;
 
+        /* GameConfig::m_connectionCaps[4] (+0x14..+0x17) — confirmed via
+         * Ghidra decompile of the original 0x438BC0 (this constructor):
+         * `*(char*)(DAT_004fd3a8 + 0x14 + i) = (char)DirectPlay_GetConnectionCaps(...)`
+         * for i in [0,4). Was previously documented as padding and written
+         * through a raw byte offset; both fixed 2026-08-17. */
         char index[2] = {'0', 0};
         for (int i = 0; i < 4; ++i, ++index[0]) {
-            *(static_cast<uint8_t*>(g_netSettings) + 0x14 + i) =
+            g_netSettings->m_connectionCaps[i] =
                 static_cast<uint8_t>(DirectPlay_GetConnectionCaps(reinterpret_cast<uint8_t*>(index)));
         }
     }

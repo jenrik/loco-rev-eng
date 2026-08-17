@@ -27,21 +27,29 @@
  * overridden by NameEntryPanel are listed; all others inherit
  * UI_WindowBase's default exactly as documented there:
  *   [0] +0x00: scalar deleting destructor  OVERRIDDEN: NameEntryPanel_Dtor, 0x440F80
- *   [1] +0x04: hide()                      OVERRIDDEN: NETMAN_LeaveSession (0x441A00,
- *                                           native/NETMAN_NetworkUI.c) — destroys the 7
- *                                           sprites/child surface then calls the inherited
- *                                           UI_WindowBase::hide(). Previously (wrongly)
- *                                           documented as inherited/not overridden.
- *   [2] +0x08: show()                      OVERRIDDEN: NETMAN_JoinSession (0x441870,
- *                                           native/NETMAN_NetworkUI.c) —
- *                                           confirmed via the vtable data at 0x4781D8.
- *                                           Inits the 7 sprites, starts a timer, and ends
- *                                           by calling DPlayManager::RenderConnectionPanel
- *                                           (0x4421D0) on `this`, which is the concrete
- *                                           evidence that RenderConnectionPanel's
- *                                           `void* panel` parameter is really a
- *                                           `NameEntryPanel*` (see
+ *   [1] +0x04: hide()                      OVERRIDDEN: NameEntryPanel::hide (0x441A00,
+ *                                           formerly a free function "NETMAN_LeaveSession")
+ *                                           — kills the animation timer, destroys the 7
+ *                                           sprites and unlocks the child-surface resource
+ *                                           (spriteTerminator), then chains to the inherited
+ *                                           UI_WindowBase::hide() explicitly (the original
+ *                                           calls UI_WindowBase_Hide directly, not through
+ *                                           the vtable, since it IS the vtable[1] override).
+ *                                           Implemented in ui/NameEntryPanel.cpp.
+ *   [2] +0x08: show()                      OVERRIDDEN: NameEntryPanel::show (0x441870,
+ *                                           formerly a free function "NETMAN_JoinSession")
+ *                                           — confirmed via the vtable data at 0x4781D8.
+ *                                           Inits the 7 sprites, calls on_create() and
+ *                                           applyProviderModes(), chains to the inherited
+ *                                           UI_WindowBase::show() explicitly (same
+ *                                           direct-base-call shape as hide() above), starts
+ *                                           the 50ms animation timer, and ends by calling
+ *                                           DPlayManager::RenderConnectionPanel (0x4421D0)
+ *                                           on `this`, which is the concrete evidence that
+ *                                           RenderConnectionPanel's `void* panel` parameter
+ *                                           is really a `NameEntryPanel*` (see
  *                                           network/DPlayManager.cpp / DPlayManager.h).
+ *                                           Implemented in ui/NameEntryPanel.cpp.
  *   [7] +0x1C: on_create()                 OVERRIDDEN: NameEntryPanel::on_create
  *                                           (0x441360) — calls the inherited
  *                                           UI_WindowBase::on_create() first, then (gated
@@ -49,15 +57,16 @@
  *                                           blit scroll offsets, all 7 ButtonSprites'
  *                                           destination rects, panelRect, panelClickRect,
  *                                           and editControlRect, ending with
- *                                           NETMAN_EnumerateSessions(this). Called from
- *                                           NETMAN_JoinSession via `panel->on_create()`.
- *                                           Previously (wrongly) documented as inherited
- *                                           UI_WindowBase_OnCreate.
- *   [8] +0x20: on_update(int32_t)           OVERRIDDEN: NETMAN_UpdateSessionInfo (0x441A90,
- *                                           native/NETMAN_NetworkUI.c) — blits the child
- *                                           surface, resets sprite states, refreshes
- *                                           session info, ends paint. Previously (wrongly)
- *                                           documented as inherited default no-op.
+ *                                           enumerateSessions(). Called from show() via
+ *                                           `this->on_create()`. Previously (wrongly)
+ *                                           documented as inherited UI_WindowBase_OnCreate.
+ *   [8] +0x20: on_update(int32_t)           OVERRIDDEN: NameEntryPanel::on_update (0x441A90,
+ *                                           formerly a free function
+ *                                           "NETMAN_UpdateSessionInfo") — blits the child
+ *                                           surface, resets sprite states, refreshes session
+ *                                           info via getSessionInfo(), ends paint. Previously
+ *                                           (wrongly) documented as inherited default no-op.
+ *                                           Implemented in ui/NameEntryPanel.cpp.
  *   [11]+0x2C: window_proc()               OVERRIDDEN: NameEntryPanel::window_proc
  *                                           (0x442150) — WM_SYSCOMMAND (0xF140-masked)
  *                                           calls WIN32_PostQuit(); WM_CTLCOLORSTATIC for
@@ -72,18 +81,57 @@
  *                                           textBuffer marquee within panelRect and calls
  *                                           RenderConnectionPanel(this) on scroll-boundary
  *                                           transitions.
- *   [14]+0x38: on_lbutton_down()           OVERRIDDEN: NETMAN_SetSessionInfo (0x441C80,
- *                                           native/NETMAN_NetworkUI.c) — hit-tests the
- *                                           WM_LBUTTONDOWN lParam (packed x/y) against the
- *                                           7 sprites' rects + panelClickRect. Confirmed by
- *                                           slot arithmetic from the 0x4781D0 base: the
- *                                           real signature carries the full
- *                                           (HWND, UINT, WPARAM, LPARAM) override params
- *                                           (matching UI_WindowBase::on_lbutton_down), even
+ *   [14]+0x38: on_lbutton_down()           OVERRIDDEN: NameEntryPanel::on_lbutton_down
+ *                                           (0x441C80) — hit-tests the WM_LBUTTONDOWN
+ *                                           lParam (packed x/y) against the 7 sprites'
+ *                                           rects + panelClickRect. Confirmed by slot
+ *                                           arithmetic from the 0x4781D0 base: the real
+ *                                           signature carries the full (HWND, UINT, WPARAM,
+ *                                           LPARAM) override params (matching
+ *                                           UI_WindowBase::on_lbutton_down) exactly, even
  *                                           though only lParam's low/high words are read.
+ *                                           Implemented in ui/NameEntryPanel.cpp.
+ *   [20]+0x50: on_mouse_move()             OVERRIDDEN: unnamed, 0x442090 (default:
+ *                                           UIPANEL_WindowProc, 0x426900). Found 2026-08-17
+ *                                           while reading the raw vtable bytes at 0x4781D0
+ *                                           end to end to resolve slot [21] below; NOT part
+ *                                           of this pass's scope (dispatch prompt covered
+ *                                           only the 8 NETMAN_* names). No other in-tree
+ *                                           reference exists (get_xrefs_to on 0x442090 shows
+ *                                           only the vtable data slot itself, consistent
+ *                                           with virtual dispatch, not a direct call) — a
+ *                                           Ghidra function shell has been created at this
+ *                                           address so a future pass can decompile/integrate
+ *                                           it. Tracked in PROGRESS.md.
+ *   [21]+0x54: on_key_down()               OVERRIDDEN: NameEntryPanel::on_key_down
+ *                                           (0x441F80, formerly misfiled as a free function
+ *                                           "NETMAN_DestroySession") — handles WM_KEYDOWN's
+ *                                           wParam == VK_RETURN (0xD, confirm/join: saves the
+ *                                           typed session name, sets the host/client auto
+ *                                           flag, calls GameConfig::SaveSettings, transitions
+ *                                           to main-menu state 3) and wParam == VK_ESCAPE
+ *                                           (0x1B, cancel: transitions to state 7); anything
+ *                                           else (or paintReadyFlag == 0) falls through to
+ *                                           DefWindowProcA. Resolved 2026-08-17: the prior
+ *                                           pass's slot table omitted this slot entirely
+ *                                           (its only xref is a DATA ref from the vtable at
+ *                                           0x478224 = 0x4781D0+0x54, i.e. slot 21, not a
+ *                                           direct CALL — exactly what a virtual override
+ *                                           with no other caller looks like). Its RET 0x10
+ *                                           epilogue and 4-stack-arg shape match
+ *                                           UI_WindowBase::on_key_down(HWND, UINT, WPARAM,
+ *                                           LPARAM) exactly, and ENTER/ESC are ordinary
+ *                                           virtual-key codes, which is why the handler is
+ *                                           keyed off wParam rather than a WM_COMMAND id.
+ *                                           Implemented in ui/NameEntryPanel.cpp.
+ *   [32]+0x80: on_close()                  OVERRIDDEN: unnamed, 0x441F20 (default:
+ *                                           UIPANEL_OnDestroy, 0x426A90). Same 2026-08-17
+ *                                           discovery/scope note as slot [20] above — found,
+ *                                           Ghidra function shell created, not decompiled or
+ *                                           integrated this pass. Tracked in PROGRESS.md.
  *
- * All other slots (including [3]/[4]/[6]/[9]/[10]/[13]/[15]-[36]) inherit
- * UI_WindowBase's defaults unmodified.
+ * All other slots (including [3]/[4]/[6]/[9]/[10]/[13]/[15]-[19]/[22]-[31]/
+ * [33]-[36]) inherit UI_WindowBase's defaults unmodified.
  *
  * Called by: UI_MainMenu_Create @ 0x42058D (alloc 0x1E4, ctor, createWindow)
  */
@@ -112,8 +160,21 @@ public:
                                        //        DPlayManager::RenderConnectionPanel (0x4421D0)
     uint8_t    _pad_E9[3];             // +0xE9  padding
 
-    int32_t    field_EC;               // +0xEC  (unknown, init 0) — receives the SetTimer()
-                                       //        result in NETMAN_JoinSession (0x441870)
+    /* +0xEC: the panel's OWN 50ms animation-timer id (distinct from the
+     * inherited UI_WindowBase::timerId, +0x28, which UI_WindowBase::show()
+     * sets to its own, separate 120ms timer, id 0x43). Evidence: show()
+     * (0x441870, Ghidra-typed `int* param_1`, so `param_1[0x3B]` is a
+     * ×4-scaled offset = 0x3B*4 = 0xEC) stores SetTimer(..., 0x50, ...)'s
+     * result here; hide() (0x441A00, byte-offset typed) reads it back via
+     * `KillTimer(*(HWND*)(this+8), *(UINT_PTR*)(this+0xEC))`. Fixed
+     * 2026-08-17: an earlier draft of show()/hide() (written during this
+     * same integration pass) mistakenly reused the inherited timerId for
+     * this, which would have made hide() kill the 0x50 timer twice and
+     * never kill UI_WindowBase::show()'s own 0x43 timer — caught before
+     * merge by re-checking the exact ×4-scaled offset math (the same class
+     * of scaling bug already documented and fixed elsewhere in this header,
+     * e.g. paintReadyFlag/gameMode/textBuffer below). */
+    UINT_PTR   animationTimerId;       // +0xEC  panel's own 50ms animation timer id
 
     /* +0xF0 (64 bytes): join-panel text buffer. Evidence: NETMAN_JoinSession
      * (0x441870) fills it via FormatResourceString(&g_resmgr, 0x79, this+0xF0, 0x40);
@@ -358,10 +419,10 @@ public:
      * (scrollOffsetX2/Y2, blitDestWidth/Height), the 7 ButtonSprites'
      * destination rects (via their x/y/sourceX/sourceY dual-use-as-RECT
      * fields), panelRect, panelClickRect, and editControlRect. Ends by
-     * calling NETMAN_EnumerateSessions(this).
+     * calling enumerateSessions().
      *
-     * Called by: NETMAN_JoinSession (0x441870, native/NETMAN_NetworkUI.c),
-     *            after hasSprites is set and sprites are initialized.
+     * Called by: show() (0x441870), after hasSprites is set and sprites
+     *            are initialized.
      */
     void on_create() override;
 
@@ -383,14 +444,185 @@ public:
      * Address: 0x4423D0
      *
      * Gated on field_E8 (text-dirty flag) and wParam == 0x50 (the 50ms
-     * animation timer id started by NETMAN_JoinSession); otherwise
-     * delegates to UI_DefWndProc. When the gate passes: optionally blits
-     * the child surface (when hasSprites), then paints a marquee-scrolled
-     * copy of textBuffer within panelRect (advancing textDrawRect by a
+     * animation timer id started by show()); otherwise delegates to
+     * UI_DefWndProc. When the gate passes: optionally blits the child
+     * surface (when hasSprites), then paints a marquee-scrolled copy of
+     * textBuffer within panelRect (advancing textDrawRect by a
      * direction/step derived from gameMode's 4-state cycle), calls
      * sprite5->setState(), advances the 4-state cycle when a scroll
      * boundary is hit, calls RenderConnectionPanel(this) only when a
      * boundary was hit, and always finishes with UIPANEL_EndPaint.
      */
     LRESULT on_timer(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+
+    /**
+     * hide — Cleanup and hide the panel (vtable[1], overrides
+     * UI_WindowBase::hide()).
+     * Address: 0x441A00 (formerly transcribed as a free function,
+     * "NETMAN_LeaveSession", in native/NETMAN_NetworkUI.c)
+     *
+     * Kills the 50ms animation timer (timerId, from UI_WindowBase). If
+     * sprites are allocated: unlocks the child-surface resource held in
+     * spriteTerminator (ResourceObject::Unlock(), vtable slot 2 — the
+     * original calls this resource's vtable+0x08 slot directly with no
+     * explicit receiver/args, matching ResourceObject's ABI given Lock()
+     * is slot 1 per show()'s already-confirmed usage), destroys all 7
+     * ButtonSprites, and clears hasSprites. Finishes by chaining to the
+     * inherited UI_WindowBase::hide() (the original calls
+     * UI_WindowBase_Hide directly — a non-virtual base-class call, not a
+     * virtual re-dispatch, since this function IS the vtable[1] override).
+     *
+     * Moved into this class 2026-08-17 from a free function that took a
+     * `NameEntryPanel* panel` first parameter (the `Class_Method(self, ...)`
+     * anti-pattern) — the vtable itself was never actually wired to this
+     * override in the compiler-managed C++ hierarchy until now.
+     */
+    void hide() override;
+
+    /**
+     * show — Initialize and show the join-session UI panel (vtable[2],
+     * overrides UI_WindowBase::show()).
+     * Address: 0x441870 (formerly transcribed as a free function,
+     * "NETMAN_JoinSession", in native/NETMAN_NetworkUI.c)
+     *
+     * Clears paintReadyFlag. If sprites are not yet allocated: fetches
+     * resource 0x439 into spriteTerminator, locks it into childSurface
+     * (ResourceObject::Lock(0, 0)), inits all 7 ButtonSprites, and sets
+     * hasSprites. Calls on_create() (a real virtual dispatch — the
+     * original calls through the vtable here, since on_create is
+     * genuinely overridable), applyProviderModes(), chains to the
+     * inherited UI_WindowBase::show() (non-virtual base call, same shape
+     * as hide() above), focuses the window, calls the inherited
+     * set_mode() (vtable[3], also a real virtual dispatch), loads/warms
+     * sound resource 0x5015, starts the 50ms animation timer (id 0x50,
+     * stored in the inherited timerId) and sets gameMode to 2 (initial
+     * marquee-scroll state), formats the join-session text into
+     * textBuffer, and ends by calling RenderConnectionPanel(this).
+     *
+     * Moved into this class 2026-08-17, same anti-pattern history as
+     * hide() above.
+     */
+    void show() override;
+
+    /**
+     * on_update — Per-frame render/refresh callback (vtable[8], overrides
+     * UI_WindowBase::on_update(int32_t)).
+     * Address: 0x441A90 (formerly transcribed as a free function,
+     * "NETMAN_UpdateSessionInfo", in native/NETMAN_NetworkUI.c)
+     *
+     * Blits childSurface (workRect as the source rect) onto the primary
+     * surface at (scrollOffsetX2, scrollOffsetY2) sized
+     * (blitDestWidth, blitDestHeight). Resets sprite6/sprite0/sprite1 to
+     * state 0. Calls getSessionInfo() to refresh sprite visibility from
+     * the current GameConfig mode. Ends the paint (UI_WindowBase's
+     * EndPaintEx) and sets paintReadyFlag.
+     *
+     * The `int32_t param` argument matches UI_WindowBase::on_update's
+     * signature but is unused by this override (same shape Ghidra shows
+     * for the original — no stack read of the parameter).
+     *
+     * Moved into this class 2026-08-17, same anti-pattern history as
+     * hide() above.
+     */
+    void on_update(int32_t param) override;
+
+    /**
+     * on_lbutton_down — WM_LBUTTONDOWN handler (vtable[14], overrides
+     * UI_WindowBase::on_lbutton_down(HWND, UINT, WPARAM, LPARAM)).
+     * Address: 0x441C80 (formerly transcribed as a free function,
+     * "NETMAN_SetSessionInfo", in native/NETMAN_NetworkUI.c)
+     *
+     * No-ops unless paintReadyFlag is set. Hit-tests the WM_LBUTTONDOWN
+     * lParam (packed x/y) against sprite0 (back/cancel: saves the typed
+     * session name, sets the host/client auto flag, calls
+     * NETMAN_SendPacket/GameConfig::SaveSettings, transitions to
+     * main-menu state 3), sprite1 (join/ok: transitions to state 7),
+     * sprite2/sprite3 (2-player/4-player toggle buttons, gated on
+     * supportsTwoPlayerMode/supportsFourPlayerMode, each followed by
+     * getSessionInfo() to refresh visibility), and panelClickRect
+     * (background: plays a random ambience sound).
+     *
+     * Moved into this class 2026-08-17, same anti-pattern history as
+     * hide() above.
+     */
+    LRESULT on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+
+    /**
+     * on_key_down — WM_KEYDOWN handler (vtable[21], overrides
+     * UI_WindowBase::on_key_down(HWND, UINT, WPARAM, LPARAM)).
+     * Address: 0x441F80 (formerly transcribed as a free function,
+     * "NETMAN_DestroySession", in native/NETMAN_SessionSettings.c —
+     * misidentified there as a plain WindowProc; resolved 2026-08-17 by
+     * reading the raw vtable bytes at 0x4781D0, which show this address at
+     * slot 21 (+0x54), matching UI_WindowBase::on_key_down exactly. Its
+     * only xref is a DATA reference from the vtable itself, consistent
+     * with virtual dispatch, not a literal call site.)
+     *
+     * No-ops unless paintReadyFlag is set. wParam == VK_RETURN (0xD):
+     * confirm/join — sets sprite0's state, ends the paint, sleeps 150ms,
+     * clears the render surface (inherited set_render_surface(), a real
+     * virtual call), saves the typed session name into
+     * GameConfig::m_sessionName, sets the host/client auto flag, calls
+     * NETMAN_SendPacket (GameConfig::SaveSettings), and transitions the
+     * main menu to state 3. wParam == VK_ESCAPE (0x1B): cancel — sets
+     * sprite1's state, ends the paint, sleeps 150ms, clears the render
+     * surface, and transitions to state 7. Anything else falls through to
+     * DefWindowProcA.
+     */
+    LRESULT on_key_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) override;
+
+    /**
+     * applyProviderModes — Set supportsTwoPlayerMode/supportsFourPlayerMode
+     * from the network provider list (NOT a vtable slot — an ordinary
+     * public method, called both from show() and directly by
+     * ui/EditWindow.cpp's EditWindow::show()).
+     * Address: 0x4419C0 (formerly transcribed as a free function,
+     * "NETMAN_CreateSession" — a Ghidra default-label holdover from before
+     * this class's real role was known; it never created or destroyed a
+     * DirectPlay session).
+     *
+     * Walks the GameConfig singleton's m_providerList (DirectPlayConnectionNode,
+     * network/DirectPlay.h): a provider with type == 2 sets
+     * supportsFourPlayerMode; type == 4 sets supportsTwoPlayerMode. The
+     * original reads the GameConfig singleton directly (no parameter is
+     * passed — confirmed via disassembly: `__fastcall`, ECX-only, no stack
+     * args) — an identical inlined copy of this same loop also appears in
+     * show()'s original assembly (0x441870); both are folded into this one
+     * shared implementation here.
+     */
+    void applyProviderModes();
+
+private:
+    /**
+     * enumerateSessions — Create the session-name EDIT child control.
+     * Address: 0x441720 (formerly transcribed as a free function,
+     * "NETMAN_EnumerateSessions", in native/NETMAN_NetworkUI.c)
+     *
+     * No-ops if sessionNameEditHwnd already exists. Otherwise creates the
+     * EDIT control at editControlRect, sets its font/text-limit, pre-fills
+     * it from GameConfig::m_sessionName, and subclasses its WndProc to
+     * 0x4417E0 (not yet decompiled — see native/NETMAN_NetworkUI.c's
+     * NETMAN_EditControlSubclassProc stub), storing the previous WndProc
+     * in originalEditWndProc.
+     *
+     * Called by: on_create() only.
+     */
+    void enumerateSessions();
+
+    /**
+     * getSessionInfo — Refresh sprite visibility from the current
+     * GameConfig mode.
+     * Address: 0x441B40 (formerly transcribed as a free function,
+     * "NETMAN_GetSessionInfo", in native/NETMAN_NetworkUI.c)
+     *
+     * Resets sprite6 to state 0. In host mode: shows/hides sprite2/sprite3
+     * (2-player/4-player toggle buttons) and the session-name edit control
+     * based on m_hostPlayerCount and the supports*PlayerMode flags. In
+     * client mode: mirrors the same logic against m_clientPlayerCount,
+     * always hiding the edit control.
+     *
+     * Called by: on_update() and on_lbutton_down() (after toggling a
+     * player-count mode).
+     */
+    void getSessionInfo();
 };

@@ -588,7 +588,13 @@ public:
 
     /* --- Editor scroll/list fields (+0x128..+0x184) --- */
     RECT       scroll_bg_rect;         // +0x128  scrollable list background rect
-    uint8_t    _pad_138[16];           // +0x138  undocumented gap (verified by binary offset map)
+    /* +0x138: was `_pad_138[16]` (undocumented gap). RESOLVED (2026-08-17):
+     * NetworkPlayerList::RenderPlayer's real 9-arg ABI (see its own doc
+     * comment) takes an optional `const RECT* highlightRect` as its 9th
+     * argument; Cursor::blit_edit_preview's real call site at 0x418A9C
+     * passes `&this->field_0x138` there — exactly this 16-byte RECT-sized
+     * field, immediately following another real RECT (scroll_bg_rect). */
+    RECT       player_row_highlight_rect;  // +0x138
     ButtonSprite*  sprite_148;         // +0x148 (compat)
     ButtonSprite*  sprite_14C;         // +0x14C (compat)
     RECT       scroll_border_rect;     // +0x150  scrollable list border rect

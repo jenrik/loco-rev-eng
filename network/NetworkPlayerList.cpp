@@ -29,6 +29,7 @@
 #include "DPlayManager.h"
 #include "../graphics/LOCOBITMAP.h"
 #include "../game/PlayerConfig.h"
+#include "../platform/ddraw_interfaces.h"
 #ifndef _WIN32
 #include <cstdio>
 #include <cstring>
@@ -767,48 +768,82 @@ void NetworkPlayerList::RenderSessionBase(void* hdc,
 /* Render full player list UI entry with name, session data, track     */
 /* piece icons, and postcard image.                                     */
 /*                                                                      */
-/* NOTE on param "playerData": In the Ghidra decompiler output,        */
-/* this parameter is used both as a rendering context (vtable slots    */
-/* 17 and 26) AND as a player-slot data pointer (fields at +0x39,      */
-/* +0x40/0x41/0x42, +0x43 name, +0x10 session, +0x25, +0x3A,          */
-/* +0x93, +0x96 track entries). This dual use suggests it is a         */
-/* UIPANEL-like struct that embeds player slot data.                   */
-/*                                                                      */
-/* Due to Ghidra register confusion (unaff_EBP / unaff_retaddr          */
-/* across 1855 bytes), some exact parameter details are approx.        */
+/* === Object-model resolution (2026-08-17) ===                         */
+/* A prior pass left `playerData` as an unresolved `void*` because this  */
+/* function ALSO dispatches through it as a vtable pointer at slots     */
+/* 0x44/4=17 and 0x68/4=26, and DPlayManager's real vtable (0x478264)   */
+/* only has one entry — nowhere near 27. That contradiction is now      */
+/* resolved: `playerData` was a conflation of TWO distinct real         */
+/* parameters, not one, because the real ABI is a 9-argument __thiscall */
+/* (confirmed via RET 0x24 in the disassembly) while Ghidra's own        */
+/* decompile of this function only recognized 7 — it silently dropped   */
+/* 2 of the 9 real stack arguments into unidentified `unaff_*` pseudo-   */
+/* locals, and every within-body `param_N` *expression* reference in    */
+/* Ghidra's pseudocode (as opposed to the formal parameter list, which   */
+/* is correctly numbered) turned out to be consistently offset by +2    */
+/* slots from that point on. Verified by mechanical stack-offset         */
+/* arithmetic against the raw disassembly of this function AND all 3    */
+/* real call sites (Cursor::blit_edit_preview @0x418A76,                */
+/* PostcardAlbum::RenderTileName @0x404956, Town::clear_postcard_ui      */
+/* @0x42E846):                                                           */
+/*   arg1: bool highlighted   — per-call UI state (row selected/active). */
+/*         Gates BOTH the background-color branch AND the               */
+/*         track-entries-vs-session-base branch below. This is NOT      */
+/*         DPlayManager's own m_flag39 — this function never reads that */
+/*         field at all; see the corrected note on DPlayManager.h.      */
+/*   arg2: DPlayManager* player — supplies every player-slot field this  */
+/*         function reads (color_r/g/b, m_playerName, m_sessionBlk1/2,   */
+/*         m_wordValue, m_unknown93, m_trackEntries). Confirmed at all   */
+/*         3 real call sites: Cursor passes `this->obj_184`, Town passes */
+/*         `this->selected_player` (both already-documented              */
+/*         DPlayManager*), and PostcardAlbum passes the return of        */
+/*         PixelDataCache::LookupAsset — which is itself just             */
+/*         NET_ResolveAddress(...)'s return value (network/              */
+/*         DPlayManager.h), i.e. also genuinely a DPlayManager*.          */
+/*   arg3: IDirectDrawSurface4* surface — the object actually dispatched  */
+/*         through vtable slots 17/26. Those slots are exactly            */
+/*         IDirectDrawSurface4::GetDC/ReleaseDC in the real DirectDraw    */
+/*         COM vtable order (platform/ddraw_interfaces.h); all 3 real     */
+/*         callers pass g_primary_surface here, and the call shape at     */
+/*         each site (the "this" value pushed as a plain stack argument,  */
+/*         no ECX setup) is COM/__stdcall, not __thiscall — impossible    */
+/*         for a first-party game method. DPlayManager's own real         */
+/*         vtable was independently re-confirmed to hold exactly one      */
+/*         entry (see DPlayManager.h), so it was never a candidate.       */
+/*   arg4..arg7: int32_t left, top, right, bottom — the row's outer draw  */
+/*         rect (Ghidra's corrupted `&param_2`-as-RECT was actually       */
+/*         `&arg4` under the +2 shift, i.e. exactly this).                */
+/*   arg8: HWND hWnd — the real disassembly shows this value IS pushed    */
+/*         into the real RenderSessionBase call (0x443FF0), but that      */
+/*         method's own signature was not re-audited in this pass (see    */
+/*         the note below) — captured here but not yet forwarded to it.   */
+/*   arg9: const RECT* highlightRect — optional; NULL in 2 of 3 real      */
+/*         callers (Postcard, Town), a real pointer in Cursor's call.     */
+/*                                                                        */
+/* RenderSessionBase/RenderTrackEntry's OWN exact parameter semantics    */
+/* were not re-audited in this pass (out of scope for the playerData/     */
+/* vtable question) — their call arguments below continue the previously */
+/* established mapping, now fed the corrected left/top/right/bottom/     */
+/* player values instead of the old confused ones.                       */
 /* ================================================================== */
-void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
-                                                  void* playerData, int32_t param4,
-                                                  int32_t param5, uint32_t param6,
-                                                  const void* param7)
+void NetworkPlayerList::RenderPlayer(bool highlighted, DPlayManager* player,
+                                      IDirectDrawSurface4* surface,
+                                      int32_t left, int32_t top,
+                                      int32_t right, int32_t bottom,
+                                      HWND hWnd, const RECT* highlightRect)
 {
+    (void)hWnd;  /* real disassembly shows this feeding RenderSessionBase's call site
+                  * (0x443FF0), but that method's own signature/semantics were not
+                  * re-audited in this pass — see this function's doc comment. */
+
     int32_t i;
-    uint32_t color;
-    void* hbr;
+    void* paintHdc = nullptr;   /* real HDC, obtained via surface->GetDC() */
+    void* hbrGray;              /* shared 0xE6E6E6 background/highlight brush */
     char label_sent[16];
     char label_rcvd[16];
-    void* hpen;
-    void* old_pen;
-    void* old_font;
-    uint32_t old_text_color;
-    int32_t old_bk_mode;
-    int32_t mid_x, mid_y;
+    RECT rowRect{ left, top, right, bottom };
     RECT text_rect;
-    void** ctx_vtbl;
     uint32_t frame_count;
-
-    /* playerData's real identity is register-confused in the original
-     * decompile (see the function-level NOTE above) — used both as a
-     * vtable-dispatched rendering context and as a raw player-slot data
-     * pointer. Truncating it to a 32-bit coordinate below is itself part
-     * of that same confusion (the original x86 code ran with 32-bit
-     * pointers natively; this host is 64-bit). Preserved exactly, not
-     * re-derived; this helper only spells the truncation as a legal cast
-     * (a bare `(int32_t)ptr` old-style cast is ill-formed for an 8-byte
-     * pointer under -Werror=old-style-cast). */
-    auto ptr_lo32 = [](const void* p) -> int32_t {
-        return static_cast<int32_t>(reinterpret_cast<uintptr_t>(p));
-    };
 
     /* Init label buffers — "Sent" / "Received" resource strings */
     label_rcvd[0] = 0;
@@ -824,7 +859,7 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
     if (this->resource_data == NULL) {
         this->resource_mgr = ResourceManager_GetById(&g_resmgr, 0x3CBD);
         if (this->resource_mgr != NULL) {
-            ctx_vtbl = *reinterpret_cast<void***>(this->resource_mgr);
+            void** ctx_vtbl = *reinterpret_cast<void***>(this->resource_mgr);
             this->resource_data =
                 reinterpret_cast<void*(__stdcall*)(int32_t, int32_t)>(ctx_vtbl[1])(0, 0);
         }
@@ -844,250 +879,213 @@ void NetworkPlayerList::RenderPlayer(void* hdc, int32_t param2,
         }
     }
 
-    /* 4. Begin paint cycle — call vtable slot 17 (0x44/4) on the
-     *    rendering context (playerData). The context has a vtable
-     *    where slot 17 is an BeginPaint-like method. */
-    ctx_vtbl = *reinterpret_cast<void***>(playerData);
-    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x44 / 4])(playerData, &hbr);
+    /* 4. Begin paint cycle on the real DirectDraw surface (was manual
+     *    vtable[0x44/4] dispatch through the misidentified `playerData` —
+     *    now a typed virtual call on the real `surface` parameter). */
+    surface->GetDC(&paintHdc);
+
+    /* 6. Shared light-gray brush — created unconditionally up front,
+     * matching the original (which allocates it before the highlighted
+     * check even though the `highlighted` branch below never uses it),
+     * and deleted once at the very end of the function regardless of
+     * which branch ran. */
+    hbrGray = CreateSolidBrush(0xE6E6E6);
 
     /* 5. Draw background.
-     *    If playerData+0x39 flag is set, compute fill color from
-     *    fields +0x40/0x41/0x42 via NET_ComputeColor.
-     *    Otherwise use WHITE_BRUSH and draw optional highlight rect.
-     *    RESOLVED (2026-08-14): +0x39/+0x40/+0x41/+0x42/+0x43, and this
-     *    file's own +0x10/+0x25/+0x93/+0x96 offsets below, all match real
-     *    network/DPlayManager.h fields exactly (m_flag39, color_r/g/b,
-     *    m_playerName, m_sessionBlk1, m_sessionBlk2, m_unknown93,
-     *    m_trackEntries) — confirmed independently via input/Cursor.cpp's
-     *    obj_184 usage of the same offsets, which is what motivated
-     *    renaming DPlayManager's +0x40..+0x42 fields from m_flag40/41/42
-     *    to color_r/g/b. The formerly-declared `DPlayPlayer` struct (this
-     *    file, above) was a separate fictional partial view that never
-     *    matched beyond +0x40..+0x43 and has been removed. Retyping
-     *    `playerData` itself to DPlayManager* is NOT done here: this
-     *    function's own vtable dispatch through the same pointer (slots
-     *    17/26, above) doesn't match DPlayManager's real vtable (only
-     *    slot [0], the destructor) and the "register confusion" caveat
-     *    at this function's top means the vtable-dispatch parts of this
-     *    parameter's identity are still unresolved — a dedicated future
-     *    RE pass, not this one. */
-    if (*reinterpret_cast<int8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x39) != 0) {
-        color = NET_ComputeColor(
-            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x40),
-            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x41),
-            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x42));
-        hbr = CreateSolidBrush(color);
-        /* &param2 aliases param2..param5 as a packed RECT — the documented
-         * stack-parameter-aliasing fidelity gap (see PeekMessage's &param3
-         * above); preserved as-is, respelled only. */
-        FillRect(hdc, reinterpret_cast<const RECT*>(&param2), hbr);
-        DeleteObject(hbr);
+     *    `highlighted` (arg1) selects a custom row color computed from
+     *    the player's own color_r/g/b, or the default white background
+     *    with an optional highlight box. */
+    if (highlighted) {
+        uint32_t color = NET_ComputeColor(player->color_r, player->color_g, player->color_b);
+        void* hbrColor = CreateSolidBrush(color);
+        FillRect(paintHdc, &rowRect, hbrColor);
+        DeleteObject(hbrColor);
     } else {
-        hbr = GetStockObject(0);  /* WHITE_BRUSH */
-        FillRect(hdc, reinterpret_cast<const RECT*>(&param2), hbr);
+        void* hbrWhite = GetStockObject(0);  /* WHITE_BRUSH */
+        FillRect(paintHdc, &rowRect, hbrWhite);
 
-        if (param7 != NULL) {
-            hbr = CreateSolidBrush(0xE6E6E6);
-            FillRect(hdc, reinterpret_cast<const RECT*>(param7), hbr);
+        if (highlightRect != NULL) {
+            FillRect(paintHdc, highlightRect, hbrGray);
             /* DrawEdge's real signature (declared above) takes a
-             * non-const void* qrc; param7 is an optional caller-owned
-             * highlight rect this function only reads. const_cast (not
-             * reinterpret_cast) makes that qualifier drop explicit. */
-            DrawEdge(hdc, const_cast<void*>(param7), 5, 0xF);
+             * non-const void* qrc; highlightRect is an optional
+             * caller-owned rect this function only reads. const_cast
+             * (not reinterpret_cast) makes that qualifier drop explicit. */
+            DrawEdge(paintHdc, const_cast<RECT*>(highlightRect), 5, 0xF);
         }
-    }
 
-    /* 6. Create light gray brush for text area backgrounds */
-    hbr = CreateSolidBrush(0xE6E6E6);
+        /* 7. Player name text rectangle (left side panel) */
+        text_rect.left   = left + 10;
+        text_rect.bottom = bottom - 10;
+        text_rect.top    = top + 2;
+        text_rect.right  = (right - left) / 2 - 0x14 + text_rect.left;
 
-    /* 7. Player name text rectangle (left side panel) */
-    text_rect.left   = param2 + 10;
-    text_rect.bottom = param5 - 10;
-    text_rect.top    = ptr_lo32(playerData) + 2;
-    text_rect.right  = (param4 - param2) / 2 - 0x14 + text_rect.left;
-
-    if (param7 != NULL) {
-        RECT edge_rect;
-        CopyRect(&edge_rect, &text_rect);
-        InflateRect(&edge_rect, 2, 2);
-        FillRect(hdc, &edge_rect, hbr);
-        DrawEdge(hdc, &edge_rect, 10, 0xF);
-    }
-
-    /* 8. Draw player name (+0x43) in orange text */
-    {
-        const char* name = reinterpret_cast<const char*>(reinterpret_cast<int8_t*>(playerData) + 0x43);
-        uint32_t name_len;
-        for (name_len = 0; name[name_len] != '\0'; name_len++) { }
-
-        if (name_len > 1) {
-            old_text_color = SetTextColor(hdc, 0xFF5C00);
-            old_bk_mode = SetBkMode(hdc, 1);          /* TRANSPARENT */
-            old_font = SelectObject(hdc, g_font_small);
-            DrawTextA(hdc, name, -1, &text_rect, 0x2810);
-            SelectObject(hdc, old_font);
-            SetTextColor(hdc, old_text_color);
-            SetBkMode(hdc, old_bk_mode);
+        if (highlightRect != NULL) {
+            RECT edge_rect;
+            CopyRect(&edge_rect, &text_rect);
+            InflateRect(&edge_rect, 2, 2);
+            FillRect(paintHdc, &edge_rect, hbrGray);
+            DrawEdge(paintHdc, &edge_rect, 10, 0xF);
         }
-    }
 
-    /* 9. Vertical divider line (gray, width=2) */
-    hpen = CreatePen(0, 2, 0x808080);
-    old_pen = SelectObject(hdc, hpen);
-    mid_x = (param4 - param2) / 2 + param2;
-    MoveToEx(hdc, mid_x, ptr_lo32(playerData) + 2, NULL);
-    LineTo(hdc, mid_x, param5 - 10);
-
-    /* 10. Session data section (right side of panel) */
-    mid_y = ptr_lo32(playerData) + (param5 - ptr_lo32(playerData)) / 2;
-    {
-        int32_t label_x = mid_x + 10;
-
-        if (param7 == NULL) {
-            MoveToEx(hdc, label_x, mid_y, NULL);
-            LineTo(hdc, param4 - 0x14, mid_y);
-            text_rect.left = label_x;
-        } else {
-            text_rect.left = mid_x + 0x0E;
-        }
-        text_rect.top    = mid_y - 0x14;
-        text_rect.right  = param4 - 0x14;
-        text_rect.bottom = mid_y;
-
-        SelectObject(hdc, g_font_normal);
-        old_text_color = SetTextColor(hdc, 0xFF5C00);
-        old_bk_mode = SetBkMode(hdc, 1);
-
-        /* Draw "Sent" label (+0x10) */
+        /* 8. Draw player name in orange text (skip empty/1-char names) */
         {
-            const char* session_data =
-                reinterpret_cast<const char*>(reinterpret_cast<int8_t*>(playerData) + 0x10);
-            uint32_t sd_len;
-            for (sd_len = 0; session_data[sd_len] != '\0'; sd_len++) { }
-            DrawTextA(hdc, session_data, -1, &text_rect, 0);
-        }
+            const char* name = player->m_playerName;
+            uint32_t name_len;
+            for (name_len = 0; name[name_len] != '\0'; name_len++) { }
 
-        /* Second horizontal divider */
-        {
-            int32_t line2_y = mid_y - 0x1E;
-            if (param7 == NULL) {
-                MoveToEx(hdc, label_x, line2_y, NULL);
-                LineTo(hdc, param4 - 0x14, line2_y);
+            if (name_len > 1) {
+                uint32_t old_text_color = SetTextColor(paintHdc, 0xFF5C00);
+                int32_t  old_bk_mode    = SetBkMode(paintHdc, 1);  /* TRANSPARENT */
+                void*    old_font       = SelectObject(paintHdc, g_font_small);
+                DrawTextA(paintHdc, name, -1, &text_rect, 0x2810);
+                SelectObject(paintHdc, old_font);
+                SetTextColor(paintHdc, old_text_color);
+                SetBkMode(paintHdc, old_bk_mode);
             }
-            text_rect.top    = mid_y - 0x32;
-            text_rect.right  = param4 - 0x14;
-            text_rect.left   = label_x;
-            text_rect.bottom = line2_y;
-
-            SelectObject(hdc, g_font_normal);
-            DrawTextA(hdc, label_sent, -1, &text_rect, 0);
         }
 
-        /* "Received" label */
+        /* 9. Vertical divider line (gray, width=2) */
+        void* hpen = CreatePen(0, 2, 0x808080);
+        void* old_pen = SelectObject(paintHdc, hpen);
+        int32_t mid_x = (right - left) / 2 + left;
+        MoveToEx(paintHdc, mid_x, top + 2, NULL);
+        LineTo(paintHdc, mid_x, bottom - 10);
+
+        /* 10. Session data section (right side of panel) */
+        int32_t mid_y = top + (bottom - top) / 2;
         {
-            int32_t line3_y = mid_y + 0x1E;
-            MoveToEx(hdc, label_x, line3_y, NULL);
-            LineTo(hdc, param4 - 0x14, line3_y);
+            int32_t label_x = mid_x + 10;
+            uint32_t old_text_color;
+            int32_t old_bk_mode;
 
-            text_rect.top    = mid_y + 0x0A;
-            text_rect.right  = param4 - 0x14;
-            text_rect.left   = label_x;
-            text_rect.bottom = param4 - 0x14;
-            DrawTextA(hdc, label_rcvd, -1, &text_rect, 0);
+            if (highlightRect == NULL) {
+                MoveToEx(paintHdc, label_x, mid_y, NULL);
+                LineTo(paintHdc, right - 0x14, mid_y);
+                text_rect.left = label_x;
+            } else {
+                text_rect.left = mid_x + 0x0E;
+            }
+            text_rect.top    = mid_y - 0x14;
+            text_rect.right  = right - 0x14;
+            text_rect.bottom = mid_y;
+
+            SelectObject(paintHdc, g_font_normal);
+            old_text_color = SetTextColor(paintHdc, 0xFF5C00);
+            old_bk_mode = SetBkMode(paintHdc, 1);
+
+            /* "Sent" line — player->m_sessionBlk1, treated as a C string.
+             * The original explicitly falls back to a literal "?" glyph
+             * (the string at 0x47EC70) when that string is empty. */
+            {
+                const char* session_data = reinterpret_cast<const char*>(player->m_sessionBlk1);
+                DrawTextA(paintHdc, (session_data[0] == '\0') ? "?" : session_data,
+                          -1, &text_rect, 0);
+            }
+
+            /* Second horizontal divider + "Sent" resource-string label */
+            {
+                int32_t line2_y = mid_y - 0x1E;
+                if (highlightRect == NULL) {
+                    MoveToEx(paintHdc, label_x, line2_y, NULL);
+                    LineTo(paintHdc, right - 0x14, line2_y);
+                }
+                text_rect.top    = mid_y - 0x32;
+                text_rect.right  = right - 0x14;
+                text_rect.left   = label_x;
+                text_rect.bottom = line2_y;
+
+                SelectObject(paintHdc, g_font_normal);
+                DrawTextA(paintHdc, label_sent, -1, &text_rect, 0);
+            }
+
+            /* "Received" resource-string label */
+            {
+                int32_t line3_y = mid_y + 0x1E;
+                MoveToEx(paintHdc, label_x, line3_y, NULL);
+                LineTo(paintHdc, right - 0x14, line3_y);
+
+                text_rect.top    = mid_y + 0x0A;
+                text_rect.right  = right - 0x14;
+                text_rect.left   = label_x;
+                /* Reuses `right` (not `bottom`) as this label's bottom edge —
+                 * preserved verbatim from the resolved disassembly; unusual,
+                 * but it is what the original computes. */
+                text_rect.bottom = right - 0x14;
+                DrawTextA(paintHdc, label_rcvd, -1, &text_rect, 0);
+            }
+
+            /* Status data — player->m_sessionBlk2 */
+            {
+                int32_t line4_y = mid_y + 0x3C;
+                MoveToEx(paintHdc, label_x, line4_y, NULL);
+                LineTo(paintHdc, right - 0x14, line4_y);
+
+                SelectObject(paintHdc, g_font_normal);
+                DrawTextA(paintHdc, reinterpret_cast<const char*>(player->m_sessionBlk2),
+                          -1, &text_rect, 0);
+            }
+
+            /* Restore GDI state */
+            SelectObject(paintHdc, old_pen);
+            SetTextColor(paintHdc, old_text_color);
+            SetBkMode(paintHdc, old_bk_mode);
+            DeleteObject(hpen);
         }
-
-        /* Status data (+0x25) */
-        {
-            int32_t line4_y = mid_y + 0x3C;
-            MoveToEx(hdc, label_x, line4_y, NULL);
-            LineTo(hdc, param4 - 0x14, line4_y);
-
-            SelectObject(hdc, g_font_normal);
-            DrawTextA(hdc, reinterpret_cast<const char*>(reinterpret_cast<int8_t*>(playerData) + 0x25),
-                      -1, &text_rect, 0);
-        }
-
-        /* Restore GDI state */
-        SelectObject(hdc, old_font);
-        SelectObject(hdc, old_pen);
-        SetTextColor(hdc, old_text_color);
-        SetBkMode(hdc, old_bk_mode);
-        DeleteObject(hpen);
     }
 
-    /* 11. Render session/track overlays */
-    /* Call vtable slot 26 (0x68/4) on rendering context — EndPaint-like method */
-    ctx_vtbl = *reinterpret_cast<void***>(playerData);
-    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x68 / 4])(playerData, hdc);
+    /* 11. End the first paint cycle before rendering session/track
+     *     overlays and the postcard blit (matches the original's two
+     *     separate GetDC/ReleaseDC round-trips — the DC is not held
+     *     across these calls). */
+    surface->ReleaseDC(paintHdc);
 
-    if (*reinterpret_cast<int8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x39) == 0) {
-        /* Non-highlighted: render base + frame session overlays */
-        /* NOTE: Exact parameters to RenderSessionBase are approximate;
-           the original passes values derived from playerData, hdc, and
-           the slider positions. The +0x93 field selects the session
-           base surface variant. */
-        this->RenderSessionBase(
-            hdc, static_cast<uint32_t>(param2), ptr_lo32(playerData),
-            param4, static_cast<uint32_t>(param5),
-            *reinterpret_cast<uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x93));
-        this->RenderSessionFrame(hdc);
+    if (!highlighted) {
+        /* Non-highlighted: render base + frame session overlays.
+         * player->m_unknown93 selects the session base surface variant. */
+        this->RenderSessionBase(paintHdc, static_cast<uint32_t>(left), top,
+                                 right, static_cast<uint32_t>(bottom),
+                                 player->m_unknown93);
+        this->RenderSessionFrame(paintHdc);
     } else {
-        /* Highlighted row: render all non-empty track entries (+0x96) */
-        const uint8_t* entry_ptr =
-            reinterpret_cast<const uint8_t*>(reinterpret_cast<int8_t*>(playerData) + 0x96);
+        /* Highlighted row: render all non-empty track entries */
+        const uint8_t* entry_ptr = player->m_trackEntries;
         int32_t entry_count;
         for (entry_count = 0; entry_count < 128; entry_count++) {
             if (entry_ptr[1] == 0) break;
-            /* NOTE: Clip coordinates here are approximate; the original
-               derives them from playerData, hdc, and param2 offsets */
-            this->RenderTrackEntry(
-                hdc, static_cast<uint32_t>(ptr_lo32(playerData)), static_cast<uint32_t>(ptr_lo32(hdc)),
-                param2, static_cast<uint32_t>(param5),
-                entry_ptr);
+            this->RenderTrackEntry(paintHdc, static_cast<uint32_t>(left),
+                                    static_cast<uint32_t>(top), right,
+                                    static_cast<uint32_t>(bottom), entry_ptr);
             entry_ptr += 6;
         }
     }
 
-    /* 12. Blit postcard image if word (+0x3A) is non-zero */
-    if (*reinterpret_cast<int16_t*>(reinterpret_cast<int8_t*>(playerData) + 0x3A) != 0) {
+    /* 12. Blit postcard image if player->m_wordValue is non-zero */
+    if (player->m_wordValue != 0) {
         UIPANEL_Surface* postcard_surf = static_cast<UIPANEL_Surface*>(this->resource_data);
         if (postcard_surf != NULL) {
-            /* width/height (+0x08/+0x0C) — Ghidra's DPLAY_RenderPlayer
-             * (0x4437C0) reads this_00+8/this_00+0xc for the exact same
-             * Blit call, matching UIPANEL_Surface::width/height, not
-             * pixels/ddraw_surf (+0x18/+0x1C) as the raw-offset version of
-             * this code used; same bug class fixed above in
-             * RenderTrackEntry/RenderSessionBase. */
             int32_t post_w = postcard_surf->width;
             int32_t post_h = postcard_surf->height;
-            /* Postcard position derived from playerData+0x14 and HDC
-               struct offset +0x10 (UIPANEL surface top-left) */
-            int32_t post_x = ptr_lo32(playerData) + 0x14;
-            int32_t post_y = *reinterpret_cast<int32_t*>(reinterpret_cast<int8_t*>(hdc) + 0x10);
+            int32_t post_x = left + 0x14;
+            int32_t post_y = top;
 
             UIPANEL_Blit(postcard_surf,
                          static_cast<uint32_t>(post_x), static_cast<uint32_t>(post_y),
                          static_cast<uint32_t>(post_x + post_w),
                          static_cast<uint32_t>(post_y + post_h),
-                         hdc, 0, 0, static_cast<uint32_t>(post_w), static_cast<uint32_t>(post_h), 0);
+                         paintHdc, 0, 0, static_cast<uint32_t>(post_w),
+                         static_cast<uint32_t>(post_h), 0);
         }
     }
 
-    /* 13. End paint cycle */
-    ctx_vtbl = *reinterpret_cast<void***>(playerData);
-    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x44 / 4])(playerData, &hbr);
-
-    /* 14. Frame outer rect with black */
+    /* 13. Second paint cycle: frame the whole row rect with black. */
+    surface->GetDC(&paintHdc);
     {
         void* black_brush = GetStockObject(4);  /* BLACK_BRUSH */
-        FrameRect(hdc, reinterpret_cast<const RECT*>(&param2), black_brush);
+        FrameRect(paintHdc, &rowRect, black_brush);
     }
+    surface->ReleaseDC(paintHdc);
 
-    /* 15. Final end-paint method */
-    ctx_vtbl = *reinterpret_cast<void***>(playerData);
-    reinterpret_cast<void(__stdcall*)(void*, void*)>(ctx_vtbl[0x68 / 4])(playerData, hdc);
-
-    DeleteObject(hbr);
+    DeleteObject(hbrGray);
 }
 
 /* ================================================================== */
@@ -1499,6 +1497,68 @@ PostBagFileNode* NET_GetHostName(int32_t type, int32_t param2)
         }
     }
     return head;
+#endif
+}
+
+/* ================================================================== */
+/* NET_SendFile — 0x445620                                               */
+/*                                                                        */
+/* Build a locale-suffixed PostBag attachment file path for `name`        */
+/* (typically a numeric player-slot id string from CRT_itoa).             */
+/* `wantsRoute` selects the extension: nonzero -> ".crd" (route/card       */
+/* file), zero -> ".rsp" (address/response file) — matches                */
+/* NETMAN_ReceiveSignalChange's two call sites (route file, then address   */
+/* file). The locale subdirectory is selected by the same DAT_004a97a0     */
+/* global EnumeratePlayers/NET_GetHostName already read above — despite    */
+/* the similar name, this is NOT ResourceManager::language_id (different   */
+/* numbering/purpose; that one offsets localized string-table resource     */
+/* ids, this one picks a PostBag\Easter\<lang> directory).                 */
+/* ================================================================== */
+void NET_SendFile(const char* name, uint8_t wantsRoute, char* pathBuf)
+{
+    extern int32_t DAT_004a97a0;
+
+#ifdef _WIN32
+    /* Windows path: original PE string-literal addresses. Documentation
+     * only — never linked, only type-checked under the MinGW cross build. */
+    const char* suffix = wantsRoute
+        ? reinterpret_cast<const char*>(0x0047eb4c)   /* ".crd" */
+        : reinterpret_cast<const char*>(0x0047ed68);  /* ".rsp" */
+    const char* easter_path;
+    switch (DAT_004a97a0) {
+    default: easter_path = reinterpret_cast<const char*>(0x0047ebf8); break; /* "\\Easter\\Eng" */
+    case 1:  easter_path = reinterpret_cast<const char*>(0x0047ec58); break; /* "\\Easter\\Dan" */
+    case 2:  easter_path = reinterpret_cast<const char*>(0x0047ec4c); break; /* "\\Easter\\Dut" */
+    case 4:  easter_path = reinterpret_cast<const char*>(0x0047ec40); break; /* "\\Easter\\Fre" */
+    case 5:  easter_path = reinterpret_cast<const char*>(0x0047ec34); break; /* "\\Easter\\Ger" */
+    case 6:  easter_path = reinterpret_cast<const char*>(0x0047ec28); break; /* "\\Easter\\Ita" */
+    case 7:  easter_path = reinterpret_cast<const char*>(0x0047ec1c); break; /* "\\Easter\\Nor" */
+    case 8:  easter_path = reinterpret_cast<const char*>(0x0047ec10); break; /* "\\Easter\\Spa" */
+    case 9:  easter_path = reinterpret_cast<const char*>(0x0047ec04); break; /* "\\Easter\\Swe" */
+    }
+    wsprintfA(pathBuf, reinterpret_cast<const char*>(0x0047ed5c), g_install_path,
+              reinterpret_cast<const char*>(0x0047e0c4), /* "PostBag" */
+              easter_path, name, suffix);
+#else
+    /* Host path: construct path with forward slashes, matching
+     * EnumeratePlayers'/NET_GetHostName's #ifndef _WIN32 branches. */
+    static const char* const lang_variants[] = {
+        "/Easter/Eng",  /* default: index 0 */
+        "/Easter/Dan",  /* case 1 */
+        "/Easter/Dut",  /* case 2 */
+        "/Easter/Eng",  /* case 3 (undefined, default) */
+        "/Easter/Fre",  /* case 4 */
+        "/Easter/Ger",  /* case 5 */
+        "/Easter/Ita",  /* case 6 */
+        "/Easter/Nor",  /* case 7 */
+        "/Easter/Spa",  /* case 8 */
+        "/Easter/Swe",  /* case 9 */
+    };
+    const char* easter_path = (DAT_004a97a0 >= 0 && DAT_004a97a0 <= 9)
+        ? lang_variants[DAT_004a97a0] : lang_variants[0];
+    const char* suffix = wantsRoute ? ".crd" : ".rsp";
+    std::snprintf(pathBuf, 0x504, "%s/PostBag%s/%s%s",
+                  g_install_path, easter_path, name, suffix);
 #endif
 }
 

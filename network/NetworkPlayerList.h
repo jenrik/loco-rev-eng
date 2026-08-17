@@ -33,7 +33,7 @@
  * These are C++ methods (__thiscall / __fastcall with ECX = this):
  *   NET_GetOrCreateSurface    — Lookup or create cached surface
  *   NET_RenderTrackEntry      — Blit track entry surface to HDC
- *   DPLAY_RenderPlayer        — Render full player list UI entry
+ *   RenderPlayer (formerly DPLAY_RenderPlayer) — Render full player list UI entry
  *   DPLAY_RenderSessionFrame  — Render session frame overlay
  *   DPLAY_RenderSessionBase   — Render session base overlay
  *   DPLAY_PeekMessage         — Render track entry and manage resource
@@ -52,6 +52,7 @@
 
 struct UIPANEL_Surface;
 class DPlayManager;
+struct IDirectDrawSurface4;
 /* ================================================================== */
 /* DPlayPlayer struct (a fictional partial view of the 0x39C-byte DPLAY */
 /* player record, matching only +0x3A..+0x43) removed 2026-08-14: it   */
@@ -60,8 +61,12 @@ class DPlayManager;
 /* not match every offset RenderPlayer reads. The real type is         */
 /* DPlayManager (network/DPlayManager.h, full 0x39C layout modeled) —  */
 /* see input/Cursor.cpp's obj_184 usage for the independent confirming */
-/* evidence, and RenderPlayer's own updated comment for what remains   */
-/* unresolved about `playerData`'s exact identity in this file. */
+/* evidence.                                                            */
+/*                                                                       */
+/* RESOLVED (2026-08-17): the former `playerData` parameter of          */
+/* RenderPlayer was a conflation of two distinct real 9-argument-ABI    */
+/* parameters (a DPlayManager* and an IDirectDrawSurface4*) — see the   */
+/* full resolution in NetworkPlayerList.cpp's RenderPlayer doc comment. */
 
 /* ================================================================== */
 /* NetworkPlayerList — Top-level DPLAY player/surface cache class      */
@@ -191,20 +196,34 @@ public:
      * track piece icons, and postcard image.
      * Address: 0x4437C0 (formerly DPLAY_RenderPlayer)
      *
-     * Uses GetOrCreateSurface for cached session/game surfaces and
-     * RenderTrackEntry for each track entry in the player's slot.
+     * Real ABI is a 9-argument __thiscall (RET 0x24) — see the full
+     * object-model resolution in NetworkPlayerList.cpp's doc comment for
+     * this method (this is what resolved the former `playerData` /
+     * vtable-slot-17/26 contradiction).
      *
-     * @param hdc         Target HDC
-     * @param param2      Left/top region coordinates
-     * @param param3      Context HDC
-     * @param param4      Right/bottom region coordinates
-     * @param param5      Rendering offset
-     * @param param6      Additional parameter
-     * @param param7      Optional highlight rectangle
+     * @param highlighted    Per-call "is this row selected/active" flag —
+     *                       gates the background-color and track-entries-
+     *                       vs-session-base branches. NOT DPlayManager's
+     *                       own m_flag39, which this function never reads.
+     * @param player         Real player-slot data source (color, name,
+     *                       session strings, track entries).
+     * @param surface        Real DirectDraw surface; GetDC/ReleaseDC on it
+     *                       brackets the actual GDI drawing.
+     * @param left           Row rect left
+     * @param top            Row rect top
+     * @param right          Row rect right
+     * @param bottom         Row rect bottom
+     * @param hWnd           Feeds RenderSessionBase's real call site per the
+     *                       disassembly; not yet forwarded there — that
+     *                       method's own signature wasn't re-audited in
+     *                       this pass (see the .cpp doc comment).
+     * @param highlightRect  Optional caller-owned highlight box (NULL in
+     *                       2 of 3 real callers).
      */
-    void RenderPlayer(void* hdc, int32_t param2, void* param3,
-                                  int32_t param4, int32_t param5,
-                                  uint32_t param6, const void* param7);
+    void RenderPlayer(bool highlighted, DPlayManager* player,
+                       IDirectDrawSurface4* surface,
+                       int32_t left, int32_t top, int32_t right, int32_t bottom,
+                       HWND hWnd, const RECT* highlightRect);
 
     /**
      * RenderSessionFrame — Render session frame overlay onto HDC.

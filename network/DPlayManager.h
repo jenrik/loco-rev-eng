@@ -27,7 +27,19 @@
  *    field layout. Created by GetPlayerData, consumed by InitPlayerFromSession.
  *
  * === Vtable 0x478264 (DPlayManager / Player Slot) ===
- *   [0] +0x00: scalar deleting destructor (DPLAY_CleanupPlayer, 0x442A00)
+ *   [0] +0x00: scalar deleting destructor (0x4428C0 — real slot; verified
+ *       by reading the raw vtable bytes at 0x478264 end-to-end and
+ *       confirming the table is genuinely only 1 dword before the next
+ *       class's vtable (DPLAY_SessionData, 0x478268) begins — its slot[0]
+ *       lands exactly at 0x478264+4 and matches that class's own
+ *       independently-known destructor (0x442EA0). Previously
+ *       misdocumented as CleanupPlayer (0x442A00): that function only
+ *       *pokes* the vtable pointer back to 0x478264 (used by exception
+ *       unwind stubs) — it is not itself an entry in the table.
+ *       (2026-08-17: this correction was itself prompted by a false lead
+ *       — RenderPlayer's vtable dispatch at slots 17/26 turned out to
+ *       belong to a *different* object, IDirectDrawSurface4, not
+ *       DPlayManager at all; see NetworkPlayerList.cpp's RenderPlayer.)
  *
  * === Vtable 0x478268 (DPLAY_SessionData) ===
  *   [0] +0x00: scalar deleting destructor (dtor at 0x442EA0)
@@ -100,9 +112,15 @@ public:
     /* +0x25 (20 bytes): Session data block 2 — overwritten via InitPlayerFromSession */
     uint8_t     m_sessionBlk2[20];
 
-    /* +0x39: Flag byte — from session. NetworkPlayerList::RenderPlayer
-     * reads this as a "use custom color" gate before consuming
-     * color_r/g/b below; no stronger evidence for other uses. */
+    /* +0x39: Flag byte — from session. CORRECTED (2026-08-17): this is
+     * NOT NetworkPlayerList::RenderPlayer's "use custom color" gate — that
+     * was a misattribution from the same register-confused decompile that
+     * originally left RenderPlayer's parameters unresolved. RenderPlayer's
+     * actual gate (verified by raw disassembly, [ESP+0x74] mechanically
+     * traced back to its own real caller-supplied `highlighted` argument)
+     * is a separate, per-call bool parameter, not read from this field at
+     * all. This function's own body never reads m_flag39. Purpose
+     * unconfirmed. */
     uint8_t     m_flag39;
 
     /* +0x3A: Word value — copied from session, initialized 0 */

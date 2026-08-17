@@ -17,6 +17,7 @@
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #include "ButtonSprite.h"
 #include "../network/Netman.h"
+#include "../game/GameConfig.h"
 #include "../resources/ResourceManager.h"
 #include "WndProcStream.h"
 
@@ -132,8 +133,9 @@ extern void   CGWND_SetMode(int mode);
    0x4FD3AC is the Netman singleton (written by GameLoop_Setup @ 0x406C9D).
    _g_dplay is at 0x4FD3A8 (written by GameLoop_Setup @ 0x406C6C). */
 extern Netman* _g_netman;              /* 0x4FD3AC — network manager singleton */
+class GameConfig;
+extern GameConfig* _g_netman_data;      /* 0x4FD3A8 — GameConfig singleton (game/GameConfig.h) */
 #ifndef _WIN32
-extern char* _g_netman_state;           /* 0x4FD3A8 — host/join menu selection */
 extern void* _g_train;                   /* 0x4FD3A4 — TrainSubsystem */
 #endif
 /* g_resmgr now declared in ResourceManager.h (included above) */
@@ -1334,8 +1336,8 @@ constexpr uint64_t kLobbyPressDurationMs = 150;  // Sleep(0x96) at 0x40A591 etc.
 
 std::string host_network_player_name()
 {
-    if (_g_netman_state != nullptr) {
-        const char* name = _g_netman_state + 0x6C;
+    if (_g_netman_data != nullptr) {
+        const char* name = _g_netman_data->m_sessionName;
         const std::size_t length = strnlen(name, 11);
         if (length != 0) return std::string(name, length);
     }
@@ -1484,8 +1486,8 @@ void GameSetupPanel::hostRenderFrame()
         // Mode-2 host composition is the guaranteed host heartbeat.
         _g_netman->Update();
     }
-    const bool hosting = network_lobby && _g_netman_state != nullptr &&
-                         _g_netman_state[8] != 0;
+    const bool hosting = network_lobby && _g_netman_data != nullptr &&
+                         _g_netman_data->m_hostMode != 0;
     if (hosting && !this->hostTransportRequested) {
         this->hostTransportRequested = true;
         this->hostSessionReady = false;
@@ -1682,7 +1684,7 @@ void GameSetupPanel::hostHandlePointer(float display_x, float display_y, bool pr
     // layout-list row, update the same Netman fields, and let drawGrid's
     // original dimensions control the next frame.
     if (g_editwindow_ptr != nullptr && g_editwindow_ptr->dialogState == 5) {
-        if (_g_netman_state != nullptr && _g_netman_state[8] == 0 &&
+        if (_g_netman_data != nullptr && _g_netman_data->m_hostMode == 0 &&
             host_lobby_contains(kDirectLeft, kDirectTop,
                                 kDirectRight - kDirectLeft, kDirectBottom - kDirectTop,
                                 canvas_x, canvas_y)) {

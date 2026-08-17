@@ -106,31 +106,53 @@
     [0]  +0x00: scalar deleting destructor (NET_Dtor_ScalarDeleting, 0x453C10) */
 
 /* ================================================================== */
-/* DPlayConfig (GameConfig) — Network session configuration manager     */
+/* GameConfig — Network session configuration manager (game/GameConfig.h) */
+/* Canonical singleton pointer: `_g_netman_data` (0x4FD3A8).             */
 /* ================================================================== */
-#define VTBL_DPLAY_CONFIG              0x004781CC  /* DPlayConfig vtable
+#define VTBL_DPLAY_CONFIG              0x004781CC  /* GameConfig vtable
     [0]  +0x00: scalar deleting destructor (NETMAN_FreeProviderList, 0x440CC0)
-    Size: 0xB0 bytes.
-    Manages: session name, player counts, provider list, timeout.
-    Persisted to NetSettings.dat via LoadSettings/SaveSettings.        */
+    Size: 0xB0 bytes (original x86 binary only — host GameConfig has no
+    vtable; see game/GameConfig.h).
+    Manages: session name, player counts, provider list, connection caps,
+    timeout. Persisted to NetSettings.dat via LoadSettings/SaveSettings. */
 
 /* ================================================================== */
 /* NetworkPlayerList — DPLAY-level player list / surface cache          */
+/*                                                                      */
+/* CORRECTED (2026-08-17): this was previously listed at 0x478268 and   */
+/* explicitly aliased to VTBL_DPLAY_SESSION_DATA below — both wrong.    */
+/* Read the raw bytes at 0x478264 end-to-end (prompted by resolving     */
+/* NetworkPlayerList::RenderPlayer's playerData/vtable-slot-17/26        */
+/* question): 0x478264 and 0x478268 are DPlayManager's and              */
+/* DPLAY_SessionData's own real (1-entry each) vtables, and              */
+/* NetworkPlayerList's real vtable — matching its own header's           */
+/* already-correct "Vtable: 0x47826C" doc comment and destructor         */
+/* (NetworkPlayerList_Term, 0x4431F0) — sits immediately after both, at  */
+/* 0x47826C, not 0x478268.                                               */
 /* ================================================================== */
-#define VTBL_NETWORK_PLAYER_LIST       0x00478268  /* NetworkPlayerList vtable
-    [1]  +0x04: (unknown)
-    Full struct derives from a base with surface cache arrays.          */
+#define VTBL_NETWORK_PLAYER_LIST       0x0047826C  /* NetworkPlayerList vtable
+    [0]  +0x00: scalar deleting destructor (NetworkPlayerList_Term, 0x4431F0) */
 
 /* ================================================================== */
-/* DPLAY_PlayerSlot — Per-player slot with track entries                */
+/* DPlayManager — Per-player slot with track entries                    */
+/* (formerly documented here as "DPLAY_PlayerSlot")                     */
 /* ================================================================== */
-#define VTBL_DPLAY_PLAYER_SLOT         0x00478264  /* DPLAY_PlayerSlot vtable
-    [0]  +0x00: scalar deleting destructor (DPLAY_CleanupPlayer, 0x442A00) */
+#define VTBL_DPLAY_PLAYER_SLOT         0x00478264  /* DPlayManager vtable — exactly
+    1 entry (re-confirmed 2026-08-17 by reading the raw bytes end-to-end
+    and finding DPLAY_SessionData's own known destructor sitting exactly
+    at +4, i.e. this table does not extend past slot 0).
+    [0]  +0x00: scalar deleting destructor (0x4428C0 — real slot; the
+         previously-documented address here, DPLAY_CleanupPlayer/
+         0x442A00, only pokes the vtable pointer and is not itself in
+         the table — see network/DPlayManager.h for the full note) */
 
 /* ================================================================== */
 /* DPLAY_SessionData — Serialized player snapshot for network use       */
 /* ================================================================== */
-#define VTBL_DPLAY_SESSION_DATA        0x00478268  /* Alias: same as VTBL_NETWORK_PLAYER_LIST */
+#define VTBL_DPLAY_SESSION_DATA        0x00478268  /* DPLAY_SessionData vtable — exactly
+    1 entry (immediately followed by NetworkPlayerList's own vtable at
+    0x47826C, previously mis-attributed here as the same table).
+    [0]  +0x00: destructor (0x442EA0) */
 
 /* ================================================================== */
 /* NameEntryPanel — Multiplayer name-entry and lobby panel              */

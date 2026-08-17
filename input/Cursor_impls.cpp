@@ -643,14 +643,15 @@ void Cursor::update_network_names()
     /* Enumerate DPLAY players */
     g_dplay->EnumeratePlayers();
 
-    /* Read names from g_dplay player table at +0xB13, stride 0xD.
-     * Up to 16 entries (0xD0 bytes). (Was incorrectly reading the
-     * always-null `_g_dplay` shadow global — see Cursor_internal.h.) */
+    /* Read names from NetworkPlayerList::player_names (+0xB13, stride 0xD,
+     * network/NetworkPlayerList.h). Up to 16 entries. (Was incorrectly
+     * reading the always-null `_g_dplay` shadow global — see
+     * Cursor_internal.h — and, even after that fix, still walked the real
+     * `g_dplay` via raw pointer-offset arithmetic instead of the already-
+     * modeled named field array; both fixed together 2026-08-17.) */
     if (g_dplay != nullptr) {
-        uint8_t* dplayBase = reinterpret_cast<uint8_t*>(g_dplay);
-        for (int offset = 0; offset < 0xD0 && nameIdx < 26; offset += 0xD) {
-            const char* srcName = reinterpret_cast<const char*>(
-                dplayBase + 0xB13 + offset);
+        for (int slot = 0; slot < 16 && nameIdx < 26; slot++) {
+            const char* srcName = g_dplay->player_names[slot];
             if (srcName[0] != '\0') {
                 for (int c = 0; c < 12; c++) {
                     this->player_names[nameIdx][c] = srcName[c];

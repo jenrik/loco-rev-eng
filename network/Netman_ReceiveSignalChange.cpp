@@ -31,6 +31,7 @@ extern PlayerConfig* g_player_config;
 
 #include "Netman.h"
 #include "DPlayManager.h"
+#include "NetworkPlayerList.h"
 #include "../game/PlayerConfig.h"
 #include <cstring>
 #include <new>
@@ -39,7 +40,7 @@ extern PlayerConfig* g_player_config;
 /* NETMAN_ReceiveSignalChange — 0x43E900                               */
 /* ================================================================== */
 
-void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
+DPlayManager* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
 {
 #ifndef _WIN32
     // The original 0x43E900 selects PostBag route/address files and resolves a
@@ -91,7 +92,7 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
     char  addrStr[0x10];           /* extracted address string */
     char  resolvedName[0x50];      /* processed player name */
     int32_t bytesRead;
-    void* resolved = nullptr;
+    DPlayManager* resolved = nullptr;
     int32_t playerEnumIdx;
     bool   playerFound = false;
     char   emptyByte = g_empty_string;
@@ -109,18 +110,29 @@ void* __stdcall NETMAN_ReceiveSignalChange(void* playerDPlayData)
     resolvedName[0] = 0;
     playerEnumIdx = 0;
 
-    /* Enumerate DPLAY players */
-    DPLAY_EnumeratePlayers((int32_t)_g_dplay);
+    /* Enumerate DPLAY players. `_g_dplay` was a dead, permanently-null
+     * alias of this same NetworkPlayerList singleton; `g_dplay` (no
+     * leading underscore, network/NetworkPlayerList.h) is the real,
+     * correctly-assigned pointer, and NetworkPlayerList::EnumeratePlayers()
+     * is the free function's real (already-integrated) body — see
+     * input/Cursor_impls.cpp's identical `g_dplay->EnumeratePlayers()`
+     * call for the established precedent. The old free-function facade,
+     * `DPLAY_EnumeratePlayers(int32_t)`, was itself a dead data symbol
+     * (shared/defsym_stubs.cpp), never a real function. */
+    if (g_dplay != nullptr) {
+        g_dplay->EnumeratePlayers();
+    }
 
     /* Iterate through enumerated players */
     while (playerEnumIdx < PLAYER_COUNT_MAX) {
         bool nameMatched = false;
         int32_t playerSlot;
 
-        /* Search the 16 player name slots at _g_dplay + 0xB13 */
-        for (playerSlot = 0; playerSlot < 16; playerSlot++) {
-            const char* slotName = (const char*)_g_dplay + 0xB13 +
-                playerSlot * 0x0D;
+        /* Search the 16 player name slots at NetworkPlayerList::player_names
+         * (+0xB13, stride 0xD — network/NetworkPlayerList.h), not a raw
+         * offset off a dead `_g_dplay` global. */
+        for (playerSlot = 0; playerSlot < 16 && g_dplay != nullptr; playerSlot++) {
+            const char* slotName = g_dplay->player_names[playerSlot];
             const char* targetName = (const char*)playerDPlayData + 0x10;
 
             /* Wide-char comparison of player name */

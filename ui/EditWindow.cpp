@@ -7,6 +7,7 @@
  */
 
 #include "EditWindow.h"
+#include "../game/GameConfig.h"
 #include "../game/ScriptedObject.h"
 #include "UIPANEL_Surface.h"
 #include "UI_Utils.h"
@@ -112,14 +113,11 @@ void* __cdecl operator_new(size_t size);                    /* 0x465CE0 */
 void  __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 
 /* Game functions */
-/* Address corrected: was cited as 0x43C8C0 (wrong/stale); Ghidra confirms
- * UI_MainMenu_Show (EditWindow::show, 0x4206B0) calls the real
- * NETMAN_CreateSession at 0x4419C0 (native/NETMAN_NetworkUI.c), which takes
- * a `NameEntryPanel*` (this->pPanelA, +0x21C), not `void*` — the previous
- * `void*` declaration here silently bound to shared/defsym_stubs.cpp's
- * no-op stub instead (call-0 landmine; see
- * docs/landmine-sweep-worklist.md). */
-void  __fastcall NETMAN_CreateSession(NameEntryPanel* panelA);  /* 0x4419C0 */
+/* NETMAN_CreateSession (0x4419C0), previously a free function taking a
+ * `NameEntryPanel*` first parameter here, is now
+ * NameEntryPanel::applyProviderModes() — an ordinary public method (not a
+ * vtable slot); see ui/NameEntryPanel.h/.cpp. Call site below updated to
+ * `this->pPanelA->applyProviderModes()` accordingly (2026-08-17). */
 void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
 /* Real def: native/NETMAN_SessionSettings.c, 0x440EA0 (misnamed in Ghidra;
  * saves NetSettings.dat via CreateFileA/WriteFile) -- `void(GameConfig*)`,
@@ -128,17 +126,13 @@ void  __fastcall NETMAN_SetGameMode(void* netman, int mode);    /* 0x43CC50 */
  * Train_SendPlayerInfo, 0x43CCC0, not this function) was a genuine call-0:
  * no definition anywhere matches its mangled name. network/Netman.h's own
  * declaration of this same function (fixed in the native-session-glue-
- * cluster session) already uses `GameConfig*`. `_g_netman_state` below is
- * this file's own `char*`-typed view of the same 0x4FD3A8 singleton that
- * class is defined over (see native/NETMAN_NetworkUI.c's `_g_netman_data`
- * comment for the cross-file corroboration) -- only this one call site is
- * retyped here, not the rest of this file's ~15 other raw `char*`-offset
- * reads of `_g_netman_state`, which is a separate, larger refactor left
- * for its own session. This call site is currently unreachable: it lives
- * in EditWindow::onPlayerNameChanged(), which has zero callers anywhere
- * in the tree (the real Win32 direct-dispatch call at 0x422AB2 is not
- * wired up here), so this fix carries none of the live-unguarded-
- * file-I/O risk a reachable call site would. */
+ * cluster session) already uses `GameConfig*`. `_g_netman_data` below is
+ * the one canonical `GameConfig*` for the same 0x4FD3A8 singleton that
+ * class is defined over (see game/GameConfig.h's header comment) -- this
+ * file's entire former `char*`-typed `_g_netman_state` raw-offset view has
+ * now been retyped/consolidated onto it (2026-08-17), closing the gap this
+ * comment used to flag as "a separate, larger refactor left for its own
+ * session". */
 class GameConfig;
 void  __fastcall NETMAN_SendPacket(GameConfig* packetPtr);      /* 0x440EA0 */
 void  __stdcall WIN32_ResumeThread(void* thread, int mode);     /* 0x4616C0 */
@@ -217,7 +211,7 @@ extern int32_t g_screen_width;          /* 0x4AABE8 */
 extern int32_t g_screen_height;         /* 0x4AABEC */
 
 extern void*   _g_network_thread;       /* 0x4FD3A0 */
-extern char*   _g_netman_state;         /* 0x4FD3A8 */
+extern GameConfig* _g_netman_data;      /* 0x4FD3A8 */
 extern void*   g_netman;                /* 0x4FD3A4 */
 extern void*   _g_train;                /* 0x4FD398 */
 extern int32_t _g_network_queue;        /* 0x4FD3A0 */
@@ -450,7 +444,7 @@ void EditWindow::show()
 
     /* Create network session on PanelA */
     std::fprintf(stderr, "[TRACE] EditWindow::show: create session\n");
-    NETMAN_CreateSession(this->pPanelA);
+    this->pPanelA->applyProviderModes();
 
     /* Call base class Show (creates timer, captures mouse) */
     std::fprintf(stderr, "[TRACE] EditWindow::show: base show\n");
@@ -495,7 +489,7 @@ void EditWindow::show()
     std::fprintf(stderr, "[TRACE] EditWindow::show: edit selection set\n");
 
     /* Set NetMan game mode based on netman state */
-    if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
+    if (_g_netman_data->m_autoStart == 0) {
         NETMAN_SetGameMode(g_netman, 0);     /* Single-player */
     } else {
         NETMAN_SetGameMode(g_netman, 3);     /* Multiplayer */
@@ -574,7 +568,7 @@ void EditWindow::setState(int32_t state)
         return;
     case 3:
         this->pPanelA->hide();
-        if (*reinterpret_cast<char*>(_g_netman_state + 0x18) == 0) {
+        if (_g_netman_data->m_hostFlagAuto == 0) {
             this->dialogState = 4;
         } else {
             this->dialogState = 5;
@@ -589,7 +583,7 @@ void EditWindow::setState(int32_t state)
     case 6:
         this->pPanelB->hide();
         this->pPanelA->hide();
-        if (*reinterpret_cast<char*>(_g_netman_state + 7) != 0) NETMAN_SetGameMode(g_netman, 1);
+        if (_g_netman_data->m_autoStart != 0) NETMAN_SetGameMode(g_netman, 1);
         WIN32_ResumeThread(_g_network_thread, 1);
         CGWND_SetMode(1);
         return;
@@ -747,19 +741,19 @@ int EditWindow::netPanelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
         goto highlight_btn;
 
     /* Play is active only for single-player. */
-    if (PtInRect(&this->btnPlayRect, pt) && _g_netman_state[7] == 0)
+    if (PtInRect(&this->btnPlayRect, pt) && _g_netman_data->m_autoStart == 0)
         goto highlight_btn;
 
     /* Scenario is active only for multiplayer when scenario data exists. */
     if (PtInRect(&this->btnScenarioRect, pt) &&
-        *reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0 &&
-        _g_netman_state[7] != 0)
+        _g_netman_data->m_providerList != nullptr &&
+        _g_netman_data->m_autoStart != 0)
         goto highlight_btn;
 
     /* The two lower controls are mutually exclusive by alternate-menu state. */
-    if (PtInRect(&this->btnExitRect, pt) && _g_netman_state[8] == 0)
+    if (PtInRect(&this->btnExitRect, pt) && _g_netman_data->m_hostMode == 0)
         goto highlight_btn;
-    if (PtInRect(&this->btnTextRect, pt) && _g_netman_state[8] != 0)
+    if (PtInRect(&this->btnTextRect, pt) && _g_netman_data->m_hostMode != 0)
         goto highlight_btn;
 
     /* No button hit -- restore the normal animation through vtable[3]. */
@@ -838,22 +832,17 @@ void EditWindow::onPlayerNameChanged()
 #endif
 
     /* Send network packet */
-    /* _g_netman_state (char*) is this file's own mistyped view of the same
-     * 0x4FD3A8 GameConfig singleton NETMAN_SendPacket's real parameter
-     * models -- see the declaration comment above. Not a cross-class
-     * reinterpret; a corrected view of a global this file never had typed
-     * as GameConfig in the first place. */
-    NETMAN_SendPacket(reinterpret_cast<GameConfig*>(_g_netman_state));
+    NETMAN_SendPacket(_g_netman_data);
 
     /* Transition based on network state */
-    if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
+    if (_g_netman_data->m_autoStart == 0) {
         /* Single-player mode */
         TileMap_Init(g_tilemap, 1);
 
-        if (*reinterpret_cast<char*>(_g_netman_state + 8) == 0) {
+        if (_g_netman_data->m_hostMode == 0) {
             /* Standard single-player or scenario */
-            if (*reinterpret_cast<char*>(_g_netman_state + 0x24) != 0) {
-                const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x28);
+            if (_g_netman_data->m_clientAutoFlag != 0) {
+                const int gameMode = _g_netman_data->m_hostPlayerCount;
                 if ((gameMode == 4 && this->pPanelA->supportsTwoPlayerMode != 0) ||
                     (gameMode == 2 && this->pPanelA->supportsFourPlayerMode != 0)) {
                     this->setState(4);     /* Single-player */
@@ -862,8 +851,8 @@ void EditWindow::onPlayerNameChanged()
             }
         } else {
             /* Scenario select screen */
-            if (*reinterpret_cast<char*>(_g_netman_state + 0x18) != 0) {
-                const int gameMode = *reinterpret_cast<int*>(_g_netman_state + 0x1C);
+            if (_g_netman_data->m_hostFlagAuto != 0) {
+                const int gameMode = _g_netman_data->m_clientPlayerCount;
                 if ((gameMode == 4 && this->pPanelA->supportsTwoPlayerMode != 0) ||
                     (gameMode == 2 && this->pPanelA->supportsFourPlayerMode != 0)) {
                     this->setState(5);     /* Multiplayer */
@@ -879,7 +868,7 @@ void EditWindow::onPlayerNameChanged()
 
     /* Multiplayer mode */
     TileMap_Init(g_tilemap, 0);
-    if (*reinterpret_cast<char*>(_g_netman_state + 7) != 0) {
+    if (_g_netman_data->m_autoStart != 0) {
         NETMAN_SetGameMode(g_netman, 1);
     }
 
@@ -893,12 +882,12 @@ void EditWindow::onPlayerNameChanged()
 /* ================================================================== */
 void EditWindow::netPanelInit()
 {
-    std::fprintf(stderr, "[TRACE] EditWindow::netPanelInit: config=%p train=%p\n", static_cast<void*>(_g_netman_state), _g_train);
+    std::fprintf(stderr, "[TRACE] EditWindow::netPanelInit: config=%p train=%p\n", static_cast<void*>(_g_netman_data), _g_train);
     /* Set polling interval based on game mode */
-    if (*reinterpret_cast<char*>(_g_netman_state + 7) == 0) {
-        *reinterpret_cast<int*>(_g_netman_state + 0x0C) = 0x1E;    /* 30ms for single-player */
+    if (_g_netman_data->m_autoStart == 0) {
+        _g_netman_data->m_timeout = 0x1E;    /* 30ms for single-player */
     } else {
-        *reinterpret_cast<int*>(_g_netman_state + 0x0C) = 0x32;    /* 50ms for multiplayer */
+        _g_netman_data->m_timeout = 0x32;    /* 50ms for multiplayer */
     }
 
     /* Skip if train subsystem already exists */
@@ -1132,10 +1121,10 @@ HostMenuButton host_button_at(const EditWindow& menu, float x, float y)
     // Exact enabled-control ordering from EditWindow_netPanelWndProc
     // (0x422D80). Keep menu composition and availability tied to the same
     // recovered configuration fields as the known-good host revision.
-    const char* const state = _g_netman_state;
-    const bool multiplayer = state && state[7] != 0;
-    const bool alternate_menu = state && state[8] != 0;
-    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
+    const GameConfig* const config = _g_netman_data;
+    const bool multiplayer = config && config->m_autoStart != 0;
+    const bool alternate_menu = config && config->m_hostMode != 0;
+    const bool has_scenario = config && config->m_providerList != nullptr;
 
     if (host_point_in_rect(menu.btnOption1Rect, x, y)) return kHostOptionOne;
     if (host_point_in_rect(menu.btnOption2Rect, x, y)) return kHostQuit;
@@ -1181,10 +1170,10 @@ void EditWindow::hostRenderFrame()
     host_set_menu_rects(*this);
     this->render();
 
-    const char* const state = _g_netman_state;
-    const bool multiplayer = state && state[7] != 0;
-    const bool alternate_menu = state && state[8] != 0;
-    const bool has_scenario = state && *reinterpret_cast<const int32_t*>(state + 0x10) != 0;
+    const GameConfig* const config = _g_netman_data;
+    const bool multiplayer = config && config->m_autoStart != 0;
+    const bool alternate_menu = config && config->m_hostMode != 0;
+    const bool has_scenario = config && config->m_providerList != nullptr;
 
     // Original 0x421C9B -> 0x422010 selection and visibility branches.
     // In particular, retain the known-good right-hand 0x409 path rather than
@@ -1284,32 +1273,32 @@ void EditWindow::hostHandlePointer(float display_x, float display_y, bool presse
 
     // 0x422C60..0x422D66 is a mode selector, not a direct game-start
     // action. Resource strings identify 0x407/0x408 as singleup/singledown
-    // and 0x409/0x40A as multipleup/multipledown. The byte at DPlayConfig+7
+    // and 0x409/0x40A as multipleup/multipledown. GameConfig::m_autoStart
     // is therefore the selected-single-player flag: 1 after the left click,
     // 0 after the enabled right click.
     bool changed = false;
     switch (button) {
     case kHostSinglePlayer:
-        _g_netman_state[7] = 1;
+        _g_netman_data->m_autoStart = 1;
         NETMAN_SetGameMode(g_netman, 3);
         loco::host_test::emit_menu_mode_selected(false);
         changed = true;
         break;
     case kHostMultiplayer:
-        _g_netman_state[7] = 0;
+        _g_netman_data->m_autoStart = 0;
         NETMAN_SetGameMode(g_netman, 0);
         loco::host_test::emit_menu_mode_selected(true);
         changed = true;
         break;
     case kHostGame:
-        // 0x40B/0x40C are hostup/hostdown; DPlayConfig+8 is the
+        // 0x40B/0x40C are hostup/hostdown; GameConfig::m_hostMode is the
         // selected-host-game flag used by the subsequent Go action.
-        _g_netman_state[8] = 1;
+        _g_netman_data->m_hostMode = 1;
         changed = true;
         break;
     case kHostJoinGame:
         // 0x40E/0x40F are joinup/joindown and clear the host selection.
-        _g_netman_state[8] = 0;
+        _g_netman_data->m_hostMode = 0;
         changed = true;
         break;
     default:
@@ -1335,7 +1324,7 @@ void EditWindow::hostCommitPlayerName()
     // The original click branch calls OnPlayerNameChanged at 0x422AB2; the
     // edit-subclass Enter branch reaches the same commit flow at 0x420D57.
     // Preserve the recovered validation. The original then branches on
-    // DPlayConfig+7 (0x422722): the local/single-player path at 0x4227DA
+    // GameConfig::m_autoStart, +7 (0x422722): the local/single-player path at 0x4227DA
     // (TileMap_Init(0), SetGameMode(1)) goes straight to CGWND_SetMode(1) —
     // mode-1 loading — while the cleared flag maps to the setup panels
     // (states 4/5). The SDL host follows the same routing now that the
@@ -1344,7 +1333,7 @@ void EditWindow::hostCommitPlayerName()
         std::memcpy(g_player_config->name, this->hostEditText,
                     sizeof(this->hostEditText));
         loco::host_test::emit_player_name_committed(g_player_config->name);
-        if (_g_netman_state[7] != 0) {
+        if (_g_netman_data->m_autoStart != 0) {
             /* Single-player: 0x4227DA → CGWND_SetMode(1) (loading → mode 3). */
             extern void CGWND_SetMode(int mode);
             extern void NETMAN_SetGameMode(void* netman, int mode);
@@ -1423,13 +1412,13 @@ void EditWindow::drawButtons()
                          g_primary_surface, 0, 0, width, height, 0);
     };
 
-    if (_g_netman_state[7] == 0) {
+    if (_g_netman_data->m_autoStart == 0) {
         blit_button(this->sprite_407, this->btnPlayRect);
-        if (*reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0) {
+        if (_g_netman_data->m_providerList != nullptr) {
             blit_button(this->sprite_40A, this->btnScenarioRect);
         }
 
-        if (_g_netman_state[8] == 0) {
+        if (_g_netman_data->m_hostMode == 0) {
             blit_button(this->sprite_40B, this->btnExitRect);
             this->drawText(&this->btnTextRect, 0,
                            this->sprite_40F.resource, this->sprite_40F.bitmap);
@@ -1442,7 +1431,7 @@ void EditWindow::drawButtons()
     }
 
     blit_button(this->sprite_408, this->btnPlayRect);
-    if (*reinterpret_cast<const int32_t*>(_g_netman_state + 0x10) != 0) {
+    if (_g_netman_data->m_providerList != nullptr) {
         blit_button(this->sprite_409, this->btnScenarioRect);
     }
 

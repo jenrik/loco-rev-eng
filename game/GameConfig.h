@@ -4,22 +4,35 @@
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
- * GameConfig (internally DPlayConfig) is the singleton network session
- * configuration manager. It stores DirectPlay session settings: player
- * counts, host/client mode flags, the session name string, timeout
- * values, and a linked list of network providers. The instance is
- * stored at _g_dplay (0x4FD3A8) and created during GameLoop_Setup.
+ * GameConfig is the singleton network session configuration manager. It
+ * stores DirectPlay session settings: player counts, host/client mode
+ * flags, the session name string, timeout values, and a linked list of
+ * network providers. The one real instance lives at 0x4FD3A8, allocated
+ * and placement-constructed by GameLoop_Setup (0x406BA0) and exposed
+ * tree-wide as `extern GameConfig* _g_netman_data;` (see below) — that is
+ * the canonical name/pointer for this singleton. It previously
+ * accumulated five other names/host-side re-implementations across the
+ * tree (a `void* g_net_host_info`, a `char* _g_netman_state` byte view, a
+ * host-only `DPlayConfig` raw-byte-buffer stand-in, an int32_t
+ * `_DAT_004fd3a8`, and the unrelated `_g_dplay`/`_g_dplay_config` globals,
+ * which are a naming collision with a *different* object — the
+ * NetworkPlayerList singleton at 0x4FD3B0, canonically `g_dplay`, no
+ * leading underscore); all of those have been consolidated onto this one
+ * class and pointer.
  *
  * Settings are persisted to and loaded from "NetSettings.dat" in the
  * game install directory.
  *
  * Size: 0xB0 bytes (confirmed)
- * Vtable: 0x4781CC (VTBL_DPLAY_CONFIG)
+ * Vtable: 0x4781CC (VTBL_DPLAY_CONFIG) — original binary only; the host
+ * reconstruction below has a real (non-virtual) destructor and no vtable
+ * (see GameConfig.cpp), so it must be destroyed via a direct destructor
+ * call + GLOBAL_free, never via manual vtable-slot dispatch.
  *
- * Vtable layout:
+ * Vtable layout (original x86 binary):
  *   [0] +0x00: scalar deleting destructor (NETMAN_FreeProviderList, 0x440CC0)
  *
- * === Field Layout ===
+ * === Field Layout (original x86 offsets; documentation only) ===
  *   +0x00: vtable (0x4781CC)
  *   +0x04: magic word (0x006A) — file format marker
  *   +0x06: initialized flag (byte) — 1 after successful load
@@ -27,8 +40,12 @@
  *   +0x08: host_mode flag (byte) — 1 = hosting, 0 = client
  *   +0x09..+0x0B: padding
  *   +0x0C: timeout_value (int32) — default 0x1E (30 seconds)
- *   +0x10: provider_list (void*) — linked list head
- *   +0x14..+0x17: unused/padding
+ *   +0x10: provider_list (DirectPlayConnectionNode*) — linked list head
+ *   +0x14..+0x17: connection_caps[4] (byte each) — confirmed via Ghidra
+ *     decompile of TrainSubsystem::TrainSubsystem (0x438BC0): writes
+ *     `*(char*)(DAT_004fd3a8 + 0x14 + i) = (char)DirectPlay_GetConnectionCaps(...)`
+ *     for i in [0,4) — NOT padding, despite this header's stale prior
+ *     documentation (2026-08-17 correction).
  *   +0x18: host_flag_auto (byte)
  *   +0x19..+0x1B: padding
  *   +0x1C: client_player_count (int32) — default 4
@@ -46,7 +63,24 @@
 
 #include "../shared/types.h"
 
-// Status: TRANSCRIBED
+/* Provider/connection linked-list node (next, type) — canonical type is
+ * network/DirectPlay.h's DirectPlayConnectionNode; only forward-declared
+ * here since this header only needs the pointer type. */
+struct DirectPlayConnectionNode;
+
+// Status: TRANSCRIBED — the singleton object model is now fully
+// integrated (real constructor/destructor, every field named and typed,
+// m_providerList/m_connectionCaps resolved via Ghidra, no reinterpret_cast/
+// void*/raw offsets, one canonical `_g_netman_data` pointer tree-wide).
+// Held one step short of INTEGRATED by a single pre-existing gap unrelated
+// to this pass: LoadSettings()/SaveSettings() below are declared but never
+// defined as GameConfig methods -- the real, fully-integrated persistence
+// logic lives in the free functions NETMAN_FreePacket/NETMAN_SendPacket
+// (native/NETMAN_SessionSettings.c), which every real caller already uses
+// directly. Nothing calls the two method declarations today (grep-
+// confirmed), so this is inert, but promoting to INTEGRATED would
+// misrepresent them as real, callable methods. A future pass should either
+// implement them as thin forwarders to the free functions or remove them.
 /* vtable addresses in vtable_addrs.h — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* GameConfig — Network configuration / DPlay settings manager        */
@@ -68,9 +102,12 @@ public:
 
     int32_t    m_timeout;                 /* +0x0C  session timeout (default 0x1E) */
 
-    void*      m_providerList;            /* +0x10  linked list of providers        */
+    DirectPlayConnectionNode* m_providerList; /* +0x10  linked list of providers    */
 
-    uint8_t    _pad_14[4];                /* +0x14  padding                         */
+    uint8_t    m_connectionCaps[4];       /* +0x14  per-provider connection-capability
+                                            * byte (index 0..3), written by
+                                            * TrainSubsystem::TrainSubsystem (0x438BC0)
+                                            * from DirectPlay_GetConnectionCaps("0".."3") */
 
     uint8_t    m_hostFlagAuto;            /* +0x18  host auto-flag (byte)          */
     uint8_t    _pad_19[3];                /* +0x19  padding                         */
@@ -138,14 +175,15 @@ public:
      * overwriting the file.
      *
      * Called by:
-     *   NETMAN_DestroySession @ 0x442078
-     *   NETMAN_SetSessionInfo @ 0x441D58
+     *   NameEntryPanel::on_key_down @ 0x442078 (formerly "NETMAN_DestroySession")
+     *   NameEntryPanel::on_lbutton_down @ 0x441D58 (formerly "NETMAN_SetSessionInfo")
      *   EditWindow_OnPlayerNameChanged @ 0x422718
      */
     void __fastcall SaveSettings();
 };
 
 /* ================================================================== */
-/* Global instance pointer references                                   */
+/* Global instance pointer — the one canonical name for this singleton  */
 /* ================================================================== */
-extern GameConfig* g_dplayConfig;   /* 0x4FD3A8 — alias _g_dplay / _g_dplay_config */
+extern GameConfig* _g_netman_data;   /* 0x4FD3A8 — GameConfig singleton,
+                                       * constructed by GameLoop_Setup (0x406BA0) */

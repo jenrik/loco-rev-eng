@@ -20,6 +20,8 @@ struct RESDATA_ScriptedObject; struct GameSetupPanel;
 struct HelpWnd; struct VehicleEditor; struct UI_WindowBase;
 struct Cursor; struct TrainEntity;
 struct UIPANEL_Surface;
+class GameConfig;  /* g_netSettings below — same 0x4FD3A8 singleton as
+                     * game/GameConfig.h's canonical `_g_netman_data`. */
 
 /* =========================================================== */
 /* A. extern "C" — Win32 APIs + CRT + non-overloaded stubs     */
@@ -501,8 +503,10 @@ void*RESDATA_CreateSpriteObject(void*,int32_t,int32_t);
 void*RESDATA_CreateSpriteObject(void*,int32_t,int32_t){return nullptr;}
 void*DPLAY_CreatePlayer__strstr(void*,const char*,const char*);
 void*DPLAY_CreatePlayer__strstr(void*,const char*,const char*){return nullptr;}
-void DPLAY_RenderPlayer(void*,void*,int32_t,void*,int32_t,int32_t,uint32_t,RECT*);
-void DPLAY_RenderPlayer(void*,void*,int32_t,void*,int32_t,int32_t,uint32_t,RECT*){}
+/* DPLAY_RenderPlayer stub removed 2026-08-17 — nothing calls this
+ * free-function facade anymore; all 3 real call sites now use
+ * NetworkPlayerList::RenderPlayer directly (see its own doc comment for
+ * the resolved 9-arg object model). */
 long double __ftol(double d);
 long double __ftol(double d){return static_cast<long double>(d);}
 
@@ -872,9 +876,9 @@ int32_t DAT_004a97a0 = 0;
 void* DAT_004a9994 = nullptr;
 void* g_click_on_town = nullptr; void* g_click_on_building = nullptr; void* g_cgwnd = nullptr;
 int32_t g_clean_exit = 0; void* g_client_rect = nullptr; void* _g_cursor_surface = nullptr;
-void* g_frame_event = nullptr; void* g_fullscreen_rect = nullptr; void* g_game_config = nullptr;
+void* g_frame_event = nullptr; void* g_fullscreen_rect = nullptr;
 int32_t g_game_difficulty = 0; int32_t g_in_build_mode = 0; uint8_t g_is_town_mode = 0;
-void* g_nameEntryPanel = nullptr; void* g_netSettings = nullptr; void* _g_network_queue = nullptr;
+void* g_nameEntryPanel = nullptr; void* _g_network_queue = nullptr;
 void* g_network_queue = nullptr; void* _g_network_thread = nullptr; void* g_network_thread = nullptr;
 void* g_pixel_data_cache = nullptr; int32_t g_placement_resource_id = 0; int32_t g_ref_count = 0;
 void* g_resource_mgr = nullptr; int32_t g_road_build_mode = 0; int32_t g_screen_bpp = 16;
@@ -888,12 +892,22 @@ void* g_asset_archive = nullptr; void* g_asset_base_path = nullptr; void* _g_aud
 // is wired to a real Sdl3DirectDrawSurface. Deliberately left unwired here —
 // see project_directdraw_shim memory / PROGRESS.md Phase 5(c) note.
 void* _g_backbuffer = nullptr;
-int32_t g_build_mode = 0; void* _g_dplay = nullptr;
-void* _g_dplay_config = nullptr; void* _g_dsound_object = nullptr;
+int32_t g_build_mode = 0; void* _g_dsound_object = nullptr;
+/* _g_dplay/_g_dplay_config (formerly declared here as always-null void*
+ * globals) and _DAT_004fd3a8 (formerly an int32_t, an additional real
+ * 4-vs-8-byte-width mismatch against core/CGWND.cpp's `void*` extern of
+ * the same name) removed 2026-08-17: all three were dead, permanently-
+ * null/zero aliases of two real singletons that already have correctly
+ * assigned canonical pointers elsewhere — `g_dplay`/`g_dplay_config`
+ * (network/NetworkPlayerList.h, no leading underscore; core/GameLoop.cpp)
+ * for the NetworkPlayerList/PixelDataCache pair at 0x4FD3B0/0x4FD3B4, and
+ * `_g_netman_data` (game/GameConfig.h) for the GameConfig singleton at
+ * 0x4FD3A8. See game/GameConfig.h's header comment and
+ * core/CGWND.cpp's PHASE 5 shutdown for the consolidation. */
 int32_t DAT_0047e0f4=0;int32_t DAT_0047e220=0;int32_t DAT_0047e224=0;
 int32_t _DAT_00481170=0;int32_t DAT_00481218=0;void* g_world_release_a=nullptr;
 void* g_world_release_b=nullptr;int32_t DAT_004aad34=0;int32_t DAT_004aad38=0;
-int32_t _DAT_004fd3a8=0;int32_t s_BALANCING_0047e164=0;int32_t s_CleanExit_0047e128=0;
+int32_t s_BALANCING_0047e164=0;int32_t s_CleanExit_0047e128=0;
 int32_t s_LEGO_LOCO_0047e1c0=0;int32_t s_measure_test_char=0;
 int32_t s_MinBuildingFPS_0047e154=0;int32_t s_MinFlyingFPS_0047e134=0;
 int32_t s_MinMinifigFPS_0047e144=0;int32_t s_MinVehicleFPS_0047e170=0;
@@ -903,6 +917,13 @@ int32_t s_RectTop_0047e198=0;
 int32_t s_StringFileInfo_080904B0_FileVer_0047e0f8=0;
 int32_t s_WINDOW_ATTRIBUTES_0047e1a0=0;
 }
+
+/* g_netSettings — same 0x4FD3A8 GameConfig singleton as `_g_netman_data`
+ * (game/GameConfig.h), under the stale translation-unit name
+ * game/Train_network.cpp's TrainSubsystem historically used. Assigned for
+ * real by shared/stubs_impl.cpp's GameConfig_constructor. Declared outside
+ * the extern "C" block above since it needs the real GameConfig* type. */
+GameConfig* g_netSettings = nullptr;
 
 /* DDRAW_Init — real, Ghidra-verified implementation (address 0x45C8A0,
  * thumbnail-palette surface init) now lives in native/ddraw_init.c.

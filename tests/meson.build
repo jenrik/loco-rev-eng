@@ -136,13 +136,6 @@ test('entity-host-resource', entity_host_resource_test,
   env: ['SDL_VIDEODRIVER=dummy'],
   workdir: meson.project_source_root())
 
-dplay_config_test = executable('dplay_config_test',
-  'dplay_config_test.cpp',
-  include_directories: inc_dirs,
-  cpp_args: test_warn_args,
-)
-test('dplay-config', dplay_config_test)
-
 postbag_cleanup_test = executable('postbag_cleanup_test',
   'postbag_cleanup_test.cpp',
   objects: obj_postbag_cleanup,

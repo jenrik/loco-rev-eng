@@ -372,8 +372,10 @@ void Cursor::hide()
         this->toolbar_sprites[i] = nullptr;
     }
 
-    /* Leave network session */
-    DPLAY_LeaveSession(_g_dplay);
+    /* Leave network session. `_g_dplay` was a dead, permanently-null alias
+     * of this same NetworkPlayerList singleton; `g_dplay` (no leading
+     * underscore) is the real, correctly-assigned pointer. */
+    DPLAY_LeaveSession(g_dplay);
 
     /* Reset flags */
     this->ui_active = 1;                                             /* +0x188 */

@@ -186,19 +186,12 @@ void CGWND_PumpMessages(char);
  * + placement-new + CreatePlayer()) instead of going through this
  * free-function facade, which bound to a no-op stub returning a garbage
  * `int` (the real DPlayManager::CreatePlayer() (0x442850) returns void). */
-/* NOTE on DPLAY_RenderPlayer: the binary call site at 0x418A9C pushes NINE
- * stack args (hdc, player, surface, left, top, right, bottom, hWnd,
- * this+0x138) and the callee (NetworkPlayerList::RenderPlayer, 0x4437C0)
- * does RET 0x24 (9 dwords) — a real 9-arg reconstruction is a separate,
- * larger task owned by the network subsystem (see NetworkPlayerList.h,
- * which already implements an 8-arg approximation). Cursor's call site
- * targets the free-function no-op stub (shared/link_stubs.cpp), matching
- * its real signature exactly rather than attempting the 9-arg fidelity
- * fix or binding into the already-integrated (but RECT-aliasing-fragile)
- * typed method — see docs/landmine-sweep-worklist.md "Cursor family". */
-void DPLAY_RenderPlayer(void* dplay, void* hdcVal, int32_t player,
-                         void* surface, int32_t x, int32_t y, uint32_t w,
-                         RECT* rect);
+/* DPLAY_RenderPlayer free-function facade removed 2026-08-17: the real
+ * 9-arg ABI (RET 0x24) is now fully resolved — see
+ * NetworkPlayerList::RenderPlayer's doc comment (network/
+ * NetworkPlayerList.h/.cpp) for the full object-model resolution.
+ * Cursor::blit_edit_preview's real call site now calls
+ * `g_dplay->RenderPlayer(...)` directly. */
 size_t WIN32_Stream_Size();  /* resources/Win32Stream.cpp — real sizeof(WIN32_Stream) */
 /* Canonical signature/size helper: resources/Win32StreamMem.h. Declared
  * locally here (forward-declared class, not a full #include) rather than
@@ -233,16 +226,11 @@ extern char    g_install_path[];
 extern void*   g_ddraw;         /* IDirectDraw4* — COM platform object */
 extern void*   _g_backbuffer;   /* IDirectDrawSurface4* — COM platform object */
 extern void*   _g_primary_surface; /* IDirectDrawSurface4* — COM platform object */
-/* NOTE: _g_dplay is a SEPARATE global from the real NetworkPlayerList
- * singleton `g_dplay` (network/NetworkPlayerList.h, constructed by
- * core/GameLoop.cpp at startup) — it is initialized to nullptr once
- * (shared/link_stubs.cpp) and never assigned anywhere, so it is always
- * null. This is a distinct landmine class (a duplicate/orphaned global
- * from the 32-to-64-bit port, not a call-0 or undersized-allocation
- * bug) — see docs/landmine-sweep-worklist.md. Do not use it for real
- * NetworkPlayerList access; use the typed `g_dplay` from
+/* _g_dplay (a separate, permanently-null global from the real
+ * NetworkPlayerList singleton `g_dplay`, network/NetworkPlayerList.h,
+ * constructed by core/GameLoop.cpp at startup) removed 2026-08-17 — every
+ * former reader now uses the typed `g_dplay` from
  * network/NetworkPlayerList.h instead (already included below). */
-extern void*   _g_dplay;        /* NetworkPlayerList* at 0x4FD3B0 (not IDirectPlay4) — always null, see NOTE above */
 extern int     _g_cursor_refcount;
 extern void*   _g_cursor_back;  /* IDirectDrawSurface4* — COM platform object */
 

@@ -217,7 +217,14 @@ IDirectDrawClipper* g_clipper_5 = nullptr;
 void* g_clipper_surf = nullptr;
 void* _g_cursor_back = nullptr;
 int32_t _g_cursor_refcount = 0;
-void* g_net_host_info = nullptr;
+/* g_net_host_info (formerly a permanently-null void* here) removed
+ * 2026-08-17: a dead alias of the GameConfig singleton at 0x4FD3A8, which
+ * already has a correctly assigned canonical pointer, `_g_netman_data`
+ * (game/GameConfig.h) — see that header's comment for the full
+ * singleton-name consolidation. Its one real reader,
+ * network/Netman.cpp's NETMAN_StartClientSession, now reads
+ * `_g_netman_data->m_hostMode` directly instead of indexing this dead
+ * global at raw offset +8. */
 // Same confirmed address as g_primary_surface (platform/ddraw_globals.cpp),
 // which is wired to a real Sdl3DirectDrawSurface. This alias is deliberately
 // left unwired (not fully confirmed as the same original global) — see
@@ -259,8 +266,17 @@ void* _g_netman = nullptr;
 } /* extern "C" */
 void CGWND_PumpMessages(char);
 void CGWND_PumpMessages(char) { /* host no-op */ }  /* loading-transition pump — C++ linkage */
+/* _g_netman_data — the one canonical GameConfig singleton pointer (0x4FD3A8,
+ * game/GameConfig.h). Assigned for real by shared/stubs_impl.cpp's
+ * GameConfig_constructor (called from core/GameLoop.cpp's GameLoop_Setup).
+ * Retyped from `void*` (2026-08-17): every real consumer already declares
+ * this as `GameConfig*` (network/Netman.cpp, native/NETMAN_SessionSettings.c,
+ * native/NETMAN_NetworkUI.c, native/multiplayer_lobby_reload.c) — C++ does
+ * not mangle plain global-scope data symbol names, so this was never a link
+ * mismatch, just a needlessly weaker type at this one definition site. */
+class GameConfig;
+GameConfig* _g_netman_data = nullptr;
 extern "C" {
-void* _g_netman_data = nullptr;
 void* STR_LEGO_LOCO = nullptr;
 void CGWND_QuitToMenu();
 void CGWND_QuitToMenu() { /* host no-op */ }
@@ -423,7 +439,9 @@ void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int)
 void Town_BlitElement(void*, int, int, int, int, void*, int, int, int, int, int) { /* host no-op */ }
 void CRT_exit(char const**, char const**);
 void CRT_exit(char const**, char const**) { /* host no-op */ }
-void* _g_netman_state = nullptr;
+/* _g_netman_state (formerly a permanently-null void* here) removed
+ * 2026-08-17 — every former raw-byte-offset reader now uses the typed
+ * `_g_netman_data` (GameConfig*, game/GameConfig.h) singleton instead. */
 void WIN32_ResumeThread(void*, int);
 void WIN32_ResumeThread(void*, int) { /* host no-op */ }
 void UI_WindowBase_OnCreate(void*);
@@ -532,8 +550,11 @@ void NETMAN_ReceiveFileTransfer(int) { /* host no-op */ }
 void NETMAN_SendAck(int);
 void NETMAN_SendAck(int) { /* host no-op */ }
 void* GAMESTATE_SetDifficulty = nullptr;
-void* DPLAY_EnumeratePlayers = nullptr;
-void* NET_SendFile = nullptr;
+/* DPLAY_EnumeratePlayers dead data-symbol stub removed 2026-08-17 — see
+ * network/Netman.h's matching removal comment. */
+/* NET_SendFile(const char*, uint8_t, char*) dead data-symbol stub removed
+ * 2026-08-17 — real implementation now in network/NetworkPlayerList.cpp
+ * (0x445620), next to its sibling NET_GetHostName. */
 /* Vehicle_SetState(void*,int): wrong return type (void; real callers in
  * core/GameLoop.cpp etc. declare `int`) — collided with shared/
  * stubs_impl.cpp's correctly-typed `int Vehicle_SetState(void*, int)`

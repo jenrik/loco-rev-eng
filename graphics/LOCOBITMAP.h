@@ -451,9 +451,11 @@ public:
      * RenderTileName — render a single tile's name text.
      * Address: 0x4048E0
      *
-     * Looks up the asset in the pixel data cache for this tile's index.
-     * If not found, clears the name flag and blits the empty background
-     * rect. If found, renders the player name via DPLAY_RenderPlayer,
+     * Looks up the asset in the pixel data cache for this tile's index
+     * (really a DPlayManager*, see PixelDataCache::LookupAsset). If not
+     * found, clears the name flag and blits the empty background rect.
+     * If found, renders the player name via
+     * NetworkPlayerList::RenderPlayer (g_dplay->RenderPlayer(...)),
      * copies the name string to tile_text_buf[tile_index], then sets
      * the tile_mid sprite state to 0 (default/visible).
      *

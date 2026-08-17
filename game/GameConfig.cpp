@@ -8,9 +8,12 @@
  * and provides persistence via NetSettings.dat.
  */
 
-// Status: TRANSCRIBED
+// Status: TRANSCRIBED — see game/GameConfig.h's header comment for the
+// precise remaining gap (LoadSettings()/SaveSettings() declared but never
+// defined as methods; unreachable, not a correctness issue).
 
 #include "GameConfig.h"
+#include "../network/DirectPlay.h"  /* DirectPlayConnectionNode (m_providerList) */
 /* vtable_addrs.h removed — compiler manages vtables via virtual methods */
 /* ================================================================== */
 /* External references                                                 */
@@ -64,10 +67,11 @@ GameConfig::GameConfig()
 GameConfig::~GameConfig()
 {
     /* Free the provider linked list */
-    void* node = this->m_providerList;              /* +0x10 */
+    DirectPlayConnectionNode* node = this->m_providerList;   /* +0x10 */
     while (node != nullptr) {
-        this->m_providerList = *reinterpret_cast<void**>(node); /* follow linked list */
+        DirectPlayConnectionNode* next = node->next;
         GLOBAL_free(node);
-        node = this->m_providerList;
+        node = next;
     }
+    this->m_providerList = nullptr;
 }

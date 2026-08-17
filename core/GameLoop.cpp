@@ -16,6 +16,7 @@
 #include "CGWND.h"
 #include "Game.h"
 #include "../game/PlayerConfig.h"
+#include "../game/GameConfig.h"
 #include "../game/ScriptedObject.h"
 #include "../network/NetworkPlayerList.h"
 #include "../shared/types.h"
@@ -89,7 +90,7 @@ extern void*    g_network_thread;    /* 0x4FD398 */
 extern void*    g_network_queue;     /* 0x4FD39C */
 extern void*    g_train;             /* 0x4FD3A4 */
 extern void*    g_train_resources;   /* 0x4FD394 */
-extern void*    g_game_config;       /* 0x4FD3A8 */
+extern GameConfig* _g_netman_data;   /* 0x4FD3A8 — canonical singleton (game/GameConfig.h) */
 extern void*    g_netman;            /* 0x4FD3AC */
 #ifndef _WIN32
 extern Netman*  _g_netman;           /* stale translated alias of 0x4FD3AC */
@@ -212,16 +213,22 @@ extern "C" int GameLoop_Setup(void* cgwnd)
     mem = operator_new(ScriptEngine_HostSize());
     g_train_resources = mem ? ScriptEngine_HostConstruct(mem) : nullptr;
 
-    /* Allocate GameConfig (0xB0 bytes). GameConfig_constructor placement-
-     * constructs a DPlayConfig (network/DPlayConfig.h) here, which stores
-     * its whole original x86 byte layout in a raw `uint8_t storage_[0xB0]`
-     * array rather than typed pointer members — sizeof(DPlayConfig) == 0xB0
-     * on every host, so this literal is safe as-is, not an
-     * undersized-allocation landmine like ScriptEngine/PixelDataCache
-     * above. */
+    /* Allocate GameConfig (0xB0 bytes in the original x86 layout).
+     * GameConfig_constructor placement-constructs the real GameConfig
+     * (game/GameConfig.h) here and assigns the one canonical singleton
+     * pointer, `_g_netman_data` — previously this site placement-constructed
+     * a host-only DPlayConfig raw-byte-buffer stand-in instead (the "local
+     * view struct over a known game object" anti-pattern) and stashed the
+     * result in a since-removed `g_game_config` alias that had no other
+     * readers tree-wide. Uses sizeof(GameConfig) rather than the stale x86
+     * literal — they happen to both be 0xB0 today (host GameConfig has no
+     * vtable, but its pointer-sized m_providerList member widens to 8 bytes
+     * to compensate), but sizeof() stays correct if that ever changes,
+     * matching the ScriptEngine/PixelDataCache/NetworkPlayerList/PlayerConfig
+     * undersized-allocation fixes elsewhere in this same function. */
     trace_setup_stage("step 3b: GameConfig");
-    mem = operator_new(0xB0);
-    g_game_config = mem ? GameConfig_constructor(mem) : nullptr;
+    mem = operator_new(sizeof(GameConfig));
+    _g_netman_data = mem ? static_cast<GameConfig*>(GameConfig_constructor(mem)) : nullptr;
 
     /* Allocate NETMAN. 0x804 was the original x86 sizeof(Netman); use the
      * real host size (0x898 — see network/NetmanTypes.h) instead of the

@@ -203,12 +203,23 @@ public:
     int32_t    postcard_rect_right;     // +0x61C
     int32_t    postcard_rect_bottom;    // +0x620
 
-    /* Postcard player render area — passed to DPLAY_RenderPlayer as
-     * (x, y, extra, rect_ptr). */
-    int32_t    render_param_x;          // +0x624
-    int32_t    render_param_y;          // +0x628
-    uint32_t   render_extra;            // +0x62C
-    void*      render_rect_ptr;         // +0x630  RECT* passed as DPLAY_RenderPlayer arg 7
+    /* Postcard player render area — passed to NetworkPlayerList::RenderPlayer
+     * as its left/top/right/bottom row rect. */
+    int32_t    render_param_x;          // +0x624  player render-area rect left
+    int32_t    render_param_y;          // +0x628  player render-area rect top
+    uint32_t   render_extra;            // +0x62C  player render-area rect right
+    /* +0x630: was `void* render_rect_ptr` — a reinterpret_cast<void*>
+     * round-trip of a plain coordinate (this->player_rect.top + 200),
+     * an anti-pattern inherited from a since-corrected misreading of
+     * NetworkPlayerList::RenderPlayer's real 9-arg ABI (its own doc
+     * comment has the full resolution). This is genuinely just the
+     * render-area rect's bottom coordinate, always was — fixed
+     * 2026-08-17 to a plain int32_t, which also removes a real
+     * host-size landmine (the same field, as `void*`, was already
+     * documented at this file's PtInRect call site as covering only
+     * the low 4 bytes of an 8-byte pointer on a 64-bit host when
+     * reinterpret_cast to a packed RECT). */
+    int32_t    render_bottom;           // +0x630  player render-area rect bottom
 
     /* Player render rect {0,0,800,600}, centered by on_create. */
     RECT       player_rect;             // +0x634

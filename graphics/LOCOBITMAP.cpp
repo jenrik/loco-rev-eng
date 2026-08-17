@@ -23,6 +23,8 @@
 #include "PixelDataCache.h"
 #include "../platform/ddraw_interfaces.h"
 #include "../resources/ResourceObject.h"
+#include "../network/DPlayManager.h"
+#include "../network/NetworkPlayerList.h"
 #include <new>
 #include <cstring>
 
@@ -66,10 +68,12 @@ extern "C" {
     void  DrawTextA(void* hdc, const char* str, int32_t count,
                     RECT* rect, uint32_t format);                            /* USER32 */
 
-    /* DPLAY rendering */
-    void  DPLAY_RenderPlayer(void* dplay, void* hdc, void* asset_entry,
-                             void* surface, int32_t x, int32_t y,
-                             int32_t w, void* h);                            /* @0x459F20 */
+    /* DPLAY_RenderPlayer free-function facade removed 2026-08-17 — its
+     * `@0x459F20` address annotation was bogus (that address is inside
+     * the unrelated DDRAW_UpdateBuilding, not this function), and its
+     * real target (NetworkPlayerList::RenderPlayer, 0x4437C0) is now
+     * called directly as `g_dplay->RenderPlayer(...)` from
+     * PostcardAlbum::RenderTileName below. */
 
     /* Win32 API */
     HICON  LoadIconA(HINSTANCE hInst, LPCSTR lpIconName);                 /* @0x45B800 - indirect */
@@ -135,7 +139,12 @@ extern void*   g_ddraw;                     /* 0x485440 -- IDirectDraw4*, confir
 extern uint8_t g_surface_lost;              /* 0x004FD198 -- DDraw surface lost flag */
 extern void*   g_font_small;                /* 0x004855F4 -- small font handle */
 extern void*   g_dplay_config;              /* 0x004FD390 -- DPLAY config */
-extern void*   g_dplay;                     /* 0x004FD394 -- DPLAY handle */
+/* g_dplay (the real NetworkPlayerList* singleton, 0x4FD3B0) comes from
+ * network/NetworkPlayerList.h below — this file used to shadow it with
+ * its own mismatched `extern void* g_dplay;` at the wrong address
+ * (0x4FD394), an extern-global type/address mismatch landmine fixed
+ * 2026-08-17 while wiring RenderTileName to the real
+ * NetworkPlayerList::RenderPlayer. */
 class ResourceManager;
 extern ResourceManager g_resmgr;            /* 0x004855E8 -- object, not a byte/pointer
                                               * (was uint8_t, a widespread cross-TU
@@ -151,12 +160,11 @@ extern int32_t g_viewport_rect_bottom;  /* 0x004851E0 */
 
 namespace {
 
-struct PixelEntryView {
-    virtual void* destroy(int flags) = 0;
-
-protected:
-    ~PixelEntryView() = default;
-};
+/* PixelEntryView (a local partial-layout view over what is really a full
+ * DPlayManager*, dispatching its vtable[0] by hand) removed 2026-08-17
+ * now that PostcardAlbum::RenderTileName's `entry` is known to be a real
+ * DPlayManager* — its release is now a plain `delete entry;` using
+ * DPlayManager's real virtual destructor. */
 
 /* This file's own ABI-slot-accurate DirectDrawSurfaceView (real COM vtable
  * slot numbers: blt at 5, restore at 27) was removed 2026-08-14 in favor of
@@ -619,8 +627,10 @@ void PostcardAlbum::FreeSprites()
 /* ================================================================== */
 void PostcardAlbum::RenderTileName(int tile_index)
 {
-    /* Look up pixel format entry for this tile from the pixel data cache */
-    void* entry = g_pixel_cache->LookupAsset(
+    /* Look up pixel format entry for this tile from the pixel data cache.
+     * Really a DPlayManager* (network/DPlayManager.h) — see
+     * PixelDataCache::LookupAsset's doc comment. */
+    DPlayManager* entry = g_pixel_cache->LookupAsset(
         this->tile_offset + tile_index,
         this->tile_shown_count
     );
@@ -640,29 +650,35 @@ void PostcardAlbum::RenderTileName(int tile_index)
     /* Get the tile_left sprite for the blit rect */
     ButtonSprite* sprite = this->tile_left[tile_index];   /* +0x168 + tile_index*4 */
 
-    /* Render player name via DPLAY */
+    /* Render player name via NetworkPlayerList::RenderPlayer.
+     *
+     * `entry` is the return of PixelDataCache::LookupAsset, which is
+     * itself just NET_ResolveAddress(...)'s return value — a real
+     * DPlayManager* (network/DPlayManager.h), not an opaque asset blob.
+     * `player_count_flag`-style byte and RECT arguments below match the
+     * resolved 9-arg ABI documented on NetworkPlayerList::RenderPlayer;
+     * this call site passes no highlight rect (nullptr) and never reads
+     * `hWnd` back (RenderPlayer only forwards it to RenderSessionBase). */
     const RECT tile_rect = sprite_rect(*sprite);
-    int32_t rect_bottom = tile_rect.bottom;
-    int32_t rect_width  = tile_rect.right;
-    int32_t rect_top    = tile_rect.top;
-    int32_t rect_left   = tile_rect.left;
-
-    /* DPLAY_RenderPlayer(global_dplay, DC, entry, primary, x, y, w, ???); */
-    DPLAY_RenderPlayer(
-        g_dplay,
-        reinterpret_cast<void*>(static_cast<intptr_t>(sprite->sourceX)),  /* hDC derived from width */
+    g_dplay->RenderPlayer(
+        this->show_debug_text != 0,
         entry,
-        g_primary_surface,
-        rect_left,
-        rect_top,
-        rect_width,
-        reinterpret_cast<void*>(static_cast<intptr_t>(rect_bottom))
-    );
+        static_cast<IDirectDrawSurface4*>(g_primary_surface),
+        tile_rect.left,
+        tile_rect.top,
+        tile_rect.right,
+        tile_rect.bottom,
+        this->hWnd,
+        nullptr);
 
-    /* Copy the entry name to tile_text_buf[tile_index] (max 20 bytes) */
-    /* Name is at entry + 0x25 */
-    const char* src_name = reinterpret_cast<const char*>(
-        static_cast<const uint8_t*>(entry) + 0x25);
+    /* Copy the entry name to tile_text_buf[tile_index] (max 20 bytes).
+     * Reads player->m_sessionBlk2 (+0x25) as a C string — verified from
+     * raw disassembly, not a guess: this postcard-flavored .crd record
+     * reuses that byte range for the sender's name rather than live
+     * session state (postcards aren't part of a live multiplayer
+     * session), unlike RenderPlayer's own live-session use of the same
+     * field for a "Sent"-line label. */
+    const char* src_name = reinterpret_cast<const char*>(entry->m_sessionBlk2);
     char* dst_buf = this->tile_text_buf[tile_index];  /* +0x1DA + tile_index*0x14 */
 
     /* Copy full string with strlen + memcpy (no 19-char limit) */
@@ -673,8 +689,10 @@ void PostcardAlbum::RenderTileName(int tile_index)
     }
     dst_buf[len] = '\0';
 
-    /* Mark entry as used through its typed release entry. */
-    reinterpret_cast<PixelEntryView*>(entry)->destroy(1);
+    /* Release the resolved player record — matches the original's
+     * vtable[0] dispatch with flags=1 (DPlayManager's real scalar
+     * deleting destructor, 0x4428C0, frees `this` when bit 0 is set). */
+    delete entry;
 
     /* Set tile_mid sprite state to 0 (default/visible) */
     Sprite_SetState(this->tile_mid[tile_index], 0, nullptr);

@@ -43,6 +43,7 @@
 
 #include "Netman.h"
 #include "DPlayManager.h"
+#include "NetworkPlayerList.h"
 #include "../graphics/LOCOBITMAP.h"
 #include "../game/Building.h"
 #include "../game/GameConfig.h"
@@ -77,13 +78,13 @@ extern void* g_train_resources;    /* 0x4FD394 */
 /* _g_netman_data — GameConfig singleton (GameLoop_Setup: DAT_004fd3a8 =
  * GameConfig_constructor(...), confirmed via Ghidra at 0x406C6C). The
  * name given to this global in this file predates that finding and
- * suggests it was assumed to be Netman-owned state; it is not. The exact
- * same 0x4FD3A8 singleton also appears elsewhere under g_dplayConfig
- * (game/GameConfig.h), _g_dplay/_g_dplay_config (this file's own extern
- * block below), and g_game_config (core/GameLoop.cpp) — a pre-existing
- * one-global/many-names landmine across the tree, out of scope to
- * consolidate here. Retyped (was void*) so the +8/+0x10 reads below use
- * GameConfig's own named fields instead of raw offsets. */
+ * suggests it was assumed to be Netman-owned state; it is not. This is now
+ * the one canonical name/pointer for the 0x4FD3A8 singleton tree-wide
+ * (game/GameConfig.h) — the other names that used to alias it
+ * (g_dplayConfig, _g_netman_state, g_net_host_info, _DAT_004fd3a8, and a
+ * host-only DPlayConfig stand-in class) have been consolidated onto this
+ * one pointer (2026-08-17). Retyped (was void*) so the +8/+0x10 reads
+ * below use GameConfig's own named fields instead of raw offsets. */
 extern GameConfig* _g_netman_data;  /* 0x4FD3A8 */
 
 /* String constants */
@@ -2349,7 +2350,11 @@ void Netman::HandleTimeout(InboundTrainNode* node)
         if (dplay == nullptr || g_player_config == nullptr) continue;
         if (std::strcmp(reinterpret_cast<const char*>(dplay->m_sessionBlk1),
                         g_player_config->name) == 0) {
-            NET_RegisterPlayer(_g_dplay, dplay, 1, 0);
+            /* `_g_dplay` was a dead, permanently-null alias of this same
+             * NetworkPlayerList singleton; `g_dplay` (no leading underscore,
+             * network/NetworkPlayerList.h) is the real, correctly-assigned
+             * pointer (constructed by core/GameLoop.cpp). */
+            NET_RegisterPlayer(g_dplay, dplay, 1, 0);
             editor->SetDPlayData(nullptr);
             registered_local_route = true;
         }
@@ -2543,8 +2548,11 @@ void NETMAN_StartClientSession()
     TrainMessage* m = allocate_train_message();
     if (m == nullptr) return;
     m->type = 1;
-    const auto* host_info = reinterpret_cast<const uint8_t*>(g_net_host_info);
-    m->data_len = static_cast<uint32_t>(host_info[8]);
+    /* `g_net_host_info` was a dead, permanently-null alias of this same
+     * GameConfig singleton; `_g_netman_data` (index 8 == m_hostMode) is the
+     * real, correctly-assigned pointer. */
+    m->data_len = (_g_netman_data != nullptr)
+        ? static_cast<uint32_t>(_g_netman_data->m_hostMode) : 0;
     m->data_ptr = nullptr;
     m->target_dpId = 0;
     m->flags = 0;

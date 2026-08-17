@@ -23,6 +23,7 @@
 
 #include "../game/World.h"
 #include "../game/Vehicle.h"
+#include "../game/GameConfig.h"
 #include "../core/VehicleEditor.h"
 #include "../world/EditorState.h"
 #include "../world/tilemap.h"
@@ -48,11 +49,13 @@
 /* ==================================================================== */
 
 extern void*   _g_train;                            /* 0x4A9990-adjacent TrainSubsystem singleton */
-extern char*   _g_netman_state;                     /* 0x4FD3A8 — host/join menu selection byte
-                                                        blob; see ui/GameSetupPanel.cpp /
-                                                        ui/EditWindow.cpp for the established
-                                                        `_g_netman_state[8] != 0` "network mode"
-                                                        idiom this file follows. */
+class GameConfig;
+extern GameConfig* _g_netman_data;                  /* 0x4FD3A8 — GameConfig singleton
+                                                        (game/GameConfig.h); see
+                                                        ui/GameSetupPanel.cpp / ui/EditWindow.cpp
+                                                        for the established
+                                                        `_g_netman_data->m_hostMode != 0`
+                                                        "network mode" idiom this file follows. */
 void NETMAN_StartClientSession();                   /* real def: network/Netman.cpp, 0x43F030 */
 void DPLAY_CopyPlayerData(void* dstSlot, const void* packet); /* real def: network/Netman.cpp, 0x4426D0 */
 void Train_QueueMessage(void* train, TrainMessage* msg);      /* real def: game/Train_network.cpp, 0x4393D0 */
@@ -544,7 +547,7 @@ void VehicleEditor_Update(Vehicle* vehicle)
  *        is null on this host if read as a raw address — the established,
  *        already-integrated idiom for this exact byte (ui/GameSetupPanel.cpp,
  *        ui/GameSetupPanel_network.cpp, ui/EditWindow.cpp all use it) is
- *        `_g_netman_state != nullptr && _g_netman_state[8] != 0`; followed
+ *        `_g_netman_data != nullptr && _g_netman_data->m_hostMode != 0`; followed
  *        that instead of dereferencing the raw address.
  *     2. StartGameTimer's `(**(code**)(*param_1 + 0x20))(0)` is a vtable
  *        dispatch at x86 BYTE offset 0x20 = index 8 = GameSetupPanel's
@@ -601,7 +604,7 @@ void EditorState_LoadExistingGame(void* uiPanel)
     if (panel == nullptr) return;
 
     GameNetman()->ResetNetworkState();
-    if (_g_netman_state == nullptr || _g_netman_state[8] == 0) {
+    if (_g_netman_data == nullptr || _g_netman_data->m_hostMode == 0) {
         EditorState_StartNewGame(panel);
         GameNetman()->m_gameMode = 0;
         panel->drawLayoutList(panel->layoutList);
@@ -623,7 +626,7 @@ void EditorState_HandleNetworkGame(void* uiPanel)
     auto* panel = static_cast<GameSetupPanel*>(uiPanel);
     if (panel == nullptr || panel->renderFlag == 0) return;
 
-    if (_g_netman_state != nullptr && _g_netman_state[8] != 0) {
+    if (_g_netman_data != nullptr && _g_netman_data->m_hostMode != 0) {
         GameNetman()->m_gameMode = 1;
         panel->updateTitle();
     }
@@ -643,7 +646,7 @@ void EditorState_StartGameTimer(int32_t* uiPanelRaw)
     if (panel == nullptr) return;
 
     panel->field_10C = 0;
-    if (_g_netman_state == nullptr || _g_netman_state[8] == 0) {
+    if (_g_netman_data == nullptr || _g_netman_data->m_hostMode == 0) {
         panel->SelectLayoutEntry(panel->selectedEntry + 1);
     } else {
         GameNetman()->Init(0);
@@ -705,7 +708,7 @@ void EditorState_SetDifficulty(void* uiPanel, int32_t difficulty)
     if (panel == nullptr) return;
 
     panel->field_110 = difficulty;
-    if ((_g_netman_state == nullptr || _g_netman_state[8] == 0) && panel->renderFlag != 0) {
+    if ((_g_netman_data == nullptr || _g_netman_data->m_hostMode == 0) && panel->renderFlag != 0) {
         panel->updateTitle();
         UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
     }

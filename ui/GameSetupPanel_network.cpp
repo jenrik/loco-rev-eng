@@ -6,6 +6,7 @@
 
 #include "../ui/GameSetupPanel.h"
 #include "../network/Netman.h"
+#include "../game/GameConfig.h"
 #include "../game/PlayerConfig.h"
 #include "../game/Train.h"
 
@@ -33,9 +34,8 @@ extern void EditorState_StartNewGame(void* panel);  // 0x40A150
  * callers in docs/landmine-sweep-worklist.md). */
 extern void UIPANEL_EndPaintEx(void* panel, int32_t hdc, int32_t unlockParam,
                                 uint8_t unlockFlag, RECT* restrictRect);
-#ifndef _WIN32
-extern char* _g_netman_state;
-#endif
+class GameConfig;
+extern GameConfig* _g_netman_data;  /* 0x4FD3A8 — GameConfig singleton (game/GameConfig.h) */
 
 namespace {
 std::uint32_t CurrentPlayerInfo()
@@ -98,12 +98,7 @@ void GameSetupPanel::ConnectToNetworkGame(int32_t index)
  *  Address: 0x40AAF0 */
 void GameSetupPanel::SelectLayoutEntry(int32_t index)
 {
-#ifndef _WIN32
-    if (_g_netman_state != nullptr && _g_netman_state[8] != 0) return;
-#else
-    extern char* _g_netman_state;
-    if (_g_netman_state[8] != 0) return;
-#endif
+    if (_g_netman_data != nullptr && _g_netman_data->m_hostMode != 0) return;
     LayoutListNode* selected = this->layoutList;
     int32_t walked = 0;
     if (selected != nullptr) {
@@ -152,12 +147,7 @@ void GameSetupPanel::HandleMapClick(int32_t clickX, int32_t clickY)
  *  Address: 0x40AC50 */
 void GameSetupPanel::SendScenarioSelect(int32_t scenarioIndex)
 {
-#ifndef _WIN32
-    const bool networkSelected = _g_netman_state != nullptr && _g_netman_state[8] != 0;
-#else
-    extern char* _g_netman_state;
-    const bool networkSelected = _g_netman_state[8] != 0;
-#endif
+    const bool networkSelected = _g_netman_data != nullptr && _g_netman_data->m_hostMode != 0;
     if (networkSelected) {
         const int32_t source = _g_netman->m_bFlag1 != 0 ? _g_netman->m_myDpId : -1;
         _g_netman->SendLayoutSelect(source, scenarioIndex,

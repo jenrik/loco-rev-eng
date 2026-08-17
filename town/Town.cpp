@@ -49,6 +49,7 @@
 #include "../network/DPlayManager.h"
 #include "../network/DirectPlay.h"
 #include "../network/NetworkPlayerList.h"
+#include "../platform/ddraw_interfaces.h"
 #include "../ui/PostcardAlbum.h"
 #include "../ui/UIPANEL_Surface.h"
 #include "../resources/ResourceObject.h"
@@ -178,9 +179,10 @@ extern "C" {
      * 2026-08-14; it was a live landmine (see DPlayManager.h's own doc
      * comment) that made every real call site here always get null. */
     void   NET_RegisterPlayer(void* dplay, void* data, int type, int unk); /* 0x4498E0 */
-    void   DPLAY_RenderPlayer(void* dplay, int param1, int param2,
-                              void* param3, int param4, int param5,
-                              uint32_t param6, RECT* param7);        /* 0x4437C0 */
+    /* DPLAY_RenderPlayer extern "C" facade removed 2026-08-17 — real
+     * 9-arg ABI resolved on NetworkPlayerList::RenderPlayer (0x4437C0);
+     * Town::clear_postcard_ui now calls `g_dplay->RenderPlayer(...)`
+     * directly. */
     void   NET_GetFilePath(uint player_id, int type, char* buf);     /* 0x445510 */
     void   NET_GetAttFilePath(uint player_id, int type, char* buf);  /* 0x445400 */
     char*  _strrchr(const char* s, int c);                           /* 0x467E60 */
@@ -751,11 +753,10 @@ void Town::on_create()
     OffsetRect(reinterpret_cast<RECT*>(&this->button_src_left), 0x100, 0xD2);
 
     /* Player render area rect: player_rect offset by (0x199, 0xB2).
-     * render_extra/render_rect_ptr are computed from the player rect
+     * render_extra/render_bottom are computed from the player rect
      * BEFORE the offset (binary order at 0x42FD8E/0x42FD98). */
     this->render_extra = this->player_rect.left + 300;
-    this->render_rect_ptr =
-        reinterpret_cast<void*>(static_cast<uintptr_t>(this->player_rect.top + 200));
+    this->render_bottom = this->player_rect.top + 200;
     CopyRect(reinterpret_cast<RECT*>(&this->render_param_x), &this->player_rect);
     OffsetRect(reinterpret_cast<RECT*>(&this->render_param_x), 0x199, 0xB2);
 
@@ -1261,16 +1262,21 @@ void Town::clear_postcard_ui()
                 0);
         }
 
-        /* DPLAY_RenderPlayer(dplay, flag(+0x610), player(+0x608),
-         * primary, +0x624, +0x628, +0x62C, *(void**)(+0x630)). */
-        DPLAY_RenderPlayer(g_dplay,
-                           static_cast<int>(this->player_count_flag),
-                           static_cast<int>(reinterpret_cast<intptr_t>(this->selected_player)),
-                           g_primary_surface,
-                           this->render_param_x,
-                           this->render_param_y,
-                           this->render_extra,
-                           reinterpret_cast<RECT*>(this->render_rect_ptr));
+        /* NetworkPlayerList::RenderPlayer's real 9-arg ABI (see its own
+         * doc comment): highlighted=player_count_flag, player=
+         * selected_player, surface=g_primary_surface, left/top/right/
+         * bottom=render_param_x/y/extra/bottom, hWnd=this->hWnd,
+         * highlightRect=nullptr (this call site passes none — matching
+         * PostcardAlbum::RenderTileName's call, not Cursor's). */
+        g_dplay->RenderPlayer(this->player_count_flag != 0,
+                              this->selected_player,
+                              static_cast<IDirectDrawSurface4*>(g_primary_surface),
+                              this->render_param_x,
+                              this->render_param_y,
+                              static_cast<int32_t>(this->render_extra),
+                              this->render_bottom,
+                              this->hWnd,
+                              nullptr);
 
         RECT send_area;
         SetRectEmpty(&send_area);
@@ -1525,15 +1531,11 @@ LRESULT Town::on_lbutton_down(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     /* Click on the player render area: select the player.
      *
-     * NOTE: on the original x86 layout, render_param_x/render_param_y/
-     * render_extra/render_rect_ptr (Town.h +0x624..+0x630) are 4
-     * consecutive 4-byte fields forming a tightly-packed RECT overlay —
-     * this cast is faithful there. On this 64-bit host, render_rect_ptr
-     * is a real 8-byte pointer, so the same 16-byte reinterpret only
-     * covers the low 4 bytes of it as "bottom" — a pre-existing,
-     * host-layout-only discrepancy (not introduced by this pass) that
-     * would need its own Ghidra-verified fix to resolve; preserved as-is
-     * rather than guessed at here. */
+     * render_param_x/render_param_y/render_extra/render_bottom (Town.h
+     * +0x624..+0x630) are 4 consecutive int32_t fields forming a
+     * tightly-packed RECT overlay on both the original x86 layout and
+     * this host (render_bottom was fixed from a `void*` 2026-08-17,
+     * which removed the previous 64-bit host-size discrepancy here). */
     if (this->selected_player &&
         PtInRect(reinterpret_cast<RECT*>(&this->render_param_x), pt)) {
         PlaySound(0x5015);

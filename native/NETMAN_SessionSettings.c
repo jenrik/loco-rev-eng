@@ -1,15 +1,12 @@
 /**
  * NETMAN_SessionSettings — Network settings persistence (NetSettings.dat)
- * and the session-name-entry panel's window proc.
  *
  * Lego Loco (loco.exe, 1998, MSVC x86)
  * Reverse engineered via Ghidra decompilation.
  *
  * Functions for loading and saving network session configuration to
- * NetSettings.dat in the install directory, and for handling ENTER/ESC in
- * the multiplayer name-entry/session dialog. Operates on the GameConfig
- * singleton (game/GameConfig.h, ~0xB0 bytes, object 0x4FD3A8) and the
- * NameEntryPanel instance (ui/NameEntryPanel.h) passed in as `this`.
+ * NetSettings.dat in the install directory. Operates on the GameConfig
+ * singleton (game/GameConfig.h, ~0xB0 bytes, object 0x4FD3A8).
  *
  * Contains:
  *   NETMAN_FreePacket     (0x440D00) — Load NetSettings.dat (MISNAMED;
@@ -21,8 +18,14 @@
  *   NETMAN_SendPacket     (0x440EA0) — Save NetSettings.dat (MISNAMED;
  *                                       matches GameConfig::SaveSettings,
  *                                       same situation as above)
- *   NETMAN_DestroySession (0x441F80) — Session panel WindowProc
- *                                       (ENTER/ESC handling)
+ *
+ * NETMAN_DestroySession (0x441F80), previously (mis)transcribed here as a
+ * free-function "Session panel WindowProc" taking a `void* panel` first
+ * parameter, has been moved: reading the NameEntryPanel vtable's raw bytes
+ * at 0x4781D0 (ui/NameEntryPanel.h) shows this address at slot 21 (+0x54),
+ * matching UI_WindowBase::on_key_down(HWND, UINT, WPARAM, LPARAM) exactly
+ * — it is NameEntryPanel::on_key_down(), a real vtable override, not a
+ * plain WindowProc. Moved into ui/NameEntryPanel.cpp 2026-08-17.
  *
  * NETMAN_AllocPacket (0x440CC0), previously in this file, has been
  * removed: it duplicated GameConfig::~GameConfig() (game/GameConfig.cpp),
@@ -53,7 +56,6 @@
  */
 #include "../shared/types.h"
 #include "../game/GameConfig.h"
-#include "../ui/NameEntryPanel.h"
 
 /* ================================================================== */
 /* External references                                                 */
@@ -73,47 +75,13 @@ extern int32_t __stdcall ReadFile(void* hFile, void* lpBuffer, uint32_t nNumberO
 extern int32_t __stdcall WriteFile(void* hFile, const void* lpBuffer, uint32_t nNumberOfBytesToWrite,
                                     uint32_t* lpNumberOfBytesWritten, void* lpOverlapped);
 extern int32_t __stdcall CloseHandle(void* hObject);
-extern void    __stdcall Sleep(uint32_t dwMilliseconds);
-extern LRESULT __stdcall DefWindowProcA(void* hWnd, uint32_t Msg, uint32_t wParam, uint32_t lParam);
-extern int32_t __stdcall GetWindowTextA(void* hWnd, char* lpString, int32_t nMaxCount);
-
-extern void  __cdecl    UI_MainMenu_SetState(void* ui_main, int32_t state);
-extern void  __cdecl    Sprite_SetState(void* sprite, int32_t state, int32_t* unk);
-
-extern void* g_ui_main;                /* 0x4A8860 */
 }
-
-/* Real def: ui/UIPANEL.cpp (0x426B90), C++ linkage (not extern "C"),
- * void(void* self, int hdc, int unlock_param, uint8_t unlock_flag,
- * RECT* restrict_rect) — the 2nd param is `int hdc`, not `void* hwnd`.
- * Was declared inside the extern "C" block above with a void* 2nd
- * param — both the linkage and the 2nd param type mismatched the real
- * mangled symbol, so both of this file's call sites were a
- * silent-wrong-stub landmine binding to shared/stubs_impl.cpp's host
- * no-op instead of the real present pipeline (the identical landmine
- * already fixed in native/NETMAN_NetworkUI.c;
- * docs/landmine-sweep-worklist.md). Moved out of extern "C" with the
- * correct 2nd-param type. */
-extern void  __thiscall UIPANEL_EndPaintEx(void* self, int32_t hdc, int32_t unlockParam,
-                                            uint8_t unlockFlag, RECT* restrictRect);
-
-/* GameConfig singleton (0x4FD3A8). network/Netman.cpp already declares
- * this exact symbol as `GameConfig*` and uses named fields through it;
- * this file matches that precedent (previously declared here as a bare
- * `void*`). Note: defsym_stubs.cpp's defining declaration is still
- * `void* _g_netman_data = nullptr;` — same ODR wrinkle Netman.cpp already
- * carries (pointer-sized either way; the linker doesn't type-check data
- * symbols). GameConfig is never actually constructed anywhere in-tree
- * today, so this remains permanently null on the host build. */
-extern GameConfig* _g_netman_data;      /* 0x4FD3A8 */
 
 /* Canonical declarations live in network/Netman.h; these local prototypes
  * (matching them exactly) satisfy -Wmissing-declarations without pulling
- * in Netman.h's much larger include graph for these three functions. */
+ * in Netman.h's much larger include graph for these two functions. */
 extern void    __fastcall  NETMAN_FreePacket(GameConfig* packetPtr);
 extern void    __fastcall  NETMAN_SendPacket(GameConfig* packetPtr);
-extern LRESULT __thiscall  NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
-                                                  uint32_t wParam, uint32_t lParam);
 
 /* Format: "%s\\%s" */
 #define FMT_FILE_PATH "%s\\%s"          /* 0x47E8A0 */
@@ -136,7 +104,11 @@ extern LRESULT __thiscall  NETMAN_DestroySession(void* panel, void* hWnd, uint32
  *  = object offset - 4. The provider-list slot (object+0x10, file
  *  [0xC..0x10)) is deliberately NOT copied: the original always restores
  *  the pre-call provider list pointer after this read (see
- *  NETMAN_FreePacket below), discarding whatever was on disk there. */
+ *  NETMAN_FreePacket below), discarding whatever was on disk there.
+ *  connection_caps (object+0x14..+0x17, file [0x10..0x14)) IS copied: the
+ *  original's raw ReadFile/WriteFile blit covers this region unconditionally
+ *  (it was previously miscategorized as padding and skipped here — fixed
+ *  2026-08-17 alongside game/GameConfig.h's field-layout correction). */
 static void GameConfig_ApplyRawSettings(GameConfig* cfg, const uint8_t raw[0xAC])
 {
     memcpy(&cfg->m_magic,               raw + 0x00, sizeof(cfg->m_magic));
@@ -144,6 +116,7 @@ static void GameConfig_ApplyRawSettings(GameConfig* cfg, const uint8_t raw[0xAC]
     memcpy(&cfg->m_autoStart,           raw + 0x03, sizeof(cfg->m_autoStart));
     memcpy(&cfg->m_hostMode,            raw + 0x04, sizeof(cfg->m_hostMode));
     memcpy(&cfg->m_timeout,             raw + 0x08, sizeof(cfg->m_timeout));
+    memcpy(cfg->m_connectionCaps,       raw + 0x10, sizeof(cfg->m_connectionCaps));
     memcpy(&cfg->m_hostFlagAuto,        raw + 0x14, sizeof(cfg->m_hostFlagAuto));
     memcpy(&cfg->m_clientPlayerCount,   raw + 0x18, sizeof(cfg->m_clientPlayerCount));
     memcpy(&cfg->m_clientPlayerCountAlt,raw + 0x1C, sizeof(cfg->m_clientPlayerCountAlt));
@@ -169,6 +142,7 @@ static void GameConfig_BuildRawSettings(const GameConfig* cfg, uint8_t raw[0xAC]
     memcpy(raw + 0x03, &cfg->m_autoStart,           sizeof(cfg->m_autoStart));
     memcpy(raw + 0x04, &cfg->m_hostMode,            sizeof(cfg->m_hostMode));
     memcpy(raw + 0x08, &cfg->m_timeout,             sizeof(cfg->m_timeout));
+    memcpy(raw + 0x10, cfg->m_connectionCaps,       sizeof(cfg->m_connectionCaps));
     memcpy(raw + 0x14, &cfg->m_hostFlagAuto,        sizeof(cfg->m_hostFlagAuto));
     memcpy(raw + 0x18, &cfg->m_clientPlayerCount,   sizeof(cfg->m_clientPlayerCount));
     memcpy(raw + 0x1C, &cfg->m_clientPlayerCountAlt,sizeof(cfg->m_clientPlayerCountAlt));
@@ -189,7 +163,7 @@ void __fastcall NETMAN_FreePacket(GameConfig* cfg)
     uint32_t bytesRead;
 
     /* Save linked list head before overwriting */
-    void* savedList = cfg->m_providerList;
+    DirectPlayConnectionNode* savedList = cfg->m_providerList;
     cfg->m_providerList = nullptr;
 
     /* Clear loaded flag */
@@ -210,7 +184,16 @@ void __fastcall NETMAN_FreePacket(GameConfig* cfg)
         return;
     }
 
-    uint8_t raw[0xAC];
+    /* Zero-initialized (not just declared): the original x86 ReadFile call
+     * only ever runs against a real NetSettings.dat of the expected size, so
+     * a short read never happened there. On the host, nothing here checks
+     * `bytesRead` against sizeof(raw) before ApplyRawSettings uses the
+     * buffer, so a host ReadFile shim that "succeeds" with a short/partial
+     * read (e.g. a missing or truncated file) must not hand ApplyRawSettings
+     * uninitialized stack bytes -- those would flow into cfg->m_sessionName,
+     * which is read back via SetWindowTextA/GetWindowTextA elsewhere and is
+     * not otherwise defaulted on this path. */
+    uint8_t raw[0xAC] = {0};
     bytesRead = 0;
     if (!ReadFile(hFile, raw, sizeof(raw), &bytesRead, nullptr)) {
         CloseHandle(hFile);
@@ -273,67 +256,4 @@ void __fastcall NETMAN_SendPacket(GameConfig* cfg)
         WriteFile(hFile, raw, sizeof(raw), &bytesWritten, nullptr);
         CloseHandle(hFile);
     }
-}
-
-/* ================================================================== */
-/* NETMAN_DestroySession — 0x441F80                                    */
-/* Session panel WindowProc: handles ENTER (0xD) and ESC (0x1B) keys. */
-/*                                                                      */
-/* `panel` is a NameEntryPanel* (ui/NameEntryPanel.h), evidenced by five */
-/* independently corroborating facts gathered while fixing this file:   */
-/*   - +0x148 matches NameEntryPanel::paintReadyFlag, which gates this    */
-/*     exact ENTER/ESC handling in this function and in                */
-/*     NETMAN_SetSessionInfo (0x441C80), and which NETMAN_JoinSession   */
-/*     (0x441870) clears on (re)open.                                  */
-/*   - +0x1B0/+0x1B4 match NameEntryPanel::sprite0/sprite1              */
-/*     (ButtonSprite*), passed to Sprite_SetState exactly as here.      */
-/*   - +0x1D8 matches NameEntryPanel::sessionNameEditHwnd, fed to              */
-/*     GetWindowTextA exactly as here.                                  */
-/*   - The vtable-slot-4 (+0x10) indirect call with args (0,0,0,0,1)    */
-/*     matches UI_WindowBase::set_render_surface's 5-parameter          */
-/*     signature exactly (surface, frame_divisor, origin,               */
-/*     reset_dirty_rect, force_redraw) — NameEntryPanel inherits this   */
-/*     slot unmodified from UI_WindowBase.                              */
-/*   - `this+8` matches the inherited UI_WindowBase::hWnd, used         */
-/*     identically by UIPANEL_EndPaintEx here and in                    */
-/*     NETMAN_SetSessionInfo/DPlayManager::RenderConnectionPanel.       */
-/* ================================================================== */
-LRESULT __thiscall NETMAN_DestroySession(void* panelPtr, void* hWnd, uint32_t msg,
-                                          uint32_t wParam, uint32_t lParam)
-{
-    NameEntryPanel* panel = static_cast<NameEntryPanel*>(panelPtr);
-
-    if (panel->paintReadyFlag == 0) {
-        return DefWindowProcA(hWnd, msg, wParam, lParam);
-    }
-
-    if (wParam != 0x0D && wParam != 0x1B) {
-        return DefWindowProcA(hWnd, msg, wParam, lParam);
-    }
-
-    if (wParam == 0x1B) {
-        /* ESC pressed — cancel/back */
-        Sprite_SetState(panel->sprite1, 1, nullptr);
-        UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
-        Sleep(0x96);
-        panel->set_render_surface(nullptr, 0, nullptr, 0, 1);
-        UI_MainMenu_SetState(g_ui_main, 7);
-        return 0;
-    }
-
-    /* wParam == 0x0D: ENTER pressed — confirm/join */
-    Sprite_SetState(panel->sprite0, 1, nullptr);
-    UIPANEL_EndPaintEx(panel, static_cast<int32_t>(reinterpret_cast<intptr_t>(panel->hWnd)), 0, 0, nullptr);  // ABI_BOUNDARY: opaque OS HWND round-tripped through the original function's int hdc param (matches ui/UIPANEL.cpp's UIPANEL_EndPaint wrapper)
-    Sleep(0x96);
-    panel->set_render_surface(nullptr, 0, nullptr, 0, 1);
-
-    GetWindowTextA(panel->sessionNameEditHwnd, _g_netman_data->m_sessionName, 0x40);
-    if (_g_netman_data->m_hostMode == 0) {
-        _g_netman_data->m_clientAutoFlag = 1;
-    } else {
-        _g_netman_data->m_hostFlagAuto = 1;
-    }
-    NETMAN_SendPacket(_g_netman_data);
-    UI_MainMenu_SetState(g_ui_main, 3);
-    return 0;
 }

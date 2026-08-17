@@ -138,9 +138,22 @@ bool NETMAN_ReceiveTrainPosition(int32_t position_x, int32_t position_y,
  * address via NET_ResolveAddress, copies data into resolved DPlayData.
  *
  * @param playerDPlayData  Source DPlayData with player name to resolve
- * @return                 Resolved DPlayData pointer, or NULL on failure
+ * @return                 Resolved DPlayManager pointer, or NULL on failure
+ *
+ * Return type is `DPlayManager*` (2026-08-17) — the host implementation
+ * (network/Netman_ReceiveSignalChange.cpp) always constructs and returns a
+ * real `DPlayManager*`, and its one same-file caller was already
+ * `static_cast`-ing the result to that type. `playerDPlayData` stays `void*`:
+ * one of its two real callers (network/Netman.cpp, the second inbound-route
+ * resolution loop) passes `(void*)(uintptr_t)VehicleEditor_GetDPlayData(...)`
+ * — and `VehicleEditor_GetDPlayData` itself returns `int32_t`, a separate,
+ * pre-existing pointer-truncation landmine on this 64-bit host — so a
+ * `DPlayManager*` parameter here would just move that landmine to a
+ * compile-time cast instead of fixing it. Retype together with
+ * `VehicleEditor_GetDPlayData`'s own return type in a dedicated pass.
  */
-void* NETMAN_ReceiveSignalChange(void* playerDPlayData);
+class DPlayManager;   /* forward decl (network/DPlayManager.h) */
+DPlayManager* NETMAN_ReceiveSignalChange(void* playerDPlayData);
 
 #ifndef _WIN32
 /**
@@ -220,12 +233,15 @@ extern int32_t  g_player_color;       /* 0x4AAD48 — host-declared 32-bit for
                                           *   loads in the binary) */
 extern TileMap* g_tilemap;            /* 0x4AAD08 — tilemap object     */
 extern void*    g_asset_mgr;          /* 0x485600 — asset manager ptr  */
-extern void*    g_net_host_info;      /* 0x4FD3A8 — net host info struct */
 extern void*    g_ui_main;            /* 0x4A8860 — main UI window ptr */
 extern void*    g_listener_x;         /* 0x486BBC — listener position x */
 extern void*    g_listener_y;         /* 0x486BC0 — listener position y */
-extern void*    _g_dplay;             /* 0x4FD3A8 — DPLAY/NetworkPlayerList instance */
-extern void*    _g_dplay_config;      /* 0x4FD3AC — DPLAY config instance */
+/* g_net_host_info / _g_dplay / _g_dplay_config (dead aliases of the
+ * GameConfig singleton at 0x4FD3A8, or of an unrelated naming collision
+ * with the real NetworkPlayerList singleton at 0x4FD3B0) removed
+ * 2026-08-17 — see game/GameConfig.h's header comment and
+ * network/NetworkPlayerList.h's `g_dplay`/`g_dplay_config` (no leading
+ * underscore) for the real, canonically-assigned pointers. */
 extern int32_t  g_object_count;       /* 0x4AAD04 — object count       */
 extern Netman*  _g_netman;            /* 0x4FD3AC — Netman singleton pointer */
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 — PlayerConfig singleton */
@@ -362,7 +378,12 @@ void    DPLAY_FreePlayerSlot(void* packet, const int32_t* slotSrc); /* 0x4427D0 
 void*   DPLAY_DecodePlayerSlots(const void* firstCompactSlot);
 #endif  /* @ 0x442750 */
 int16_t DPLAY_GetMessageCount(int32_t dplay);
-void    DPLAY_EnumeratePlayers(int32_t dplay);
+/* DPLAY_EnumeratePlayers(int32_t) removed 2026-08-15 — was never a real
+ * function (its only "definition" was shared/defsym_stubs.cpp's dead data
+ * symbol, `void* DPLAY_EnumeratePlayers = nullptr;`); its one real call
+ * site (network/Netman_ReceiveSignalChange.cpp) now calls the real,
+ * already-integrated NetworkPlayerList::EnumeratePlayers() method on the
+ * canonical `g_dplay` singleton directly. */
 
 /* -- Stream I/O -- */
 void* WIN32_StreamFromMemory(void* stream, const char* data,
@@ -388,26 +409,17 @@ void     NET_Ctor(void* dplay, void* param1, uint32_t param2, uint32_t param3,
 void     NET_BaseDtor(void* dplay);
 
 /* -- Network UI helpers -- */
-/* All operate on NameEntryPanel (ui/NameEntryPanel.h), confirmed via the
- * vtable data at 0x4781D0 — see that header's vtable table. Real
- * definitions: native/NETMAN_NetworkUI.c. Previously declared here with
- * `int32_t`/plain `void*` panel params (a documentation-only mismatch:
- * nothing outside native/NETMAN_NetworkUI.c currently includes/calls
- * through these particular declarations, so it was never a live call-0). */
+/* All 8 of NameEntryPanel's (ui/NameEntryPanel.h) former free-function
+ * "Class_Method(self, ...)" transcriptions — NETMAN_EnumerateSessions,
+ * NETMAN_JoinSession, NETMAN_CreateSession, NETMAN_LeaveSession,
+ * NETMAN_UpdateSessionInfo, NETMAN_GetSessionInfo, NETMAN_SetSessionInfo,
+ * and NETMAN_DestroySession — were moved into real compiler-managed
+ * NameEntryPanel methods/overrides 2026-08-17 (enumerateSessions(),
+ * show(), applyProviderModes(), hide(), on_update(), getSessionInfo(),
+ * on_lbutton_down(), on_key_down() respectively). See that header's
+ * vtable table for the full per-slot evidence. Declarations removed here
+ * — callers now go through `NameEntryPanel*` objects directly. */
 class NameEntryPanel;
-void  NETMAN_EnumerateSessions(NameEntryPanel* panel);
-void  NETMAN_JoinSession(NameEntryPanel* panel);
-void  NETMAN_CreateSession(NameEntryPanel* panel);
-void  NETMAN_LeaveSession(NameEntryPanel* panel);
-void  NETMAN_UpdateSessionInfo(NameEntryPanel* panel);
-void  NETMAN_GetSessionInfo(NameEntryPanel* panel);
-LRESULT NETMAN_SetSessionInfo(NameEntryPanel* panel, void* hWnd, uint32_t msg,
-                               uint32_t wParam, uint32_t lParam);
-/* Return type fixed to LRESULT (was void*) — Ghidra confirms 0x441F80
- * returns LRESULT (always 0 on every path), matching a __thiscall
- * session-panel WindowProc, not a pointer. See native/NETMAN_SessionSettings.c. */
-LRESULT NETMAN_DestroySession(void* panel, void* hWnd, uint32_t msg,
-                               uint32_t wParam, uint32_t lParam);
 
 /* -- DirectPlay message/file management -- */
 void  DPLAY_SendMessages(void);
@@ -420,10 +432,12 @@ void __stdcall DPLAY_ReceiveMessage(const char* path);
  * different, never-defined symbol than native/NETMAN_SessionSettings.c's
  * real definition, so any caller using the old declaration (e.g.
  * GameConfig::GameConfig()) was an unresolved call masked only by this
- * target's -Wl,--unresolved-symbols=ignore-all link flag. Still a live
- * call-0 for ui/EditWindow.cpp's own separate `void*`-typed local
- * declaration of NETMAN_SendPacket (not fixed — real file I/O side effect
- * risk, left for a dedicated session; see docs/landmine-sweep-worklist.md). */
+ * target's -Wl,--unresolved-symbols=ignore-all link flag. ui/EditWindow.cpp's
+ * own separate `void*`-typed local declaration of NETMAN_SendPacket (the
+ * "live call-0" this comment used to flag) was fixed 2026-08-17 as part of
+ * the GameConfig-singleton-unification pass — it now declares/calls the
+ * same `(GameConfig*)` shape via the canonical `_g_netman_data` pointer;
+ * see docs/landmine-sweep-worklist.md for the resolution note. */
 void  NETMAN_FreePacket(GameConfig* packetPtr);
 void  NETMAN_SendPacket(GameConfig* packetPtr);
 

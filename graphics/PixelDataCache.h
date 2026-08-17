@@ -23,6 +23,7 @@
 
 #include "../shared/types.h"
 
+class DPlayManager;
 
 // Status: TRANSCRIBED
 /* ================================================================ */
@@ -189,13 +190,20 @@ public:
      * NET_ResolveAddress on each entry's value. Returns the first
      * resolved address, or NULL if none found.
      *
+     * Return type resolved 2026-08-17: NET_ResolveAddress (network/
+     * DPlayManager.h) returns DPlayManager*, so this does too — confirmed
+     * via PostcardAlbum::RenderTileName's real caller, which passes this
+     * return value straight into NetworkPlayerList::RenderPlayer's real
+     * `DPlayManager* player` parameter and reads DPlayManager fields from
+     * it directly (graphics/LOCOBITMAP.cpp).
+     *
      * Called by: CGWND_GameSetup_RenderPlayerSlots, GFX_RenderTileName
      *
      * @param start_index  entry index to start searching from
      * @param album_index  album category index to search
-     * @return             resolved asset address, or NULL
+     * @return             resolved player record, or NULL
      */
-    void* LookupAsset(int32_t start_index, int32_t album_index);
+    DPlayManager* LookupAsset(int32_t start_index, int32_t album_index);
 
     /* ================================================================ */
     /* Internal helpers (should be private, but called by flat C code)   */

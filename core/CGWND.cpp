@@ -11,6 +11,9 @@
 #include "../game/ScriptedObject.h"
 #include "../platform/ddraw_interfaces.h"
 #include "../game/PlayerConfig.h"  /* for sizeof(PlayerConfig) */
+#include "../game/GameConfig.h"          /* PHASE 5 shutdown: _g_netman_data */
+#include "../network/NetworkPlayerList.h" /* PHASE 5 shutdown: g_dplay */
+#include "../graphics/PixelDataCache.h"   /* PHASE 5 shutdown: g_dplay_config */
 #include <cstring>
 #include <cstdio>
 #include <cassert>
@@ -1082,19 +1085,60 @@ void CGWND_Cleanup()
     /* PHASE 5: Destroy additional non-UI subsystems                     */
     /* ================================================================ */
     extern void* _g_train;
-    extern void* _DAT_004fd3a8;
-    extern void* _g_dplay;
-    extern void* _g_dplay_config;
     extern void* _g_train_resources;
     /* g_player_config: declared as PlayerConfig* in PlayerConfig.h */
     extern void* _g_audio_config;
     extern void* _g_dsound_object;
+    /* No header declares this one with its real type yet (every other
+     * declaration tree-wide is a bare `void*`, matching its one real
+     * definition in shared/stubs_impl.cpp) -- declared PixelDataCache*
+     * here since this phase calls a named method through it. */
+    extern PixelDataCache* g_dplay_config;
+    /* _g_netman_data (GameConfig*, 0x4FD3A8), g_dplay (NetworkPlayerList*,
+     * 0x4FD3B0), g_dplay_config (PixelDataCache*, 0x4FD3B4) — the real,
+     * canonically-assigned singletons for this group (game/GameConfig.h,
+     * network/NetworkPlayerList.h). Previously this phase destroyed
+     * `_DAT_004fd3a8`/`_g_dplay`/`_g_dplay_config` instead — three globals
+     * that were always null/zero dead aliases of these same three objects
+     * (see game/GameConfig.h's header comment), so nothing in this group
+     * was ever actually destroyed on shutdown. `_DAT_004fd3a8` was also a
+     * real 4-vs-8-byte width mismatch: declared `void*` here but defined
+     * `int32_t` in shared/link_stubs.cpp. */
 
     destroy_subsystem(_g_train);
-    destroy_subsystem(_DAT_004fd3a8);
     destroy_subsystem(g_netman);
-    destroy_subsystem(_g_dplay);
-    destroy_subsystem(_g_dplay_config);
+    /* g_dplay (NetworkPlayerList) has a real, compiler-managed virtual
+     * destructor (network/NetworkPlayerList.h), so destroy_subsystem's
+     * manual vtable-slot-0 dispatch applies the same way it does to the
+     * other polymorphic UI objects destroyed elsewhere in this function. */
+    destroy_subsystem(g_dplay);
+    if (_g_netman_data != nullptr) {
+        /* GameConfig has a real, non-virtual destructor and no vtable in
+         * the host reconstruction (game/GameConfig.h/.cpp) -- calling
+         * destroy_subsystem on it would misinterpret its first data member
+         * (m_magic) as a vtable pointer and crash. It was also allocated
+         * via this project's own operator_new (0x465CE0, core/GameLoop.cpp),
+         * not ::operator new, so plain `delete` would allocator-mismatch.
+         * Call the destructor directly and free with the matching
+         * allocator instead. */
+        _g_netman_data->~GameConfig();
+        GLOBAL_free(_g_netman_data);
+        _g_netman_data = nullptr;
+    }
+    if (g_dplay_config != nullptr) {
+        /* PixelDataCache is likewise non-polymorphic in the host
+         * reconstruction (graphics/PixelDataCache.h has no virtual
+         * methods) -- its real cleanup entry point is the named method
+         * DestroyFromResource(flags), not a C++ destructor. flags=1
+         * matches the original scalar-deleting-destructor's "free heap
+         * memory" bit; DestroyFromResource's current body only flushes to
+         * disk and does not itself call GLOBAL_free on `this` (a pre-
+         * existing gap documented in graphics/PixelDataCache.cpp), so this
+         * intentionally leaks the allocation rather than freeing it out
+         * from under a not-yet-verified contract. */
+        g_dplay_config->DestroyFromResource(1);
+        g_dplay_config = nullptr;
+    }
     destroy_subsystem(_g_train_resources);
     destroy_subsystem(g_player_config);
     destroy_subsystem(g_config_ini);

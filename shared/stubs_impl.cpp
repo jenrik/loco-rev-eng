@@ -10,7 +10,7 @@
 // Status: TRANSCRIBED
 
 #include "types.h"
-#include "../network/DPlayConfig.h"
+#include "../game/GameConfig.h"
 #include "../network/NetworkPlayerList.h"
 #include "../network/DirectPlay.h"
 #include "../game/PlayerConfig.h"
@@ -798,8 +798,8 @@ void PixelDataCache_GetEntryCount(void* self);
 void PixelDataCache_GetEntryCount(void* self) { (void)self; }
 void PixelDataCache_Unlock(void* self, int i);
 void PixelDataCache_Unlock(void* self, int i) { (void)self; (void)i; }
-void DPLAY_RenderPlayer(void*, void*, int, void*, int, int, unsigned int, RECT*);
-void DPLAY_RenderPlayer(void*, void*, int, void*, int, int, unsigned int, RECT*) { /* host no-op */ }
+/* DPLAY_RenderPlayer stub removed 2026-08-17 — see shared/link_stubs.cpp's
+ * matching removal note. */
 void PlaySoundAt(int, int, int, int);
 void PlaySoundAt(int, int, int, int) { /* host no-op */ }
 void Collection_Resize(int);
@@ -819,16 +819,23 @@ void SortedCollection_SortRange(int, int) { /* host no-op */ }
 void* GameConfig_constructor(void* memory);
 void* GameConfig_constructor(void* memory)
 {
-    // GameConfig_constructor @ 0x440C60 initializes the 0xB0-byte DPlayConfig
-    // at DAT_004FD3A8. Keep that binary-facing object available to the menu.
+    // GameConfig_constructor @ 0x440C60 placement-constructs the real
+    // GameConfig singleton (game/GameConfig.h) at DAT_004FD3A8. This used to
+    // construct a host-only DPlayConfig raw-byte-buffer stand-in instead of a
+    // real GameConfig -- the exact "local view struct over a known game
+    // object" anti-pattern CLAUDE.md forbids -- and stored a raw
+    // uint8_t* byte view into every consumer instead of a typed pointer.
+    // GameConfig's real constructor (game/GameConfig.cpp) performs the same
+    // field-default-initialization the original 0x440C60 does, then loads
+    // NetSettings.dat for real (NETMAN_FreePacket, native/NETMAN_SessionSettings.c).
     if (!memory) return nullptr;
-    auto* config = new (memory) DPlayConfig();
-    extern void* _g_netman_state;
-    extern void* g_netSettings;
-    _g_netman_state = config->binary_data();
+    auto* config = new (memory) GameConfig();
+    extern GameConfig* _g_netman_data;
+    extern GameConfig* g_netSettings;
+    _g_netman_data = config;
     // g_netSettings is the same binary DAT_004FD3A8 object under a stale
-    // translation-unit name used by TrainSubsystem.
-    g_netSettings = config->binary_data();
+    // translation-unit name used by TrainSubsystem (game/Train_network.cpp).
+    g_netSettings = config;
     return config;
 }
 void* NETMAN_constructor(void*);
