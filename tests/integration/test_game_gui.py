@@ -140,6 +140,66 @@ def test_singleplayer_accept_reaches_mode3_without_crashing(game):
     game.screenshot("singleplayer-mode3-stable")
 
 
+@pytest.mark.parametrize(
+    "game", [{"SDL_AUDIODRIVER": "dummy"}], indirect=True,
+)
+def test_singleplayer_enter_key_commit_reaches_mode3_without_crashing(game):
+    """Regression for lego_loco.core (coredumpctl PID 607663/613744/614018,
+    2026-08-18): SIGSEGV in PostcardAlbum::InitWindowSurface.
+
+    Two coredumps of this exact build converge on the identical crash site
+    from two different UI triggers:
+
+        EditWindow::hostHandleKey(key_code=13) -> hostCommitPlayerName
+          -> CGWND_SetMode(1) -> CGWND::initMode1
+          -> PostcardAlbum::InitWindowSurface  [crash]
+
+        host_complete_lobby_control(Go) -> CGWND_SetMode(1) -> ...same tail
+
+    gdb on the core showed `this->is_high_res == 1`, so `resId = 0x3C0B`;
+    `album_bg_resource == 0x0` -- i.e. `g_resmgr.GetById(0x3C0B)` returned 0
+    and the very next line unconditionally dereferences it
+    (ui/PostcardAlbum.cpp:670, `static_cast<ResourceObject*>(resource)
+    ->Lock(0, 0)`).
+
+    This is NOT a missing null check to add at that call site: Ghidra's
+    disassembly of the original 0x404720 is the identical 23-instruction,
+    no-null-check sequence (PUSH ESI; ...; CALL [EAX+4] on the raw GetById
+    result), so the original game made the same unchecked call and relied
+    on the resource always being present. The defect is upstream, in
+    ResourceManager::GetById (resources/ResourceManager.cpp, `// Status:
+    TRANSCRIBED` -- not yet integrated into the canonical object model).
+    One live-but-unverified lead worth recording so it isn't lost: the
+    lazy-load path there computes `idx = typeEntry - this->resource_ptrs`
+    (ResourceManager.cpp:1089) where `typeEntry` points into
+    `resource_type_idx`, not `resource_ptrs` -- suspicious, but a from-
+    scratch `ResourceManager` probe and the real `g_resmgr` diverged under
+    the resulting undefined behavior (out-of-bounds `resource_ptrs[idx]`
+    access) in ways this investigation could not fully reconcile, so treat
+    it as a lead for the next debugging session, not a confirmed
+    mechanism.
+
+    test_singleplayer_accept_reaches_mode3_without_crashing (immediately
+    above) already reaches this same crash via a mouse click on
+    accept/ok -- both it and this test independently fail on this exact
+    SIGSEGV as of this commit (confirmed via coredumpctl during this
+    investigation). This test exists separately because it drives the
+    *physical Enter key* path (EditWindow::hostHandleKey), matching
+    lego_loco.core's primary stack trace exactly, so a future fix that
+    only patches the button's render-poll path would not silently leave
+    this one uncovered."""
+    game.wait_for_event("screen_presented", screen="main_menu", dialog_state=0)
+    game.click_logical(600, 550, "select single player")
+    game.click_logical(600, 720, "player-name field")
+    game.clear_text()
+    game.type_text("test")
+    game.press_key("Return")
+    game.wait_for_event("mode_changed", new_mode=3, timeout=10)
+    time.sleep(2)
+    assert game.is_alive(), game._failure("game crashed after Enter-key name commit")
+    game.screenshot("singleplayer-enter-key-mode3-stable")
+
+
 def test_singleplayer_mode3_mouse_input_reaches_game(game):
     """Regression for BUG-mode-3-render-freeze.md: PumpMessages_SDL3 only
     forwarded SDL input while active_host_menu() was non-null (mode 2), so
