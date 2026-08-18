@@ -180,10 +180,14 @@ public:
      * 3 KeySequenceRecord key-array pointers, then calls handle_edit_message
      * to load the .dat descriptor.
      *
-     * @param resId      Resource ID for this descriptor
-     * @param nameParam  Non-zero = load descriptor data from disk/asset mgr
+     * @param resId  Resource ID for this descriptor
+     * @param name   Non-null = load descriptor data from disk/asset mgr
+     *               (widened from the original's int32_t ABI slot to a real
+     *               `const char*` — see ui/UI_ChildWindow.h's ChildWindow
+     *               constructor doc for why the int32 pointer-handle round
+     *               trip is unsafe on this host)
      */
-    BuildingDescriptorEditor(uint32_t resId, int32_t nameParam);
+    BuildingDescriptorEditor(uint32_t resId, const char* name);
 
     /**
      * Virtual destructor (vtable[0]). Address: 0x41E600
@@ -210,10 +214,10 @@ public:
      * dispatches to Render() (vtable slot [3]) for both the archive and
      * disk-fallback cases. Called by the constructor.
      *
-     * @param resId     Resource ID (used to build the descriptor filename)
-     * @param nameParam Non-zero to actually load; zero for no-op reset only
+     * @param resId  Resource ID (used to build the descriptor filename)
+     * @param name   Non-null to actually load; nullptr for no-op reset only
      */
-    void handle_edit_message(uint32_t resId, int32_t nameParam);
+    void handle_edit_message(uint32_t resId, const char* name);
 
     /**
      * Render — vtable slot [3]. Address: 0x41E9F0
@@ -299,8 +303,8 @@ uint32_t edit_key_handler_parse(void* stream, KeySequenceRecord* record);
  *
  * resources/ResourceManager.cpp's AddString (0x446840) drives a C-style
  * resource-type dispatch table that allocates raw memory with
- * operator_new(size) and then calls a `void* Ctor(void* mem, resId,
- * strPtr)` function for each resource-type family (see e.g.
+ * operator_new(size) and then calls a `void* Ctor(void* mem, resId, name)`
+ * function for each resource-type family (see e.g.
  * CGWND_CursorEditWindow_Ctor, TrainStation_Ctor for the sibling
  * classes). This bridge follows that exact established convention
  * rather than reshaping ResourceManager.cpp's own dispatch style.
@@ -309,4 +313,4 @@ uint32_t edit_key_handler_parse(void* stream, KeySequenceRecord* record);
  * — renamed here since it is this class's real constructor, not
  * something related to exiting the game.
  */
-void* BuildingDescriptorEditor_Ctor(void* memory, int32_t resId, int32_t strPtr);
+void* BuildingDescriptorEditor_Ctor(void* memory, int32_t resId, const char* name);

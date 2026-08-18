@@ -77,9 +77,13 @@ public:
      * Called by: CGWND init path during train station creation
      *
      * @param resourceId  Resource/panel ID for base window
-     * @param param2      Non-zero to load sprites and fully initialize
+     * @param name        Non-null to load sprites and fully initialize
+     *                    (widened from the original's int32_t ABI slot to a
+     *                    real `const char*` — see ui/UI_ChildWindow.h's
+     *                    ChildWindow constructor doc for why the int32
+     *                    pointer-handle round trip is unsafe on this host)
      */
-    TrainStation(uint32_t resourceId, int32_t param2);
+    TrainStation(uint32_t resourceId, const char* name);
 
     /**
      * Virtual destructor (vtable[0]).
@@ -180,9 +184,9 @@ public:
      *      f. Set default road offset (Y=8) if both offsets are zero.
      *
      * @param param1  Resource/panel ID (passed from constructor)
-     * @param param2  Non-zero to load sprites; 0 to defer
+     * @param name    Non-null to load sprites; nullptr to defer
      */
-    void Init(int32_t param1, int32_t param2);
+    void Init(int32_t param1, const char* name);
 };
 
 /* ================================================================== */
@@ -201,10 +205,10 @@ extern "C" {
  *
  * @param memory   Pre-allocated memory block for the new TrainStation object
  * @param resId    Resource/panel ID for base window
- * @param strPtr   Non-zero to load sprites
+ * @param name     Non-null to load sprites
  * @return         Pointer to the constructed TrainStation object (memory)
  */
-void* TrainStation_Ctor(void* memory, uint32_t resId, int32_t strPtr);
+void* TrainStation_Ctor(void* memory, uint32_t resId, const char* name);
 
 }  // extern "C"
 

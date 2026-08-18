@@ -184,18 +184,41 @@ public:
      * ChildWindow constructor.
      * Address: 0x424AF0 (wrapper) + 0x424BF0 (init body)
      *
-     * Initializes all fields to zero/defaults, and (if nameParam != 0)
+     * Initializes all fields to zero/defaults, and (if name != nullptr)
      * loads associated .dat/.bmp resources via resource manager or disk.
      *
-     * Called by: CursorEditWindow::CursorEditWindow (0x40E600),
-     *            TrainStation_Ctor (0x436400),
-     *            BuildingDescriptorEditor constructor.
+     * Called by: ResourceManager::AddString (0x446840) directly, for the
+     *            resource-type families that construct a plain ChildWindow
+     *            (not a derived subclass) — the `name` string in that path
+     *            is typically a caller-owned stack buffer such as
+     *            ResourceManager::GetById/LoadStringTable's own
+     *            `char stringBuf[264]` locals, which stay live for the
+     *            duration of the call chain. Also called (with name =
+     *            nullptr, deferring immediate loading) by
+     *            CursorEditWindow::CursorEditWindow (0x40E600),
+     *            TrainStation::TrainStation (0x436400), and
+     *            BuildingDescriptorEditor::BuildingDescriptorEditor
+     *            (0x41E570), each of which loads its own resources
+     *            separately after the base constructor returns.
      *
      * @param resourceId  Resource ID to load for this window
-     * @param nameParam   Non-zero to load resources immediately (currently
-     *                    deferred — no caller uses this yet)
+     * @param name        Non-null to load resources immediately. Widened
+     *                    from the original's int32_t ABI slot to a real
+     *                    `const char*`: the original x86 ABI carried this
+     *                    as a plain 32-bit register/stack value because x86
+     *                    pointers are 32 bits, but truncating a genuine
+     *                    64-bit host pointer to int32_t and reconstructing
+     *                    it later (as ResourceManager.cpp's pre-existing
+     *                    `handle_from_pointer`/`pointer_from_handle` idiom
+     *                    does for other, heap-owned handles) is a silent
+     *                    corruption/segfault hazard here, not a faithful
+     *                    ABI reproduction — confirmed empirically this
+     *                    session: the real caller's buffer is a *stack*
+     *                    local (see above), whose address on this 64-bit
+     *                    host is far outside the low 4GB a truncate/
+     *                    zero-extend round trip can represent.
      */
-    ChildWindow(uint32_t resourceId, int32_t nameParam);
+    ChildWindow(uint32_t resourceId, const char* name);
 
     /**
      * Virtual destructor (vtable[0]).
@@ -331,9 +354,11 @@ public:
      * variables.
      *
      * @param resourceId  Resource ID
-     * @param nameParam   Non-zero to load resources immediately (deferred)
+     * @param name        Non-null to load resources immediately (see the
+     *                    constructor's own doc comment above for why this
+     *                    is a real `const char*`, not an int32_t ABI slot)
      */
-    void InitFields(uint32_t resourceId, int32_t nameParam);
+    void InitFields(uint32_t resourceId, const char* name);
 };
 
 /* sizeof(ChildWindow) on this host — see ui/UI_ChildWindow.cpp. Plain C++
@@ -349,12 +374,12 @@ extern "C" {
 /**
  * UI_CreateChildWindow — ChildWindow init shim @ 0x424AF0
  */
-void* UI_CreateChildWindow(void* self, uint32_t resourceId, int32_t nameParam);
+void* UI_CreateChildWindow(void* self, uint32_t resourceId, const char* name);
 
 /**
  * UI_ChildWindow_Create — Init-body shim @ 0x424BF0
  */
-void UI_ChildWindow_Create(void* self, uint32_t resourceId, int32_t nameParam);
+void UI_ChildWindow_Create(void* self, uint32_t resourceId, const char* name);
 
 /**
  * UI_ChildWindow_Dtor — Destructor shim @ 0x424BA0

@@ -35,9 +35,6 @@ extern void GLOBAL_free(void* ptr);                     /* 0x465CD0 */
 /* ================================================================== */
 extern "C" {
     void  CRT_free(void* ptr);
-    int   CRT_sprintf_buf(void* buf, const void* fmt); /* chained sprintf-family helper, exact
-                                                          * shape unresolved — matches other files'
-                                                          * usage of the same call pattern */
     void  SetRectEmpty(RECT* rect);
 
     /* Win32-stream family (see resources/WndProcStreamBuf.h / Win32StreamFile.h
@@ -124,6 +121,24 @@ void* WNDPROC_StreamWrite(void* stream, void* outBuf);
  * that real implementation instead of the dead-symbol stub. */
 extern int32_t CRT_wcsstr(uint8_t* str, uint8_t* sub);
 
+/* CRT_sprintf_buf — same real-symbol-identity landmine as CRT_wcsstr above.
+ * This declaration was previously `extern "C" int CRT_sprintf_buf(void* buf,
+ * const void* fmt);` (2 fixed params, no varargs) INSIDE this file's extern
+ * "C" block: C linkage discards parameter types from the link symbol, so it
+ * collapsed onto the bare `CRT_sprintf_buf` symbol, which shared/
+ * link_stubs.cpp binds to an inert `{ return 0; }` no-op — every one of this
+ * function's 3 call sites below was therefore called with only 2 arguments
+ * (buf, fmt; no g_install_path/name varargs at all) and, even if it had been
+ * called correctly, would have written nothing to the buffer regardless.
+ * shared/stubs_link001_batch1_crt_win32.cpp's `int CRT_sprintf_buf(void* buf,
+ * const char* fmt, ...)` (plain, non-"C" linkage, real vsprintf-backed body,
+ * same 0x466D60 address, same signature game/ScriptedObject.cpp already
+ * declares) is the real implementation; declaring it here with matching
+ * (non-"C") linkage binds these call sites to that real body instead. */
+extern int CRT_sprintf_buf(void* buf, const char* fmt, ...);
+
+extern char g_install_path[];        /* 0x4A99C8 — install directory path */
+
 /* WIN32_MemoryStream_Size() (resources/Win32StreamMem.h, included above)
  * is used below to size the WNDPROC_StreamFromMemory allocation — x86
  * WIN32_MemoryStream is 0x5C bytes; this host's real sizeof() may differ
@@ -155,8 +170,8 @@ static const char s_TotalVisits[]        = "TotalVisits";          /* 0x0047E504
 /* Constructor                                                          */
 /* Address: 0x41E570 (Ghidra label "INPUT_ExitGame" — misnomer)         */
 /* ================================================================== */
-BuildingDescriptorEditor::BuildingDescriptorEditor(uint32_t resId, int32_t nameParam)
-    : ChildWindow(resId, 0)
+BuildingDescriptorEditor::BuildingDescriptorEditor(uint32_t resId, const char* name)
+    : ChildWindow(resId, nullptr)
 {
     TrackPos_Init(&this->track_pos_a);
     TrackPos_Init(&this->track_pos_b);
@@ -167,7 +182,7 @@ BuildingDescriptorEditor::BuildingDescriptorEditor(uint32_t resId, int32_t nameP
     this->mobile_seq.key_ids  = nullptr;   /* +0x598 */
     this->total_visits.key_ids = nullptr;  /* +0x5CC */
 
-    handle_edit_message(resId, static_cast<int32_t>(nameParam));
+    handle_edit_message(resId, name);
 }
 
 /* ================================================================== */
@@ -202,7 +217,7 @@ BuildingDescriptorEditor::~BuildingDescriptorEditor()
 /* handle_edit_message                                                  */
 /* Address: 0x41E6E0 (Ghidra label "INPUT_HandleEditMessage")           */
 /* ================================================================== */
-void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameParam)
+void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, const char* name)
 {
     (void)resId;
 
@@ -229,7 +244,7 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
     this->leisure_destination = 0;
     this->loaded = 0;  /* +0x162 — inherited from ChildWindow */
 
-    if (nameParam == 0) {
+    if (name == nullptr) {
         return;
     }
 
@@ -251,14 +266,14 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
      * rather than a persistent (and otherwise dead) class member. */
     char datPath[264];
     char bmpPathBuf[264];
-    CRT_sprintf_buf(datPath, "%s%s.dat");
-    CRT_sprintf_buf(bmpPathBuf, "%s%s.bmp");
+    CRT_sprintf_buf(datPath, "%s%s.dat", g_install_path, name);
+    CRT_sprintf_buf(bmpPathBuf, "%s%s.bmp", g_install_path, name);
 
     bool loadedFromArchive = false;
     if (g_asset_mgr.archive_file != 0) {
         int fileSize = 0;
         char archivePath[264];
-        CRT_sprintf_buf(archivePath, "%s.dat");
+        CRT_sprintf_buf(archivePath, "%s.dat", name);
         uint8_t* fileData = g_asset_mgr.LoadFile(
             reinterpret_cast<uint8_t*>(archivePath), &fileSize);
         if (fileData != nullptr) {
@@ -312,7 +327,16 @@ void BuildingDescriptorEditor::handle_edit_message(uint32_t resId, int32_t nameP
         void* streamMem = ::operator new(WIN32_Stream_Size(), std::nothrow);
         if (streamMem != nullptr) {
             WIN32_StreamOpen(streamMem, 1);
-            WIN32_StreamOpenPath(streamMem, datPath, 0x20, 0 /* DAT_00479190 */);
+            /* DAT_00479190 (0x479190) — confirmed via read_bytes as the 4
+             * bytes `A4 01 00 00` (0x1A4); see resources/Win32Stream.h's
+             * kStreamShareMask doc comment for the full evidence trail (not
+             * reused directly here since this file's WIN32_StreamOpenPath
+             * is the raw extern "C" free-function facade, not the
+             * WIN32_Stream class those headers declare — including that
+             * class header here would conflict with this file's own,
+             * differently-shaped extern "C" declarations of the same
+             * facades). */
+            WIN32_StreamOpenPath(streamMem, datPath, 0x20, 0x1A4);
             uint8_t ok = this->Render(streamMem);  /* Virtual call — derived override */
             this->loaded = ok;
             if (ok) {
@@ -697,10 +721,10 @@ uint32_t edit_key_handler_parse(void* stream, KeySequenceRecord* record)
 /* ================================================================== */
 /* BuildingDescriptorEditor_Ctor — placement-new compatibility bridge   */
 /* ================================================================== */
-void* BuildingDescriptorEditor_Ctor(void* memory, int32_t resId, int32_t strPtr)
+void* BuildingDescriptorEditor_Ctor(void* memory, int32_t resId, const char* name)
 {
     if (memory == nullptr) {
         return nullptr;
     }
-    return new (memory) BuildingDescriptorEditor(static_cast<uint32_t>(resId), strPtr);
+    return new (memory) BuildingDescriptorEditor(static_cast<uint32_t>(resId), name);
 }

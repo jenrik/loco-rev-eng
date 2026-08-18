@@ -7,6 +7,10 @@
 
 #include "UI_ChildWindow.h"
 #include "../graphics/LOCOBITMAP.h"
+#include "../resources/AssetArchive.h"
+#include "../resources/Win32Stream.h"
+#include "../resources/Win32StreamFile.h"
+#include "../resources/Win32StreamMem.h"
 
 #include <cassert>
 #include <cstdio>
@@ -21,6 +25,7 @@
 extern "C" {
 void   __cdecl GLOBAL_free(void* ptr);                       /* 0x465CD0 */
 void*  __cdecl operator_new(size_t size);                     /* 0x465CE0 */
+void   __cdecl CRT_free(void* ptr);                           /* 0x466C70 */
 void*  __thiscall ResourceManager_GetById(void* mgr, int32_t resId); /* 0x446EA0 */
 
 void   WNDPROC_EnterCriticalSection(void* cs);
@@ -142,16 +147,29 @@ extern void* g_netman;      /* 0x4FD3AC — NetMan singleton (raw-offset view; s
                                 g_netman[0x17].scenarioId idiom) */
 extern uint32_t g_game_time; /* 0x4A99B4 */
 
+/* g_asset_mgr (0x485600) — real AssetArchive value object, canonically
+ * declared in resources/AssetArchive.h (included above); used for real by
+ * InitFields()'s name!=nullptr branch below on both the host and _WIN32
+ * paths (the archive-load path only needs portable WIN32_Stream/CRT file
+ * I/O, not any Windows-only rendering API — unlike OnMouseMove/Render's
+ * UIPANEL_StretchBlit calls, which remain _WIN32-guarded below). A stray,
+ * unused, wrong-type `void*` redeclaration of this same global previously
+ * lived in this now-removed comment's place; it was never referenced. */
+extern char g_install_path[];        /* 0x4A99C8 — install directory path */
+
+/* CRT_sprintf_buf's first parameter MUST be `void*`, not `char*`: this
+ * exact function name is overloaded across several shared/*.cpp stub files
+ * with mutually-incompatible bodies (a pre-existing link-time landmine,
+ * confirmed via `readelf -sW` on the built .o files this session) — a
+ * `(char*, const char*, ...)` overload binds to shared/stubs_impl.cpp's
+ * `{ return 0; }` no-op stub, while the REAL vsprintf-backed implementation
+ * (shared/stubs_link001_batch1_crt_win32.cpp, same address 0x466D60) is
+ * declared with a `void*` first parameter, matching game/ScriptedObject.cpp's
+ * own declaration of the same real symbol. `char[]`/`char*` buffers convert
+ * implicitly to `void*` at every call site below, so no cast is needed. */
+extern int __cdecl CRT_sprintf_buf(void* buf, const char* fmt, ...); /* 0x466D60 */
+
 #ifdef _WIN32
-/* g_asset_mgr (0x485600) was extern-declared here as `void*` but never
- * actually referenced anywhere in this file — a stray, unused, wrong-type
- * redeclaration (see resources/AssetArchive.h for the canonical
- * `AssetArchive g_asset_mgr` value-object declaration). Removed rather
- * than corrected in place since nothing here uses it. The bodies below are
- * declaration-only; neither is implemented anywhere else in this codebase
- * yet (a separate, pre-existing gap — not introduced by this file). The
- * MinGW typecheck build compiles _WIN32 code but does not link it, so this
- * is sufficient for that build's purpose. */
 extern "C" {
 void __thiscall INPUT_EditScrollHandler(void* obj, uint32_t resId);
 void __thiscall ResourceManager_AnimateClock(void* mgr, uint32_t gameTime);
@@ -246,17 +264,17 @@ size_t ChildWindow_Size()
 /* ChildWindow::ChildWindow (Constructor)                             */
 /* Address: 0x424AF0 (wrapper) + 0x424BF0 (init body)                  */
 /* ================================================================== */
-ChildWindow::ChildWindow(uint32_t resourceId, int32_t nameParam)
+ChildWindow::ChildWindow(uint32_t resourceId, const char* name)
 {
     /* Delegate to InitFields to populate all member variables */
-    InitFields(resourceId, nameParam);
+    InitFields(resourceId, name);
 }
 
 /* ================================================================== */
 /* ChildWindow::InitFields (Factored init body)                       */
 /* Address: 0x424BF0 (UI_ChildWindow_Create body)                     */
 /* ================================================================== */
-void ChildWindow::InitFields(uint32_t resourceId, int32_t nameParam)
+void ChildWindow::InitFields(uint32_t resourceId, const char* name)
 {
     /* Common field initialization (both _WIN32 and host) */
     this->resourceId = resourceId;
@@ -291,17 +309,114 @@ void ChildWindow::InitFields(uint32_t resourceId, int32_t nameParam)
     this->ready = 1;
     this->animFlags = 0;
 
-    /* Conditional resource loading (nameParam != 0 path).
-     * This branch is not exercised by any current caller in the codebase;
-     * both CursorEditWindow and TrainStation pass nameParam=0 and handle
-     * their own resource loading separately. The branch is deferred pending
-     * recovery of CRT_sprintf_buf's vararg signature. */
-    if (nameParam != 0) {
-        std::fprintf(stderr,
-            "STUB: ChildWindow InitFields (0x424BF0) nameParam!=0 resource-"
-            "loading branch reached — not yet ported (see PROGRESS.md).\n");
-        assert(false &&
-               "ChildWindow InitFields: nameParam!=0 branch not yet ported");
+    /* Conditional resource loading (name != nullptr path).
+     *
+     * Every derived subclass (CursorEditWindow, TrainStation,
+     * BuildingDescriptorEditor) passes name=nullptr here and loads its own
+     * resources separately after the base constructor returns — this
+     * branch is exercised only when ResourceManager::AddString constructs
+     * a plain ChildWindow directly (resource types 0/1/4/5/6/9/10/11/14 and
+     * the even-resId halves of 0/2/3/4/6/7/8, per AddString's dispatch
+     * table). Disassembly of 0x424BF0 (0x424CA1-0x424DC2) shows this is the
+     * same "build .dat/.bmp path, try the AssetMgr archive, fall back to a
+     * direct file open" shape CursorEditWindow::init (0x40E690) and
+     * TrainStation::Init (0x436490) already established for their own,
+     * separate original functions — cross-checked instruction-for-
+     * instruction against both siblings' call shapes (same CRT_sprintf_buf
+     * call count/argument order, same AssetMgr_LoadFile/
+     * WNDPROC_StreamFromMemory/CRT_free sequence, same WIN32_StreamOpenPath
+     * fallback), with two differences specific to this function, confirmed
+     * against disassembly rather than assumed from the siblings:
+     *   1. The disk-path format strings here are "%s%s.dat"/"%s%s.bmp"
+     *      (0x47E368/0x47E35C, confirmed via read_bytes — no backslash
+     *      separator, unlike CursorEditWindow's own hardcoded literal),
+     *      matching TrainStation::Init's identical pair exactly.
+     *   2. Only ONE Render() call happens per attempt (assigned straight to
+     *      `loaded`) — unlike CursorEditWindow::init/TrainStation::Init,
+     *      which each follow their own virtual Render() with an explicit
+     *      second `ChildWindow::Render()` call. That second call exists in
+     *      the derived classes specifically to also run the *base* class's
+     *      Render() after a derived override — meaningless here, since
+     *      `this` (mid ChildWindow's own constructor) already dispatches to
+     *      ChildWindow::Render() directly.
+     */
+    if (name != nullptr) {
+        /* Build full disk paths: "%s%s.dat" / "%s%s.bmp" — no separator
+         * (confirmed via read_bytes at 0x47E368/0x47E35C: exactly 8 bytes
+         * each, "%s%s.dat"/"%s%s.bmp", no backslash). bmpPath is a member
+         * (+0x48, written directly, matching the disassembly's
+         * `LEA ECX,[ESI+0x48]` buffer target); datPath is a local scratch
+         * buffer used only for the disk-fallback OpenPath call below. */
+        char datPath[264];
+        CRT_sprintf_buf(datPath, "%s%s.dat", g_install_path, name);
+        CRT_sprintf_buf(this->bmpPath, "%s%s.bmp", g_install_path, name);
+
+        /* --- Attempt 1: load from the AssetMgr archive --- */
+        if (g_asset_mgr.archive_file != 0) {
+            char shortPath[264];  /* archive-relative "<name>.dat" */
+            CRT_sprintf_buf(shortPath, "%s.dat", name);
+
+            int fileSize = 0;
+            uint8_t* fileData = g_asset_mgr.LoadFile(
+                // ABI_BOUNDARY: AssetArchive::LoadFile's `filename` param is
+                // this codebase's byte-oriented archive-lookup convention
+                // (resources/AssetArchive.h); shortPath is the same bytes
+                // under a plain C string buffer.
+                reinterpret_cast<uint8_t*>(shortPath), &fileSize);
+            if (fileData != nullptr) {
+                /* 0x5C was the original x86 sizeof(WIN32_MemoryStream); use
+                 * the real host size (resources/Win32StreamMem.h). */
+                void* streamAlloc = operator_new(WIN32_MemoryStream_Size());
+                if (streamAlloc != nullptr) {
+                    // ABI_BOUNDARY: WNDPROC_StreamFromMemory's `char* data`
+                    // param is this codebase's older byte-buffer convention;
+                    // fileData is the same raw bytes under AssetArchive::
+                    // LoadFile's real `uint8_t*` return type.
+                    WNDPROC_Stream* memStream = WNDPROC_StreamFromMemory(
+                        streamAlloc, reinterpret_cast<char*>(fileData),
+                        fileSize, 1);
+                    if (memStream != nullptr) {
+                        /* Virtual dispatch: during ChildWindow's own
+                         * constructor, `this`'s vptr is ChildWindow's own
+                         * vtable (derived classes only overwrite it after
+                         * the base constructor returns — see this class's
+                         * header doc comment), so this always resolves to
+                         * ChildWindow::Render() here, matching the
+                         * disassembly's direct vtable-slot-3 call. */
+                        this->loaded = this->Render(memStream);
+
+                        /* Real C++ `delete` through WNDPROC_Stream*
+                         * dispatches to WIN32_MemoryStream's scalar
+                         * deleting destructor via StreamObject's virtual
+                         * ~StreamObject() — matches the original's
+                         * `vtable[0](1)` dispatch on the memory stream. */
+                        delete memStream;
+                    }
+                }
+                CRT_free(fileData);
+            }
+        }
+
+        /* --- Attempt 2: fall back to a direct file open --- */
+        if (this->loaded == 0) {
+            WIN32_Stream localStream;
+            localStream.OpenPath(datPath, 0x20, kStreamShareMask);
+
+            WIN32_StreamFile* file =
+                static_cast<WIN32_StreamFile*>(localStream.rdbuf);
+            if (file != nullptr && file->fileHandle() != -1) {
+                this->loaded = this->Render(&localStream);
+
+                /* Matches the original's WIN32_StreamDestroyImmediate — NOT
+                 * the object's own destructor, which still runs once at
+                 * scope exit below. */
+                localStream.CloseNow();
+            }
+
+            /* localStream's destructor runs automatically here (real C++
+             * RAII) — replaces the original's WIN32_StreamDestroy +
+             * WNDPROC_StreamCleanup pair (see resources/Win32Stream.h). */
+        }
     }
 }
 
@@ -762,18 +877,18 @@ extern "C" {
  * in this batch. These shims can be removed as each derived class's
  * callers migrate to direct C++ constructor calls.
  */
-void* UI_CreateChildWindow(void* self, uint32_t resourceId, int32_t nameParam)
+void* UI_CreateChildWindow(void* self, uint32_t resourceId, const char* name)
 {
 #ifdef _WIN32
     /* Cast the pre-allocated derived-object pointer and call InitFields
      * to populate base-class fields. Mirrors the assembly behavior of
      * 0x424AF0: zeroes fields, stages the vtable, and delegates to 0x424BF0. */
     ChildWindow* const obj = reinterpret_cast<ChildWindow*>(self);
-    obj->InitFields(resourceId, nameParam);
+    obj->InitFields(resourceId, name);
     return self;
 #else
     (void)resourceId;
-    (void)nameParam;
+    (void)name;
     std::fprintf(stderr,
         "STUB: UI_CreateChildWindow (0x424AF0) reached on host build — "
         "the ChildWindow cluster is not yet ported to a non-Windows "
@@ -791,16 +906,16 @@ void* UI_CreateChildWindow(void* self, uint32_t resourceId, int32_t nameParam)
  * In the C++ class, the logic is in InitFields(). This shim is kept
  * for reference; no external caller invokes it directly in current code.
  */
-void UI_ChildWindow_Create(void* self, uint32_t resourceId, int32_t nameParam)
+void UI_ChildWindow_Create(void* self, uint32_t resourceId, const char* name)
 {
 #ifdef _WIN32
     /* If called directly (which shouldn't happen), delegate to InitFields */
     ChildWindow* const obj = reinterpret_cast<ChildWindow*>(self);
-    obj->InitFields(resourceId, nameParam);
+    obj->InitFields(resourceId, name);
 #else
     (void)self;
     (void)resourceId;
-    (void)nameParam;
+    (void)name;
     std::fprintf(stderr,
         "STUB: UI_ChildWindow_Create (0x424BF0) reached on host build "
         "(see PROGRESS.md).\n");

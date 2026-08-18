@@ -30,7 +30,17 @@
 extern void* __cdecl operator_new(size_t size);     /* 0x465CE0 */
 extern void  __cdecl GLOBAL_free(void* ptr);        /* 0x465CD0 */
 extern void  __cdecl CRT_free(void* ptr);           /* 0x466C70 */
-extern int   __cdecl CRT_sprintf_buf(char* buf, const char* fmt, ...); /* 0x466D60 */
+/* CRT_sprintf_buf's first parameter MUST be `void*`, not `char*`: this
+ * exact function name is overloaded across several shared/*.cpp stub files
+ * with mutually-incompatible bodies (a pre-existing link-time landmine,
+ * confirmed via `readelf -sW` on the built .o files this session) — the
+ * `(char*, const char*, ...)` overload binds to shared/stubs_impl.cpp's
+ * `{ return 0; }` no-op stub, while the REAL vsprintf-backed implementation
+ * (shared/stubs_link001_batch1_crt_win32.cpp, same address 0x466D60) is
+ * declared with a `void*` first parameter, matching game/ScriptedObject.cpp's
+ * own declaration of the same real symbol. `char[]`/`char*` buffers convert
+ * implicitly to `void*` at every call site below, so no cast is needed. */
+extern int   __cdecl CRT_sprintf_buf(void* buf, const char* fmt, ...); /* 0x466D60 */
 
 /* Stream / WNDPROC helpers.
  *
@@ -89,11 +99,11 @@ extern char  g_install_path[];        /* 0x4A99C8 — install directory path */
 /* Initializes as a ChildWindow (with nameParam=0 to defer loading     */
 /* in base), then calls init() to load cursor data in derived context. */
 /* ================================================================== */
-CursorEditWindow::CursorEditWindow(uint32_t resourceId, int32_t nameParam)
-    : ChildWindow(resourceId, 0)  /* Base constructor with nameParam=0 */
+CursorEditWindow::CursorEditWindow(uint32_t resourceId, const char* name)
+    : ChildWindow(resourceId, nullptr)  /* Base constructor defers loading */
 {
     /* Load cursor data via derived init() */
-    this->init(resourceId, nameParam);
+    this->init(resourceId, name);
 }
 
 /* ================================================================== */
@@ -236,7 +246,7 @@ uint8_t CursorEditWindow::Render(void* stream)
 /*                                                                      */
 /*   4. Store success/failure in loaded (+0x162)                       */
 /* ================================================================== */
-void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
+void CursorEditWindow::init(uint32_t resourceId, const char* name)
 {
     /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
      * original's WIN32_StreamOpen(&buf,1) construction and paired
@@ -258,27 +268,23 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
     this->field_7AA = 0;           /* +0x7AA (short) */
     this->loaded = 0;              /* +0x162 (inherited, byte) */
 
-    /* If nameParam is 0 (null pointer cast), skip all loading.
+    /* If name is null, skip all loading.
      * localStream's destructor runs automatically here (real C++ RAII). */
-    if (nameParam == 0) {
+    if (name == nullptr) {
         return;
     }
-
-    /* nameParam is passed as int32_t but is actually a string pointer */
-    const char* cursorName = reinterpret_cast<const char*>(
-        static_cast<uintptr_t>(static_cast<uint32_t>(nameParam)));
 
     /* Build file paths */
     char datPath[264];   /* local buffer for .dat path */
 
     /* Build: "%s\\<name>.dat" and "%s\\<name>.bmp" */
-    CRT_sprintf_buf(datPath, "%s\\%s.dat", g_install_path, cursorName);
-    CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, cursorName);  /* +0x48 */
+    CRT_sprintf_buf(datPath, "%s\\%s.dat", g_install_path, name);
+    CRT_sprintf_buf(this->bmpPath, "%s\\%s.bmp", g_install_path, name);  /* +0x48 */
 
     /* --- Attempt 1: Load from AssetMgr (game archive) --- */
     if (g_asset_mgr.archive_file != 0) {
         char shortPath[264];  /* local buffer for just "<name>.dat" */
-        CRT_sprintf_buf(shortPath, "%s.dat", cursorName);
+        CRT_sprintf_buf(shortPath, "%s.dat", name);
 
         pLoadedData = g_asset_mgr.LoadFile(
             reinterpret_cast<uint8_t*>(shortPath), &dataSize);
@@ -322,9 +328,7 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 
     /* --- Attempt 2: Fall back to direct file open --- */
     if (this->loaded == 0) {
-        localStream.OpenPath(
-            datPath, 0x20,
-            *reinterpret_cast<const int*>(static_cast<uintptr_t>(0x479190)));
+        localStream.OpenPath(datPath, 0x20, kStreamShareMask);
 
         /* Check if the file actually opened: rdbuf->fileHandle() != -1,
          * matching the original's `*(rdbuf+0x4C) != -1` (the WIN32_Stream
@@ -378,10 +382,10 @@ void CursorEditWindow::init(uint32_t resourceId, int32_t nameParam)
 /* to C++ placement-new constructor.                                   */
 /* ================================================================== */
 extern "C"
-void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr)
+void* CursorEditWindow_Ctor(void* memory, int32_t resId, const char* name)
 {
     if (memory == nullptr) {
         return nullptr;
     }
-    return new (memory) CursorEditWindow(static_cast<uint32_t>(resId), strPtr);
+    return new (memory) CursorEditWindow(static_cast<uint32_t>(resId), name);
 }

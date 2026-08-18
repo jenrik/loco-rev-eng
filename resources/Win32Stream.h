@@ -88,6 +88,20 @@
 
 #include "WndProcStream.h"
 #include "Win32StreamFile.h"
+#include <cstdint>
+
+/* DAT_00479190 (0x479190) — the `shareMask` constant every real caller of
+ * WIN32_StreamOpenPath/OpenPath passes for a plain read-only .dat open.
+ * Zero WRITE xrefs anywhere in the binary (confirmed via get_xrefs_to); the
+ * real baked .data value was confirmed via read_bytes as the 4 bytes
+ * `A4 01 00 00` (little-endian 0x000001A4) — matching resources/
+ * ResDataSave.cpp's independent finding for the same global. Declaring this
+ * as a named constant, rather than reading a literal absolute address
+ * (`*reinterpret_cast<const int*>(0x479190)`, an earlier version of this
+ * idiom used by ui/CursorEditWindow.cpp) avoids dereferencing an address
+ * that isn't actually mapped in this host's process image — 0x479190 is a
+ * valid .data offset only inside the original Windows PE image. */
+constexpr uint32_t kStreamShareMask = 0x1A4;
 
 class WIN32_Stream : public WNDPROC_Stream {
 public:

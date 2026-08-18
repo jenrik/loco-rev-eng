@@ -136,7 +136,7 @@ int32_t Config_GetIniInt(void* config, const char* section,
  * AddString and cites the same "INPUT_ExitGame" Ghidra misnomer) —
  * these call sites just hadn't been updated to use it. */
 extern "C" {
-    void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr);        /* @ 0x0040E600 */
+    void* CursorEditWindow_Ctor(void* memory, int32_t resId, const char* name);        /* @ 0x0040E600 */
 }
 /* TrackTileDescriptor_Ctor (@ 0x0044B190, Ghidra label
  * "RESDATA_ScriptedObject_AddChild" — misnomer) has real C++ linkage,
@@ -571,7 +571,7 @@ bool ResourceManager::Init()
             if (adjustedId == static_cast<uint32_t>(id)) {
                 /* No language offset applied */
                 if (result != 0) {
-                    this->AddString(id, handle_from_pointer(stringBuf));
+                    this->AddString(id, stringBuf);
                 } else {
                     *slotPtr = -1;  /* mark as not found */
                 }
@@ -584,10 +584,10 @@ bool ResourceManager::Init()
                     if (result == 0) {
                         *slotPtr = -1;
                     } else {
-                        this->AddString(id, handle_from_pointer(stringBuf));
+                        this->AddString(id, stringBuf);
                     }
                 } else {
-                    this->AddString(id, handle_from_pointer(stringBuf));
+                    this->AddString(id, stringBuf);
                 }
             }
 
@@ -794,7 +794,7 @@ void ResourceManager::FreeAllResources()
 /* Address: 0x446840                                                   */
 /* ================================================================== */
 
-uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
+uint8_t ResourceManager::AddString(int32_t resId, const char* name)
 {
     int32_t existing = this->resource_ptrs[resId];
 
@@ -815,7 +815,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         /* Fallthrough for type > 14 */
         newObj = operator_new(sizeof(ChildWindow));
         if (newObj != nullptr) {
-            result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+            result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
         }
     } else {
         switch (resourceType) {
@@ -823,12 +823,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
-                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
                 }
             } else {
                 newObj = operator_new(sizeof(BuildingDescriptorEditor));
                 if (newObj != nullptr) {
-                    result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
+                    result = BuildingDescriptorEditor_Ctor(newObj, resId, name);
                 }
             }
             break;
@@ -836,7 +836,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 1:
             newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
-                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
             }
             break;
 
@@ -845,12 +845,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
-                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
                 }
             } else {
                 newObj = operator_new(sizeof(BuildingDescriptorEditor));
                 if (newObj != nullptr) {
-                    result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
+                    result = BuildingDescriptorEditor_Ctor(newObj, resId, name);
                 }
             }
             break;
@@ -859,7 +859,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
-                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
                 }
             } else {
                 /* 0x63C was the original x86 sizeof of TrackTileDescriptor
@@ -870,7 +870,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
                  * BuildingDescriptorEditor/TrainStation branches above. */
                 newObj = operator_new(sizeof(TrackTileDescriptor));
                 if (newObj != nullptr) {
-                    result = TrackTileDescriptor_Ctor(newObj, resId, strPtr);
+                    result = TrackTileDescriptor_Ctor(newObj, resId, name);
                 }
             }
             break;
@@ -879,7 +879,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             /* Type 5: ChildWindow with persistence enabled */
             newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
-                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
             }
             this->resource_ptrs[resId] = handle_from_pointer(result);
             if (result != nullptr) {
@@ -891,12 +891,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if (resId == 0x1802 || (resId >= 0x1866 && (resId & 1) == 1)) {
                 newObj = operator_new(sizeof(CursorEditWindow));
                 if (newObj != nullptr) {
-                    result = CursorEditWindow_Ctor(newObj, resId, strPtr);
+                    result = CursorEditWindow_Ctor(newObj, resId, name);
                 }
             } else {
                 newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
-                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
                 }
             }
             break;
@@ -906,12 +906,12 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             if ((resId & 1) == 0) {
                 newObj = operator_new(sizeof(TrainStation));
                 if (newObj != nullptr) {
-                    result = TrainStation_Ctor(newObj, resId, strPtr);
+                    result = TrainStation_Ctor(newObj, resId, name);
                 }
             } else {
                 newObj = operator_new(sizeof(ChildWindow));
                 if (newObj != nullptr) {
-                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                    result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
                 }
             }
             break;
@@ -921,7 +921,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 11:
             newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
-                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
             }
             break;
 
@@ -929,14 +929,14 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
         case 13:
             newObj = operator_new(sizeof(BuildingDescriptorEditor));
             if (newObj != nullptr) {
-                result = BuildingDescriptorEditor_Ctor(newObj, resId, strPtr);
+                result = BuildingDescriptorEditor_Ctor(newObj, resId, name);
             }
             break;
 
         case 14:
             newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
-                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
             }
             this->resource_ptrs[resId] = handle_from_pointer(result);
             if (resId > 0x3801 && result != nullptr) {
@@ -948,7 +948,7 @@ uint8_t ResourceManager::AddString(int32_t resId, int32_t strPtr)
             /* Fallthrough for types not explicitly handled */
             newObj = operator_new(sizeof(ChildWindow));
             if (newObj != nullptr) {
-                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), strPtr);
+                result = new (newObj) ChildWindow(static_cast<uint32_t>(resId), name);
             }
             break;
         }
@@ -1105,7 +1105,7 @@ int32_t ResourceManager::GetById(int32_t resId)
 
                 if (adjustedId == static_cast<uint32_t>(idx)) {
                     if (result != 0) {
-                        this->AddString(idx, handle_from_pointer(stringBuf));
+                        this->AddString(idx, stringBuf);
                     } else {
                         *slotPtr = -1;
                     }
@@ -1116,10 +1116,10 @@ int32_t ResourceManager::GetById(int32_t resId)
                         if (result == 0) {
                             *slotPtr = -1;
                         } else {
-                            this->AddString(idx, handle_from_pointer(stringBuf));
+                            this->AddString(idx, stringBuf);
                         }
                     } else {
-                        this->AddString(idx, handle_from_pointer(stringBuf));
+                        this->AddString(idx, stringBuf);
                     }
                 }
 
@@ -1224,8 +1224,7 @@ int32_t ResourceManager::LoadStringToResource(UINT resId)
 
             if (adjustedId == curId) {
                 if (result != 0) {
-                    this->AddString(static_cast<int32_t>(curId),
-                                    handle_from_pointer(stringBuf));
+                    this->AddString(static_cast<int32_t>(curId), stringBuf);
                 } else {
                     this->resource_ptrs[curId] = -1;
                 }
@@ -1236,12 +1235,10 @@ int32_t ResourceManager::LoadStringToResource(UINT resId)
                     if (result == 0) {
                         this->resource_ptrs[curId] = -1;
                     } else {
-                        this->AddString(static_cast<int32_t>(curId),
-                                        handle_from_pointer(stringBuf));
+                        this->AddString(static_cast<int32_t>(curId), stringBuf);
                     }
                 } else {
-                    this->AddString(static_cast<int32_t>(curId),
-                                    handle_from_pointer(stringBuf));
+                    this->AddString(static_cast<int32_t>(curId), stringBuf);
                 }
             }
 

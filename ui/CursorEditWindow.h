@@ -71,10 +71,14 @@ public:
      * Called by: ResourceManager::AddString @ 0x446840
      *
      * @param resourceId  Resource ID (unique ID for this cursor)
-     * @param nameParam   Pointer to cursor name (e.g., "ArrowCursor");
-     *                    non-zero to load cursor data from disk/asset mgr
+     * @param name        Cursor name (e.g., "ArrowCursor"); non-null to load
+     *                    cursor data from disk/asset mgr. Widened from the
+     *                    original's int32_t ABI slot to a real `const char*`
+     *                    (see ui/UI_ChildWindow.h's ChildWindow constructor
+     *                    doc for why the int32-pointer-handle round trip is
+     *                    unsafe on this host).
      */
-    CursorEditWindow(uint32_t resourceId, int32_t nameParam);
+    CursorEditWindow(uint32_t resourceId, const char* name);
 
     /**
      * Virtual destructor (vtable[0]).
@@ -125,9 +129,9 @@ public:
      * Called by: Constructor
      *
      * @param resourceId  Resource ID
-     * @param nameParam   Pointer to cursor name; non-zero to load
+     * @param name        Cursor name; non-null to load
      */
-    void init(uint32_t resourceId, int32_t nameParam);
+    void init(uint32_t resourceId, const char* name);
 
     /* NOTE: 0x40E8B0 ("cleanup") was previously declared here as a public
      * method ("Destroys the stream at +0x0C... Called externally..."),
@@ -169,10 +173,11 @@ extern "C" {
  *
  * @param memory      Pre-allocated 0x7AC-byte buffer (from operator_new)
  * @param resId       Resource ID
- * @param strPtr      Pointer to cursor name string (cast from int32_t ABI)
+ * @param name        Cursor name string (real `const char*`, not an int32
+ *                    ABI handle — see CursorEditWindow's own constructor doc)
  * @return            Pointer to constructed CursorEditWindow (== memory)
  */
-void* CursorEditWindow_Ctor(void* memory, int32_t resId, int32_t strPtr);
+void* CursorEditWindow_Ctor(void* memory, int32_t resId, const char* name);
 
 } // extern "C"
 

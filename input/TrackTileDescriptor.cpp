@@ -420,7 +420,7 @@ void TrackTileDescriptor::HandleEvent(uint32_t resId, const char* name_suffix)
 /* ================================================================== */
 /* TrackTileDescriptor_Ctor — placement-new + load compatibility bridge */
 /* ================================================================== */
-void* TrackTileDescriptor_Ctor(void* memory, int32_t resId, int32_t strPtr)
+void* TrackTileDescriptor_Ctor(void* memory, int32_t resId, const char* name)
 {
     if (memory == nullptr) {
         return nullptr;
@@ -428,16 +428,16 @@ void* TrackTileDescriptor_Ctor(void* memory, int32_t resId, int32_t strPtr)
 
     TrackTileDescriptor* obj = new (memory) TrackTileDescriptor(static_cast<uint32_t>(resId));
 
-    /* ABI_BOUNDARY: strPtr is ResourceManager::AddString's original generic
-     * int32_t resource-dispatch slot (resources/ResourceManager.cpp). Most
-     * resource types in that dispatch (ChildWindow, BuildingDescriptorEditor)
-     * treat it as a boolean "load flag"; this resource type's real function
+    /* `name` is ResourceManager::AddString's resource-dispatch string
+     * parameter (resources/ResourceManager.cpp), a real `const char*` (see
+     * ui/UI_ChildWindow.h's ChildWindow constructor doc for why the
+     * original's int32_t ABI slot is not reproduced as a pointer-through-
+     * integer round trip here). This resource type's real function
      * (0x44B290) is proven — via its CRT_sprintf_buf "%s%s.dat"/g_scene_name/
      * name_suffix call shape, already independently reverse-engineered in
      * game/ScriptedObject.cpp before being moved here — to dereference it as
      * the child's name-suffix string. */
-    obj->HandleEvent(static_cast<uint32_t>(resId),
-                      reinterpret_cast<const char*>(static_cast<intptr_t>(strPtr)));
+    obj->HandleEvent(static_cast<uint32_t>(resId), name);
 
     return obj;
 }

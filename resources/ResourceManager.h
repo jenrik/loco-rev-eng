@@ -438,11 +438,21 @@ public:
      *
      * Called by: LoadStringTable, Init, RESMGR_LoadStringTable_single
      *
-     * @param resId    Resource ID
-     * @param strPtr   String pointer (typically localized string data)
-     * @return         1 on success, 0 if already exists, -1 on error
+     * @param resId  Resource ID
+     * @param name   Localized string data, typically a caller-owned stack
+     *               buffer (see GetById/LoadStringTable/LoadStringToResource's
+     *               own `char stringBuf[264]` locals) that stays live for the
+     *               duration of this call. Widened from the original's
+     *               int32_t "strPtr" ABI slot to a real `const char*`: on
+     *               this 64-bit host, truncating a genuine pointer (which may
+     *               be a stack address well above 4GB) to int32_t and
+     *               reconstructing it later is a silent-corruption/segfault
+     *               hazard, not a faithful ABI reproduction — the original
+     *               only got away with the int32 slot because x86 pointers
+     *               are 32 bits. nullptr when no name-based load is needed.
+     * @return       1 on success, 0 if already exists, -1 on error
      */
-    uint8_t AddString(int32_t resId, int32_t strPtr);
+    uint8_t AddString(int32_t resId, const char* name);
 
     /* ================================================================ */
     /* Formatted String Loading                                          */

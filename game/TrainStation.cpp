@@ -165,11 +165,11 @@ extern void* g_resource_dir_path;                   /* 0x479190 — resource dir
 /* Initializes base class (ChildWindow), then calls Init for           */
 /* TrainStation-specific setup (sprite/resource loading and config).  */
 /* ================================================================== */
-TrainStation::TrainStation(uint32_t resourceId, int32_t param2)
-    : ChildWindow(resourceId, 0)  /* Base ctor with nameParam=0 */
+TrainStation::TrainStation(uint32_t resourceId, const char* name)
+    : ChildWindow(resourceId, nullptr)  /* Base ctor defers loading */
 {
     /* SEH is compiler-managed in real C++ */
-    Init(resourceId, param2);
+    Init(resourceId, name);
 }
 
 /* ================================================================== */
@@ -383,7 +383,7 @@ uint8_t TrainStation::Render(void* stream)
 /* within Init itself; the actual sprite resources are driven by      */
 /* param2 (passed as format string argument to sprintf).              */
 /* ================================================================== */
-void TrainStation::Init(int32_t param1, int32_t param2)
+void TrainStation::Init(int32_t param1, const char* name)
 {
     /* Real WIN32_Stream object (resources/Win32Stream.h) — replaces the
      * original's WIN32_StreamOpen(&buf,1) construction and paired
@@ -415,9 +415,9 @@ void TrainStation::Init(int32_t param1, int32_t param2)
     this->removable_flag  = 0;                          /* +0x16C */
     this->loaded          = 0;                          /* +0x162 (inherited from ChildWindow) */
 
-    /* Step 3: Early return if param2 is 0 (no sprite loading).
+    /* Step 3: Early return if name is null (no sprite loading).
      * stream_handle's destructor runs automatically here (real C++ RAII). */
-    if (param2 == 0) {
+    if (name == nullptr) {
         return;
     }
 
@@ -436,21 +436,19 @@ void TrainStation::Init(int32_t param1, int32_t param2)
      *
      * Arguments determined by disassembly analysis:
      *   - g_install_path (0x4A99C8) = address of install directory path string
-     *   - param2 (via EDI) = resource name pointer (e.g., "trainsta" or similar)
+     *   - name (via EDI) = resource name pointer (e.g., "trainsta" or similar),
+     *     widened from the original's int32_t ABI slot to a real `const char*`
      * ==================================================== */
 
     /* First sprintf: build full .dat path (buffer at local [ESP+0x184]) */
-    sprintf_wrapper(dat_filename, "%s%s.dat", g_install_path,
-                    reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
+    sprintf_wrapper(dat_filename, "%s%s.dat", g_install_path, name);
 
     /* Second sprintf: build full .bmp path (buffer at this->bmpPath +0x48) */
-    sprintf_wrapper(this->bmpPath, "%s%s.bmp", g_install_path,
-                    reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
+    sprintf_wrapper(this->bmpPath, "%s%s.bmp", g_install_path, name);
 
     /* Third sprintf: build short .dat name for archive lookup (buffer at local [ESP+0x78]) */
     char short_dat_name[264];  /* Local buffer for short filename */
-    sprintf_wrapper(short_dat_name, "%s.dat",
-                    reinterpret_cast<char*>(static_cast<uintptr_t>(param2)));
+    sprintf_wrapper(short_dat_name, "%s.dat", name);
 
     /* Step 4a: Load .dat file via AssetMgr (using short archive-relative name) */
     if (g_asset_mgr.archive_file != 0) {
@@ -588,13 +586,13 @@ void TrainStation::Init(int32_t param1, int32_t param2)
 /* in-place, then return the same pointer.                            */
 /* ================================================================== */
 extern "C"
-void* TrainStation_Ctor(void* memory, uint32_t resId, int32_t strPtr)
+void* TrainStation_Ctor(void* memory, uint32_t resId, const char* name)
 {
     if (memory == nullptr) {
         return nullptr;
     }
 
     /* Construct the TrainStation object at the given address */
-    TrainStation* obj = new (memory) TrainStation(resId, strPtr);
+    TrainStation* obj = new (memory) TrainStation(resId, name);
     return obj;
 }

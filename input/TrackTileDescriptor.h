@@ -306,16 +306,18 @@ public:
  *
  * resources/ResourceManager.cpp's AddString (0x446840) drives a C-style
  * resource-type dispatch table that allocates raw memory with
- * operator_new(size) and then calls a `void* Ctor(void* mem, resId,
- * strPtr)` function for each resource-type family — this bridge follows
+ * operator_new(size) and then calls a `void* Ctor(void* mem, resId, name)`
+ * function for each resource-type family — this bridge follows
  * that exact established convention (see e.g. BuildingDescriptorEditor_Ctor,
  * TrainStation_Ctor for the sibling classes) rather than reshaping
  * ResourceManager.cpp's own dispatch style.
  *
  * Places the new object, constructs it (BuildingDescriptorEditor base with
  * nameParam=0, then this class's own field reset), then explicitly calls
- * HandleEvent(resId, name_suffix) to perform the real .dat load — matching
+ * HandleEvent(resId, name) to perform the real .dat load — matching
  * the disassembly's post-construction direct call, not a constructor-time
- * call.
+ * call. `name` is a real `const char*` (widened from the original's int32_t
+ * ABI slot — see ui/UI_ChildWindow.h's ChildWindow constructor doc for why
+ * the int32 pointer-handle round trip is unsafe on this host).
  */
-void* TrackTileDescriptor_Ctor(void* memory, int32_t resId, int32_t strPtr);
+void* TrackTileDescriptor_Ctor(void* memory, int32_t resId, const char* name);
