@@ -91,9 +91,39 @@ public:
     /* vtable at +0x00 is compiler-managed via virtual methods */
     int32_t   owner_handle;        // +0x04  owner/creator parameter
     int32_t   active_editor;       // +0x08  0=forward, 1=reverse (direction toggle)
-    int16_t   editor_count;        // +0x0C  number of active VehicleEditor refs (0-4)
+    int16_t   editor_count;        // +0x0C  number of populated CARRIAGE
+                                    //   slots in editors[1..3], range 0-3
+                                    //   — NOT a count of all 4 editors[]
+                                    //   entries (previous doc here was
+                                    //   wrong). editors[0] is the lead
+                                    //   unit, populated directly by the
+                                    //   constructor (0x44BE50: writes
+                                    //   editors[0] at 0x44BF4A without
+                                    //   ever touching editor_count, which
+                                    //   is separately zero-initialized at
+                                    //   0x44BF17) and never counted here.
+                                    //   Vehicle::InitRoute (0x44C220)
+                                    //   confirms the range: it checks slot
+                                    //   editors[1+editor_count] free, then
+                                    //   increments editor_count (1..3) and
+                                    //   writes the new editor at
+                                    //   editors[editor_count]; it refuses
+                                    //   to grow once editor_count==3. Same
+                                    //   base/bound as
+                                    //   Vehicle::GetOccupantCount's
+                                    //   documented editors[1..3] scan and
+                                    //   TrainSubsystem::ResetMultiplayerState/
+                                    //   HandleConnectionSetup's carriage
+                                    //   loops (game/Train_network.cpp).
     /* +0x0E: padding 2 bytes */
-    VehicleEditor* editors[4];     // +0x10  VehicleEditor pointers (max 4)
+    VehicleEditor* editors[4];     // +0x10  VehicleEditor pointers.
+                                    //   editors[0] = lead unit (always
+                                    //   populated by the constructor,
+                                    //   never counted by editor_count).
+                                    //   editors[1..3] = carriages, of
+                                    //   which the first `editor_count`
+                                    //   slots are populated (see
+                                    //   editor_count doc above).
     EditorState* editor_state;      // +0x20  GAMESTATE_EditorState (0x20-byte sub-object)
     int16_t   max_speed;           // +0x24  forward speed limit
     int16_t   reverse_speed;       // +0x26  reverse speed limit
@@ -189,7 +219,28 @@ public:
     union { uint8_t flag_89; uint8_t ack_counter; }; // +0x89
     uint8_t   flag_8A;             // +0x8A  unknown flag
     uint8_t   _pad_8B;             // +0x8B
-    void*     editor_state_2;      // +0x8C  secondary editor state pointer
+    /* +0x8C: no code path anywhere in the recovered tree (Vehicle's own
+     * CleanupChildren/0x44C0D0, GameVehicle.cpp, World.cpp, Town.cpp,
+     * Netman.cpp, EditorState.cpp, Cursor_Editor.cpp/Cursor_new_impls.cpp)
+     * ever reads, writes, or frees this slot as a genuine pointer -- both
+     * Vehicle constructors (0x44BE50 and the host-only
+     * HostNetworkVehicleTag ctor) only zero-init it, and CleanupChildren
+     * -- which explicitly frees editor_state at +0x20 and editors[] at
+     * +0x10..+0x1C -- never touches +0x8C at all. The only real
+     * behavioral evidence for this offset in the whole binary is
+     * TrainSubsystem::HandleControllerInit (0x43B6D0: `MOV dword ptr
+     * [EAX+0x8C], ECX` where ECX is a DPlay player ID passed in as a
+     * plain int32_t argument) and ResetMultiplayerState (0x43B770: reads
+     * it back as a dword and compares against a DPlay player ID). Same
+     * repurposed-storage pattern as tunnel_angle/field_76 above: a
+     * generically-named slot that, once traced to its real use sites, is
+     * only ever touched by TrainSubsystem's train-car code path -- never
+     * a genuinely dereferenced "secondary editor state" pointer. */
+    union { void* editor_state_2; int32_t dplay_id; }; // +0x8C DPlay
+                                    //   player ID of the peer that
+                                    //   currently owns this train car
+                                    //   (TrainSubsystem-specific; see
+                                    //   comment above).
     uint8_t   active_flag;         // +0x90  active/update flag
     /* Total: 0x94 bytes */
 
