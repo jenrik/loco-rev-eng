@@ -36,6 +36,12 @@
 #include "../input/InputMgr.h"
 #include "../world/scriptengine.h"
 #include <new>
+#include <cstring> /* strcmp/memcpy — HandleConnectionSetup's DPLAY_SessionData
+                    * field copies; strcpy/memcpy/strlen were already used
+                    * unqualified elsewhere in this file before this include
+                    * existed, so it was presumably reaching <cstring>
+                    * transitively -- added explicitly now that strcmp joins
+                    * them, rather than relying on that transitive path. */
 #ifndef _WIN32
 #include "sdl3_net_runtime.h"
 #include "host_test_events.h"
@@ -121,7 +127,16 @@ void*  __thiscall WIN32_PeekMessageLoop(void* dplay_peer);  /* 0x00460F10 */
 /* Network manager */
 int    __thiscall NETMAN_FindPlayerIndex(void* netman, int player_id); /* 0x00446760 */
 int    __thiscall NETMAN_CheckTrackConnection(void* netman, int direction, uint8_t player_index); /* 0x00446830 */
-int    __thiscall NETMAN_GetPlayerCount(void* netman);                 /* 0x00446890 */
+/* NETMAN_GetPlayerCount(void*) at "0x00446890" removed 2026-08-18 — that
+ * address is mid-body of ResourceManager::AddString (0x446840), a totally
+ * unrelated function (confirmed via decompile_function), not a real
+ * "get player count" entry point; its sole real call site (inside
+ * TrainSubsystem::HandleConnectionSetup, below) actually disassembles to
+ * `CALL 0x43D210`, i.e. Netman::GetPlayerCount() (network/NetmanTypes.h) —
+ * which itself, per that method's own long-standing TODO, returns
+ * `m_currentSlot` reinterpreted as int32_t, not a count at all. Rather than
+ * route through that pointer-truncating method (unsafe on a 64-bit host),
+ * HandleConnectionSetup now reads `m_currentSlot`/`m_gameMode` directly. */
 void   __thiscall NETMAN_SendBuildingData(void* netman, int player_id); /* 0x00446510 */
 
 /* DPLAY player helpers. DPLAY_CreatePlayer/InitPlayer (formerly declared
@@ -152,14 +167,20 @@ void   __thiscall NET_RegisterPlayer(void* dplay, void* player, int flag, int un
  * and takes no implicit `this` (it's a plain free function, not a method —
  * __thiscall here was already a no-op on host either way). */
 
-/* Vehicle */
-void*  __thiscall Vehicle_Ctor(void* obj, int resource_id, int type,
-                                uint8_t flag, int unknown);   /* 0x0043D380 */
-void   __thiscall Vehicle_CalcSpeed(void* obj, short param);  /* 0x0043D980 */
-void   __thiscall Vehicle_InitRoute(void* obj, int resource_id, int type, uint8_t flag); /* 0x0043DC60 */
+/* Vehicle_Ctor/Vehicle_CalcSpeed/Vehicle_InitRoute(void*, ...) removed
+ * 2026-08-18 — their sole call sites (all inside
+ * TrainSubsystem::HandleConnectionSetup, below) now use the real typed
+ * Vehicle constructor and Vehicle::CalcSpeed/InitRoute methods (game/Vehicle.h),
+ * consistent with the real disassembly's call targets (0x44BE50/0x44D6C0/
+ * 0x44C220). The removed "Vehicle_Ctor" declaration's own address comment,
+ * 0x0043D380, was fabricated — the real constructor call in this function's
+ * disassembly targets 0x44BE50, matching Vehicle.h's documented ctor. */
 int    __thiscall VehicleEditor_GetResourceId(void* vehicle);  /* 0x0043CC20 */
 void*  __thiscall VehicleEditor_GetDPlayData(void* vehicle);   /* 0x0043CD00 */
-void   __thiscall VehicleEditor_SetDPlayData(void* vehicle, int data); /* 0x0043CD60 */
+/* VehicleEditor_SetDPlayData(void*, int) removed 2026-08-18 — its sole call
+ * site (HandleConnectionSetup, below) now uses the real typed
+ * VehicleEditor::SetDPlayData(const DPlayManager*) method (core/VehicleEditor.h,
+ * address 0x40D770, matching this function's own disassembly). */
 
 /* Config */
 int    __thiscall Config_GetIniInt(void* config, const char* section, const char* key, int default_val); /* 0x00413FC0 */
@@ -186,7 +207,15 @@ void*  __thiscall Config_GetIniString(void* config, const char* section, const c
  * only compiled here because of -fpermissive. */
 void   __thiscall Train_ConnectToServer(void* subsystem, void* payload); /* 0x43C860 */
 void   __fastcall Train_HandleTrackBuild(void* subsystem, int data); /* 0x0043CE10 */
-void   __fastcall Train_SendPlayerInfo(void* subsystem);             /* 0x0043CDA0 */
+/* Address corrected 2026-08-18 from a fabricated 0x0043CDA0 (zero xrefs;
+ * that address is mid-body of this same function, confirmed via
+ * disassemble_function — Train_SendPlayerInfo's real prologue is at
+ * 0x43CCC0, matching Ghidra's own function name/boundary there and its
+ * three real callers: Train_HandleTrackBuild (0x43D017),
+ * Train_ProcessMessages (0x439A50), TrainSubsystem::HandleJoinMultiplayer
+ * (0x43C7DE) below). Signature unchanged (single ECX arg, __fastcall,
+ * matches Ghidra's own `void __fastcall Train_SendPlayerInfo(int)`). */
+void   __fastcall Train_SendPlayerInfo(void* subsystem);             /* 0x0043CCC0 */
 void   __fastcall Train_RemoveAllTracks(void* subsystem);            /* 0x43CC40 */
 
 /* OutputDebugStringA is available as g_OutputDebugStringA from main file */
@@ -929,23 +958,27 @@ void TrainSubsystem::ProcessMessages()
                     NETMAN_QueueMessage(qmsg);
                 }
 
-                /* If scenario mode, unlink all cars from sprite_list_1 */
+                /* If scenario mode, unlink all cars from sprite_list_1,
+                 * marking each dead (init_flag=0, Vehicle.h +0x88) and
+                 * queueing a type-0xF (RemoveCar) notification per car —
+                 * the same "unlink + init_flag=0 + notify" pattern as
+                 * RemoveAllCars (0x43CBE0). Disassembly at 0x439790-
+                 * 0x4397AD confirms car->next (+0x70) is both the unlink
+                 * pointer and the field cleared on the just-unlinked node
+                 * after sprite_list_1 is advanced. */
                 if (g_netman->m_gameMode == 1) {
-                    uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-                    while (car != nullptr) {
+                    while (this->sprite_list_1 != nullptr) {
+                        Vehicle* car = this->sprite_list_1;
                         NetworkMsg* qmsg = AllocateNetworkMessage();
                         if (qmsg) {
                             qmsg->data = NULL; qmsg->next = NULL;
                             qmsg->type = 0x0F;
-                            qmsg->data = this->sprite_list_1;
+                            qmsg->data = car;
                         }
-                        *reinterpret_cast<uint8_t*>((car + 0x88)) = 0;
-                        this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70));
-                        if (qmsg && qmsg->data) {
-                            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
-                        }
+                        car->init_flag = 0;
+                        this->sprite_list_1 = car->next;
+                        car->next = nullptr;
                         NETMAN_QueueMessage(qmsg);
-                        car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
                     }
                 }
                 goto free_msg;
@@ -958,13 +991,14 @@ void TrainSubsystem::ProcessMessages()
             if (msg_type == 1000) {
                 this->player_peer_id = player_id;
 
-                /* Reset timeout on all controller cars */
-                {
-                    uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-                    while (car != nullptr) {
-                        *reinterpret_cast<uint16_t*>((car + 0x74)) = 32000;
-                        car = *reinterpret_cast<uint8_t**>((car + 0x70));
-                    }
+                /* Reset timeout on all controller cars. Reuses
+                 * Vehicle::tunnel_angle (+0x74) as a 32000 (0x7d00) "max
+                 * timeout" sentinel rather than a heading value here —
+                 * the same reuse already documented as "max timeout" at
+                 * TrainSubsystem::HandleJoinMultiplayer's identical site
+                 * in this file — not a distinct field. */
+                for (Vehicle* car = this->sprite_list_1; car != nullptr; car = car->next) {
+                    car->tunnel_angle = 32000;
                 }
 
                 /* Send player info response (0x3E9, 24 bytes). Fixed-size
@@ -1005,8 +1039,12 @@ void TrainSubsystem::ProcessMessages()
             uint8_t info_flag = static_cast<uint8_t>(p[4]);
             int32_t config_val = *reinterpret_cast<int32_t*>((p + 2));
 
-            uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-            while (car) { *reinterpret_cast<uint16_t*>((car + 0x74)) = 32000; car = *reinterpret_cast<uint8_t**>((car + 0x70)); }
+            /* Reset timeout on all controller cars — same tunnel_angle
+             * "max timeout" sentinel reuse as the msg_type==1000 case
+             * above. */
+            for (Vehicle* car = this->sprite_list_1; car != nullptr; car = car->next) {
+                car->tunnel_angle = 32000;
+            }
 
             if (info_flag) this->field_30 = 1;
             *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(g_player_config) + 0x14)) = config_val;
@@ -1655,33 +1693,43 @@ void TrainSubsystem::UpdatePlayerCount(uint32_t player_index)
     /* g_netman->m_mySlotIndex — self slot index, not a "local player" count. */
     uint32_t self_slot_index = static_cast<uint32_t>(g_netman->m_mySlotIndex);
 
-    void*  prev = NULL;
-    void*  node = this->sprite_list_3;
+    Vehicle* prev = nullptr;
+    Vehicle* node = this->sprite_list_3;
 
-    while (node != NULL) {
-        uint8_t node_owner = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
-        void*   next_node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+    while (node != nullptr) {
+        Vehicle* next_node = node->next;
 
-        if (node_owner == static_cast<uint8_t>(player_index)) {
-            /* Unlink this node */
-            if (prev == NULL) {
-                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+        /* Disassembly at 0x43A6F0 (MOV DL, [ECX+0x78]; CMP EDX, EBP) reads
+         * and compares Vehicle::slot_index (+0x78), NOT peer_index (+0x7C)
+         * despite peer_index being the "owner" field other sprite_list_3
+         * scans in this file key off (e.g. UpdateTrainMovement's
+         * `node->peer_index`, 0x43BB00). Verified against the real bytes
+         * at this address rather than assumed from sibling functions —
+         * the write-back a few lines below (0x43A705/0x43A72F, MOV
+         * [ECX+0x7C], BL) really is a different field, peer_index. */
+        if (node->slot_index == static_cast<uint8_t>(player_index)) {
+            /* Unlink this node from sprite_list_3 */
+            if (prev == nullptr) {
+                this->sprite_list_3 = next_node;
             } else {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+                prev->next = next_node;
             }
 
             if (player_index == self_slot_index) {
-                /* Local player's slot: preserve on sprite_list_1 free list */
-                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) = static_cast<uint8_t>(self_slot_index);
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70)) = this->sprite_list_1;
+                /* Local player's slot: reassign ownership to self and
+                 * preserve on the sprite_list_1 free list for reuse. */
+                node->peer_index = static_cast<uint8_t>(self_slot_index);
+                node->next = this->sprite_list_1;
                 this->sprite_list_1 = node;
-                node = this->sprite_list_3;
             } else {
-                /* Remote player: destroy via vtable[0] */
-                void** vt = *reinterpret_cast<void***>(node);
-                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
-                node = this->sprite_list_3;
+                /* Remote player: destroy. CALL dword ptr [vtable+0] at
+                 * both call sites (0x43A71E and 0x43A748) with arg 1 —
+                 * confirmed to be Vehicle's scalar deleting destructor
+                 * (vtable[0], Vehicle::~Vehicle at 0x44C0B0, flags=1 to
+                 * free memory), so plain `delete` is exact. */
+                delete node;
             }
+            node = next_node;
         } else {
             prev = node;
             node = next_node;
@@ -1779,10 +1827,20 @@ send_disconnect:
 void TrainSubsystem::HandleDisconnect()
 {
     if (g_dplay_peer != NULL) {
-        /* Send game-over notification if connected in scenario mode */
+        /* Send game-over notification if connected in scenario mode.
+         * BUG (original): 0x43AC10 `PUSH ECX` allocates a 4-byte stack slot
+         * seeded with the incoming `this`; 0x43AC42 overwrites only the low
+         * word with 0x3FD, but 0x43AC3D sends all 4 bytes — so the upper 2
+         * bytes on the wire are the high half of the this-pointer
+         * (Ghidra's own decompile shows this as
+         * `CONCAT22((short)((uint)param_1 >> 0x10), 0x3fd)`). Every
+         * receiver in this file reads only the 16-bit type at payload
+         * offset 0, so that garbage is protocol-inert. Reconstructed as a
+         * genuinely 4-byte, deterministic buffer instead of reading past a
+         * 2-byte local. */
         if (g_dplay_peer->session_ready != 0 && g_netman->m_gameMode == 2) {
-            uint16_t msg = 0x3FD;
-            WIN32_SendNetworkData(g_dplay_peer, 0, &msg, 4, 1);
+            uint32_t game_over_msg = 0x3FD;
+            WIN32_SendNetworkData(g_dplay_peer, 0, &game_over_msg, 4, 1);
             Sleep(10);
         }
 
@@ -1799,37 +1857,40 @@ void TrainSubsystem::HandleDisconnect()
     /* Only free lists in scenario mode or non-scenario */
     int scenario = g_netman->m_gameMode;
     if (scenario == 2 || scenario == 0) {
-        /* Free sprite_list_1 (active) */
-        {
-            void* node = this->sprite_list_1;
-            while (node != NULL) {
-                this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
-                void** vt = *reinterpret_cast<void***>(node);
-                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
-                node = this->sprite_list_1;
-            }
+        /* Free sprite_list_1/2/3. Disassembly at 0x43AC99-0x43ACF1 shows all
+         * three loops share one shape (0x43ACA0-0x43ACB5 for sprite_list_1,
+         * 0x43ACBE-0x43ACD3 for sprite_list_2, 0x43ACDC-0x43ACF1 for
+         * sprite_list_3): each iteration reads node->next (Vehicle::next,
+         * +0x70 in the original x86 layout), stores it as the new list head
+         * BEFORE destroying the old head, then invokes vtable[0] with
+         * flags=1 (0x43ACAA/0x43ACAE, 0x43ACC8/0x43ACCC, 0x43ACE6/0x43ACEA)
+         * — confirmed to be Vehicle's scalar deleting destructor
+         * (Vehicle::~Vehicle, 0x44C0B0), the same call shape already
+         * verified in UpdatePlayerCount (0x43A71E/0x43A748) and
+         * ProcessMessages' sprite_list_1 purge (0x439790-0x4397AD) in this
+         * file — so plain `delete` is exact. The redundant `TEST ECX,ECX`/
+         * `JZ` pairs at 0x43ACA3/0x43ACA8 (etc.) test the still-live node
+         * pointer against itself and are never taken; not a distinct
+         * null-check branch. No prev-pointer/mid-list unlink logic here —
+         * unlike UpdatePlayerCount, every node reachable from each list head
+         * is destroyed, matching TrainSubsystem::BaseDtor's own
+         * "frees all 3 sprite linked lists" documentation. */
+        while (this->sprite_list_1 != nullptr) {
+            Vehicle* node = this->sprite_list_1;
+            this->sprite_list_1 = node->next;
+            delete node;
         }
 
-        /* Free sprite_list_2 (dead) */
-        {
-            void* node = this->sprite_list_2;
-            while (node != NULL) {
-                this->sprite_list_2 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
-                void** vt = *reinterpret_cast<void***>(node);
-                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
-                node = this->sprite_list_2;
-            }
+        while (this->sprite_list_2 != nullptr) {
+            Vehicle* node = this->sprite_list_2;
+            this->sprite_list_2 = node->next;
+            delete node;
         }
 
-        /* Free sprite_list_3 (persistent) */
-        {
-            void* node = this->sprite_list_3;
-            while (node != NULL) {
-                this->sprite_list_3 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
-                void** vt = *reinterpret_cast<void***>(node);
-                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
-                node = this->sprite_list_3;
-            }
+        while (this->sprite_list_3 != nullptr) {
+            Vehicle* node = this->sprite_list_3;
+            this->sprite_list_3 = node->next;
+            delete node;
         }
     }
 }
@@ -1842,24 +1903,45 @@ void TrainSubsystem::HandleDisconnect()
 void TrainSubsystem::HandleFileTransfer(void* msg)
 {
     NetworkMsg* net_msg = reinterpret_cast<NetworkMsg*>(msg);
-    void*       car     = net_msg->data;
-    int         dir     = net_msg->flags;
+    Vehicle*    car      = static_cast<Vehicle*>(net_msg->data);
+    int         dir      = net_msg->flags;
 
     if (g_netman->m_gameMode != 2) {
-        /* Not in multiplayer scenario — destroy car */
+        /* Not in multiplayer scenario — destroy car. Disassembly at
+         * 0x43AD25-0x43AD2B (MOV EAX,[ESI]; PUSH 1; MOV ECX,ESI;
+         * CALL [EAX]) is the same vtable[0]-with-flags=1 shape already
+         * confirmed as Vehicle's scalar deleting destructor
+         * (Vehicle::~Vehicle, 0x44C0B0) at every other call site in this
+         * file (UpdatePlayerCount, HandleDisconnect) — plain `delete` is
+         * exact here too. */
         if (car != NULL) {
-            void** vt = *reinterpret_cast<void***>(car);
-            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
+            delete car;
             net_msg->data = NULL;
         }
         return;
     }
 
-    /* Check if this is a 'remove' message */
-    if (car && *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 4)) == 1) {
-        if (car) {
-            void** vt = *reinterpret_cast<void***>(car);
-            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
+    /* Check if this is a 'remove' message. Vehicle::owner_handle (+0x04)
+     * doubles as an inbound-train "destroy me" flag on this alias
+     * (network/NetmanTypes.h: `using InboundTrainNode = Vehicle;`) — the
+     * identical `node->owner_handle == 1` check gates net_delete(node) in
+     * Netman::ReceiveGameStart (network/Netman.cpp, ~line 1158, address
+     * 0x43E560) for the same InboundTrainNode/Vehicle alias. Confirmed at
+     * THIS call site directly against the real bytes, not assumed from
+     * that sibling: 0x43AD3B `CMP dword ptr [ESI+0x4],0x1` reads
+     * car->owner_handle unconditionally (no null check before the read —
+     * that really is the binary's own behavior), while the separate
+     * `TEST ESI,ESI`/`JZ` pair at 0x43AD41/0x43AD43 guards only the
+     * destroy call below it. Same vtable[0]/flags=1 destructor shape as
+     * above (0x43AD45-0x43AD4B) — `delete` is exact here as well.
+     * NOTE: the `car != NULL` guard below is provably dead under C++
+     * semantics (car->owner_handle above already requires a non-null
+     * car) — kept only to mirror the real TEST/JZ pair 1:1; do not "fix"
+     * it by hoisting a null check above the owner_handle read, which
+     * would silently change behavior relative to the binary. */
+    if (car->owner_handle == 1) {
+        if (car != NULL) {
+            delete car;
         }
         net_msg->data = NULL;
         return;
@@ -1871,17 +1953,24 @@ void TrainSubsystem::HandleFileTransfer(void* msg)
      * right-edge bound — despite its name, it holds the *column* count; see
      * the loud TODO in Netman.cpp's CheckTrackConnection for the same
      * pre-existing name/role mismatch). Only the raw address matters here —
-     * it is the field occupying +0xC, whatever its name says. */
+     * it is the field occupying +0xC, whatever its name says.
+     *
+     * Flattened vs. the pre-existing transcription: the real disassembly's
+     * "no heading matched" fallthrough (0x43AD86 `XOR EAX,EAX` and the
+     * equivalent tail of the dir>0x5A branch; Ghidra's own decompile shows
+     * both converging on a shared `iVar4 = 0;` before LAB_0043ad94) sets
+     * target_town to 0, not self_slot_index — the previous transcription's
+     * `int target_town = self_slot_index;` initializer was wrong for that
+     * case. Every real caller only ever sends one of the four
+     * MirrorTrainHeading values, so the fallback is unreachable in
+     * practice, but this now matches the binary for every possible `dir`. */
     int self_slot_index = g_netman->m_mySlotIndex;
-    int target_town = self_slot_index;
-
-    if (dir < 0x5B) {
-        if (dir == 0x5A)      target_town = self_slot_index + 1;
-        else if (dir == 0)    target_town = self_slot_index - g_netman->m_playerRows;
-    } else {
-        if (dir == 0xB4)      target_town = g_netman->m_playerRows + self_slot_index;
-        else if (dir == 0x10E) target_town = self_slot_index - 1;
-    }
+    int target_town;
+    if (dir == 0x5A)       target_town = self_slot_index + 1;
+    else if (dir == 0)     target_town = self_slot_index - g_netman->m_playerRows;
+    else if (dir == 0xB4)  target_town = g_netman->m_playerRows + self_slot_index;
+    else if (dir == 0x10E) target_town = self_slot_index - 1;
+    else                   target_town = 0;
 
     /* Find player at target town */
     PlayerSlot* player_slot = NULL;
@@ -1904,178 +1993,264 @@ void TrainSubsystem::HandleFileTransfer(void* msg)
     return;
 
 forward_train:
-    /* Forward train to another player at the target */
-    {
-        if (this->sprite_list_2 != NULL) {
-            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_2);
-            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) {
-                tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-            }
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            *reinterpret_cast<void**>((tail + 0x70)) = car;
-        } else {
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            this->sprite_list_2 = car;
-        }
-        Train_RemoveAllTracks(this);
-    }
+    /* Forward train to another player at the target: append `car` to the
+     * tail of sprite_list_2. Disassembly at 0x43ADD6-0x43AE11 is exactly
+     * AppendToVehicleList's shape (car->next cleared, then either becomes
+     * the new head or is linked onto the existing tail found by walking
+     * ->next) — re-verified directly against this call site's own bytes,
+     * not assumed from the sibling append blocks the helper was
+     * originally extracted from. */
+    AppendToVehicleList(this->sprite_list_2, car);
+    Train_RemoveAllTracks(this);
 }
 
 
 /* ================================================================== */
 /* TrainSubsystem::HandleConnectionSetup                               */
-/* Address: 0x43B240                                                    */
-/* Size: 1162 bytes                                                     */
+/* Address: 0x43B240 (1162 bytes)                                      */
+/*                                                                      */
+/* Handles an inbound MSG_CONN_SETUP (0x3F2) wire message -- the exact  */
+/* 0xB1C-byte layout produced by MoveToNeighborTown's `buf` (this file, */
+/* above): type(2)/direction(2)@0x04/network_id(2)@0x06/max_steps(2)@0x08/ */
+/* slot_index(1)@0x0A/active_editor(4)@0x0C/carriage_count(1)@0x14, then   */
+/* 0x3A8-byte carriage records starting at +0x18, and a 10-byte primary-  */
+/* editor name at +0xB10. `carriage_count` is an unbounded byte straight  */
+/* off the wire (no clamp in the real code, reproduced as-is below); only */
+/* MoveToNeighborTown's own producer happens to always emit <=3 records — */
+/* a hostile/corrupt sender with a larger count walks past the 0xB1C      */
+/* buffer and writes editors[4+], matching the original's own exposure.   */
+/* Re-derived directly from raw disassembly (not decompiler pseudocode,   */
+/* which mis-scaled several pointer-arithmetic terms -- see the per-field */
+/* notes below); every offset here is cross-validated against             */
+/* MoveToNeighborTown's producer, which serializes the exact same wire    */
+/* format from the opposite side, and independently against the existing */
+/* DPLAY_SessionData struct doc (network/DPlayManager.h).                 */
+/*                                                                      */
+/* ABI_BOUNDARY: `msg`/`record` below are raw external network-message   */
+/* bytes, not a modeled game object -- byte arithmetic on them is the    */
+/* legitimate wire-format case, not a field-access shortcut.             */
 /* ================================================================== */
 void TrainSubsystem::HandleConnectionSetup(void* data)
 {
-    uint16_t* p = reinterpret_cast<uint16_t*>(data);
+    const uint8_t* msg = static_cast<const uint8_t*>(data); /* ABI_BOUNDARY */
 
-    /* Create a new Vehicle controller. 0x94 was the original x86
-     * sizeof(Vehicle); use the real host size (see game/Vehicle.h). */
-    void* vehicle_obj = operator_new(sizeof(Vehicle));
-    void* controller = NULL;
-    if (vehicle_obj) {
-        controller = Vehicle_Ctor(vehicle_obj, *reinterpret_cast<int*>((p + 8)), 2, 1, 1);
+    /* Local DPlayManager staging object (0x43B261/0x43B269:
+     * `LEA ECX,[ESP+0x28]; CALL 0x442850`), used to relay each carriage's
+     * serialized DPLAY data on to the matching VehicleEditor below. Created
+     * once, before the Vehicle is even allocated, matching instruction
+     * order; reused/overwritten per carriage (0x43B566 passes the SAME
+     * ESP+0x28 address to VehicleEditor::SetDPlayData on every iteration).
+     * The original's paired `DPLAY_CleanupPlayer(&obj)` at the very end
+     * (0x43B69B) only resets the vtable pointer for MSVC SEH-unwind safety
+     * (DPlayManager::CleanupPlayer's own doc) -- compiler/EH scaffolding,
+     * not reimplemented, matching the established omission at
+     * Train_ConnectToServer (this file, "MSVC SEH not supported on GCC"). */
+    DPlayManager local_session;
+    local_session.CreatePlayer();
+
+    /* Allocate the new Vehicle controller (real ctor at 0x44BE50, matching
+     * Vehicle.h; disassembly at 0x43B29B-0x43B2A7 pushes resource_id=
+     * *(int32*)(msg+0x10), 2, 1, 1 in that param order). */
+    void* vehicle_mem = operator_new(sizeof(Vehicle));
+    Vehicle* controller = nullptr;
+    if (vehicle_mem != nullptr) {
+        int32_t resource_id = *reinterpret_cast<const int32_t*>(msg + 0x10); /* ABI_BOUNDARY */
+        controller = new (vehicle_mem) Vehicle(resource_id, 2, 1, 1);
     }
-    if (controller == NULL) return;
+    /* BUG: the original unconditionally dereferences the ctor result at
+     * 0x43B2CD with no null check -- an allocation failure crashes. This
+     * guard is the file-wide safe idiom used by every other sibling here
+     * (see e.g. HandleControllerInit's BUG note); unreachable in practice. */
+    if (controller == nullptr) return;
 
-    /* Set direction and town info */
-    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x74)) = p[2];    /* direction */
-    *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A)) = p[3];    /* resource ID */
-    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 10));  /* type */
-    Vehicle_CalcSpeed(controller, *reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(p) + 8));
+    controller->tunnel_angle   = *reinterpret_cast<const uint16_t*>(msg + 0x04); /* direction */
+    controller->network_id     = *reinterpret_cast<const uint16_t*>(msg + 0x06);
+    controller->slot_index     = msg[0x0A];
+    controller->CalcSpeed(*reinterpret_cast<const int16_t*>(msg + 0x08));
+    controller->active_editor  = *reinterpret_cast<const int32_t*>(msg + 0x0C);
 
-    /* Set parent/controller reference */
-    *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(controller) + 8)) = *reinterpret_cast<int32_t*>((p + 6));
+    uint8_t carriage_count = msg[0x14];
+    int dplay_editor_index = 0; /* next unfilled slot in editors[1..3];
+                                  * advances only for carriages that carry
+                                  * DPLAY data (0x43B562/0x43B575: local_3b4
+                                  * is incremented ONLY inside the
+                                  * has_dplay-data branch, not every
+                                  * iteration). */
 
-    /* Process up to 3 track elements */
-    if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 0x14)) != 0) {
-        uint32_t* track_entry = reinterpret_cast<uint32_t*>((p + 0x16));
+    for (int i = 0; i < carriage_count; i++) {
+        const uint8_t* record = msg + 0x18 + i * 0x3A8; /* ABI_BOUNDARY */
 
-        for (int i = 0; i < *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 0x14)); i++) {
-            Vehicle_InitRoute(controller, track_entry[-5], track_entry[-4], 1);
+        int32_t resource_id_1 = *reinterpret_cast<const int32_t*>(record + 0x00);
+        int32_t resource_id_2 = *reinterpret_cast<const int32_t*>(record + 0x04);
+        controller->InitRoute(resource_id_1, resource_id_2, 1);
 
-            if (*reinterpret_cast<uint8_t*>((track_entry + -3)) != 0) {
-                /* Has DPLAY data — check if it matches local player */
-                uint16_t track_id = static_cast<uint16_t>(track_entry[-1]);
-                int player_count = NETMAN_GetPlayerCount(g_netman);
+        bool has_dplay_data = record[0x08] != 0;
+        if (has_dplay_data) {
+            /* Populate the local DPlayManager staging object field-by-field
+             * from the wire record. Every offset below is disassembly-
+             * verified (object base = ESP+0x28 = &local_session; e.g.
+             * 0x43B341 `MOV [ESP+0x30],EDX` writes object+8 = m_colorId
+             * from source EDX = record+0x14 -- and so on for every field;
+             * the two REP MOVSD block copies for m_sessionBlk1/2 (0x43B34C,
+             * 0x43B35E) and m_playerName/m_trackEntries (0x43B397,
+             * 0x43B3CC) land exactly on those fields' documented offsets
+             * in network/DPlayManager.h with zero slack). The 2-byte pad
+             * after m_magic (DPlayManager.h's `_pad_06`) is never written
+             * here, matching the original -- it keeps whatever CreatePlayer
+             * or a prior iteration left there. */
+            local_session.m_magic    = *reinterpret_cast<const uint16_t*>(record + 0x10);
+            local_session.m_colorId  = *reinterpret_cast<const int32_t*>(record + 0x14);
+            local_session.m_configId = *reinterpret_cast<const int32_t*>(record + 0x18);
+            memcpy(local_session.m_sessionBlk1, record + 0x1C, sizeof(local_session.m_sessionBlk1));
+            memcpy(local_session.m_sessionBlk2, record + 0x31, sizeof(local_session.m_sessionBlk2));
+            local_session.m_dwordValue = *reinterpret_cast<const int32_t*>(record + 0x48);
+            local_session.m_wordValue  = *reinterpret_cast<const uint16_t*>(record + 0x46);
+            local_session.color_r = record[0x4C];
+            local_session.color_g = record[0x4D];
+            local_session.color_b = record[0x4E];
+            memcpy(local_session.m_playerName, record + 0x4F, sizeof(local_session.m_playerName));
+            local_session.m_unknown93   = record[0x9F];
+            local_session.m_playerType  = record[0xA0];
+            local_session.m_playerTrack = record[0xA1];
+            memcpy(local_session.m_trackEntries, record + 0xA2, sizeof(local_session.m_trackEntries));
+            local_session.unknown_0x398 = *reinterpret_cast<const int32_t*>(record + 0x3A4);
 
-                uint8_t* player_name = reinterpret_cast<uint8_t*>(track_entry);
-                /* 2-byte stride name compare */
-                int match = -1;
-                for (int j = 0; j < player_count; j++) {
-                    /* Compare player name from track_entry */
-                    uint8_t* pn = reinterpret_cast<uint8_t*>(g_netman->m_slots[j].compact_name);
-                    uint8_t* tn = player_name;
-                    int k = 0;
-                    while (tn[k] == pn[k] && tn[k] != 0) { k++; }
-                    if (tn[k] == pn[k]) { match = j; break; }
-                }
+            /* m_wordValue doubles as an attachment-request gate here (real
+             * call target is Netman::GetPlayerCount, 0x43D210 -- despite
+             * its name, and per its own class-level TODO, it returns
+             * `m_currentSlot` cast to int32_t, not a count; inlined directly
+             * below to avoid round-tripping that pointer through a
+             * truncating int32_t on a 64-bit host). m_sessionBlk1/
+             * m_sessionBlk2 are generic byte blocks in DPlayManager's own
+             * doc, but THIS wire message uses them to carry two
+             * null-terminated player-name strings for the lookups below.
+             *
+             * BUG: when m_gameMode != 2, the real 0x43D210 returns 0, and
+             * the caller does `ADD EAX,5; CMP DL,[EAX]` (0x43B3EC-0x43B3F7)
+             * -- an unconditional read of address 0x00000005, which
+             * crashes. That is a reachable live-path bug in the original,
+             * not an OOM edge case. `current_slot != nullptr` below turns
+             * that crash into "treat as no match" instead, a deliberate
+             * safe deviation matching this file's other guarded near-null
+             * derefs (see HandleControllerInit's BUG note for the same
+             * class of fix). */
+            if (local_session.m_wordValue != 0) {
+                PlayerSlot* current_slot = (g_netman->m_gameMode == 2) ? g_netman->m_currentSlot : nullptr;
+                bool is_self = current_slot != nullptr &&
+                    strcmp(reinterpret_cast<const char*>(local_session.m_sessionBlk1),
+                           current_slot->compact_name) == 0;
 
-                if (match >= 0) {
-                    /* Send PlayerJoin response for matching track */
+                if (is_self) {
                     uint16_t* resp = reinterpret_cast<uint16_t*>(operator_new(8));
                     if (resp) {
                         resp[0] = 0x3FB;
-                        resp[2] = track_id;
+                        resp[2] = local_session.m_wordValue;
                         resp[3] = NET_GetNextAttId();
 
-                        /* Find player by name match */
-                        PlayerSlot* target_player = NULL;
-                        for (int j = 0; j < player_count; j++) {
-                            uint8_t* pn = reinterpret_cast<uint8_t*>(g_netman->m_slots[j].compact_name);
-                            uint8_t* tn = reinterpret_cast<uint8_t*>(track_entry) + 6; /* 2+ byte per char */
-                            int k = 0;
-                            while (tn[k*2] == pn[k] && tn[k*2] != 0) { k++; }
-                            if (tn[k*2] == pn[k]) {
-                                target_player = &g_netman->m_slots[j];
+                        PlayerSlot* target_player = nullptr;
+                        for (int j = 0; j < g_netman->m_playerSlotCount; j++) {
+                            PlayerSlot& slot = g_netman->m_slots[j];
+                            if (slot.dpId != 0 &&
+                                strcmp(slot.compact_name,
+                                       reinterpret_cast<const char*>(local_session.m_sessionBlk2)) == 0) {
+                                target_player = &slot;
                                 break;
                             }
                         }
 
-                        if (target_player) {
-                            WIN32_SendNetworkData(g_dplay_peer, target_player->dpId,
-                                                  resp, 8, 1);
+                        if (target_player == nullptr) {
+                            local_session.m_wordValue = 0;
+                        } else {
+                            WIN32_SendNetworkData(g_dplay_peer, target_player->dpId, resp, 8, 1);
+                            local_session.m_wordValue = resp[3];
+                            controller->ack_counter++;
 
-                            /* Create PlayerConnectionNode for attachment transfer */
-                            track_id = resp[3]; /* att ID */
-                            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x89)) += 1;
-
-                            PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(operator_new(sizeof(PlayerConnectionNode)));
+                            PlayerConnectionNode* node = reinterpret_cast<PlayerConnectionNode*>(
+                                operator_new(sizeof(PlayerConnectionNode)));
                             if (node) {
                                 node->player_id      = target_player->dpId;
-                                node->file_handle    = 0;
                                 node->sub_type       = resp[3];
                                 node->extra_info     = resp[3];
-                                node->transfer_state = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
-                                node->notify_id      = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
-                                node->sequence_num   = 0;
-                                node->throttle       = 0;
-                                node->next           = this->handle_list_2;
-                                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 8)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
-                                *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 10)) = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
-                                this->handle_list_2 = node;
+                                node->transfer_state = controller->slot_index;
+                                node->notify_id       = controller->network_id;
+                                node->file_handle     = 0;
+                                node->throttle        = 0;
+                                node->sequence_num    = 0;
+                                node->next            = this->handle_list_2;
+                                this->handle_list_2   = node;
                             }
                         }
                         GLOBAL_free(resp);
                     }
                 }
-
-                /* Set DPLAY data for this track element */
-                VehicleEditor_SetDPlayData(reinterpret_cast<void*>(static_cast<uintptr_t>(*reinterpret_cast<uint32_t*>((reinterpret_cast<uint8_t*>(controller) + 0x14 + i * 4)))),
-                                            static_cast<int>(reinterpret_cast<uintptr_t>(&track_entry[-7])));
             }
-            track_entry += 0x75; /* advance by 0xEA bytes / 4 = 0x75 dwords */
+
+            /* Relay the populated session data on to this carriage's
+             * VehicleEditor (0x43B562-0x43B56D: SetDPlayData(editors[1+n],
+             * &local_session)). */
+            controller->editors[1 + dplay_editor_index]->SetDPlayData(&local_session);
+            dplay_editor_index++;
         }
     }
 
-    /* Call vtable[13] on the controller's 5th field (4 = +0x10 ptr) */
-    {
-        void** vt = *reinterpret_cast<void***>((*reinterpret_cast<uintptr_t*>((reinterpret_cast<uint8_t*>(controller) + 0x10))));
-        (reinterpret_cast<void (__thiscall*)(void*, void*)>(vt[13]))(*reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(controller) + 0x10)),
-                                                     reinterpret_cast<void*>((reinterpret_cast<uint8_t*>(p) + 0xB10)));
-    }
+    /* Set the primary editor's display name from the wire message's fixed
+     * 10-byte name field (0x43B5A2-0x43B5AE: vtable[0x34/4=13] on
+     * editors[0] -- VehicleEditor's vtable slot 13 is Entity::SetName,
+     * unmodified, per core/VehicleEditor.h's vtable doc; MoveToNeighborTown
+     * writes this exact wire offset from `car->editors[0]->name`, closing
+     * the loop on both sides of the wire format). */
+    controller->editors[0]->SetName(reinterpret_cast<const char*>(msg) + 0xB10); /* ABI_BOUNDARY */
 
-    /* If this train belongs to the local player, remove from sprite_list_1 */
-    if (*reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78)) ==
-        static_cast<uint32_t>(g_netman->m_mySlotIndex)) {
-        void* prev = NULL;
-        void* node = this->sprite_list_1;
-        while (node) {
-            if (*reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x7A)) ==
-                *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A))) {
-                if (prev == NULL) {
-                    this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+    /* If this train belongs to the local player, remove the matching entry
+     * from sprite_list_1 (0x43B5B9-0x43B601). Newly found via real
+     * disassembly (not present in any prior transcription of this
+     * function): `controller->owner_handle = 0` (0x43B5C4) unconditionally,
+     * before the list search even runs.
+     *
+     * Deliberately NOT narrowed to uint8_t: the real compare
+     * (0x43B5B7-0x43B5BC) zero-extends slot_index into EAX and compares the
+     * full 32-bit m_mySlotIndex, which is documented as "0-8 or -1" — with
+     * -1, no uint8_t slot_index can ever match. `slot_index` (uint8_t)
+     * promotes to int for this comparison, reproducing that zero-extend
+     * exactly; casting m_mySlotIndex down to uint8_t here would let a
+     * network-supplied slot_index of 0xFF wrongly match m_mySlotIndex==-1. */
+    if (controller->slot_index == g_netman->m_mySlotIndex) {
+        controller->owner_handle = 0;
+
+        Vehicle* prev = nullptr;
+        Vehicle* node = this->sprite_list_1;
+        while (node != nullptr) {
+            if (node->network_id == controller->network_id) {
+                if (prev == nullptr) {
+                    this->sprite_list_1 = node->next;
                 } else {
-                    *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+                    prev->next = node->next;
                 }
-                void** vt = *reinterpret_cast<void***>(node);
-                (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(node, 1);
+                delete node; /* vtable[0] scalar deleting destructor, flag=1 */
                 break;
             }
             prev = node;
-            node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
+            node = node->next;
         }
     }
 
-    /* Broadcast MSG_CTRL_INIT (0x3F3) to all players */
+    /* Broadcast MSG_CTRL_INIT (0x3F3, 10 bytes) to all players. */
     {
         uint16_t* ctrl_init = reinterpret_cast<uint16_t*>(operator_new(10));
         if (ctrl_init) {
             ctrl_init[0] = 0x3F3;
-            ctrl_init[2] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7A));
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 6)) = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x78));
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(ctrl_init) + 7)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
-            ctrl_init[4] = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(controller) + 0x74));
+            ctrl_init[2] = controller->network_id;
+            *(reinterpret_cast<uint8_t*>(ctrl_init) + 6) = controller->slot_index;
+            *(reinterpret_cast<uint8_t*>(ctrl_init) + 7) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
+            ctrl_init[4] = controller->tunnel_angle;
             WIN32_SendNetworkData(g_dplay_peer, 0, ctrl_init, 10, 1);
             GLOBAL_free(ctrl_init);
         }
     }
 
-    /* Set controller owner and queue type-0x11 notification */
-    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x7C)) = static_cast<uint8_t>(g_netman->m_mySlotIndex);
-    *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x8A)) = 0;
+    /* Set controller owner and queue type-0x11 (car-added) notification. */
+    controller->peer_index = static_cast<uint8_t>(g_netman->m_mySlotIndex);
+    controller->flag_8A = 0;
 
     {
         NetworkMsg* notify = AllocateNetworkMessage();
@@ -2084,7 +2259,7 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
             notify->type = 0x11;
             notify->data = controller;
         }
-        *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(controller) + 0x88)) = 0;
+        controller->init_flag = 0;
         NETMAN_QueueMessage(notify);
     }
 }
@@ -2093,39 +2268,68 @@ void TrainSubsystem::HandleConnectionSetup(void* data)
 /* ================================================================== */
 /* TrainSubsystem::HandleControllerInit                                */
 /* Address: 0x43B6D0                                                    */
+/*                                                                      */
+/* Handles an inbound MSG_CTRL_INIT (0x3F3) wire message -- the exact   */
+/* 10-byte layout produced by AddTrainCar's `ctrl_init` buffer          */
+/* (0x43B8C0-0x43B933, this file). Finds the matching car in            */
+/* sprite_list_1 by (network_id, slot_index) [CMP word[EAX+0x7A],CX;    */
+/* CMP byte[EAX+0x78],DL at 0x43B6E1-0x43B6ED], records the sender's    */
+/* DPlay player ID and peer_index on it [0x43B6FE/0x43B707], then       */
+/* re-broadcasts a type-0x12 notification carrying the same identifying */
+/* fields [0x43B733-0x43B753].                                          */
 /* ================================================================== */
 void TrainSubsystem::HandleControllerInit(void* data, int dplay_id)
 {
-    uint16_t* p = reinterpret_cast<uint16_t*>(data);
-    uint16_t  train_id = p[2];
-    uint8_t   color    = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 6));
-    uint8_t   owner    = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(p) + 7));
-    uint16_t  dir      = p[4];
+    /* ABI_BOUNDARY: raw MSG_CTRL_INIT wire buffer -- external network
+     * message layout, not a modeled game object. Matches AddTrainCar's
+     * `ctrl_init` producer (same file) byte-for-byte. */
+    const uint16_t* p = reinterpret_cast<const uint16_t*>(data);
+    uint16_t network_id = p[2];                                              /* +0x04 */
+    uint8_t  slot_index = *(reinterpret_cast<const uint8_t*>(p) + 6);         /* +0x06 */
+    uint8_t  peer_index = *(reinterpret_cast<const uint8_t*>(p) + 7);         /* +0x07 */
+    uint16_t direction  = p[4];                                              /* +0x08 */
 
-    /* Find matching car in sprite_list_1 */
-    {
-        uint8_t* car = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-        while (car != nullptr) {
-            if (*reinterpret_cast<uint16_t*>((car + 0x7A)) == train_id &&
-                *reinterpret_cast<uint8_t*>((car + 0x78)) == color) {
-                *reinterpret_cast<int32_t*>((car + 0x8C)) = dplay_id;
-                *reinterpret_cast<uint8_t*>((car + 0x7C)) = owner;
-                break;
-            }
-            car = *reinterpret_cast<uint8_t**>((car + 0x70));
+    /* Find matching car in sprite_list_1 by (network_id, slot_index) and
+     * record the sender's DPlay ID + peer_index on it.
+     *
+     * +0x78/+0x7A/+0x7C are `slot_index`/`network_id`/`peer_index`, not the
+     * general-Vehicle `color_r`/`player_id`/`color_g` union members, per
+     * two independent disassembly sites (not inferred from AddTrainCar's
+     * reconstruction):
+     *   - Vehicle::Vehicle (0x44BE50): under `g_netman->m_gameMode == 2`
+     *     writes `m_mySlotIndex` into both +0x78 and +0x7C (and a shared
+     *     literal 1/1 otherwise) -- a multiplayer slot index, not a color
+     *     channel.
+     *   - RESDATA_ScriptedObject_CleanupChildren (0x44C0D0, 0x44C0EF-
+     *     0x44C0FE): reads byte[+0x7C], byte[+0x78], word[+0x7A] together
+     *     and passes them straight into NETMAN_ReceiveAck(0x440410) -- the
+     *     same three fields travel together into a network-ack call, and
+     *     the same function never touches +0x8C at all (see Vehicle.h). */
+    for (Vehicle* car = this->sprite_list_1; car != nullptr; car = car->next) {
+        if (car->network_id == network_id && car->slot_index == slot_index) {
+            car->dplay_id = dplay_id;      /* +0x8C, see Vehicle.h union doc */
+            car->peer_index = peer_index;  /* +0x7C */
+            break;
         }
     }
 
-    /* Broadcast type-0x12 notification */
+    /* BUG: the original null-checks operator new (0x43B714-0x43B716) but
+     * then writes dword ptr [EAX+8]=0 (0x43B72C) and dword ptr [EAX]=0x12
+     * (0x43B733) unconditionally on both branches -- an allocation failure
+     * (EAX==0) dereferences a null pointer and crashes. The `if (msg)`
+     * guard below is the file-wide safe idiom already used by every other
+     * sibling in this file (ResetMultiplayerState, HandleFileTransfer,
+     * ProcessMessages); behavior differs from the original only on the
+     * OOM path, which is unreachable in practice. */
     NetworkMsg* msg = AllocateNetworkMessage();
     if (msg) {
         msg->data = NULL; msg->next = NULL;
         msg->type = 0x12;
         msg->data = NULL;
-        msg->flags = train_id;
-        msg->setMetadata0(color);
-        msg->setMetadata1(owner);
-        msg->size = dir;
+        msg->flags = network_id;
+        msg->setMetadata0(slot_index);
+        msg->setMetadata1(peer_index);
+        msg->size = direction;
     }
     NETMAN_QueueMessage(msg);
 }
@@ -2148,76 +2352,88 @@ void TrainSubsystem::ResetMultiplayerState(int player_id)
 
     if (static_cast<int>(player_index) < 0) return;
 
-    /* Walk sprite_list_1 and remove matching cars */
-    {
-        void* prev = NULL;
-        void* node = this->sprite_list_1;
+    /* Walk sprite_list_1 releasing cars owned by (or awaiting a DPlay ack
+     * from) the target player back to local ownership. Field mapping
+     * re-verified independently against this function's own disassembly
+     * (0x43B7C5-0x43B7E3), not assumed from HandleControllerInit's:
+     *   MOV CL,[ESI+0x7C]; CMP ECX,EAX; JNZ +6; CMP EDI,EBX; JNZ match
+     *     -> owner_match: player_id != 0 && peer_index == player_index
+     *   MOV DL,[ESI+0x78]; CMP EDX,EAX; JNZ +6; CMP EDI,EBX; JZ match
+     *     -> self_match:  player_id == 0 && slot_index == player_index
+     *   CMP [ESI+0x8C],EDI; JNZ advance-to-next (else fall into match)
+     *     -> dplay_match: dplay_id == player_id, checked unconditionally
+     *        either way (so a full reset, player_id==0, also matches any
+     *        car whose dplay_id happens to be 0). */
+    Vehicle* node = this->sprite_list_1;
+    while (node != nullptr) {
+        const bool owner_match = player_id != 0 &&
+            node->peer_index == static_cast<uint8_t>(player_index);
+        const bool self_match = player_id == 0 &&
+            node->slot_index == static_cast<uint8_t>(player_index);
+        const bool dplay_match = node->dplay_id == player_id;
 
-        while (node != NULL) {
-            uint8_t owner_byte = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C));
-            uint8_t color_byte = *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x78));
-            int     dplay_id   = *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(node) + 0x8C));
-
-            int match = 0;
-            if (player_id != 0 && owner_byte == static_cast<uint8_t>(player_index)) {
-                match = 1;
-            }
-            if (player_id == 0 && color_byte == static_cast<uint8_t>(player_index)) {
-                match = 1;
-            }
-            if (dplay_id == player_id) {
-                match = 1;
-            }
-
-            if (match) {
-                void* next_node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
-
-                /* Unlink from sprite_list_1 */
-                if (prev == NULL) {
-                    this->sprite_list_1 = next_node;
-                } else {
-                    *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(prev) + 0x70)) = next_node;
-                }
-
-                /* Reverse direction */
-                uint16_t dir = *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74));
-                if (dir < 0x5B) {
-                    if (dir == 0x5A)      dir = 0x10E;
-                    else if (dir == 0)    dir = 0xB4;
-                } else {
-                    if (dir == 0xB4)      dir = 0;
-                    else if (dir == 0x10E) dir = 0x5A;
-                }
-                *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x74)) = dir;
-
-                /* Set owner to local player */
-                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x7C)) =
-                    static_cast<uint8_t>(g_netman->m_mySlotIndex);
-
-                /* Clear DPlay data on all carriages */
-                if (*reinterpret_cast<short*>(reinterpret_cast<uint8_t*>(node) + 0x0C) != 0) {
-                    void** carriage = reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x14));
-                    for (int j = 0; j < *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(node) + 0x0C)); j++) {
-                        VehicleEditor_SetDPlayData(carriage[j], 0);
-                    }
-                }
-
-                /* Send type-0x11 release message */
-                NetworkMsg* msg = AllocateNetworkMessage();
-                if (msg) {
-                    msg->data = NULL; msg->next = NULL;
-                    msg->type = 0x11;
-                    msg->data = node;
-                }
-                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(node) + 0x88)) = 0;
-                NETMAN_QueueMessage(msg);
-
-                node = this->sprite_list_1;
-            } else {
-                prev = node;
-                node = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(node) + 0x70));
-            }
+        if (!owner_match && !self_match && !dplay_match) {
+            node = node->next;
+            continue;
         }
+
+        /* BUG: preserved from the original. The real unlink (0x43B7E9-
+         * 0x43B7EC: `MOV EAX,[ESI+0x70]; MOV [this+0x14],EAX`) sets
+         * sprite_list_1 unconditionally to this node's successor,
+         * regardless of whether `node` is actually the current list
+         * head — there is no equivalent of UpdatePlayerCount's
+         * prev->next splice anywhere in this function's disassembly.
+         * Any car walked past earlier in the same call without matching
+         * becomes unreachable from sprite_list_1 the instant a later
+         * car matches, since its predecessor's `next` link is never
+         * rewritten. Real original behavior, not a transcription
+         * shortcut — do not "fix" this into a correct prev-tracking
+         * unlink without re-checking the assembly first. */
+        Vehicle* next_node = node->next;
+        this->sprite_list_1 = next_node;
+        node->next = nullptr;
+
+        /* Reverse this car's parked/handoff heading (same mirror table
+         * as AddTrainCar, 0x43B8C0) and reassign ownership to the local
+         * player's slot. */
+        node->tunnel_angle = MirrorTrainHeading(node->tunnel_angle);
+        node->peer_index = static_cast<uint8_t>(g_netman->m_mySlotIndex);
+
+        /* Clear DPlay data on every carriage: editors[1..editor_count],
+         * deliberately skipping the lead unit at editors[0] — the same
+         * base/bound already established by Vehicle::GetOccupantCount
+         * (0x44C370: "Scans editors[1..3]... skips slot 0 deliberately")
+         * and by this exact "for (i=1;i<=editor_count;i++) editors[i]"
+         * idiom already used lower in this file's HandleConnectionSetup
+         * carriage-serialization loop. Vehicle::InitRoute (0x44C220)
+         * bounds editor_count to 0-3 before ever writing a new editor
+         * slot, so this can never read editors[] out of bounds. No null
+         * guard on editors[i], matching the disassembly exactly
+         * (0x43B845-0x43B85D has no TEST/JZ on the loaded pointer before
+         * the CALL) — InitRoute's own invariant guarantees a populated
+         * slot for every index in [1, editor_count]. */
+        for (int i = 1; i <= node->editor_count; ++i) {
+            node->editors[i]->SetDPlayData(nullptr);
+        }
+
+        /* Queue a type-0x11 "release" notification carrying the car,
+         * then clear init_flag (+0x88) — matches the real write order
+         * (0x43B87B-0x43B884 set the message fields, then the +0x88
+         * store, both before NETMAN_QueueMessage's CALL at 0x43B891).
+         * `if (msg)` guards the same alloc-failure null-deref bug
+         * already documented earlier in this file (see
+         * HandleControllerInit's BUG comment above) rather than
+         * reproducing the crash. */
+        NetworkMsg* msg = AllocateNetworkMessage();
+        if (msg) {
+            msg->data = NULL; msg->next = NULL;
+            msg->type = 0x11;
+            msg->data = node;
+        }
+        node->init_flag = 0;
+        NETMAN_QueueMessage(msg);
+
+        node = this->sprite_list_1;
     }
 }
 
@@ -2869,220 +3085,278 @@ uint32_t TrainSubsystem::MoveToNeighborTown(int to_player, Vehicle* car, int dir
 /* TrainSubsystem::HandleJoinMultiplayer                               */
 /* Address: 0x43C410                                                    */
 /* Size: 1089 bytes                                                     */
+/*                                                                      */
+/* Control-flow correction (2026-08-18): the previous transcription     */
+/* split this function into two top-level siblings — "scenario mode"    */
+/* (g_netman->m_gameMode==1) and a "free-play mode" block containing    */
+/* the DirectPlay session/host/connect/DPlayManager-registration logic. */
+/* That is NOT the real shape. Re-derived directly from the disassembly */
+/* (0x43C448-0x43C851, all jump targets traced): there is exactly one    */
+/* branch on g_netman->m_gameMode==1 at the top (0x43C448/0x43C44D).     */
+/* Its "else" (mode!=1, 0x43C44F-0x43C45D) is a short leaf that either   */
+/* destroys `car` (if non-null) or does nothing, and always returns      */
+/* immediately — it can NEVER reach the DirectPlay/session code, and it  */
+/* does NOT check car->owner_handle (0x43C451 tests only car==0; the     */
+/* previous transcription's owner_handle gate on this branch was         */
+/* fabricated, not evidenced). The entire DirectPlay-session/            */
+/* DPlayManager-registration sequence lives ONLY inside the mode==1      */
+/* branch, nested under owner_handle!=1 (0x43C46D) and sprite_list_1     */
+/* being empty before this call (0x43C489 JZ 0x43C508) and neither demo  */
+/* mode nor byte_flags being set (0x43C50E/0x43C51A) — i.e. it only runs */
+/* when this is the very first car being added while g_netman->m_gameMode */
+/* == 1 (NetmanTypes.h: 1 = hosting). Restructured below to match that   */
+/* real nesting exactly; behavior for every input is unchanged from the  */
+/* function as compiled, not from the previous (wrong) transcription.    */
 /* ================================================================== */
 void TrainSubsystem::HandleJoinMultiplayer(void* msg)
 {
     NetworkMsg* net_msg = reinterpret_cast<NetworkMsg*>(msg);
-    void*       car     = net_msg->data;
-
-    if (car == NULL) return;
+    Vehicle*    car     = static_cast<Vehicle*>(net_msg->data);
 
     if (g_netman->m_gameMode == 1) {
-        /* === Scenario mode: append car to sprite_list_1 === */
-        *reinterpret_cast<uint16_t*>((reinterpret_cast<uint8_t*>(car) + 0x74)) = 32000; /* max timeout */
+        /* Unconditional dereference below matches the binary exactly
+         * (0x43C462/0x43C465 read car->owner_handle / write
+         * car->tunnel_angle with no null check on `car` at all) — there is
+         * no top-of-function `if (car == NULL) return;` in the original;
+         * that early-out was fabricated in the previous transcription and
+         * is removed here. This message type is only ever queued with a
+         * real car (matching HandleFileTransfer's identical "provably
+         * dead but preserved" null-check note elsewhere in this file). */
+        car->tunnel_angle = 32000; /* max timeout sentinel, 0x43C465 */
 
-        if (*reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 4)) == 1) {
-            /* Remove message: destroy car */
-            void** vt = *reinterpret_cast<void***>(car);
-            (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
-            net_msg->data = NULL;
+        if (car->owner_handle == 1) {
+            /* Remove message: destroy car. The car!=nullptr guard mirrors
+             * the real TEST/JZ pair at 0x43C471-0x43C473 1:1 (provably
+             * dead given the owner_handle read above already requires a
+             * non-null car, same as HandleFileTransfer's identical note). */
+            if (car != nullptr) {
+                delete car;
+            }
+            net_msg->data = nullptr;
             return;
         }
 
-        /* Append to end of sprite_list_1 */
-        if (this->sprite_list_1 == NULL) {
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            this->sprite_list_1 = car;
-        } else {
-            uint8_t* tail = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-            while (*reinterpret_cast<uint8_t**>((tail + 0x70)) != nullptr) tail = *reinterpret_cast<uint8_t**>((tail + 0x70));
-            *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(car) + 0x70)) = NULL;
-            *reinterpret_cast<void**>((tail + 0x70)) = car;
-        }
+        /* owner_handle != 1: append car to the tail of sprite_list_1.
+         * AppendToVehicleList's shape (clear car->next, then either set
+         * head=car or walk-and-link) is equivalent to the binary's two
+         * separate paths (0x43C48B-0x43C4A1 walk-then-append vs.
+         * 0x43C508-0x43C50B set-as-head) because `car` is always a fresh
+         * inbound node, never already linked into the list. */
+        const bool had_cars = (this->sprite_list_1 != nullptr);
+        AppendToVehicleList(this->sprite_list_1, car);
 
-        if (g_demo_mode == 1) {
-            /* Demo mode: remove all existing cars from sprite_list_1 */
-            uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-            while (c != nullptr) {
+        if (had_cars) {
+            /* 0x43C4A1: only checks g_demo_mode==1; no separate
+             * byte_flags check on this path. */
+            if (g_demo_mode != 1) {
+                return;
+            }
+            /* Demo mode: drain sprite_list_1, notifying (type 0x0F) per
+             * car — same idiom as ProcessMessages' scenario-mode unlink
+             * loop (0x439790-0x4397AD). This function's own bytes at
+             * 0x43C4C2/0x43C4CC/0x43C4CE (JZ-to-XOR-EAX,EAX fallthrough,
+             * then an unconditional `MOV dword ptr [EAX],0xf`) write
+             * msg->type even when operator_new returned null — same BUG
+             * documented on RemoveAllCars, 0x43CBE0 — guarded here per
+             * dispatch intent to match the already-established
+             * ProcessMessages idiom instead. */
+            while (this->sprite_list_1 != nullptr) {
+                Vehicle* head = this->sprite_list_1;
                 NetworkMsg* qmsg = AllocateNetworkMessage();
-                if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
-                           qmsg->type = 0x0F;
-                           qmsg->data = this->sprite_list_1; }
-                *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
-                this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
-                if (qmsg && qmsg->data) {
-                    *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
+                if (qmsg) {
+                    qmsg->data = nullptr; qmsg->next = nullptr;
+                    qmsg->type = 0x0F;
+                    qmsg->data = head;
                 }
+                head->init_flag = 0;
+                this->sprite_list_1 = head->next;
+                head->next = nullptr;
                 NETMAN_QueueMessage(qmsg);
-                c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
+            }
+            return;
+        }
+
+        /* sprite_list_1 was empty before this call: `car` is now the sole
+         * entry. 0x43C7E5's loop-entry test checks ECX (== car, not
+         * sprite_list_1) directly, but this is equivalent to testing
+         * sprite_list_1 here — sprite_list_1 was just set to car at
+         * 0x43C50B, and car was already proven non-null by the
+         * owner_handle/tunnel_angle dereferences above. */
+        if (g_demo_mode == 1 || this->byte_flags != 0) {
+            /* Same drain-and-notify idiom as above (second copy). */
+            while (this->sprite_list_1 != nullptr) {
+                Vehicle* head = this->sprite_list_1;
+                NetworkMsg* qmsg = AllocateNetworkMessage();
+                if (qmsg) {
+                    qmsg->data = nullptr; qmsg->next = nullptr;
+                    qmsg->type = 0x0F;
+                    qmsg->data = head;
+                }
+                head->init_flag = 0;
+                this->sprite_list_1 = head->next;
+                head->next = nullptr;
+                NETMAN_QueueMessage(qmsg);
+            }
+            return;
+        }
+
+        /* First car, not in demo mode: establish (or reuse) the local
+         * DirectPlay session, host it, and connect to the shared train
+         * server, then register a DPlayManager player and flush the
+         * freshly-appended solo car. None of this touches Vehicle fields;
+         * copied here verbatim from its previous (mis-nested) location,
+         * only its position in the control-flow tree is corrected. */
+        if (g_dplay_peer == NULL) {
+            /* Sized to the real class — see TrainSubsystem::InitNetwork's
+             * own comment on why sizeof(DirectPlaySession) replaces the
+             * original x86 struct's hardcoded 0x160c bytes. */
+            auto* new_peer = static_cast<DirectPlaySession*>(operator_new(sizeof(DirectPlaySession)));
+            if (new_peer != NULL) {
+                new_peer->CreatePeer(this->context_id_a, 0);
+            }
+            g_dplay_peer = new_peer;
+
+            if (g_dplay_peer) {
+                /* See InitNetwork's identical override — deliberate
+                 * caller-side policy, not a bug. */
+                g_dplay_peer->error_callback = nullptr;
+                g_dplay_peer->show_dialogs = 0;
+                g_dplay_peer->hwnd = reinterpret_cast<void*>(static_cast<uintptr_t>(this->context_id_b));
             }
         }
-        return;
-    }
 
-    /* === Free-play mode === */
-    if (car && *reinterpret_cast<int32_t*>((reinterpret_cast<uint8_t*>(car) + 4)) == 1) {
-        void** vt = *reinterpret_cast<void***>(car);
-        (reinterpret_cast<void (__thiscall*)(void*, byte)>(vt[0]))(car, 1);
-        net_msg->data = NULL;
-        return;
-    }
-
-    if (g_demo_mode == 1 || this->byte_flags != 0) {
-        /* Demo mode or flag set — remove all cars */
-        uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-        while (c != nullptr) {
-            NetworkMsg* qmsg = AllocateNetworkMessage();
-            if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
-                       qmsg->type = 0x0F;
-                       qmsg->data = this->sprite_list_1; }
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
-            this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
-            if (qmsg && qmsg->data) {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
-            }
-            NETMAN_QueueMessage(qmsg);
-            c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-        }
-        return;
-    }
-
-    /* Create DirectPlay session and connect to train server */
-    if (g_dplay_peer == NULL) {
-        /* Sized to the real class — see TrainSubsystem::InitNetwork's own
-         * comment on why sizeof(DirectPlaySession) replaces the original
-         * x86 struct's hardcoded 0x160c bytes. */
-        auto* new_peer = static_cast<DirectPlaySession*>(operator_new(sizeof(DirectPlaySession)));
-        if (new_peer != NULL) {
-            new_peer->CreatePeer(this->context_id_a, 0);
-        }
-        g_dplay_peer = new_peer;
-
-        if (g_dplay_peer) {
-            /* See InitNetwork's identical override — deliberate caller-side
-             * policy, not a bug. */
-            g_dplay_peer->error_callback = nullptr;
-            g_dplay_peer->show_dialogs = 0;
-            g_dplay_peer->hwnd = reinterpret_cast<void*>(static_cast<uintptr_t>(this->context_id_b));
-        }
-    }
-
-    if (g_dplay_peer && g_dplay_peer->session_ready != 0) {
-        Train_SendPlayerInfo(this);
-        return;
-    }
-
-    if (g_dplay_peer == NULL) return;
-
-    /* Host a new session */
-    g_dplay_peer->Close();
-    g_dplay_peer->HostSession(0, 1, 0, 0);
-    Train_StartMultiplayer();
-
-    if (g_dplay_peer->dplay_interface != nullptr) {
-        /* Get server name from config and connect */
-        char server_name[0x200];
-        Config_GetIniString(g_config_ini, "Configuration", "ServerName",
-                            "LEGO International Train Server",
-                            server_name, 0x200);
-
-        g_dplay_peer->ConnectToSession(
-            reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-            server_name, NULL);
-
-        if (g_dplay_peer->session_ready != 0) {
+        if (g_dplay_peer && g_dplay_peer->session_ready != 0) {
+            /* Only this FIRST session_ready check calls Train_SendPlayerInfo
+             * (0x43C589-0x43C7DC/0x43CCC0). The two later session_ready
+             * checks below (after each connect attempt) are bare returns
+             * with no call at all (0x43C60F-0x43C615, 0x43C65D-0x43C669)
+             * — the previous transcription called Train_SendPlayerInfo at
+             * all three, which is not what the binary does. */
             Train_SendPlayerInfo(this);
             return;
         }
 
-        /* Retry after close+re-host */
+        if (g_dplay_peer == NULL) return;
+
+        /* Host a new session */
         g_dplay_peer->Close();
-        Sleep(1000);
         g_dplay_peer->HostSession(0, 1, 0, 0);
         Train_StartMultiplayer();
-        g_dplay_peer->ConnectToSession(
-            reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
-            server_name, NULL);
-    }
 
-    if (g_dplay_peer && g_dplay_peer->session_ready != 0) {
-        Train_SendPlayerInfo(this);
+        if (g_dplay_peer->dplay_interface != nullptr) {
+            /* Get server name from config and connect */
+            char server_name[0x200];
+            Config_GetIniString(g_config_ini, "Configuration", "ServerName",
+                                "LEGO International Train Server",
+                                server_name, 0x200);
+
+            g_dplay_peer->ConnectToSession(
+                reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                server_name, NULL);
+
+            if (g_dplay_peer->session_ready != 0) {
+                /* Bare return — no Train_SendPlayerInfo call here (see
+                 * note above). */
+                return;
+            }
+
+            /* Retry after close+re-host */
+            g_dplay_peer->Close();
+            Sleep(1000);
+            g_dplay_peer->HostSession(0, 1, 0, 0);
+            Train_StartMultiplayer();
+            g_dplay_peer->ConnectToSession(
+                reinterpret_cast<char*>((reinterpret_cast<uint8_t*>(g_player_config) + 6)),
+                server_name, NULL);
+        }
+
+        if (g_dplay_peer && g_dplay_peer->session_ready != 0) {
+            /* Bare return — no Train_SendPlayerInfo call here either (see
+             * note above). */
+            return;
+        }
+
+        /* Failed to connect — queue error message (type 0x1C) */
+        {
+            NetworkMsg* err_msg = AllocateNetworkMessage();
+            if (err_msg) { err_msg->data = NULL; err_msg->next = NULL;
+                          err_msg->type = 0x1C; err_msg->next = NULL; }
+            NETMAN_QueueMessage(err_msg);
+        }
+
+        /* Create and register a DPLAY player for this session. DPLAY_CreatePlayer's
+         * real address is 0x442850 (DPlayManager::CreatePlayer, already
+         * implemented for real, network/DPlayManager.cpp) — this file's extern
+         * declaration's own address comment, 0x4429C0, is fabricated (zero
+         * xrefs anywhere in the binary; get_xrefs_to on the real 0x442850 lists
+         * this exact function, TrainSubsystem::HandleJoinMultiplayer, as one of
+         * its 7 real callers). Matches the operator_new+placement-new+
+         * CreatePlayer() idiom already established at Train_ConnectToServer
+         * (this file, below) and network/Netman.cpp:2333-2336; the
+         * free-function DPLAY_CreatePlayer(void*) declared elsewhere in this
+         * file bound to a no-op/nullptr-returning stub instead of this real
+         * method (2026-08-15). */
+        {
+            void* storage = operator_new(sizeof(DPlayManager));
+            DPlayManager* player = nullptr;
+            if (storage != nullptr) {
+                player = ::new (storage) DPlayManager();
+                player->CreatePlayer();
+            }
+            if (player != nullptr) {
+                char name_buf[0x50];
+                FormatResourceString(&g_resmgr, 0xDF, name_buf, 0x50);
+                memcpy(player->m_playerName, name_buf, sizeof(name_buf));
+
+                player->InitPlayer(5, 1, 5, 0x94, 99, 0x48, 0x48);
+                player->color_g = 0xFF;
+
+                /* Copy player name from g_player_config + 6 (PlayerConfig::name).
+                 * PlayerConfig::name is char[14]; this 0x14 (20)-byte copy is the
+                 * original's own width and reads 6 bytes past name[] into the
+                 * adjacent PlayerConfig fields — transcribed as-evidenced, not
+                 * narrowed to sizeof(name), since the sibling Train_ConnectToServer
+                 * block (below) uses a different call (strcpy) on the same source
+                 * and neither this file's disassembly nor the caller proves which
+                 * width is intentional vs. a pre-existing over-read in the
+                 * original binary. */
+                memcpy(player->m_sessionBlk1,
+                       reinterpret_cast<uint8_t*>(g_player_config) + 6, 0x14);
+                /* Copy "LEGO LOCO" as session name */
+                memcpy(player->m_sessionBlk2, "LEGO LOCO", 10);
+
+                NET_RegisterPlayer(g_dplay, player, 1, 0);
+
+                player->~DPlayManager();
+                GLOBAL_free(player);
+            }
+        }
+
+        /* Remove all existing cars from sprite_list_1 to join fresh (third
+         * copy of the same drain-and-notify idiom). */
+        while (this->sprite_list_1 != nullptr) {
+            Vehicle* head = this->sprite_list_1;
+            NetworkMsg* qmsg = AllocateNetworkMessage();
+            if (qmsg) {
+                qmsg->data = nullptr; qmsg->next = nullptr;
+                qmsg->type = 0x0F;
+                qmsg->data = head;
+            }
+            head->init_flag = 0;
+            this->sprite_list_1 = head->next;
+            head->next = nullptr;
+            NETMAN_QueueMessage(qmsg);
+        }
         return;
     }
 
-    /* Failed to connect — queue error message (type 0x1C) */
-    {
-        NetworkMsg* err_msg = AllocateNetworkMessage();
-        if (err_msg) { err_msg->data = NULL; err_msg->next = NULL;
-                      err_msg->type = 0x1C; err_msg->next = NULL; }
-        NETMAN_QueueMessage(err_msg);
+    /* g_netman->m_gameMode != 1 (0x43C44F-0x43C45D): unconditionally
+     * destroy `car` if present. No owner_handle check exists on this path
+     * in the binary — 0x43C451 tests only car==0. */
+    if (car != nullptr) {
+        delete car;
     }
-
-    /* Create and register a DPLAY player for this session. DPLAY_CreatePlayer's
-     * real address is 0x442850 (DPlayManager::CreatePlayer, already
-     * implemented for real, network/DPlayManager.cpp) — this file's extern
-     * declaration's own address comment, 0x4429C0, is fabricated (zero
-     * xrefs anywhere in the binary; get_xrefs_to on the real 0x442850 lists
-     * this exact function, TrainSubsystem::HandleJoinMultiplayer, as one of
-     * its 7 real callers). Matches the operator_new+placement-new+
-     * CreatePlayer() idiom already established at Train_ConnectToServer
-     * (this file, below) and network/Netman.cpp:2333-2336; the
-     * free-function DPLAY_CreatePlayer(void*) declared elsewhere in this
-     * file bound to a no-op/nullptr-returning stub instead of this real
-     * method (2026-08-15). */
-    {
-        void* storage = operator_new(sizeof(DPlayManager));
-        DPlayManager* player = nullptr;
-        if (storage != nullptr) {
-            player = ::new (storage) DPlayManager();
-            player->CreatePlayer();
-        }
-        if (player != nullptr) {
-            char name_buf[0x50];
-            FormatResourceString(&g_resmgr, 0xDF, name_buf, 0x50);
-            memcpy(player->m_playerName, name_buf, sizeof(name_buf));
-
-            player->InitPlayer(5, 1, 5, 0x94, 99, 0x48, 0x48);
-            player->color_g = 0xFF;
-
-            /* Copy player name from g_player_config + 6 (PlayerConfig::name).
-             * PlayerConfig::name is char[14]; this 0x14 (20)-byte copy is the
-             * original's own width and reads 6 bytes past name[] into the
-             * adjacent PlayerConfig fields — transcribed as-evidenced, not
-             * narrowed to sizeof(name), since the sibling Train_ConnectToServer
-             * block (below) uses a different call (strcpy) on the same source
-             * and neither this file's disassembly nor the caller proves which
-             * width is intentional vs. a pre-existing over-read in the
-             * original binary. */
-            memcpy(player->m_sessionBlk1,
-                   reinterpret_cast<uint8_t*>(g_player_config) + 6, 0x14);
-            /* Copy "LEGO LOCO" as session name */
-            memcpy(player->m_sessionBlk2, "LEGO LOCO", 10);
-
-            NET_RegisterPlayer(g_dplay, player, 1, 0);
-
-            player->~DPlayManager();
-            GLOBAL_free(player);
-        }
-    }
-
-    /* Remove all existing cars from sprite_list_1 to join fresh */
-    {
-        uint8_t* c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-        while (c != nullptr) {
-            NetworkMsg* qmsg = AllocateNetworkMessage();
-            if (qmsg) { qmsg->data = NULL; qmsg->next = NULL;
-                       qmsg->type = 0x0F;
-                       qmsg->data = this->sprite_list_1; }
-            *reinterpret_cast<uint8_t*>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x88)) = 0;
-            this->sprite_list_1 = *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(this->sprite_list_1) + 0x70));
-            if (qmsg && qmsg->data) {
-                *reinterpret_cast<void**>((reinterpret_cast<uint8_t*>(qmsg->data) + 0x70)) = NULL;
-            }
-            NETMAN_QueueMessage(qmsg);
-            c = reinterpret_cast<uint8_t*>(this->sprite_list_1);
-        }
-    }
+    net_msg->data = nullptr;
 }
 
 /**
