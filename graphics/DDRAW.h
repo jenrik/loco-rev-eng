@@ -70,20 +70,13 @@ class  Building;
  * back via `(short)param_1[3]`). See resources/AssetMgr.h for the real
  * AssetMgr::AssetMgr/~AssetMgr this was renamed to. */
 
-/* ================================================================== */
-/* FileData — loaded game resource file descriptor                    */
-/* Size: 0x10 bytes                                                   */
-/* Destroyed by DDRAW_FileData_Dtor (0x45CA20)                        */
-/* ================================================================== */
-
-struct FileData {
-    void*     file_handle;       /* +0x00  opened file stream handle     */
-    void*     block_list;        /* +0x04  linked list of decompressed   */
-                                 /*        sub-blocks (+0x00=name, +0x04= */
-                                 /*        size, +0x08=offset, +0x0C=next)*/
-    int32_t   total_size;        /* +0x08  total decompressed size       */
-    char*     file_name;         /* +0x0C  allocated file path string    */
-};
+/* FileData/ChunkNode — see graphics/FileData.h. Destroyed by
+ * DDRAW_FileData_Dtor (0x45CA20). Previously this header declared its
+ * own independently-guessed FileData layout (void* file_handle/
+ * block_list, no verified field semantics); native/ddraw_filedata.c's
+ * implementation is backed by actual 0x45CAA0 disassembly evidence, so
+ * that layout is now the single canonical one both files share. */
+#include "FileData.h"
 
 /* DDRAW_Building's class declaration lives in DDRAW_Building.h (included
  * above) so translation units that can't include the rest of this header
@@ -132,11 +125,12 @@ extern void* g_tilemap;             /* 0x4AAD08 — tilemap global */
  * sets color key, attaches clipper to HWND. Sets global pixel-format
  * vars at 0x485274-0x485290.
  *
- * Called by: CGWND_InitMode1 (init sequence)
+ * Called by: ResourceManager::Init (Step 1, gates the rest of Init on
+ * this succeeding — confirmed via Ghidra xrefs to 0x45B500).
  *
- * @return  1 on success, error code on failure
+ * @return  true on success, false on failure
  */
-uint32_t __cdecl DDRAW_GetSurface(void);
+bool __cdecl DDRAW_GetSurface(void);
 
 /**
  * DDRAW_UnlockPrimary — unlock and flip the primary surface.
@@ -298,18 +292,15 @@ void __fastcall DDRAW_FreeClipper(void* clipper);
 void __fastcall DDRAW_FileData_Dtor(FileData* data);
 
 /**
- * DDRAW_LoadFile — load a game resource file into FileData struct.
- * Address: 0x45CAA0, __thiscall
- *
- * Opens file via WIN32_StreamOpen or AssetMgr, reads into allocated
- * buffer, handling compressed (Huffman) and uncompressed files.
- * Stores decompressed sub-blocks in a linked list. Replaces extension
- * to load accompanying data file.
+ * DDRAW_LoadFile — load a chunked resource file (.PKG/.RES) into a
+ * FileData struct. Address: 0x45CAA0, __thiscall.
+ * Real implementation: native/ddraw_filedata.c (Ghidra-verified chunk
+ * read order).
  *
  * @param path  file path to load
  * @return      1 on success, 0 on failure
  */
-uint32_t __thiscall DDRAW_LoadFile(FileData* self, const char* path);
+uint8_t __thiscall DDRAW_LoadFile(FileData* self, char* path);
 
 /* ================================================================== */
 /* Global state — DirectDraw globals                                   */

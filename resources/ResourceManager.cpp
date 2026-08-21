@@ -30,6 +30,7 @@
 #include <ctype.h>
 #include <new>
 #include <cstdio>
+#include <cstdlib>
 
 /* Class headers for placement-new constructor dispatch in AddString */
 #include "../ui/UI_ChildWindow.h"
@@ -115,8 +116,16 @@ char* DDRAW_GetDsoundErrorString(int32_t error);      /* @ 0x0045BBC0 */
 bool DDRAW_GetSurface(void);                         /* @ 0x0045B500 */
 void DDRAW_ReleaseSurfaces(void);                    /* @ 0x0045BAA0 */
 void DDRAW_DestroyAudio(void);                       /* @ 0x0045BB20 */
-int32_t DDRAW_LoadFile(int32_t* outHandle, const char* filename); /* @ 0x0045CAA0 */
-void Config_GetIniString(void* config, const char* section,
+uint8_t DDRAW_LoadFile(FileData* fd, char* filename);              /* @ 0x0045CAA0 */
+/* extern "C" is load-bearing: game/ConfigIni.cpp's real implementation
+ * (which at least copies `def` into `out` on this host, unlike the
+ * no-op `shared/link_stubs.cpp` overload a plain-C++ declaration here
+ * would silently bind to instead) is itself declared extern "C". A
+ * mismatched declaration here previously bound to that other overload
+ * and left `out` as uninitialized stack garbage — confirmed live via
+ * ResourceManager::Init's Step 3 receiving a garbage path instead of
+ * the empty-string default. */
+extern "C" int Config_GetIniString(void* config, const char* section,
     const char* key, const char* def, char* out, int32_t maxLen); /* @ 0x00452D80 */
 int32_t Config_GetIniInt(void* config, const char* section,
     const char* key, int32_t defaultValue);           /* @ 0x00452D60 */
@@ -473,10 +482,27 @@ bool ResourceManager::Init()
 
     /* Step 1: Verify DirectDraw surface is available */
     if (!DDRAW_GetSurface()) {
+        std::fprintf(stderr, "[TRACE] ResourceManager::Init FAILED at step 1 (DDRAW_GetSurface)\n"); std::fflush(stderr);
         return false;
     }
 
     /* Step 2: Read the resource file path from config */
+#ifndef _WIN32
+    /* Host deviation: the real Exe/LEGO.INI stores a Windows absolute
+     * path ("d:\loco\art-res\resource.rfh", confirmed via read) that
+     * has no meaning on this host, and Config_GetIniString's host
+     * implementation never actually opens the INI file anyway -- it
+     * just copies back the caller-supplied default. Construct the real
+     * archive path from the same LEGO_LOCO_DATA-rooted asset convention
+     * every other host loader in this tree uses (see
+     * resources/resource_manager_sdl3.cpp's game_root_from_environment)
+     * instead of feeding DDRAW_LoadFile an unopenable Windows path. */
+    {
+        const char* root = std::getenv("LEGO_LOCO_DATA");
+        std::snprintf(resFilePath, sizeof(resFilePath), "%s/art-res/resource.rfh",
+                      root && *root ? root : "lego-loco-unpacked");
+    }
+#else
     Config_GetIniString(
         g_config_ini,
         "DIRECTORIES",      /* section */
@@ -485,10 +511,12 @@ bool ResourceManager::Init()
         resFilePath,
         0x104               /* max length */
     );
+#endif
 
     /* Step 3: Load the resource file archive */
-    DDRAW_LoadFile(&this->file_data_handle /* +0x18 */, resFilePath);
-    if (this->file_data_handle == 0) {
+    DDRAW_LoadFile(&this->file_data /* +0x18 */, resFilePath);
+    if (this->file_data.file_handle == 0) {
+        std::fprintf(stderr, "[TRACE] ResourceManager::Init FAILED at step 3 (DDRAW_LoadFile, path=%s)\n", resFilePath); std::fflush(stderr);
         return false;
     }
 

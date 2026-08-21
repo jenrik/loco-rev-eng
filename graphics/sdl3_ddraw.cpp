@@ -723,6 +723,19 @@ bool SDL3_EnsurePrimarySurface()
     return true;
 }
 
+/* DDRAW_GetSurface (0x45B500) — the original creates the DirectDraw
+ * object, primary surface, and backbuffer, then detects the 555/565
+ * pixel format. SDL3_EnsurePrimarySurface() already does the host
+ * equivalent of all of that against the real window/renderer created by
+ * CGWND::RegisterWindowClass (using the same evidenced 565 pixel-format
+ * globals a decompiled 0x45B500 branch would set — see that function's
+ * own doc comment above), so this is a thin delegating wrapper rather
+ * than a second implementation. */
+bool DDRAW_GetSurface(void)
+{
+    return SDL3_EnsurePrimarySurface();
+}
+
 Sdl3DirectDrawSurface* SDL3_GetPrimarySurface()
 {
     return SDL3_EnsurePrimarySurface() ? g_sdl_primary_surface : nullptr;

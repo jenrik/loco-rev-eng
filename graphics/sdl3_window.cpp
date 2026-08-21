@@ -12,6 +12,8 @@
 #include <SDL3/SDL.h>
 #include "sdl3_game_audio.h"
 #include "sdl3_ddraw.h"
+#include "../resources/pe_string_table.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -885,14 +887,35 @@ char* lstrcatA(char* dst, LPCSTR src)
 int LoadStringA(HINSTANCE hInstance, UINT uID, LPSTR lpBuffer, int cchBufferMax)
 {
     (void)hInstance;
-    /* The original loads from the executable's string table resource.
-     * We return a placeholder. Real implementation needs to parse
-     * the .exe's resource section. */
-    if (lpBuffer && cchBufferMax > 0) {
-        snprintf(lpBuffer, cchBufferMax, "STR_%u", uID);
-        return static_cast<int>(strlen(lpBuffer));
+    /* Real Win32 LoadStringA reads the RT_STRING table baked into the
+     * calling module's own resource section. On host there is no such
+     * module -- read the same table straight out of loco.exe via the
+     * PE resource parser used elsewhere for asset lookups
+     * (resources/pe_string_table.h), so callers that gate on failure
+     * (ResourceManager::Init's preload loop, ResourceManager::GetById)
+     * see real absence instead of an always-succeeding fabrication. */
+    if (!lpBuffer || cchBufferMax <= 0) return 0;
+    static loco::assets::PeStringTable* const table = [] {
+        auto* t = new loco::assets::PeStringTable();
+        const char* root = std::getenv("LEGO_LOCO_DATA");
+        const std::string exe_path =
+            std::string(root && *root ? root : "lego-loco-unpacked") + "/Exe/loco.exe";
+        std::string error;
+        if (!t->open(exe_path, &error)) {
+            std::fprintf(stderr, "[HOST] LoadStringA: failed to open %s: %s\n",
+                         exe_path.c_str(), error.c_str());
+        }
+        return t;
+    }();
+    const std::string* value = table->find(uID);
+    if (!value) {
+        lpBuffer[0] = '\0';
+        return 0;
     }
-    return 0;
+    const size_t copy_len = std::min(value->size(), static_cast<size_t>(cchBufferMax) - 1);
+    std::memcpy(lpBuffer, value->data(), copy_len);
+    lpBuffer[copy_len] = '\0';
+    return static_cast<int>(copy_len);
 }
 
 /* =========================================================================

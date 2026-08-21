@@ -395,9 +395,31 @@ void* g_tile_occupied_bitmap = nullptr;
  *      dirty-rect/present path no longer depends on it. */
 uint8_t ATTR_0047f108[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
 int DAT_00481170 = 0;
-int DAT_0048118c = 0;
-int DAT_00481190 = 0;
-int DAT_00481194 = 0;
+/* DAT_0048118c/0x00481190/0x00481194 were previously placeholder ints
+ * (value 0) despite native/ddraw_filedata.c declaring and using them as
+ * `const char[4]` string constants (a fopen mode and two file
+ * extensions) — reading a real string through a mismatched-type extern
+ * that's actually a zeroed int happens to work by accident on a
+ * little-endian host (both are 4 bytes, and an all-zero int reads back
+ * as an empty string), but the extension strings were never populated
+ * at all, so DDRAW_LoadFile's extension-swap always produced an empty
+ * extension. Values below are read directly from loco.exe's .rdata via
+ * Ghidra (0x481190/0x48118c/0x481194) — "RFH"/"RFD", not the ".PKG"/
+ * ".RES" the old comments guessed; matches the "RFH"/"RFD" archive
+ * pair actually shipped in lego-loco-unpacked/art-res/. */
+/* `extern` is load-bearing here: unlike C, a `const` global at
+ * namespace scope has INTERNAL linkage by default in C++, so without it
+ * these would compile to file-local symbols (mangled `_ZL12DAT_...`)
+ * invisible to native/ddraw_filedata.c's `extern const char[4]`
+ * references in a different translation unit — exactly what happened
+ * before this fix: the linker treated them as genuinely unresolved,
+ * -Wl,--unresolved-symbols=ignore-all suppressed the resulting error,
+ * and the GOT slots for the never-relocated references stayed zeroed,
+ * so DDRAW_LoadFile's fopen-mode argument silently became a null
+ * pointer instead of "rb" and crashed inside libc's fopen. */
+extern const char DAT_0048118c[4] = "RFD";
+extern const char DAT_00481190[4] = "rb";
+extern const char DAT_00481194[4] = "RFH";
 int s_AW_Blit_failure_reported_0047e0d8 = 0;
 
 /* Win32 stubs */
@@ -409,13 +431,36 @@ void* LocalFree(void*) { return nullptr; }
 /* Critical section stubs */
 void InitializeCriticalSection(void*) {}
 
-/* CRT stubs */
-void CRT_0x4681D0(int);
-void CRT_0x4681D0(int) {}
-void CRT_0x468480(char*, void*);
-void CRT_0x468480(char*, void*) {}
-void CRT_0x468610(void*, unsigned int, unsigned int, int);
-void CRT_0x468610(void*, unsigned int, unsigned int, int) {}
+/* CRT stubs — fopen/fread/fclose-style thin wrappers (0x468480/0x468610/
+ * 0x4681D0). Real bodies use this tree's existing int32-as-FILE*-handle
+ * convention (see shared/stubs_link001_batch1_crt_win32.cpp's
+ * CRT_0x468610/CRT_0x468790 doc comments and shared/link_stubs.cpp's
+ * ReadFile/WriteFile: the handle is a real FILE* truncated to int32_t,
+ * safe on this host because glibc's early heap allocations land under
+ * 4GB) — a genuinely thin OS-wrapper stub per this project's stub rules,
+ * not the game-logic-in-disguise pattern that rule warns about. Return
+ * types corrected to match native/ddraw_filedata.c's real declarations
+ * (int32_t handle / byte count) instead of the previous silently-wrong
+ * void no-ops. */
+int32_t CRT_0x468480(char* filename, void* mode);
+int32_t CRT_0x468480(char* filename, void* mode)
+{
+    FILE* file = std::fopen(filename, static_cast<const char*>(mode));
+    return static_cast<int32_t>(reinterpret_cast<intptr_t>(file));
+}
+void CRT_0x4681D0(int handle);
+void CRT_0x4681D0(int handle)
+{
+    if (handle == 0) return;
+    std::fclose(reinterpret_cast<FILE*>(static_cast<intptr_t>(handle)));
+}
+int32_t CRT_0x468610(void* buf, unsigned int size, unsigned int count, int handle);
+int32_t CRT_0x468610(void* buf, unsigned int size, unsigned int count, int handle)
+{
+    if (buf == nullptr || handle == 0) return 0;
+    return static_cast<int32_t>(std::fread(
+        buf, size, count, reinterpret_cast<FILE*>(static_cast<intptr_t>(handle))));
+}
 void* CRT_malloc_zero(unsigned int sz);
 void* CRT_malloc_zero(unsigned int sz) { return operator_new(static_cast<size_t>(sz)); }
 void* operator_new(unsigned int sz);

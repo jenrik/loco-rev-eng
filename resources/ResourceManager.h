@@ -50,6 +50,7 @@
 
 #include "../shared/types.h"
 #include "ResourceObject.h"
+#include "../graphics/FileData.h"
 
 // Status: TRANSCRIBED
 #if defined(__GNUC__)
@@ -235,9 +236,17 @@ public:
     HFONT      font_large;           /* +0x10  Arial 24pt, 700 weight              */
     HFONT      font_clock;           /* +0x14  Arial 20pt, 900 weight              */
 
-    int32_t    file_data_handle;     /* +0x18  DDRAW_LoadFile result (0=invalid)   */
-
-    uint8_t    _pad_1C[0x0C];        /* +0x1C..+0x27  unknown/padding */
+    /* +0x18..+0x27 (original x86 layout, 0x10 bytes): embedded FileData
+     * object that DDRAW_LoadFile (0x45CAA0) loads the resource archive
+     * into directly (ECX=this+0x18 at the real call site) — not a
+     * standalone handle. Previously modeled as a lone int32_t handle
+     * plus 0x0C bytes of "unknown" padding standing in for the rest of
+     * the struct; both are replaced by the real FileData member (see
+     * graphics/FileData.h). On this 64-bit host sizeof(FileData) exceeds
+     * the original 0x10 bytes (chunk_list/filename are real 8-byte
+     * pointers) — exact x86 layout parity is a non-goal for host
+     * builds, so no compensating padding follows. */
+    FileData   file_data;            /* +0x18  resource archive descriptor */
 
     int32_t    clock_hand_segment;   /* +0x28  current clock hand segment (0-11)   */
 

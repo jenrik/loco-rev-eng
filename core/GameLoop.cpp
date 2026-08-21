@@ -22,6 +22,7 @@
 #include "../shared/types.h"
 #include "../world/tilemap.h"
 #include "../graphics/PixelDataCache.h"
+#include "../resources/ResourceManager.h"
 #ifndef _WIN32
 #include "sdl3_net_game_bridge.h"
 #include "sdl3_town_mode3.h"
@@ -97,7 +98,6 @@ extern Netman*  _g_netman;           /* stale translated alias of 0x4FD3AC */
 #endif
 extern PlayerConfig* g_player_config; /* 0x4AA4A8 */
 extern void*    g_dplay_config;      /* 0x4FD3B4 */
-class ResourceManager;
 extern ResourceManager g_resmgr;     /* 0x4855E8 — object, not a pointer (was void*,
                                        * a widespread cross-TU landmine — see
                                        * PROGRESS.md's g_resmgr sweep) */
@@ -324,7 +324,23 @@ extern "C" int GameLoop_Setup(void* cgwnd)
 #endif
 
     trace_setup_stage("step 8: resources");
-    /* Step 8: Initialize resource manager */
+    /* Step 8: Initialize resource manager.
+     * ResourceManager_Init(&g_resmgr) (despite the name/argument) is an
+     * unrelated host asset-loader init (resources/resource_manager_sdl3.cpp)
+     * that PeStringTable/SpriteResource depend on -- it ignores its
+     * parameter entirely. g_resmgr.Init() is the real ResourceManager::Init
+     * (0x446050), and the original calls both at this exact point in
+     * GameLoop_Setup (0x406DBC, confirmed via Ghidra xrefs), immediately
+     * before InitAllSubsystems -- but g_resmgr.Init() is deliberately NOT
+     * called here yet: it now runs to Step 7 (LoadStringTable) before
+     * SIGSEGVing in create_string_resource, because RESMGR_AllocResourceEntry
+     * is still an empty void-returning stub (PROGRESS.md's "RESMGR_
+     * AllocResourceEntry ... three-function dependency chain" item). Wiring
+     * this call in before that chain is fixed regresses the whole GUI suite
+     * from 10 passed/5 failed to 0/15 (verified via git-stash A/B this
+     * session) -- the crash currently only blocks the single-player/mode3
+     * tests, but Init() failing this early would kill every test before any
+     * window maps. Add this call back in the same tick that chain is fixed. */
     if (!ResourceManager_Init(&g_resmgr)) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 8\n"); std::fflush(stderr);
         return -1;

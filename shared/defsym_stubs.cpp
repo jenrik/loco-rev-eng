@@ -405,8 +405,6 @@ void TileMap_SetViewport(void*, void*);
 void TileMap_SetViewport(void*, void*) { /* host no-op */ }
 void TileMap_GetTileAt(void*, void*);
 void TileMap_GetTileAt(void*, void*) { /* host no-op */ }
-void DDRAW_GetSurface();
-void DDRAW_GetSurface() { /* host no-op */ }
 void DDRAW_LoadFile(int*, char const*);
 void DDRAW_LoadFile(int*, char const*) { /* host no-op */ }
 void Town_CopyTiles8bpp_Transparent(void*, int, int, int, int, int, int, int, int, int, int);
