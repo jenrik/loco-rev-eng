@@ -21,6 +21,8 @@
 
 #include "WndProcStreamBuf.h"
 
+#include <cassert>
+#include <cstdio>
 #include <cstring>  /* memcpy */
 
 /* ================================================================== */
@@ -254,4 +256,36 @@ void WNDPROC_StreamBuf::Unlock()
     if (syncActive_ < 0) {
         WNDPROC_LeaveCriticalSection(&cs_);
     }
+}
+
+/* ================================================================== */
+/* PutBack — 0x4657A0 (vtable+0x24, Ghidra-mislabeled "_flsbuf")        */
+/* ================================================================== */
+int32_t WNDPROC_StreamBuf::PutBack(int32_t ch)
+{
+    if (readBase_ < readPtr_) {
+        --readPtr_;
+        *readPtr_ = static_cast<uint8_t>(ch);
+        return ch;
+    }
+
+    /* Original fallback: reseeks/regrows the buffer via the still-
+     * unreconstructed vtable slot [3] (0x463E00 on WIN32_StreamFile — see
+     * WndProcStreamBuf.h's PutBack() doc comment and Win32StreamFile.h's
+     * Open() doc comment for the same open gap), plus a buffer memmove
+     * step Ghidra's own decompiler lost register tracking on. The only
+     * real caller in this codebase (WNDPROC_Stream::ReadNumericToken's
+     * failed-extraction unget) only reaches this fallback when the
+     * get-region's buffered bytes are entirely exhausted at the moment a
+     * numeric-token parse fails — which in turn is only reachable through
+     * ResourceEntry::Parse, itself unreachable in the shipped retail
+     * binary and on this host (see ResourceEntry::Parse's own doc
+     * comment). Fails loudly rather than silently misbehaving if this is
+     * ever actually reached. */
+    std::fprintf(stderr,
+        "WNDPROC_StreamBuf::PutBack: get-region exhausted; the seek/grow "
+        "fallback (WIN32_StreamFile vtable slot 0x463E00) is not yet "
+        "reconstructed\n");
+    assert(false && "WNDPROC_StreamBuf::PutBack fallback not implemented");
+    return -1;
 }

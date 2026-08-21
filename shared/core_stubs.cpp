@@ -24,7 +24,6 @@ typedef const char* LPCSTR;
 struct RECT { int32_t left, top, right, bottom; };
 struct POINT { int32_t x, y; };
 struct RESDATA;
-struct ResourceEntry;
 struct Building;
 struct GameAudio;
 struct WNDPROC_Stream;
@@ -95,9 +94,14 @@ void CGWND_AudioChannel_Play(void*) {}
 void GameAudio_PlayResourceEx(void*, unsigned int, int*);
 void GameAudio_PlayResourceEx(void*, unsigned int, int*) {}
 
-/* RESMGR_AllocResourceEntry */
-void RESMGR_AllocResourceEntry(ResourceEntry*, int, int);
-void RESMGR_AllocResourceEntry(ResourceEntry*, int, int) {}
+/* RESMGR_AllocResourceEntry removed 2026-08-21: this `void`-returning
+ * stub (mismatched from ResourceManager.h's real `ResourceEntry*`-
+ * returning declaration — an ODR violation two independently-linked
+ * TUs both defined) was the actual root cause of a SIGSEGV in
+ * ResourceManager::LoadStringTable's create_string_resource/
+ * destroy_resource chain. ResourceEntry is now a real class with real
+ * constructors (resources/ResourceManager.h/.cpp); no free function of
+ * this name exists anymore. */
 
 /* =========================================================== */
 /* B. Class definitions (generate vtables + typeinfo)           */

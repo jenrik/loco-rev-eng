@@ -292,18 +292,14 @@ void  WNDPROC_StreamReadLine(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\
 void* WNDPROC_StreamWrite(void*, void*);
 void* WNDPROC_StreamWrite(void*, void*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
 
-/* WNDPROC_Stream::ExtractInt (0x4646C0) — real C++-mangled method,
- * operator>>(int32_t*) on the stream (decompiled, see
- * input/TrackTileDescriptor.cpp's doc comment for the full body: calls
- * WNDPROC_Stream_InputPrefix + StreamBuf_ReadString + a CRT numeric-parse
- * call Ghidra mislabeled "_rand_wrapper", handles ERANGE, releases two
- * nested critical sections). Not yet implemented for real — those three
- * callees are themselves unresolved (same class of gap as
- * WNDPROC_StreamReadLine above); stubbed loud rather than silently
- * returning success. TODO: implement for real once InputPrefix/
- * StreamBuf_ReadString/the numeric-parse callee are decompiled. */
-extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*);
-extern "C" void* WNDPROC_Stream__ExtractInt(void*, int32_t*) { fprintf(stderr, "STUB: %s at %s:%d\n", __func__, __FILE__, __LINE__); assert(0 && "stub reached"); }
+/* WNDPROC_Stream::ExtractInt (0x4646C0) is now implemented for real as a
+ * genuine WNDPROC_Stream method (resources/WndProcStream.h/.cpp), along
+ * with its "unsigned" sibling ExtractUnsignedInt() (0x464F70, Ghidra-
+ * mislabeled "CRT_fabs") and the shared ReadNumericToken() tokenizer
+ * (0x465AD0). The extern "C" free-function adapter this file used to
+ * stub — for input/TrackTileDescriptor.cpp's pre-existing caller — now
+ * lives next to WNDPROC_CriticalSectionLock's own real adapter in
+ * resources/WndProcStream.cpp, forwarding to the real method. */
 
 int  Config_GetIniInt(void*, const char*, const char*, int def);
 int  Config_GetIniInt(void*, const char*, const char*, int def) { return def; }

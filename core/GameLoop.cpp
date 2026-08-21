@@ -331,18 +331,23 @@ extern "C" int GameLoop_Setup(void* cgwnd)
      * parameter entirely. g_resmgr.Init() is the real ResourceManager::Init
      * (0x446050), and the original calls both at this exact point in
      * GameLoop_Setup (0x406DBC, confirmed via Ghidra xrefs), immediately
-     * before InitAllSubsystems -- but g_resmgr.Init() is deliberately NOT
-     * called here yet: it now runs to Step 7 (LoadStringTable) before
-     * SIGSEGVing in create_string_resource, because RESMGR_AllocResourceEntry
-     * is still an empty void-returning stub (PROGRESS.md's "RESMGR_
-     * AllocResourceEntry ... three-function dependency chain" item). Wiring
-     * this call in before that chain is fixed regresses the whole GUI suite
-     * from 10 passed/5 failed to 0/15 (verified via git-stash A/B this
-     * session) -- the crash currently only blocks the single-player/mode3
-     * tests, but Init() failing this early would kill every test before any
-     * window maps. Add this call back in the same tick that chain is fixed. */
+     * before InitAllSubsystems. g_resmgr.Init() was previously NOT wired in
+     * here because it reached Step 7 (LoadStringTable) and SIGSEGV'd in
+     * create_string_resource/destroy_resource: RESMGR_AllocResourceEntry
+     * was an empty void-returning stub, and destroy_resource cross-cast
+     * every handle to `ResourceObject*` before calling `delete` even though
+     * ResourceEntry is a wholly separate, unrelated hierarchy (see
+     * resources/ResourceManager.h's ResourceEntry class doc comment).
+     * Fixed 2026-08-21: ResourceEntry is now a real class with real
+     * constructors/destructor/Parse(), and the destroy path is split by
+     * real type (destroy_window_resource/destroy_resource_entry in
+     * resources/ResourceManager.cpp) -- wired in below. */
     if (!ResourceManager_Init(&g_resmgr)) {
         std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 8\n"); std::fflush(stderr);
+        return -1;
+    }
+    if (!g_resmgr.Init()) {
+        std::fprintf(stderr, "[TRACE] GameLoop_Setup FAILED at step 8 (g_resmgr.Init())\n"); std::fflush(stderr);
         return -1;
     }
 

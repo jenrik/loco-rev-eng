@@ -192,7 +192,10 @@ void* s_VolumeHigh_0047f14c = nullptr;
 void* s_VolumeLow_0047f164 = nullptr;
 void* s_VolumeMed_0047f158 = nullptr;
 void* __imp_SystemParametersInfoA = nullptr;
-void* g_scene_name = nullptr;
+/* g_scene_name (this dead void* alias) removed 2026-08-21: input/
+ * TrackTileDescriptor.cpp's own "g_scene_name" was a duplicate-alias
+ * landmine for g_install_path (0x4A99C8, real storage in
+ * shared/stubs_impl.cpp) — see that file's doc comment. */
 /* GetOpenFileNameA(): this 0-arg landmine collided with graphics/
  * sdl3_window.cpp's real (void* lpofn) -> BOOL body (LINK-001); removed —
  * sdl3_window.cpp's survives. */

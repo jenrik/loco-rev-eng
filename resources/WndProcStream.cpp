@@ -18,7 +18,10 @@
 #include "WndProcStream.h"
 
 #include <cassert>
+#include <cctype>
+#include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 
 extern "C" {
 /* Same family as WNDPROC_StreamBuf's Lock()/Unlock() (resources/
@@ -280,6 +283,193 @@ WNDPROC_Stream* WNDPROC_Stream::Read(void* buf, uint32_t size)
         }
     }
     return this;
+}
+
+/* ================================================================== */
+/* ReadNumericToken — 0x465AD0 (Ghidra + shared/crt_stubs.cpp both      */
+/* mislabel this "_ftol"/"CRT ftol"; see WndProcStream.h's doc comment) */
+/* ================================================================== */
+uint32_t WNDPROC_Stream::ReadNumericToken(char* buf, size_t bufCapacity)
+{
+    uint32_t radix;
+    if (format_flags & kFmtDec) {
+        radix = 10;
+    } else if (format_flags & kFmtHex) {
+        radix = 16;
+    } else if (format_flags & kFmtOct) {
+        radix = 8;
+    } else {
+        radix = 0;
+    }
+
+    if (!InputPrefix(0)) {
+        return radix;
+    }
+
+    size_t pos = 0;          /* characters written to buf so far */
+    size_t significant = 0;  /* count of validated digit characters */
+    size_t signWidth = 1;    /* buf index at which digit checking begins;
+                               * becomes 2 once a leading sign is consumed */
+    bool naturalEof = false;
+
+    int32_t c = (rdbuf != nullptr) ? rdbuf->ReadChar() : -1;
+    while (c != -1) {
+        if (pos == 0 && (c == '-' || c == '+')) {
+            ++signWidth;
+        } else {
+            if (pos == signWidth && buf[pos - 1] == '0') {
+                /* Positioned right after a leading '0': check for an
+                 * "0x"/"0X" hex prefix, else promote to octal. */
+                if ((c == 'x' || c == 'X') && (radix == 0 || radix == 16)) {
+                    radix = 16;
+                    significant = 0;
+                    goto store_char;
+                }
+                if (radix == 0) {
+                    radix = 8;
+                }
+            }
+            if (radix == 16) {
+                if (!std::isxdigit(static_cast<unsigned char>(c))) {
+                    break;
+                }
+            } else {
+                if (!std::isdigit(static_cast<unsigned char>(c)) ||
+                    (radix == 8 && c > '7')) {
+                    break;
+                }
+            }
+            ++significant;
+        }
+    store_char:
+        buf[pos] = static_cast<char>(c);
+        c = static_cast<int32_t>(rdbuf->GetChar());
+        ++pos;
+        if (pos > bufCapacity - 2) {
+            /* Classic old-iostream 15-significant-character extraction
+             * cap — matches the original's `if (0xe < iVar7) goto DONE`,
+             * which bypasses the natural-EOF eofbit assignment below. */
+            goto done_reading;
+        }
+    }
+    naturalEof = true;
+
+done_reading:
+    if (naturalEof) {
+        state_bits |= kEofBit;
+    }
+
+    if (significant == 0) {
+        state_bits |= kFailBit;
+        /* Push every consumed character back onto the stream, matching
+         * the original's exact unwind order (last-written first). */
+        while (pos != 0) {
+            --pos;
+            int32_t result = (rdbuf != nullptr)
+                ? rdbuf->PutBack(static_cast<uint8_t>(buf[pos]))
+                : -1;
+            if (result == -1) {
+                state_bits |= kBadBit;
+                break;
+            }
+            state_bits &= ~kEofBit;
+        }
+        pos = 0;
+    }
+    buf[pos] = '\0';
+
+    if (rdbuf != nullptr) {
+        rdbuf->Unlock();
+    }
+    if (sync_flag < 0) {
+        WNDPROC_LeaveCriticalSection(&critical_section);
+    }
+    return radix;
+}
+
+/* ================================================================== */
+/* ExtractInt — 0x4646C0 (operator>>(int32_t*), signed)                 */
+/* ================================================================== */
+WNDPROC_Stream* WNDPROC_Stream::ExtractInt(int32_t* out)
+{
+    if (!InputPrefix(0)) {
+        return this;
+    }
+
+    char buf[16] = {};  /* zero-initialized: if ReadNumericToken() itself
+                          * bails out early (its own nested InputPrefix(0)
+                          * fails) it returns before writing a terminator,
+                          * and strtol() below must not scan uninitialized
+                          * stack bytes. */
+    uint32_t radix = ReadNumericToken(buf, sizeof(buf));
+
+    errno = 0;
+    char* end = nullptr;
+    long value = std::strtol(buf, &end, static_cast<int>(radix));
+    *out = static_cast<int32_t>(value);
+    if (errno == ERANGE) {
+        state_bits |= kFailBit;
+    }
+
+    /* ReadNumericToken() re-entered InputPrefix(0)/released its own
+     * (reentrant) lock pair already; this releases the OUTER pair this
+     * function itself acquired above — matches the original's own
+     * double Enter/Leave nesting exactly. */
+    if (rdbuf != nullptr) {
+        rdbuf->Unlock();
+    }
+    if (sync_flag < 0) {
+        WNDPROC_LeaveCriticalSection(&critical_section);
+    }
+    return this;
+}
+
+/* ================================================================== */
+/* ExtractUnsignedInt — 0x464F70 (Ghidra-mislabeled "CRT_fabs")         */
+/* ================================================================== */
+WNDPROC_Stream* WNDPROC_Stream::ExtractUnsignedInt(int32_t* out)
+{
+    if (!InputPrefix(0)) {
+        return this;
+    }
+
+    char buf[16] = {};  /* see ExtractInt()'s identical comment above */
+    uint32_t radix = ReadNumericToken(buf, sizeof(buf));
+
+    errno = 0;
+    char* end = nullptr;
+    unsigned long value = std::strtoul(buf, &end, static_cast<int>(radix));
+    *out = static_cast<int32_t>(value);
+    if (*out == -1 && errno == ERANGE) {
+        state_bits |= kFailBit;
+    }
+
+    if (rdbuf != nullptr) {
+        rdbuf->Unlock();
+    }
+    if (sync_flag < 0) {
+        WNDPROC_LeaveCriticalSection(&critical_section);
+    }
+    return this;
+}
+
+/* ================================================================== */
+/* WNDPROC_Stream__ExtractInt(void*, int32_t*) — free-function adapter */
+/* for the pre-existing caller in input/TrackTileDescriptor.cpp (which   */
+/* declares it `extern "C"` — matched here — and also calls the         */
+/* WNDPROC_CriticalSectionLock adapter above on the same `stream`        */
+/* parameter). Real callers there (TrackTileDescriptor::Render, see its  */
+/* own .cpp) always pass either a WIN32_Stream local or a                */
+/* WNDPROC_StreamFromMemory-constructed WNDPROC_Stream — genuine,        */
+/* already-constructed WNDPROC_Stream-family objects, confirmed by       */
+/* reading that function's real call sites — so forwarding to the real,  */
+/* already-validated ExtractInt() is safe, matching                      */
+/* WNDPROC_CriticalSectionLock's own established precedent above.        */
+/* Previously a loud deferred stub in shared/stubs_impl.cpp (removed).   */
+/* ================================================================== */
+extern "C" void* WNDPROC_Stream__ExtractInt(void* stream, int32_t* out)
+{
+    return reinterpret_cast<WNDPROC_Stream*>(stream)->ExtractInt(out);
 }
 
 /* ================================================================== */

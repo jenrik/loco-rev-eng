@@ -155,7 +155,16 @@ static const char s_PickUpSoundId[] = "PickUpSoundId";  /* 0x47E958 */
  * this session (earlier files' "&DAT_..." usage of this exact address
  * speculated it was an empty marker string; it is not). */
 static const char s_terminator[] = "-9";  /* 0x47E3CC */
-extern void* g_resource_dir_path;                   /* 0x479190 — resource directory path pointer */
+/* g_resource_dir_path (this file's former name for this constant) was a
+ * landmine, same class as input/TrackTileDescriptor.cpp's
+ * "g_stream_open_flags" (see that file's doc comment for the full
+ * evidence trail, found via a live SIGSEGV in this exact function
+ * 2026-08-21): declared `extern void*` at address 0x479190, but never
+ * actually defined anywhere in this tree (confirmed via nm) — reading
+ * its value read through a null GOT slot instead of the real constant.
+ * 0x479190 is Win32Stream.h's `kStreamShareMask` (0x1A4), a small
+ * integer share-mask value, not a pointer — "resource directory path
+ * pointer" was never what this address held. */
 
 /* ================================================================== */
 /* TrainStation::TrainStation — Constructor                           */
@@ -485,10 +494,10 @@ void TrainStation::Init(int32_t param1, const char* name)
     }
 
     /* Step 4b: Fall back to re-opening the .dat file from disk using full path
-       (address 0x436619: MOV EAX,[0x00479190] loads resource directory reference) */
+       (address 0x436619: MOV EAX,[0x00479190] loads the real kStreamShareMask
+       constant, not a "resource directory reference" as previously guessed) */
     {
-        stream_handle.OpenPath(dat_filename, 0x20,
-                            static_cast<int>(reinterpret_cast<uintptr_t>(g_resource_dir_path)));
+        stream_handle.OpenPath(dat_filename, 0x20, kStreamShareMask);
 
         /* Check if the file actually opened: rdbuf->fileHandle() != -1,
          * matching the original's `*(rdbuf+0x4C) != -1` (the WIN32_Stream

@@ -23,16 +23,37 @@
  * input/BuildingDescriptorEditor.cpp). */
 extern void GLOBAL_free(void* ptr);                     /* 0x465CD0 */
 
-/* g_scene_name — already-established global from game/ScriptedObject.cpp
- * (this file's HandleEvent logic used to live there, misattributed; the
- * global moves with it). g_asset_mgr is the real AssetArchive value object
- * (resources/AssetArchive.h, included below) — was previously declared
- * `void*` here and passed BY VALUE (not by address) to AssetMgr_LoadFile,
- * which only happened to "work" because the old global storage really was
- * a `void*`; now that it's the real value object, call sites use
- * g_asset_mgr.LoadFile(...) directly. */
-extern char  g_scene_name[];                            /* 0x4A99C8 */
-extern int   g_stream_open_flags;                       /* 0x479190 */
+/* g_scene_name (this file's former name for this global, inherited from a
+ * misattribution in game/ScriptedObject.cpp) and g_install_path both
+ * annotated the SAME real address, 0x4A99C8 — confirmed via Ghidra
+ * (list_names finds exactly one label there, "g_install_path"; 122
+ * xrefs across the whole binary, none named "scene", including
+ * CGWND_InstallPathInit, the function that actually writes it). This was
+ * a duplicate-alias landmine, same class as g_asset_mgr/GameConfig
+ * elsewhere in this project: `g_scene_name` here was defined separately
+ * in shared/defsym_stubs.cpp as `void* g_scene_name = nullptr;` — a
+ * SEPARATE, never-written host global, permanently empty, instead of
+ * sharing the real, host-populated `g_install_path` storage
+ * (shared/stubs_impl.cpp; see resources/AssetArchive.h's doc comment)
+ * every other real consumer of this address already uses. Unified onto
+ * the one real global rather than kept as a second, dead alias.
+ *
+ * g_stream_open_flags — a second landmine at this same call site (found
+ * 2026-08-21 via a live SIGSEGV, not code inspection): declared as an
+ * `extern int` annotated with address 0x479190, but genuinely never DEFINED
+ * anywhere in this tree (confirmed via nm — no such symbol, not even
+ * undefined). 0x479190 is real .data in the ORIGINAL Windows PE image
+ * only (Win32Stream.h already documents this exact address as the
+ * shareMask constant every other real OpenPath caller passes, and
+ * explicitly warns against re-reading it as a live host address rather
+ * than the named `kStreamShareMask` constant) — this file was the one
+ * caller that hadn't been converted, and the resulting undefined extern
+ * silently linked to a null GOT slot under
+ * -Wl,--unresolved-symbols=ignore-all, crashing the instant this
+ * function's disk-fallback branch was first reached (only possible once
+ * ResourceManager::Init() actually runs LoadStringTable's full resource
+ * sweep, which happens for the first time this session). */
+extern char g_install_path[];                           /* 0x4A99C8 */
 
 extern "C" {
     void CRT_free(void* ptr);                                          /* 0x466C70 */
@@ -344,11 +365,11 @@ void TrackTileDescriptor::HandleEvent(uint32_t resId, const char* name_suffix)
     }
 
     /* Build path strings:
-       dat_path  = g_scene_name + name_suffix + ".dat"
-       bmpPath   = g_scene_name + name_suffix + ".bmp" (inherited from
+       dat_path  = g_install_path + name_suffix + ".dat"
+       bmpPath   = g_install_path + name_suffix + ".bmp" (inherited from
                    ChildWindow, +0x48 — NOT a new field on this class) */
-    CRT_sprintf_buf(dat_path, "%s%s.dat", g_scene_name, name_suffix);
-    CRT_sprintf_buf(this->bmpPath, "%s%s.bmp", g_scene_name, name_suffix);
+    CRT_sprintf_buf(dat_path, "%s%s.dat", g_install_path, name_suffix);
+    CRT_sprintf_buf(this->bmpPath, "%s%s.bmp", g_install_path, name_suffix);
 
     /* Try loading from RFD archive (asset manager) first */
     if (g_asset_mgr.archive_file != 0) {
@@ -394,7 +415,7 @@ void TrackTileDescriptor::HandleEvent(uint32_t resId, const char* name_suffix)
 
     /* Fall back to disk file I/O if archive load didn't succeed */
     if (this->loaded == 0) {
-        stream_handle.OpenPath(dat_path, 0x20, g_stream_open_flags);
+        stream_handle.OpenPath(dat_path, 0x20, kStreamShareMask);
 
         if ((stream_handle.state_bits & StreamObject::kBadBit) == 0) {
             uint8_t ok = this->BuildingDescriptorEditor::Render(&stream_handle);
@@ -433,7 +454,7 @@ void* TrackTileDescriptor_Ctor(void* memory, int32_t resId, const char* name)
      * ui/UI_ChildWindow.h's ChildWindow constructor doc for why the
      * original's int32_t ABI slot is not reproduced as a pointer-through-
      * integer round trip here). This resource type's real function
-     * (0x44B290) is proven — via its CRT_sprintf_buf "%s%s.dat"/g_scene_name/
+     * (0x44B290) is proven — via its CRT_sprintf_buf "%s%s.dat"/g_install_path/
      * name_suffix call shape, already independently reverse-engineered in
      * game/ScriptedObject.cpp before being moved here — to dereference it as
      * the child's name-suffix string. */

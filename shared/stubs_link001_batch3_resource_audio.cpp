@@ -294,12 +294,13 @@ void ReleaseSoundResource(int handle)
 /* ReleaseSoundResource(ResourceEntry*)                                 */
 /* Address: 0x448EE0                                                   */
 /*                                                                     */
-/* Declared in resources/ResourceManager.h:828. Decompiled in full      */
+/* Declared in resources/ResourceManager.h. Decompiled in full           */
 /* (2026-08-15): decrements refcount at +0x120 (never below 0); when it */
-/* reaches 0 and a DirectSound buffer exists at +0x0C, checks the exact  */
-/* low byte at +0x08 against the literal 1 (`*(char*)(this+8) != 1`,     */
-/* NOT a bitmask test — flags is an int16_t, so this reads only its low  */
-/* byte) before stopping (vtable slot 0x48/4=18) and releasing (vtable   */
+/* reaches 0 and a DirectSound buffer exists at +0x0C, checks `flags`    */
+/* (+0x08, a real `uint8_t` — confirmed via raw disassembly of           */
+/* ResourceEntry::OpenResourceFile's single-byte zeroing write, 2026-08- */
+/* 21) against the literal 1 (`*(char*)(this+8) != 1`, an exact-byte-    */
+/* equals test, NOT a bitmask) before stopping (vtable slot 0x48/4=18) and releasing (vtable   */
 /* slot 8/4=2) the buffer and clearing the field. `entry->buffer` is now */
 /* typed `AudioDirectSoundBuffer*` (resources/ResourceManager.h), the    */
 /* same COM interface audio/AudioChannel.cpp already uses for its own    */
@@ -316,7 +317,7 @@ int32_t ReleaseSoundResource(ResourceEntry* entry)
         entry->refcount--;
     }
     if (entry->refcount <= 0 && entry->buffer != nullptr &&
-        static_cast<uint8_t>(entry->flags) != 1) {
+        entry->flags != 1) {
         entry->buffer->Stop();
         entry->buffer->Release();
         entry->buffer = nullptr;

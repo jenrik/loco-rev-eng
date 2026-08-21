@@ -136,8 +136,20 @@ struct StreamObject {
     static constexpr uint32_t kFailBit = 0x2;
     static constexpr uint32_t kBadBit  = 0x4;
 
-    /* format_flags bits */
+    /* format_flags bits. kSkipws is the only bit ever written anywhere in
+     * this codebase (WNDPROC_Stream::AttachBuffer) -- kFmtDec/kFmtHex/
+     * kFmtOct are read-only evidence from StreamBuf_ReadString's numeric-
+     * token radix selection (0x465AD0, see WndProcStream.cpp's
+     * ReadNumericToken) but have no writer anywhere in the binary, so a
+     * numeric extraction's radix is always auto-detected (0), exactly like
+     * strtol/strtoul's own base==0 contract. Kept as real, named bits
+     * rather than collapsed away, since ReadNumericToken is a genuine,
+     * reachable branch on them even though it is never observed to fire
+     * with anything but the "unset" (auto) combination in this binary. */
     static constexpr uint8_t kSkipws = 0x1;
+    static constexpr uint8_t kFmtDec = 0x10;
+    static constexpr uint8_t kFmtOct = 0x20;
+    static constexpr uint8_t kFmtHex = 0x40;
 
     /* 0x464590 (Ghidra auto-analysis named this "WNDPROC_StreamGetSize";
      * it does not get any size — it default-initializes this virtual base:

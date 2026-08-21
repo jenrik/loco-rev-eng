@@ -31,6 +31,11 @@
 #include <new>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <string>
+#include <strings.h>   /* POSIX strcasecmp — host-only, matches the
+                        * established convention in
+                        * shared/stubs_link001_batch1_crt_win32.cpp */
 
 /* Class headers for placement-new constructor dispatch in AddString */
 #include "../ui/UI_ChildWindow.h"
@@ -39,6 +44,13 @@
 #include "../input/BuildingDescriptorEditor.h"
 #include "../input/TrackTileDescriptor.h"
 #include "../audio/GameAudio.h"
+#include "../audio/AudioChannel.h"
+
+/* ResourceEntry's real construction/destruction/Parse chain. */
+#include "AssetArchive.h"
+#include "WndProcStream.h"
+#include "Win32Stream.h"
+#include "Win32StreamMem.h"
 
 /* ================================================================== */
 /* External references                                                 */
@@ -50,8 +62,13 @@ void  GLOBAL_free(void* ptr);        /* @ 0x00465CD0 */
 
 extern "C" {
 
-/* Windows API */
-void* __stdcall GetModuleHandleA(void* lpModuleName);
+/* Windows API. GetModuleHandleA/SetRect/OffsetRect/PostMessageA are
+ * declared in stubs/windows.h (transitively included via WndProcStream.h
+ * below) with real RECT/HWND-pointer-typed signatures; this file's own
+ * weaker void*-typed local redeclarations were harmless while windows.h
+ * was never included here, but now collide as duplicate, incompatible C
+ * declarations of the same symbols. Removed in favor of the canonical
+ * ones rather than kept as a second, weaker declaration site. */
 int32_t __stdcall LoadStringA(void* hInstance, UINT uID, char* lpBuffer, int32_t cchBufferMax);
 int32_t __stdcall DeleteObject(void* hObject);
 void* __stdcall CreateFontA(
@@ -61,9 +78,7 @@ void* __stdcall CreateFontA(
     uint32_t fdwClipPrecision, uint32_t fdwQuality, uint32_t fdwPitchAndFamily,
     const char* lpszFace);
 
-void __stdcall SetRect(void* lprc, int32_t left, int32_t top, int32_t right, int32_t bottom);
 void __stdcall CopyRect(void* lprcDst, const void* lprcSrc);
-void __stdcall OffsetRect(void* lprc, int32_t dx, int32_t dy);
 
 int32_t __stdcall wsprintfA(char* out, const char* format, ...);
 uint32_t __stdcall GetSystemDefaultLCID(void);
@@ -72,7 +87,6 @@ void* __stdcall LoadLibraryA(const char* libName);
 void* __stdcall GetProcAddress(void* hModule, const char* procName);
 uint32_t __stdcall SetErrorMode(uint32_t mode);
 uint32_t __stdcall GetFileAttributesA(const char* path);
-int32_t __stdcall PostMessageA(void* hWnd, uint32_t msg, uint32_t wParam, uint32_t lParam);
 int32_t __cdecl PlaySoundA(const char* pszSound, void* hmod, uint32_t fdwSound);
 
 /* CRT */
@@ -214,9 +228,12 @@ extern int32_t g_sound_cache[]; /* @ 0x0049161C, indexed by sound ID (0x5000-0x6
 /* Vehicle slot globals — updated by vehicle placement code */
 extern int32_t g_vehicle_slots[3]; /* @ 0x004A98B8, 3 vehicle pointers */
 
-/* Win32 GDI */
+/* Win32 GDI. CreateSolidBrush is unused in this file and conflicts with
+ * stubs/windows.h's real `HBRUSH CreateSolidBrush(COLORREF)` (COLORREF
+ * vs this file's old `int` parameter, now visible together via
+ * WndProcStream.h's transitive include) — removed rather than fixed,
+ * since nothing here calls it. */
 extern "C" {
-void* __stdcall CreateSolidBrush(int color);
 int   __stdcall DestroyWindow(void* hwnd);
 int   __stdcall FreeLibrary(void* hLib);
 } /* extern "C" */
@@ -397,30 +414,229 @@ T& field_at(void* object, size_t offset)
     return *reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(object) + offset);
 }
 
-void destroy_resource(int32_t handle)
+/* Destroys a `resource_ptrs`-registry entry (main resource registry,
+ * +0x10030). Every value ever stored there comes from
+ * ResourceManager::AddString, which only ever placement-constructs
+ * ChildWindow or one of its subclasses (CursorEditWindow, TrainStation,
+ * BuildingDescriptorEditor, TrackTileDescriptor — all `: public
+ * ChildWindow`, confirmed via their own headers) — NOT a ResourceObject,
+ * a wholly separate, unrelated hierarchy. A prior version of this
+ * function cast every handle here to `ResourceObject*` before deleting;
+ * fixed 2026-08-21 to use the real common base, `ChildWindow`, which
+ * declares a real `virtual ~ChildWindow()` (ui/UI_ChildWindow.h). */
+void destroy_window_resource(int32_t handle)
 {
-    /* Original vtable[0] scalar deleting destructor with flag 1 -- ordinary
-     * `delete` reproduces this exactly; see resources/ResourceObject.h. */
-    delete static_cast<ResourceObject*>(pointer_from_handle<void>(handle));
+    delete pointer_from_handle<ChildWindow>(handle);
+}
+
+/* Destroys a `string_cache`-registry entry (string table cache,
+ * +0x20034). Every value ever stored there comes from
+ * create_string_resource() below, which only ever constructs a real
+ * `ResourceEntry` — a separate, unrelated hierarchy from ChildWindow/
+ * ResourceObject (see resources/ResourceManager.h's ResourceEntry doc
+ * comment for the full anti-pattern history this replaces). */
+void destroy_resource_entry(int32_t handle)
+{
+    delete pointer_from_handle<ResourceEntry>(handle);
 }
 
 int32_t create_string_resource(int32_t resource_id, char* string_data)
 {
-    void* allocation = operator_new(300);
+    void* allocation = operator_new(sizeof(ResourceEntry));
     if (allocation == nullptr) {
         return 0;
     }
 
-    ResourceEntry* entry = RESMGR_AllocResourceEntry(
-        static_cast<ResourceEntry*>(allocation), resource_id,
-        handle_from_pointer(string_data));
+    ResourceEntry* entry = new (allocation) ResourceEntry(resource_id, string_data);
     int32_t handle = handle_from_pointer(entry);
-    if (entry != nullptr && entry->is_valid == 0) {
-        destroy_resource(handle);
+    if (entry->is_valid == 0) {
+        destroy_resource_entry(handle);
         return -1;
     }
     return handle;
 }
+}
+
+/* ================================================================== */
+/* ResourceEntry — real class implementation                           */
+/* See resources/ResourceManager.h's class doc comment for the full     */
+/* address map and the anti-pattern this replaces.                      */
+/* ================================================================== */
+
+ResourceEntry::ResourceEntry(int32_t resourceId, const char* soundName)
+    : resource_id(resourceId), flags(0), is_valid(0), buffer(nullptr),
+      replay_delay(0), unknown_0x14(0), path{}, refcount(0),
+      max_instances(-1), is_global(0)
+{
+    if (soundName != nullptr) {
+        std::snprintf(this->path, sizeof(this->path), "%s%s.wav",
+                      g_install_path, soundName);
+    }
+    OpenResourceFile();
+}
+
+ResourceEntry::ResourceEntry(const char* filePath)
+    : resource_id(-1), flags(0), is_valid(0), buffer(nullptr),
+      replay_delay(0), unknown_0x14(0), path{}, refcount(0),
+      max_instances(-1), is_global(0)
+{
+    /* Matches the original's real instruction order exactly:
+     * OpenResourceFile() runs BEFORE `path` is populated with `filePath`
+     * (RESMGR_CreateResourceFromFile, 0x448A20, calls
+     * RESMGR_OpenResourceFile(this) before copying filePath into +0x18).
+     * In the original, `this->path` is genuinely uninitialized heap
+     * garbage at that point (the object comes from a raw
+     * operator_new(300) with no zeroing) -- reproducing that exactly
+     * would mean reading uninitialized memory, which is undefined
+     * behavior in C++ and not something to deliberately introduce. This
+     * class's member-initializer list value-initializes `path` to an
+     * empty string first, so OpenResourceFile() here builds its lookup
+     * path from "" instead of garbage -- both cases fail every real
+     * lookup (archive-file/disk-file open against a nonsense name) and
+     * fall through to the SAME "file missing -> is_valid = 1" last-resort
+     * branch inside OpenResourceFile(), so the observable outcome
+     * (is_valid always ends up 1 for this constructor) matches either
+     * way. */
+    OpenResourceFile();
+    if (filePath != nullptr) {
+        std::strncpy(this->path, filePath, sizeof(this->path) - 1);
+        this->path[sizeof(this->path) - 1] = '\0';
+    }
+}
+
+ResourceEntry::~ResourceEntry()
+{
+    if (this->buffer != nullptr) {
+        this->buffer->Stop();     /* vtable slot 18 (+0x48) */
+        this->buffer->Release();  /* vtable slot 2 (+0x08) */
+        this->buffer = nullptr;
+    }
+    this->is_valid = 0;
+}
+
+/* ================================================================== */
+/* OpenResourceFile — 0x448A70 (was RESMGR_OpenResourceFile)            */
+/*                                                                     */
+/* SEH-protected in the original purely because it constructs a local  */
+/* WIN32_Stream (real C++ RAII here, see game/TrainStation.cpp's        */
+/* Init() for the same already-converted idiom this mirrors).           */
+/* Verified instruction-by-instruction via disassemble_function, not    */
+/* decompile_function alone (the decompiler's pseudocode obscured        */
+/* which buffer gets mutated).                                          */
+/* ================================================================== */
+void ResourceEntry::OpenResourceFile()
+{
+    WIN32_Stream stream;  /* 0x463890 constructor; real RAII */
+
+    this->refcount = 0;                 /* +0x120 */
+    this->max_instances = -1;           /* +0x124 */
+    this->replay_delay = 0;             /* +0x10 */
+    this->unknown_0x14 = 0;             /* +0x14 */
+    this->is_global = 0;                /* +0x128 */
+    this->flags = 0;                    /* +0x08 */
+    this->buffer = nullptr;             /* +0x0C */
+    this->is_valid = 0;                 /* +0x09 */
+
+    /* Build a ".dat"-normalized copy of `path` for file lookups. The
+     * original blindly truncates the LAST 3 CHARACTERS off `this->path`
+     * (assuming any extension present is exactly 3 letters, e.g. "wav")
+     * and appends "dat" — confirmed via raw disassembly (0x448AEB:
+     * `SUB EDX,3` combined with the truncating null-write at 0x448B08,
+     * re-traced instruction-by-instruction this session: "zap1.wav" (8
+     * chars) minus 3 = "zap1." + "dat" = "zap1.dat"). `this->path`
+     * itself is NEVER mutated by this function — only this local copy is
+     * used for the lookups below; `this->path` keeps its original
+     * extension (e.g. ".wav") for whatever later code reads it directly
+     * for real audio playback. */
+    std::string dat_path = this->path;
+    if (dat_path.size() >= 3) {
+        dat_path.resize(dat_path.size() - 3);
+    }
+    dat_path += "dat";
+
+    /* Archive-backed lookup. g_asset_mgr (resources/AssetArchive.h) is a
+     * VALUE object; archive_file is confirmed ALWAYS 0 in the shipped
+     * retail binary (zero WRITE xrefs anywhere in the whole binary — see
+     * AssetArchive.h's own doc comment) — this branch is real, reachable
+     * code that must be preserved, but is a no-op on every actual run. */
+    if (g_asset_mgr.archive_file != 0) {
+        /* "install-path stripped": skip exactly strlen(g_install_path)
+         * characters from the FRONT of dat_path (confirmed via raw
+         * disassembly at 0x448B45-0x448B85 — exactly strlen(g_install_path),
+         * not off-by-one). */
+        const char* stripped_name = dat_path.c_str() + std::strlen(g_install_path);
+        int32_t file_size = 0;
+        uint8_t* file_data = g_asset_mgr.LoadFile(
+            reinterpret_cast<const uint8_t*>(stripped_name), &file_size);
+        if (file_data != nullptr) {
+            void* mem_stream = operator_new(WIN32_MemoryStream_Size());
+            WNDPROC_Stream* render_stream = (mem_stream != nullptr)
+                ? WNDPROC_StreamFromMemory(mem_stream, reinterpret_cast<char*>(file_data), file_size, 1)
+                : nullptr;
+            if (render_stream != nullptr) {
+                this->is_valid = this->Parse(render_stream) ? 1 : 0;
+                delete render_stream;
+            }
+            CRT_free(file_data);
+        }
+    }
+
+    /* Disk-file fallback — ALWAYS exercised in retail (archive_file==0
+     * above always skips the archive branch). CONFIRMED via raw
+     * disassembly (0x448BFD: `LEA ECX,[ESP+0x74]` — same stack slot as
+     * dat_path above) that this ALSO uses the .dat-normalized path, not
+     * the original this->path with its native extension. */
+    if (!this->is_valid) {
+        stream.OpenPath(dat_path.c_str(), 0x20, kStreamShareMask);
+        WIN32_StreamFile* file = static_cast<WIN32_StreamFile*>(stream.rdbuf);
+        if (file != nullptr && file->fileHandle() != -1) {
+            this->is_valid = this->Parse(&stream) ? 1 : 0;
+            stream.CloseNow();
+        }
+    }
+
+    /* Last-resort: if still not exactly valid(1), and the file plain
+     * doesn't exist on disk, force is_valid=1 anyway (confirmed via
+     * disassembly: `CMP byte[EBP+9],1; JZ skip; GetFileAttributesA(...);
+     * CMP EAX,-1; JNZ skip; MOV byte[EBP+9],1` — i.e. a MISSING file is
+     * treated as valid, not invalid; only checked when is_valid isn't
+     * ALREADY exactly 1). Preserved exactly even though it looks
+     * backwards — it's what the original does. */
+    if (this->is_valid != 1) {
+        if (GetFileAttributesA(dat_path.c_str()) == 0xFFFFFFFFu) {
+            this->is_valid = 1;
+        }
+    }
+    /* `stream` destructs here (real RAII). */
+}
+
+/* ================================================================== */
+/* Parse — vtable slot [1], 0x448C90                                    */
+/*                                                                       */
+/* NOT REACHABLE in the shipped retail binary or on this host — see      */
+/* this method's own doc comment in resources/ResourceManager.h.         */
+/* ================================================================== */
+bool ResourceEntry::Parse(WNDPROC_Stream* stream)
+{
+    bool ok = false;
+    if ((stream->state_bits & StreamObject::kBadBit) == 0) {
+        ok = true;
+        if ((stream->state_bits & StreamObject::kEofBit) == 0) {
+            char token[264];
+            do {
+                stream->ExtractToken(token);
+                if (strcasecmp(token, "MaxInstances") == 0) {
+                    stream->ExtractUnsignedInt(&this->max_instances);
+                } else if (strcasecmp(token, "ResourceReplayDelay") == 0) {
+                    stream->ExtractInt(&this->replay_delay);
+                } else if (strcasecmp(token, "Global") == 0) {
+                    this->is_global = 1;
+                }
+                token[0] = '\0';
+            } while ((stream->state_bits & StreamObject::kEofBit) == 0);
+        }
+    }
+    return ok;
 }
 
 /* ================================================================== */
@@ -786,8 +1002,9 @@ void ResourceManager::FreeAllResources()
             *slotPtr = 0;  /* reset sentinel */
         }
         if (*slotPtr != 0) {
-            /* Invoke the common typed resource destruction slot. */
-            destroy_resource(*slotPtr);
+            /* resource_ptrs entries are always ChildWindow-hierarchy
+             * objects (see destroy_window_resource's own doc comment). */
+            destroy_window_resource(*slotPtr);
             *slotPtr = 0;
         }
         /* Clear corresponding type_idx entry */
@@ -807,8 +1024,9 @@ void ResourceManager::FreeAllResources()
             *slotPtr = 0;  /* reset sentinel */
         }
         if (*slotPtr != 0) {
-            /* Invoke the common typed resource destruction slot. */
-            destroy_resource(*slotPtr);
+            /* string_cache entries are always ResourceEntry objects (see
+             * destroy_resource_entry's own doc comment). */
+            destroy_resource_entry(*slotPtr);
             *slotPtr = 0;
         }
 
@@ -1002,10 +1220,11 @@ uint8_t ResourceManager::AddString(int32_t resId, const char* name)
         return 1;
     }
 
-    /* Not persistent — destroy the resource */
+    /* Not persistent — destroy the resource (always a ChildWindow-
+     * hierarchy object here; see destroy_window_resource's doc comment). */
     int32_t stored = this->resource_ptrs[resId];
     if (stored != 0) {
-        destroy_resource(stored);
+        destroy_window_resource(stored);
     }
     this->resource_ptrs[resId] = -1;
 

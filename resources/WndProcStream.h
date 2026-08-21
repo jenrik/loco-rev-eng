@@ -53,6 +53,8 @@
 
 #pragma once
 
+#include <cstddef>
+
 #include "StreamObject.h"
 
 class WNDPROC_Stream : public virtual StreamObject {
@@ -121,6 +123,33 @@ public:
      * on this host since preceding pointer-bearing members widen). */
     int32_t Gcount() const { return gcount_; }
 
+    /* 0x4646C0 (real C++-mangled method — operator>>(int32_t*) for
+     * SIGNED integers). Re-enters InputPrefix(0)/ReadNumericToken()
+     * itself (CRITICAL_SECTIONs are reentrant, matching the original's
+     * own nested Enter/Leave pairs), converts the resulting token via the
+     * CRT's signed strtol-family primitive, and sets failbit
+     * UNCONDITIONALLY whenever that conversion overflows (errno==ERANGE)
+     * — unlike ExtractUnsignedInt() below, which only consults errno for
+     * its own ambiguous overflow-clamp sentinel. Always returns `this`
+     * (classic operator>> chaining), regardless of success. Real caller:
+     * ResourceEntry::Parse's "ResourceReplayDelay" branch
+     * (resources/ResourceManager.cpp). */
+    WNDPROC_Stream* ExtractInt(int32_t* out);
+
+    /* 0x464F70 (Ghidra auto-analysis mislabeled this "CRT_fabs" — NOT
+     * floating-point absolute value; disassembly shows it operates
+     * purely on stream/StreamObject state and calls the CRT's UNSIGNED
+     * strtoul-family primitive, the same 0x469560 numeric-parse routine
+     * ExtractInt() uses with its "unsigned" flag set). Genuinely distinct
+     * from ExtractInt(), not a duplicate: only checks errno==ERANGE when
+     * the parsed result is exactly -1 (0xFFFFFFFF, the unsigned overflow-
+     * clamp sentinel) — any other return value cannot be an overflow
+     * result for this variant, so skipping the errno check for those is
+     * a genuine, intentional CRT optimization, not dead code. Real
+     * caller: ResourceEntry::Parse's "MaxInstances" branch
+     * (resources/ResourceManager.cpp). */
+    WNDPROC_Stream* ExtractUnsignedInt(int32_t* out);
+
 protected:
     /* 0x464840 (Ghidra auto-analysis named this "WNDPROC_StreamVPrintf"; it
      * is not printf-related — it attaches a buffer). Calls the inherited
@@ -136,6 +165,30 @@ protected:
     void AttachBuffer(WNDPROC_StreamBuf* newBuf);
 
 private:
+    /* 0x465AD0 (Ghidra AND shared/crt_stubs.cpp both mislabel this
+     * "_ftol"/"CRT ftol" — a genuinely distinct 511-byte function, not
+     * the tiny FPU-based double-to-long intrinsic; see crt_stubs.cpp's
+     * own doc comment for that still-outstanding collision). Classic
+     * old-iostream numeric-token tokenizer, shared by ExtractInt() and
+     * ExtractUnsignedInt() above: re-enters InputPrefix(0) itself, then
+     * consumes a run of characters honoring an optional leading sign and
+     * an auto-detected "0x"/"0" radix prefix (this codebase never sets
+     * the explicit kFmtDec/kFmtHex/kFmtOct format_flags bits anywhere —
+     * see StreamObject.h — so radix is always auto-detected exactly like
+     * strtol/strtoul's own base==0 contract) into `buf`, bounded to the
+     * classic 15-significant-character old-iostream cap. On total
+     * failure (zero valid digits consumed), sets failbit and pushes
+     * every consumed character back onto rdbuf via PutBack()
+     * (WndProcStreamBuf.h). Returns the detected radix (0/8/10/16) for
+     * the caller to hand to strtol/strtoul. `bufCapacity` is always 16 at
+     * both real call sites, matching the original's fixed 16-byte stack
+     * buffer.
+     * NOTE: the original's final `if (finalLength == 0x10) failbit=true`
+     * safety check is provably unreachable (the loop's own hard cap
+     * guarantees finalLength <= 15) and is not reproduced — see the .cpp
+     * for the reachability proof. */
+    uint32_t ReadNumericToken(char* buf, size_t bufCapacity);
+
     /* 0x464B10. Discards characters from rdbuf (via ReadChar()/GetChar())
      * while they're whitespace, stopping at the first non-space char or
      * EOF. Sets eofbit if the stream runs dry. Locks/unlocks rdbuf's own
@@ -180,3 +233,17 @@ private:
  * binds here. NOT declared `extern "C"` — must keep C++ linkage to
  * match. */
 void WNDPROC_CriticalSectionLock(int* stream, char* buf);
+
+/* Free-function `extern "C"` adapter for the pre-existing
+ * `WNDPROC_Stream__ExtractInt` symbol `input/TrackTileDescriptor.cpp`
+ * declares (`extern "C" void* WNDPROC_Stream__ExtractInt(void*,
+ * int32_t*);`) and calls on the same `stream` parameter as
+ * WNDPROC_CriticalSectionLock above — real callers there always pass a
+ * genuine, already-constructed WNDPROC_Stream-family object (a
+ * WIN32_Stream local or a WNDPROC_StreamFromMemory result; confirmed by
+ * reading TrackTileDescriptor::Render's own call sites), so forwarding
+ * to the real WNDPROC_Stream::ExtractInt() is safe, matching
+ * WNDPROC_CriticalSectionLock's own established precedent. Declared
+ * here (rather than left as a bare definition) to satisfy
+ * -Wmissing-declarations at -Dstrict=2. */
+extern "C" void* WNDPROC_Stream__ExtractInt(void* stream, int32_t* out);

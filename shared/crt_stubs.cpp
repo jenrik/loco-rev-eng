@@ -264,13 +264,22 @@
  */
 
 /* ================================================================== */
-/*  0x465AD0 — _ftol                                                   */
+/*  0x465AD0 — NOT _ftol (correction, 2026-08-21)                       */
 /* ================================================================== */
-/*  double-to-long conversion with truncation (used by compiler).
- *  Address: 0x465AD0, size: 511 bytes
- *  Calling convention: __cdecl
- *  Called by: compiler-generated code for float→int casts
- *  src: _FTOL.OBJ
+/*  This address/size pairing was wrong: a real CRT `_ftol` (FPU
+ *  `fistp`-based double-to-long truncation) is a handful of
+ *  instructions, not 511 bytes. Decompiling 0x465AD0 directly (while
+ *  reconstructing resources/ResourceManager.cpp's ResourceEntry::Parse
+ *  chain) shows a substantial custom numeric-token tokenizer used by
+ *  WNDPROC_Stream::ExtractInt/ExtractUnsignedInt — see
+ *  resources/WndProcStream.h's ReadNumericToken() doc comment for the
+ *  real reconstruction. `_ftol` below (crt_stubs.h:166) has zero real
+ *  callers anywhere in this tree (confirmed via grep) — this was a
+ *  stale, never-linked declaration, not a live landmine; left in place
+ *  only for documentation continuity, not because anything calls it.
+ *  The genuine double-to-long helper this codebase actually calls is
+ *  `__ftol` (two leading underscores, shared/collections.cpp) at the
+ *  UNRELATED address 0x466D30 — a separate function, not this one.
  */
 
 /* ================================================================== */

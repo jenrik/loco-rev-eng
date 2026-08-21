@@ -15,7 +15,7 @@
 struct RECT{int32_t l,t,r,b;};
 struct POINT{int32_t x,y;};
 struct GameWindow; struct Building; struct GameAudio;
-struct TileMap; struct ResourceEntry; struct RESDATA;
+struct TileMap; struct RESDATA;
 struct RESDATA_ScriptedObject; struct GameSetupPanel;
 struct HelpWnd; struct VehicleEditor; struct UI_WindowBase;
 struct Cursor; struct TrainEntity;

@@ -69,6 +69,7 @@
 
 struct GameAudio;
 class AudioDirectSoundBuffer;
+class WNDPROC_Stream; /* resources/WndProcStream.h */
 
 /* ================================================================== */
 /* RESDATA — resource data object (loaded by ResourceManager)          */
@@ -83,26 +84,101 @@ class AudioDirectSoundBuffer;
 
 /* ================================================================== */
 /* ResourceEntry — individual resource entry with file backing         */
-/* Non-virtual class with vtable 0x478278. Size: 0x12C bytes (300).   */
 /*                                                                     */
-/* Vtable layout:                                                      */
-/*   [0] scalar deleting destructor (RESMGR_ResourceEntry_Dtor,       */
-/*       0x4489D0)                                                    */
-/*   [1] OpenResourceFile / Parse (virtual, reads + parses data)      */
+/* Own polymorphic class (compiler-managed vtable), NOT derived from   */
+/* ResourceObject (resources/ResourceObject.h) — a genuinely separate,  */
+/* unrelated hierarchy with a different vtable and slot count. A prior  */
+/* version of this file's `destroy_resource()` helper cross-cast every  */
+/* handle (including ResourceEntry ones) to `ResourceObject*` before    */
+/* calling `delete` — the exact "erase a known type, cross-cast between */
+/* reconstructed classes" anti-pattern CLAUDE.md forbids, and the root   */
+/* cause of a real SIGSEGV in ResourceManager::LoadStringTable's         */
+/* create_string_resource/destroy_resource pair. Fixed 2026-08-21 by     */
+/* giving ResourceEntry its own real class with a real virtual           */
+/* destructor, so `delete` on a genuine `ResourceEntry*` dispatches      */
+/* correctly regardless of what else shares the same free function.      */
+/*                                                                       */
+/* Original size: 0x12C bytes (300). Vtable: 0x478278.                  */
+/* Vtable layout:                                                        */
+/*   [0] scalar deleting destructor -> ~ResourceEntry() (0x4489D0)       */
+/*   [1] Parse(WNDPROC_Stream*) (virtual; reads + parses descriptor)     */
+/*                                                                       */
+/* Address map:                                                          */
+/*   ResourceEntry(int32_t, const char*)  0x448990 (was                 */
+/*     RESMGR_AllocResourceEntry)                                        */
+/*   ResourceEntry(const char*)           0x448A20 (was                 */
+/*     RESMGR_CreateResourceFromFile)                                    */
+/*   ~ResourceEntry()                     0x4489D0 (was                 */
+/*     RESMGR_ResourceEntry_Dtor)                                        */
+/*   OpenResourceFile() [private]         0x448A70 (was                 */
+/*     RESMGR_OpenResourceFile)                                          */
+/*   Parse(WNDPROC_Stream*)               0x448C90 (no Ghidra name;      */
+/*     had no function boundary at all before this session)              */
 /* ================================================================== */
 
-struct ResourceEntry {
-    void* vtable;                 /* +0x00: compiler-managed resource vtable */
+class ResourceEntry {
+public:
+    /* 0x448990. Loads a string-table sound resource: if soundName is
+     * non-null, builds path = g_install_path + soundName + ".wav" via a
+     * bounded snprintf (the original's manual byte-loop sprintf
+     * collapses to this with identical observable behavior), then
+     * unconditionally resolves/parses it via OpenResourceFile(). Real
+     * caller: ResourceManager::LoadStringTable's create_string_resource
+     * helper (ResourceManager.cpp). */
+    ResourceEntry(int32_t resourceId, const char* soundName);
+
+    /* 0x448A20. Loads an external WAV file resource: resource_id is
+     * fixed at -1, path = filePath verbatim (no prefix/extension
+     * applied), then resolves/parses it via OpenResourceFile(). Real
+     * caller: PlaySoundFile (ResourceManager.cpp). */
+    explicit ResourceEntry(const char* filePath);
+
+    ResourceEntry(const ResourceEntry&) = delete;
+    ResourceEntry& operator=(const ResourceEntry&) = delete;
+
+    /* 0x4489D0 (scalar deleting destructor). Stops and releases the
+     * owned DirectSound buffer, if any (vtable slots [18]=Stop and
+     * [2]=Release on AudioDirectSoundBuffer — audio/AudioChannel.h),
+     * then clears is_valid. The original's "also call operator delete"
+     * flag is the compiler's own scalar-deleting-destructor bookkeeping;
+     * plain C++ `delete` on a `ResourceEntry*` already reproduces it. */
+    virtual ~ResourceEntry();
+
+    /* vtable slot [1]. 0x448C90 (no prior Ghidra function boundary — only
+     * ever reached through vtable dispatch inside OpenResourceFile(), so
+     * auto-analysis missed it entirely). Line-oriented key=value
+     * descriptor parser: recognizes "MaxInstances" (-> ExtractUnsignedInt
+     * into max_instances), "ResourceReplayDelay" (-> ExtractInt into
+     * replay_delay), and "Global" (-> is_global = 1), looping via
+     * WNDPROC_Stream::ExtractToken until eofbit is set. Returns true iff
+     * the stream was neither already bad (badbit) nor already at EOF
+     * (eofbit) when Parse() was entered — a real success/failure result,
+     * not merely "did we loop at all".
+     *
+     * NOT REACHABLE in the shipped retail binary or on this host: both
+     * real callers are gated behind either `g_asset_mgr.archive_file != 0`
+     * (AssetArchive.h: confirmed zero WRITE xrefs anywhere in the whole
+     * binary — always 0 in retail) or a disk-file open of a
+     * ".dat"-normalized path built from `this->path`, which for every
+     * real caller in this codebase contains literal Windows backslashes
+     * (e.g. "sounds\SpecialFX\zap1.dat") that do not separate directories
+     * on this host — see OpenResourceFile()'s own doc comment. Kept as a
+     * full, real (non-stub) implementation per this project's decompile-
+     * everything policy, not merely because it's unreachable. */
+    virtual bool Parse(WNDPROC_Stream* stream);
+
     /* +0x04: resource ID (-1 for external files) */
     int32_t resource_id;
 
-    /* +0x08: flags/status word */
-    int16_t flags;
+    /* +0x08: low byte of the original's flags word; zeroed by
+     * OpenResourceFile(), read (as an exact byte-equals-1 test, not a
+     * bitmask) by ReleaseSoundResource — no writer other than the zero
+     * above has been found, so its "1" value is never actually produced
+     * by any evidenced code path in this tree. */
+    uint8_t flags;
 
     /* +0x09: validity flag (1 = loaded and ready) */
     uint8_t is_valid;
-
-    /* +0x0A..+0x0B: padding */
 
     /* +0x0C: DirectSound secondary buffer — real COM interface, confirmed
      * via RESMGR_LoadSoundResource/ReleaseSoundResource's own vtable calls
@@ -110,16 +186,41 @@ struct ResourceEntry {
      * AudioDirectSoundBuffer's declared layout (audio/AudioChannel.h). */
     AudioDirectSoundBuffer* buffer;
 
-    /* +0x10..+0x17: additional fields (direct sound format, etc.) */
+    /* +0x10: "ResourceReplayDelay" descriptor value, written by Parse()
+     * via WNDPROC_Stream::ExtractInt. Zeroed by OpenResourceFile(). */
+    int32_t replay_delay;
 
-    /* +0x18: path string (formatted "%s\\name.wav", 0x108 bytes max) */
-    char   path[0x108];
+    /* +0x14: zeroed by OpenResourceFile(); no reader has been found in
+     * any function examined so far. Kept as a real, named, neutral field
+     * (not folded into padding) since it is a genuine, confirmed write. */
+    int32_t unknown_0x14;
+
+    /* +0x18: path string. For the sound-resource constructor, formatted
+     * "<g_install_path><soundName>.wav"; for the file-path constructor,
+     * the caller's path verbatim. OpenResourceFile() derives a SEPARATE
+     * ".dat"-normalized local copy for its own file lookups and never
+     * mutates this field. */
+    char path[0x108];
 
     /* +0x120: refcount (for sound resources) */
     int32_t refcount;
 
-    /* +0x128: flag byte (8-bit flag for playback mode) */
-    uint8_t mode_flag;
+    /* +0x124: "MaxInstances" descriptor value (default -1 = unlimited),
+     * written by Parse() via WNDPROC_Stream::ExtractUnsignedInt. */
+    int32_t max_instances;
+
+    /* +0x128: "Global" descriptor flag — set to 1 by Parse() when the
+     * descriptor file contains a "Global" key; zeroed by
+     * OpenResourceFile(). */
+    uint8_t is_global;
+
+private:
+    /* 0x448A70. Shared post-construction resolution/load step used by
+     * both constructors — see the .cpp for the full evidence trail
+     * (archive lookup via g_asset_mgr, disk-file fallback via
+     * WIN32_Stream, and a "missing file counts as valid" last-resort
+     * check). */
+    void OpenResourceFile();
 };
 
 /* ================================================================== */
@@ -803,65 +904,12 @@ size_t host_stream_bytes_remaining(void* stream);
 #endif
 
 /* ================================================================== */
-/* ResourceEntry methods (operate on ResourceEntry struct)             */
+/* ResourceEntry construction/destruction/Parse are now real C++        */
+/* members declared on the class itself, above — see its doc comment    */
+/* for the full address map. RESMGR_AllocResourceEntry/                 */
+/* RESMGR_CreateResourceFromFile/RESMGR_ResourceEntry_Dtor/              */
+/* RESMGR_OpenResourceFile no longer exist as free functions.            */
 /* ================================================================== */
-
-/**
- * RESMGR_AllocResourceEntry — Allocate and init a resource entry.
- * Address: 0x448990
- *
- * Initializes the resource-entry object, stores resource_id,
- * formats path as "%s\\name.wav" from param_2 string, calls
- * RESMGR_OpenResourceFile to load the resource.
- * Called by ResourceManager_LoadStringTable.
- *
- * @param resEntry  ResourceEntry object (pre-allocated)
- * @param resId     Resource ID
- * @param nameStr   String to format into path (may be NULL)
- * @return          The ResourceEntry pointer (this)
- */
-ResourceEntry* RESMGR_AllocResourceEntry(ResourceEntry* resEntry, int32_t resId, int32_t nameStr);
-
-/**
- * RESMGR_ResourceEntry_Dtor — Scalar-deleting destructor for ResourceEntry.
- * Address: 0x4489D0
- *
- * Destroys the resource-entry sub-object at
- * +0x0C via vtable dispatch (slot 0x48/+0x09 then slot 8), clears +0x09
- * status flag. If flags & 1, frees the struct memory.
- * This is the compiler-generated destruction slot.
- *
- * @param flags  Bit 0: free memory flag
- * @return       this pointer
- */
-void* RESMGR_ResourceEntry_Dtor(ResourceEntry* resEntry, uint8_t flags);
-
-/**
- * RESMGR_CreateResourceFromFile — Create ResourceEntry from file path.
- * Address: 0x448A20
- *
- * Initializes the resource-entry state, calls RESMGR_OpenResourceFile,
- * sets resource_id to -1, copies raw file path to +0x18.
- * Used by RESMGR_PlaySoundFile for external WAV files.
- *
- * @param resEntry  ResourceEntry object (pre-allocated)
- * @param filePath  File path string
- * @return          The ResourceEntry pointer
- */
-ResourceEntry* RESMGR_CreateResourceFromFile(ResourceEntry* resEntry, const char* filePath);
-
-/**
- * RESMGR_OpenResourceFile — Core resource resolution + loading.
- * Address: 0x448A70
- *
- * Initialises entry fields, then tries (in order):
- *   1. AssetMgr_LoadFile via install path prefix
- *   2. WIN32_StreamOpenPath direct file open
- *   3. GetFileAttributesA existence check
- * Calls vtable[1] on entry to parse loaded data. Sets +0x09=1 on success.
- * SEH-protected.
- */
-void RESMGR_OpenResourceFile(ResourceEntry* resEntry);
 
 /* ================================================================== */
 /* Sound resource methods (operate on ResourceEntry as sound resource) */

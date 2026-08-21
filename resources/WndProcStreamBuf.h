@@ -185,6 +185,23 @@ public:
     void Lock();
     void Unlock();
 
+    /* vtable +0x24 (slot9, classic "pbackfail"-equivalent). Concrete base
+     * implementation (0x4657A0, Ghidra-mislabeled "CRT_0x4657A0"/
+     * "_flsbuf") — confirmed NOT overridden by WIN32_StreamFile (its own
+     * vtable at 0x4791AC carries this exact address unchanged at +0x24,
+     * the same situation as ReadBytes/AllocateDefaultBuffer above).
+     * Pushes `ch` back onto the already-buffered get-region when there is
+     * room (readBase_ < readPtr_): decrements readPtr_ and writes the
+     * byte in place, returning it. The original's fallback for "no room"
+     * reseeks/regrows the buffer through vtable slot [3] (0x463E00 on
+     * WIN32_StreamFile) — a still-unreconstructed method (see
+     * Win32StreamFile.h's Open() doc comment for the same open gap) whose
+     * own decompile additionally loses register tracking (`unaff_ESI`);
+     * see the .cpp for why this narrow fallback is a loud deferred path
+     * rather than a full transcription. Real caller: WNDPROC_Stream::
+     * ReadNumericToken's failed-extraction unget (WndProcStream.h). */
+    virtual int32_t PutBack(int32_t ch);
+
 protected:
     /* WNDPROC_StreamBuf_CheckFlush, 0x4656D0. Despite the address's original
      * (wrong) auto-generated name, this is a lazy buffer-allocation guard,

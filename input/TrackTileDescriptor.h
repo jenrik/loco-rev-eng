@@ -103,7 +103,7 @@
  *     explicit, sequential, gated parse phases invoked directly by
  *     HandleEvent.
  *   - HandleEvent's string-building call shape (`CRT_sprintf_buf(buf,
- *     "%s%s.dat", g_scene_name, name_suffix)` at 0x47e368, `"%s%s.bmp"` at
+ *     "%s%s.dat", g_install_path, name_suffix)` at 0x47e368, `"%s%s.bmp"` at
  *     0x47e35c writing to `this+0x48` == inherited ChildWindow::bmpPath —
  *     NOT +0x63B as the prior mis-attribution assumed — and `"%s.dat"` at
  *     0x47e354 for the archive path) exactly matches game/ScriptedObject.
@@ -265,7 +265,7 @@ public:
      * — misleading, since this is not ScriptedObject's own method).
      *
      * Resets tile_type and the inherited `loaded` flag, then (if
-     * name_suffix is non-null) builds "<g_scene_name><name_suffix>.dat" /
+     * name_suffix is non-null) builds "<g_install_path><name_suffix>.dat" /
      * ".bmp" paths, tries the AssetMgr archive first (building
      * "<name_suffix>.dat" for the archive lookup), falls back to
      * WIN32_Stream::OpenPath, and for whichever stream actually opens,
@@ -279,7 +279,7 @@ public:
      * that established precedent.
      *
      * @param resId       Resource ID (used only for the archive/disk path
-     *                    strings' shared "g_scene_name" prefix; not itself
+     *                    strings' shared "g_install_path" prefix; not itself
      *                    part of the path)
      * @param name_suffix Resource-name string used to build the .dat/.bmp
      *                    paths; null is a no-op (matches the original's
