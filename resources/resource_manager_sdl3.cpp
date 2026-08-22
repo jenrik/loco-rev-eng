@@ -389,6 +389,13 @@ bool parse_sprite_metadata(const std::vector<uint8_t>& bytes, SpriteMetadata* me
                 valid = valid && parse_int(tokens[index + 1], fields[index]);
             }
             frame_set.is_connected = (is_connected_int != 0);
+            // Mirror the original's parse-time zero-clamp on step_delay --
+            // see AnimationFrameSet::frame_delay's doc comment
+            // (UI_ChildWindow_Render 0x4252F4-0x425300 stores 1 when the
+            // parsed token is not above zero) -- so a `.dat` row with
+            // "frame_delay 0" can't reach Entity::Update's
+            // `phase_timer / step_delay` division as a zero divisor.
+            if (frame_set.frame_delay == 0) frame_set.frame_delay = 1;
             // The 10th numeric token -- see AnimationFrameSet::flip_horizontal's
             // doc comment for the disassembly evidence that this is a real,
             // used field (FrameData::flip_horizontal, +0x16), not discardable.

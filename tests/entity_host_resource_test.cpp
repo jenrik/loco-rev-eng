@@ -11,6 +11,19 @@
  * the original code path would otherwise dereference. See PROGRESS.md's
  * InitBase host-safety entry: this is the "measure it fires" half of the
  * fix, before INPUT_PlaceObject's dispatcher can safely exercise it.
+ *
+ * Also proves Entity::Update's and Entity::PlayAnimation's host branches
+ * (added 2026-08-22 once the .dat animation-row token mapping was fully
+ * confirmed by disassembly -- see shared/types.h's FrameData and
+ * resources/resource_manager_sdl3.h's AnimationFrameSet doc comments):
+ * resource 0x402 ("train whistle"-shaped animation set, verified directly
+ * against the shipped resource.RFD bytes) has a real "complete" frame set
+ * (anim_index 1: "complete 5 8 1 0  0 -1  22301 -1 4  0" -- start_frame=5,
+ * end_frame=8, frame_delay=1, not connected, sound_resource_id=22301) that
+ * both actually advances frame_index across repeated Update() calls and
+ * exercises PlayAnimation's host branch with a real nonzero sound resource
+ * ID, unlike 0x1020 below (whose Update() calls may legitimately leave
+ * frame_index unchanged via the original's own early-return paths).
  */
 #include "core/Entity.h"
 #include "resources/resource_manager_sdl3.h"
@@ -77,7 +90,13 @@ IDirectDrawSurface4* SDL3_WrapSdlSurfaceAsDirectDraw(SDL_Surface*) { return null
 void* g_primary_surface = nullptr;
 class ResourceManager {};
 ResourceManager g_resmgr;
-void* g_audio = nullptr;
+/* Non-null so Entity::PlayAnimation's real body (including its new host
+ * branch, core/GameObject.cpp) actually runs instead of bailing at its
+ * first `g_audio == nullptr` check -- GameAudio_AllocChannel/
+ * CGWND_AudioChannel_Play above are already harmless no-op stubs, so this
+ * is safe to flip on for the whole file. */
+int g_audio_sentinel = 0;
+void* g_audio = &g_audio_sentinel;
 uint32_t g_game_time = 0;
 HWND g_main_window = nullptr;
 double _DAT_00481170 = 0.0;
@@ -123,32 +142,72 @@ int main() {
 
         // Entity::Update (vtable[10]) runs every game tick for any
         // initialized entity -- InputMgr's per-tick loop calls it on the
-        // whole live-entity collection (input/InputMgr.cpp). Its host guard
-        // (core/GameObject.cpp) is a separate fix from InitBase's: reading
-        // resource+0x20's FrameData array on a host SpriteResource has no
-        // verified field mapping yet, so it rejects loudly and holds the
-        // current frame instead of reading past the allocation. Call it
-        // twice and check the guard's own hit counter, not just
-        // frame_index -- the original also has early-return paths
-        // (single-frame no-loop animation, already-at-end-frame,
-        // mid-wait) that would leave frame_index unchanged with no guard
-        // at all, so an unchanged frame_index alone doesn't prove the
-        // guard fired rather than one of those.
-        const uint32_t hits_before = loco::host_test::entity_update_host_guard_hit_count();
-        const int frame_before = entity.frame_index;
+        // whole live-entity collection (input/InputMgr.cpp). This resource's
+        // default animation state may legitimately be single-frame or
+        // already at its end (the original's own early-return paths), so
+        // this is only a crash-safety smoke test -- resource 0x402 below is
+        // the real proof that frame_index actually advances.
         entity.Update();
         entity.Update();
-        if (entity.frame_index != frame_before) {
-            return fail("Entity::Update advanced frame_index on a host "
-                         "SpriteResource -- its host guard did not fire") ? 0 : 1;
-        }
-        if (loco::host_test::entity_update_host_guard_hit_count() != hits_before + 2) {
-            return fail("Entity::Update's host guard did not run on both calls -- "
-                         "frame_index staying put was coincidental, not proof") ? 0 : 1;
-        }
     }
     std::puts("PASS: ~Entity's host branch released a live host SpriteResource "
               "without calling the original's null release_surface slot");
+
+    // Resource 0x402's "complete" frame set (anim_index 1) is a real,
+    // multi-frame, non-connected animation -- confirmed directly against
+    // resource.RFD's animation-row text: "complete 5 8 1 0  0 -1  22301 -1
+    // 4  0" (start_frame=5, end_frame=8, frame_delay=1, is_connected=0,
+    // restart_delay=0, next_frame_set=-1, sound_resource_id=22301,
+    // replay_delay=-1, volume=4, flip_horizontal=0). Constructed with
+    // anim_idx=1 directly (not -1/"default") to land on this specific
+    // frame set.
+    {
+        Entity entity(0x402, 1, 0, 0);
+
+        if (!loco::assets::is_host_sprite_resource(entity.resource)) {
+            return fail("Entity(0x402, 1, ...) did not load a host SpriteResource -- "
+                         "test no longer proves what it claims to") ? 0 : 1;
+        }
+        if (entity.anim_index != 1) {
+            return fail("Entity::InitBase's host branch did not honor the requested "
+                         "anim_index 1 for resource 0x402") ? 0 : 1;
+        }
+
+        // Entity::Update's host branch (core/GameObject.cpp) must actually
+        // step frame_index forward using AnimationFrameSet's start_frame/
+        // end_frame/frame_delay/is_connected fields, not just hold the
+        // current frame -- this is the real behavioral proof the older
+        // guard-hit-counter test (0x1020 above, before the .dat token
+        // mapping was confirmed) couldn't provide.
+        const int frame_before = entity.frame_index;
+        entity.Update();
+        entity.Update();
+        if (entity.frame_index == frame_before) {
+            return fail("Entity::Update's host branch did not advance frame_index "
+                         "on resource 0x402's real multi-frame \"complete\" animation "
+                         "(start_frame=5, end_frame=8, frame_delay=1)") ? 0 : 1;
+        }
+        if (entity.frame_index < 5 || entity.frame_index > 8) {
+            return fail("Entity::Update's host branch produced a frame_index outside "
+                         "the \"complete\" frame set's [5,8] range") ? 0 : 1;
+        }
+
+        // Entity::PlayAnimation's host branch (core/GameObject.cpp): this
+        // frame set's real sound_resource_id (22301) is nonzero, so calling
+        // it directly exercises the AnimationFrameSet-sourced audio_delay/
+        // volume lookup this fix added in place of the undersized-host-
+        // object FrameData dereference the previous code had. Entity's
+        // construction above (via SetAnimState's own existing host branch)
+        // already called this same path once; call it again directly here
+        // -- the load-bearing claim is "does not crash or read past the
+        // host SpriteResource's allocation", not a specific audio outcome
+        // (GameAudio_AllocChannel is a no-op stub in this test).
+        entity.PlayAnimation(22301);
+        entity.PlayAnimation(22301);
+    }
+    std::puts("PASS: Entity::Update's and Entity::PlayAnimation's host branches "
+              "advance a real multi-frame animation and play its real sound "
+              "resource without reading past a host SpriteResource's allocation");
 
     loco::assets::host_resource_manager().reset();
     SDL_Quit();

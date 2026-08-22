@@ -42,6 +42,12 @@ struct AnimationFrameSet {
     std::string name;
     int start_frame = 0;
     int end_frame = 0;
+    // The 3rd numeric .dat token -> FrameData::step_delay (+0x04, shared/
+    // types.h). The original clamps a literal-zero token to 1 at parse time
+    // (UI_ChildWindow_Render, 0x4252F4-0x425300: `CMP word ptr [rec+0x4],0`
+    // / `MOV word ptr [rec+0x4], 1` when not-above-zero) so Entity::Update's
+    // `phase_timer / step_delay` division never sees a zero divisor. This
+    // parser applies the same clamp below (search "frame_delay == 0").
     int frame_delay = 0;
     // The 4th numeric .dat token. Original writes this same token
     // (truncated to a byte) to FrameData::is_connected (+0x17,
@@ -54,9 +60,43 @@ struct AnimationFrameSet {
     // two readers
     // (TileMap::ProcessRect 0x4569AF, Entity::Update 0x405CCE).
     bool is_connected = false;
+    // The 5th numeric .dat token -> FrameData::wait_time (+0x08, shared/
+    // types.h): the pause duration (in ticks) Entity::Update latches once an
+    // animation first reaches its start/end boundary. Confirmed by
+    // disassembly: `LEA EAX,[rec+0x8]` at 0x42528F/0x425294 followed by the
+    // 32-bit extractor call (0x4646c0) at 0x425299 (UI_ChildWindow_Render).
     int restart_delay = 0;
+    // The 6th numeric .dat token -> FrameData::sound_fx_index (+0x0C,
+    // shared/types.h -- a documented misnomer there; kept as-is pending a
+    // wider rename sweep, see PROGRESS.md). Despite living in a field named
+    // "sound_fx_index", this is the *next animation-state index* Entity::
+    // Update (0x405C40) auto-chains into via SetAnimState (vtable[14],
+    // 0x405A50) once the animation's wait boundary is reached a second time;
+    // a negative value makes SetAnimState's own bounds check fail, which is
+    // why it also serves as the "<0 = no-loop" sentinel. This field's own
+    // name -- "next_frame_set" -- is the historically correct one; do not
+    // rename it to match FrameData's misnomer. Confirmed by direct
+    // disassembly 2026-08-22: `LEA EDX,[rec+0xC]` at 0x4252A1 followed by
+    // the extractor call (0x464bc0, ExtractSignedShort) at 0x4252A8
+    // (UI_ChildWindow_Render). Previously only reachable "by elimination".
+    // Already a signed `int` here (parse_int), so Entity::Update's `< 0`
+    // no-loop test needs no extra cast on this field.
     int next_frame_set = 0;
+    // The 7th numeric .dat token -> FrameData::audio_res_id (+0x0E, shared/
+    // types.h): the audio resource ID Entity::PlayAnimation/SetAnimState
+    // play when this animation state becomes active. Confirmed by direct
+    // disassembly 2026-08-22: `LEA ECX,[rec+0xE]` at 0x4252B0 followed by
+    // the extractor call (0x464bc0, ExtractSignedShort) at 0x4252B7
+    // (UI_ChildWindow_Render). Previously only cross-referenced via
+    // Entity::SetAnimState's usage, not a direct store-instruction citation.
     int sound_resource_id = 0;
+    // The 8th numeric .dat token -> FrameData::audio_delay (+0x10, shared/
+    // types.h): playback delay mode Entity::PlayAnimation reads (0 =
+    // immediate, nonzero = randomized replay interval). Confirmed by direct
+    // disassembly 2026-08-22: `LEA EAX,[rec+0x10]` at 0x4252C1 followed by
+    // the extractor call (0x4646c0, ExtractInt, full 32-bit -- matching
+    // FrameData::audio_delay's dword width) at 0x4252C6
+    // (UI_ChildWindow_Render). Previously only reachable "by elimination".
     int replay_delay = 0;
     // The 9th numeric .dat token. Disassembly confirms the original writes
     // this token directly (no truncation) to FrameData::volume (+0x14,

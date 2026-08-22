@@ -23,14 +23,6 @@
 #include "../resources/resource_manager_sdl3.h"
 #include <cstdio>
 #include <unordered_set>
-
-namespace {
-uint32_t g_entity_update_host_guard_hits = 0;
-}  // namespace
-
-namespace loco::host_test {
-uint32_t entity_update_host_guard_hit_count() { return g_entity_update_host_guard_hits; }
-}  // namespace loco::host_test
 #endif
 
 namespace {
@@ -667,6 +659,65 @@ void Entity::PlayAnimation(int sound_id)
         return;
     }
 
+#ifndef _WIN32
+    /* Host deviation: same undersized-host-object landmine already fixed in
+     * InitBase/SetAnimState/SetFrame/Draw/DrawConnected/Update above --
+     * `this->resource` may be a host loco::assets::SpriteResource with none
+     * of RESDATA's x86 layout, so resource+0x20 (FrameData array) does not
+     * exist on it. Source the same two fields (audio_delay/volume) from the
+     * current anim_index's AnimationFrameSet instead. This call site is
+     * reachable today unconditionally from SetAnimState's own host branch
+     * (`this->PlayAnimation(frame_set.sound_resource_id)`, above). */
+    if (loco::assets::is_host_sprite_resource(resource)) {
+        const loco::assets::SpriteMetadata* metadata =
+            ResourceManager_GetSpriteMetadata(resource);
+        if (metadata == nullptr || this->anim_index < 0 ||
+            static_cast<size_t>(this->anim_index) >= metadata->frame_sets.size()) {
+            return;
+        }
+        const loco::assets::AnimationFrameSet& frame_set =
+            metadata->frame_sets[static_cast<size_t>(this->anim_index)];
+
+        void** audio_ch_ptr = &this->audio_channel;
+
+        if (*audio_ch_ptr == nullptr) {
+            if (frame_set.replay_delay == 0) {
+                GameAudio_AllocChannel(g_audio, snd_res, audio_ch_ptr,
+                                       this->screen_rect.left,
+                                       this->screen_rect.top,
+                                       frame_set.volume, 1);
+                return;
+            }
+
+            GameAudio_AllocChannel(g_audio, snd_res, audio_ch_ptr,
+                                   this->screen_rect.left,
+                                   this->screen_rect.top,
+                                   frame_set.volume, 0);
+
+            int delay = frame_set.replay_delay;
+            if (delay > 0) {
+                if (delay > 0) {
+                    uint32_t r = CRT_rand();
+                    this->next_sound_time = g_game_time + (r % delay) + 1;
+                    return;
+                }
+                if (delay != 2) {
+                    uint32_t r = CRT_rand();
+                    delay = (r % (2 - delay)) + delay;
+                }
+                this->next_sound_time = g_game_time + delay;
+            }
+        } else {
+            if (frame_set.replay_delay > 0 &&
+                this->next_sound_time < g_game_time)
+            {
+                CGWND_AudioChannel_Play(*audio_ch_ptr);
+            }
+        }
+        return;
+    }
+#endif
+
     /* Get FrameData for current animation */
     FrameData* fd = *field_at<FrameData*>(resource, 0x20)
                     + this->anim_index;
@@ -747,6 +798,31 @@ void Entity::MoveTo(int x, int y)
 /* ================================================================== */
 /* Entity::Update — Animation state machine                        */
 /* Address: 0x405C40                                                   */
+/*                                                                     */
+/* Boundary transition dispatches through vtable[14] = SetAnimState,   */
+/* NOT PlayAnimation directly: 0x405DBB is `CALL dword ptr [EDX+0x38]` */
+/* where EDX is the object's vtable pointer -- 0x38/4 = slot 14, which */
+/* Entity.h's vtable map identifies as SetAnimState (0x405A50). The    */
+/* argument passed is FrameData::sound_fx_index (+0x0C); despite its   */
+/* name that field is the *next animation-state index* to auto-chain   */
+/* into once this animation reaches its wait boundary a second time    */
+/* (SetAnimState validates it against RESDATA+0x1A's frame-set count   */
+/* and, if valid, jumps the entity to that state's start_frame and     */
+/* itself calls SetFrame/PlayAnimation for the new state) -- confirmed */
+/* by reading GameObject_SetAnimState's own body, not inferred from    */
+/* the field's (pre-existing, uncorrected -- see shared/types.h and    */
+/* PROGRESS.md) name. A negative value fails that bounds check and     */
+/* becomes a no-op, which is exactly why it doubles as the "<0 =       */
+/* no-loop" sentinel tested below. The trailing SetFrame call at the   */
+/* very end (0x405DC2's compare) is expressed uniformly for both the   */
+/* plain-step path (compares against the freshly computed frame) and   */
+/* the SetAnimState-dispatch path (compares against SetAnimState's own */
+/* return value) rather than special-cased, since SetAnimState always  */
+/* returns `this->frame_index` on its normal paths (so the compare is  */
+/* trivially satisfied and this call is skipped -- SetAnimState already*/
+/* invoked SetFrame itself) but returns a literal 0 on its own          */
+/* `initialized != 1` failure path, which a derived override could     */
+/* still reach through this virtual call.                              */
 /* ================================================================== */
 void Entity::Update()
 {
@@ -757,22 +833,6 @@ void Entity::Update()
     void* resource = this->resource;
 
 #ifndef _WIN32
-    /* Host deviation: FrameData's step_delay/wait_time/sound_fx_index/
-     * audio_delay/volume fields (+0x04/+0x08/+0x0C/+0x10/+0x14, shared/
-     * types.h) have no verified mapping onto the .dat animation row's
-     * remaining numeric tokens yet -- AnimationFrameSet (resources/
-     * resource_manager_sdl3.h) only nails down start_frame/end_frame/
-     * sound_resource_id, which is all Entity::SetAnimState needs. Reading
-     * resource+0x20 here on a host SpriteResource would be the exact same
-     * undersized-object OOB read fixed in InitBase/SetAnimState/SetFrame
-     * (see PROGRESS.md's "raw fixed-offset reads against undersized host
-     * resource objects" item and the "FrameData field-name mismatch"
-     * follow-up), except this call site runs at game-tick rate instead of
-     * once at construction -- every placed, animated host entity would
-     * hit it continuously. Reject loudly, once per resource rather than
-     * every tick given the call frequency, and hold the current frame
-     * (already valid from SetAnimState's host branch) instead of guessing
-     * at the missing field mapping or crashing. */
     /* Host deviation: `initialized` only means "constructed" (GameObject's
      * own base constructor sets it unconditionally, see GameObject::
      * GameObject() above) -- it is NOT a "has a real resource" guarantee.
@@ -797,17 +857,114 @@ void Entity::Update()
         return;
     }
 
+    /* Host deviation: a host loco::assets::SpriteResource carries none of
+     * RESDATA's x86 layout, so the per-tile FrameData array this function
+     * reads below (resource+0x20, indexed by anim_index) does not exist on
+     * one. Read the equivalent fields from AnimationFrameSet (resources/
+     * resource_manager_sdl3.h) instead -- the .dat token mapping is now
+     * fully confirmed by disassembly (see that header's field-by-field
+     * citations), so this mirrors the real logic below exactly rather than
+     * rejecting the resource outright as the previous guard did. */
     if (loco::assets::is_host_sprite_resource(resource)) {
-        ++g_entity_update_host_guard_hits;
-        static std::unordered_set<const void*> warned;
-        if (warned.insert(resource).second) {
-            std::fprintf(stderr,
-                "[HOST] Entity::Update: skipping animation advance -- "
-                "resource %p is a host SpriteResource and FrameData's "
-                "timing fields have no verified .dat mapping yet (see "
-                "PROGRESS.md)\n",
-                resource);
-            std::fflush(stderr);
+        const loco::assets::SpriteMetadata* metadata =
+            ResourceManager_GetSpriteMetadata(resource);
+        if (metadata == nullptr || this->anim_index < 0 ||
+            static_cast<size_t>(this->anim_index) >= metadata->frame_sets.size()) {
+            return;
+        }
+        const loco::assets::AnimationFrameSet& frame_set =
+            metadata->frame_sets[static_cast<size_t>(this->anim_index)];
+
+        const uint16_t start_frame = static_cast<uint16_t>(frame_set.start_frame);
+        const uint16_t end_frame   = static_cast<uint16_t>(frame_set.end_frame);
+        const int32_t  cur_frame   = this->frame_index;
+        /* next_frame_set is already a signed int (parse_int writes it
+         * directly, no truncation), so the "<0 = no-loop" test needs no
+         * extra cast -- see resource_manager_sdl3.h's doc comment. */
+        const int32_t  next_frame_set = frame_set.next_frame_set;
+
+        if (start_frame == end_frame && next_frame_set < 0) {
+            return;
+        }
+        if (cur_frame == end_frame && next_frame_set < 0) {
+            return;
+        }
+
+        if (this->waiting_flag == 1) {
+            if (_DAT_00481170 < static_cast<double>(
+                    *field_at<uint8_t>(g_main_window, 0x11)) &&
+                frame_set.restart_delay > 0)
+            {
+                return;
+            }
+            if (g_game_time < this->timer) {
+                return;
+            }
+        }
+
+        /* step_delay is already clamped away from 0 by the parser (see
+         * AnimationFrameSet::frame_delay's doc comment), mirroring the
+         * original's own parse-time clamp -- no defensive check needed here. */
+        const int32_t step_delay = frame_set.frame_delay;
+
+        uint32_t phase_timer = this->phase_timer;
+        int32_t  new_frame;
+        bool     overshoot = false;
+
+        if (!frame_set.is_connected) {
+            phase_timer = phase_timer + 1;
+            this->phase_timer = phase_timer;
+
+            if (start_frame < end_frame) {
+                int step = static_cast<int16_t>(phase_timer / step_delay);
+                new_frame = step + start_frame;
+                if (new_frame > end_frame) {
+                    overshoot = true;
+                    new_frame = end_frame;
+                }
+            } else {
+                int step = static_cast<int16_t>(phase_timer / step_delay);
+                new_frame = static_cast<int32_t>(start_frame) - step;
+                if (new_frame < end_frame) {
+                    overshoot = true;
+                    new_frame = end_frame;
+                }
+            }
+        } else {
+            phase_timer = phase_timer + 2;
+            this->phase_timer = phase_timer;
+
+            if (start_frame < end_frame) {
+                int16_t step = static_cast<int16_t>(phase_timer / step_delay)
+                             + static_cast<int16_t>(start_frame);
+                new_frame = static_cast<int32_t>(step) & ~1;
+                if (new_frame > end_frame) {
+                    overshoot = true;
+                    new_frame = end_frame;
+                }
+            } else {
+                int16_t step = static_cast<int16_t>(start_frame) -
+                               static_cast<int16_t>(phase_timer / step_delay) + 1;
+                new_frame = static_cast<int32_t>(step) & ~1;
+                if (new_frame < end_frame) {
+                    overshoot = true;
+                    new_frame = end_frame;
+                }
+            }
+        }
+
+        if (overshoot) {
+            if (this->waiting_flag == 0) {
+                this->waiting_flag = 1;
+                this->timer = static_cast<uint32_t>(frame_set.restart_delay) + g_game_time;
+            } else {
+                new_frame = this->SetAnimState(next_frame_set);
+                this->waiting_flag = 0;
+            }
+        }
+
+        if (this->frame_index != new_frame) {
+            this->SetFrame(new_frame, true);
         }
         return;
     }
@@ -819,8 +976,6 @@ void Entity::Update()
     uint16_t start_frame = fd->start_frame;
     uint16_t end_frame   = fd->end_frame;
     int32_t cur_frame    = this->frame_index;
-    uint8_t  waiting     = this->waiting_flag;
-    uint32_t phase_timer = this->phase_timer;
 
     /* Single-frame animation with no-loop flag — never updates */
     if (start_frame == end_frame && fd->sound_fx_index < 0) {
@@ -833,7 +988,7 @@ void Entity::Update()
     }
 
     /* Check if waiting at animation boundary */
-    if (waiting == 1) {
+    if (this->waiting_flag == 1) {
         /* fps_limit check: DAT_00481170 vs g_main_window+0x11 */
         if (_DAT_00481170 < static_cast<double>(
                 *field_at<uint8_t>(g_main_window, 0x11)) &&
@@ -848,6 +1003,8 @@ void Entity::Update()
     }
 
     int32_t new_frame;
+    bool overshoot = false;
+    uint32_t phase_timer = this->phase_timer;
     uint8_t step_mode = *field_at<uint8_t>(fd, 0x17);
 
     if (step_mode == 0) {
@@ -861,7 +1018,7 @@ void Entity::Update()
             new_frame = step + start_frame;
 
             if (new_frame > end_frame) {
-                waiting = 1;
+                overshoot = true;
                 new_frame = end_frame;
             }
         } else {
@@ -870,7 +1027,7 @@ void Entity::Update()
             new_frame = static_cast<int32_t>(start_frame) - step;
 
             if (new_frame < end_frame) {
-                waiting = 1;
+                overshoot = true;
                 new_frame = end_frame;
             }
         }
@@ -885,7 +1042,7 @@ void Entity::Update()
             new_frame = static_cast<int32_t>(step) & ~1;  /* sign-extend, then force even */
 
             if (new_frame > end_frame) {
-                waiting = 1;
+                overshoot = true;
                 new_frame = end_frame;
             }
         } else {
@@ -894,20 +1051,25 @@ void Entity::Update()
             new_frame = static_cast<int32_t>(step) & ~1;  /* sign-extend, then force even */
 
             if (new_frame < end_frame) {
-                waiting = 1;
+                overshoot = true;
                 new_frame = end_frame;
             }
         }
     }
 
-    /* The byte at +0x70 is both the current waiting state and the
-     * first-boundary latch. There is no separate byte at +0x71. */
-    if (waiting == 1 || new_frame == cur_frame) {
+    /* Only an actual boundary overshoot this tick latches the wait state or
+     * dispatches the state transition below (0x405D02/0x405D30/0x405D6D/
+     * 0x405D93 all jump straight past this block to the trailing SetFrame
+     * check on a non-overshoot tick) -- there is no additional
+     * "new_frame == cur_frame" trigger in the assembly. */
+    if (overshoot) {
         if (this->waiting_flag == 0) {
             this->waiting_flag = 1;
             this->timer = fd->wait_time + g_game_time;
         } else {
-            this->PlayAnimation(fd->sound_fx_index);
+            /* SetAnimState (vtable[14]), not PlayAnimation -- see this
+             * function's doc comment above. */
+            new_frame = this->SetAnimState(fd->sound_fx_index);
             this->waiting_flag = 0;
         }
     }

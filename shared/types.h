@@ -173,10 +173,51 @@ struct FrameData {
     uint16_t end_frame;         /* +0x02  last frame in animation range     */
     uint16_t step_delay;        /* +0x04  ticks to wait between steps       */
     uint16_t _pad_06;           /* +0x06  (alignment)                       */
-    int32_t  wait_time;         /* +0x08  pause duration at boundary (ticks)*/
-    int16_t  sound_fx_index;    /* +0x0C  <0 = no-loop (stop at boundary)    */
-    uint16_t audio_res_id;      /* +0x0E  audio resource ID for playback    */
-    uint32_t audio_delay;       /* +0x10  delay mode (0=immediate, 1=random)*/
+    int32_t  wait_time;         /* +0x08  pause duration at boundary (ticks);
+                                 *   the 5th .dat numeric token ("restart_delay"
+                                 *   in resources/resource_manager_sdl3.h),
+                                 *   confirmed by disassembly at
+                                 *   UI_ChildWindow_Render 0x425294/0x425299. */
+    int16_t  sound_fx_index;    /* +0x0C  <0 = no-loop (stop at boundary).
+                                 *   MISNOMER, kept for now (see PROGRESS.md's
+                                 *   pending rename sweep): despite the name,
+                                 *   this is NOT a sound-effect index. It is
+                                 *   the *next animation-state index* to
+                                 *   auto-chain into once Entity::Update
+                                 *   (0x405C40) reaches this animation's wait
+                                 *   boundary a second time -- confirmed by
+                                 *   disassembly: 0x405DBB `CALL dword ptr
+                                 *   [EDX+0x38]` where EDX is the vtable
+                                 *   pointer (0x38/4 = slot 14 = SetAnimState,
+                                 *   0x405A50, per core/Entity.h's vtable map),
+                                 *   passing this field (sign-extended) as
+                                 *   SetAnimState's `anim_index` argument.
+                                 *   SetAnimState validates it against
+                                 *   RESDATA+0x1A's frame-set count and jumps
+                                 *   the entity to that state's start_frame if
+                                 *   valid; a negative value fails that bounds
+                                 *   check and becomes a no-op, which is why it
+                                 *   doubles as the "<0 = no-loop" sentinel
+                                 *   tested earlier in Update(). The 6th .dat
+                                 *   numeric token ("next_frame_set" in
+                                 *   resources/resource_manager_sdl3.h, which
+                                 *   already carries the correct semantic
+                                 *   name), confirmed by disassembly at
+                                 *   UI_ChildWindow_Render 0x4252A1/0x4252A8. */
+    uint16_t audio_res_id;      /* +0x0E  audio resource ID for playback;
+                                 *   the 7th .dat numeric token
+                                 *   ("sound_resource_id" in resources/
+                                 *   resource_manager_sdl3.h), confirmed by
+                                 *   disassembly at UI_ChildWindow_Render
+                                 *   0x4252B0/0x4252B7 (previously only
+                                 *   cross-referenced via Entity::SetAnimState's
+                                 *   usage, not a direct store-instruction
+                                 *   citation). */
+    uint32_t audio_delay;       /* +0x10  delay mode (0=immediate, 1=random);
+                                 *   the 8th .dat numeric token ("replay_delay"
+                                 *   in resources/resource_manager_sdl3.h),
+                                 *   confirmed by disassembly at
+                                 *   UI_ChildWindow_Render 0x4252C1/0x4252C6. */
     uint16_t volume;            /* +0x14  audio playback volume             */
     uint8_t  flip_horizontal;   /* +0x16  1 = mirrored sprite               */
     uint8_t  is_connected;      /* +0x17  1 = connected/multi-tile sprite;
