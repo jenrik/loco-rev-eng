@@ -351,9 +351,20 @@ public:
 
     int32_t    clock_hand_segment;   /* +0x28  current clock hand segment (0-11)   */
 
-    /* +0x2C: resource_type_idx — indirection array.
-     * Each entry stores the address of the corresponding slot in resource_ptrs. */
-    int32_t    resource_type_idx[0x4001];  /* +0x2C..+0x1002F (16385 entries) */
+    /* +0x2C: resource_type_idx — two-level indirection array (confirmed
+     * against ResourceManager::GetById's real disassembly, 0x446EA0:
+     * `piVar3 = *(int**)(this+resId*4+0x2c); iVar6 = *piVar3;` — the slot
+     * holds a POINTER into resource_ptrs, dereferenced once more to reach
+     * the actual resource value). Each entry normally points at its own
+     * corresponding resource_ptrs slot; ResourceManager::RegisterDependency
+     * (0x447290) can repoint a slot at a *different* index's resource_ptrs
+     * slot, aliasing one resource ID's lookup onto another's data.
+     * A prior version of this field was a plain int32_t value array,
+     * collapsing the indirection and making every lookup miscompute its
+     * loop index as `resId - 0x4001` (see ResourceManager.cpp's GetById/
+     * Init doc comments for the crash this caused and the coredump
+     * evidence). */
+    int32_t*   resource_type_idx[0x4001];  /* +0x2C..+0x1002F (16385 entries) */
 
     /* +0x10030: resource_ptrs — main resource object registry.
      * Array of void* pointers, one per resource ID (0-0x3FFF).

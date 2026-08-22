@@ -796,6 +796,46 @@ bool ResourceManager::Init()
     int32_t startTime;
     CRT_timeGetTime(&startTime);
 
+#ifndef _WIN32
+    /* Host-only deviation: populate resource_type_idx's self-pointers.
+     * ResourceManager::GetById (0x446EA0) requires resource_type_idx[i]
+     * to already hold a non-null pointer (normally &resource_ptrs[i])
+     * before it will do anything at all -- including the lazy-load that
+     * Step 8 below relies on. RegisterDependency (0x447290) is the only
+     * function in the original binary that ever writes to
+     * resource_type_idx, and it has exactly one caller (INPUT_SetMouse,
+     * for a handful of easter-egg/track-marker IDs) -- confirmed by
+     * exhaustively searching the disassembly for every write pattern
+     * that could populate the array: the this-relative 0x2C/0x10030
+     * displacement pair, the absolute 0x485614/0x495618 address
+     * immediates, and the -0x10004 pointer-increment style
+     * FreeAllResources itself uses. None of them appear anywhere else.
+     * This is therefore NOT a restored original init loop -- no such
+     * loop exists in loco.exe -- it is a host compatibility shim so the
+     * two-level indirection GetById performs (see its own doc comment)
+     * has something to read for the general case, matching the
+     * self-pointer semantics RegisterDependency's aliasing already
+     * assumes. Must run before Step 8, which is the first thing to
+     * populate resource_ptrs.
+     *
+     * ResourceManager::FreeAllResources nulls every one of these
+     * pointers (matching the real 0x4467E0), and Shutdown() calls it —
+     * so GetById silently returns 0 for everything again after a
+     * Shutdown() that isn't followed by another Init(). Confirmed via
+     * Ghidra xrefs this is currently safe: FreeAllResources's only
+     * caller is Shutdown(), and Shutdown()'s only caller reachable from
+     * this port's control flow is the terminal app-quit path
+     * (CGWND_Cleanup, invoked from CGWND_ShutdownOrDeferToMode10 right
+     * before WM_CLOSE/DestroyWindow) -- g_resmgr.Init() itself runs
+     * exactly once, from main(). If a future session adds any
+     * "restart"/"return to menu and start a new game" flow that tears
+     * resources down via Shutdown()/FreeAllResources() without a
+     * following Init(), this loop must run again first. */
+    for (int32_t i = 0; i < RESOURCE_ARRAY_SIZE; i++) {
+        this->resource_type_idx[i] = &this->resource_ptrs[i];
+    }
+#endif
+
     /* Step 7: Load the full string table for the entire string ID range */
     this->LoadStringTable(STRING_ID_MIN, STRING_ID_MAX);
 
@@ -1007,9 +1047,13 @@ void ResourceManager::FreeAllResources()
             destroy_window_resource(*slotPtr);
             *slotPtr = 0;
         }
-        /* Clear corresponding type_idx entry */
+        /* Clear corresponding type_idx entry (matches the real
+         * ResourceManager::FreeAllResources's `piVar1[-0x4001] = 0`,
+         * 0x4467E0 -- that write lands exactly on the type_idx slot
+         * because resource_type_idx's 0x4001-entry span ends exactly
+         * where resource_ptrs begins). */
         int32_t idx = static_cast<int32_t>(slotPtr - this->resource_ptrs);
-        (this->resource_type_idx)[idx] = 0;
+        this->resource_type_idx[idx] = nullptr;
 
         slotPtr++;
         count--;
@@ -1323,8 +1367,23 @@ int32_t ResourceManager::GetById(int32_t resId)
         return 0;
     }
 
-    /* Read from type-index array at +0x2C */
-    int32_t* typeEntry = &this->resource_type_idx[resId];
+    /* Read the type-index slot's VALUE at +0x2C: a pointer into
+     * resource_ptrs (normally &resource_ptrs[resId] itself; see
+     * ResourceManager::RegisterDependency for the aliasing case), not
+     * the slot's own address. A prior version of this function took
+     * &resource_type_idx[resId] here, collapsing the two-level
+     * indirection the real 0x446EA0 performs (`piVar3 = *(int**)(this+
+     * resId*4+0x2c); iVar6 = *piVar3;`) and computing the loop index
+     * below as `resId - 0x4001` -- always negative, which happened to
+     * land back on resource_type_idx[resId] itself (0x10030-0x2C is
+     * exactly 4*0x4001) and silently self-corrupt that one slot to -1
+     * instead of ever reading the resource_ptrs entry Init()'s preload
+     * had already populated. Confirmed via coredump: resource_ptrs
+     * [0x3C0B] held a valid handle while resource_type_idx[0x3C0B] had
+     * been stomped to -1 by this exact bug, causing PostcardAlbum::
+     * InitWindowSurface's unchecked GetById(0x3C0B) to return 0 and
+     * crash on a null vtable dispatch. */
+    int32_t* typeEntry = this->resource_type_idx[resId];
     if (typeEntry == nullptr) {
         return 0;
     }
@@ -1332,15 +1391,17 @@ int32_t ResourceManager::GetById(int32_t resId)
     int32_t resourcePtr = *typeEntry;
 
     if (resourcePtr == 0) {
-        /* Lazy-load: compute resource index and load */
-        int32_t idx = typeEntry - this->resource_ptrs;               /* pointer diff = array index */
+        /* Lazy-load: recover the resource index as a same-array pointer
+         * diff (well-defined -- typeEntry always points somewhere inside
+         * resource_ptrs, per the field's contract). */
+        int32_t idx = static_cast<int32_t>(typeEntry - this->resource_ptrs);
         int32_t endIdx = idx;
         if (endIdx > 0x3FFF) {
             endIdx = 0x4000;
         }
 
         if (idx <= endIdx) {
-            int32_t* slotPtr = &this->resource_ptrs[idx];
+            int32_t* slotPtr = typeEntry;
 
             while (idx <= endIdx && g_game_mode != 10) {
                 char stringBuf[264];
@@ -1375,11 +1436,12 @@ int32_t ResourceManager::GetById(int32_t resId)
             }
         }
 
-        /* Re-read after loading */
-        typeEntry = &this->resource_type_idx[resId];
-        if (typeEntry != nullptr) {
-            resourcePtr = *typeEntry;
-        }
+        /* Re-read after loading (matches 0x446EA0's own re-read: no null
+         * check here, since typeEntry was already confirmed non-null
+         * above and nothing in the loop clears resource_type_idx[resId]
+         * itself). */
+        typeEntry = this->resource_type_idx[resId];
+        resourcePtr = *typeEntry;
 
         if (resourcePtr == 0) {
             *typeEntry = -1;
@@ -1520,9 +1582,14 @@ int32_t ResourceManager::LoadStringToResource(UINT resId)
 
 void ResourceManager::RegisterDependency(int32_t depIndex, int32_t resIndex)
 {
-    /* Write the address of the resource slot into the type-index array */
-    this->resource_type_idx[depIndex] =
-        handle_from_pointer(&this->resource_ptrs[resIndex]);
+    /* Write the address of the resource slot into the type-index array.
+     * A typed pointer, not handle_from_pointer's truncating int32_t
+     * round-trip -- that cast loses the high bits of a real 64-bit
+     * address on this host (see handle_from_pointer's definition above);
+     * resource_type_idx is host-internal indirection, never serialized,
+     * so it has no ABI reason to go through the handle encoding that
+     * resource_ptrs uses for its original x86-pointer-sized values. */
+    this->resource_type_idx[depIndex] = &this->resource_ptrs[resIndex];
 }
 
 /* ================================================================== */
